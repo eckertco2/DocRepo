@@ -1,0 +1,24 @@
+# DocRepo's dependencies, pinned to exact versions.
+# Approved in the first version's Phase 0: PySide6, pywin32, pypdf, python-docx, python-pptx, openpyxl, pytest.
+# The others are what those packages need.
+# Install with: .venv\Scripts\python.exe -m pip install -r requirements.txt
+colorama==0.4.6
+et_xmlfile==2.0.0
+iniconfig==2.3.1
+lxml==6.1.3
+openpyxl==3.1.5
+packaging==26.3
+pillow==12.3.0
+pluggy==1.6.0
+Pygments==2.21.0
+pypdf==6.19.0
+PySide6==6.8.2.1
+PySide6_Addons==6.8.2.1
+PySide6_Essentials==6.8.2.1
+pytest==9.1.1
+python-docx==1.2.0
+python-pptx==1.0.2
+pywin32==312
+shiboken6==6.8.2.1
+typing_extensions==4.16.0
+xlsxwriter==3.2.9

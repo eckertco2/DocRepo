@@ -1,0 +1,9 @@
+[project]
+name = "docrepo"
+version = "0.1.0"
+description = "Capture work notes, emails and documents, and organize them as a tree of tasks."
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--basetemp=.pytest_tmp -p no:cacheprovider"
