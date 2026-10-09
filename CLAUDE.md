@@ -10,4 +10,4 @@
 - Write automated tests for everything that doesn't need the GUI. Run them with `.venv\Scripts\python.exe -m pytest`.
 - Classic Outlook isn't installed on this computer. Outlook code is tested with fakes here and by hand on the corporate computer.
 - Run the app against `dev_data/` only, for example `.venv\Scripts\python.exe -m docrepo --data-root dev_data init`.
-- Commit only when the owner asks. Publishing means pushing to the private GitHub repo.
+- Commit only when the owner asks. Publishing means pushing to the public GitHub repo, so check each change for personal or company details first.

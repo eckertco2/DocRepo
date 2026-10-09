@@ -12,7 +12,7 @@ A Windows desktop tool for someone who manages many projects at once. Informatio
 
 ## 2. How it's built and installed
 
-- Developed on the owner's personal computer, in Python 3.12 with PySide6, and published to a private GitHub repo.
+- Developed on the owner's personal computer, in Python 3.12 with PySide6, and published to a public GitHub repo, https://github.com/eckertco2/DocRepo.
 - On the corporate computer, the owner downloads the repo, makes a `.venv` and runs `pip install -r requirements.txt`. That computer's pip settings fetch the packages from the company's package repository. DocRepo's code never refers to it.
 - No packaging into an .exe. DocRepo runs as `python -m docrepo` from its folder.
 - `README.md` has the steps for installing and updating.

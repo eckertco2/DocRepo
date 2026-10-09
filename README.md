@@ -8,7 +8,7 @@ Status: being rebuilt. See `PROGRESS.md`.
 
 You need Windows and Python 3.12.
 
-1. Get the code from the private GitHub repo. Either click **Code → Download ZIP** and unzip it to a folder such as `C:\Users\<you>\DocRepo`, or use git: `git clone <repo URL>`.
+1. Get the code from GitHub. The repo is public, so no sign-in is needed. Download https://github.com/eckertco2/DocRepo/archive/refs/heads/main.zip (the same as **Code → Download ZIP** on the repo's page) and extract it. The files are inside a folder named `DocRepo-main`; rename it to `DocRepo` and keep it on the local drive, outside OneDrive, for example `C:\Users\<you>\DocRepo`. With git, `git clone https://github.com/eckertco2/DocRepo.git` does the same.
 2. Open a terminal in that folder and make a virtual environment:
    ```
    py -3.12 -m venv .venv

@@ -19,7 +19,8 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 - Packages: the seven approved in the first version's Phase 0, at the same versions, pinned in `requirements.txt` with their dependencies. extract-msg isn't used; `.msg` files are read through Outlook.
 - Default hotkey: Ctrl+Shift+Space.
 - No paths in the code. The data root's location is kept in `%LOCALAPPDATA%\DocRepo\location.json`; everything else is in `<data root>\Config\settings.json` and is edited in the browse tool's Settings view.
-- Publish to the private GitHub repo after phase 1, to test the route to the corporate computer early.
+- Publish to GitHub after phase 1, to test the route to the corporate computer early.
+- The GitHub repo is public (2026-10-09), so the corporate computer can download it without signing in to GitHub. Nothing personal or company-related may go into it.
 
 ## Code layout (phase 1)
 
@@ -32,4 +33,4 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 ## Unfinished / notes
 
 - `SPEC.md` covers phase 1 in full; later phases are summaries until they're built. The detailed design is in the parent workspace's `docs/task-model/brainstorm.md`.
-- Not yet published to GitHub. The owner creates an empty private repo; then phase 1 is committed and pushed.
+- Published to the GitHub repo `eckertco2/DocRepo` on 2026-10-09 (phase 1). Next: the owner installs it on the corporate computer to test the route, including pip installing from JFrog.

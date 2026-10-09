@@ -2,13 +2,13 @@
 
 DocRepo is a Windows desktop tool for capturing and organizing work notes, tasks and documents. It's written in Python 3.12 with PySide6. These rules apply to every request in this repo, from GitHub Copilot or Claude Code.
 
-DocRepo is developed on its owner's personal computer and published to a private GitHub repo. The owner downloads it from there onto a locked-down corporate computer that handles company information. The rules below exist for that computer.
+DocRepo is developed on its owner's personal computer and published to a public GitHub repo. The owner downloads it from there onto a locked-down corporate computer that handles company information. The rules below exist for that computer.
 
 ## Hard rules (non-negotiable)
 
 ### Installing software
 - Install Python packages only with `pip`, using the computer's existing pip configuration. On the corporate computer that configuration points to the company's package repository. Never change pip configuration, and never pass `--index-url` or `--extra-index-url`.
-- Never install a third-party package from a URL, a git repository or a downloaded file. DocRepo itself is the one exception: its owner brings it onto the corporate computer from its private GitHub repo.
+- Never install a third-party package from a URL, a git repository or a downloaded file. DocRepo itself is the one exception: its owner brings it onto the corporate computer from its GitHub repo.
 - Use only the packages pinned in `requirements.txt`. Ask the owner before adding or upgrading any package: name it and say why it's needed. Install only into this repo's `.venv`.
 - Never download or install anything else (installers, executables, scripts, model files or tools) by any means. If something seems to need that, stop and ask.
 
@@ -32,8 +32,8 @@ DocRepo is developed on its owner's personal computer and published to a private
 - No `eval` or `exec`, no `pickle` for stored data, no `shell=True`, no running or launching attachments, and no macros. Use parameterized SQL queries.
 - Logs stay on the computer and never contain full captured content. IDs, file names and actions are fine.
 
-### This repo is on GitHub
-- Use only made-up sample data in code, tests and docs: no real names, projects, paths or company information.
+### This repo is public
+- Anyone can read this repo on GitHub. Use only made-up sample data in code, tests and docs: no real names, projects, paths, host names or company information. Check every change for them before it's committed.
 - During development, never point the app at real data. Use `dev_data/` in this repo, which git ignores.
 
 ## Changes on the corporate computer
