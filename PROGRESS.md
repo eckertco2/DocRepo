@@ -6,7 +6,7 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 
 | Phase | What | Status |
 |---|---|---|
-| 1 | Skeleton and safety: the data root's location, settings, guarded writes, logging, the command line, and the network-module scan | Built; waiting for the owner's test |
+| 1 | Skeleton and safety: the data root's location, settings, guarded writes, logging, the command line, and the network-module scan | Done. Tested on the corporate computer (2026-10-09): pip install, pytest and the command checks |
 | 2 | Database and task model: schema, IDs, the task tree, labels, people, logs, recurrence, days until due, the capacity calendar, and the generated pages, checked against the mockup's test vectors and examples | Not started |
 | 3 | Capture app: tray, hotkey, the capture window (task picker, New subtask, Update task, Parse and populate, Copy prompt, mods log), saving captures, text extraction, Outlook emails and LAN paths | Not started |
 | 4 | Browse tool: the views, task and capture pages, agendas, capacity, people, labels, documents, search, and Settings | Not started |
@@ -33,4 +33,5 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 ## Unfinished / notes
 
 - `SPEC.md` covers phase 1 in full; later phases are summaries until they're built. The detailed design is in the parent workspace's `docs/task-model/brainstorm.md`.
-- Published to the GitHub repo `eckertco2/DocRepo` on 2026-10-09 (phase 1). Next: the owner installs it on the corporate computer to test the route, including pip installing from JFrog.
+- Published to the GitHub repo `eckertco2/DocRepo` on 2026-10-09 (phase 1).
+- The route to the corporate computer works (2026-10-09): download, a security scan there, `pip install -r requirements.txt` with every pinned version available, and pytest passing.
