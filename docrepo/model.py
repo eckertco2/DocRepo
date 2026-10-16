@@ -106,6 +106,12 @@ class Document:
     capture: str | None
     status: str
     checked: str | None
+    text_status: str | None = None  # ok, partial, none or error
+    text_chars: int | None = None
+    text_note: str | None = None
+    size: int | None = None
+    modified: str | None = None
+    sha256: str | None = None
 
 
 @dataclass

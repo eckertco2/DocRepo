@@ -116,10 +116,12 @@ class Settings:
     hotkey: str = "Ctrl+Shift+Space"
     backup_dir: str | None = None
     doc_check_minutes: int = 60
+    reminder_time: str = "08:00"
     extracted_text_cap_chars: int = 200_000
     prompt_warn_chars: int = 60_000
     capacity_horizon_years: int = 5
     workdays: list[str] = field(default_factory=lambda: ["Mon", "Tue", "Wed", "Thu", "Fri"])
+    event_words: list[str] = field(default_factory=lambda: ["turnaround", "shutdown", "audit", "inspection", "outage", "walkthrough"])
 
     @classmethod
     def load(cls, data_root: Path) -> Settings:

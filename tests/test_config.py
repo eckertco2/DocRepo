@@ -80,9 +80,17 @@ def test_settings_file_has_the_documented_fields(tmp_path):
     Settings(me="P001").save(make_safe_fs(root, Settings()), root)
     data = json.loads((root / "Config" / "settings.json").read_text(encoding="utf-8"))
     assert list(data) == [
-        "schema_version", "me", "hotkey", "backup_dir", "doc_check_minutes",
-        "extracted_text_cap_chars", "prompt_warn_chars", "capacity_horizon_years", "workdays",
+        "schema_version", "me", "hotkey", "backup_dir", "doc_check_minutes", "reminder_time",
+        "extracted_text_cap_chars", "prompt_warn_chars", "capacity_horizon_years", "workdays", "event_words",
     ]
+
+
+def test_settings_match_the_example_apart_from_the_backup_folder(tmp_path):
+    from conftest import example_block
+
+    root = tmp_path / "DocRepoData"
+    Settings(me="P001", backup_dir="C:\\Users\\<user>\\Documents\\DocRepoBackups").save(make_safe_fs(root, Settings()), root)
+    assert (root / "Config" / "settings.json").read_text(encoding="utf-8") == example_block("Config/settings.json")
 
 
 def test_unreadable_settings_raise_rather_than_being_replaced(tmp_path):

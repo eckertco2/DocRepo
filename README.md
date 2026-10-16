@@ -32,6 +32,16 @@ You need Windows and Python 3.12.
 
 Your data root is outside the code folder, so updating never touches your data.
 
+## Start the capture app
+
+```
+.venv\Scripts\pythonw.exe -m docrepo app
+```
+
+DocRepo's icon appears in the tray (it may be under the ^ arrow). Press **Ctrl+Shift+Space**, or click the icon, to open the capture window; Esc hides it again. The first time, DocRepo asks for your name, to add you to its people list as "me". If another program already uses the hotkey, DocRepo says so; choose another with `.venv\Scripts\python.exe -m docrepo set-hotkey "Ctrl+Alt+Space"` and start the app again. Quit it from the tray icon's menu.
+
+Starting it automatically when you sign in comes in a later version.
+
 ## Try it with the sample data
 
 DocRepo comes with made-up sample data: a few projects, people, captures and agendas, as of 8 October 2026. Load it into a separate, empty data root, never your real one:
@@ -42,7 +52,7 @@ DocRepo comes with made-up sample data: a few projects, people, captures and age
 .venv\Scripts\python.exe -m docrepo --data-root "C:\Users\<you>\DocRepoSample" report --as-of 2026-10-08
 ```
 
-Then open the sample data root's `Contents.md` in VS Code and press Ctrl+Shift+V to follow its links. Delete the folder when you're done.
+Then open the sample data root's `Contents.md` in VS Code and press Ctrl+Shift+V to follow its links. To try the capture window on it, start the app with the same `--data-root` (quit any other copy first, since both would want the hotkey). Delete the folder when you're done.
 
 ## Where things are
 

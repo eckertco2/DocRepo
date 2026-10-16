@@ -10,7 +10,7 @@ from contextlib import closing
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from docrepo import __version__, capacity, db
+from docrepo import __version__, capacity, db, hotkey, prompts
 from docrepo.config import (
     SETTINGS_FILE,
     Settings,
@@ -70,6 +70,9 @@ def build_parser() -> argparse.ArgumentParser:
     report = commands.add_parser("report", help="print capacity, days until due, lists, labels, raw text logs and agendas")
     report.add_argument("--as-of", type=as_of, metavar="WHEN", help=as_of_help)
     report.add_argument("--week", type=a_date, metavar="DATE", help="break this week's hours down by task (default: this week)")
+    commands.add_parser("app", help="start the capture app: the tray icon, the hotkey and the capture window (use pythonw for no console)")
+    set_hotkey = commands.add_parser("set-hotkey", help="choose the capture window's hotkey, such as \"Ctrl+Alt+Space\"")
+    set_hotkey.add_argument("keys")
     return parser
 
 
@@ -143,6 +146,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     created = init_data_root(root)
     fs = make_safe_fs(root, Settings.load(root))
     setup_logging(fs, root)
+    created += prompts.write_defaults(fs, root)
     if not db.db_path(root).exists():
         created.append(db.db_path(root))
     db.connect(fs, root).close()
@@ -229,7 +233,41 @@ def cmd_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_app(args: argparse.Namespace) -> int:
+    root = _data_root(args)
+    if root is None:
+        return 1
+    if not (root / SETTINGS_FILE).exists():
+        print(f"{root} isn't set up yet. Run: python -m docrepo init", file=sys.stderr)
+        return 1
+    settings = Settings.load(root)
+    fs = make_safe_fs(root, settings)
+    setup_logging(fs, root)
+    from docrepo.app import run  # PySide6 loads only for the app
+
+    return run(root, settings, fs)
+
+
+def cmd_set_hotkey(args: argparse.Namespace) -> int:
+    root = _data_root(args)
+    if root is None:
+        return 1
+    try:
+        hotkey.parse_hotkey(args.keys)
+    except ValueError as e:
+        print(f"Can't use {args.keys}: {e}", file=sys.stderr)
+        return 1
+    settings = Settings.load(root)
+    fs = make_safe_fs(root, settings)
+    settings.hotkey = args.keys.strip()
+    settings.save(fs, root)
+    print(f"The hotkey is now {settings.hotkey}. Quit DocRepo from its tray icon and start it again to use it.")
+    return 0
+
+
 COMMANDS: dict[str, Callable[[argparse.Namespace], int]] = {
+    "app": cmd_app,
+    "set-hotkey": cmd_set_hotkey,
     "where": cmd_where,
     "set-data-root": cmd_set_data_root,
     "init": cmd_init,

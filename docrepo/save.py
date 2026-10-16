@@ -1,0 +1,409 @@
+"""Saving a capture from the capture window.
+
+Everything that goes into docs.db happens in one transaction: new people and labels,
+the new task or the update, the capture's record, its documents and saved copies,
+and its agenda items. Then the files are written: capture.md, each document's
+extracted text, the saved copies, an Outlook email's email.msg and attachments,
+and the generated pages. A file that fails never undoes the capture; it's reported
+in the result and the log.
+
+Ported from the mockup's ``capture.js`` (``save``). SPEC section 7 describes it.
+"""
+from __future__ import annotations
+
+import logging
+import re
+import sqlite3
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+from docrepo import agenda, captures, people, tasks
+from docrepo.config import Settings
+from docrepo.dates import stamp
+from docrepo.db import next_id, transaction
+from docrepo.extract import extract_text, file_info
+from docrepo.model import Model
+from docrepo.pages import write_pages
+from docrepo.parse import ParseLabel, ParsePerson, Who, parse_capture
+from docrepo.safe_fs import SafeFS
+from docrepo.text import capture_title, first_sentence, plain_text
+
+log = logging.getLogger(__name__)
+
+TYPE_ORDER = ("note", "new_task", "update")
+_FORBIDDEN = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
+class SaveError(ValueError):
+    """The capture can't be saved as it is. ``focus`` names the field to fix: task, title, content or file:<n>."""
+
+    def __init__(self, message: str, focus: str = "content") -> None:
+        super().__init__(message)
+        self.focus = focus
+
+
+@dataclass
+class Attachment:
+    """An Outlook email's attachment. ``save`` writes it to a path (Outlook's SaveAsFile)."""
+
+    name: str
+    save: Callable[[Path], None]
+
+
+@dataclass
+class EmailItem:
+    """An Outlook email added to a capture. ``save_msg`` writes it as a .msg file (Outlook's SaveAs)."""
+
+    subject: str
+    sender: str
+    sent: str
+    to: str
+    body: str
+    attachments: list[Attachment] = field(default_factory=list)
+    save_msg: Callable[[Path], None] | None = None
+
+    def text(self) -> str:
+        """The email as it goes into the content text: its header lines, then its body."""
+        head = [f"From: {self.sender}", *([f"Sent: {self.sent}"] if self.sent else []), *([f"To: {self.to}"] if self.to else []),
+                f"Subject: {self.subject}"]
+        return "\n".join(head) + "\n\n" + self.body.strip()
+
+
+@dataclass
+class FileRow:
+    """A file or email added to the capture, with its description and choices. A file's ``path`` is its original."""
+
+    name: str
+    path: str | None = None
+    description: str = ""
+    save_a_copy: bool = False
+    extract: bool = False
+    email: EmailItem | None = None
+
+
+@dataclass
+class NewTaskFields:
+    title: str = ""
+    labels: list[str] = field(default_factory=list)  # names; one that doesn't exist yet is created
+    inherit_labels: bool = True
+    leads: list[Who] = field(default_factory=list)  # people on the list, or new names to add
+    assignees: list[Who] = field(default_factory=list)
+    due: str | None = None
+    deadline: str | None = None
+    deadline_desc: str | None = None
+    urgent: bool = False
+    meeting: bool = False
+    state: str = "Not started"
+    start: str | None = None
+    reminder: str | None = None
+    recurrence: str | None = None
+    repeat_until: str | None = None
+    lead_hours: float | None = None
+    assignee_hours: float | None = None
+
+
+@dataclass
+class CaptureDraft:
+    """Everything in the capture window when Save is pressed."""
+
+    content: str = ""
+    task: str | None = None
+    types: set[str] = field(default_factory=lambda: {"note"})
+    files: list[FileRow] = field(default_factory=list)
+    agenda: list[str] = field(default_factory=list)  # agenda targets: task or person IDs
+    summary: str = ""
+    summary_type: str | None = None
+    new_task: NewTaskFields = field(default_factory=NewTaskFields)
+    #: The Update fields, prefilled with the task's values; only those that differ are changed.
+    update: dict[str, Any] = field(default_factory=dict)
+
+    def agenda_shown(self) -> bool:
+        """Add to agenda applies with New task, with Update on a picked task, or with no task picked."""
+        return "new_task" in self.types or ("update" in self.types and bool(self.task)) or not self.task
+
+
+@dataclass
+class SaveResult:
+    capture_id: str | None
+    created_task: str | None
+    updated_task: str | None
+    changes: list[tasks.Change]
+    added_people: list[str]
+    message: str
+    problems: list[str] = field(default_factory=list)
+
+
+def copy_name(day: str, name: str, taken: set[str]) -> str:
+    """A saved copy's file name: "YYYY-MM-DD name", cleaned of characters Windows forbids, at most 100 characters, and unique."""
+    stem, dot, ext = _FORBIDDEN.sub("", name).rpartition(".")
+    if not dot:
+        stem, ext = ext, ""
+    ext = f".{ext}" if ext else ""
+    base = f"{day} {stem}".rstrip(". ")[: 100 - len(ext)].rstrip(". ")
+    candidate, n = base + ext, 2
+    while candidate.lower() in {t.lower() for t in taken}:
+        candidate = f"{base[: 100 - len(ext) - 4]} ({n}){ext}"
+        n += 1
+    return candidate
+
+
+def _and_list(items: list[str]) -> str:
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1] if items else ""
+
+
+def _check(draft: CaptureDraft, task_exists: bool) -> None:
+    is_new, is_upd = "new_task" in draft.types, "update" in draft.types
+    content = draft.content.strip()
+    has_body = bool(content or draft.files)
+    targets = draft.agenda if draft.agenda_shown() else []
+    if draft.task and not task_exists:
+        raise SaveError(f"There's no task {draft.task}.", "task")
+    if is_new and not draft.new_task.title.strip() and not content and not any(f.email for f in draft.files):
+        raise SaveError("A new task needs a title or some content text.", "title")
+    if is_upd and not draft.task:
+        raise SaveError("Pick a task to update first.", "task")
+    if not draft.types:
+        raise SaveError("Check Note, New task or Update.", "content")
+    if not is_new and not is_upd and not has_body:
+        raise SaveError("There's nothing to save yet. Type or paste something, or add a file or an email.", "content")
+    if targets and not is_new and not is_upd and not draft.task and not content:
+        raise SaveError("A note on an agenda needs some content text: it's what goes on the agenda.", "content")
+    for i, f in enumerate(draft.files):
+        if not f.description.strip():
+            more = " “Use the first file's description” fills every row from the first." if len(draft.files) > 1 else ""
+            raise SaveError(f"Describe each file before saving: what's in {f.name}?{more}", f"file:{i}")
+
+
+def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, draft: CaptureDraft, at: datetime) -> SaveResult:
+    """Save what's in the capture window. Raises SaveError, changing nothing, if something is missing."""
+    is_new, is_upd, is_note = ("new_task" in draft.types, "update" in draft.types, "note" in draft.types)
+    t = draft.task
+    task_row = conn.execute("SELECT title FROM tasks WHERE id = ?", (t,)).fetchone() if t else None
+    _check(draft, task_row is not None)
+    content = draft.content.strip()
+    emails = [f.email for f in draft.files if f.email]
+    full_content = "\n\n".join([content] * bool(content) + [e.text() for e in emails])
+    summary = draft.summary.strip()
+    targets = list(dict.fromkeys(draft.agenda)) if draft.agenda_shown() else []
+    keep = bool(content or draft.files or summary)
+    when, day = stamp(at), at.date().isoformat()
+    added_people: list[str] = []
+    documents: list[tuple[str, FileRow, Attachment | None]] = []  # (document ID, its row, the attachment it came from)
+    copies: list[tuple[str, str]] = []  # (document ID, file name) for saved copies
+    changes: list[tasks.Change] = []
+    created = None
+    with transaction(conn):
+        capture_id = next_id(conn, "C") if keep else None
+        via = capture_id or "Capture window"
+
+        def person(w: Who) -> str:
+            if w.id:
+                return w.id
+            row = conn.execute("SELECT id FROM people WHERE lower(name) = lower(?)", (w.name.strip(),)).fetchone()
+            if row:
+                return str(row["id"])
+            note = f"Added on {day} {'from ' + capture_id if capture_id else 'in the capture window'}. Aliases and hours aren't set yet."
+            added_people.append(w.name.strip())
+            return people.add_person(conn, w.name, added_note=note)
+
+        if is_new:
+            nt = draft.new_task
+            for name in nt.labels:
+                if conn.execute("SELECT 1 FROM labels WHERE name = ?", (name.strip(),)).fetchone() is None:
+                    people.add_label(conn, name)
+            source = full_content
+            title = nt.title.strip() or _parsed_title(conn, source, at, settings) or first_sentence(plain_text(source)) or "Untitled task"
+            created = tasks.create_task(
+                conn, settings, title=title, at=at, created_by=via, parents=[t] if t else [], description=plain_text(source),
+                state=nt.state, start=nt.start if nt.start and nt.start != day else None, due=nt.due, deadline=nt.deadline,
+                deadline_desc=nt.deadline_desc, reminder=nt.reminder, recurrence=nt.recurrence, repeat_until=nt.repeat_until,
+                urgent=nt.urgent, meeting=nt.meeting, leads=[person(w) for w in nt.leads], assignees=[person(w) for w in nt.assignees],
+                lead_hours=nt.lead_hours, assignee_hours=nt.assignee_hours, labels=nt.labels, inherit_labels=nt.inherit_labels,
+            )
+        if is_upd and t:
+            update = dict(draft.update)
+            for key in ("leads", "assignees"):
+                if key in update:
+                    update[key] = [person(w) if isinstance(w, Who) else w for w in update[key]]
+            changes = tasks.update_task(conn, settings, t, at=at, via=via, **update)
+            if not is_new and not keep and not changes and not targets:
+                raise SaveError("There's nothing to save yet. Change a field, add an agenda, or type the update in the content text.", "content")
+        if capture_id:
+            first_file = next((a.name for e in emails for a in e.attachments), None) or next((f.name for f in draft.files if not f.email), None)
+            source_kind = "outlook_email" if emails else "file_path" if draft.files else "typed"
+            captures.add_capture(
+                conn, capture_id=capture_id, saved=when, source=source_kind,
+                types=[k for k in TYPE_ORDER if k in draft.types and (k != "update" or t)],
+                title=capture_title(source_kind, full_content, first_file, capture_id), task=t, created_task=created,
+                summary=summary or None, summary_type=draft.summary_type if summary else None,
+            )
+            for row in draft.files:
+                desc = row.description.strip()
+                if row.email:
+                    for a in row.email.attachments:
+                        doc = captures.add_document(conn, name=a.name, description=desc, capture=capture_id)
+                        captures.add_attachment(conn, capture_id, a.name)
+                        captures.link_document(conn, capture_id, doc, save_a_copy=row.save_a_copy, extract=row.extract)
+                        documents.append((doc, row, a))
+                    continue
+                existing = conn.execute("SELECT id FROM documents WHERE lower(original) = lower(?)", (row.path,)).fetchone()
+                if existing:
+                    doc = str(existing["id"])
+                    conn.execute("UPDATE documents SET description = ? WHERE id = ?", (desc, doc))
+                else:
+                    doc = captures.add_document(conn, name=row.name, description=desc, original=row.path)
+                if conn.execute("SELECT 1 FROM capture_documents WHERE capture = ? AND document = ?", (capture_id, doc)).fetchone():
+                    continue
+                captures.link_document(conn, capture_id, doc, save_a_copy=row.save_a_copy, extract=row.extract)
+                documents.append((doc, row, None))
+            # Save a copy goes into the task's Files folder now, or when an unfiled capture is filed.
+            holder = created or t
+            if holder:
+                taken = {r["name"] for r in conn.execute("SELECT name FROM saved_copies WHERE task = ?", (holder,))}
+                for doc, row, _ in documents:
+                    if row.save_a_copy:
+                        name_row = conn.execute("SELECT name FROM documents WHERE id = ?", (doc,)).fetchone()
+                        name = copy_name(day, name_row["name"], taken)
+                        taken.add(name)
+                        captures.add_saved_copy(conn, task=holder, name=name, document=doc, from_capture=capture_id)
+                        copies.append((doc, name))
+        subject = created if is_new else t if is_upd else None
+        note_text = "" if is_new else plain_text(draft.content)
+        for target in targets:
+            agenda.add_item(conn, subject=subject, target=target, note=note_text, added=when, added_by=via)
+
+    result = SaveResult(capture_id, created, t if is_upd else None, changes, added_people, "")
+    if capture_id:
+        _write_files(conn, data_root, fs, settings, capture_id, full_content, documents, copies, created or t, result)
+    try:
+        write_pages(Model(conn), data_root, fs, at.date(), at)
+    except OSError as e:
+        result.problems.append(f"The generated pages weren't all updated ({type(e).__name__}).")
+    result.message = _message(conn, draft, result, targets, bool(draft.new_task.title.strip()))
+    log.info("capture %s saved: %s", capture_id or "(none kept)", _log_line(draft, result, targets, [d for d, _, _ in documents]))
+    return result
+
+
+def _parsed_title(conn: sqlite3.Connection, source: str, at: datetime, settings: Settings) -> str:
+    """The title Parse and populate would give, when the Title box was left empty."""
+    model = Model(conn)
+    found = parse_capture(source, "new_task", at.date(), _parse_people(model, settings), _parse_labels(model), settings.event_words)
+    return found.title
+
+
+def _parse_people(model: Model, settings: Settings) -> list[ParsePerson]:
+    return [ParsePerson(p.id, p.name, tuple(p.aliases), p.status, p.id == settings.me) for p in model.people.values()]
+
+
+def _parse_labels(model: Model) -> list[ParseLabel]:
+    return [ParseLabel(label.name, tuple(label.keywords)) for label in model.active_labels()]
+
+
+def _write_files(
+    conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, capture_id: str, content: str,
+    documents: list[tuple[str, FileRow, Attachment | None]], copies: list[tuple[str, str]], holder: str | None, result: SaveResult,
+) -> None:
+    """Write the capture's files. Each step that fails is noted in ``result.problems`` and the log, and the rest go on."""
+    model = Model(conn)
+    folder = captures.capture_folder(data_root, capture_id, model.captures[capture_id].saved)
+    try:
+        fs.makedirs(folder)
+        captures.write_capture_md(fs, data_root, model, capture_id, content)
+    except OSError as e:
+        result.problems.append(f"capture.md couldn't be written ({type(e).__name__}).")
+    for row in {id(r): r for _, r, _ in documents}.values():  # each email once
+        if row.email and row.email.save_msg:
+            try:
+                row.email.save_msg(fs.checked_path(folder / "email.msg"))
+            except Exception as e:  # noqa: BLE001 - Outlook can fail in many ways; the capture stays saved
+                result.problems.append(f"The email couldn't be saved as email.msg ({type(e).__name__}).")
+                log.warning("capture %s: email.msg not saved: %s", capture_id, type(e).__name__)
+    sources: dict[str, Path] = {}
+    for doc, row, attachment in documents:
+        if attachment:
+            target = fs.checked_path(folder / "attachments" / attachment.name)
+            try:
+                fs.makedirs(target.parent)
+                attachment.save(target)
+                sources[doc] = target
+            except Exception as e:  # noqa: BLE001
+                result.problems.append(f"The attachment {attachment.name} couldn't be saved ({type(e).__name__}).")
+                continue
+        elif row.path:
+            sources[doc] = Path(row.path)
+    for doc, source in sources.items():
+        _record_text(conn, data_root, fs, settings, doc, source, result)
+    for doc, name in copies:
+        source = sources.get(doc)
+        if not source or not holder:
+            continue
+        try:
+            fs.copy_file(source, data_root / "Tasks" / holder / "Files" / name)
+        except (OSError, FileExistsError) as e:
+            result.problems.append(f"The copy of {source.name} couldn't be saved ({type(e).__name__}).")
+            log.warning("capture %s: saved copy %s failed: %s", capture_id, name, type(e).__name__)
+
+
+def _record_text(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, doc: str, source: Path, result: SaveResult) -> None:
+    """Pull a document's plain text into Documents/<id>/extracted.txt, and note its size, time and checksum."""
+    try:
+        info = file_info(source)
+    except OSError as e:
+        result.problems.append(f"{source.name} couldn't be opened ({type(e).__name__}), so its text wasn't saved.")
+        conn.execute("UPDATE documents SET text_status = 'error', text_note = ? WHERE id = ?", (f"couldn't open it ({type(e).__name__})", doc))
+        return
+    found = extract_text(source, settings.extracted_text_cap_chars)
+    if found.text:
+        try:
+            fs.write_text(data_root / "Documents" / doc / "extracted.txt", found.text)
+        except OSError as e:
+            result.problems.append(f"The text of {source.name} couldn't be saved ({type(e).__name__}).")
+    if found.status in ("none", "error"):
+        result.problems.append(f"{source.name}: {found.note}.")
+    with transaction(conn):
+        conn.execute(
+            "UPDATE documents SET text_status = ?, text_chars = ?, text_note = ?, size = ?, modified = ?, sha256 = ?, checked = ? WHERE id = ?",
+            (found.status, len(found.text), found.note or None, info.size, info.modified, info.sha256, stamp(datetime.now()), doc),
+        )
+
+
+def _message(conn: sqlite3.Connection, draft: CaptureDraft, r: SaveResult, targets: list[str], typed_title: bool) -> str:
+    """What Save did, in a sentence or two, for the notification."""
+    model = Model(conn)
+    t = model.tasks.get(draft.task) if draft.task else None
+    bits = []
+    if r.created_task:
+        new = model.task(r.created_task)
+        bits.append(f"Created {new.id}, {new.title}{f', under {t.title}' if t else ''}." + ("" if typed_title else " The title came from the content text."))
+    if r.updated_task and t:
+        n = len(r.changes)
+        bits.append(f"{n} change{'s' if n != 1 else ''} in the status log of {t.title}." if n else f"Added to the status log of {t.title}." if r.capture_id else "")
+    if "note" in draft.types and not r.created_task and not r.updated_task:
+        bits.append(f"Added to the raw text log of {t.title}." if t else "" if targets else "Kept as an unfiled capture, listed under Unfiled.")
+    if targets:
+        bits.append(f"On the agenda of {_and_list([model.target_name(x) for x in targets])}.")
+    text = (f"Saved {r.capture_id}. " if r.capture_id else "") + " ".join(b for b in bits if b)
+    if r.added_people:
+        text += f" Added {' and '.join(r.added_people)} to people."
+    return text.strip()
+
+
+def _log_line(draft: CaptureDraft, r: SaveResult, targets: list[str], documents: list[str]) -> str:
+    """The log's account of a save: IDs and counts only, never content."""
+    parts = []
+    if r.created_task:
+        parts.append(f"new task {r.created_task}" + (f" under {draft.task}" if draft.task else ""))
+    if r.updated_task:
+        parts.append(f"update to {r.updated_task}, {len(r.changes)} changes")
+    if "note" in draft.types and draft.task and not r.created_task and not r.updated_task:
+        parts.append(f"raw text log of {draft.task}")
+    if targets:
+        parts.append(f"agenda items for {', '.join(targets)}")
+    if documents:
+        parts.append(f"documents {', '.join(documents)}")
+    if r.problems:
+        parts.append(f"{len(r.problems)} problems with files")
+    return "; ".join(parts) or "unfiled"

@@ -30,6 +30,25 @@ def test_a_newer_database_is_refused(data_root, fs):
         db.connect(fs, data_root)
 
 
+def test_a_version_1_database_is_brought_up_to_date(data_root, fs):
+    (data_root / "System").mkdir()
+    old = sqlite3.connect(data_root / "System" / "docs.db")
+    old.executescript(db.SCHEMA)
+    old.execute("INSERT INTO documents (id, name, original) VALUES ('D000001', 'a.pdf', 'C:\\a.pdf')")
+    old.execute("PRAGMA user_version = 1")
+    old.commit()
+    old.close()
+    conn = db.connect(fs, data_root)
+    try:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert conn.execute("SELECT name, sha256, text_status FROM documents").fetchone()[:] == ("a.pdf", None, None)
+        db.set_state(conn, "daily", "2026-10-16")
+        db.set_state(conn, "daily", "2026-10-17")
+        assert db.get_state(conn, "daily") == "2026-10-17" and db.get_state(conn, "other") is None
+    finally:
+        conn.close()
+
+
 def test_another_programs_database_is_refused(data_root, fs):
     (data_root / "System").mkdir()
     other = sqlite3.connect(data_root / "System" / "docs.db")

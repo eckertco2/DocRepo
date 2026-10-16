@@ -15,7 +15,7 @@ from pathlib import Path
 from docrepo.safe_fs import SafeFS
 
 DB_FILE = Path("System") / "docs.db"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 #: Each kind of ID: its letter and how many digits follow it.
 ID_FORMATS = {"T": 6, "C": 6, "D": 6, "P": 3}
@@ -191,6 +191,29 @@ CREATE TABLE id_counters (
 );
 """
 
+#: Changes from one schema version to the next. Version 2 (phase 3): how each document's text was pulled out, and its
+#: size, modified time and checksum for the document checks; the app's daily state; reminders already shown.
+MIGRATIONS = {
+    2: """
+ALTER TABLE documents ADD COLUMN text_status TEXT;
+ALTER TABLE documents ADD COLUMN text_chars INTEGER;
+ALTER TABLE documents ADD COLUMN text_note TEXT;
+ALTER TABLE documents ADD COLUMN size INTEGER;
+ALTER TABLE documents ADD COLUMN modified TEXT;
+ALTER TABLE documents ADD COLUMN sha256 TEXT;
+CREATE TABLE app_state (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+CREATE TABLE reminders_shown (
+    task     TEXT NOT NULL REFERENCES tasks(id),
+    reminder TEXT NOT NULL,
+    shown    TEXT NOT NULL,
+    PRIMARY KEY (task, reminder)
+);
+""",
+}
+
 
 class DatabaseError(Exception):
     """docs.db can't be used: it's from a newer DocRepo, or isn't a DocRepo database."""
@@ -224,19 +247,39 @@ def connect_memory() -> sqlite3.Connection:
     return conn
 
 
+def _run(conn: sqlite3.Connection, script: str) -> None:
+    for statement in script.split(";"):
+        if statement.strip():
+            conn.execute(statement)
+
+
 def _ensure_schema(conn: sqlite3.Connection) -> None:
+    """Create the schema in a new database, or bring an older DocRepo database up to date."""
     version = conn.execute("PRAGMA user_version").fetchone()[0]
     if version == SCHEMA_VERSION:
         return
     if version > SCHEMA_VERSION:
         raise DatabaseError(f"docs.db was made by a newer DocRepo (schema {version}). Update DocRepo before using it.")
-    if conn.execute("SELECT count(*) FROM sqlite_master").fetchone()[0]:
+    if version == 0 and conn.execute("SELECT count(*) FROM sqlite_master").fetchone()[0]:
         raise DatabaseError("docs.db holds tables but no DocRepo schema version, so it isn't a DocRepo database.")
     with transaction(conn):
-        for statement in SCHEMA.split(";"):
-            if statement.strip():
-                conn.execute(statement)
+        if version == 0:
+            _run(conn, SCHEMA)
+            version = 1
+        for step in range(version + 1, SCHEMA_VERSION + 1):
+            _run(conn, MIGRATIONS[step])
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+
+def get_state(conn: sqlite3.Connection, key: str) -> str | None:
+    """A value the app keeps between runs, such as the day it last did its daily work."""
+    row = conn.execute("SELECT value FROM app_state WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row else None
+
+
+def set_state(conn: sqlite3.Connection, key: str, value: str) -> None:
+    with transaction(conn):
+        conn.execute("INSERT INTO app_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, value))
 
 
 @contextlib.contextmanager

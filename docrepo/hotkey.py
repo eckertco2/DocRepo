@@ -1,0 +1,56 @@
+"""The global hotkey, through Windows' own RegisterHotKey.
+
+Windows tells DocRepo only when its own key combination is pressed. Nothing here
+watches the keyboard, so security software has nothing to flag as a keylogger.
+"""
+from __future__ import annotations
+
+import ctypes
+import os
+import re
+
+MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN, MOD_NOREPEAT = 0x1, 0x2, 0x4, 0x8, 0x4000
+WM_HOTKEY = 0x0312
+MODIFIERS = {"ctrl": MOD_CONTROL, "control": MOD_CONTROL, "alt": MOD_ALT, "shift": MOD_SHIFT, "win": MOD_WIN}
+KEYS = {"space": 0x20, "enter": 0x0D, "tab": 0x09, "insert": 0x2D, "ins": 0x2D, "delete": 0x2E, "del": 0x2E, "home": 0x24,
+        "end": 0x23, "pageup": 0x21, "pagedown": 0x22, "up": 0x26, "down": 0x28, "left": 0x25, "right": 0x27,
+        "pause": 0x13, "backquote": 0xC0, "`": 0xC0, "-": 0xBD, "=": 0xBB, ";": 0xBA, "'": 0xDE, ",": 0xBC, ".": 0xBE,
+        "/": 0xBF, "\\": 0xDC, "[": 0xDB, "]": 0xDD}
+
+
+def parse_hotkey(text: str) -> tuple[int, int]:
+    """(modifiers, virtual key) for a hotkey such as "Ctrl+Shift+Space". It needs Ctrl, Alt or Win, and one key."""
+    parts = [p.strip() for p in re.split(r"\s*\+\s*", text.strip()) if p.strip()]
+    if not parts:
+        raise ValueError("The hotkey is empty.")
+    *mods, key = parts
+    modifiers = 0
+    for m in mods:
+        if m.lower() not in MODIFIERS:
+            raise ValueError(f"{m!r} isn't a modifier. Use Ctrl, Alt, Shift and Win.")
+        modifiers |= MODIFIERS[m.lower()]
+    if not modifiers & (MOD_CONTROL | MOD_ALT | MOD_WIN):
+        raise ValueError("A hotkey needs Ctrl, Alt or Win, so it doesn't get in the way of typing.")
+    k = key.lower()
+    if k in KEYS:
+        vk = KEYS[k]
+    elif re.fullmatch(r"[a-z0-9]", k):
+        vk = ord(k.upper())
+    elif re.fullmatch(r"f([1-9]|1[0-9]|2[0-4])", k):
+        vk = 0x70 + int(k[1:]) - 1
+    else:
+        raise ValueError(f"{key!r} isn't a key DocRepo knows. Use a letter, a digit, F1 to F24, Space and so on.")
+    return modifiers, vk
+
+
+def register(hwnd: int, hotkey_id: int, text: str) -> bool:
+    """Ask Windows to send WM_HOTKEY to ``hwnd`` for this hotkey. False if another program already has it."""
+    if os.name != "nt":
+        return False
+    modifiers, vk = parse_hotkey(text)
+    return bool(ctypes.windll.user32.RegisterHotKey(ctypes.c_void_p(hwnd), hotkey_id, modifiers | MOD_NOREPEAT, vk))
+
+
+def unregister(hwnd: int, hotkey_id: int) -> None:
+    if os.name == "nt":
+        ctypes.windll.user32.UnregisterHotKey(ctypes.c_void_p(hwnd), hotkey_id)

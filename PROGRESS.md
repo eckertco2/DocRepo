@@ -8,7 +8,7 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 |---|---|---|
 | 1 | Skeleton and safety: the data root's location, settings, guarded writes, logging, the command line, and the network-module scan | Done. Tested on the corporate computer (2026-10-09): pip install, pytest and the command checks |
 | 2 | Database and task model: schema, IDs, the task tree, labels, people, logs, recurrence, days until due, the capacity calendar, and the generated pages, checked against the mockup's test vectors and examples | Built 2026-10-16; every test passes here. Waiting for the owner's hand test, then goes to the corporate computer with phase 3 |
-| 3 | Capture app: tray, hotkey, the capture window (task picker, the Note, New task and Update capture types, Parse and populate, Copy prompt, mods log), saving captures, text extraction, Outlook emails and LAN paths | Not started |
+| 3 | Capture app: tray, hotkey, the capture window (task picker, the Note, New task and Update capture types, Parse and populate, Copy prompt, mods log), saving captures, text extraction, Outlook emails and LAN paths | Built 2026-10-16; every test passes here. 3a waits for the owner's hand test; 3b (Outlook) can only be tested on the corporate computer |
 | 4 | Browse tool: the views, task and capture pages, agendas, capacity, people, labels, documents, search, and Settings | Not started |
 | 5 | First everyday version: Startup shortcut, backups, the one-time Excel import of the project list, and the README | Not started |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
@@ -49,11 +49,31 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 - A generated page is rewritten only when more than its "Generated on" line changes.
 - `report` writes UTF-8 when its output goes to a file.
 
+## Code layout (phase 3)
+
+- `docrepo/parse.py`: Parse and populate, ported from the mockup's `parse.js`. `tests/test_parse_vectors.py` runs all of `test-vectors.md`'s captures and date phrases.
+- `docrepo/save.py`: saving a capture (the draft, the checks, one transaction, then the files). `docrepo/extract.py`: text from files, file checksums, mapped drives as network paths.
+- `docrepo/prompts.py`: summary types and Copy prompt. `docrepo/mods.py`: the mods log.
+- `docrepo/hotkey.py`: RegisterHotKey through ctypes. `docrepo/outlook.py`: Outlook through COM (phase 3b).
+- `docrepo/app.py`: the tray, single copy, hotkey, reminders, daily work and the first-start question. `docrepo/ui/`: the capture window, task picker, chip pickers, mods log panel, help texts (generated from the mockup's `HELP`) and style.
+- `docrepo/db.py`: schema version 2, brought up from version 1 when a database is opened.
+- `tests/`: 288 new tests, 242 of them Parse and populate's vectors. The capture window and the app are tested offscreen (`QT_QPA_PLATFORM=offscreen`), so no window appears.
+
+## Decisions (phase 3)
+
+- Saving runs on the window's own thread, because Outlook's COM objects belong to it. The window shows a busy cursor; a big file on the LAN can take a moment.
+- Only one copy of the app runs per data root, through a lock file in `System`. A second copy finds the first's window and asks it, with a registered Windows message, to show itself. (Qt's local sockets are in QtNetwork, which the network rule bans.)
+- An email's attachments are saved only with the capture, so Copy prompt can't include their text before then: DocRepo has nowhere else it may write them.
+- Until the browse tool exists, clicking a reminder opens the capture window on that task with Update checked.
+- The label, people and agenda pickers show their suggestions in a list under the box, not a floating popup, so typing never loses focus.
+- The capture window uses Segoe UI, which every Windows 10 and 11 computer has.
+
 ## Unfinished / notes
 
-- Phase 2 isn't on GitHub yet. Phases 2 and 3 go up together (brainstorm round 12).
-- The daily rebuild of routine tasks' calendar rows, and of the pages, runs when the capture app starts each day; that's phase 3. Until then, `rebuild` does it.
+- Phases 2 and 3 aren't on GitHub yet. They go up together (brainstorm round 12), after the owner's hand tests.
+- To test on the corporate computer: Outlook emails (dragging from Outlook, Add selected Outlook email, a dropped `.msg` file, email.msg and attachments in the capture folder, any Outlook security prompt), mapped drives recorded as network paths, files on the LAN drive, and the hotkey there.
+- The Startup shortcut comes in phase 5; until then the app is started by hand.
 
-- `SPEC.md` covers phase 1 in full; later phases are summaries until they're built. The detailed design is in the parent workspace's `docs/task-model/brainstorm.md`.
+- `SPEC.md` covers phases 1 to 3 in full; later phases are summaries until they're built. The detailed design is in the parent workspace's `docs/task-model/brainstorm.md`.
 - Published to the GitHub repo `eckertco2/DocRepo` on 2026-10-09 (phase 1).
 - The route to the corporate computer works (2026-10-09): download, a security scan there, `pip install -r requirements.txt` with every pinned version available, and pytest passing.
