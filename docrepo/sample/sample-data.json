@@ -1,0 +1,970 @@
+{
+  "today": "2026-10-08",
+  "people": [
+    {
+      "id": "P001",
+      "name": "Me",
+      "me": true,
+      "aliases": [],
+      "hours": 40,
+      "status": "active"
+    },
+    {
+      "id": "P002",
+      "name": "Priya Shah",
+      "aliases": [
+        "Priya",
+        "PS"
+      ],
+      "hours": 40,
+      "status": "active"
+    },
+    {
+      "id": "P003",
+      "name": "Tom Becker",
+      "aliases": [
+        "Tom",
+        "Thomas"
+      ],
+      "hours": 40,
+      "status": "active"
+    },
+    {
+      "id": "P004",
+      "name": "Mike Ortiz",
+      "aliases": [
+        "Mike",
+        "Michael"
+      ],
+      "hours": 32,
+      "status": "active"
+    },
+    {
+      "id": "P005",
+      "name": "Tyler Nguyen",
+      "aliases": [
+        "Tyler",
+        "Tyler N."
+      ],
+      "hours": 40,
+      "status": "active"
+    },
+    {
+      "id": "P006",
+      "name": "Todd",
+      "aliases": [],
+      "hours": null,
+      "status": "active",
+      "added": "Added on 2026-10-07 by Parse and populate (C000018). Aliases and hours aren't set yet."
+    },
+    {
+      "id": "P007",
+      "name": "Rob Lee",
+      "aliases": [
+        "Rob"
+      ],
+      "hours": 40,
+      "status": "retired"
+    }
+  ],
+  "labels": [
+    {
+      "name": "Line 1",
+      "keywords": [
+        "line 1"
+      ]
+    },
+    {
+      "name": "Line 2",
+      "keywords": [
+        "line 2"
+      ]
+    },
+    {
+      "name": "Strategic Plan",
+      "keywords": [
+        "strategic"
+      ]
+    },
+    {
+      "name": "Safety",
+      "keywords": [
+        "safety",
+        "guard",
+        "rail",
+        "walkthrough",
+        "LOTO"
+      ]
+    },
+    {
+      "name": "Profitability",
+      "keywords": [
+        "cost",
+        "savings",
+        "budget",
+        "overtime"
+      ]
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T000001",
+      "title": "Reactor impeller upgrade",
+      "state": "In progress",
+      "labels": [
+        "Line 1",
+        "Strategic Plan"
+      ],
+      "leads": [
+        "P001"
+      ],
+      "leadH": 20,
+      "assignees": [
+        "P003"
+      ],
+      "asgH": 16,
+      "start": "2026-09-01",
+      "due": "2026-11-27",
+      "created": "2026-09-01",
+      "by": "Excel import",
+      "desc": "Replace the reactor agitator impeller with the new high-efficiency design during the fall turnaround.",
+      "status": "Impeller arrived on site on 1 Oct. Installation is planned for the turnaround, 19 to 30 Oct."
+    },
+    {
+      "id": "T000002",
+      "title": "Verification walkthrough readiness",
+      "state": "In progress",
+      "labels": [
+        "Safety"
+      ],
+      "leads": [
+        "P001"
+      ],
+      "leadH": 4,
+      "start": "2026-10-01",
+      "deadline": "2026-10-31",
+      "deadlineDesc": "Verification walkthrough",
+      "created": "2026-09-01",
+      "by": "Excel import",
+      "desc": "Close the open findings before the fall verification walkthrough.",
+      "status": "Two items open: rail painting and the area 3 guard drawings."
+    },
+    {
+      "id": "T000003",
+      "title": "Q4 cost reduction",
+      "state": "Parked",
+      "labels": [
+        "Profitability"
+      ],
+      "leads": [
+        "P001"
+      ],
+      "created": "2026-09-01",
+      "by": "Excel import",
+      "desc": "Find savings for the Q4 budget review.",
+      "status": "Parked until the turnaround is over."
+    },
+    {
+      "id": "T000004",
+      "title": "Line 2 extruder screw replacement",
+      "state": "Parked",
+      "labels": [
+        "Line 2"
+      ],
+      "leads": [
+        "P002"
+      ],
+      "leadH": 10,
+      "assignees": [
+        "P004"
+      ],
+      "asgH": 30,
+      "start": "2027-01-11",
+      "due": "2027-02-26",
+      "created": "2026-09-01",
+      "by": "Excel import",
+      "desc": "Replace the worn Line 2 extruder screw and barrel liner.",
+      "status": "Waiting on the 2027 capital approval."
+    },
+    {
+      "id": "T000005",
+      "title": "Cooling tower fan gearbox",
+      "state": "Closed",
+      "closed": "2026-09-16",
+      "labels": [
+        "Line 1"
+      ],
+      "leads": [
+        "P001"
+      ],
+      "leadH": 4,
+      "assignees": [
+        "P004"
+      ],
+      "asgH": 16,
+      "start": "2026-08-17",
+      "due": "2026-09-18",
+      "created": "2026-09-01",
+      "by": "Excel import",
+      "desc": "Rebuild the cooling tower fan gearbox.",
+      "status": "Gearbox reinstalled; fan back in service."
+    },
+    {
+      "id": "T000006",
+      "title": "Monthly safety report",
+      "state": "In progress",
+      "recurrence": "Monthly",
+      "labels": [
+        "Safety"
+      ],
+      "assignees": [
+        "P001"
+      ],
+      "asgH": 3,
+      "start": "2026-01-26",
+      "due": "2026-01-30",
+      "created": "2026-09-01",
+      "by": "Excel import",
+      "desc": "Compile the monthly safety statistics for the area manager.",
+      "status": "September report sent on 30 Sep."
+    },
+    {
+      "id": "T000007",
+      "title": "Order spare mechanical seal",
+      "state": "Closed",
+      "closed": "2026-09-28",
+      "assignees": [
+        "P005"
+      ],
+      "asgH": 2,
+      "start": "2026-09-04",
+      "due": "2026-09-25",
+      "created": "2026-09-04",
+      "by": "C000002",
+      "desc": "Order a spare mechanical seal for the new impeller. Tyler to place the PO by 25 Sep.",
+      "status": "Seal received; PO closed."
+    },
+    {
+      "id": "T000008",
+      "title": "Installation",
+      "state": "In progress",
+      "leads": [
+        "P001"
+      ],
+      "leadH": 8,
+      "assignees": [
+        "P003",
+        "P004"
+      ],
+      "asgH": 60,
+      "start": "2026-10-19",
+      "due": "2026-10-30",
+      "deadline": "2026-10-30",
+      "deadlineDesc": "Turnaround ends",
+      "created": "2026-09-22",
+      "by": "C000005",
+      "desc": "Install and align the new impeller during the turnaround. Maintenance planning's procedure is attached.",
+      "status": "Procedure rev 2 approved. Waiting on the rigging plan."
+    },
+    {
+      "id": "T000009",
+      "title": "Vendor drawing package",
+      "state": "In progress",
+      "assignees": [
+        "P002"
+      ],
+      "asgH": 6,
+      "start": "2026-09-22",
+      "due": "2026-10-23",
+      "created": "2026-09-22",
+      "by": "C000006",
+      "desc": "Vendor to send the GA and seal drawings. Priya to review them by 16 Oct.",
+      "status": "Drawings came in late; review moved to 23 Oct."
+    },
+    {
+      "id": "T000010",
+      "title": "Business team meeting",
+      "state": "In progress",
+      "recurrence": "Weekly",
+      "meeting": true,
+      "leads": [
+        "P002"
+      ],
+      "leadH": 1.5,
+      "assignees": [
+        "P003",
+        "P004",
+        "P001"
+      ],
+      "asgH": 1,
+      "start": "2026-10-06",
+      "created": "2026-10-02",
+      "by": "C000009",
+      "desc": "Business team meeting, weekly on Tuesdays at 9:00, starting 6 Oct. Priya leads; Tom, Mike and I attend.",
+      "status": ""
+    },
+    {
+      "id": "T000011",
+      "title": "Draft monitoring plan",
+      "state": "Not started",
+      "leads": [
+        "P002"
+      ],
+      "leadH": 2,
+      "assignees": [
+        "P003"
+      ],
+      "asgH": 12,
+      "start": "2026-10-12",
+      "due": "2026-10-23",
+      "created": "2026-10-02",
+      "by": "C000010",
+      "desc": "Tom to draft the vibration monitoring plan for the new impeller, 12 Oct to 23 Oct. Priya to review.",
+      "status": ""
+    },
+    {
+      "id": "T000012",
+      "title": "Rigging plan",
+      "state": "In progress",
+      "assignees": [
+        "P004"
+      ],
+      "asgH": 6,
+      "start": "2026-10-05",
+      "due": "2026-10-14",
+      "created": "2026-10-05",
+      "by": "C000012",
+      "desc": "Mike to write the rigging plan for the impeller lift. Crane booked for 20 Oct. Due 14 Oct.",
+      "status": "Lift study done; drawing the sling arrangement."
+    },
+    {
+      "id": "T000015",
+      "title": "Q4 overtime budget",
+      "state": "Not started",
+      "created": "2026-10-06",
+      "by": "C000015",
+      "desc": "Raise the Q4 overtime forecast for the turnaround.",
+      "status": ""
+    },
+    {
+      "id": "T000016",
+      "title": "Holiday coverage schedule",
+      "state": "Not started",
+      "assignees": [
+        "P001"
+      ],
+      "asgH": 2,
+      "reminder": "2026-10-07",
+      "created": "2026-10-06",
+      "by": "C000016",
+      "desc": "Holiday coverage schedule for December. I'll draft it. Remind me on 7 Oct.",
+      "status": ""
+    },
+    {
+      "id": "T000017",
+      "title": "Rails need to be painted red",
+      "state": "Not started",
+      "assignees": [
+        "P006"
+      ],
+      "due": "2026-10-16",
+      "deadline": "2026-10-31",
+      "deadlineDesc": "Next verification walkthrough",
+      "created": "2026-10-07",
+      "by": "C000018",
+      "desc": "Rails need to be painted red. Try to have this done by next Friday. Deadline is the next verification walkthrough at the end of October. We'll assign this one to Todd.",
+      "status": ""
+    },
+    {
+      "id": "T000018",
+      "title": "Update area 3 guard drawings",
+      "state": "In progress",
+      "assignees": [
+        "P004"
+      ],
+      "asgH": 4,
+      "start": "2026-10-07",
+      "due": "2026-10-23",
+      "reminder": "2026-10-08",
+      "created": "2026-10-07",
+      "by": "C000019",
+      "desc": "Mike to update the area 3 guard drawings by 23 Oct. Check in with him on 8 Oct.",
+      "status": "Markups started."
+    },
+    {
+      "id": "T000019",
+      "title": "Book the alignment contractor",
+      "state": "Not started",
+      "urgent": true,
+      "labels": [
+        "Safety"
+      ],
+      "leads": [
+        "P001"
+      ],
+      "assignees": [
+        "P005"
+      ],
+      "due": "2026-10-09",
+      "deadline": "2026-10-19",
+      "deadlineDesc": "Turnaround",
+      "reminder": "2026-10-09",
+      "created": "2026-10-08",
+      "by": "C000020",
+      "desc": "Remind Tyler tomorrow that he needs to book the alignment contractor. Urgent: hard deadline is the turnaround on Oct 19. Safety review needed before mobilizing.",
+      "status": ""
+    }
+  ],
+  "links": [
+    [
+      "T000007",
+      "T000001"
+    ],
+    [
+      "T000008",
+      "T000001"
+    ],
+    [
+      "T000009",
+      "T000001"
+    ],
+    [
+      "T000011",
+      "T000001"
+    ],
+    [
+      "T000012",
+      "T000008"
+    ],
+    [
+      "T000015",
+      "T000003"
+    ],
+    [
+      "T000015",
+      "T000008"
+    ],
+    [
+      "T000017",
+      "T000002"
+    ],
+    [
+      "T000018",
+      "T000002"
+    ],
+    [
+      "T000019",
+      "T000008"
+    ]
+  ],
+  "captures": [
+    {
+      "id": "C000001",
+      "at": "2026-09-03 09:14",
+      "kind": "typed",
+      "task": "T000001",
+      "types": [
+        "note"
+      ],
+      "content": "Kickoff with Tom and Priya. Vendor confirms delivery in late September. We install during the fall turnaround. Still need an installation procedure, a rigging plan and a vibration monitoring plan."
+    },
+    {
+      "id": "C000002",
+      "at": "2026-09-04 08:50",
+      "kind": "typed",
+      "task": "T000001",
+      "types": [
+        "new"
+      ],
+      "created": "T000007",
+      "content": "Order a spare mechanical seal for the new impeller. Tyler to place the PO by 25 Sep."
+    },
+    {
+      "id": "C000003",
+      "at": "2026-09-10 14:02",
+      "kind": "email",
+      "task": "T000001",
+      "types": [
+        "note"
+      ],
+      "content": "From: Norvane Pumps (vendor)\nSubject: Impeller datasheet rev B\n\nPlease find rev B of the datasheet attached. Delivery is confirmed for the week of 28 Sep. Please send the final shaft-end dimensions by 18 Sep.",
+      "attachments": [
+        "Impeller datasheet rev B.pdf"
+      ],
+      "docs": [
+        "D000001"
+      ],
+      "copies": [
+        "D000001"
+      ],
+      "extract": [
+        "D000001"
+      ],
+      "summaryType": "Email extraction and summary",
+      "summary": "Norvane sent datasheet rev B: 316 stainless, 1,450 mm diameter, rated 62 rpm. Delivery confirmed for the week of 28 Sep. They need the final shaft-end dimensions by 18 Sep."
+    },
+    {
+      "id": "C000004",
+      "at": "2026-09-16 16:40",
+      "kind": "typed",
+      "task": "T000005",
+      "types": [
+        "update"
+      ],
+      "content": "Gearbox reinstalled and the fan is back in service. Closing this out.",
+      "changes": [
+        [
+          "State",
+          "In progress",
+          "Closed"
+        ]
+      ]
+    },
+    {
+      "id": "C000005",
+      "at": "2026-09-22 10:31",
+      "kind": "path",
+      "task": "T000001",
+      "types": [
+        "new"
+      ],
+      "created": "T000008",
+      "content": "Install and align the new impeller during the turnaround. Maintenance planning's procedure is attached.\n\\\\fileserver\\eng\\Line 1\\Impeller upgrade\\Installation procedure.docx",
+      "docs": [
+        "D000002"
+      ],
+      "copies": [
+        "D000002"
+      ]
+    },
+    {
+      "id": "C000006",
+      "at": "2026-09-22 10:44",
+      "kind": "typed",
+      "task": "T000001",
+      "types": [
+        "new"
+      ],
+      "created": "T000009",
+      "content": "Vendor to send the GA and seal drawings. Priya to review them by 16 Oct."
+    },
+    {
+      "id": "C000007",
+      "at": "2026-09-28 11:05",
+      "kind": "typed",
+      "task": "T000007",
+      "types": [
+        "update"
+      ],
+      "content": "Spare seal received and the PO is closed.",
+      "changes": [
+        [
+          "State",
+          "Not started",
+          "Closed"
+        ]
+      ]
+    },
+    {
+      "id": "C000008",
+      "at": "2026-10-01 07:55",
+      "kind": "typed",
+      "task": "T000001",
+      "types": [
+        "update"
+      ],
+      "content": "New impeller has arrived on site.",
+      "changes": [
+        [
+          "Current status",
+          "Waiting on delivery from Norvane.",
+          "Impeller arrived on site on 1 Oct. Installation is planned for the turnaround, 19 to 30 Oct."
+        ]
+      ]
+    },
+    {
+      "id": "C000009",
+      "at": "2026-10-02 13:20",
+      "kind": "typed",
+      "task": null,
+      "types": [
+        "new"
+      ],
+      "created": "T000010",
+      "content": "Business team meeting, weekly on Tuesdays at 9:00, starting 6 Oct. Priya leads; Tom, Mike and I attend."
+    },
+    {
+      "id": "C000010",
+      "at": "2026-10-02 13:31",
+      "kind": "typed",
+      "task": "T000001",
+      "types": [
+        "new"
+      ],
+      "created": "T000011",
+      "content": "Tom to draft the vibration monitoring plan for the new impeller, 12 Oct to 23 Oct. Priya to review."
+    },
+    {
+      "id": "C000012",
+      "at": "2026-10-05 09:10",
+      "kind": "typed",
+      "task": "T000008",
+      "types": [
+        "new"
+      ],
+      "created": "T000012",
+      "content": "Mike to write the rigging plan for the impeller lift. Crane booked for 20 Oct. Due 14 Oct."
+    },
+    {
+      "id": "C000013",
+      "at": "2026-10-05 09:25",
+      "kind": "typed",
+      "task": "T000008",
+      "types": [
+        "update"
+      ],
+      "content": "Bring up the 20 Oct crane booking at the next business team meeting."
+    },
+    {
+      "id": "C000014",
+      "at": "2026-10-06 10:15",
+      "kind": "typed",
+      "task": "T000001",
+      "types": [
+        "update"
+      ],
+      "content": "Bring up the reactor impeller status at the next business team meeting."
+    },
+    {
+      "id": "C000015",
+      "at": "2026-10-06 10:18",
+      "kind": "typed",
+      "task": "T000003",
+      "types": [
+        "new"
+      ],
+      "created": "T000015",
+      "content": "Raise the Q4 overtime forecast for the turnaround."
+    },
+    {
+      "id": "C000016",
+      "at": "2026-10-06 10:20",
+      "kind": "typed",
+      "task": null,
+      "types": [
+        "new"
+      ],
+      "created": "T000016",
+      "content": "Holiday coverage schedule for December. I'll draft it. Remind me on 7 Oct."
+    },
+    {
+      "id": "C000017",
+      "at": "2026-10-07 15:02",
+      "kind": "typed",
+      "task": "T000009",
+      "types": [
+        "update"
+      ],
+      "content": "Vendor drawings came in late, so the package is now due Oct 23.",
+      "changes": [
+        [
+          "Due",
+          "2026-10-16",
+          "2026-10-23"
+        ]
+      ]
+    },
+    {
+      "id": "C000018",
+      "at": "2026-10-07 16:45",
+      "kind": "typed",
+      "task": "T000002",
+      "types": [
+        "new"
+      ],
+      "created": "T000017",
+      "content": "Rails need to be painted red. Try to have this done by next Friday. Deadline is the next verification walkthrough at the end of October. We'll assign this one to Todd."
+    },
+    {
+      "id": "C000019",
+      "at": "2026-10-07 16:50",
+      "kind": "typed",
+      "task": "T000002",
+      "types": [
+        "new"
+      ],
+      "created": "T000018",
+      "content": "Mike to update the area 3 guard drawings by 23 Oct. Check in with him on 8 Oct."
+    },
+    {
+      "id": "C000020",
+      "at": "2026-10-08 08:40",
+      "kind": "typed",
+      "task": "T000008",
+      "types": [
+        "new"
+      ],
+      "created": "T000019",
+      "content": "Remind Tyler tomorrow that he needs to book the alignment contractor. Urgent: hard deadline is the turnaround on Oct 19. Safety review needed before mobilizing."
+    },
+    {
+      "id": "C000021",
+      "at": "2026-10-08 10:05",
+      "kind": "email",
+      "task": null,
+      "types": [
+        "note"
+      ],
+      "content": "From: Calder Steam Services\nSubject: Steam trap survey quote\n\nQuote 4471 attached for a full steam trap survey of Line 1 and Line 2, two days on site.",
+      "attachments": [
+        "Quote 4471.pdf"
+      ],
+      "docs": [
+        "D000003"
+      ]
+    },
+    {
+      "id": "C000022",
+      "at": "2026-10-08 11:30",
+      "kind": "typed",
+      "task": null,
+      "types": [
+        "note"
+      ],
+      "content": "Check whether the new guard drawings need to show the area 3 lockout points."
+    },
+    {
+      "id": "C000023",
+      "at": "2026-10-08 13:15",
+      "kind": "path",
+      "task": null,
+      "types": [
+        "note"
+      ],
+      "content": "\\\\fileserver\\eng\\Safety\\Walkthrough checklist 2026.xlsx",
+      "docs": [
+        "D000004"
+      ]
+    },
+    {
+      "id": "C000024",
+      "at": "2026-10-08 13:40",
+      "kind": "typed",
+      "task": null,
+      "types": [
+        "note"
+      ],
+      "content": "Ask whether the December shutdown dates are confirmed."
+    },
+    {
+      "id": "C000025",
+      "at": "2026-10-08 13:52",
+      "kind": "typed",
+      "task": "T000011",
+      "types": [
+        "update"
+      ],
+      "content": "Ask Tom whether the monitoring plan should cover the gearbox too."
+    }
+  ],
+  "documents": [
+    {
+      "id": "D000001",
+      "name": "Impeller datasheet rev B.pdf",
+      "desc": "Vendor datasheet for the new impeller: material, size, speed and balance grade.",
+      "capture": "C000003",
+      "status": "Current",
+      "checked": "2026-10-08 07:58",
+      "versions": [
+        "2026-09-10"
+      ],
+      "text": "NORVANE PUMPS\nImpeller datasheet, rev B\n\nType: 4-blade hydrofoil, high efficiency\nMaterial: 316 stainless steel\nDiameter: 1,450 mm\nRated speed: 62 rpm\nShaft bore: 120 mm, keyed\nMass: 410 kg\n\nNotes\n1. Balance to ISO 21940 G6.3.\n2. Shaft-end dimensions to be confirmed by the customer before machining."
+    },
+    {
+      "id": "D000002",
+      "name": "Installation procedure.docx",
+      "desc": "Maintenance planning's step-by-step procedure for installing and aligning the impeller.",
+      "original": "\\\\fileserver\\eng\\Line 1\\Impeller upgrade\\Installation procedure.docx",
+      "status": "Current",
+      "checked": "2026-10-08 07:58",
+      "versions": [
+        "2026-09-22",
+        "2026-10-05"
+      ],
+      "text": "Reactor R-101 impeller replacement: installation procedure, rev 2\n\n1. Scope\n2. Isolation and lockout\n...\n7. Alignment\n7.1 Set the shaft runout check.\n7.4 Laser-align the coupling to 0.05 mm TIR before the run-in.\n7.5 Hold for 4 hours, then re-torque the coupling bolts.\n8. Run-in and vibration baseline"
+    },
+    {
+      "id": "D000003",
+      "name": "Quote 4471.pdf",
+      "desc": "Calder's quote for a two-day steam trap survey of Line 1 and Line 2.",
+      "capture": "C000021",
+      "status": "Current",
+      "checked": "2026-10-08 10:05",
+      "versions": [
+        "2026-10-08"
+      ],
+      "text": "CALDER STEAM SERVICES\nQuote 4471\n\nSteam trap survey, Line 1 and Line 2\nTwo technicians, two days on site\nIncludes: ultrasonic testing of every trap, tagged results, savings estimate\nValid for 60 days"
+    },
+    {
+      "id": "D000004",
+      "name": "Walkthrough checklist 2026.xlsx",
+      "desc": "Area 3 findings to close before the verification walkthrough.",
+      "original": "\\\\fileserver\\eng\\Safety\\Walkthrough checklist 2026.xlsx",
+      "status": "Current",
+      "checked": "2026-10-08 13:15",
+      "versions": [
+        "2026-10-08"
+      ],
+      "text": "Sheet: Area 3\nItem | Finding | Owner | Status\nWalkway rails | Paint faded, needs safety red | Area 3 | Open\nMachine guards | Drawings out of date | Engineering | Open\nEyewash station | Weekly test log complete | Area 3 | Closed"
+    }
+  ],
+  "versions": [
+    {
+      "doc": "D000002",
+      "at": "2026-10-05 06:30",
+      "text": "+ 7.4 Laser-align the coupling to 0.05 mm TIR before the run-in.\n+ 7.5 Hold for 4 hours, then re-torque the coupling bolts.\n- 7.4 Align the coupling with a dial indicator.",
+      "summaryType": "Report high-level summary and topic overview",
+      "summary": "Procedure rev 2 replaces the dial-indicator alignment with a laser alignment to 0.05 mm TIR, and adds a 4-hour hold before the coupling bolts are re-torqued."
+    }
+  ],
+  "copies": [
+    {
+      "task": "T000001",
+      "name": "2026-09-10 Impeller datasheet rev B.pdf",
+      "doc": "D000001",
+      "from": "C000003"
+    },
+    {
+      "task": "T000008",
+      "name": "2026-09-22 Installation procedure.docx",
+      "doc": "D000002",
+      "from": "C000005"
+    },
+    {
+      "task": "T000008",
+      "name": "2026-09-22 Installation procedure (replaced 2026-10-05).docx",
+      "doc": "D000002",
+      "replaced": "2026-10-05",
+      "old": true
+    }
+  ],
+  "agenda": [
+    {
+      "subject": "T000008",
+      "target": "T000010",
+      "note": "Bring up the 20 Oct crane booking at the next business team meeting.",
+      "at": "2026-10-05 09:25",
+      "by": "C000013",
+      "closed": "2026-10-06 09:55",
+      "how": "Discussed",
+      "closedBy": "Agenda view"
+    },
+    {
+      "subject": "T000001",
+      "target": "T000010",
+      "note": "Bring up the reactor impeller status at the next business team meeting.",
+      "at": "2026-10-06 10:15",
+      "by": "C000014"
+    },
+    {
+      "subject": "T000015",
+      "target": "T000010",
+      "note": "",
+      "at": "2026-10-06 10:18",
+      "by": "C000015"
+    },
+    {
+      "subject": "T000016",
+      "target": "T000010",
+      "note": "",
+      "at": "2026-10-06 10:20",
+      "by": "C000016"
+    },
+    {
+      "subject": null,
+      "target": "T000010",
+      "note": "Ask whether the December shutdown dates are confirmed.",
+      "at": "2026-10-08 13:40",
+      "by": "C000024"
+    },
+    {
+      "subject": "T000011",
+      "target": "P003",
+      "note": "Ask Tom whether the monitoring plan should cover the gearbox too.",
+      "at": "2026-10-08 13:52",
+      "by": "C000025"
+    }
+  ],
+  "edits": [
+    {
+      "task": "T000008",
+      "at": "2026-09-30 15:10",
+      "field": "State",
+      "from": "Not started",
+      "to": "In progress",
+      "via": "Browse tool"
+    },
+    {
+      "task": "T000008",
+      "at": "2026-10-05 09:12",
+      "field": "Current status",
+      "from": "Procedure in review.",
+      "to": "Procedure rev 2 approved. Waiting on the rigging plan.",
+      "via": "Browse tool"
+    },
+    {
+      "task": "T000012",
+      "at": "2026-10-06 08:30",
+      "field": "State",
+      "from": "Not started",
+      "to": "In progress",
+      "via": "Browse tool"
+    },
+    {
+      "task": "T000015",
+      "at": "2026-10-06 10:19",
+      "field": "Parents",
+      "from": "Q4 cost reduction",
+      "to": "Q4 cost reduction; Installation",
+      "via": "Browse tool"
+    },
+    {
+      "task": "T000018",
+      "at": "2026-10-08 07:45",
+      "field": "State",
+      "from": "Not started",
+      "to": "In progress",
+      "via": "Browse tool"
+    }
+  ],
+  "prompts": [
+    {
+      "file": "general-summary.md",
+      "name": "General summary",
+      "fields": "[raw_text_latest]",
+      "scope": "self",
+      "body": "Summarize the notes below for my task records in three to five lines. List any dates, decisions and open questions."
+    },
+    {
+      "file": "email-summary.md",
+      "name": "Email extraction and summary",
+      "fields": "[raw_text_latest]",
+      "scope": "self",
+      "body": "Summarize the email below for my task records. List any requests, dates and decisions in it."
+    },
+    {
+      "file": "report-overview.md",
+      "name": "Report high-level summary and topic overview",
+      "fields": "[raw_text_latest, file_text]",
+      "scope": "self",
+      "body": "Give a five-line summary of the report below, then list its main topics."
+    },
+    {
+      "file": "ancestor-context.md",
+      "name": "Ancestor context",
+      "fields": "[summary_log, status_log, events, file_list]",
+      "scope": "ancestors",
+      "body": "Below is the record of a task and every task above it. Brief me on where things stand, what's due next and what's blocking."
+    }
+  ]
+}

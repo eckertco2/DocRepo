@@ -32,6 +32,18 @@ You need Windows and Python 3.12.
 
 Your data root is outside the code folder, so updating never touches your data.
 
+## Try it with the sample data
+
+DocRepo comes with made-up sample data: a few projects, people, captures and agendas, as of 8 October 2026. Load it into a separate, empty data root, never your real one:
+
+```
+.venv\Scripts\python.exe -m docrepo --data-root "C:\Users\<you>\DocRepoSample" init
+.venv\Scripts\python.exe -m docrepo --data-root "C:\Users\<you>\DocRepoSample" load-sample
+.venv\Scripts\python.exe -m docrepo --data-root "C:\Users\<you>\DocRepoSample" report --as-of 2026-10-08
+```
+
+Then open the sample data root's `Contents.md` in VS Code and press Ctrl+Shift+V to follow its links. Delete the folder when you're done.
+
 ## Where things are
 
 - The code is in this folder.

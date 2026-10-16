@@ -1,0 +1,278 @@
+"""The database, ``System\\docs.db``: DocRepo's source of truth.
+
+The schema is created here, and its version is kept in SQLite's ``user_version``.
+SQLite writes the file itself, so its path goes through ``SafeFS.checked_path``
+first. Connections run in autocommit mode; every change is made inside
+``transaction()``, so a save either happens completely or not at all.
+"""
+from __future__ import annotations
+
+import contextlib
+import sqlite3
+from collections.abc import Iterator
+from pathlib import Path
+
+from docrepo.safe_fs import SafeFS
+
+DB_FILE = Path("System") / "docs.db"
+SCHEMA_VERSION = 1
+
+#: Each kind of ID: its letter and how many digits follow it.
+ID_FORMATS = {"T": 6, "C": 6, "D": 6, "P": 3}
+
+STATES = ("Not started", "In progress", "Parked", "Closed")
+RECURRENCES = ("Daily", "Weekly", "Bi-weekly", "Monthly", "Quarterly", "Yearly")
+
+SCHEMA = """
+CREATE TABLE people (
+    id             TEXT PRIMARY KEY,
+    name           TEXT NOT NULL,
+    hours_per_week REAL CHECK (hours_per_week IS NULL OR hours_per_week >= 0),
+    status         TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'retired')),
+    added_note     TEXT
+);
+CREATE TABLE person_aliases (
+    person TEXT NOT NULL REFERENCES people(id),
+    pos    INTEGER NOT NULL,
+    alias  TEXT NOT NULL,
+    PRIMARY KEY (person, pos)
+);
+CREATE TABLE labels (
+    id     INTEGER PRIMARY KEY,
+    name   TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'retired'))
+);
+CREATE TABLE label_keywords (
+    label   INTEGER NOT NULL REFERENCES labels(id),
+    pos     INTEGER NOT NULL,
+    keyword TEXT NOT NULL,
+    PRIMARY KEY (label, pos)
+);
+CREATE TABLE tasks (
+    id             TEXT PRIMARY KEY,
+    title          TEXT NOT NULL CHECK (title <> ''),
+    state          TEXT NOT NULL CHECK (state IN ('Not started', 'In progress', 'Parked', 'Closed')),
+    closed         TEXT,
+    urgent         INTEGER NOT NULL DEFAULT 0,
+    meeting        INTEGER NOT NULL DEFAULT 0,
+    recurrence     TEXT CHECK (recurrence IN ('Daily', 'Weekly', 'Bi-weekly', 'Monthly', 'Quarterly', 'Yearly')),
+    repeat_until   TEXT,
+    start          TEXT,
+    due            TEXT,
+    deadline       TEXT,
+    deadline_desc  TEXT,
+    reminder       TEXT,
+    lead_hours     REAL CHECK (lead_hours IS NULL OR lead_hours >= 0),
+    assignee_hours REAL CHECK (assignee_hours IS NULL OR assignee_hours >= 0),
+    inherit_labels INTEGER NOT NULL DEFAULT 1,
+    description    TEXT NOT NULL DEFAULT '',
+    current_status TEXT NOT NULL DEFAULT '',
+    created        TEXT NOT NULL,
+    created_by     TEXT NOT NULL,
+    CHECK (repeat_until IS NULL OR recurrence IS NOT NULL),
+    CHECK ((state = 'Closed') = (closed IS NOT NULL))
+);
+-- Parent links, oldest first. A task's first link is its first parent.
+CREATE TABLE task_parents (
+    id     INTEGER PRIMARY KEY,
+    child  TEXT NOT NULL REFERENCES tasks(id),
+    parent TEXT NOT NULL REFERENCES tasks(id),
+    UNIQUE (child, parent),
+    CHECK (child <> parent)
+);
+CREATE TABLE task_people (
+    id     INTEGER PRIMARY KEY,
+    task   TEXT NOT NULL REFERENCES tasks(id),
+    person TEXT NOT NULL REFERENCES people(id),
+    role   TEXT NOT NULL CHECK (role IN ('lead', 'assignee')),
+    UNIQUE (task, person, role)
+);
+CREATE TABLE task_labels (
+    id    INTEGER PRIMARY KEY,
+    task  TEXT NOT NULL REFERENCES tasks(id),
+    label INTEGER NOT NULL REFERENCES labels(id),
+    UNIQUE (task, label)
+);
+-- Field changes, as shown in the status log. Values are display text, and NULL shows as "None".
+-- via is the capture that made the change, or where it was made (Browse tool, Capture window, Reminders list).
+-- (No semicolons in these comments: the schema is split on them.)
+CREATE TABLE status_log (
+    id         INTEGER PRIMARY KEY,
+    task       TEXT NOT NULL REFERENCES tasks(id),
+    at         TEXT NOT NULL,
+    field      TEXT NOT NULL,
+    from_value TEXT,
+    to_value   TEXT,
+    via        TEXT NOT NULL
+);
+-- Captures. The content text is in the capture's capture.md, and the title is how it's listed.
+CREATE TABLE captures (
+    id           TEXT PRIMARY KEY,
+    saved        TEXT NOT NULL,
+    source       TEXT NOT NULL CHECK (source IN ('typed', 'outlook_email', 'file_path')),
+    task         TEXT REFERENCES tasks(id),
+    types        TEXT NOT NULL,
+    created_task TEXT REFERENCES tasks(id),
+    filed_to     TEXT REFERENCES tasks(id),
+    filed        TEXT,
+    title        TEXT NOT NULL,
+    summary      TEXT,
+    summary_type TEXT,
+    edited       TEXT
+);
+CREATE TABLE documents (
+    id          TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    description TEXT,
+    original    TEXT,
+    capture     TEXT REFERENCES captures(id),
+    status      TEXT NOT NULL DEFAULT 'Current',
+    checked     TEXT,
+    CHECK (original IS NOT NULL OR capture IS NOT NULL)
+);
+CREATE TABLE capture_documents (
+    capture     TEXT NOT NULL REFERENCES captures(id),
+    document    TEXT NOT NULL REFERENCES documents(id),
+    pos         INTEGER NOT NULL,
+    save_a_copy INTEGER NOT NULL DEFAULT 0,
+    extract     INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (capture, document)
+);
+CREATE TABLE capture_attachments (
+    capture TEXT NOT NULL REFERENCES captures(id),
+    pos     INTEGER NOT NULL,
+    name    TEXT NOT NULL,
+    PRIMARY KEY (capture, pos)
+);
+-- A tracked original that changed. It isn't a capture. It joins the raw text log of its document's tasks.
+CREATE TABLE document_versions (
+    id           INTEGER PRIMARY KEY,
+    document     TEXT NOT NULL REFERENCES documents(id),
+    at           TEXT NOT NULL,
+    difference   TEXT NOT NULL,
+    summary      TEXT,
+    summary_type TEXT
+);
+CREATE TABLE saved_copies (
+    id           INTEGER PRIMARY KEY,
+    task         TEXT NOT NULL REFERENCES tasks(id),
+    name         TEXT NOT NULL,
+    document     TEXT NOT NULL REFERENCES documents(id),
+    from_capture TEXT REFERENCES captures(id),
+    replaced     TEXT,
+    old          INTEGER NOT NULL DEFAULT 0
+);
+-- Agenda items: a task (subject), or a note with no task, on the agenda of a task or a person (target).
+CREATE TABLE agenda_items (
+    id        INTEGER PRIMARY KEY,
+    subject   TEXT REFERENCES tasks(id),
+    target    TEXT NOT NULL,
+    note      TEXT NOT NULL DEFAULT '',
+    added     TEXT NOT NULL,
+    added_by  TEXT NOT NULL,
+    closed    TEXT,
+    how       TEXT CHECK (how IN ('Discussed', 'Removed')),
+    closed_by TEXT,
+    CHECK ((closed IS NULL) = (how IS NULL))
+);
+-- The capacity calendar: a cache rebuilt from the task fields.
+CREATE TABLE work_calendar (
+    person TEXT NOT NULL REFERENCES people(id),
+    date   TEXT NOT NULL,
+    task   TEXT NOT NULL REFERENCES tasks(id),
+    hours  REAL NOT NULL,
+    PRIMARY KEY (person, date, task)
+);
+CREATE INDEX work_calendar_by_date ON work_calendar(date);
+CREATE INDEX work_calendar_by_task ON work_calendar(task);
+CREATE TABLE id_counters (
+    prefix TEXT PRIMARY KEY,
+    last   INTEGER NOT NULL
+);
+"""
+
+
+class DatabaseError(Exception):
+    """docs.db can't be used: it's from a newer DocRepo, or isn't a DocRepo database."""
+
+
+def db_path(data_root: Path) -> Path:
+    return data_root / DB_FILE
+
+
+def connect(fs: SafeFS, data_root: Path) -> sqlite3.Connection:
+    """Open docs.db, creating it with the current schema if it doesn't exist yet."""
+    path = fs.checked_path(db_path(data_root))
+    fs.makedirs(path.parent)
+    conn = sqlite3.connect(path, isolation_level=None)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    try:
+        _ensure_schema(conn)
+    except BaseException:
+        conn.close()
+        raise
+    return conn
+
+
+def connect_memory() -> sqlite3.Connection:
+    """An empty in-memory database with the schema, for tests."""
+    conn = sqlite3.connect(":memory:", isolation_level=None)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    _ensure_schema(conn)
+    return conn
+
+
+def _ensure_schema(conn: sqlite3.Connection) -> None:
+    version = conn.execute("PRAGMA user_version").fetchone()[0]
+    if version == SCHEMA_VERSION:
+        return
+    if version > SCHEMA_VERSION:
+        raise DatabaseError(f"docs.db was made by a newer DocRepo (schema {version}). Update DocRepo before using it.")
+    if conn.execute("SELECT count(*) FROM sqlite_master").fetchone()[0]:
+        raise DatabaseError("docs.db holds tables but no DocRepo schema version, so it isn't a DocRepo database.")
+    with transaction(conn):
+        for statement in SCHEMA.split(";"):
+            if statement.strip():
+                conn.execute(statement)
+        conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+
+@contextlib.contextmanager
+def transaction(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
+    """Run the block as one transaction: committed if it finishes, rolled back if it raises.
+
+    Nested use joins the outer transaction.
+    """
+    if conn.in_transaction:
+        yield conn
+        return
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        yield conn
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+    conn.execute("COMMIT")
+
+
+def format_id(prefix: str, number: int) -> str:
+    return f"{prefix}{number:0{ID_FORMATS[prefix]}d}"
+
+
+def next_id(conn: sqlite3.Connection, prefix: str) -> str:
+    """The next unused ID of a kind, such as T000020. IDs are never reused."""
+    with transaction(conn):
+        conn.execute("INSERT OR IGNORE INTO id_counters (prefix, last) VALUES (?, 0)", (prefix,))
+        conn.execute("UPDATE id_counters SET last = last + 1 WHERE prefix = ?", (prefix,))
+        number = conn.execute("SELECT last FROM id_counters WHERE prefix = ?", (prefix,)).fetchone()[0]
+    return format_id(prefix, number)
+
+
+def note_used_id(conn: sqlite3.Connection, item_id: str) -> None:
+    """Record that an ID is taken, so next_id never hands it out. Used when importing records with their IDs."""
+    prefix, number = item_id[0], int(item_id[1:])
+    with transaction(conn):
+        conn.execute("INSERT OR IGNORE INTO id_counters (prefix, last) VALUES (?, 0)", (prefix,))
+        conn.execute("UPDATE id_counters SET last = max(last, ?) WHERE prefix = ?", (number, prefix))
