@@ -39,4 +39,4 @@ DocRepo is developed on its owner's personal computer and published to a public 
 ## Changes on the corporate computer
 Don't change DocRepo's code on the corporate computer; it's replaced by the next download from GitHub. Note wanted changes in DocRepo's mods log (the **?** button in the capture window) instead. The owner carries the log to the personal computer, where the changes are made.
 
-The full specification is in `SPEC.md`, and progress is tracked in `PROGRESS.md`.
+The full specification is in `SPEC.md`, and progress is tracked in `PROGRESS.md`. `GLOSSARY.md` defines the terms they use: use those terms in code, comments, tests and docs, and not the retired words listed at its end.
