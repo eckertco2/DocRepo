@@ -81,32 +81,53 @@ class FileEntry:
     extract: QCheckBox | None = None
 
 
-class ContentEdit(QPlainTextEdit):
-    """The content text box. Files and Outlook emails can be dropped on it."""
+def read_drop(mime) -> tuple[str, list[str]]:
+    """What a drop holds: ("files", paths) for files that have a place on disk; ("outlook", []) for an email dragged
+    from Outlook; ("virtual", []) for files only another program holds, such as one inside a zip folder; ("", []) for
+    anything else (text, which the content text box takes as text).
 
-    files_dropped = Signal(list)
-    outlook_dropped = Signal()
+    Files come first: File Explorer's drags carry the same "virtual file" format as Outlook's (FileGroupDescriptorW)
+    next to the files, so only Outlook's own formats mean an email.
+    """
+    paths = [u.toLocalFile() for u in mime.urls() if u.isLocalFile()]
+    if paths:
+        return "files", paths
+    formats = mime.formats()
+    if outlook.is_outlook_drop(formats):
+        return "outlook", []
+    if any("FileGroupDescriptor" in f for f in formats):
+        return "virtual", []
+    return "", []
+
+
+def _accept_copy(event) -> None:
+    """Take a drop as a copy, never a move: the original stays where it is."""
+    event.setDropAction(Qt.DropAction.CopyAction)
+    event.accept()
+
+
+class ContentEdit(QPlainTextEdit):
+    """The content text box. Files and Outlook emails can be dropped on it; ``dropped`` sends read_drop's answer."""
+
+    dropped = Signal(str, list)
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # noqa: N802 - Qt's name
-        if event.mimeData().hasUrls() or outlook.is_outlook_drop(event.mimeData().formats()):
-            event.acceptProposedAction()
+        if read_drop(event.mimeData())[0]:
+            _accept_copy(event)
         else:
             super().dragEnterEvent(event)
 
     def dragMoveEvent(self, event) -> None:  # noqa: N802
-        if event.mimeData().hasUrls() or outlook.is_outlook_drop(event.mimeData().formats()):
-            event.acceptProposedAction()
+        if read_drop(event.mimeData())[0]:
+            _accept_copy(event)
         else:
             super().dragMoveEvent(event)
 
     def dropEvent(self, event: QDropEvent) -> None:  # noqa: N802
-        mime = event.mimeData()
-        if outlook.is_outlook_drop(mime.formats()):
-            event.acceptProposedAction()
-            self.outlook_dropped.emit()
-        elif mime.hasUrls():
-            event.acceptProposedAction()
-            self.files_dropped.emit([u.toLocalFile() for u in mime.urls() if u.isLocalFile()])
+        kind, paths = read_drop(event.mimeData())
+        if kind:
+            _accept_copy(event)
+            self.dropped.emit(kind, paths)
         else:
             super().dropEvent(event)
 
@@ -224,8 +245,7 @@ class CaptureWindow(QWidget):
         self.content = ContentEdit()
         self.content.setMinimumHeight(110)
         self.content.textChanged.connect(self._content_changed)
-        self.content.files_dropped.connect(self.add_paths)
-        self.content.outlook_dropped.connect(self.add_outlook)
+        self.content.dropped.connect(self.dropped)
         self.content_field = field("Content text", self.content, "content")
         b.addWidget(self.content_field)
         hint = QLabel("Type or paste. Drop files or Outlook emails anywhere on this window. Start with “Closed.” or another state for a quick update.",
@@ -512,16 +532,28 @@ class CaptureWindow(QWidget):
         super().keyPressEvent(event)
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # noqa: N802 - files can be dropped anywhere on the window
-        if event.mimeData().hasUrls() or outlook.is_outlook_drop(event.mimeData().formats()):
-            event.acceptProposedAction()
+        if read_drop(event.mimeData())[0]:
+            _accept_copy(event)
+
+    def dragMoveEvent(self, event) -> None:  # noqa: N802
+        if read_drop(event.mimeData())[0]:
+            _accept_copy(event)
 
     def dropEvent(self, event: QDropEvent) -> None:  # noqa: N802
-        mime = event.mimeData()
-        if outlook.is_outlook_drop(mime.formats()):
+        kind, paths = read_drop(event.mimeData())
+        if kind:
+            _accept_copy(event)
+            self.dropped(kind, paths)
+
+    def dropped(self, kind: str, paths: list[str]) -> None:
+        """What a drop on the window or the content text brought: files, an Outlook email, or files DocRepo can't read."""
+        if kind == "files":
+            self.add_paths(paths)
+        elif kind == "outlook":
             self.add_outlook()
-        elif mime.hasUrls():
-            self.add_paths([u.toLocalFile() for u in mime.urls() if u.isLocalFile()])
-        event.acceptProposedAction()
+        elif kind == "virtual":
+            self._fail("These files come from a program that doesn't hand DocRepo a file it can read, such as a zip folder. "
+                       "Save or extract them to a folder first, then drop them from there.", self.content)
 
     # ================= the draft =================
     def reset_draft(self) -> None:
@@ -794,7 +826,9 @@ class CaptureWindow(QWidget):
                     self._add_file(FileRow(Path(line).name, to_unc(line)), "pasted", line)
 
     def add_paths(self, paths: list[str]) -> None:
-        """Files dropped or picked. A .msg file is read through Outlook as an email."""
+        """Files dropped or picked. A .msg file is read through Outlook as an email. A folder, or something that
+        isn't there, is left out, and the window says so."""
+        left_out = []
         for p in paths:
             path = Path(p)
             if path.suffix.lower() == ".msg":
@@ -803,8 +837,16 @@ class CaptureWindow(QWidget):
                 except outlook.OutlookError as e:
                     self._fail(str(e), self.content)
                 continue
-            if path.is_file() and not any((e.row.path or "").lower() == to_unc(str(path)).lower() for e in self.files):
+            try:
+                is_file, is_dir = path.is_file(), path.is_dir()
+            except OSError:
+                is_file = is_dir = False
+            if not is_file:
+                left_out.append(f"{path.name or p} is a folder: add the files in it instead." if is_dir else f"{path.name or p} can't be found.")
+            elif not any((e.row.path or "").lower() == to_unc(str(path)).lower() for e in self.files):
                 self._add_file(FileRow(path.name, to_unc(str(path))), "dropped")
+        if left_out:
+            self._fail(" ".join(left_out), self.content)
 
     def _pick_files(self) -> None:
         paths, _ = QFileDialog.getOpenFileNames(self, "Add files to the capture")

@@ -96,5 +96,6 @@ def open_msg_file(path: Path) -> EmailItem:
 
 
 def is_outlook_drop(formats: list[str]) -> bool:
-    """True for what Outlook puts on a drag: it isn't a file yet, so the email is read from Outlook's selection."""
-    return any("RenPrivate" in f or "FileGroupDescriptor" in f for f in formats)
+    """True for what Outlook puts on a drag (its own RenPrivate formats): the email isn't a file yet, so it's read from
+    Outlook's selection. FileGroupDescriptorW alone doesn't count: File Explorer puts it on every file it drags."""
+    return any("RenPrivate" in f for f in formats)

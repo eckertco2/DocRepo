@@ -227,3 +227,74 @@ def test_set_hotkey_command(tmp_path, capsys):
     assert Settings.load(root).hotkey == "Ctrl+Alt+Space"
     assert main(["--data-root", str(root), "set-hotkey", "Shift+A"]) == 1
     assert "needs Ctrl, Alt or Win" in capsys.readouterr().err
+
+
+# ---- drops: what File Explorer and Outlook put on a drag ----
+EXPLORER_FORMATS = ("Shell IDList Array", "FileName", "FileContents", "FileNameW", "FileGroupDescriptorW", "ZoneIdentifier")
+
+
+def _mime(paths=(), formats=()):
+    from PySide6.QtCore import QMimeData, QUrl
+
+    mime = QMimeData()
+    if paths:
+        mime.setUrls([QUrl.fromLocalFile(str(p)) for p in paths])
+    for f in formats:
+        mime.setData(f'application/x-qt-windows-mime;value="{f}"', b"")
+    return mime
+
+
+def _drop(widget, mime):
+    from PySide6.QtCore import QPointF, Qt
+    from PySide6.QtGui import QDragEnterEvent, QDropEvent
+
+    where = widget.rect().center()
+    enter = QDragEnterEvent(where, Qt.DropAction.CopyAction | Qt.DropAction.MoveAction, mime, Qt.MouseButton.LeftButton,
+                            Qt.KeyboardModifier.NoModifier)
+    QApplication.sendEvent(widget, enter)
+    drop = QDropEvent(QPointF(where), Qt.DropAction.CopyAction | Qt.DropAction.MoveAction, mime, Qt.MouseButton.LeftButton,
+                      Qt.KeyboardModifier.NoModifier)
+    QApplication.sendEvent(widget, drop)
+    return enter, drop
+
+
+def test_a_file_dragged_from_file_explorer_becomes_a_file_row(window, tmp_path, monkeypatch):
+    from docrepo import outlook
+    from docrepo.ui.capture_window import read_drop
+
+    monkeypatch.setattr(outlook, "selected_emails", lambda: pytest.fail("a file drop must not ask Outlook"))
+    report = tmp_path / "Pump curve.pdf"
+    report.write_bytes(b"%PDF-1.4")
+    mime = _mime([report], EXPLORER_FORMATS)  # Explorer carries Outlook's virtual-file format too
+    assert read_drop(mime) == ("files", [str(report).replace("\\", "/")])
+    for target in (window.content.viewport(), window):
+        window.reset_draft()
+        enter, drop = _drop(target, mime)
+        assert enter.isAccepted() and drop.isAccepted() and drop.dropAction().name == "CopyAction"  # a copy, never a move
+        assert [e.row.name for e in window.files] == ["Pump curve.pdf"] and window.files[0].desc is not None
+    assert window.content.toPlainText() == ""  # the path isn't pasted into the content text
+
+
+def test_an_email_dragged_from_outlook_is_read_from_outlook(window, monkeypatch):
+    from docrepo import outlook
+    from docrepo.ui.capture_window import read_drop
+
+    asked = []
+    monkeypatch.setattr(outlook, "selected_emails", lambda: asked.append(True) or [])
+    mime = _mime([], ("RenPrivateSourceFolder", "RenPrivateMessages", "FileGroupDescriptorW", "FileContents"))
+    assert read_drop(mime) == ("outlook", [])
+    _drop(window.content.viewport(), mime)
+    assert asked == [True]
+
+
+def test_drops_that_bring_no_file_say_why(window, tmp_path):
+    from docrepo.ui.capture_window import read_drop
+
+    virtual = _mime([], ("FileGroupDescriptorW", "FileContents"))  # such as a file inside a zip folder
+    assert read_drop(virtual) == ("virtual", [])
+    _drop(window.content.viewport(), virtual)
+    assert "doesn't hand DocRepo a file" in window.error.text() and not window.files
+    folder = tmp_path / "Drawings"
+    folder.mkdir()
+    _drop(window.content.viewport(), _mime([folder], EXPLORER_FORMATS))
+    assert "Drawings is a folder" in window.error.text() and not window.files
