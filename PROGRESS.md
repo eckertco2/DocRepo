@@ -9,7 +9,7 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 1 | Skeleton and safety: the data root's location, settings, guarded writes, logging, the command line, and the network-module scan | Done. Tested on the corporate computer (2026-10-09): pip install, pytest and the command checks |
 | 2 | Database and task model: schema, IDs, the task tree, labels, people, logs, recurrence, days until due, the capacity calendar, and the generated pages, checked against the mockup's test vectors and examples | Built and hand-tested by the owner 2026-10-16; on GitHub 2026-10-16. Next: testing on the corporate computer with phase 3 |
 | 3 | Capture app: tray, hotkey, the capture window (task picker, the Note, New task and Update capture types, Parse and populate, Copy prompt, mods log), saving captures, text extraction, Outlook emails and LAN paths | Built and hand-tested by the owner 2026-10-16 (3a); on GitHub 2026-10-16. Next: testing on the corporate computer, including 3b (Outlook), which can only be tested there |
-| 4 | Browse tool: the views, task and capture pages, agendas, capacity, people, labels, documents, search, and Settings | Built 2026-10-17. Next: the owner's hand test here, then testing on the corporate computer |
+| 4 | Browse tool: the views, task and capture pages, agendas, capacity, people, labels, documents, search, and Settings | Built 2026-10-17; hand-tested by the owner 2026-10-18; on GitHub 2026-10-18. Next: testing on the corporate computer |
 | 5 | First everyday version: Startup shortcut, backups, the one-time Excel import of the project list, and the README | Not started |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
@@ -92,7 +92,7 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 
 ## Unfinished / notes
 
-- Phase 4 is built and its automated tests pass; it hasn't been hand-tested yet. Not covered by the automated tests: how the window looks with the real Windows style (the tests draw it offscreen), File Explorer opening, the tray menu and reminder clicks, and the Settings view's folder pickers.
+- Phase 4 passed the owner's hand test on this computer on 2026-10-18, after the fix that keeps the windows light in Windows' dark mode, and went to GitHub the same day. The hand test covered what the automated tests can't: the window with the real Windows style, File Explorer opening, the tray menu and reminder clicks, and the Settings view.
 
 - Phases 2 and 3 passed the owner's hand tests on this computer and went to GitHub together on 2026-10-16 (brainstorm round 12).
 - To test on the corporate computer: Outlook emails (dragging from Outlook, Add selected Outlook email, a dropped `.msg` file, email.msg and attachments in the capture folder, any Outlook security prompt), mapped drives recorded as network paths, files on the LAN drive, and the hotkey there.
@@ -100,5 +100,5 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 - On the corporate computer, phase 4 needs the same checks as phases 2 and 3, plus the browse tool on the real data root (search over real captures, File Explorer on the LAN drive).
 
 - `SPEC.md` covers phases 1 to 4 in full; later phases are summaries until they're built. The detailed design is in the parent workspace's `docs/task-model/brainstorm.md`.
-- Published to the GitHub repo `eckertco2/DocRepo` on 2026-10-09 (phase 1), and on 2026-10-16 (the glossary, phases 2 and 3).
+- Published to the GitHub repo `eckertco2/DocRepo` on 2026-10-09 (phase 1), on 2026-10-16 (the glossary, phases 2 and 3), and on 2026-10-18 (phase 4).
 - The route to the corporate computer works (2026-10-09): download, a security scan there, `pip install -r requirements.txt` with every pinned version available, and pytest passing.
