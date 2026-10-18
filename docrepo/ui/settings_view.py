@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import asdict
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -28,9 +29,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo import capacity, db, hotkey, prompts, search
+from docrepo import backup, capacity, db, hotkey, prompts, search, startup
 from docrepo.config import Settings, data_root_problem, init_data_root, make_safe_fs, resolve_data_root, save_location
-from docrepo.dates import WEEKDAYS
+from docrepo.dates import WEEKDAYS, long_date
 from docrepo.model import Model
 from docrepo.pages import write_pages
 from docrepo.ui.context import AppContext
@@ -125,11 +126,13 @@ def rebuild_everything(ctx: AppContext) -> str:
 class SettingsView(QWidget):
     """The form. ``message`` shows a line in the browse tool's status line."""
 
-    def __init__(self, ctx: AppContext, message: Callable[[str], None], confirm: Callable[[str, str], bool]) -> None:
+    def __init__(self, ctx: AppContext, message: Callable[[str], None], confirm: Callable[[str, str], bool],
+                 reveal: Callable[[Path], bool] = lambda path: False, open_import: Callable[[], None] = lambda: None) -> None:
         super().__init__()
         self.ctx = ctx
         self.message = message
         self.confirm = confirm
+        self.reveal = reveal
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         scroll = QScrollArea()
@@ -158,18 +161,49 @@ class SettingsView(QWidget):
         lay.addWidget(self.where)
         lay.addLayout(row)
 
+        # Starting when the owner signs in, and the one-time import of the project list
+        self.startup_status = QLabel()
+        self.startup_status.setWordWrap(True)
+        make = QPushButton("Make the Startup shortcut")
+        make.setToolTip("Makes DocRepo.lnk and opens your Startup folder next to it, for you to drag it in")
+        make.clicked.connect(self.make_shortcut)
+        imp = QPushButton("Import projects from Excel…")
+        imp.setToolTip("A one-time import of your project list: each row becomes a top-level task")
+        imp.clicked.connect(lambda: open_import())
+        row = QHBoxLayout()
+        row.addWidget(make)
+        row.addWidget(imp)
+        row.addStretch()
+        lay.addWidget(self.startup_status)
+        lay.addLayout(row)
+
         form = QFormLayout()
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         self.me = QComboBox()
         self.hotkey = QLineEdit()
         self.hotkey.setPlaceholderText("Such as Ctrl+Shift+Space")
         self.backup = QLineEdit()
-        self.backup.setPlaceholderText("Not set. Backups start in a later version")
+        self.backup.setPlaceholderText("Not set: no backups are made")
         browse = QPushButton("Browse…")
         browse.clicked.connect(self._pick_backup)
         backup_row = QHBoxLayout()
         backup_row.addWidget(self.backup, 1)
         backup_row.addWidget(browse)
+        self.backup_days = QSpinBox()
+        self.backup_days.setRange(1, 90)
+        self.backup_days.setPrefix("every ")
+        self.backup_days.setSuffix(" days")
+        self.backup_keep = QSpinBox()
+        self.backup_keep.setRange(1, 60)
+        self.backup_keep.setSuffix(" database copies")
+        self.backup_status = QLabel()
+        self.backup_status.setWordWrap(True)
+        now = QPushButton("Back up now")
+        now.clicked.connect(self.backup_now)
+        backup_when = QHBoxLayout()
+        for w in (self.backup_days, QLabel("keeping"), self.backup_keep, now):
+            backup_when.addWidget(w)
+        backup_when.addStretch()
         self.reminder = QTimeEdit()
         self.reminder.setDisplayFormat("HH:mm")
         self.workdays = {d: QCheckBox(d) for d in WEEKDAYS}
@@ -194,7 +228,8 @@ class SettingsView(QWidget):
         self.check.setRange(5, 24 * 60)
         self.check.setSuffix(" minutes")
         rows = [("Me", self.me, "Who “I” and “me” are in captures."), ("Hotkey", self.hotkey, "Opens the capture window. It needs Ctrl, Alt or Win."),
-                ("Backup folder", backup_row, "Where daily backups go (a later version). Outside the data root."),
+                ("Backup folder", backup_row, "Where backups go: a copy of docs.db and a mirror of the data root's files. Outside the data root."),
+                ("Backups", backup_when, "How often DocRepo backs up, at its first start of the day, and how many copies of docs.db it keeps."),
                 ("Reminders at", self.reminder, "Each day's reminders show as notifications from this time."),
                 ("Workdays", days, "The capacity calendar spreads hours over these days."),
                 ("Capacity horizon", self.horizon, "How far ahead routine tasks fill the capacity calendar."),
@@ -217,6 +252,7 @@ class SettingsView(QWidget):
             bl.addWidget(note)
             form.addRow(label, box)
         lay.addLayout(form)
+        lay.addWidget(self.backup_status)
         self.error = QLabel()
         self.error.setStyleSheet("background:#fbe3e1; color:#b0261e; padding:6px 10px")
         self.error.setWordWrap(True)
@@ -257,6 +293,10 @@ class SettingsView(QWidget):
         self.cap.setValue(s.extracted_text_cap_chars)
         self.warn.setValue(s.prompt_warn_chars)
         self.check.setValue(s.doc_check_minutes)
+        self.backup_days.setValue(s.backup_every_days)
+        self.backup_keep.setValue(s.backup_keep)
+        self.startup_status.setText(f"<b>Start when you sign in:</b> {startup.status()}")
+        self.show_backup_status()
         self.error.hide()
 
     def values(self) -> dict[str, Any]:
@@ -265,6 +305,7 @@ class SettingsView(QWidget):
             "reminder_time": self.reminder.time().toString("HH:mm"), "workdays": [d for d, box in self.workdays.items() if box.isChecked()],
             "capacity_horizon_years": self.horizon.value(), "event_words": [w for w in self.events.text().split(",")],
             "extracted_text_cap_chars": self.cap.value(), "prompt_warn_chars": self.warn.value(), "doc_check_minutes": self.check.value(),
+            "backup_every_days": self.backup_days.value(), "backup_keep": self.backup_keep.value(),
         }
 
     def save(self) -> list[str]:
@@ -282,6 +323,54 @@ class SettingsView(QWidget):
             later = " The hotkey works from now on." if "hotkey" in changed else ""
             self.message(f"Saved {len(changed)} setting{'s' if len(changed) > 1 else ''} to settings.json.{later}")
         return changed
+
+    # ---- backups ----
+    def show_backup_status(self) -> None:
+        s = self.ctx.settings
+        if not s.backup_dir:
+            self.backup_status.setText("<b>Backups:</b> off. Choose a backup folder and save, to turn them on.")
+            return
+        last = backup.last_backup(self.ctx.conn)
+        if not last:
+            self.backup_status.setText("<b>Backups:</b> none yet. The first is made at DocRepo's next start, or with Back up now.")
+            return
+        when = datetime.fromisoformat(last)
+        left = s.backup_every_days - (self.ctx.now().date() - when.date()).days
+        nxt = "at DocRepo's next start" if left <= 0 else "tomorrow" if left == 1 else f"in {left} days"
+        self.backup_status.setText(f"<b>Backups:</b> the last was on {long_date(when.date(), self.ctx.now().date())} at "
+                                   f"{last[11:16]}. The next is due {nxt}. Each one is listed in backup-log.md in the backup folder.")
+
+    def backup_now(self) -> None:
+        if (self.backup.text().strip() or None) != self.ctx.settings.backup_dir:
+            self.message("Save the settings first, so the backup goes to the folder shown.")
+            return
+        if self.ctx.start_backup is not None:
+            if self.ctx.start_backup():
+                self.message("Backing up. A notification says when it's done.")
+            return
+        try:
+            result = backup.run_backup(self.ctx.data_root, self.ctx.settings, self.ctx.now())
+        except backup.BackupError as e:
+            self.message(str(e))
+            return
+        backup.record(self.ctx.conn, result)
+        self.show_backup_status()
+        self.message(result.message())
+
+    # ---- the Startup shortcut ----
+    def make_shortcut(self) -> None:
+        try:
+            path = startup.make_shortcut(self.ctx.fs)
+        except (startup.StartupError, OSError) as e:
+            self.message(f"The shortcut couldn't be made: {e}")
+            return
+        folder = startup.startup_folder()
+        self.reveal(path)
+        if folder is not None:
+            self.reveal(folder)
+        self.message(f"Made {startup.SHORTCUT}. Drag it from the File Explorer window it's selected in into your Startup folder, "
+                     "the other window. To stop DocRepo starting when you sign in, delete it from the Startup folder.")
+        self.startup_status.setText(f"<b>Start when you sign in:</b> {startup.status()}")
 
     def _pick_backup(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Backup folder", self.backup.text())

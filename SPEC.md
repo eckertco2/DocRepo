@@ -38,6 +38,8 @@ DocRepo picks the data root from, in order:
 | `me` | The owner's person ID, such as `P001` | none |
 | `hotkey` | The capture window's hotkey | Ctrl+Shift+Space |
 | `backup_dir` | The backup folder | none |
+| `backup_every_days` | How often a backup is made, in days (9.1) | 7 |
+| `backup_keep` | How many copies of docs.db the backup folder keeps | 8 |
 | `doc_check_minutes` | How often tracked documents are checked for changes | 60 |
 | `reminder_time` | When each day's reminders are shown | 08:00 |
 | `extracted_text_cap_chars` | Most text kept per extracted file | 200000 |
@@ -57,6 +59,8 @@ A missing file gives the defaults. An unreadable file stops DocRepo with an erro
 - **Writing:** `write_text` writes only `.md`, `.json`, `.txt` and `.log` files, as UTF-8, atomically (a temporary file in the same folder replaces the target).
 - **Copying:** `copy_file` copies a file the owner asked to keep. It only reads the source, and never overwrites.
 - **Moving:** `move` moves only from one allowed place to another, and never overwrites.
+- **Replacing:** `replace_file` (copy over) and `replace` (move over) work only inside a SafeFS's replace roots. `make_safe_fs` makes the backup folder the only one, and none when the backup folder is inside the data root or holds it, so a backup can bring its copies up to date (9.1) while nothing in the data root is ever overwritten by a copy.
+- **The Startup shortcut:** `DocRepo.lnk` in `%LOCALAPPDATA%\DocRepo\` is written by Windows' shell, to a path `checked_path` allows (9.2).
 - **No delete function.** Every refusal is logged.
 - Code that writes on its own (SQLite, the log, Outlook's SaveAs) gets its path from `checked_path` first.
 
@@ -75,6 +79,8 @@ A missing file gives the defaults. An unreadable file stops DocRepo with an erro
 | `report [--as-of WHEN] [--week DATE]` | Prints what DocRepo works out: capacity for 9 weeks, days until due, the lists, labels and parent chains, raw text logs and agendas. |
 | `app` | Starts the capture app (section 7). Use `pythonw` instead of `python` for no console window. |
 | `browse` | Opens the browse tool (section 8), starting the app first if it isn't running. |
+| `backup` | Makes a backup now (9.1). |
+| `make-shortcut` | Makes `DocRepo.lnk`, the Startup shortcut, in `%LOCALAPPDATA%\DocRepo\`, and says where to move it (9.2). |
 | `set-hotkey KEYS` | Sets the capture window's hotkey, such as `"Ctrl+Alt+Space"`. It needs Ctrl, Alt or Win. Takes effect when the app next starts. The browse tool's Settings view does the same, at once. |
 
 `--as-of` takes `YYYY-MM-DD` or `"YYYY-MM-DD HH:MM"` and makes the command work as if it were then. It's for testing.
@@ -276,11 +282,38 @@ The words used here are defined in `GLOSSARY.md`.
 ### 8.9 Settings
 - The data root in use. **Change data root…** picks a folder, checks it isn't in OneDrive or the code folder, sets it up if it's new and records it in `location.json`; DocRepo uses it from its next start, and nothing in the current data root moves. When DocRepo was started with `--data-root` or `DOCREPO_DATA_ROOT`, the page says the recorded one isn't in use.
 - **Rebuild pages, calendar and search** does what `rebuild` does.
-- The fields of `settings.json` (3): me (from the active people), the hotkey (checked as `set-hotkey` checks it, and registered again at once), the backup folder (a full path outside the data root; it joins the places DocRepo may write at once), the reminder time, the workdays, the capacity horizon, the event words, the extracted text cap, Copy prompt's warning length and how often documents are checked. Save settings writes only what changed; a change to the workdays or the horizon rebuilds the capacity calendar and the pages. Undo changes shows what's saved again.
+- Whether DocRepo starts when the owner signs in, with **Make the Startup shortcut** (9.2), and **Import projects from Excel…** (9.3).
+- Under the fields, when the last backup was made and when the next is due, with **Back up now** (9.1).
+- The fields of `settings.json` (3): me (from the active people), the hotkey (checked as `set-hotkey` checks it, and registered again at once), the backup folder (a full path outside the data root; it joins the places DocRepo may write at once), how often to back up and how many database copies to keep, the reminder time, the workdays, the capacity horizon, the event words, the extracted text cap, Copy prompt's warning length and how often documents are checked. Save settings writes only what changed; a change to the workdays or the horizon rebuilds the capacity calendar and the pages. Undo changes shows what's saved again.
 
-## 9. Later phases (summaries)
+## 9. First everyday version (phase 5, built)
+
+### 9.1 Backups
+- `docrepo/backup.py`. A backup runs every `backup_every_days` (7 by default) at the app's first start of the day, on its own thread so the windows stay quick, and when the owner asks: **Back up now** in Settings, or the `backup` command. A notification says what it did. The time of the last backup is kept in `app_state`.
+- It needs a backup folder (Settings), outside the data root; with none, no backups are made. In the backup folder:
+  - `Database\docs-1.db` to `docs-<backup_keep>.db` (8 by default): copies of docs.db made with SQLite's backup API, so they're whole even while DocRepo writes. Each backup fills an empty slot, or overwrites the oldest copy.
+  - `Files\`: the data root's files as they are there, except the `System` folder (docs.db is copied whole instead; the lock and the logs stay). New and changed files (by size and modified time) are copied over; nothing is ever removed from it.
+  - `backup-log.md`: one line per backup (when, which database copy, how many files were copied), and how to restore.
+- A backup writes through a SafeFS that allows only the backup folder. It's the one place DocRepo replaces files: `replace_file` and `replace` work only in a SafeFS's replace roots, which `make_safe_fs` sets to the backup folder, and never when that folder is inside the data root (section 4).
+- A file that can't be copied is listed in the notification and the log, and the backup goes on. A missing backup drive stops the backup with a message.
+- **Restoring** (by hand, in the README and the log): quit DocRepo, copy `Files` into a new empty folder, copy the newest database copy into its `System` folder as `docs.db`, then `set-data-root` and `rebuild`.
+
+### 9.2 Starting when the owner signs in
+- `docrepo/startup.py`. DocRepo may write only in its three places, and the Startup folder isn't one of them, so **Make the Startup shortcut** in Settings (or the `make-shortcut` command) makes `DocRepo.lnk` in `%LOCALAPPDATA%\DocRepo\`, then opens that folder (with the shortcut selected) and the owner's Startup folder in File Explorer, for the owner to drag it across.
+- The shortcut runs this copy's `pythonw.exe -m docrepo app` from DocRepo's folder, so no console window opens, and names no data root (DocRepo finds it in `location.json`). Windows' shell (`WScript.Shell`, through pywin32) writes it, to a path the guard checks first. No admin rights, services, scheduled tasks or registry changes.
+- Settings says whether DocRepo starts when the owner signs in, by reading the Startup folder: not yet, yes, or a shortcut that starts DocRepo from another folder (made before DocRepo moved), to make again.
+
+### 9.3 Importing the project list from Excel
+- `docrepo/excel_import.py` and the form `docrepo/ui/import_dialog.py`, from **Import projects from Excel…** in Settings. A one-time import: each row of the owner's project list becomes a top-level task, created by "Excel import", so its story begins "Imported from the Excel tracker" with its current status. After it, DocRepo is the master list.
+- The workbook (`.xlsx` or `.xlsm`) is opened with openpyxl in read-only mode with cached values, so formulas and macros never run, and it's never changed. A workbook open in Excel can't always be read; the form says to close it or import a copy.
+- **The form:** the workbook and sheet (a sheet named like "projects" is picked first), the header row (the first row with two or more text cells, so title rows above it are skipped), and the state tasks start in without a State column (In progress). Then each column, with a few example values and a dropdown for what it fills: Title, Description, Add to the description ("Header: value" lines, so nothing is lost), Current status, State, Start, Due, Deadline, Deadline description, Lead, Assignees, Labels, A label (yes or no), Urgent, Lead hours, Assignee hours, or Leave out. The proposal comes from the header's words (Owner and Project lead are Lead, Team is Assignees, Category is Labels, Due date is Due and so on, with Title last so "Project lead" isn't the title), and a column holding only yes, no, x or blank is one label, named by its header (changeable). A State column's values each get the state they become, proposed from their words (complete is Closed, on hold is Parked). Only one column can fill each single field, and one must fill Title.
+- **The preview** lists the tasks Import will make (row, title, state, due, lead, assignees, labels), the new people and labels, what to check, and the rows skipped. Nothing is written until **Import**.
+- **Values:** dates from date cells, Excel day numbers, or text read as Parse and populate reads date phrases ("Q1 2027", "10/30/2026"); text that isn't a date goes into the description, and the preview says so. Names in Lead and Assignees (split at commas, semicolons, slashes, "&" and "and") match the people list by name or alias; a retired person is left off, as Parse and populate does; the rest become new people. Label names that don't exist become new labels. Urgent reads yes, x, high, urgent, critical or P1.
+- Rows with no title are left out. A row whose title is already an Excel-imported task's is skipped, so importing again makes no doubles; the form shows the last import (when, how many, the workbook's name).
+- **Import** runs in one transaction (the new people, labels and tasks, each task's capacity calendar rows), then writes the pages. The log records counts only.
+
+## 10. Later phases (summaries)
 
 These are designed in detail in the owner's design notes, and move into this file as each phase is built.
 
-- **First everyday version (phase 5):** Startup shortcut, daily backups, and a one-time import of the project list from Excel.
 - **Document tracking (phase 6):** change checks on tracked files, diffs, replaced saved copies, relinking moved files, and editing file descriptions.

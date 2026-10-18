@@ -115,6 +115,8 @@ class Settings:
     me: str | None = None
     hotkey: str = "Ctrl+Shift+Space"
     backup_dir: str | None = None
+    backup_every_days: int = 7
+    backup_keep: int = 8
     doc_check_minutes: int = 60
     reminder_time: str = "08:00"
     extracted_text_cap_chars: int = 200_000
@@ -149,7 +151,10 @@ def make_safe_fs(data_root: Path, settings: Settings) -> SafeFS:
     roots: list[Path] = [data_root, app_dir()]
     if settings.backup_dir:
         roots.append(Path(settings.backup_dir))
-    return SafeFS(roots)
+    # Backups may replace their own copies, but never in the data root, even if settings.json says the backup folder is there.
+    backup = Path(settings.backup_dir) if settings.backup_dir else None
+    usable = backup is not None and not _inside(backup, data_root) and not _inside(data_root, backup)
+    return SafeFS(roots, replace_roots=[backup] if usable else [])
 
 
 def init_data_root(data_root: Path) -> list[Path]:

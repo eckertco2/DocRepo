@@ -18,11 +18,12 @@ DocRepo is developed on its owner's personal computer and published to a public 
 
 ### Files
 - The app may **read** any file the owner gives it.
-- The app may **write** only in three places: the data root, the backup folder, and `%LOCALAPPDATA%\DocRepo\`, which holds only `location.json`, the record of where the data root is.
+- The app may **write** only in three places: the data root, the backup folder, and `%LOCALAPPDATA%\DocRepo\`, which holds only `location.json` (the record of where the data root is) and `DocRepo.lnk` (the Startup shortcut, which the owner moves into their Startup folder by hand). The app only reads the Startup folder.
 - All writes, copies, moves and new folders go through `docrepo/safe_fs.py`. It resolves the real path and refuses anything outside those places. Its tests cover `..` paths, symlinks and junctions.
 - Never modify, move, rename or delete a file outside those places. Original files are only ever read, or copied when the owner asks for a copy.
 - Never edit Word, PowerPoint, PDF or Excel files anywhere, including DocRepo's own copies. Open them read-only, and only to extract text.
-- The app writes only Markdown, JSON, plain text, its SQLite database, its own logs and settings, and file copies the owner asked for.
+- The app writes only Markdown, JSON, plain text, its SQLite database (and copies of it in the backup folder), its own logs and settings, file copies the owner asked for and their backups, and the Startup shortcut.
+- Copying and moving never overwrite a file, except inside the backup folder, where a backup brings its copies up to date. The backup folder is never inside the data root.
 - Never delete captures, copied files or saved emails. Generated files (`Task.md`, `Contents.md`, the search index) may be rebuilt. A capture's `capture.md` may be edited only to file it or to fix a mistake, and a fix keeps the previous version in the capture's `_old versions` folder.
 - No paths in the code: no user names, data root, backup folder, LAN host names or package repository addresses. Paths come from settings that the owner enters in the app.
 

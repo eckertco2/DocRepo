@@ -215,7 +215,8 @@ class BrowseWindow(QWidget):
         lp.addWidget(self.tree, 1)
         self.middle.addWidget(list_page)
         self.middle.addWidget(self._build_capacity())
-        self.settings_view = SettingsView(self.ctx, self.say, lambda title, text: self.confirm(title, text))
+        self.settings_view = SettingsView(self.ctx, self.say, lambda title, text: self.confirm(title, text),
+                                          lambda path: self.reveal(path), lambda: self.open_import())
         self.middle.addWidget(self.settings_view)
         self.split.addWidget(self.middle)
 
@@ -1127,6 +1128,16 @@ class BrowseWindow(QWidget):
         else:
             self.file_to.pop(capture_id, None)
         self.render_detail()
+
+    def open_import(self) -> None:
+        """The one-time import of the project list from Excel."""
+        from docrepo.ui.import_dialog import ImportDialog
+
+        dialog = ImportDialog(self, self.ctx)
+        if dialog.exec() and dialog.outcome:
+            self.refresh(render=False)
+            self.set_view("tasks")
+            self.say(dialog.outcome)
 
     # ================= the capture window =================
     def open_capture(self, **options) -> None:

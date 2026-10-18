@@ -9,18 +9,20 @@ routine tasks roll forward. Reminders show as Windows notifications.
 from __future__ import annotations
 
 import ctypes
+import dataclasses
 import logging
 import os
 import sys
+import threading
 from ctypes import wintypes
 from datetime import datetime, time
 from pathlib import Path
 
-from PySide6.QtCore import QAbstractNativeEventFilter, QLockFile, QObject, QTimer
+from PySide6.QtCore import QAbstractNativeEventFilter, QLockFile, QObject, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QFont, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QInputDialog, QMenu, QSystemTrayIcon
 
-from docrepo import capacity, db, hotkey, people, prompts, search
+from docrepo import backup, capacity, db, hotkey, people, prompts, search
 from docrepo.config import Settings
 from docrepo.dates import long_date
 from docrepo.model import Model
@@ -100,6 +102,9 @@ class _MessageFilter(QAbstractNativeEventFilter):
 
 
 class CaptureApp(QObject):
+    #: A backup finished on its own thread: its BackupResult, or the exception that stopped it.
+    backup_finished = Signal(object)
+
     def __init__(self, qt: QApplication, ctx: AppContext) -> None:
         super().__init__()
         self.qt = qt
@@ -111,6 +116,9 @@ class CaptureApp(QObject):
         self.tray.setToolTip("DocRepo")
         ctx.notify = self.notify
         ctx.settings_changed = self.settings_changed
+        ctx.start_backup = self.start_backup
+        self._backup_thread: threading.Thread | None = None
+        self.backup_finished.connect(self._backup_done)
         self.window = CaptureWindow(ctx)
         self.hwnd = int(self.window.winId())
         self.browse = BrowseWindow(ctx, self.window)
@@ -232,7 +240,38 @@ class CaptureApp(QObject):
             search.rebuild(self.ctx.conn, self.ctx.data_root)
         db.set_state(self.ctx.conn, "daily", now.date().isoformat())
         log.info("daily start: %d calendar rows, %d pages written", rows, pages)
+        if backup.is_due(self.ctx.conn, self.ctx.settings, now):
+            self.start_backup()
         return True
+
+    # ---- backups ----
+    def start_backup(self) -> bool:
+        """Start a backup on its own thread, so the windows stay quick. A notification says when it's done."""
+        if self._backup_thread is not None and self._backup_thread.is_alive():
+            self.notify("Backup", "A backup is already running.")
+            return False
+        root, settings, now = self.ctx.data_root, dataclasses.replace(self.ctx.settings), self.ctx.now()
+
+        def work() -> None:
+            try:
+                result: object = backup.run_backup(root, settings, now)
+            except Exception as e:  # noqa: BLE001 - reported in the notification and the log
+                result = e
+            self.backup_finished.emit(result)
+
+        self._backup_thread = threading.Thread(target=work, name="DocRepo backup", daemon=True)
+        self._backup_thread.start()
+        log.info("backup started")
+        return True
+
+    def _backup_done(self, result: object) -> None:
+        if isinstance(result, backup.BackupResult):
+            backup.record(self.ctx.conn, result)
+            self.notify("Backup", result.message())
+        else:
+            log.warning("backup failed: %s", result)
+            self.notify("Backup", f"The backup couldn't be made. {result}")
+        self.browse.settings_view.show_backup_status()
 
     def tick(self) -> None:
         """Every minute: the daily work after midnight, and reminders once it's past reminder_time."""

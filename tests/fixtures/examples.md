@@ -526,6 +526,8 @@ Settings.
   "me": "P001",
   "hotkey": "Ctrl+Shift+Space",
   "backup_dir": "C:\\Users\\<user>\\Documents\\DocRepoBackups",
+  "backup_every_days": 7,
+  "backup_keep": 8,
   "doc_check_minutes": 60,
   "reminder_time": "08:00",
   "extracted_text_cap_chars": 200000,

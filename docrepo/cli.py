@@ -10,11 +10,12 @@ from contextlib import closing
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from docrepo import __version__, capacity, db, hotkey, prompts, search
+from docrepo import __version__, backup, capacity, db, hotkey, prompts, search
 from docrepo.config import (
     SETTINGS_FILE,
     Settings,
     SettingsError,
+    app_dir,
     data_root_problem,
     init_data_root,
     location_file,
@@ -72,6 +73,8 @@ def build_parser() -> argparse.ArgumentParser:
     report.add_argument("--week", type=a_date, metavar="DATE", help="break this week's hours down by task (default: this week)")
     commands.add_parser("app", help="start the capture app: the tray icon, the hotkey and the capture window (use pythonw for no console)")
     commands.add_parser("browse", help="open the browse tool, starting the app if it isn't running (use pythonw for no console)")
+    commands.add_parser("backup", help="back up docs.db and the data root's files to the backup folder now")
+    commands.add_parser("make-shortcut", help="make DocRepo.lnk, to move into your Startup folder so DocRepo starts when you sign in")
     set_hotkey = commands.add_parser("set-hotkey", help="choose the capture window's hotkey, such as \"Ctrl+Alt+Space\"")
     set_hotkey.add_argument("keys")
     return parser
@@ -236,6 +239,39 @@ def cmd_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_backup(args: argparse.Namespace) -> int:
+    opened = _open(args)
+    if opened is None:
+        return 1
+    root, settings, _fs, conn = opened
+    with closing(conn):
+        try:
+            result = backup.run_backup(root, settings, datetime.now())
+        except backup.BackupError as e:
+            print(e, file=sys.stderr)
+            return 1
+        backup.record(conn, result)
+    print(result.message())
+    for problem in result.problems:
+        print(f"  {problem}")
+    return 0
+
+
+def cmd_make_shortcut(args: argparse.Namespace) -> int:
+    from docrepo import startup
+
+    try:
+        path = startup.make_shortcut(SafeFS([app_dir()]))
+    except (startup.StartupError, OSError) as e:
+        print(f"The shortcut couldn't be made: {e}", file=sys.stderr)
+        return 1
+    print(f"Made {path}.")
+    folder = startup.startup_folder()
+    if folder is not None:
+        print(f"To start DocRepo when you sign in, move it into your Startup folder: {folder}")
+    return 0
+
+
 def cmd_browse(args: argparse.Namespace) -> int:
     return cmd_app(args, browse=True)
 
@@ -275,6 +311,8 @@ def cmd_set_hotkey(args: argparse.Namespace) -> int:
 COMMANDS: dict[str, Callable[[argparse.Namespace], int]] = {
     "app": cmd_app,
     "browse": cmd_browse,
+    "backup": cmd_backup,
+    "make-shortcut": cmd_make_shortcut,
     "set-hotkey": cmd_set_hotkey,
     "where": cmd_where,
     "set-data-root": cmd_set_data_root,

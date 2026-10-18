@@ -287,3 +287,81 @@ def test_the_windows_stay_light_in_dark_mode(qapp):
     assert palette.color(QPalette.ColorRole.Base).name() == "#ffffff" and palette.color(QPalette.ColorRole.Text).name() == "#1a1f25"
     # The offscreen platform has no colour schemes (Unknown); on Windows this is Light, never Dark.
     assert qapp.styleHints().colorScheme() != Qt.ColorScheme.Dark
+
+
+def test_back_up_now_from_settings(browse, ctx, tmp_path):
+    view = browse.settings_view
+    browse.set_view("settings")
+    view.backup.setText(str(tmp_path / "Backups"))
+    view.backup_now()
+    assert "Save the settings first" in browse.status.text()
+    assert "backup_dir" in view.save()
+    assert "Backups:</b> none yet" in view.backup_status.text()
+    view.backup_now()
+    assert browse.status.text().startswith("Backed up the database (docs-1.db)")
+    assert (tmp_path / "Backups" / "Database" / "docs-1.db").exists() and "the last was on" in view.backup_status.text()
+
+
+def test_the_startup_shortcut_button(browse, ctx, tmp_path, monkeypatch):
+    from docrepo import startup
+
+    from docrepo.config import make_safe_fs
+
+    monkeypatch.setattr(startup, "startup_folder", lambda: tmp_path / "Startup")
+    ctx.fs = make_safe_fs(ctx.data_root, ctx.settings)  # the app's guard, which includes DocRepo's own folder
+    browse.set_view("settings")
+    browse.settings_view.make_shortcut()
+    assert browse.revealed == [startup.shortcut_path(), tmp_path / "Startup"]
+    assert "Drag it" in browse.status.text() and startup.shortcut_path().exists()
+
+
+def test_the_import_form(browse, ctx, tmp_path):
+    from sample_workbook import make_workbook
+
+    from docrepo.ui.import_dialog import ImportDialog
+
+    dialog = ImportDialog(browse, ctx)
+    dialog.set_workbook(make_workbook(tmp_path / "projects.xlsx"))
+    assert dialog.sheet.currentText() == "PROJECTS" and dialog.header.value() == 3 and dialog.table.rowCount() == 11
+    assert dialog.preview.toPlainText().startswith("4 tasks to import, 1 row skipped. New people: Dana Kim. New labels: Strategic.")
+    dialog.set_field("Strategic", "label", "Strategic Plan")  # the label that's already there
+    assert "New labels" not in dialog.preview.toPlainText()
+    dialog.set_field("Status", "state")
+    assert dialog.states.rowCount() == 5 and dialog.states.isVisibleTo(dialog)
+    dialog.set_field("Status", "current_status")
+    assert dialog.import_button.isEnabled()
+    dialog.import_now()
+    assert dialog.outcome == "Imported 4 tasks from Excel, added 1 person. 1 row was skipped."
+    m = Model(browse.conn)
+    boiler = next(t for t in m.tasks.values() if t.title == "Boiler feedwater pump overhaul")
+    assert boiler.labels == ["Line 1", "Strategic Plan"] and boiler.created_by == "Excel import"
+    again = ImportDialog(browse, ctx)
+    assert again.last.isVisibleTo(again) and "4 tasks" in again.last.text()
+
+
+def test_the_app_backs_up_on_its_own_thread(ctx, tmp_path, monkeypatch):
+    from docrepo import app as app_module
+    from docrepo import hotkey
+
+    monkeypatch.setattr(hotkey, "register", lambda *a: True)
+    monkeypatch.setattr(hotkey, "unregister", lambda *a: None)
+    ctx.settings.backup_dir = str(tmp_path / "Backups")
+    from docrepo.config import make_safe_fs
+
+    ctx.fs = make_safe_fs(ctx.data_root, ctx.settings)
+    capture_app = app_module.CaptureApp(QApplication.instance(), ctx)
+    notes: list[tuple[str, str]] = []
+    capture_app.notify = lambda title, text: notes.append((title, text))
+    try:
+        assert capture_app.daily() is True  # a backup is due: there's never been one
+        capture_app._backup_thread.join(30)
+        for _ in range(50):
+            QApplication.processEvents()
+            if notes:
+                break
+        assert notes and notes[-1][0] == "Backup" and notes[-1][1].startswith("Backed up the database")
+        from docrepo import backup
+
+        assert backup.last_backup(ctx.conn) and not backup.is_due(ctx.conn, ctx.settings, ctx.now())
+    finally:
+        capture_app.quit()

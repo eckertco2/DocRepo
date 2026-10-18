@@ -7,6 +7,11 @@ roots: the data root, the backup folder and DocRepo's own folder in
 data streams, reserved names such as NUL) are refused before they're resolved.
 
 There is deliberately no delete function. Every refusal is logged.
+
+Copying and moving never overwrite (``write_text`` replaces DocRepo's own text
+files). The one exception is inside the "replace roots" a SafeFS is given: only
+the backup folder, where a backup brings its copies up to date
+(``replace_file`` and ``replace``).
 """
 from __future__ import annotations
 
@@ -74,7 +79,7 @@ def _is_within(path: Path, root: Path) -> bool:
 class SafeFS:
     """Writes files, but only inside the allowed roots."""
 
-    def __init__(self, roots: Iterable[PathLike]) -> None:
+    def __init__(self, roots: Iterable[PathLike], replace_roots: Iterable[PathLike] = ()) -> None:
         self._roots: list[Path] = []
         for root in roots:
             raw = os.fspath(root)
@@ -84,6 +89,10 @@ class SafeFS:
             self._roots.append(Path(os.path.abspath(raw)))
         if not self._roots:
             raise ValueError("SafeFS needs at least one allowed folder.")
+        self._replace_roots = [Path(os.path.abspath(os.fspath(r))) for r in replace_roots]
+        for r in self._replace_roots:
+            if not any(_is_within(Path(os.path.realpath(r)), Path(os.path.realpath(a))) for a in self._roots):
+                raise ValueError(f"{r} can't be a replace root: it isn't inside an allowed folder.")
 
     @property
     def roots(self) -> tuple[Path, ...]:
@@ -145,6 +154,36 @@ class SafeFS:
             raise FileExistsError(f"{target} already exists.")
         self.makedirs(target.parent)
         shutil.copy2(os.fspath(src), target)
+        return target
+
+    def _replaceable(self, path: PathLike) -> Path:
+        target = self.checked_path(path)
+        if not any(_is_within(target, Path(os.path.realpath(r))) for r in self._replace_roots):
+            self._refuse(os.fspath(path), "DocRepo replaces files only in the backup folder")
+        return target
+
+    def replace_file(self, src: PathLike, dst: PathLike) -> Path:
+        """Copy ``src`` over ``dst``, or to it if it's new. Only inside a replace root (the backup folder).
+
+        The copy goes to a temporary file next to ``dst`` first, which then replaces it in one step.
+        """
+        target = self._replaceable(dst)
+        self.makedirs(target.parent)
+        fd, tmp = tempfile.mkstemp(prefix=f".{target.name}.", suffix=".tmp", dir=target.parent)
+        os.close(fd)
+        try:
+            shutil.copy2(os.fspath(src), tmp)
+            os.replace(tmp, target)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp)  # only the temporary file this call just created
+            raise
+        return target
+
+    def replace(self, src: PathLike, dst: PathLike) -> Path:
+        """Move ``src`` over ``dst`` in one step. Both must be inside a replace root (the backup folder)."""
+        source, target = self._replaceable(src), self._replaceable(dst)
+        os.replace(source, target)
         return target
 
     def move(self, src: PathLike, dst: PathLike) -> Path:

@@ -24,6 +24,8 @@ class AppContext:
     now: Callable[[], datetime] = field(default=datetime.now)
     #: Told which settings the Settings view just changed, so the app can apply them (a new hotkey, say).
     settings_changed: Callable[[list[str]], None] = lambda keys: None
+    #: Starts a backup on the app's own thread. Without the app (in tests), the Settings view backs up there and then.
+    start_backup: Callable[[], bool] | None = None
 
     def model(self) -> Model:
         return Model(self.conn)
