@@ -144,6 +144,20 @@ def test_a_pasted_path_line_adds_the_file(window, tmp_path):
     assert window.files == []
 
 
+def test_a_pasted_path_on_a_mapped_drive_stays_put(window, tmp_path, monkeypatch):
+    from docrepo.ui import capture_window
+
+    report = tmp_path / "Survey.txt"
+    report.write_text("Traps", encoding="utf-8")
+    monkeypatch.setattr(capture_window, "to_unc", lambda p: "\\\\server\\share\\Survey.txt")  # as if on a mapped drive
+    window.content.setPlainText(str(report))
+    window._sync_paths()
+    window._sync_paths()  # the network path differs from the typed line; the row must not come and go
+    assert [(e.row.path, e.line) for e in window.files] == [("\\\\server\\share\\Survey.txt", str(report))]
+    window._remove_file(window.files[0])
+    assert window.content.toPlainText() == "" and window.files == []
+
+
 def test_a_bad_date_is_caught_before_saving(window):
     window.set_type("new_task", True)
     window.title.setText("Check the guards")

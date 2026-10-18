@@ -73,6 +73,7 @@ class FileEntry:
 
     row: FileRow
     src: str  # dropped, picked, pasted or outlook
+    line: str | None = None  # for a pasted path, the line in the content text it came from
     doc: str | None = None  # an already tracked document this file reuses
     widget: QFrame | None = None
     desc: QLineEdit | None = None
@@ -745,16 +746,16 @@ class CaptureWindow(QWidget):
         """A line of the content text that's an existing file's path adds that file; deleting the line removes it."""
         lines = [line.strip() for line in self.content.toPlainText().split("\n") if PATH_LINE.match(line.strip())]
         keep = {line.lower() for line in lines}
-        for entry in [e for e in self.files if e.src == "pasted" and (e.row.path or "").lower() not in keep]:
+        for entry in [e for e in self.files if e.src == "pasted" and (e.line or "").lower() not in keep]:
             self._remove_file(entry, from_content=False)
         for line in lines:
-            if not any((e.row.path or "").lower() == line.lower() for e in self.files):
+            if not any(line.lower() in ((e.line or "").lower(), (e.row.path or "").lower()) for e in self.files):
                 try:
                     exists = Path(line).is_file()
                 except OSError:
                     exists = False
                 if exists:
-                    self._add_file(FileRow(Path(line).name, to_unc(line)), "pasted")
+                    self._add_file(FileRow(Path(line).name, to_unc(line)), "pasted", line)
 
     def add_paths(self, paths: list[str]) -> None:
         """Files dropped or picked. A .msg file is read through Outlook as an email."""
@@ -783,10 +784,10 @@ class CaptureWindow(QWidget):
     def _add_email(self, email: EmailItem) -> None:
         self._add_file(FileRow(email.subject, description="", email=email), "outlook")
 
-    def _add_file(self, row: FileRow, src: str) -> None:
+    def _add_file(self, row: FileRow, src: str, line: str | None = None) -> None:
         m = self.ctx.model()
         doc = next((d for d in m.documents.values() if row.path and d.original and d.original.lower() == row.path.lower()), None)
-        entry = FileEntry(row, src, doc.id if doc else None)
+        entry = FileEntry(row, src, line=line, doc=doc.id if doc else None)
         frame = QFrame(objectName="fileRow")
         fl = QVBoxLayout(frame)
         fl.setContentsMargins(7, 6, 7, 6)
@@ -829,7 +830,7 @@ class CaptureWindow(QWidget):
         if entry.widget:
             entry.widget.deleteLater()
         if from_content and entry.src == "pasted":
-            lines = [line for line in self.content.toPlainText().split("\n") if line.strip().lower() != (entry.row.path or "").lower()]
+            lines = [line for line in self.content.toPlainText().split("\n") if line.strip().lower() != (entry.line or "").lower()]
             self._set_plain(self.content, "\n".join(lines))
         if len(self.files) < 2:
             self.same_all.setChecked(False)
