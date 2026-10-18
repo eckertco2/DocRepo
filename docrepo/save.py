@@ -20,7 +20,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from docrepo import agenda, captures, people, tasks
+from docrepo import agenda, captures, edits, people, search, tasks
 from docrepo.config import Settings
 from docrepo.dates import stamp
 from docrepo.db import next_id, transaction
@@ -119,6 +119,8 @@ class CaptureDraft:
     new_task: NewTaskFields = field(default_factory=NewTaskFields)
     #: The Update fields, prefilled with the task's values; only those that differ are changed.
     update: dict[str, Any] = field(default_factory=dict)
+    #: Make it a task: the unfiled capture the new task is made from. It's filed to the new task; no new capture is kept.
+    from_capture: str | None = None
 
     def agenda_shown(self) -> bool:
         """Add to agenda applies with New task, with Update on a picked task, or with no task picked."""
@@ -134,6 +136,9 @@ class SaveResult:
     added_people: list[str]
     message: str
     problems: list[str] = field(default_factory=list)
+    agenda_targets: list[str] = field(default_factory=list)
+    filed_capture: str | None = None  # Make it a task: the capture filed to the new task
+    picked_task: str | None = None  # the task picked in the window
 
 
 def copy_name(day: str, name: str, taken: set[str]) -> str:
@@ -179,6 +184,8 @@ def _check(draft: CaptureDraft, task_exists: bool) -> None:
 
 def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, draft: CaptureDraft, at: datetime) -> SaveResult:
     """Save what's in the capture window. Raises SaveError, changing nothing, if something is missing."""
+    if draft.from_capture:
+        draft.types = {"new_task"}
     is_new, is_upd, is_note = ("new_task" in draft.types, "update" in draft.types, "note" in draft.types)
     t = draft.task
     task_row = conn.execute("SELECT title FROM tasks WHERE id = ?", (t,)).fetchone() if t else None
@@ -188,8 +195,14 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
     full_content = "\n\n".join([content] * bool(content) + [e.text() for e in emails])
     summary = draft.summary.strip()
     targets = list(dict.fromkeys(draft.agenda)) if draft.agenda_shown() else []
-    keep = bool(content or draft.files or summary)
+    keep = bool(content or draft.files or summary) and not draft.from_capture
     when, day = stamp(at), at.date().isoformat()
+    source_capture = Model(conn).captures.get(draft.from_capture) if draft.from_capture else None
+    if draft.from_capture and source_capture is None:
+        raise SaveError(f"There's no capture {draft.from_capture}.", "content")
+    # Make it a task rewrites the capture's own capture.md, with its own content text, not the window's.
+    source_content = captures.read_content(data_root, source_capture) if source_capture else None
+    filed_copies: list[tuple[str, str]] = []
     added_people: list[str] = []
     documents: list[tuple[str, FileRow, Attachment | None]] = []  # (document ID, its row, the attachment it came from)
     copies: list[tuple[str, str]] = []  # (document ID, file name) for saved copies
@@ -197,7 +210,7 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
     created = None
     with transaction(conn):
         capture_id = next_id(conn, "C") if keep else None
-        via = capture_id or "Capture window"
+        via = capture_id or draft.from_capture or "Capture window"
 
         def person(w: Who) -> str:
             if w.id:
@@ -223,6 +236,10 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
                 urgent=nt.urgent, meeting=nt.meeting, leads=[person(w) for w in nt.leads], assignees=[person(w) for w in nt.assignees],
                 lead_hours=nt.lead_hours, assignee_hours=nt.assignee_hours, labels=nt.labels, inherit_labels=nt.inherit_labels,
             )
+        if source_capture and created:
+            filed_copies = edits.file_capture_records(conn, source_capture.id, created, at)
+            if summary and not source_capture.summary:
+                conn.execute("UPDATE captures SET summary = ?, summary_type = ? WHERE id = ?", (summary, draft.summary_type, source_capture.id))
         if is_upd and t:
             update = dict(draft.update)
             for key in ("leads", "assignees"):
@@ -275,9 +292,15 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
         for target in targets:
             agenda.add_item(conn, subject=subject, target=target, note=note_text, added=when, added_by=via)
 
-    result = SaveResult(capture_id, created, t if is_upd else None, changes, added_people, "")
+    result = SaveResult(capture_id, created, t if is_upd else None, changes, added_people, "", agenda_targets=targets,
+                        filed_capture=source_capture.id if source_capture else None, picked_task=t)
     if capture_id:
         _write_files(conn, data_root, fs, settings, capture_id, full_content, documents, copies, created or t, result)
+        search.index_items(conn, data_root, captures=[capture_id], documents=[d for d, _, _ in documents])
+    if source_capture and created:
+        edits.rewrite_capture_md(conn, data_root, fs, source_capture.id, source_content, result.problems)
+        edits.copy_files(conn, data_root, fs, created, filed_copies, result.problems)
+        search.index_items(conn, data_root, captures=[source_capture.id])
     try:
         write_pages(Model(conn), data_root, fs, at.date(), at)
     except OSError as e:
@@ -375,7 +398,10 @@ def _message(conn: sqlite3.Connection, draft: CaptureDraft, r: SaveResult, targe
     model = Model(conn)
     t = model.tasks.get(draft.task) if draft.task else None
     bits = []
-    if r.created_task:
+    if r.created_task and r.filed_capture:
+        new = model.task(r.created_task)
+        bits.append(f"Created {new.id}, {new.title}{f', under {t.title}' if t else ''}, and filed {r.filed_capture} to it.")
+    elif r.created_task:
         new = model.task(r.created_task)
         bits.append(f"Created {new.id}, {new.title}{f', under {t.title}' if t else ''}." + ("" if typed_title else " The title came from the content text."))
     if r.updated_task and t:

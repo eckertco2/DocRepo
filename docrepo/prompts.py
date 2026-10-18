@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -111,9 +112,23 @@ def capture_blocks(st: SummaryType, model: Model, content: str, file_texts: list
     return blocks
 
 
-def task_blocks(st: SummaryType, model: Model, task_id: str, include_raw: bool = True) -> list[tuple[str, str]]:
-    """Blocks from a task's records, for each task in the type's scope."""
+def task_blocks(
+    st: SummaryType, model: Model, task_id: str, include_raw: bool = True,
+    content_of: Callable[[str], str] | None = None, file_text_of: Callable[[str], str] | None = None,
+) -> list[tuple[str, str]]:
+    """Blocks from a task's records, for each task in the type's scope.
+
+    ``content_of`` gives a capture's content text by its ID, and ``file_text_of`` a document's extracted text; without
+    them a capture is sent by its title and files' text is left out.
+    """
     blocks: list[tuple[str, str]] = []
+
+    def entry_text(e) -> str:
+        if e.version:
+            return e.version.difference
+        return (content_of(e.capture.id) if content_of else "") or e.capture.title
+
+    sent_files: set[str] = set()
     for tid in model.scope_ids(task_id, st.scope):
         t = model.task(tid)
         if "title" in st.fields:
@@ -122,10 +137,22 @@ def task_blocks(st: SummaryType, model: Model, task_id: str, include_raw: bool =
             blocks.append((f"Description, {t.title}", t.description))
         if "current_status" in st.fields and t.current_status:
             blocks.append((f"Current status, {t.title}", t.current_status))
-        if include_raw and "raw_text_latest" in st.fields:
-            raw = model.raw_log_of(tid)
-            if raw and raw[-1].capture:
-                blocks.append((f"Latest raw text log entry ({raw[-1].capture.id})", raw[-1].capture.title))
+        raw = model.raw_log_of(tid)
+        if include_raw and "raw_text_all" in st.fields:
+            for e in raw:
+                what = e.capture.id if e.capture else f"{model.documents[e.version.document].name} changed"
+                blocks.append((f"Raw text log, {t.title}, {e.at[:16]} ({what})", entry_text(e)))
+        elif include_raw and "raw_text_latest" in st.fields and raw and tid == task_id:
+            e = raw[-1]
+            what = e.capture.id if e.capture else f"{model.documents[e.version.document].name} changed"
+            blocks.append((f"Latest raw text log entry ({what})", entry_text(e)))
+        if include_raw and "file_text" in st.fields and file_text_of:
+            for f in model.files_of(tid):
+                if f.document not in sent_files:
+                    sent_files.add(f.document)
+                    text = file_text_of(f.document)
+                    if text:
+                        blocks.append((f"Text of {model.documents[f.document].name}", text))
         if "summary_log" in st.fields:
             blocks += [(f"Summary, {t.title}, {s.at[:16]}", s.text) for s in model.summaries_of(tid)]
         if "status_log" in st.fields:

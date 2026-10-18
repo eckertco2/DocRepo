@@ -271,7 +271,7 @@ class ChipPicker(QWidget):
         self.edit = QLineEdit()
         self.edit.setPlaceholderText(placeholder)
         self.edit.setFrame(False)
-        self.edit.setMinimumWidth(120)
+        self.edit.setMinimumWidth(max(120, self.edit.fontMetrics().horizontalAdvance(placeholder) + 24))  # the whole hint shows
         self.edit.textEdited.connect(self._suggest)
         self.edit.installEventFilter(self)
         self._flow.addWidget(self.edit)

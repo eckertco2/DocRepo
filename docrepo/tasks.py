@@ -26,11 +26,11 @@ FIELDS = (
     ("deadline_desc", "Deadline description"), ("leads", "Lead"), ("assignees", "Assignees"), ("lead_hours", "Lead hours"),
     ("assignee_hours", "Assignee hours"), ("urgent", "Urgent"), ("meeting", "Meeting"), ("start", "Start"),
     ("reminder", "Reminder"), ("recurrence", "Recurrence"), ("repeat_until", "Repeat until"), ("title", "Title"),
-    ("labels", "Labels"), ("inherit_labels", "Inherit parent labels"),
+    ("description", "Description"), ("labels", "Labels"), ("inherit_labels", "Inherit parent labels"),
 )
 FIELD_NAMES = dict(FIELDS)
 DATE_FIELDS = ("due", "deadline", "start", "reminder", "repeat_until")
-TEXT_FIELDS = ("title", "current_status", "deadline_desc")
+TEXT_FIELDS = ("title", "current_status", "deadline_desc", "description")
 FLAG_FIELDS = ("urgent", "meeting", "inherit_labels")
 HOUR_FIELDS = ("lead_hours", "assignee_hours")
 ROLES = {"leads": "lead", "assignees": "assignee"}
@@ -249,6 +249,32 @@ def add_parent(conn: sqlite3.Connection, task_id: str, parent_id: str, *, at: da
         conn.execute("INSERT INTO task_parents (child, parent) VALUES (?, ?)", (task_id, parent_id))
         change = Change("Parents", before, parent_titles(conn, task_id))
         _log(conn, task_id, at, via, [change])
+    return change
+
+
+def move_parent(conn: sqlite3.Connection, task_id: str, old_parent: str | None, new_parent: str | None, *, at: datetime, via: str) -> Change:
+    """Move a task from under ``old_parent`` to under ``new_parent``, as one change. Its other parent links stay.
+
+    ``old_parent`` None adds a parent to a top-level task; ``new_parent`` None makes the task top-level (if
+    ``old_parent`` was its only parent). A task can't end up under itself.
+    """
+    with transaction(conn):
+        get_task(conn, task_id)
+        before = parent_titles(conn, task_id)
+        if old_parent is not None:
+            cur = conn.execute("DELETE FROM task_parents WHERE child = ? AND parent = ?", (task_id, old_parent))
+            if cur.rowcount == 0:
+                raise TaskError(f"{task_id} isn't under {old_parent}.")
+        if new_parent is not None:
+            get_task(conn, new_parent)
+            if new_parent == task_id or new_parent in descendant_ids(conn, task_id):
+                raise TaskError("That would put the task under itself.")
+            if conn.execute("SELECT 1 FROM task_parents WHERE child = ? AND parent = ?", (task_id, new_parent)).fetchone():
+                raise TaskError(f"{task_id} is already under {new_parent}.")
+            conn.execute("INSERT INTO task_parents (child, parent) VALUES (?, ?)", (task_id, new_parent))
+        change = Change("Parents", before, parent_titles(conn, task_id))
+        if change.from_value != change.to_value:
+            _log(conn, task_id, at, via, [change])
     return change
 
 

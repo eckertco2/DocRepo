@@ -15,7 +15,7 @@ from pathlib import Path
 from docrepo.safe_fs import SafeFS
 
 DB_FILE = Path("System") / "docs.db"
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 #: Each kind of ID: its letter and how many digits follow it.
 ID_FORMATS = {"T": 6, "C": 6, "D": 6, "P": 3}
@@ -193,6 +193,7 @@ CREATE TABLE id_counters (
 
 #: Changes from one schema version to the next. Version 2 (phase 3): how each document's text was pulled out, and its
 #: size, modified time and checksum for the document checks; the app's daily state; reminders already shown.
+#: Version 3 (phase 4): the search index.
 MIGRATIONS = {
     2: """
 ALTER TABLE documents ADD COLUMN text_status TEXT;
@@ -210,6 +211,16 @@ CREATE TABLE reminders_shown (
     reminder TEXT NOT NULL,
     shown    TEXT NOT NULL,
     PRIMARY KEY (task, reminder)
+);
+""",
+    3: """
+-- The search index: a cache of each capture's and document's text, from its capture.md or extracted.txt.
+-- It can be rebuilt at any time (the rebuild command).
+CREATE TABLE search_text (
+    kind TEXT NOT NULL CHECK (kind IN ('capture', 'document')),
+    id   TEXT NOT NULL,
+    body TEXT NOT NULL,
+    PRIMARY KEY (kind, id)
 );
 """,
 }

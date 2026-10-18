@@ -1,4 +1,44 @@
-"""The capture window's look: close to the browse tool mockup, on top of Windows' own widgets."""
+"""The windows' look: close to the browse tool mockup, on top of Windows' own widgets.
+
+DocRepo's colours are light. With Windows in dark mode, Qt would draw its own
+controls dark and mix them with those light colours, so ``use_light_theme``
+keeps the whole app light, whatever Windows is set to.
+"""
+from __future__ import annotations
+
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor, QGuiApplication, QPalette
+
+#: The light palette, from the mockup's light colours.
+LIGHT = {
+    QPalette.ColorRole.Window: "#f4f6f8", QPalette.ColorRole.WindowText: "#1a1f25", QPalette.ColorRole.Base: "#ffffff",
+    QPalette.ColorRole.AlternateBase: "#f4f6f8", QPalette.ColorRole.Text: "#1a1f25", QPalette.ColorRole.Button: "#f4f6f8",
+    QPalette.ColorRole.ButtonText: "#1a1f25", QPalette.ColorRole.BrightText: "#ffffff", QPalette.ColorRole.Highlight: "#dbe8f5",
+    QPalette.ColorRole.HighlightedText: "#1a1f25", QPalette.ColorRole.ToolTipBase: "#ffffff", QPalette.ColorRole.ToolTipText: "#1a1f25",
+    QPalette.ColorRole.PlaceholderText: "#87919c", QPalette.ColorRole.Link: "#1d5e98", QPalette.ColorRole.LinkVisited: "#1d5e98",
+    QPalette.ColorRole.Light: "#ffffff", QPalette.ColorRole.Midlight: "#e9edf1", QPalette.ColorRole.Mid: "#b8c1cb",
+    QPalette.ColorRole.Dark: "#87919c", QPalette.ColorRole.Shadow: "#5a6571",
+}
+#: Text that's turned off: buttons and fields that can't be used now.
+DISABLED_TEXT = "#9aa3ad"
+
+
+def light_palette() -> QPalette:
+    palette = QPalette()
+    for role, colour in LIGHT.items():
+        palette.setColor(role, QColor(colour))
+    for role in (QPalette.ColorRole.WindowText, QPalette.ColorRole.Text, QPalette.ColorRole.ButtonText):
+        palette.setColor(QPalette.ColorGroup.Disabled, role, QColor(DISABLED_TEXT))
+    return palette
+
+
+def use_light_theme(app: QGuiApplication) -> None:
+    """Keep DocRepo light even when Windows is in dark mode. Call it before any window is made."""
+    hints = app.styleHints()
+    if hasattr(hints, "setColorScheme"):  # Qt 6.8 and later; Windows 11's style draws its controls by the colour scheme
+        hints.setColorScheme(Qt.ColorScheme.Light)
+    app.setPalette(light_palette())
+
 
 STYLE = """
 QWidget#capture { background: #ffffff; color: #1a1f25; font-family: "Segoe UI"; font-size: 10pt; }
@@ -21,6 +61,7 @@ QToolButton#info:checked, QToolButton#info:hover { background: #1d5e98; border-c
 QToolButton#chip { border: 1px solid #b8c1cb; border-radius: 9px; background: #e9edf1; padding: 1px 6px; }
 QToolButton#chip[filled="true"] { background: #fcefcf; border-color: #875700; color: #875700; }
 QWidget#chips { border: 1px solid #b8c1cb; border-radius: 4px; background: #ffffff; }
+QWidget#chips QLineEdit { background: transparent; border: none; }
 QLineEdit[filled="true"], QPlainTextEdit[filled="true"], QComboBox[filled="true"] { background: #fcefcf; border: 1px solid #875700; }
 QCheckBox[filled="true"] { background: #fcefcf; }
 QPushButton#primary { background: #1d5e98; color: #ffffff; border: 1px solid #1d5e98; border-radius: 4px; padding: 4px 14px; }

@@ -259,6 +259,7 @@ class Model:
             for r in q("SELECT * FROM saved_copies ORDER BY id")
         ]
         self.agenda: list[AgendaItem] = [AgendaItem(**{k: r[k] for k in r.keys()}) for r in q("SELECT * FROM agenda_items ORDER BY id")]
+        self._holders: dict[str, list[str]] | None = None  # document -> tasks, worked out when first asked
         self.status: list[StatusEntry] = [
             StatusEntry(r["task"], r["at"], r["field"], r["from_value"], r["to_value"], r["via"])
             for r in q("SELECT * FROM status_log ORDER BY id")
@@ -366,8 +367,15 @@ class Model:
 
     def document_holders(self, document_id: str) -> list[str]:
         """The tasks a document belongs to: those of the captures it came in with, and those it has saved copies in."""
-        from_captures = [t for c in self.captures.values() if document_id in c.document_ids for t in self.capture_tasks(c)]
-        return _unique(from_captures + [f.task for f in self.copies if f.document == document_id])
+        if self._holders is None:
+            holders: dict[str, list[str]] = {}
+            for c in self.captures.values():
+                for d in c.document_ids:
+                    holders.setdefault(d, []).extend(self.capture_tasks(c))
+            for f in self.copies:
+                holders.setdefault(f.document, []).append(f.task)
+            self._holders = {d: _unique(ts) for d, ts in holders.items()}
+        return self._holders.get(document_id, [])
 
     def versions_of(self, task_id: str) -> list[Version]:
         return [v for v in self.versions if task_id in self.document_holders(v.document)]

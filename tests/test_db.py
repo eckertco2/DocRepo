@@ -40,8 +40,9 @@ def test_a_version_1_database_is_brought_up_to_date(data_root, fs):
     old.close()
     conn = db.connect(fs, data_root)
     try:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
         assert conn.execute("SELECT name, sha256, text_status FROM documents").fetchone()[:] == ("a.pdf", None, None)
+        assert conn.execute("SELECT count(*) FROM search_text").fetchone()[0] == 0
         db.set_state(conn, "daily", "2026-10-16")
         db.set_state(conn, "daily", "2026-10-17")
         assert db.get_state(conn, "daily") == "2026-10-17" and db.get_state(conn, "other") is None

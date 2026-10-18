@@ -10,7 +10,7 @@ from contextlib import closing
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from docrepo import __version__, capacity, db, hotkey, prompts
+from docrepo import __version__, capacity, db, hotkey, prompts, search
 from docrepo.config import (
     SETTINGS_FILE,
     Settings,
@@ -65,12 +65,13 @@ def build_parser() -> argparse.ArgumentParser:
     as_of_help = "work as if it were this date (and time), YYYY-MM-DD or \"YYYY-MM-DD HH:MM\", for testing"
     sample = commands.add_parser("load-sample", help="fill a new, empty data root with the made-up sample data, for trying DocRepo")
     sample.add_argument("--as-of", type=as_of, metavar="WHEN", help=f"{as_of_help} (default: the sample's own date, 2026-10-08 07:58)")
-    rebuild = commands.add_parser("rebuild", help="rebuild the capacity calendar and every generated page from docs.db")
+    rebuild = commands.add_parser("rebuild", help="rebuild the capacity calendar, every generated page and the search index")
     rebuild.add_argument("--as-of", type=as_of, metavar="WHEN", help=as_of_help)
     report = commands.add_parser("report", help="print capacity, days until due, lists, labels, raw text logs and agendas")
     report.add_argument("--as-of", type=as_of, metavar="WHEN", help=as_of_help)
     report.add_argument("--week", type=a_date, metavar="DATE", help="break this week's hours down by task (default: this week)")
     commands.add_parser("app", help="start the capture app: the tray icon, the hotkey and the capture window (use pythonw for no console)")
+    commands.add_parser("browse", help="open the browse tool, starting the app if it isn't running (use pythonw for no console)")
     set_hotkey = commands.add_parser("set-hotkey", help="choose the capture window's hotkey, such as \"Ctrl+Alt+Space\"")
     set_hotkey.add_argument("keys")
     return parser
@@ -177,6 +178,7 @@ def cmd_try_write(args: argparse.Namespace) -> int:
 def _rebuild(conn: sqlite3.Connection, root: Path, settings: Settings, fs: SafeFS, when: datetime) -> tuple[int, int]:
     rows = capacity.rebuild_all(conn, when.date(), settings)
     pages = write_pages(Model(conn), root, fs, when.date(), when)
+    search.rebuild(conn, root)
     return rows, pages
 
 
@@ -209,7 +211,8 @@ def cmd_rebuild(args: argparse.Namespace) -> int:
         when = args.as_of or datetime.now().replace(second=0, microsecond=0)
         rows, pages = _rebuild(conn, root, settings, fs, when)
     log.info("rebuild: %d calendar rows, %d pages written, as of %s", rows, pages, when)
-    print(f"Rebuilt the capacity calendar ({rows} rows) and wrote {pages} changed pages, as of {when:%Y-%m-%d %H:%M}.")
+    print(f"Rebuilt the capacity calendar ({rows} rows), wrote {pages} changed pages and rebuilt the search index, "
+          f"as of {when:%Y-%m-%d %H:%M}.")
     return 0
 
 
@@ -233,7 +236,11 @@ def cmd_report(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_app(args: argparse.Namespace) -> int:
+def cmd_browse(args: argparse.Namespace) -> int:
+    return cmd_app(args, browse=True)
+
+
+def cmd_app(args: argparse.Namespace, browse: bool = False) -> int:
     root = _data_root(args)
     if root is None:
         return 1
@@ -245,7 +252,7 @@ def cmd_app(args: argparse.Namespace) -> int:
     setup_logging(fs, root)
     from docrepo.app import run  # PySide6 loads only for the app
 
-    return run(root, settings, fs)
+    return run(root, settings, fs, browse)
 
 
 def cmd_set_hotkey(args: argparse.Namespace) -> int:
@@ -267,6 +274,7 @@ def cmd_set_hotkey(args: argparse.Namespace) -> int:
 
 COMMANDS: dict[str, Callable[[argparse.Namespace], int]] = {
     "app": cmd_app,
+    "browse": cmd_browse,
     "set-hotkey": cmd_set_hotkey,
     "where": cmd_where,
     "set-data-root": cmd_set_data_root,

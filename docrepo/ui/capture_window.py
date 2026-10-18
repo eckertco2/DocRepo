@@ -114,7 +114,8 @@ class ContentEdit(QPlainTextEdit):
 class CaptureWindow(QWidget):
     """The capture window. It's made once at start-up and shown or hidden, so it opens at once."""
 
-    saved = Signal(str)
+    #: Sends the SaveResult after each save, so the browse tool can show what Save did.
+    saved = Signal(object)
 
     def __init__(self, ctx: AppContext) -> None:
         super().__init__(None, Qt.WindowType.Window | Qt.WindowType.WindowStaysOnTopHint)
@@ -446,17 +447,28 @@ class CaptureWindow(QWidget):
         self.refresh()
 
     # ================= showing and hiding =================
-    def show_capture(self, task: str | None = None, mode: str | None = None, content: str | None = None, mods: bool = False) -> None:
-        """Open the window. ``mode`` checks only that capture type ("note", "new_task" or "update")."""
+    def show_capture(self, task: str | None = None, mode: str | None = None, content: str | None = None, mods: bool = False,
+                     agenda: list[str] | None = None, agenda_focus: bool = False, from_capture: str | None = None) -> None:
+        """Open the window. ``mode`` checks only that capture type ("note", "new_task" or "update"). ``agenda`` picks
+        agenda targets under Add to agenda. ``from_capture`` starts Make it a task from an unfiled capture."""
         self._load_summary_types()
-        if task:
-            self.set_task(task)
-        if mode:
-            self.types, self.note_auto = {mode}, mode == "note"
-            if mode == "update":
-                self.prefill()
-        if content is not None:
-            self._set_plain(self.content, content)
+        if from_capture:
+            self.make_task_from(from_capture)
+        else:
+            if task:
+                self.set_task(task)
+            if mode:
+                self.types, self.note_auto = {mode}, mode == "note"
+                if mode == "update":
+                    self.prefill()
+            if content is not None:
+                self._set_plain(self.content, content)
+                cursor = self.content.textCursor()
+                cursor.movePosition(cursor.MoveOperation.End)
+                self.content.setTextCursor(cursor)
+            if agenda is not None:
+                m = self.ctx.model()
+                self.agenda.set_chips([Chip(x, m.target_name(x)) for x in agenda])
         self.error.hide()
         self.refresh()
         self.show_mods(mods)
@@ -464,7 +476,8 @@ class CaptureWindow(QWidget):
         self.show()
         self.raise_()
         self.activateWindow()
-        target = self.mods.text if mods else self.title if "new_task" in self.types and not self.title.text() else self.content
+        target = (self.mods.text if mods else self.agenda.edit if agenda_focus
+                  else self.title if "new_task" in self.types and not self.title.text() else self.content)
         target.setFocus()
 
     def _place(self) -> None:
@@ -515,6 +528,7 @@ class CaptureWindow(QWidget):
         """Clear the window for a new capture."""
         self._setting = True
         self.task: str | None = None
+        self.from_capture: str | None = None
         self.types: set[str] = {"note"}
         self.note_auto = True
         self.touched: set[str] = set()
@@ -544,6 +558,23 @@ class CaptureWindow(QWidget):
         self._show_summary(False)
         self.found_box.hide()
         self.error.hide()
+        self.refresh()
+
+    def make_task_from(self, capture_id: str) -> None:
+        """Make it a task: a new task from an unfiled capture. Saving creates it and files the capture to it."""
+        from docrepo.captures import read_content
+        from docrepo.text import first_sentence, plain_text
+
+        m = self.ctx.model()
+        c = m.captures[capture_id]
+        content = read_content(self.ctx.data_root, c) or ""
+        self.reset_draft()
+        self.from_capture = capture_id
+        self.types, self.note_auto = {"new_task"}, False
+        self._set_plain(self.content, content)
+        sentence = first_sentence(plain_text(content), 400)
+        title = parse_capture(sentence, "new_task", self.ctx.now().date(), self.ctx.parse_people(m), [], []).title if sentence else ""
+        self.title.setText(title or c.title)
         self.refresh()
 
     def set_task(self, task_id: str | None) -> None:
@@ -626,6 +657,7 @@ class CaptureWindow(QWidget):
         self._setting = True
         for key, box in self.type_boxes.items():
             box.setChecked(key in self.types)
+            box.setEnabled(not self.from_capture)
         self._setting = False
         self.task_button.setText(full_path(m, t.id) if t else ("None: a new top-level task" if new else "None: keep it unfiled"))
         self.title_field.setVisible(new)
@@ -656,6 +688,10 @@ class CaptureWindow(QWidget):
             "Status log: " + "; ".join(f"{k.replace('_', ' ')} → {self._short(v)}" for k, v in changes.items())
             if changes else "Prefilled with the task's current values. Each change goes into its status log.")
         self.does.setText(self._does(m, len(changes)))
+        if self.from_capture:
+            self.does.setText(f"Save creates {'a subtask under <b>' + esc(t.title) + '</b>' if t else 'a top-level task'} from "
+                              f"{self.from_capture}, with this content text as its description, and files {self.from_capture} to it. "
+                              "The capture's own text stays as it was.")
 
     @staticmethod
     def _short(value: Any) -> str:
@@ -1073,6 +1109,7 @@ class CaptureWindow(QWidget):
             content=self.content.toPlainText(), task=self.task, types=set(self.types), files=self._file_rows(),
             agenda=self.agenda.values(), summary=self.summary.toPlainText() if self.summary_field.isVisible() else "",
             summary_type=summary_type, new_task=new, update=self.update_changes(t) if "update" in self.types else {},
+            from_capture=self.from_capture,
         )
 
     def save(self) -> None:
@@ -1098,7 +1135,7 @@ class CaptureWindow(QWidget):
         self.ctx.notify("Saved", result.message + problems)
         self.reset_draft()
         self.hide()
-        self.saved.emit(result.capture_id or "")
+        self.saved.emit(result)
 
 
 def _as_date(value: str | None) -> date | None:

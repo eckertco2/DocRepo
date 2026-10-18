@@ -9,7 +9,7 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 1 | Skeleton and safety: the data root's location, settings, guarded writes, logging, the command line, and the network-module scan | Done. Tested on the corporate computer (2026-10-09): pip install, pytest and the command checks |
 | 2 | Database and task model: schema, IDs, the task tree, labels, people, logs, recurrence, days until due, the capacity calendar, and the generated pages, checked against the mockup's test vectors and examples | Built and hand-tested by the owner 2026-10-16; on GitHub 2026-10-16. Next: testing on the corporate computer with phase 3 |
 | 3 | Capture app: tray, hotkey, the capture window (task picker, the Note, New task and Update capture types, Parse and populate, Copy prompt, mods log), saving captures, text extraction, Outlook emails and LAN paths | Built and hand-tested by the owner 2026-10-16 (3a); on GitHub 2026-10-16. Next: testing on the corporate computer, including 3b (Outlook), which can only be tested there |
-| 4 | Browse tool: the views, task and capture pages, agendas, capacity, people, labels, documents, search, and Settings | Not started |
+| 4 | Browse tool: the views, task and capture pages, agendas, capacity, people, labels, documents, search, and Settings | Built 2026-10-17. Next: the owner's hand test here, then testing on the corporate computer |
 | 5 | First everyday version: Startup shortcut, backups, the one-time Excel import of the project list, and the README | Not started |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
@@ -68,12 +68,37 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 - The label, people and agenda pickers show their suggestions in a list under the box, not a floating popup, so typing never loses focus.
 - The capture window uses Segoe UI, which every Windows 10 and 11 computer has.
 
+## Code layout (phase 4)
+
+- `docrepo/views.py`: what the middle pane lists (the task tree, the lists and Documents in tree form, unfiled captures, agendas, the capacity grid), the date cells and the view counts.
+- `docrepo/stories.py`: the status log and raw text log as stories, ported from the mockup's `storyOf` and `noteItem`.
+- `docrepo/detail.py`: the task, capture, document, person and label pages as HTML, and the capacity view's details. Its links (`task:`, `tab:`, `chap:` and so on) are handled by the window; none leaves DocRepo.
+- `docrepo/search.py`: the search index (`search_text`, schema version 3) and searching. `docrepo/edits.py`: the browse tool's changes (filing, fixing a capture, clearing a reminder, closing an agenda item, task edits and moves).
+- `docrepo/ui/browse_window.py`: the window. `docrepo/ui/tree_view.py`: the list with HTML cells and the group colours. `docrepo/ui/settings_view.py`, `docrepo/ui/dialogs.py`, `docrepo/ui/explorer.py` (File Explorer only).
+- Also changed: `save.py` (Make it a task, the search index, what Save did for the browse tool), `capture_window.py` (opening with an agenda target or from an unfiled capture), `tasks.py` (Description in the status log, `move_parent`), `prompts.py` (content text, `raw_text_all` and `file_text` for a task), `captures.py` (reading content text back from capture.md), `app.py` (Open browse tool, reminders open the Reminders list, the hotkey from Settings), `cli.py` (`browse`; `rebuild` rebuilds the search index too).
+- `tests/`: 119 new tests (526 pass in all). `tests/fixtures/stories.json` is the mockup's `exportStories`: every sample task's story and raw text log, checked entry for entry. The views are checked against the mockup's rows. The window is tested offscreen.
+
+## Decisions (phase 4)
+
+- The browse tool runs inside the app, sharing its database connection and capture window, so the two never disagree. `browse` starts the app if it isn't running.
+- The detail pane is a QTextBrowser showing HTML built by `docrepo/detail.py`, so the pages are tested as text without Qt. Captured text is always escaped, never shown as markup.
+- Moving a task in the tree is done from the task page's Edit menu (Move from under, Also put under, Take out from under), with the task picker, not by dragging.
+- The browse tool never opens or runs a document: Show in File Explorer only starts File Explorer, in line with the rule against launching attachments. Open original, Check now and Relink wait for phase 6.
+- Search finds items holding every word typed, anywhere in their text, as the mockup's search does with one phrase. Captures' and documents' text is copied into `search_text` in docs.db; tasks, people and labels are searched in their own tables.
+- Make it a task files the unfiled capture to the new task instead of making a second capture. The capture keeps its own content text; the new task's description is what was in the window.
+- Copy prompt for a task sends the latest raw text log entry's content text (not just its title), and `raw_text_all` and `file_text` now work for a task too.
+- A status log value with line breaks stays on one line in `Task.md`.
+- DocRepo's windows stay light even when Windows is in dark mode (found in the owner's first hand test, 2026-10-17). Qt follows Windows' dark mode and drew its controls dark under DocRepo's light colours, which hid text in both windows. A dark look could come later; it would need dark versions of every colour.
+
 ## Unfinished / notes
+
+- Phase 4 is built and its automated tests pass; it hasn't been hand-tested yet. Not covered by the automated tests: how the window looks with the real Windows style (the tests draw it offscreen), File Explorer opening, the tray menu and reminder clicks, and the Settings view's folder pickers.
 
 - Phases 2 and 3 passed the owner's hand tests on this computer and went to GitHub together on 2026-10-16 (brainstorm round 12).
 - To test on the corporate computer: Outlook emails (dragging from Outlook, Add selected Outlook email, a dropped `.msg` file, email.msg and attachments in the capture folder, any Outlook security prompt), mapped drives recorded as network paths, files on the LAN drive, and the hotkey there.
 - The Startup shortcut comes in phase 5; until then the app is started by hand.
+- On the corporate computer, phase 4 needs the same checks as phases 2 and 3, plus the browse tool on the real data root (search over real captures, File Explorer on the LAN drive).
 
-- `SPEC.md` covers phases 1 to 3 in full; later phases are summaries until they're built. The detailed design is in the parent workspace's `docs/task-model/brainstorm.md`.
+- `SPEC.md` covers phases 1 to 4 in full; later phases are summaries until they're built. The detailed design is in the parent workspace's `docs/task-model/brainstorm.md`.
 - Published to the GitHub repo `eckertco2/DocRepo` on 2026-10-09 (phase 1), and on 2026-10-16 (the glossary, phases 2 and 3).
 - The route to the corporate computer works (2026-10-09): download, a security scan there, `pip install -r requirements.txt` with every pinned version available, and pytest passing.

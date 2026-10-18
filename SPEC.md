@@ -7,7 +7,7 @@ This file describes what DocRepo does and how it's built. It grows phase by phas
 A Windows desktop tool for someone who manages many projects at once. Information arrives all day as emails, quick notes and documents, many of them on a shared LAN drive. DocRepo lets its owner capture any of it in seconds and organize it as a tree of tasks, where projects are the top-level tasks.
 
 - **Capture app:** runs in the background with a tray icon. A global hotkey opens a small capture window.
-- **Browse tool:** a separate window for the task tree, lists, agendas, capacity, people, labels, documents, search and settings.
+- **Browse tool:** a separate window for the task tree, lists, agendas, capacity, people, labels, documents, search and settings (section 8).
 - **Capture first.** Every capture is saved at once, with no AI involved. DocRepo never calls an AI. Its Copy prompt button builds a prompt for the owner to paste into an AI chat, and the answer is pasted back as text.
 
 ## 2. How it's built and installed
@@ -25,7 +25,7 @@ DocRepo keeps all its data in one folder, the **data root**, on the local drive.
 DocRepo picks the data root from, in order:
 1. `--data-root PATH` on the command line (for development and tests);
 2. the `DOCREPO_DATA_ROOT` environment variable;
-3. `%LOCALAPPDATA%\DocRepo\location.json`, which holds `{"data_root": "<path>"}` and is written by `set-data-root` (later, by the Settings view).
+3. `%LOCALAPPDATA%\DocRepo\location.json`, which holds `{"data_root": "<path>"}` and is written by `set-data-root` or the browse tool's Settings view (8.9).
 
 ### Folders
 `init` creates `Captures`, `Tasks`, `Documents`, `Mods`, `Config\prompts` and `System\logs` in the data root, plus `Config\settings.json` and the database, `System\docs.db`. Other folders, such as a task's `Files`, appear only when needed.
@@ -71,10 +71,11 @@ A missing file gives the defaults. An unreadable file stops DocRepo with an erro
 | `init` | Creates the data root's folders, default settings and database, and starts the log. |
 | `try-write PATH` | Writes a small test file at PATH if DocRepo is allowed to, to check the guard. |
 | `load-sample [--as-of WHEN]` | Fills a new, empty data root with the made-up sample data (section 6.10). Refuses a database that holds anything. |
-| `rebuild [--as-of WHEN]` | Rebuilds the capacity calendar and every generated page from `docs.db`. |
+| `rebuild [--as-of WHEN]` | Rebuilds the capacity calendar and every generated page from `docs.db`, and the search index from the capture and document files. |
 | `report [--as-of WHEN] [--week DATE]` | Prints what DocRepo works out: capacity for 9 weeks, days until due, the lists, labels and parent chains, raw text logs and agendas. |
 | `app` | Starts the capture app (section 7). Use `pythonw` instead of `python` for no console window. |
-| `set-hotkey KEYS` | Sets the capture window's hotkey, such as `"Ctrl+Alt+Space"`. It needs Ctrl, Alt or Win. Takes effect when the app next starts. |
+| `browse` | Opens the browse tool (section 8), starting the app first if it isn't running. |
+| `set-hotkey KEYS` | Sets the capture window's hotkey, such as `"Ctrl+Alt+Space"`. It needs Ctrl, Alt or Win. Takes effect when the app next starts. The browse tool's Settings view does the same, at once. |
 
 `--as-of` takes `YYYY-MM-DD` or `"YYYY-MM-DD HH:MM"` and makes the command work as if it were then. It's for testing.
 
@@ -86,7 +87,7 @@ The words used here are defined in `GLOSSARY.md`.
 
 ### 6.1 The database
 - `System\docs.db`, SQLite, is the source of truth. Folders never encode the task tree: task folders are named by ID only, and nothing moves when a task is renamed or gets another parent.
-- `docrepo/db.py` creates the schema and keeps its version in SQLite's `user_version` (now 2). An older DocRepo database is brought up to date when it's opened (version 2, phase 3: each document's text status, size, modified time and checksum, plus `app_state` and `reminders_shown`). A database from a newer DocRepo, or one that isn't DocRepo's, is refused rather than changed.
+- `docrepo/db.py` creates the schema and keeps its version in SQLite's `user_version` (now 3). An older DocRepo database is brought up to date when it's opened (version 2, phase 3: each document's text status, size, modified time and checksum, plus `app_state` and `reminders_shown`; version 3, phase 4: the search index, `search_text`). A database from a newer DocRepo, or one that isn't DocRepo's, is refused rather than changed.
 - Foreign keys are on. Every change runs inside one transaction, so a save happens completely or not at all.
 - The tables:
 
@@ -106,6 +107,7 @@ The words used here are defined in `GLOSSARY.md`.
 | `agenda_items` | Agenda items (6.7). |
 | `work_calendar` | The capacity calendar (6.8). |
 | `id_counters` | The last ID handed out of each kind. |
+| `search_text` | The search index: each capture's and document's text (8.8). A cache, rebuilt by `rebuild`. |
 
 ### 6.2 IDs
 - Tasks `T000001`, captures `C000001`, documents `D000001`, people `P001`. Mods log entries are `M0001` (phase 3).
@@ -135,7 +137,7 @@ The words used here are defined in `GLOSSARY.md`.
 - Phase 2 provides these records and the file format. Saving captures comes in phase 3.
 
 ### 6.6 The logs
-- **Status log:** each field change, with when, the field, its old and new values as shown, and where it came from (a capture's ID, or "Browse tool", "Capture window", "Agenda view", "Reminders list"). Agenda items add their own entries: "Agenda: None → *target*" when one is added and "Agenda: *target* → Discussed" (or Removed) when it's closed.
+- **Status log:** each field change, with when, the field, its old and new values as shown, and where it came from (a capture's ID, or "Browse tool", "Capture window", "Agenda view", "Reminders list"). In `Task.md` each entry stays on one line, so a value with line breaks, such as an edited description, is shown with spaces. Agenda items add their own entries: "Agenda: None → *target*" when one is added and "Agenda: *target* → Discussed" (or Removed) when it's closed.
 - **Raw text log:** the task's captures and its documents' versions, oldest first.
 - **Summary log:** pasted summaries from the task's captures and from its documents' versions.
 - **Files:** the task's saved copies (and replaced ones), then the documents of its captures: tracked originals and email attachments.
@@ -168,11 +170,11 @@ The words used here are defined in `GLOSSARY.md`.
 
 ### 7.1 Running it
 - `pythonw -m docrepo app` (no console window) or `python -m docrepo app`. It runs in the background with a tray icon. Only one copy runs per data root (a lock file, `System\capture-app.lock`); starting it again shows the running copy's capture window.
-- **Tray menu:** New capture, Mods log, Pause hotkey (or Resume hotkey), Quit. Clicking the icon opens the capture window. Open browse tool joins it in phase 4.
+- **Tray menu:** New capture, Open browse tool, Mods log, Pause hotkey (or Resume hotkey), Quit. Clicking the icon opens the capture window.
 - **Hotkey:** `hotkey` in settings, Ctrl+Shift+Space by default, registered with Windows' own `RegisterHotKey` through ctypes. Nothing watches the keyboard. If another program has the hotkey, a notification says so and suggests `set-hotkey`; the tray icon still opens the window.
 - **First start:** DocRepo asks for the owner's name and adds them to the people list as me (`me` in settings), so "I" and "me" in a capture mean them.
 - **Daily work:** at the first start each day, and after midnight while it runs, it rebuilds the capacity calendar (so routine tasks roll forward) and the generated pages. The day is kept in `app_state`.
-- **Reminders:** a Windows notification from the tray icon for each open task whose reminder is today or past and hasn't been shown (`reminders_shown`), at start-up and from `reminder_time` each day. More than three become one notification. Clicking a single reminder opens the capture window on that task with Update checked (the browse tool's Reminders list comes in phase 4).
+- **Reminders:** a Windows notification from the tray icon for each open task whose reminder is today or past and hasn't been shown (`reminders_shown`), at start-up and from `reminder_time` each day. More than three become one notification. Clicking a reminder opens the browse tool's Reminders list, on that task when there's one.
 - Saves, reminders and errors are logged by ID only.
 
 ### 7.2 The capture window
@@ -213,10 +215,72 @@ The words used here are defined in `GLOSSARY.md`.
 - `Mods\mods-log.md`, a plain Markdown file kept out of docs.db so it works when something else is broken and can leave the computer on its own. Entries M0001, M0002 and so on, oldest first: a heading with the ID, date and time, area and open or "done" with the day, then the note.
 - The panel over the capture window (the **?** button, or Mods log in the tray menu): a text box, an Area (General, Capture window, Task picker, Parse and populate, Copy prompt, Browse tool, Capacity, Documents), Save, Copy log (the whole log as Markdown, to the clipboard) and the open entries, newest first, each with Mark done. A line reminds the owner to leave out names and work details.
 
-## 8. Later phases (summaries)
+## 8. Browse tool (phase 4, built)
+
+### 8.1 Running it
+- It's part of the app: **Open browse tool** in the tray menu, or `pythonw -m docrepo browse`, which starts the app first if it isn't running and otherwise asks the running copy (with a registered Windows message, `DocRepo.ShowBrowse`) to show it. Closing the window only hides it; the app keeps running in the tray.
+- `docrepo/ui/browse_window.py` is the window. What it shows is worked out in modules with no Qt in them, so they're tested as text: `docrepo/views.py` (the rows of the middle pane), `docrepo/stories.py` (the status log and raw text log as stories), `docrepo/detail.py` (the pages, as HTML) and `docrepo/search.py`. Its changes are in `docrepo/edits.py`. All are ported from the browse tool mockup.
+- It shares the capture app's database connection and capture window, so both always show the same data. After the capture window saves, the browse tool shows what Save did: the new task, the updated task (Status log tab), the agenda it went on, the task it was added to, or the unfiled capture. The task just saved shows in the task tree whatever the filters, until something else is selected.
+
+### 8.2 The window
+- **Top:** search, New capture, and New task (N) and Update (U) for the selected task. While browsing (not typing in a box), A adds a note to the selected task, N a new task under it and U an update, through the capture window. Ctrl+F goes to search; F5 reads docs.db again.
+- **Left:** the views, with their counts. **Middle:** the view's list. **Right:** the selected item's page, with its buttons above it. Capacity and Settings use the middle and right together.
+- **Lists** show tasks in tree form: each matching task under its parents, which show dimmed for context. Each top-level task's group has a colour band (blue, teal, amber, violet in turn), lighter for each level down. A task's row has its title, its markers (Urgent, the recurrence, "2 parents"), its state and its days until due (red when late, amber within two days). Titles wrap. Double-clicking a row shows it in File Explorer.
+- A line at the bottom says what the last action did, or why it couldn't.
+- Both windows stay light when Windows is in dark mode: the app asks Qt for the light colour scheme and a light palette as it starts, since its colours are the mockup's light ones (`use_light_theme` in `docrepo/ui/style.py`).
+
+### 8.3 Views
+
+| View | Shows |
+|---|---|
+| Unfiled | Unfiled captures, newest first, with their source and when they were saved. |
+| Task tree | Top-level tasks and their subtasks. Show parked, Show closed and Show routine (on by default), a Label and a Person filter (non-matching parents dimmed), Collapse a level and Expand a level. Opening a parked, closed or routine task from elsewhere turns its filter on. |
+| Overdue and next 7 days, Reminders, Waiting on others, Assigned to me, Urgent, No dates or hours | The lists of section 6.8. Reminders shows the reminder date instead of days until due ("1 d ago" once passed) and a Clear button on each row, which clears the reminder and logs it as "Reminders list". Waiting on others names the assignees. |
+| Agendas | Pick an agenda target (open meetings first, then any task or person with open items). Its open items, grouped under the top-level task their subject belongs to, with notes last under "Other topics"; each has Discussed and Remove. Then "Closed recently". Copy as Markdown copies the agenda. Discussed closes the item and opens an Update capture on its task, starting "Discussed at *target*: ", so the outcome goes into its status log; Esc skips it. |
+| Capacity | Hours per active person and week, nine weeks from this one, from `work_calendar`, with each person's share of their hours a week (under 80%, 80 to 100%, over 100%). Earlier, This week and Later move by nine weeks. Clicking a cell lists its tasks. Unestimated and unscheduled tasks are listed below. |
+| People | Name, aliases, hours a week and open tasks; Show retired; Add person. |
+| Labels | Name, keywords and open tasks; Show retired; Add label. |
+| Documents | Each task that holds documents, under its parents, with its documents (name and file description) first under it; documents not filed yet last. A Task filter (the task picker) with Include subtasks. |
+| Settings | Section 8.9. |
+
+### 8.4 The task page
+- The path (one line per parent chain), the title, the state, markers, Meeting, labels (inherited ones in italics; each opens its label) and the ID.
+- Fields: description, current status, lead and assignees with hours (per occurrence for a routine task), start ("date entered" when it's the created day), due and deadline with days until due, reminder ("1 d ago" once passed), recurrence with its next occurrence, the agendas it's on, when it closed, and what created it. An agenda target lists its open items, with Open agenda.
+- **Buttons:** Add note (A), Update (U), New task (N), Open agenda (an open meeting, or a task with open items), Add to agenda (the open meetings, those with open items first, then "Someone else or another task…", each opening an Update capture with that target under Add to agenda), Edit, the summary type and Copy prompt, and Open folder.
+- **Edit:** Title and description…, Labels… (its own labels, which can include a new one, and Inherit parent labels), Move from under *parent*…, Put under a task… (a top-level task), Also put under…, Take out from under *parent* (with several parents) and Make it a top-level task (with one). Each change goes into the status log as "Browse tool". A move that would put a task under itself is refused.
+- **Tabs:** Raw text log, Summaries, Status log, Files, Subtasks. A scope (this task, with ancestors, with subtasks, family) applies to all but Subtasks; it's With subtasks each time a task is opened.
+- **Status log and Raw text log** read as stories (`docrepo/stories.py`), oldest first (an Order switch gives newest first), grouped by day with a heading for each month. The status log opens with how the task began (created under its parents, made from an unfiled capture, or imported, with its description and what it started with), tells each update in words (a state change as a chip such as "Work started" or "Closed", then sentences such as "Due date moved to Fri 23 Oct."), and shows its direct subtasks and, for an agenda target, its agenda items as one-line milestones. The raw text log shows each capture as a journal entry (what it is, such as "Update · Due date moved to Fri 23 Oct." or "Email from …", its title and its text; a summary with the original behind Show the email) and each document version. Long entries fold after 360 characters, with Show all. With subtasks or ancestors in the scope, each one's story is a chapter, closed until opened, with its state, latest status or number of entries, its latest date and Open; Open all chapters and Close all.
+- **Summaries, Files and Subtasks** are one row per entry. An entry from another task in the scope names that task, which opens it. A file's name shows it in File Explorer.
+- **Copy prompt** works as in the capture window (7.6), on the task's records within the summary type's scope: the latest raw text log entry's content text (or every entry's, for `raw_text_all`), each document's extracted text for `file_text`, and the rest as before.
+
+### 8.5 The capture page
+- Saved, source, capture types, what Save did (the task it created, updated or added to, where it was filed, and each agenda item, with how and when it was closed), when it was filed, its field changes, its files with their descriptions and choices, its summary, when it was edited and how many earlier versions are kept, then the content text, read from its capture.md.
+- **Edit** fixes the content text and the summary. Saving first copies the previous capture.md to the capture's `_old versions\capture YYYY-MM-DD HHMM.md` (made unique), then updates docs.db (`edited`, the title, the summary), rewrites capture.md with `edited` in its front matter, the search index and the pages. A capture with no files can't be left without content text. A capture.md that can't be read can't be edited.
+- **Show in File Explorer** shows its capture.md.
+- **An unfiled capture** also has a task picker, **File to task** and **Make it a task**. Filing sets the capture's task in docs.db and its capture.md (with `filed`); the folder doesn't move; the saved copies its files asked for are made in the task's `Files` folder now. Make it a task opens the capture window with New task checked, the capture's content text and a title from it; saving creates the task (its creator is the capture, so its story says "Made into a task from an unfiled capture") and files the capture to it. No new capture is made, and the capture's own content text stays as it was, even if it was changed in the window for the new task's description.
+
+### 8.6 Documents, people and labels
+- **A document's page:** its file description, ID, original (or the capture holding it as an email attachment), status, how its text was pulled out, when it was last checked, its document versions, its tasks and its saved copies. Show in File Explorer shows the original; Show extracted text shows its extracted.txt. DocRepo never opens or runs the file itself: it only starts File Explorer. Checking for changes, relinking and editing descriptions come in phase 6.
+- **A person's page:** aliases, hours a week, status, hours scheduled this week and next, the open tasks they lead and are assigned, and their agenda. Edit… (name, aliases, hours a week) and Retire or Make active. The owner (me) can't be retired.
+- **A label's page:** keywords, status and its tasks, inherited ones marked. Edit… (name and keywords; renaming keeps it on its tasks) and Retire or Make active.
+- People and label changes rewrite the generated pages, since they show names.
+
+### 8.7 Changes made in the browse tool
+- Every change runs in one transaction, then rewrites the generated pages; a file that can't be written is reported and logged, and never undoes the change. Task changes go into the status log as "Browse tool" ("Reminders list" for Clear, "Agenda view" for closing an agenda item).
+- The status log's sentences for the browse tool's own fields: "Renamed “…”.", "Description edited.", "Label Safety added.", "No longer inherits its parents' labels.".
+
+### 8.8 Search
+- Typing two letters or more in the search box lists what holds every word typed, in any case: tasks (ID, title, description, current status, deadline description), captures (ID, title, summary, content text), documents (ID, name, file description, original's path, extracted text), saved copies (by name), people (name and aliases) and labels (name and keywords), grouped in that order, at most 40 of each. Captures and documents show the text around the first word found. Esc clears it.
+- Captures' and documents' text is copied into `search_text` in docs.db when a capture is saved, edited or filed. `rebuild`, the Settings view's Rebuild button, and the app's start (when the index is missing items, as after updating to phase 4) rebuild it from the files.
+
+### 8.9 Settings
+- The data root in use. **Change data root…** picks a folder, checks it isn't in OneDrive or the code folder, sets it up if it's new and records it in `location.json`; DocRepo uses it from its next start, and nothing in the current data root moves. When DocRepo was started with `--data-root` or `DOCREPO_DATA_ROOT`, the page says the recorded one isn't in use.
+- **Rebuild pages, calendar and search** does what `rebuild` does.
+- The fields of `settings.json` (3): me (from the active people), the hotkey (checked as `set-hotkey` checks it, and registered again at once), the backup folder (a full path outside the data root; it joins the places DocRepo may write at once), the reminder time, the workdays, the capacity horizon, the event words, the extracted text cap, Copy prompt's warning length and how often documents are checked. Save settings writes only what changed; a change to the workdays or the horizon rebuilds the capacity calendar and the pages. Undo changes shows what's saved again.
+
+## 9. Later phases (summaries)
 
 These are designed in detail in the owner's design notes, and move into this file as each phase is built.
 
-- **Browse tool (phase 4):** the task tree, lists, agendas, capacity, people, labels, documents, search, and Settings for the paths and other settings.
 - **First everyday version (phase 5):** Startup shortcut, daily backups, and a one-time import of the project list from Excel.
-- **Document tracking (phase 6):** change checks on tracked files, diffs, replaced saved copies, and relinking moved files.
+- **Document tracking (phase 6):** change checks on tracked files, diffs, replaced saved copies, relinking moved files, and editing file descriptions.

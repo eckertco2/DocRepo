@@ -1,7 +1,7 @@
 """Capture records in docs.db, and the capture.md file each capture keeps in its folder.
 
-Phase 2 provides the records and the file format. Saving captures from the
-capture window, with their files and emails, comes in phase 3.
+The content text lives only in capture.md, so the browse tool reads it back from
+there (``read_content``) to show it, search it and edit it.
 """
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import sqlite3
 from pathlib import Path
 
 from docrepo.db import next_id, note_used_id, transaction
-from docrepo.model import Model
+from docrepo.model import Capture, Model
 from docrepo.safe_fs import SafeFS
 
 SOURCES = ("typed", "outlook_email", "file_path")
@@ -148,3 +148,28 @@ def capture_md(model: Model, capture_id: str, content: str) -> str:
     if c.summary:
         lines += ["", "## Summary", "", c.summary]
     return "\n".join(lines) + "\n"
+
+
+def capture_md_path(data_root: Path, c: Capture) -> Path:
+    return capture_folder(data_root, c.id, c.saved) / "capture.md"
+
+
+def split_capture_md(text: str, summary: str | None) -> str:
+    """The content text in a capture.md's text: what's between the front matter and the Summary section."""
+    text = text.replace("\r\n", "\n")
+    if text.startswith("---\n"):
+        end = text.find("\n---\n", 4)
+        text = text[end + 5:] if end >= 0 else text
+    text = text.removeprefix("\n")
+    tail = f"\n\n## Summary\n\n{summary}\n" if summary else ""
+    if tail and text.endswith(tail):
+        text = text[: -len(tail)]
+    return text.removesuffix("\n")
+
+
+def read_content(data_root: Path, c: Capture) -> str | None:
+    """A capture's content text, read from its capture.md. None if the file can't be read."""
+    try:
+        return split_capture_md(capture_md_path(data_root, c).read_text(encoding="utf-8"), c.summary)
+    except (OSError, UnicodeDecodeError):
+        return None

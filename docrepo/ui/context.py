@@ -22,6 +22,8 @@ class AppContext:
     #: Shows a notification from the tray icon: (title, text).
     notify: Callable[[str, str], None] = lambda title, text: None
     now: Callable[[], datetime] = field(default=datetime.now)
+    #: Told which settings the Settings view just changed, so the app can apply them (a new hotkey, say).
+    settings_changed: Callable[[list[str]], None] = lambda keys: None
 
     def model(self) -> Model:
         return Model(self.conn)

@@ -23,7 +23,7 @@ You need Windows and Python 3.12.
    .venv\Scripts\python.exe -m docrepo set-data-root "C:\Users\<you>\DocRepoData"
    .venv\Scripts\python.exe -m docrepo init
    ```
-   Once the browse tool exists, this moves into its Settings view.
+   Later, the browse tool's Settings view can change the data root, and the other settings.
 
 ## Update
 
@@ -32,13 +32,21 @@ You need Windows and Python 3.12.
 
 Your data root is outside the code folder, so updating never touches your data.
 
-## Start the capture app
+## Start DocRepo
 
 ```
 .venv\Scripts\pythonw.exe -m docrepo app
 ```
 
-DocRepo's icon appears in the tray (it may be under the ^ arrow). Press **Ctrl+Shift+Space**, or click the icon, to open the capture window; Esc hides it again. The first time, DocRepo asks for your name, to add you to its people list as "me". If another program already uses the hotkey, DocRepo says so; choose another with `.venv\Scripts\python.exe -m docrepo set-hotkey "Ctrl+Alt+Space"` and start the app again. Quit it from the tray icon's menu.
+DocRepo's icon appears in the tray (it may be under the ^ arrow). Press **Ctrl+Shift+Space**, or click the icon, to open the capture window; Esc hides it again. The first time, DocRepo asks for your name, to add you to its people list as "me". If another program already uses the hotkey, DocRepo says so; choose another in the browse tool's Settings, or with `.venv\Scripts\python.exe -m docrepo set-hotkey "Ctrl+Alt+Space"` and start the app again. Quit it from the tray icon's menu.
+
+To open the browse tool, choose **Open browse tool** in the tray icon's menu, or run:
+
+```
+.venv\Scripts\pythonw.exe -m docrepo browse
+```
+
+which starts DocRepo first if it isn't running. Closing the browse tool only hides it.
 
 Starting it automatically when you sign in comes in a later version.
 
@@ -52,7 +60,7 @@ DocRepo comes with made-up sample data: a few projects, people, captures and age
 .venv\Scripts\python.exe -m docrepo --data-root "C:\Users\<you>\DocRepoSample" report --as-of 2026-10-08
 ```
 
-Then open the sample data root's `Contents.md` in VS Code and press Ctrl+Shift+V to follow its links. To try the capture window on it, start the app with the same `--data-root` (quit any other copy first, since both would want the hotkey). Delete the folder when you're done.
+Then open the sample data root's `Contents.md` in VS Code and press Ctrl+Shift+V to follow its links. To try the capture window and the browse tool on it, run `browse` with the same `--data-root` (quit any other copy first, since both would want the hotkey). Delete the folder when you're done.
 
 ## Where things are
 

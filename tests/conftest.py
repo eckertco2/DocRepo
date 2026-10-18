@@ -75,3 +75,22 @@ def data_root(tmp_path: Path) -> Path:
 @pytest.fixture
 def fs(data_root: Path) -> SafeFS:
     return SafeFS([data_root])
+
+
+@pytest.fixture
+def sample_root(data_root: Path, fs: SafeFS) -> Iterator[tuple[sqlite3.Connection, Path, SafeFS]]:
+    """A data root holding the sample data with its files (capture.md, extracted.txt), its calendar and its search index."""
+    from datetime import date
+
+    from docrepo import capacity, prompts, search
+    from docrepo.config import Settings
+    from docrepo.sample import write_sample_files
+
+    conn = db.connect(fs, data_root)
+    load_sample(conn)
+    write_sample_files(conn, data_root, fs)
+    capacity.rebuild_all(conn, date(2026, 10, 8), Settings(me="P001"))
+    prompts.write_defaults(fs, data_root)
+    search.rebuild(conn, data_root)
+    yield conn, data_root, fs
+    conn.close()

@@ -150,7 +150,9 @@ class Pages:
         return self._task_link(here, subject) + (f" · {note}" if note else "")
 
     def _status_line(self, here: list[str], e: StatusEntry) -> str:
-        return f"- {minutes(e.at)} · {e.field}: {_value(e.from_value)} → {_value(e.to_value)} · {self._ref_link(here, e.via)}"
+        # A value with line breaks, such as an edited description, stays on the entry's one line.
+        return (f"- {minutes(e.at)} · {e.field}: {' '.join(_value(e.from_value).split())} → {' '.join(_value(e.to_value).split())}"
+                f" · {self._ref_link(here, e.via)}")
 
     def _file_line(self, here: list[str], f: FileEntry) -> str:
         d = self.m.documents[f.document]
