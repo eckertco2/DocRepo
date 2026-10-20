@@ -233,6 +233,41 @@ def test_the_app_does_its_daily_work_once_and_shows_reminders(ctx, monkeypatch):
         capture_app.quit()
 
 
+def test_the_other_hotkeys_are_registered_when_set_and_do_their_own_thing(ctx, monkeypatch):
+    """Mods log round 1 (M0002, M0010, M0020)."""
+    from docrepo import app as app_module
+
+    registered = []
+    monkeypatch.setattr(hotkey, "register", lambda hwnd, hotkey_id, keys: registered.append((hotkey_id, keys)) or True)
+    monkeypatch.setattr(hotkey, "unregister", lambda *a: None)
+    ctx.settings.browse_hotkey, ctx.settings.update_hotkey = "Ctrl+Alt+B", "Ctrl+Alt+U"
+    capture_app = app_module.CaptureApp(QApplication.instance(), ctx)
+    opened = []
+    monkeypatch.setattr(capture_app, "show_browse", lambda *a: opened.append("browse"))
+    monkeypatch.setattr(capture_app.window, "open_with_hotkey", lambda kind: opened.append(kind))
+    try:
+        assert registered == [(1, "Ctrl+Shift+Space"), (2, "Ctrl+Alt+B"), (5, "Ctrl+Alt+U")]  # the others are off
+        for setting in ("browse_hotkey", "note_hotkey", "new_task_hotkey", "update_hotkey", "agenda_hotkey"):
+            capture_app.hotkey_actions[hotkey.HOTKEY_IDS[setting]]()
+        assert opened == ["browse", "note", "new_task", "update", "agenda"]
+    finally:
+        capture_app.quit()
+
+
+def test_a_capture_types_hotkey_opens_the_window_for_it(window, ctx):
+    window.open_with_hotkey("new_task")
+    assert window.types == {"new_task"}
+    window.hide()  # Esc keeps the draft, New task and all
+    window.open_with_hotkey("update")  # no task picked: the task picker opens first
+    assert window.types == {"new_task"} and window._after_pick == "update"
+    window._picked("T000008")
+    assert window.types == {"update"} and window._after_pick is None  # only Update, as with a task already picked
+    window.reset_draft()
+    window.set_task("T000008")
+    window.open_with_hotkey("agenda")  # a task already picked: Update at once, ready for Add to agenda
+    assert window.types == {"update"} and window.agenda_field.isVisibleTo(window)
+
+
 def test_set_hotkey_command(tmp_path, capsys):
     from docrepo.cli import main
 

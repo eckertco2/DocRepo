@@ -14,6 +14,7 @@ import logging
 import os
 import sys
 import threading
+from collections.abc import Callable
 from ctypes import wintypes
 from datetime import datetime, time
 from pathlib import Path
@@ -40,7 +41,7 @@ LOCK_FILE = Path("System") / "capture-app.lock"
 WINDOW_TITLE = "DocRepo Capture"
 SHOW_MESSAGE = "DocRepo.ShowCapture"
 SHOW_BROWSE_MESSAGE = "DocRepo.ShowBrowse"
-HOTKEY_ID = 1
+HOTKEY_ID = hotkey.HOTKEY_IDS["hotkey"]
 MAX_SINGLE_REMINDERS = 3
 
 
@@ -89,8 +90,8 @@ class _MessageFilter(QAbstractNativeEventFilter):
             msg = wintypes.MSG.from_address(int(message))
         except (TypeError, ValueError):
             return False, 0
-        if msg.message == hotkey.WM_HOTKEY and msg.wParam == HOTKEY_ID:
-            self.app.toggle_window()
+        if msg.message == hotkey.WM_HOTKEY and msg.wParam in self.app.hotkey_actions:
+            self.app.hotkey_actions[msg.wParam]()
             return True, 0
         if self.show_id and msg.message == self.show_id:
             self.app.window.show_capture()
@@ -126,7 +127,7 @@ class CaptureApp(QObject):
         menu.addAction("New capture", lambda: self.window.show_capture())
         menu.addAction("Open browse tool", lambda: self.show_browse())
         menu.addAction("Mods log", lambda: self.window.show_capture(mods=True))
-        self.pause_action = QAction("Pause hotkey", menu)
+        self.pause_action = QAction("Pause hotkeys", menu)
         self.pause_action.triggered.connect(self.toggle_pause)
         menu.addAction(self.pause_action)
         menu.addSeparator()
@@ -138,46 +139,70 @@ class CaptureApp(QObject):
         self.tray.show()
         self.filter = _MessageFilter(self)
         qt.installNativeEventFilter(self.filter)
+        self.registered: list[int] = []
+        #: What each hotkey's Windows ID does (hotkey.HOTKEYS).
+        self.hotkey_actions: dict[int, Callable[[], None]] = {
+            hotkey.HOTKEY_IDS["hotkey"]: self.toggle_window,
+            hotkey.HOTKEY_IDS["browse_hotkey"]: lambda: self.show_browse(),
+            hotkey.HOTKEY_IDS["note_hotkey"]: lambda: self.window.open_with_hotkey("note"),
+            hotkey.HOTKEY_IDS["new_task_hotkey"]: lambda: self.window.open_with_hotkey("new_task"),
+            hotkey.HOTKEY_IDS["update_hotkey"]: lambda: self.window.open_with_hotkey("update"),
+            hotkey.HOTKEY_IDS["agenda_hotkey"]: lambda: self.window.open_with_hotkey("agenda"),
+        }
         self.register_hotkey()
         self.timer = QTimer(self)
         self.timer.setInterval(60_000)
         self.timer.timeout.connect(self.tick)
         self.timer.start()
 
-    # ---- the hotkey ----
+    # ---- the hotkeys ----
     def register_hotkey(self) -> None:
-        keys = self.ctx.settings.hotkey
-        try:
-            ok = hotkey.register(self.hwnd, HOTKEY_ID, keys)
-        except ValueError as e:
-            self.notify("Hotkey", f"{keys} isn't a hotkey DocRepo can use: {e} Set another with: python -m docrepo set-hotkey KEYS")
-            return
-        if not ok:
-            log.warning("hotkey %s is taken by another program", keys)
-            self.notify("Hotkey taken", f"Another program uses {keys}. Choose another with: python -m docrepo set-hotkey \"Ctrl+Alt+Space\", "
-                        "then start DocRepo again. The tray icon still opens the capture window.")
-        else:
-            log.info("hotkey %s registered", keys)
+        """Register the capture window's hotkey and each of the others that's set (hotkey.HOTKEYS)."""
+        taken = []
+        for setting, label in hotkey.HOTKEYS:
+            keys = getattr(self.ctx.settings, setting)
+            if not keys:
+                continue
+            hotkey_id = hotkey.HOTKEY_IDS[setting]
+            try:
+                ok = hotkey.register(self.hwnd, hotkey_id, keys)
+            except ValueError as e:
+                self.notify("Hotkey", f"{keys} isn't a hotkey DocRepo can use: {e} Choose another in Settings.")
+                continue
+            if ok:
+                self.registered.append(hotkey_id)
+                log.info("hotkey %s registered (%s)", keys, setting)
+            else:
+                log.warning("hotkey %s (%s) is taken by another program", keys, setting)
+                taken.append(f"{keys} ({label.lower()})")
+        if taken:
+            self.notify("Hotkey taken", f"Another program uses {', '.join(taken)}. Choose another in Settings, or for the capture window "
+                        "with: python -m docrepo set-hotkey \"Ctrl+Alt+Space\". The tray icon still opens the capture window.")
+
+    def unregister_hotkeys(self) -> None:
+        for hotkey_id in self.registered:
+            hotkey.unregister(self.hwnd, hotkey_id)
+        self.registered = []
 
     def toggle_pause(self) -> None:
         self.paused = not self.paused
         if self.paused:
-            hotkey.unregister(self.hwnd, HOTKEY_ID)
+            self.unregister_hotkeys()
         else:
             self.register_hotkey()
-        self.pause_action.setText("Resume hotkey" if self.paused else "Pause hotkey")
-        self.window.hotkey_label.setText("Hotkey paused" if self.paused else self.ctx.settings.hotkey)
-        self.notify("Hotkey", f"Hotkey paused. {self.ctx.settings.hotkey} does nothing until you resume it." if self.paused else "Hotkey resumed.")
+        self.pause_action.setText("Resume hotkeys" if self.paused else "Pause hotkeys")
+        self.window.hotkey_label.setText("Hotkeys paused" if self.paused else self.ctx.settings.hotkey)
+        self.notify("Hotkey", "Hotkeys paused. They do nothing until you resume them." if self.paused else "Hotkeys resumed.")
 
     def show_browse(self, view: str | None = None, task: str | None = None) -> None:
         self.browse.show_browse(view, task)
 
     def settings_changed(self, keys: list[str]) -> None:
         """Apply what the Settings view changed: a new hotkey works at once."""
-        if "hotkey" in keys:
-            hotkey.unregister(self.hwnd, HOTKEY_ID)
+        if any(k in hotkey.HOTKEY_IDS for k in keys):
+            self.unregister_hotkeys()
             self.paused = False
-            self.pause_action.setText("Pause hotkey")
+            self.pause_action.setText("Pause hotkeys")
             self.register_hotkey()
             self.window.hotkey_label.setText(self.ctx.settings.hotkey)
 
@@ -283,7 +308,7 @@ class CaptureApp(QObject):
             log.exception("background check failed")
 
     def quit(self) -> None:
-        hotkey.unregister(self.hwnd, HOTKEY_ID)
+        self.unregister_hotkeys()
         self.tray.hide()
         self.qt.quit()
 

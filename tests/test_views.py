@@ -32,9 +32,49 @@ def test_the_task_tree_filters(m):
     assert {"T000005", "T000007", "T000003", "T000004"} <= set(with_closed)
     no_routine = ids(views.task_tree(m, views.TreeFilter(routine=False)))
     assert "T000010" not in no_routine and "T000006" not in no_routine
-    by_label = views.task_tree(m, views.TreeFilter(label="Safety"))
+    by_label = views.task_tree(m, views.TreeFilter(labels=("Safety",)))
     matched = {n.id: n.match for n in views.walk(by_label)}
     assert matched["T000002"] and matched["T000017"] and not matched.get("T000001", True)
+
+
+def test_several_people_or_labels_match_any_of_them(m):
+    """Mods log round 1 (M0018)."""
+    def matching(**f):
+        return {n.id for n in views.walk(views.task_tree(m, views.TreeFilter(**f))) if n.match}
+
+    tom, mike = matching(people=("P003",)), matching(people=("P004",))
+    assert tom and mike and tom != mike
+    assert matching(people=("P003", "P004")) == tom | mike
+    safety, line1 = matching(labels=("Safety",)), matching(labels=("Line 1",))
+    assert matching(labels=("Safety", "Line 1")) == safety | line1
+    assert matching(labels=("Safety", "Line 1"), people=("P003", "P004")) == (safety | line1) & (tom | mike)
+
+
+def test_sorting_keeps_the_tree_and_sorts_each_level(m):
+    """Mods log round 1 (M0015)."""
+    tree = views.task_tree(m, views.TreeFilter())
+
+    def levels(nodes):
+        yield nodes
+        for n in nodes:
+            yield from levels(n.children)
+
+    by_title = views.sort_tree(m, views.task_tree(m, views.TreeFilter()), "title", TODAY)
+    assert sorted(ids(by_title)) == sorted(ids(tree))  # the same tasks, each still under its parent
+    for level in levels(by_title):
+        titles = [m.task(n.id).title.casefold() for n in level]
+        assert titles == sorted(titles)
+    assert [n.group for n in by_title] == list(range(len(by_title)))  # colour bands in the new order
+    by_due = views.sort_tree(m, views.task_tree(m, views.TreeFilter()), "due", TODAY)
+    soonest = [min((d.date for x in views.walk([n]) if (d := views.due_of(m.task(x.id), TODAY))), default=date.max) for n in by_due]
+    assert soonest == sorted(soonest) and soonest[-1] == date.max  # undated last
+    by_state = views.sort_tree(m, views.task_tree(m, views.TreeFilter(closed=True, parked=True)), "state", TODAY)
+    order = [views.STATE_ORDER[m.task(n.id).state] for n in by_state]
+    assert order == sorted(order)
+    updated = views.last_updated(m)
+    latest = [updated[n.id] for n in views.sort_tree(m, views.task_tree(m, views.TreeFilter()), "updated", TODAY)]
+    assert latest == sorted(latest, reverse=True)
+    assert ids(views.sort_tree(m, views.task_tree(m, views.TreeFilter()), "default", TODAY)) == ids(tree)
 
 
 def test_a_pinned_task_shows_whatever_the_filters(m):
@@ -107,6 +147,10 @@ def test_due_cells():
     reminder = views.due_cell(T(), TODAY, DueDate(date(2026, 10, 7), "Reminder"))
     assert (reminder.text, reminder.tip) == ("1 d ago", "Reminder Wed 7 Oct, 1 d ago")
     assert views.due_cell(T(), TODAY, DueDate(date(2026, 10, 9), "Reminder")).text == "Tomorrow"
+    assert not views.due_cell(T(), TODAY).deadline
+    T.due, T.deadline = None, "2026-10-31"  # no Due: the deadline shows in its place, marked (M0003)
+    cell = views.due_cell(T(), TODAY)
+    assert (cell.text, cell.tip, cell.deadline) == ("31 Oct · 23 d", "Deadline Sat 31 Oct, in 23 d", True)
 
 
 def test_collapse_and_expand_a_level(m):

@@ -43,6 +43,12 @@ def test_a_task_page(pages):
     assert {"task:T000001", "person:P003", "capture:C000005", "tab:log", "scope:family", "chap:T000012", "label:Line%201"} <= set(links(html))
 
 
+def test_with_no_due_the_deadline_shows_in_its_place(pages):
+    """Mods log round 1 (M0003): T000002 has a deadline and no Due."""
+    words = text(pages.task_page("T000002", PageState()))
+    assert "Due Sat 31 Oct (deadline) in 23 d" in words and "Deadline Sat 31 Oct" in words
+
+
 def test_tabs_scopes_and_chapters(pages):
     log = text(pages.task_page("T000008", PageState(tab="log")))
     assert "Work started" in log and "↳ New subtask: Rigging plan · Mike Ortiz, due 14 Oct" in log

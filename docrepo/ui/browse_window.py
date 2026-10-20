@@ -3,7 +3,7 @@
 Search is always at the top. New capture, and the Add note, Update and New task
 buttons on a task page, open the capture window, so tasks are entered in one
 place only. While browsing (not typing), A adds a note to the selected task, N
-a new task under it and U an update. Changes made here (filing a capture,
+a new task under it, U an update and G puts it on an agenda. Ctrl+B hides the views. Changes made here (filing a capture,
 fixing one, clearing a reminder, closing an agenda item, editing people, labels
 and a task's title, labels and parents) go into docs.db and the status log at
 once, and the generated pages are written again.
@@ -43,7 +43,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo import capacity, edits, people, prompts, search
+from docrepo import capacity, db, edits, people, prompts, search
 from docrepo.agenda import AgendaError
 from docrepo.captures import capture_folder, capture_md_path
 from docrepo.dates import long_date, short
@@ -60,9 +60,10 @@ from docrepo.ui.explorer import show_in_explorer
 from docrepo.ui.settings_view import SettingsView
 from docrepo.ui.task_picker import TaskPicker
 from docrepo.ui.tree_view import GREY, KEY_ROLE, RowTree, tint
-from docrepo.ui.widgets import FlowLayout, Option
+from docrepo.ui.widgets import CheckMenuButton, FlowLayout, Option
 from docrepo.views import (
     LIST_IDS,
+    SORTS,
     TASK_VIEWS,
     VIEW_IDS,
     VIEWS,
@@ -84,6 +85,7 @@ from docrepo.views import (
     meetings_for_menu,
     open_count,
     path_text,
+    sort_tree,
     task_tree,
     unfiled_rows,
     view_counts,
@@ -92,6 +94,7 @@ from docrepo.views import (
 log = logging.getLogger(__name__)
 
 WINDOW_TITLE = "DocRepo"
+VIEWS_HIDDEN_KEY = "browse_views_hidden"
 STYLE = """
 QWidget#browse { background: #ffffff; color: #1a1f25; font-family: "Segoe UI"; font-size: 10pt; }
 QWidget#toolbar { background: #f4f6f8; border-bottom: 1px solid #d6dce3; }
@@ -128,7 +131,9 @@ class BrowseWindow(QWidget):
         self.view = "tasks"
         self.sel: tuple[str, str] | None = None
         self.pin: str | None = None
-        self.tree_filter = {"parked": False, "closed": False, "routine": True, "label": "", "person": ""}
+        self.tree_filter = {"parked": False, "closed": False, "routine": True, "labels": [], "people": []}
+        #: Each task view's sort order (views.SORTS); "default" is its own order.
+        self.sorts: dict[str, str] = {}
         self.open: set[str] = set()
         self.doc_task: str | None = None
         self.doc_subs = True
@@ -147,7 +152,9 @@ class BrowseWindow(QWidget):
         self._placed = False
         self._build()
         for keys, handler in (("A", lambda: self._key("note")), ("N", lambda: self._key("new_task")), ("U", lambda: self._key("update")),
-                              ("Ctrl+F", self.search_box.setFocus), ("F5", self.refresh)):
+                              ("G", lambda: self._key("agenda")),
+                              ("Ctrl+F", self.search_box.setFocus), ("F5", self.refresh),
+                              ("Ctrl+B", lambda: self.show_views_pane(not self.views_button.isChecked()))):
             QShortcut(QKeySequence(keys), self, handler)
         if capture is not None:
             capture.saved.connect(self.capture_saved)
@@ -160,6 +167,10 @@ class BrowseWindow(QWidget):
         bar = QWidget(objectName="toolbar")
         bl = QHBoxLayout(bar)
         bl.setContentsMargins(10, 6, 10, 6)
+        self.views_button = QPushButton("≡ Views")
+        self.views_button.setCheckable(True)
+        self.views_button.setToolTip("Hide or show the list of views on the left   (Ctrl+B)")
+        bl.addWidget(self.views_button)
         self.search_box = QLineEdit()
         self.search_box.setPlaceholderText("Search tasks, captures, documents and people   (Ctrl+F)")
         self.search_box.setClearButtonEnabled(True)
@@ -244,6 +255,10 @@ class BrowseWindow(QWidget):
         self.split.setStretchFactor(1, 1)
         self.split.setStretchFactor(2, 1)
         outer.addWidget(self.split, 1)
+        hidden = db.get_state(self.ctx.conn, VIEWS_HIDDEN_KEY) == "1"
+        self.views_button.setChecked(not hidden)
+        self.nav.setVisible(not hidden)
+        self.views_button.toggled.connect(self.show_views_pane)
 
         self.status = QLabel(objectName="status")
         self.status.setWordWrap(True)
@@ -430,6 +445,14 @@ class BrowseWindow(QWidget):
             self.nav.add_row(None, ("view", v.id), [label, f'<p align="right" class="sub">{count}</p>' if count is not None else ""])
         self.nav.end(("view", self.view) if self.view != "search" else None)
 
+    def show_views_pane(self, on: bool) -> None:
+        """Show or hide the views on the left (mods log round 1, M0012). The choice is kept in docs.db's app_state."""
+        self.nav.setVisible(on)
+        if self.views_button.isChecked() != on:
+            self.views_button.setChecked(on)  # its toggled signal calls this again, which then finds nothing to do
+        if db.get_state(self.ctx.conn, VIEWS_HIDDEN_KEY) != ("0" if on else "1"):
+            db.set_state(self.ctx.conn, VIEWS_HIDDEN_KEY, "0" if on else "1")
+
     # ================= the list pane =================
     def _set_head(self, title: str, note: str = "") -> None:
         self.pane_title.setText(title)
@@ -498,7 +521,8 @@ class BrowseWindow(QWidget):
         chips = "".join(" " + chip(text, cls) for text, cls in markers(m, t))
         cell = due_cell(t, self.today(), when, use_due)
         colour = {"over": "color:#b0261e; font-weight:600", "soon": "color:#875700; font-weight:600"}.get(cell.cls if cell else "", "")
-        due = f'<p align="right" style="{colour}">{esc(cell.text)}</p>' if cell else ""
+        mark = '<br><span style="color:#87919c; font-weight:400; font-size:8pt">deadline</span>' if cell and cell.deadline else ""
+        due = f'<p align="right" style="{colour}">{esc(cell.text)}{mark}</p>' if cell else ""
         return [title + chips + extra, state_chip(t.state), due]
 
     def _add_nodes(self, nodes: list[Node], parent=None, filtered: bool = False, expand_all: bool = True,
@@ -521,27 +545,24 @@ class BrowseWindow(QWidget):
 
     def _tasks_view(self) -> None:
         f = self.tree_filter
-        filtered = bool(f["label"] or f["person"])
+        filtered = bool(f["labels"] or f["people"])
         self._set_head("Task tree", "Dimmed rows don't match the filter. They're parents of tasks that do, shown for context." if filtered else "")
         m = self.model()
         self._check("Show parked", f["parked"], lambda on: self._set_filter("parked", on))
         self._check("Show closed", f["closed"], lambda on: self._set_filter("closed", on))
         self._check("Show routine", f["routine"], lambda on: self._set_filter("routine", on), "Recurring tasks, such as meetings, and their subtasks")
-        labels = QComboBox()
-        labels.addItem("Any label", "")
-        for lb in m.active_labels():
-            labels.addItem(lb.name, lb.name)
-        labels.setCurrentIndex(max(0, labels.findData(f["label"])))
-        labels.currentIndexChanged.connect(lambda _: self._set_filter("label", labels.currentData()))
+        # Several labels and people at once (mods log round 1, M0018): a task matches with any of each.
+        labels = CheckMenuButton("Labels", "any", [(lb.name, lb.name) for lb in m.active_labels()], f["labels"])
+        labels.chosen.connect(lambda values: self._set_filter("labels", values))
         self._filter_widget(labels)
-        person = QComboBox()
-        person.addItem("Anyone", "")
-        for p in m.active_people():
-            person.addItem(p.name, p.id)
-        person.setCurrentIndex(max(0, person.findData(f["person"])))
-        person.currentIndexChanged.connect(lambda _: self._set_filter("person", person.currentData()))
-        self._filter_widget(person)
-        nodes = task_tree(m, TreeFilter(**f, pin=self.pin))
+        people_button = CheckMenuButton("People", "anyone", [(p.name, p.id) for p in m.active_people()], f["people"])
+        people_button.chosen.connect(lambda values: self._set_filter("people", values))
+        people_button.setToolTip(people_button.toolTip() or "Tasks any of the ticked people lead or are assigned")
+        self._filter_widget(people_button)
+        self._sort_box("tasks")
+        nodes = task_tree(m, TreeFilter(parked=f["parked"], closed=f["closed"], routine=f["routine"], labels=tuple(f["labels"]),
+                                        people=tuple(f["people"]), pin=self.pin))
+        nodes = sort_tree(m, nodes, self.sorts.get("tasks", "default"), self.today())
         self._button("− Collapse a level", lambda: self._level(nodes, "collapse"), collapse_level(nodes, self.open) != self.open,
                      "Fold every branch up one level")
         self._button("+ Expand a level", lambda: self._level(nodes, "expand"), expand_level(nodes, self.open) != self.open,
@@ -553,6 +574,21 @@ class BrowseWindow(QWidget):
 
     def _set_filter(self, key: str, value) -> None:
         self.tree_filter[key] = value
+        self.render_list()
+
+    def _sort_box(self, view_id: str) -> None:
+        """The Sort list for the task tree or a list (mods log round 1, M0015)."""
+        box = QComboBox()
+        box.setAccessibleName("Sort")
+        for key, label in SORTS:
+            box.addItem(f"Sort: {label.lower() if key != 'default' else ('tree order' if view_id == 'tasks' else 'soonest first')}", key)
+        box.setCurrentIndex(max(0, box.findData(self.sorts.get(view_id, "default"))))
+        box.setToolTip("Sorts the tasks under each parent, so the tree keeps its shape")
+        box.currentIndexChanged.connect(lambda _: self._set_sort(view_id, box.currentData()))
+        self._filter_widget(box)
+
+    def _set_sort(self, view_id: str, how: str) -> None:
+        self.sorts[view_id] = how
         self.render_list()
 
     def _level(self, nodes: list[Node], direction: str) -> None:
@@ -572,7 +608,8 @@ class BrowseWindow(QWidget):
         reminders = view_id == "reminders"
         self.tree.set_columns(["Title", "State", "Reminder" if reminders else "Due", ""] if reminders else ["Title", "State", "Due"],
                               [0, 96, 96, 56] if reminders else None)
-        nodes = list_tree(m, task_list, self.today(), self.ctx.settings.me)
+        self._sort_box(view_id)
+        nodes = sort_tree(m, list_tree(m, task_list, self.today(), self.ctx.settings.me), self.sorts.get(view_id, "default"), self.today())
 
         def row(n: Node) -> tuple[list[str], str]:
             if not n.match:
@@ -869,7 +906,7 @@ class BrowseWindow(QWidget):
             act.triggered.connect(lambda _=False, x=meeting.id: self.open_capture(task=task_id, mode="update", agenda=[x]))
         other = agenda.addAction("Someone else or another task…")
         other.triggered.connect(lambda: self.open_capture(task=task_id, mode="update", agenda_focus=True))
-        self._action("Add to agenda", tip="Put this task on an agenda", menu=agenda)
+        self._action("Add to agenda   G", tip="Put this task on an agenda", menu=agenda)
         edit = QMenu(self)
         edit.addAction("Title and description…", lambda: self.edit_task_text(task_id))
         edit.addAction("Labels…", lambda: self.edit_task_labels(task_id))
@@ -1148,10 +1185,15 @@ class BrowseWindow(QWidget):
         self.capture.show_capture(**options)
 
     def capture_for_selected(self, mode: str) -> None:
+        """A note, a new task under it or an update for the selected task; "agenda" (G) is an update with the cursor in
+        Add to agenda (mods log round 1, M0020)."""
         if not (self.sel and self.sel[0] == "task"):
             self.say("Select a task first. The shortcut works on the task that's selected in the browse tool.")
             return
-        self.open_capture(task=self.sel[1], mode=mode)
+        if mode == "agenda":
+            self.open_capture(task=self.sel[1], mode="update", agenda_focus=True)
+        else:
+            self.open_capture(task=self.sel[1], mode=mode)
 
     def capture_saved(self, result: SaveResult) -> None:
         """After the capture window saves: show what it did, as the mockup does."""

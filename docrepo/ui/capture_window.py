@@ -168,6 +168,7 @@ class CaptureWindow(QWidget):
         self.setStyleSheet(STYLE)
         self.setAcceptDrops(True)
         self._setting = False  # True while the window fills fields itself, so it doesn't count as typing
+        self._after_pick: str | None = None  # "update" or "agenda" when that hotkey opened the task picker
         self._summary_types: list = []
         self._path_timer = QTimer(self)
         self._path_timer.setSingleShot(True)
@@ -522,6 +523,22 @@ class CaptureWindow(QWidget):
                   else self.title if "new_task" in self.types and not self.title.text() else self.content)
         target.setFocus()
 
+    def open_with_hotkey(self, kind: str) -> None:
+        """A capture type's own hotkey (mods log round 1, M0010 and M0020): "note", "new_task", "update" or "agenda".
+        Note and New task open with that type checked. Update and Add to agenda need a task: with the draft's task,
+        Update is checked at once (and for Add to agenda, the cursor goes there); with none, the task picker opens,
+        and picking a task does the same."""
+        if kind in ("note", "new_task"):
+            self.show_capture(mode=kind)
+            return
+        agenda = kind == "agenda"
+        if self.task:
+            self.show_capture(mode="update", agenda_focus=agenda)
+            return
+        self.show_capture()
+        self._after_pick = kind
+        QTimer.singleShot(0, self._open_picker)  # once the window is placed, so the picker opens under the task button
+
     def _place(self) -> None:
         screen = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
         area = screen.availableGeometry()
@@ -790,6 +807,10 @@ class CaptureWindow(QWidget):
 
     def _picked(self, task_id: str | None) -> None:
         self.set_task(task_id)
+        after, self._after_pick = self._after_pick, None
+        if after and task_id:  # the Update or Add to agenda hotkey opened the picker: only Update is checked, as with a task already picked
+            self.show_capture(mode="update", agenda_focus=after == "agenda")
+            return
         (self.title if "new_task" in self.types else self.content).setFocus()
 
     def _label_options(self, text: str, picked: list[str]) -> list[Option]:

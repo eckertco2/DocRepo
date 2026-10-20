@@ -63,10 +63,24 @@ def check_values(ctx: AppContext, values: dict[str, Any]) -> dict[str, Any]:
     out = dict(values)
     keys = out.get("hotkey", "").strip()
     try:
-        hotkey.parse_hotkey(keys)
+        taken = {hotkey.parse_hotkey(keys): "the capture window"}
     except ValueError as e:
         raise SettingsProblem(f"The hotkey {keys or '(empty)'} can't be used: {e}") from e
     out["hotkey"] = keys
+    for setting, label in hotkey.HOTKEYS[1:]:  # the others are off when empty (mods log round 1)
+        if setting not in out:
+            continue
+        keys = (out[setting] or "").strip()
+        out[setting] = keys
+        if not keys:
+            continue
+        try:
+            combo = hotkey.parse_hotkey(keys)
+        except ValueError as e:
+            raise SettingsProblem(f"The hotkey for {label.lower()}, {keys}, can't be used: {e}") from e
+        if combo in taken:
+            raise SettingsProblem(f"{keys} is already the hotkey for {taken[combo]}. Give each hotkey its own keys.")
+        taken[combo] = label.lower()
     backup = (out.get("backup_dir") or "").strip()
     if backup:
         path = Path(backup)
@@ -231,6 +245,15 @@ class SettingsView(QWidget):
         self.me = QComboBox()
         self.hotkey = QLineEdit()
         self.hotkey.setPlaceholderText("Such as Ctrl+Shift+Space")
+        more = QWidget()
+        more_form = QFormLayout(more)
+        more_form.setContentsMargins(0, 0, 0, 0)
+        self.more_hotkeys: dict[str, QLineEdit] = {}
+        for setting, label in hotkey.HOTKEYS[1:]:
+            box = QLineEdit()
+            box.setPlaceholderText("Off")
+            self.more_hotkeys[setting] = box
+            more_form.addRow(label, box)
         self.backup = QLineEdit()
         self.backup.setPlaceholderText("Not set: no backups are made")
         browse = QPushButton("Browse…")
@@ -277,6 +300,8 @@ class SettingsView(QWidget):
         self.check.setRange(5, 24 * 60)
         self.check.setSuffix(" minutes")
         rows = [("Me", self.me, "Who “I” and “me” are in captures."), ("Hotkey", self.hotkey, "Opens the capture window. It needs Ctrl, Alt or Win."),
+                ("More hotkeys", more, "Each is off until you set it. Update and Add to agenda use the task picked in the capture window, "
+                                       "or open the task picker. Pause hotkeys in the tray menu pauses them all."),
                 ("Backup folder", backup_row, "Where backups go: a copy of docs.db and a mirror of the data root's files. Outside the data root."),
                 ("Backups", backup_when, "How often DocRepo backs up, at its first start of the day, and how many copies of docs.db it keeps."),
                 ("Reminders at", self.reminder, "Each day's reminders show as notifications from this time."),
@@ -333,6 +358,8 @@ class SettingsView(QWidget):
             self.me.addItem(p.name, p.id)
         self.me.setCurrentIndex(max(0, self.me.findData(s.me)))
         self.hotkey.setText(s.hotkey)
+        for setting, box in self.more_hotkeys.items():
+            box.setText(getattr(s, setting))
         self.backup.setText(s.backup_dir or "")
         self.reminder.setTime(QTime.fromString(s.reminder_time, "HH:mm") if QTime.fromString(s.reminder_time, "HH:mm").isValid() else QTime(8, 0))
         for d, box in self.workdays.items():
@@ -350,7 +377,8 @@ class SettingsView(QWidget):
 
     def values(self) -> dict[str, Any]:
         return {
-            "me": self.me.currentData(), "hotkey": self.hotkey.text(), "backup_dir": self.backup.text(),
+            "me": self.me.currentData(), "hotkey": self.hotkey.text(), **{k: box.text() for k, box in self.more_hotkeys.items()},
+            "backup_dir": self.backup.text(),
             "reminder_time": self.reminder.time().toString("HH:mm"), "workdays": [d for d, box in self.workdays.items() if box.isChecked()],
             "capacity_horizon_years": self.horizon.value(), "event_words": [w for w in self.events.text().split(",")],
             "extracted_text_cap_chars": self.cap.value(), "prompt_warn_chars": self.warn.value(), "doc_check_minutes": self.check.value(),
@@ -369,7 +397,8 @@ class SettingsView(QWidget):
         if not changed:
             self.message("Nothing changed.")
         else:
-            later = " The hotkey works from now on." if "hotkey" in changed else ""
+            n = sum(1 for k in changed if k in hotkey.HOTKEY_IDS)
+            later = f" The hotkey{'s work' if n > 1 else ' works'} from now on." if n else ""
             self.message(f"Saved {len(changed)} setting{'s' if len(changed) > 1 else ''} to settings.json.{later}")
         return changed
 

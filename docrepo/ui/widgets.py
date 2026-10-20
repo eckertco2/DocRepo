@@ -5,7 +5,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 
-from PySide6.QtCore import QDate, QPoint, QRect, QSize, Qt, Signal
+from PySide6.QtCore import QDate, QPoint, QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import (
     QCalendarWidget,
@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMenu,
+    QPushButton,
     QSizePolicy,
     QToolButton,
     QVBoxLayout,
@@ -375,3 +376,63 @@ class ChipPicker(QWidget):
                     self.remove(len(self._chips) - 1)
                     return True
         return super().eventFilter(watched, event)
+
+
+class _StayOpenMenu(QMenu):
+    """A menu whose tick boxes can be ticked one after another without it closing."""
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        action = self.activeAction()
+        if action is not None and action.isEnabled() and action.isCheckable():
+            action.trigger()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        action = self.activeAction()
+        if event.key() in (Qt.Key.Key_Space, Qt.Key.Key_Return, Qt.Key.Key_Enter) and action is not None and action.isCheckable():
+            action.trigger()
+            return
+        super().keyPressEvent(event)
+
+
+class CheckMenuButton(QPushButton):
+    """A filter button whose menu has a tick box for each choice (mods log round 1, M0018). ``chosen`` sends the ticked
+    values once the menu closes, so the list behind it is drawn again only then."""
+
+    chosen = Signal(list)
+
+    def __init__(self, noun: str, empty: str, choices: list[tuple[str, str]], picked: list[str]) -> None:
+        super().__init__()
+        self.noun, self.empty = noun, empty
+        self.picks = _StayOpenMenu(self)
+        clear = self.picks.addAction(empty)
+        clear.triggered.connect(lambda: [a.setChecked(False) for a in self.choices])
+        self.picks.addSeparator()
+        self.choices = []
+        for label, value in choices:
+            action = self.picks.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(value in picked)
+            action.setData(value)
+            action.toggled.connect(lambda _=False: self._name())
+            self.choices.append(action)
+        self.setMenu(self.picks)
+        self._shown = self.values()
+        self.picks.aboutToHide.connect(lambda: QTimer.singleShot(0, self._closed))  # after the action that closed it
+        self._name()
+
+    def values(self) -> list[str]:
+        return [a.data() for a in self.choices if a.isChecked()]
+
+    def _name(self) -> None:
+        names = [a.text() for a in self.choices if a.isChecked()]
+        shown = self.empty if not names else ", ".join(names) if len(names) <= 2 else f"{names[0]} and {len(names) - 1} more"
+        self.setText(f"{self.noun}: {shown}")
+        self.setToolTip(", ".join(names) if len(names) > 2 else "")
+
+    def _closed(self) -> None:
+        if self.values() != self._shown:
+            self._shown = self.values()
+            self.chosen.emit(self._shown)

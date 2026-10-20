@@ -203,7 +203,10 @@ class Pages:
             ("Lead", self.roles(t.leads, t.lead_hours, routine)),
             ("Assignees", self.roles(t.assignees, t.assignee_hours, routine)),
             ("Start", esc(long_date(start_of(t), self.today)) + ("" if t.start else ' <span class="sub">date entered</span>')),
-            ("Due", f'{esc(self.long(t.due))} <span class="sub">{days_text(to_date(t.due), self.today)}</span>' if t.due else none_text()),
+            ("Due", f'{esc(self.long(t.due))} <span class="sub">{days_text(to_date(t.due), self.today)}</span>' if t.due
+             # With no Due, the deadline shows in its place, marked (mods log round 1, M0003); nothing changes in docs.db.
+             else f'{esc(self.long(t.deadline))} <span class="sub">(deadline) {days_text(to_date(t.deadline), self.today)}</span>'
+             if t.deadline and not routine else none_text()),
             ("Deadline", f'{esc(self.long(t.deadline))}{", " + esc(t.deadline_desc) if t.deadline_desc else ""} '
                          f'<span class="sub">{days_text(to_date(t.deadline), self.today)}</span>' if t.deadline else none_text()),
             ("Reminder", f'{esc(self.long(t.reminder))} <span class="sub">{rem_text(to_date(t.reminder), self.today)}</span>' if t.reminder else none_text()),

@@ -63,6 +63,55 @@ def test_it_opens_on_the_task_tree(browse):
     assert "Reactor impeller upgrade" in browse.page.toPlainText()
 
 
+def test_the_views_pane_hides_and_stays_hidden(browse, ctx):
+    """Mods log round 1 (M0012): Ctrl+B or ≡ Views, remembered in docs.db's app_state."""
+    from docrepo import db
+
+    assert browse.nav.isVisible() and browse.views_button.isChecked()
+    browse.views_button.click()
+    assert not browse.nav.isVisible() and db.get_state(ctx.conn, "browse_views_hidden") == "1"
+    again = BrowseWindow(ctx, None)
+    try:
+        again.show_browse()
+        assert not again.nav.isVisible() and not again.views_button.isChecked()
+        again.show_views_pane(True)
+        assert again.nav.isVisible() and db.get_state(ctx.conn, "browse_views_hidden") == "0"
+    finally:
+        again.deleteLater()
+
+
+def test_filter_by_several_people_and_sort(browse):
+    """Mods log round 1 (M0018, M0015)."""
+    from PySide6.QtWidgets import QComboBox
+
+    from docrepo.ui.widgets import CheckMenuButton
+
+    people = next(w for w in browse.filters.findChildren(CheckMenuButton) if w.noun == "People")
+    assert people.text() == "People: anyone"
+    for action in people.choices:
+        if action.data() in ("P003", "P004"):
+            action.trigger()  # ticking doesn't redraw the list; closing the menu does
+    assert people.text() == "People: Tom Becker, Mike Ortiz" and browse.tree_filter["people"] == []
+    people.picks.aboutToHide.emit()
+    QApplication.processEvents()
+    assert browse.tree_filter["people"] == ["P003", "P004"]
+    shown = browse.filters.findChildren(CheckMenuButton)
+    assert any(w.text() == "People: Tom Becker, Mike Ortiz" for w in shown)  # drawn again, still ticked
+    sort = next(w for w in browse.filters.findChildren(QComboBox) if w.accessibleName() == "Sort")
+    sort.setCurrentIndex(sort.findData("title"))
+    assert browse.sorts == {"tasks": "title"}
+    browse.set_view("due")
+    due_sort = next(w for w in browse.filters.findChildren(QComboBox) if w.accessibleName() == "Sort")
+    assert due_sort.currentText() == "Sort: soonest first"  # each view keeps its own order
+
+
+def test_g_puts_the_selected_task_on_an_agenda(browse, monkeypatch):
+    opened = []
+    monkeypatch.setattr(browse, "open_capture", lambda **options: opened.append(options))
+    browse.capture_for_selected("agenda")
+    assert opened == [{"task": "T000001", "mode": "update", "agenda_focus": True}]
+
+
 def test_each_view_selects_its_first_item(browse):
     expected = {"unfiled": ("capture", "C000023"), "due": ("task", "T000019"), "reminders": ("task", "T000016"), "people": ("person", "P001"),
                 "labels": ("label", "Line 1"), "docs": ("doc", "D000001"), "agenda": ("task", "T000010")}
@@ -251,6 +300,13 @@ def test_settings(browse, ctx):
     assert browse.conn.execute("SELECT count(*) FROM work_calendar").fetchone()[0] != rows_before
     view.hotkey.setText("K")
     assert view.save() == [] and view.error.isVisibleTo(view) and "can't be used" in view.error.text()
+    view.load()
+    view.more_hotkeys["browse_hotkey"].setText("ctrl+alt+k")  # the capture window's, in other words
+    assert view.save() == [] and "Ctrl+Alt+K is already the hotkey for the capture window" in view.error.text().replace("ctrl+alt+k", "Ctrl+Alt+K")
+    view.more_hotkeys["browse_hotkey"].setText("Ctrl+Alt+B")
+    view.more_hotkeys["agenda_hotkey"].setText("Ctrl+Alt+G")
+    assert view.save() == ["browse_hotkey", "agenda_hotkey"] and "The hotkeys work from now on." in browse.status.text()
+    assert (ctx.settings.browse_hotkey, ctx.settings.note_hotkey) == ("Ctrl+Alt+B", "")
     view.load()
     view.backup.setText(str(ctx.data_root / "Backups"))
     assert view.save() == [] and "inside the data root" in view.error.text()

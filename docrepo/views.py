@@ -81,6 +81,7 @@ class DueCell:
     days: str  # the short form for a narrow list: "8 d"
     cls: str  # "over", "soon" or ""
     tip: str  # "Due Fri 16 Oct, in 8 d"
+    deadline: bool = False  # the task has no Due, so this is its deadline, shown in Due's place (M0003)
 
 
 def rem_text(day: date, today: date) -> str:
@@ -106,7 +107,7 @@ def due_cell(t: Task, today: date, d: DueDate | None = None, use_due: bool = Tru
     else:
         text, days = f"{short(d.date, today)} · {n} d", f"{n} d"
     tip = f"{d.label} {long_date(d.date, today)}, {rem_text(d.date, today) if rem else days_text(d.date, today)}"
-    return DueCell(text, days, "over" if n < 0 else "soon" if n <= 2 else "", tip)
+    return DueCell(text, days, "over" if n < 0 else "soon" if n <= 2 else "", tip, d.label == "Deadline")
 
 
 def list_date(task_list: TaskList, t: Task, today: date) -> DueDate | None:
@@ -166,27 +167,30 @@ class TreeFilter:
     parked: bool = False
     closed: bool = False
     routine: bool = True
-    label: str = ""
-    person: str = ""
+    #: Tasks with any of these labels, and any of these people as lead or assignee (several of each since mods log round 1, M0018).
+    labels: tuple[str, ...] = ()
+    people: tuple[str, ...] = ()
     #: A task just saved in the capture window: it shows whatever the filters, with its parents, until something else is selected.
     pin: str | None = None
 
     @property
     def filtered(self) -> bool:
-        return bool(self.label or self.person)
+        return bool(self.labels or self.people)
 
 
 def task_tree(m: Model, f: TreeFilter) -> list[Node]:
     """The task tree: top-level tasks and their subtasks, as the filters allow.
 
     Show routine off hides recurring tasks, such as meetings, with their subtasks; a subtask with another parent still
-    shows there. With a label or person filter on, a parent that doesn't match shows dimmed (``match`` False).
+    shows there. With a label or person filter on, a parent that doesn't match shows dimmed (``match`` False). A task
+    matches with any of the filter's labels and any of its people.
     """
     def pass_state(t: Task) -> bool:
         return (f.parked or t.state != "Parked") and (f.closed or t.state != "Closed") and (f.routine or not t.recurrence)
 
     def pass_filter(t: Task) -> bool:
-        return (not f.label or any(name == f.label for name, _ in m.labels_of(t.id))) and (not f.person or f.person in (*t.leads, *t.assignees))
+        return ((not f.labels or any(name in f.labels for name, _ in m.labels_of(t.id)))
+                and (not f.people or any(p in f.people for p in (*t.leads, *t.assignees))))
 
     pinned = {f.pin, *m.ancestors_of(f.pin)} if f.pin and f.pin in m.tasks else set()
     seen: dict[str, bool] = {}
@@ -215,6 +219,62 @@ def task_tree(m: Model, f: TreeFilter) -> list[Node]:
         return out
 
     return build([t.id for t in m.top_level()], 0, 0)
+
+
+# ---- sorting ----
+#: How the task tree and the lists can be sorted (mods log round 1, M0015). Each sorts the tasks under each parent, so
+#: the tree keeps its shape. "default" is the view's own order: tree order, or soonest first for a list.
+SORTS: tuple[tuple[str, str], ...] = (("default", "Default order"), ("due", "Due date"), ("title", "Title"), ("state", "State"),
+                                      ("updated", "Last updated"))
+STATE_ORDER = {"In progress": 0, "Not started": 1, "Parked": 2, "Closed": 3}
+
+
+def last_updated(m: Model) -> dict[str, str]:
+    """When each task last changed: its latest status log entry or capture, else when it was created ("YYYY-MM-DD HH:MM")."""
+    def norm(at: str | None) -> str:
+        return (at or "").replace("T", " ")[:16]
+
+    out = {t.id: norm(t.created) for t in m.tasks.values()}
+    for e in m.status:
+        out[e.task] = max(out.get(e.task, ""), norm(e.at))
+    for c in m.captures.values():
+        for task_id in m.capture_tasks(c):
+            out[task_id] = max(out.get(task_id, ""), norm(c.saved))
+    return out
+
+
+def sort_tree(m: Model, nodes: list[Node], how: str, today: date) -> list[Node]:
+    """``nodes`` with each task's subtasks sorted, and the top-level tasks too, their colour bands numbered again in the
+    new order. Due date sorts a task by the soonest Due (else Deadline) among it and the subtasks shown under it, undated
+    last; Last updated puts the latest first. Ties keep the view's own order."""
+    if how == "default" or how not in dict(SORTS):
+        return nodes
+    updated = last_updated(m) if how == "updated" else {}
+
+    def soonest(n: Node) -> date:
+        days = [d.date for x in walk([n]) if x.kind == "task" and (d := due_of(m.task(x.id), today))]
+        return min(days, default=date.max)
+
+    def key(n: Node):
+        t = m.task(n.id)
+        if how == "due":
+            return soonest(n)
+        if how == "title":
+            return t.title.casefold()
+        if how == "state":
+            return STATE_ORDER.get(t.state, 9)
+        return updated.get(n.id, "")
+
+    def sort(level: list[Node]) -> list[Node]:
+        for n in level:
+            n.children = sort(n.children)
+        return sorted(level, key=key, reverse=how == "updated")
+
+    out = sort(nodes)
+    for g, top in enumerate(out):
+        for x in walk([top]):
+            x.group = g
+    return out
 
 
 def pruned_tree(m: Model, holds: Callable[[str], bool], first: Callable[[str], str] | None = None) -> list[Node]:

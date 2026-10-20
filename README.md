@@ -58,7 +58,8 @@ In the browse tool, open **Settings** and click **Make the Startup shortcut**. D
 ## Everyday use
 
 - **Capture:** press the hotkey, pick a task (or none, to file it later), type or paste, drop files or Outlook emails on the window, and press **Ctrl+Enter**. Check **New task** to make a task, or **Update** to change one. **Alt+P** (Parse and populate) fills the fields from what you typed. The **i** buttons explain each field.
-- **Browse:** the task tree, the lists (overdue, reminders, waiting on others and so on), agendas, capacity, people, labels and documents. With a task selected, **A** adds a note, **N** a new task under it and **U** an update. Search is at the top (Ctrl+F).
+- **Browse:** the task tree, the lists (overdue, reminders, waiting on others and so on), agendas, capacity, people, labels and documents. With a task selected, **A** adds a note, **N** a new task under it, **U** an update and **G** puts it on an agenda. Search is at the top (Ctrl+F). The task tree filters by several labels and people at once, and the tree and lists can be sorted by due date, title, state or last update. **≡ Views** (Ctrl+B) hides the views on the left.
+- **More hotkeys:** in **Settings**, set a hotkey for the browse tool, for a note, a new task or an update, and for Add to agenda. Each is off until you set it.
 - **Unfiled captures** wait in the Unfiled view: file each one to a task, or make it a task.
 - **Changes to DocRepo itself:** note them in the mods log, the **?** button in the capture window.
 
@@ -113,7 +114,7 @@ Quit any other running copy first, since both would want the hotkey. You can als
 - **Adding an Outlook email doesn't work.** The capture window says what Outlook refused, with an error code. Make a troubleshooting report with the email still selected.
 - **Nothing seems to happen when DocRepo starts.** `pythonw` has no console, so errors go to the log: the end of `System\logs\docrepo.log` in your data root. Or start it once with `python.exe` instead of `pythonw.exe` to see the message.
 - **"DocRepo is already running".** Another copy has the data root open; its tray icon may be under the ^ arrow. If none is running, the lock file named in the message is left from a crash: delete it and start again.
-- **The hotkey does nothing.** Another program may use it; DocRepo says so when it starts. Choose another in Settings. **Pause hotkey** in the tray menu turns it off for a while.
+- **The hotkey does nothing.** Another program may use it; DocRepo says so when it starts. Choose another in Settings. **Pause hotkeys** in the tray menu turns them all off for a while.
 - **The data root is refused.** It must be a full path on the local drive, outside OneDrive and outside DocRepo's own folder.
 - **A backup couldn't be made.** The notification says why: often the backup folder's drive isn't there. The next backup tries again; **Back up now** tries at once.
 - **A page in the data root looks out of date.** `Contents.md` and each `Task.md` are rebuilt from the database. **Rebuild pages, calendar and search** in Settings (or the `rebuild` command) rebuilds them all.
