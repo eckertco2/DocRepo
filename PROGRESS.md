@@ -151,6 +151,13 @@ Stage 2 of the round 1 plan: M0003, M0012, M0002, M0010, M0020, M0018 and the fi
 - The hotkeys for Update and Add to agenda use the task already picked in the capture window's draft; only with none do they open the task picker. Picking None there leaves a note (on an agenda, for Add to agenda).
 - Sorting by label waits for the timeline view (stage 4), where grouping by label fits.
 
+## The first Frogbot findings (2026-10-20)
+
+The corporate computer's Frogbot scan of phase 5 found four things.
+
+- `requirements.txt`: Pillow 12.3.0 had CVE-2026-96639 (critical) and CVE-2026-96640 (high), both fixed in Pillow 13.0.0, now pinned. DocRepo doesn't use Pillow itself; python-pptx needs it, and works with 13.0.0.
+- `pyproject.toml` is gone, and its pytest settings are in `pytest.ini`. Two GPL-3.0 findings named a component `docrepo` (in `pyproject.toml` and `docrepo/log_setup.py`). That was DocRepo itself: JFrog's pip scan runs `pip install .` first, and the `[project]` table named "docrepo" matched an unrelated GPL-3.0 package of that name on PyPI. DocRepo isn't installed as a package, so nothing used the table. Now `pip install .` fails, and the scan falls back to `requirements.txt`.
+
 ## Unfinished / notes
 
 - Phase 5 passed the owner's hand test on this computer on 2026-10-18, after the fix for files dropped from File Explorer, and went to GitHub the same day. Still to try on the corporate computer: DocRepo starting at sign-in from the shortcut, a backup to the chosen backup folder there, and the import on the real workbook.
@@ -162,5 +169,5 @@ Stage 2 of the round 1 plan: M0003, M0012, M0002, M0010, M0020, M0018 and the fi
 - On the corporate computer, phase 4 needs the same checks as phases 2 and 3, plus the browse tool on the real data root (search over real captures, File Explorer on the LAN drive).
 
 - `SPEC.md` covers phases 1 to 5 in full; later phases are summaries until they're built. The detailed design is in the parent workspace's `docs/task-model/brainstorm.md`.
-- Published to the GitHub repo `eckertco2/DocRepo` on 2026-10-09 (phase 1), on 2026-10-16 (the glossary, phases 2 and 3), on 2026-10-18 (phases 4 and 5), and on 2026-10-20 (releases 5.1 and 5.2).
+- Published to the GitHub repo `eckertco2/DocRepo` on 2026-10-09 (phase 1), on 2026-10-16 (the glossary, phases 2 and 3), on 2026-10-18 (phases 4 and 5), and on 2026-10-20 (releases 5.1 and 5.2, and the fixes for the first Frogbot findings).
 - The route to the corporate computer works (2026-10-09): download, a security scan there, `pip install -r requirements.txt` with every pinned version available, and pytest passing.
