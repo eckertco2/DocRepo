@@ -141,7 +141,7 @@ Results of `parseCapture` in `docs/browse-tool/mockup/parse.js`, with today = 20
 |---|---|---|
 | New task | Rails need to be painted red. Try to have this done by next Friday. Deadline is the next verification walkthrough at the end of October. We'll assign this one to Todd. | Title "Rails need to be painted red". Due 2026-10-16. Deadline 2026-10-31. Deadline description "Next verification walkthrough". Labels [Safety]. Assignees [Todd (new person)]. |
 | New task | Remind Tyler tomorrow that he needs to book the alignment contractor. Urgent: hard deadline is the turnaround on Oct 19. Safety review needed before mobilizing. | Title "Book the alignment contractor". Due 2026-10-09. Deadline 2026-10-19. Deadline description "Turnaround". Reminder 2026-10-09. Urgent. Labels [Safety]. Lead [Me]. Assignees [Tyler Nguyen]. |
-| Update | Vendor drawings came in late, so the package is now due Oct 23. | Due 2026-10-23. |
+| Update | Vendor drawings came in late, so the package is now due Oct 23. | Current status "Vendor drawings came in late, so the package is now due Oct 23.". Due 2026-10-23. |
 | New task | Tom to draft the vibration monitoring plan for the new impeller, 12 Oct to 23 Oct. Priya to review. | Title "Draft the vibration monitoring plan for the new impeller". Due 2026-10-23. Start 2026-10-12. Assignees [Tom Becker, Priya Shah]. |
 | New task | Safety walkthrough every Monday starting Oct 19. Mike owns it; I'll attend. | Title "Safety walkthrough". Start 2026-10-19. Recurrence Weekly. Labels [Safety]. Lead [Mike Ortiz]. Assignees [Me]. |
 | New task | Ask Priya to send the overtime numbers ASAP. | Title "Send the overtime numbers". Urgent. Labels [Profitability]. Lead [Me]. Assignees [Priya Shah]. |
@@ -200,10 +200,10 @@ Made-up captures that test the rules' edges: phrasing that should, or shouldn't,
 | New task | Plan the Line 2 outage for March 2027. | Title "Plan the Line 2 outage". Deadline 2027-03-31. Deadline description "Line 2 outage". Labels [Line 2]. |
 | New task | Plan for a 4 hour outage on Oct 20. | Title "Plan for a 4 hour outage". Deadline 2026-10-20. Deadline description "4 hour outage". |
 | New task | Prepare for the audit on Oct 30. | Title "Prepare for the audit". Deadline 2026-10-30. Deadline description "Audit". |
-| Update | Was due Oct 16, now due Oct 23. | Due 2026-10-23. |
-| Update | Slipped from Oct 16 to Oct 23 because of the late drawings. | Due 2026-10-23. |
-| Update | Deadline was Oct 30, now Nov 6. | Deadline 2026-11-06. |
-| Update | pushed the install to next Tuesday because of the crane | Due 2026-10-20. |
+| Update | Was due Oct 16, now due Oct 23. | Current status "Was due Oct 16, now due Oct 23.". Due 2026-10-23. |
+| Update | Slipped from Oct 16 to Oct 23 because of the late drawings. | Current status "Slipped from Oct 16 to Oct 23 because of the late drawings.". Due 2026-10-23. |
+| Update | Deadline was Oct 30, now Nov 6. | Current status "Deadline was Oct 30, now Nov 6.". Deadline 2026-11-06. |
+| Update | pushed the install to next Tuesday because of the crane | Current status "pushed the install to next Tuesday because of the crane". Due 2026-10-20. |
 
 #### Recurrence
 
@@ -309,12 +309,12 @@ Made-up captures that test the rules' edges: phrasing that should, or shouldn't,
 | Update | On hold - waiting for the 2027 budget. | State Parked. Current status "Waiting for the 2027 budget.". |
 | Update | In progress: scaffold is up. | State In progress. Current status "Scaffold is up.". |
 | Update | Closed | State Closed. |
-| Update | Closed the valve and tagged it out. | Nothing. |
+| Update | Closed the valve and tagged it out. | Current status "Closed the valve and tagged it out.". |
 | Update | Parked. Waiting on capital approval, revisit Jan 11. | State Parked. Current status "Waiting on capital approval, revisit Jan 11.". Due 2027-01-11. |
 | Update | Reopened. The seal is leaking again. | State In progress. Current status "The seal is leaking again.". |
 | Update | Not started - waiting on the permit. | State Not started. Current status "Waiting on the permit.". |
 | Update | in progress, scaffold up, insulation off by Friday | State In progress. Current status "Scaffold up, insulation off by Friday". Due 2026-10-09. |
-| Update | Done by Friday: the guards. | Due 2026-10-09. |
+| Update | Done by Friday: the guards. | Current status "Done by Friday: the guards.". Due 2026-10-09. |
 
 #### Not dates, people or hours
 
@@ -334,6 +334,29 @@ Made-up captures that test the rules' edges: phrasing that should, or shouldn't,
 | New task | Get the quote in an hour. | Title "Get the quote in an hour". |
 | New task | Book the crane for the turnaround. | Title "Book the crane for the turnaround". |
 | New task | Check the bolts\nC:\\Projects\\Tom\\bolt list.xlsx | Title "Check the bolts". |
+
+### Mods log round 1
+
+Made-up versions of what Parse and populate missed in DocRepo's first use (2026-10-19): a list of names, "is lead", half years with the year joined on, and an update's first sentence as its Current status.
+
+| Capture type | Content text | Fills |
+|---|---|---|
+| New task | Pilot run window. October 26 to October 30. 40 hours per assignee. Priya, Tom, Mike and Tyler. | Title "Pilot run window". Due 2026-10-30. Start 2026-10-26. Assignees [Priya Shah, Tom Becker, Mike Ortiz, Tyler Nguyen]. Assignee hours 40. |
+| New task | Pilot run window. October 26 to October 30. 40 hours per assignee. Priya, Tom, Todd and Marcus. | Title "Pilot run window". Due 2026-10-30. Start 2026-10-26. Assignees [Priya Shah, Tom Becker, Todd (new person), Marcus (new person)]. Assignee hours 40. |
+| New task | Prep the spares list. 6 hours each: Tom, Mike and Todd. | Title "Prep the spares list". Assignees [Tom Becker, Mike Ortiz, Todd (new person)]. Assignee hours 6. |
+| New task | Walk the line with Tom and Mike. | Title "Walk the line with Tom and Mike". |
+| New task | Tom, Mike. | Title "Tom, Mike". Assignees [Tom Becker, Mike Ortiz]. |
+| New task | Valves, Pumps and Motors. | Title "Valves, Pumps and Motors". |
+| New task | Sort the spares. QA, HR and Tom. | Title "Sort the spares". Assignees [Tom Becker]. |
+| New task | Line 2 rework. Tom is Lead. Due 2H2027. | Title "Line 2 rework". Due 2027-12-31. Labels [Line 2]. Lead [Tom Becker]. |
+| New task | Line 2 rework. Tom is the lead, due 2H 2027. | Title "Line 2 rework". Due 2027-12-31. Labels [Line 2]. Lead [Tom Becker]. |
+| New task | Line 2 rework, Tom as lead. Mike to scope it, 2H 2027. | Title "Line 2 rework, Tom as lead". Due 2027-12-31. Labels [Line 2]. Lead [Tom Becker]. Assignees [Mike Ortiz]. |
+| New task | Strip the old coating. Tom is lead-certified. | Title "Strip the old coating". Assignees [Tom Becker]. |
+| New task | Spare parts review, due Q42026. | Title "Spare parts review". Due 2026-12-31. |
+| New task | Pump survey, 2 h of work for Mike. | Title "Pump survey". Assignees [Mike Ortiz]. Assignee hours 2. |
+| Update | Vendor confirmed the parts ship Friday. Install is the week after. | Current status "Vendor confirmed the parts ship Friday.". Due 2026-10-09. |
+| Update | Scaffold is up and insulation is off | Current status "Scaffold is up and insulation is off". |
+| Update | Closed. Mike confirmed he doesn't want extra coverage. | State Closed. Current status "Mike confirmed he doesn't want extra coverage.". |
 
 ### Date phrases
 
@@ -436,3 +459,8 @@ Each phrase on its own, as `findDates` reads it with today = 2026-10-08, a Thurs
 | next year's budget | not a date |
 | this week's numbers | not a date |
 | the 4th quarter | not a date |
+| 2H2027 | 2027-12-31 |
+| Q42026 | 2026-12-31 |
+| 1H2027 | 2027-06-30 |
+| 2H 2027 | 2027-12-31 |
+| due 2H | 2026-12-31 |

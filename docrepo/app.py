@@ -22,7 +22,7 @@ from PySide6.QtCore import QAbstractNativeEventFilter, QLockFile, QObject, QTime
 from PySide6.QtGui import QAction, QColor, QFont, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QInputDialog, QMenu, QSystemTrayIcon
 
-from docrepo import backup, capacity, db, hotkey, people, prompts, search
+from docrepo import backup, capacity, db, diagnose, hotkey, people, prompts, search
 from docrepo.config import Settings
 from docrepo.dates import long_date
 from docrepo.model import Model
@@ -331,6 +331,7 @@ def run(data_root: Path, settings: Settings, fs: SafeFS, browse: bool = False) -
         log.warning("no system tray; the capture window opens with the hotkey only")
     ask_who_i_am(ctx)
     app = CaptureApp(qt, ctx)
+    diagnose.install_excepthook(app.notify)  # under pythonw an error nothing caught would otherwise vanish
     app.daily()
     if search.needs_rebuild(conn):
         search.rebuild(conn, data_root)

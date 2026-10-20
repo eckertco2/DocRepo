@@ -64,6 +64,7 @@ class EmailItem:
     body: str
     attachments: list[Attachment] = field(default_factory=list)
     save_msg: Callable[[Path], None] | None = None
+    refused: tuple[str, ...] = ()  # fields Outlook didn't give DocRepo, such as "Body"
 
     def text(self) -> str:
         """The email as it goes into the content text: its header lines, then its body."""

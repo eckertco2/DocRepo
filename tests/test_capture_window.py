@@ -106,6 +106,21 @@ def test_a_quick_update_checks_update_itself(window, ctx):
     assert Model(ctx.conn).task("T000012").state == "Closed"
 
 
+def test_an_updates_first_sentence_is_its_current_status(window, ctx):
+    """Mods log round 1: Update takes the first sentence as Current status, but not when New task is checked too, since
+    then the first sentence is the new task's description."""
+    window.set_task("T000009")
+    window.set_type("update", True)
+    window.content.setPlainText("Vendor confirmed the parts ship Friday. Install is the week after.")
+    window.parse()
+    assert window.u_status.toPlainText() == "Vendor confirmed the parts ship Friday."
+    window.set_type("new_task", True)
+    window.u_status.setPlainText(Model(ctx.conn).task("T000009").current_status or "")
+    window.parse()
+    assert window.u_status.toPlainText() == (Model(ctx.conn).task("T000009").current_status or "")
+    assert "Update: Current status" not in window.found_label.text()
+
+
 def test_an_update_changes_only_what_differs(window, ctx):
     window.set_task("T000009")
     window.set_type("update", True)
@@ -285,6 +300,57 @@ def test_an_email_dragged_from_outlook_is_read_from_outlook(window, monkeypatch)
     assert read_drop(mime) == ("outlook", [])
     _drop(window.content.viewport(), mime)
     assert asked == [True]
+
+
+def test_an_outlook_failure_always_shows_in_the_window(window, monkeypatch):
+    """Mods log round 1 (M0004): an error outlook.py didn't expect used to escape the button and, under pythonw, show nowhere."""
+    from docrepo import outlook
+
+    outlook.PROBLEMS.clear()
+    monkeypatch.setattr(outlook, "selected_emails", lambda: (_ for _ in ()).throw(AttributeError("Selection")))
+    window.add_outlook()
+    assert window.error.text().startswith("Outlook didn't give DocRepo the email (AttributeError: Selection).")
+    assert outlook.PROBLEMS[-1].step == "adding the selected Outlook email"
+    monkeypatch.setattr(outlook, "selected_emails", lambda: (_ for _ in ()).throw(outlook.OutlookError("No email is selected in Outlook.")))
+    window.add_outlook()
+    assert window.error.text() == "No email is selected in Outlook."
+
+
+def test_an_email_with_refused_fields_is_added_and_says_so(window, monkeypatch):
+    from docrepo import outlook
+    from docrepo.save import EmailItem
+
+    email = EmailItem("Revised guard delivery", "", "2026-10-08 09:30", "", "", refused=("Body", "SenderName"))
+    monkeypatch.setattr(outlook, "selected_emails", lambda: [email])
+    window.add_outlook()
+    assert [e.row.name for e in window.files] == ["Revised guard delivery"]
+    assert window.error.text().startswith("Outlook didn't give DocRepo the email's Body, SenderName, so those are left out.")
+
+
+def test_drags_are_noted_for_the_troubleshooting_report(window, monkeypatch):
+    from docrepo import diagnose, outlook
+
+    diagnose.DRAGS.clear()
+    monkeypatch.setattr(outlook, "selected_emails", lambda: [])
+    _drop(window.content.viewport(), _mime([], ("RenPrivateMessages", "FileGroupDescriptorW")))
+    assert [(d.stage, d.taken_as, d.urls) for d in diagnose.DRAGS] == [("enter", "outlook", 0), ("drop", "outlook", 0)]
+    assert 'application/x-qt-windows-mime;value="RenPrivateMessages"' in diagnose.DRAGS[-1].formats
+
+
+def test_a_pasted_onenote_list_keeps_its_bullets(window):
+    from PySide6.QtCore import QMimeData
+    from test_paste import ONENOTE
+
+    mime = QMimeData()
+    mime.setText("Pump 7 walkdown\nCheck the coupling guard\nBolts torqued")  # OneNote's plain text: no bullets
+    mime.setHtml(ONENOTE)
+    window.content.insertFromMimeData(mime)
+    assert window.content.toPlainText().startswith("Pump 7 walkdown\n- Check the coupling guard\n  - Bolts torqued\n")
+    window.content.clear()
+    plain = QMimeData()
+    plain.setText("•\tGuard\n•\tBolts")
+    window.content.insertFromMimeData(plain)
+    assert window.content.toPlainText() == "- Guard\n- Bolts"
 
 
 def test_drops_that_bring_no_file_say_why(window, tmp_path):

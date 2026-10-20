@@ -12,15 +12,18 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QTime
+from PySide6.QtCore import Qt, QTime
+from PySide6.QtGui import QFont, QGuiApplication
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDialog,
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QPlainTextEdit,
     QPushButton,
     QScrollArea,
     QSpinBox,
@@ -29,11 +32,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo import backup, capacity, db, hotkey, prompts, search, startup
+from docrepo import backup, capacity, db, diagnose, hotkey, prompts, search, startup
 from docrepo.config import Settings, data_root_problem, init_data_root, make_safe_fs, resolve_data_root, save_location
 from docrepo.dates import WEEKDAYS, long_date
 from docrepo.model import Model
 from docrepo.pages import write_pages
+from docrepo.safe_fs import WriteRefused
 from docrepo.ui.context import AppContext
 
 log = logging.getLogger(__name__)
@@ -123,6 +127,37 @@ def rebuild_everything(ctx: AppContext) -> str:
     return f"Rebuilt the capacity calendar ({rows} rows), {pages} changed pages and the search index ({items} items)."
 
 
+class ReportDialog(QDialog):
+    """The troubleshooting report, to read through and copy."""
+
+    def __init__(self, parent: QWidget, text: str, path: Path | None, reveal: Callable[[Path], bool]) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Troubleshooting report")
+        self.resize(820, 620)
+        lay = QVBoxLayout(self)
+        intro = QLabel("Read it through before you send it on: it should hold no email text, names or company details. "
+                       + (f"It's saved as {path.name} in System\\diagnostics." if path else "It couldn't be saved, so copy it from here."))
+        intro.setWordWrap(True)
+        lay.addWidget(intro)
+        self.text = QPlainTextEdit(text)
+        self.text.setReadOnly(True)
+        self.text.setFont(QFont("Consolas", 9))
+        lay.addWidget(self.text, 1)
+        buttons = QHBoxLayout()
+        self.copy = QPushButton("Copy report")
+        self.copy.clicked.connect(lambda: (QGuiApplication.clipboard().setText(text), self.copy.setText("Copied")))
+        buttons.addWidget(self.copy)
+        if path:
+            show = QPushButton("Show in File Explorer")
+            show.clicked.connect(lambda: reveal(path))
+            buttons.addWidget(show)
+        buttons.addStretch()
+        close = QPushButton("Close")
+        close.clicked.connect(self.accept)
+        buttons.addWidget(close)
+        lay.addLayout(buttons)
+
+
 class SettingsView(QWidget):
     """The form. ``message`` shows a line in the browse tool's status line."""
 
@@ -175,6 +210,20 @@ class SettingsView(QWidget):
         row.addWidget(imp)
         row.addStretch()
         lay.addWidget(self.startup_status)
+        lay.addLayout(row)
+
+        # The troubleshooting report, to bring to the personal computer
+        trouble = QLabel("<b>Troubleshooting:</b> a report of DocRepo's versions, a step-by-step check of reading the email selected "
+                         "in Outlook, recent drags onto the capture window and recent problems. It leaves out email text, names and "
+                         "addresses, to bring to the personal computer. Select an email in Outlook first.")
+        trouble.setWordWrap(True)
+        report = QPushButton("Troubleshooting report…")
+        report.setToolTip("Saved in System\\diagnostics in the data root, and shown here to copy")
+        report.clicked.connect(self.troubleshooting_report)
+        row = QHBoxLayout()
+        row.addWidget(report)
+        row.addStretch()
+        lay.addWidget(trouble)
         lay.addLayout(row)
 
         form = QFormLayout()
@@ -371,6 +420,23 @@ class SettingsView(QWidget):
         self.message(f"Made {startup.SHORTCUT}. Drag it from the File Explorer window it's selected in into your Startup folder, "
                      "the other window. To stop DocRepo starting when you sign in, delete it from the Startup folder.")
         self.startup_status.setText(f"<b>Start when you sign in:</b> {startup.status()}")
+
+    def troubleshooting_report(self) -> None:
+        """Make the report (asking Outlook about the email selected there), save it and show it to copy."""
+        now = self.ctx.now()
+        QGuiApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            text = diagnose.build_report(self.ctx.data_root, now, list(diagnose.DRAGS))
+            try:
+                path: Path | None = diagnose.save_report(self.ctx.fs, self.ctx.data_root, text, now)
+            except (OSError, WriteRefused) as e:
+                log.warning("troubleshooting report not saved: %s", e)
+                path = None
+        finally:
+            QGuiApplication.restoreOverrideCursor()
+        self.message(f"Saved the troubleshooting report as {path.name} in System\\diagnostics." if path
+                     else "Made the troubleshooting report, but couldn't save it. Copy it from the window.")
+        ReportDialog(self, text, path, self.reveal).exec()
 
     def _pick_backup(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Backup folder", self.backup.text())

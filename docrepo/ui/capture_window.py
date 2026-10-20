@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -38,7 +39,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo import outlook
+from docrepo import diagnose, outlook, paste
 from docrepo.db import RECURRENCES, STATES
 from docrepo.extract import extract_text, to_unc
 from docrepo.model import Model, is_person
@@ -100,6 +101,15 @@ def read_drop(mime) -> tuple[str, list[str]]:
     return "", []
 
 
+def note_drag(stage: str, mime) -> str:
+    """read_drop's answer, after noting the drag for the troubleshooting report: its formats' names and how many
+    URLs it carried, never their paths or contents."""
+    kind, _paths = read_drop(mime)
+    urls = mime.urls()
+    diagnose.note_drag(stage, list(mime.formats()), len(urls), sum(1 for u in urls if u.isLocalFile()), kind)
+    return kind
+
+
 def _accept_copy(event) -> None:
     """Take a drop as a copy, never a move: the original stays where it is."""
     event.setDropAction(Qt.DropAction.CopyAction)
@@ -112,7 +122,7 @@ class ContentEdit(QPlainTextEdit):
     dropped = Signal(str, list)
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # noqa: N802 - Qt's name
-        if read_drop(event.mimeData())[0]:
+        if note_drag("enter", event.mimeData()):
             _accept_copy(event)
         else:
             super().dragEnterEvent(event)
@@ -124,12 +134,24 @@ class ContentEdit(QPlainTextEdit):
             super().dragMoveEvent(event)
 
     def dropEvent(self, event: QDropEvent) -> None:  # noqa: N802
+        note_drag("drop", event.mimeData())
         kind, paths = read_drop(event.mimeData())
         if kind:
             _accept_copy(event)
             self.dropped.emit(kind, paths)
         else:
             super().dropEvent(event)
+
+    def insertFromMimeData(self, source) -> None:  # noqa: N802 - Qt's name; pasting, and dropping text
+        """Lists keep their bullets: OneNote's are only in the clipboard's HTML (mods log round 1, M0022)."""
+        as_list = source.hasHtml() and paste.has_list(source.html())
+        diagnose.note_drag("paste", list(source.formats()), 0, 0, "a list, from its HTML" if as_list else "text")
+        if as_list:
+            self.insertPlainText(paste.html_to_text(source.html()))
+        elif source.hasText():
+            self.insertPlainText(paste.bullets_to_dashes(source.text()))
+        else:
+            super().insertFromMimeData(source)
 
 
 class CaptureWindow(QWidget):
@@ -532,7 +554,7 @@ class CaptureWindow(QWidget):
         super().keyPressEvent(event)
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # noqa: N802 - files can be dropped anywhere on the window
-        if read_drop(event.mimeData())[0]:
+        if note_drag("enter", event.mimeData()):
             _accept_copy(event)
 
     def dragMoveEvent(self, event) -> None:  # noqa: N802
@@ -540,6 +562,7 @@ class CaptureWindow(QWidget):
             _accept_copy(event)
 
     def dropEvent(self, event: QDropEvent) -> None:  # noqa: N802
+        note_drag("drop", event.mimeData())
         kind, paths = read_drop(event.mimeData())
         if kind:
             _accept_copy(event)
@@ -832,10 +855,7 @@ class CaptureWindow(QWidget):
         for p in paths:
             path = Path(p)
             if path.suffix.lower() == ".msg":
-                try:
-                    self._add_email(outlook.open_msg_file(path))
-                except outlook.OutlookError as e:
-                    self._fail(str(e), self.content)
+                self._read_emails(lambda path=path: [outlook.open_msg_file(path)], "reading a dropped .msg file")
                 continue
             try:
                 is_file, is_dir = path.is_file(), path.is_dir()
@@ -853,11 +873,26 @@ class CaptureWindow(QWidget):
         self.add_paths(paths)
 
     def add_outlook(self) -> None:
+        self._read_emails(outlook.selected_emails, "adding the selected Outlook email")
+
+    def _read_emails(self, read: Callable[[], list[EmailItem]], step: str) -> None:
+        """Add the emails ``read`` gets from Outlook. Every failure shows here, never silently: under pythonw an error
+        that escaped would show nowhere."""
         try:
-            for email in outlook.selected_emails():
-                self._add_email(email)
+            emails = read()
         except outlook.OutlookError as e:
             self._fail(str(e), self.content)
+            return
+        except Exception as e:  # noqa: BLE001 - anything Outlook or pywin32 raises that outlook.py didn't expect
+            detail = outlook.record_problem(step, e)
+            log.exception("Outlook: %s failed", step)
+            self._fail(f"Outlook didn't give DocRepo the email ({detail}). Settings → Troubleshooting report collects the details.", self.content)
+            return
+        for email in emails:
+            self._add_email(email)
+        note = outlook.refused_note(emails)
+        if note:
+            self._fail(note, self.content)
 
     def _add_email(self, email: EmailItem) -> None:
         self._add_file(FileRow(email.subject, description="", email=email), "outlook")
@@ -980,8 +1015,10 @@ class CaptureWindow(QWidget):
             found += [("", f) for f in r.found]
         if "update" in self.types and self.task:
             r = parse_capture(text, "update", today, people, labels, events)
-            if "new_task" in self.types:  # the dates belong to the new task; Update takes only a quick update's state and status
-                r.found = [f for f in r.found if f.key in ("state", "status")]
+            if "new_task" in self.types:  # the dates and first sentence belong to the new task; Update takes only a quick update's
+                r.found = [f for f in r.found if f.key == "state" or (f.key == "status" and r.state)]
+                if not r.state:
+                    r.status = ""
                 r.due = r.deadline = None
                 r.deadline_desc = ""
             self._fill("upd", r)

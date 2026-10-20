@@ -10,7 +10,7 @@ from contextlib import closing
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from docrepo import __version__, backup, capacity, db, hotkey, prompts, search
+from docrepo import __version__, backup, capacity, db, diagnose, hotkey, prompts, search
 from docrepo.config import (
     SETTINGS_FILE,
     Settings,
@@ -77,6 +77,8 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser("make-shortcut", help="make DocRepo.lnk, to move into your Startup folder so DocRepo starts when you sign in")
     set_hotkey = commands.add_parser("set-hotkey", help="choose the capture window's hotkey, such as \"Ctrl+Alt+Space\"")
     set_hotkey.add_argument("keys")
+    commands.add_parser("outlook-check", aliases=["troubleshoot"],
+                        help="check each step of reading the email selected in Outlook, and save a troubleshooting report to bring to the personal computer")
     return parser
 
 
@@ -229,13 +231,32 @@ def cmd_report(args: argparse.Namespace) -> int:
         first = monday_of(today)
         weeks = [first + timedelta(weeks=i) for i in range(REPORT_WEEKS)]
         text = build_report(conn, Model(conn), today, settings, weeks, monday_of(args.week) if args.week else first)
-    # Saved to a file (report > report.md), it's UTF-8. A console that can't show "›" gets "?" rather than an error.
+    _utf8_stdout()  # report > report.md is UTF-8
+    print(text)
+    return 0
+
+
+def _utf8_stdout() -> None:
+    """Saved to a file, output is UTF-8. A console that can't show "→" gets "?" rather than an error."""
     if hasattr(sys.stdout, "reconfigure"):
         if sys.stdout.isatty():
             sys.stdout.reconfigure(errors="replace")
         else:
             sys.stdout.reconfigure(encoding="utf-8")
+
+
+def cmd_outlook_check(args: argparse.Namespace) -> int:
+    opened = _open(args)
+    if opened is None:
+        return 1
+    root, _settings, fs, conn = opened
+    conn.close()
+    now = datetime.now()
+    text = diagnose.build_report(root, now, drags=None)
+    path = diagnose.save_report(fs, root, text, now)
+    _utf8_stdout()
     print(text)
+    print(f"Saved as {path.relative_to(root)} in the data root. Bring it, or the text above, to the personal computer.")
     return 0
 
 
@@ -321,4 +342,6 @@ COMMANDS: dict[str, Callable[[argparse.Namespace], int]] = {
     "load-sample": cmd_load_sample,
     "rebuild": cmd_rebuild,
     "report": cmd_report,
+    "outlook-check": cmd_outlook_check,
+    "troubleshoot": cmd_outlook_check,
 }

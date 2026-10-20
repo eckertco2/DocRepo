@@ -355,7 +355,7 @@ DATE_RULES: list[Rule] = [
     (re.compile(r"\b(?:(?:the\s+)?end of (?:the |this )?quarter|EOQ)\b", I), lambda m, t: last_day(t.year, (t.month - 1) // 3 * 3 + 2), None),
     (re.compile(r"\b(?:(?:the\s+)?end of\s+)?(?:the\s+)?(next|this)\s+quarter\b(?!['’]s)", I), _next_quarter, None),
     (re.compile(r"\b(end of (?:the )?|by |in |during |before |until |due (?:in |by )?)?(?:([QH])([1-4])|([1-4])([QH]))"
-                r"(?:\s*['’]\s*(\d{2})\b|\s+(\d{4})\b|(\d{2})\b)?(?![\w'’])", I), _quarter, None),
+                r"(?:\s*['’]\s*(\d{2})\b|\s*(\d{4})\b|(\d{2})\b)?(?![\w'’])", I), _quarter, None),  # "2H2027" too (mods log round 1)
     (re.compile(r"\b(?:(?:the\s+)?end of (?:the |this )?year|year[- ]end|EOY)\b", I), lambda m, t: date(t.year, 12, 31), None),
     (re.compile(r"\b(?:(?:the\s+)?end of\s+)?(next|this)\s+year\b(?!['’]s)", I), _next_year, None),
     (re.compile(r"\b(?:this week|end of (?:the |this )?week|EOW)\b(?!['’]s)", I), lambda m, t: {"date": friday_of(t), "first": t}, "week"),
@@ -466,6 +466,9 @@ ROLE_HOURS_RE = re.compile(rf"\b(lead|assignee)s?(?:['’]s?)?\s+(?:hours|hrs|ef
 NOT_WORK_BEFORE = re.compile(r"\b(?:in|within|after|every|next|last|past|than|for\s+the\s+next)\s+\Z", I)
 NOT_WORK_AFTER = re.compile(r"^\s*(?:ago|before|after|later|earlier|early|late|notice|delay|outage|shutdown|downtime|window|drive|flight|away"
                             r"|from\s+now|lead\s*time|response|old)\b", I)
+# "1H" or "2H" before a year, or after "due", "by" and the like, is a half year, not hours: "Due 2H 2027" (mods log round 1).
+HALF_YEAR_AFTER = re.compile(r"^(?:\s*['’]\s*\d{2}\b|\s*20\d{2}\b)")
+HALF_YEAR_BEFORE = re.compile(r"\b(?:due(?:\s+(?:in|by))?|by|during|until|before|end\s+of(?:\s+the)?)\s+\Z", I)
 RATE_UNIT = {"week": "week", "wk": "week", "weekly": "week", "day": "day", "daily": "day", "month": "month", "monthly": "month"}
 WEEKS_IN = {"day": 0.2, "week": 1, "month": 52 / 12}  # a day is a fifth of a working week
 OCCURRENCE_WEEKS = {"Daily": 0.2, "Weekly": 1, "Bi-weekly": 2, "Monthly": 52 / 12, "Quarterly": 13, "Yearly": 52}
@@ -507,7 +510,10 @@ def find_hours(text: str) -> list[HoursHit]:
             continue
         if NOT_WORK_BEFORE.search(text[max(0, start - 20):start]) or NOT_WORK_AFTER.search(text[end:]):
             continue
-        unit = (m.group(4) or "").lower()
+        if ((m.group(4) or "").lower() == "h" and m.group(3) in ("1", "2") and not m.group(2)
+                and (HALF_YEAR_AFTER.search(text[end:]) or HALF_YEAR_BEFORE.search(text[max(0, start - 20):start]))):
+            continue
+        unit =(m.group(4) or "").lower()
         value = 0.5 if m.group(1) else h_num(m.group(3))
         low = h_num(m.group(2)) if m.group(2) else None
         scale = 1 / 60 if unit.startswith("min") else 8 if "day" in unit else 1
@@ -741,7 +747,8 @@ PERSON_BEFORE = [
                 r"|\bassignees?\s*[:\-–]\s*|\bhave\s+|@)\Z", I), "asg"),
 ]
 PERSON_AFTER = [
-    (re.compile(r"^\s+(?:owns|leads|is\s+leading|is\s+driving|will\s+coordinate|will\s+lead)\b", I), "lead"),
+    # "Tom is lead", "Tom is the lead", "Tom as lead" (mods log round 1), but not "Tom is lead-certified".
+    (re.compile(r"^\s+(?:owns|leads|is\s+leading|is\s+driving|will\s+coordinate|will\s+lead|(?:is|will\s+be|as)\s+(?:the\s+)?lead)\b(?!-)", I), "lead"),
     (re.compile(r"^\s+(?:will|to|should|needs?\s+to|has\s+to|is\s+going\s+to|is\s+(?!going\b)[a-z]+ing|does|handles|covers|takes|completes"
                 r"|prepares|drafts|writes|checks|reviews|updates|books|orders|installs|fixes|runs)\b", I), "asg"),
     (re.compile(r"^\s*[:\-–]?\s*(?:about\s+|~\s*)?\d+(?:\.\d+)?\s*(?:hours?|hrs?|h)\b", I), "asg"),  # "Tom 20 hours", "Mike - 6 h"
@@ -757,6 +764,14 @@ NEW_NAME_RULES = [
 ]
 # A name that's also an everyday word counts only when it's capitalized: "Will" and "Mark" are people, "will" and "mark" words.
 WORD_NAMES = set("will may mark rob bill pat sue grant frank chase jack art max hope joy faith".split())
+# A list of names: words of a name (a surname capitalized), joined by commas, "and" or "&" (mods log round 1).
+# Initials in a list are a name too, except teams' and units' initials.
+_LIST_ITEM = r"[A-Za-z][\w'’-]*(?:\s+[A-Z][\w'’-]*)?"
+NAME_LIST_RE = re.compile(rf"{_LIST_ITEM}(?:\s*(?:,\s*(?:and\s+|&\s*)?|\s+and\s+|\s*&\s*){_LIST_ITEM})+")
+LIST_ITEM_RE = re.compile(rf"\b(?!and\b){_LIST_ITEM}")  # "and" joins names; it's never the start of one
+LIST_CUE = re.compile(r"^(.*\b(?:each|apiece|per\s+(?:assignee|person|head))\s*[:\-–]\s*)", I)
+LIST_CUE_BEFORE = re.compile(r"\b(?:assignees?|each|apiece|per\s+(?:person|head))\b", I)
+NOT_INITIALS = set("HR QA QC EHS HSE IT PM OPS PO PR RFQ RFI EOD COB EOW EOM EOY OK NA TBD".split())
 
 
 def is_name(w: str) -> bool:
@@ -863,9 +878,42 @@ def find_people(text: str, people: Sequence[ParsePerson]) -> PeopleFound:
         a, b = mentions[i], mentions[i + 1]
         if joined(a, b) and b.dir == "after" and not a.role:
             a.role, a.source, a.dir = b.role, text[a.start:b.start] + b.source, "after"
+    # A sentence or line that's only a list of names, such as "Priya, Tom, Mike and Tyler.", or the list after "each:" or
+    # "per assignee:", names the assignees (mods log round 1). It needs two names or more, and one of them known or an
+    # assignee or "each" in the sentence before it, so "Valves, Pumps and Motors." adds no one. Its new names are new people.
+    listed_new: list[tuple[str, str]] = []
+    prev_seg = ""
+    for seg in re.finditer(r"[^.!?;\n]+", text):
+        cue = LIST_CUE.match(seg.group(0))
+        cut = len(cue.group(1)) if cue else 0
+        at, body = seg.start() + cut, seg.group(0)[cut:]
+        list_cue = bool(cue) or bool(LIST_CUE_BEFORE.search(prev_seg))
+        prev_seg = seg.group(0)
+        if not NAME_LIST_RE.fullmatch(body.strip()):
+            continue
+        items: list[tuple[_Mention | None, str, bool]] = []
+        for x in LIST_ITEM_RE.finditer(body):
+            mn =next((y for y in mentions if y.start == at + x.start()), None)
+            first, *rest = x.group(0).split()
+            second = rest[0] if rest else ""
+            if re.fullmatch(r"[A-Z]{2,3}", first):
+                is_new = mn is None and first not in NOT_INITIALS and not second
+            else:
+                is_new = mn is None and is_name(first) and (not second or is_name(second))
+            items.append((mn, x.group(0), mn is not None or is_new))
+        if len(items) < 2 or not all(ok for _, _, ok in items) or not (list_cue or any(mn for mn, _, _ in items)):
+            continue
+        source = body.strip()
+        for mn, name, _ in items:
+            if mn is None:
+                listed_new.append((name, source))
+            elif not mn.role:
+                mn.role, mn.source, mn.dir = "asg", source, "list"
     for mn in mentions:
         if mn.role:
             apply(mn.role, Who(mn.id), mn.source)
+    for name, source in listed_new:
+        apply("asg", Who(name=name), source)
     if me_id:
         for m in re.finditer(r"\bI(?:'ll|’ll|\s+will)\s+lead\b", text):
             add("leads", Who(me_id), m.group(0))
@@ -994,6 +1042,11 @@ def parse_capture(
             note("status", "Current status", quick.rest, "the rest of the content text")
     text = prep_text(content).strip()
     sents = sentences(text)
+    # An update's first sentence is its Current status (mods log round 1), as a new task's first sentence is its
+    # description. A quick update's status, the rest of its text, comes first.
+    if capture_type == "update" and not quick and sents:
+        r.status = sents[0].text
+        note("status", "Current status", r.status, "the first sentence")
 
     def sentence_at(pos: int) -> Sentence | None:
         return next((s for s in sents if s.start <= pos < s.end), sents[-1] if sents else None)
@@ -1208,7 +1261,7 @@ def _fill_hours(r: ParseResult, text: str, hours: list[HoursHit], people: Sequen
     def role_for(s: str, at: int) -> str:
         if re.search(r"\bfor\s+(?:the\s+)?lead\b|\blead(?:'s)?\s+(?:hours|time|load|effort)\b|\bas\s+(?:the\s+)?lead\b", s, I):
             return "lead_hours"
-        if re.search(r"\bfor\s+(?:the\s+|each\s+)?assignees?\b|\bassignees?(?:'s|')?\s+(?:hours|time|load|effort)\b", s, I):
+        if re.search(r"\b(?:for|per)\s+(?:the\s+|each\s+)?assignees?\b|\bassignees?(?:'s|')?\s+(?:hours|time|load|effort)\b", s, I):
             return "assignee_hours"
         lead_at, asg_at = where(s, r.leads), where(s, r.assignees)
         if bool(lead_at) != bool(asg_at):

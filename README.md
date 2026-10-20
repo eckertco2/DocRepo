@@ -109,6 +109,8 @@ Quit any other running copy first, since both would want the hotkey. You can als
 
 ## Troubleshooting
 
+- **A troubleshooting report to bring to the personal computer.** In **Settings**, click **Troubleshooting report…** (select an email in Outlook first if the problem is with Outlook). It checks each step of reading the selected email, lists recent drags and pastes in the capture window and recent warnings in the log, and leaves out email text, names and addresses. Read it through, then **Copy report**; it's also saved in `System\diagnostics` in your data root. From a console, `.venv\Scripts\python.exe -m docrepo troubleshoot` makes the same report without the drags and pastes.
+- **Adding an Outlook email doesn't work.** The capture window says what Outlook refused, with an error code. Make a troubleshooting report with the email still selected.
 - **Nothing seems to happen when DocRepo starts.** `pythonw` has no console, so errors go to the log: the end of `System\logs\docrepo.log` in your data root. Or start it once with `python.exe` instead of `pythonw.exe` to see the message.
 - **"DocRepo is already running".** Another copy has the data root open; its tray icon may be under the ^ arrow. If none is running, the lock file named in the message is left from a crash: delete it and start again.
 - **The hotkey does nothing.** Another program may use it; DocRepo says so when it starts. Choose another in Settings. **Pause hotkey** in the tray menu turns it off for a while.
