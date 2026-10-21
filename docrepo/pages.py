@@ -166,6 +166,8 @@ class Pages:
             return f"- {f.kind}: [{_text(f.name)}]({rel_link(here, [*here, *path])}) · {d.id}"
         if f.kind == "Tracked original":
             return f"- Tracked original: `{d.original}` · {d.id} · {text_link}"
+        if f.kind == "Link":  # as code, not a Markdown link: DocRepo's pages never open a link (round 1 plan, decision 5)
+            return f"- Link: {_text(f.name)} · `{d.original}` · {d.id}"
         capture = self.m.captures[d.capture]
         return f"- Email attachment: [{_text(f.name)}]({rel_link(here, [*capture_dir(capture), 'attachments', f.name])}) · {d.id} · {text_link}"
 

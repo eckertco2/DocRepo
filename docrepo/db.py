@@ -15,7 +15,7 @@ from pathlib import Path
 from docrepo.safe_fs import SafeFS
 
 DB_FILE = Path("System") / "docs.db"
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 #: Each kind of ID: its letter and how many digits follow it.
 ID_FORMATS = {"T": 6, "C": 6, "D": 6, "P": 3}
@@ -194,7 +194,7 @@ CREATE TABLE id_counters (
 #: Changes from one schema version to the next. Version 2 (phase 3): how each document's text was pulled out, and its
 #: size, modified time and checksum for the document checks; the app's daily state; reminders already shown.
 #: Version 3 (phase 4): the search index. Version 4 (release 5.3): discarded tasks and captures, and agenda items closed
-#: as Done (the Today list).
+#: as Done (the Today list). Version 5 (release 5.4): each email capture's email layer 0 line.
 MIGRATIONS = {
     2: """
 ALTER TABLE documents ADD COLUMN text_status TEXT;
@@ -249,6 +249,10 @@ INSERT INTO agenda_items_new (id, subject, target, note, added, added_by, closed
     SELECT id, subject, target, note, added, added_by, closed, how, closed_by FROM agenda_items;
 DROP TABLE agenda_items;
 ALTER TABLE agenda_items_new RENAME TO agenda_items;
+""",
+    5: """
+-- Email layer 0 (mods log round 1, M0024): what it kept from an email and what it left out, in words.
+ALTER TABLE captures ADD COLUMN email_layer_0 TEXT;
 """,
 }
 

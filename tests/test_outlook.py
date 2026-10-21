@@ -7,7 +7,7 @@ from datetime import datetime
 import pytest
 import pywintypes
 
-from docrepo import outlook
+from docrepo import layer0, outlook
 
 ABORTED = -2147467260  # 0x80004004, as Outlook's security guard refuses
 
@@ -28,12 +28,17 @@ class Refuses:
 
 
 class FakeAttachment:
-    def __init__(self, name: str, kind: int = outlook.OL_BY_VALUE) -> None:
-        self.FileName, self.Type = name, kind
+    def __init__(self, name: str, kind: int = outlook.OL_BY_VALUE, size: int = 40_000, cid: str = "", hidden: bool = False) -> None:
+        self.FileName, self.Type, self.Size = name, kind, size
+        self.cid, self.hidden = cid, hidden
         self.PropertyAccessor = self
 
-    def GetProperty(self, _name):  # noqa: N802 - Outlook's name
-        return False
+    def GetProperty(self, name):  # noqa: N802 - Outlook's name
+        if name == outlook.PR_ATTACHMENT_HIDDEN:
+            return self.hidden
+        if name == outlook.PR_ATTACH_CONTENT_ID and self.cid:
+            return self.cid
+        raise com_error(-2147221233, "The property doesn't exist")  # MAPI_E_NOT_FOUND, as for an ordinary attachment
 
 
 class FakeAttachments:
@@ -52,7 +57,12 @@ class FakeMail:
     To = "Me"
     SentOn = datetime(2026, 10, 8, 9, 30)
     Body = "The guards ship Friday.\r\nRegards"
-    Attachments = FakeAttachments(FakeAttachment("Guard drawing.pdf"))
+    HTMLBody = ('<p>The guards ship Friday. <a href="https://example.sharepoint.com/sites/Line1/Shared%20Documents/Guard%20spec.pdf">Spec</a>'
+                ' <a href="mailto:sales@example.com">Sales</a></p><img src="cid:image001.png@01DC0001"><img src="cid:image002.png@01DC0001">')
+    # An attachment, two pictures the body shows (Outlook hides those), a hidden one it doesn't, and an attached email.
+    Attachments = FakeAttachments(FakeAttachment("Guard drawing.pdf"), FakeAttachment("image001.png", size=52_000, cid="image001.png@01DC0001", hidden=True),
+                                  FakeAttachment("image002.png", size=3_000, cid="<image002.png@01DC0001>", hidden=True),
+                                  FakeAttachment("old.png", hidden=True), FakeAttachment("Re: guards", kind=5))
 
     def SaveAs(self, path, kind):  # noqa: N802
         raise AssertionError("not called while reading")
@@ -64,6 +74,7 @@ class GuardedMail(FakeMail):
     SenderName = Refuses(com_error())
     To = Refuses(com_error())
     Body = Refuses(com_error())
+    HTMLBody = Refuses(com_error())
 
 
 class FakeSelection:
@@ -107,16 +118,25 @@ def test_an_email_is_read_field_by_field():
     email = outlook.email_from_item(FakeMail())
     assert (email.subject, email.sender, email.sent, email.to, email.body) == (
         "Revised guard delivery", "Calder Supply", "2026-10-08 09:30", "Me", "The guards ship Friday.\nRegards")
-    assert [a.name for a in email.attachments] == ["Guard drawing.pdf"] and email.refused == ()
+    # Every attached file comes with what email layer 0 needs; an attached email (an embedded item) is left out.
+    assert [(a.name, a.size, a.content_id, a.hidden) for a in email.attachments] == [
+        ("Guard drawing.pdf", 40_000, "", False), ("image001.png", 52_000, "image001.png@01DC0001", True),
+        ("image002.png", 3_000, "<image002.png@01DC0001>", True), ("old.png", 40_000, "", True)]
+    assert email.refused == () and 'href="mailto:' in email.html
+    found = layer0.find(email)
+    assert [(p.kind, p.name, p.keep) for p in found.parts] == [
+        ("attachment", "Guard drawing.pdf", True), ("link", "Guard spec.pdf", True), ("picture", "image001.png", True), ("picture", "image002.png", False)]
+    assert (found.addresses, found.hidden) == (1, 1)
 
 
 def test_fields_outlook_refuses_are_left_out_not_the_whole_email():
     email = outlook.email_from_item(GuardedMail())
-    assert email.subject == "Revised guard delivery" and email.sender == email.to == email.body == ""
-    assert email.refused == ("Body", "SenderName", "To")
-    assert [p.step for p in outlook.PROBLEMS] == ["reading the email's Body", "reading the email's SenderName", "reading the email's To"]
+    assert email.subject == "Revised guard delivery" and email.sender == email.to == email.body == email.html == ""
+    assert email.refused == ("Body", "HTMLBody", "SenderName", "To")
+    assert [p.step for p in outlook.PROBLEMS] == ["reading the email's Body", "reading the email's HTMLBody", "reading the email's SenderName",
+                                                  "reading the email's To"]
     assert "0x80004004" in outlook.PROBLEMS[0].detail
-    assert outlook.refused_note([email]).startswith("Outlook didn't give DocRepo the email's Body, SenderName, To, so those are left out.")
+    assert outlook.refused_note([email]).startswith("Outlook didn't give DocRepo the email's Body, HTMLBody, SenderName, To, so those are left out.")
 
 
 def test_selected_emails(monkeypatch):

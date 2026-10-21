@@ -19,6 +19,7 @@ from docrepo import agenda, bulk, captures, people, search, tasks
 from docrepo.config import Settings
 from docrepo.dates import stamp
 from docrepo.db import transaction
+from docrepo.links import is_link
 from docrepo.model import TODAY, Model
 from docrepo.pages import write_pages
 from docrepo.safe_fs import SafeFS
@@ -52,8 +53,11 @@ def write_all_pages(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, at: d
 
 # ---- saved copies ----
 def source_of(data_root: Path, model: Model, document_id: str) -> Path | None:
-    """Where a document's file is: its tracked original, or an email attachment in its capture's folder."""
+    """Where a document's file is: its tracked original, or an email attachment in its capture's folder. A link has
+    no file, so None: DocRepo never hands one to File Explorer, which would open it in the browser."""
     d = model.documents[document_id]
+    if is_link(d.original):
+        return None
     if d.original:
         return Path(d.original)
     if d.capture and d.capture in model.captures:

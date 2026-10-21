@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from datetime import date
 
 from docrepo.dates import long_date
+from docrepo.links import is_link
 from docrepo.schedule import due_of, is_open
 
 TYPE_NAMES = {"note": "Note", "new_task": "New task", "update": "Update"}
@@ -92,6 +93,8 @@ class Capture:
     #: When it was discarded, and why. A discarded capture leaves its task's logs, the views and search; its folder stays.
     discarded: str | None = None
     discard_reason: str | None = None
+    #: Email layer 0's line (mods log round 1, M0024): what it kept from the email and what it left out.
+    email_layer_0: str | None = None
     documents: list[CaptureDocument] = field(default_factory=list)
     attachments: list[str] = field(default_factory=list)
 
@@ -187,7 +190,7 @@ class Summary:
 
 @dataclass(frozen=True)
 class FileEntry:
-    kind: str  # Saved copy, Old version, Tracked original or Email attachment
+    kind: str  # Saved copy, Old version, Tracked original, Link or Email attachment
     name: str
     document: str
     task: str
@@ -426,7 +429,8 @@ class Model:
         out = [FileEntry("Old version" if f.old else "Saved copy", f.name, f.document, task_id) for f in self.copies if f.task == task_id]
         for doc_id in _unique(d for c in self.notes_of(task_id) for d in c.document_ids):
             d = self.documents[doc_id]
-            out.append(FileEntry("Tracked original" if d.original else "Email attachment", d.name, doc_id, task_id))
+            kind = "Link" if is_link(d.original) else "Tracked original" if d.original else "Email attachment"
+            out.append(FileEntry(kind, d.name, doc_id, task_id))
         return out
 
     # ---- the status log ----

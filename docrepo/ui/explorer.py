@@ -14,6 +14,8 @@ def show_in_explorer(path: Path) -> bool:
     if os.name != "nt":
         return False
     target = Path(path)
+    if not target.is_absolute():  # only a full path: never a link, which Explorer would open in the browser
+        return False
     try:
         if target.is_dir():
             subprocess.Popen(["explorer", str(target)])  # noqa: S603, S607 - Explorer only, no shell

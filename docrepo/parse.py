@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 
 from docrepo.dates import add_months, long_date, short
-from docrepo.text import Sentence, is_path_line, sentences
+from docrepo.text import Sentence, is_file_line, sentences
 
 EVENT_WORDS = ("turnaround", "shutdown", "audit", "inspection", "outage", "walkthrough")
 I = re.IGNORECASE  # noqa: E741
@@ -976,11 +976,11 @@ def quick_update(content: str) -> QuickUpdate | None:
 
 
 def prep_text(s: str) -> str:
-    """The content text without file path lines, and an email's header lines left out except its subject."""
+    """The content text without file path and link lines, and an email's header lines left out except its subject."""
     mail = bool(re.search(r"^\s*From:", s, I | re.M) and re.search(r"^\s*(?:Subject|Sent|To):", s, I | re.M))
     lines = []
     for line in s.split("\n"):
-        if is_path_line(line):
+        if is_file_line(line):
             continue
         if mail:
             subject = re.match(r"\s*Subject:\s*(.*)", line, I)

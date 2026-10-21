@@ -21,6 +21,7 @@ def add_capture(
     conn: sqlite3.Connection, *, saved: str, source: str, types: list[str], title: str, task: str | None = None,
     created_task: str | None = None, summary: str | None = None, summary_type: str | None = None,
     filed_to: str | None = None, filed: str | None = None, edited: str | None = None, capture_id: str | None = None,
+    email_layer_0: str | None = None,
 ) -> str:
     """Record a capture. ``saved`` is a stored time (``YYYY-MM-DD HH:MM:SS``). Returns its ID."""
     if source not in SOURCES:
@@ -34,9 +35,10 @@ def add_capture(
         else:
             capture_id = next_id(conn, "C")
         conn.execute(
-            "INSERT INTO captures (id, saved, source, task, types, created_task, filed_to, filed, title, summary, summary_type, edited)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (capture_id, saved, source, task, ",".join(types), created_task, filed_to, filed, title, summary, summary_type, edited),
+            "INSERT INTO captures (id, saved, source, task, types, created_task, filed_to, filed, title, summary, summary_type, edited,"
+            " email_layer_0) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (capture_id, saved, source, task, ",".join(types), created_task, filed_to, filed, title, summary, summary_type, edited,
+             email_layer_0),
         )
     return capture_id
 
@@ -143,6 +145,8 @@ def capture_md(model: Model, capture_id: str, content: str) -> str:
          "description": model.documents[d.document].description, "save_a_copy": d.save_a_copy, "extract": d.extract}
         for d in c.documents
     ]
+    if c.email_layer_0:  # what email layer 0 kept and left out (mods log round 1, M0024), for later layers
+        front["email_layer_0"] = c.email_layer_0
     front["summary_type"] = c.summary_type
     lines = ["---", *[f"{k}: {json.dumps(v, ensure_ascii=False, separators=(',', ':'))}" for k, v in front.items()], "---", "", content]
     if c.summary:

@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QPlainTextEdit,
@@ -42,10 +43,12 @@ from PySide6.QtWidgets import (
 from docrepo import diagnose, outlook, paste
 from docrepo.db import RECURRENCES, STATES
 from docrepo.extract import extract_text, to_unc
+from docrepo.layer0 import size_text
+from docrepo.links import is_link, link_name
 from docrepo.model import TODAY, Model, is_person
 from docrepo.parse import Found, Known, Who, parse_capture, quick_update
 from docrepo.prompts import capture_blocks, load_summary_types, prompt_text
-from docrepo.save import CaptureDraft, EmailItem, FileRow, NewTaskFields, SaveError, save_capture
+from docrepo.save import CaptureDraft, EmailItem, FileRow, NewTaskFields, SaveError, email_layer0_line, email_rows, save_capture
 from docrepo.schedule import is_open, start_of
 from docrepo.ui.context import AppContext
 from docrepo.ui.mods_panel import ModsPanel
@@ -66,7 +69,8 @@ from docrepo.ui.widgets import (
 
 log = logging.getLogger(__name__)
 
-#: A line of the content text that is a file path adds that file; deleting the line removes it.
+#: A line of the content text that is a file path adds that file; deleting the line removes it. A link on a line of its
+#: own does the same (``links.LINK_LINE``).
 PATH_LINE = re.compile(r"^(?:\\\\[^\\\s][^\\]*\\.+|[A-Za-z]:\\.+)\.[A-Za-z0-9]{1,5}$")
 WIDTH = 640
 
@@ -81,16 +85,20 @@ def esc(text: str) -> str:
 
 @dataclass
 class FileEntry:
-    """A file or email added to the capture, with its row of widgets."""
+    """A file or email added to the capture, with its row of widgets. An email's own row has no description: its parts
+    (email layer 0) are rows of their own, each with Keep."""
 
     row: FileRow
-    src: str  # dropped, picked, pasted or outlook
-    line: str | None = None  # for a pasted path, the line in the content text it came from
+    src: str  # dropped, picked, pasted, added (Add link…), outlook (an email) or email (one of its parts)
+    line: str | None = None  # for a pasted path or link, the line in the content text it came from
     doc: str | None = None  # an already tracked document this file reuses
-    widget: QFrame | None = None
+    widget: QWidget | None = None
     desc: QLineEdit | None = None
     copy: QCheckBox | None = None
     extract: QCheckBox | None = None
+    keep: QCheckBox | None = None  # an email's part: whether it's kept
+    layer0: QLabel | None = None  # an email's row: what email layer 0 kept and left out
+    what: str = ""  # the description's placeholder
 
 
 def read_drop(mime) -> tuple[str, list[str]]:
@@ -326,6 +334,10 @@ class CaptureWindow(QWidget):
         add_files = QPushButton("Add files…")
         add_files.clicked.connect(self._pick_files)
         attach.addWidget(add_files)
+        add_link = QPushButton("Add link…")
+        add_link.setToolTip("A web or SharePoint link. DocRepo keeps the address, and never opens or fetches it.")
+        add_link.clicked.connect(self.add_link)
+        attach.addWidget(add_link)
         add_email = QPushButton("Add selected Outlook email")
         add_email.clicked.connect(self.add_outlook)
         attach.addWidget(add_email)
@@ -761,11 +773,12 @@ class CaptureWindow(QWidget):
         self.agenda_field.property("label").setText("Add to agenda  <span style='color:#87919c'>" + (
             "puts the new task on it" if new else "puts the picked task on it" if upd and t else "puts this note on it") + "</span>")
         self.files_label.setVisible(bool(self.files))
-        self.same_all.setVisible(len(self.files) > 1)
+        self.same_all.setVisible(sum(e.desc is not None for e in self.files) > 1)
         where = "the new task's Files folder" if new else f"Tasks\\{t.id}\\Files\\" if t else "the task's Files folder once the capture is filed"
+        has_files = any(e.copy is not None and not e.copy.isHidden() for e in self.files)  # rows that offer Save a copy
         self.copy_hint.setText(f"Save a copy puts the file in {where}, named with today's date. Extract information marks it for the later processing stage."
-                               if self.files else "")
-        self.copy_hint.setVisible(bool(self.files))
+                               if has_files else "")
+        self.copy_hint.setVisible(has_files)
         changes = self.update_changes(t) if upd and t else {}
         self.changes_label.setText(
             "Status log: " + "; ".join(f"{k.replace('_', ' ')} → {self._short(v)}" for k, v in changes.items())
@@ -862,13 +875,18 @@ class CaptureWindow(QWidget):
             self.refresh()
 
     def _sync_paths(self) -> None:
-        """A line of the content text that's an existing file's path adds that file; deleting the line removes it."""
-        lines = [line.strip() for line in self.content.toPlainText().split("\n") if PATH_LINE.match(line.strip())]
+        """A line of the content text that's an existing file's path, or a link, adds a row for it; deleting the line
+        removes it."""
+        lines = [line.strip() for line in self.content.toPlainText().split("\n") if PATH_LINE.match(line.strip()) or is_link(line)]
         keep = {line.lower() for line in lines}
         for entry in [e for e in self.files if e.src == "pasted" and (e.line or "").lower() not in keep]:
             self._remove_file(entry, from_content=False)
         for line in lines:
             if not any(line.lower() in ((e.line or "").lower(), (e.row.path or "").lower()) for e in self.files):
+                if is_link(line):
+                    # No focus move: a link typed by hand matches before it's finished, and typing must go on.
+                    self._add_file(FileRow(link_name(line), line), "pasted", line, focus=False)
+                    continue
                 try:
                     exists = Path(line).is_file()
                 except OSError:
@@ -900,6 +918,24 @@ class CaptureWindow(QWidget):
         paths, _ = QFileDialog.getOpenFileNames(self, "Add files to the capture")
         self.add_paths(paths)
 
+    def add_link(self) -> None:
+        """Add link…: asks for the address, starting with the clipboard's when it holds one."""
+        clip = QGuiApplication.clipboard().text().strip()
+        url, ok = QInputDialog.getText(self, "Add link", "A web or SharePoint link. DocRepo keeps the address, and never opens or fetches it.",
+                                       text=clip if is_link(clip) else "")
+        if ok and url.strip():
+            self.add_link_url(url)
+
+    def add_link_url(self, url: str) -> None:
+        """A link as a row of its own, like a file (mods log round 1, M0001)."""
+        url = url.strip()
+        if not is_link(url):
+            self._fail("That isn't a web link: a link starts with http:// or https:// and has no spaces.", self.content)
+        elif any(e.row.path == url for e in self.files):
+            self._fail(f"{link_name(url)} is already added.", self.content)
+        else:
+            self._add_file(FileRow(link_name(url), url), "added")
+
     def add_outlook(self) -> None:
         self._read_emails(outlook.selected_emails, "adding the selected Outlook email")
 
@@ -923,29 +959,81 @@ class CaptureWindow(QWidget):
             self._fail(note, self.content)
 
     def _add_email(self, email: EmailItem) -> None:
-        self._add_file(FileRow(email.subject, description="", email=email), "outlook")
+        """The email's row, then a row for each attachment, link and picture email layer 0 finds in it (mods log round 1,
+        M0024), with the cursor in the first kept part's description."""
+        rows = email_rows(email)
+        for row in rows:
+            self._add_file(row, "outlook" if row.email else "email", focus=False)
+        first = next((e for e in self.files if e.row.of is email and e.row.keep), None)
+        (first.desc if first and first.desc else self.content).setFocus()
 
-    def _add_file(self, row: FileRow, src: str, line: str | None = None) -> None:
+    def _file_note(self, row: FileRow, doc_id: str | None, link: bool) -> str:
+        """The line beside a row's name: where its file stays or goes, or what layer 0 made of it."""
+        part = row.part
+        if row.email:
+            return "Saved as email.msg in the capture's folder."
+        if part and part.kind != "link":
+            size = f"{size_text(part.size)}. " if part.size else ""
+            if part.kind == "picture":
+                return size + ("In the email's body. Small, so probably a logo or signature picture: unticked." if part.small
+                               else "In the email's body. Saved in the capture's attachments folder.")
+            return size + "Saved in the capture's attachments folder."
+        if doc_id:
+            return f"Already tracked as {doc_id}, so that record is reused."
+        if link:
+            return ("Unwrapped from Outlook's Safe Links. " if part and part.safe else "") + "Only the address is kept. DocRepo never opens or fetches it."
+        return "It stays where it is."
+
+    def _add_file(self, row: FileRow, src: str, line: str | None = None, focus: bool = True) -> None:
         m = self.ctx.model()
-        doc = next((d for d in m.documents.values() if row.path and d.original and d.original.lower() == row.path.lower()), None)
+        link = is_link(row.path)  # a link is matched exactly; a path in any case, as Windows does
+        kind = row.part.kind if row.part else ""
+
+        def same(original: str) -> bool:
+            return original == row.path if link else original.lower() == (row.path or "").lower()
+
+        doc = next((d for d in m.documents.values() if row.path and d.original and same(d.original)), None)
         entry = FileEntry(row, src, line=line, doc=doc.id if doc else None)
+        holder = QWidget()
+        hl = QHBoxLayout(holder)
+        hl.setContentsMargins(18 if row.of else 0, 0, 0, 0)  # an email's parts sit under it
         frame = QFrame(objectName="fileRow")
+        hl.addWidget(frame)
         fl = QVBoxLayout(frame)
         fl.setContentsMargins(7, 6, 7, 6)
         top = QHBoxLayout()
-        kind = "Email" if row.email else "Path" if src == "pasted" else "File"
-        top.addWidget(QLabel(f"<span style='color:#5a6571'>{kind}</span>  <b>{esc(row.name)}</b>"))
-        note = (f"{len(row.email.attachments)} attachment{'' if len(row.email.attachments) == 1 else 's'}. Saved as email.msg in the capture's folder."
-                if row.email else f"Already tracked as {doc.id}, so that record is reused." if doc else "It stays where it is.")
-        info = QLabel(note, objectName="hint")
-        top.addWidget(info, 1)
-        remove = QToolButton(text="×")
-        remove.setToolTip(f"Remove {row.name}")
-        remove.clicked.connect(lambda: self._remove_file(entry))
-        top.addWidget(remove)
+        if row.of is not None:
+            entry.keep = QCheckBox("Keep")
+            entry.keep.setChecked(row.keep)
+            entry.keep.setToolTip("Untick to leave it out of the capture")
+            entry.keep.toggled.connect(lambda on: self._keep(entry, on))
+            top.addWidget(entry.keep)
+        label = "Email" if row.email else {"attachment": "Attachment", "picture": "Picture"}.get(kind) or (
+            "Link" if link else "Path" if src == "pasted" else "File")
+        name = QLabel(f"<span style='color:#5a6571'>{label}</span>  <b>{esc(row.name)}</b>")
+        name.setToolTip(row.path or "")
+        top.addWidget(name)
+        top.addWidget(QLabel(self._file_note(row, doc.id if doc else None, link), objectName="hint"), 1)
+        if row.of is None:
+            remove = QToolButton(text="×")
+            remove.setToolTip(f"Remove {row.name}")
+            remove.clicked.connect(lambda: self._remove_file(entry))
+            top.addWidget(remove)
         fl.addLayout(top)
+        entry.widget = holder
+        self.files.append(entry)
+        self.files_box.addWidget(holder)
+        if row.email:
+            entry.layer0 = QLabel(objectName="hint")
+            entry.layer0.setWordWrap(True)
+            fl.addWidget(entry.layer0)
+            self._show_layer0()
+            self.refresh()
+            return
+        entry.what = ("What's at this link? Required" if link else "What does this picture show? Required" if kind == "picture"
+                      else "What's in this file? Required")
         entry.desc = QLineEdit(doc.description or "" if doc else "")
-        entry.desc.setPlaceholderText("What's in this file? Required")
+        entry.desc.setPlaceholderText(entry.what)
         entry.desc.setAccessibleName(f"Description of {row.name}")
         fl.addWidget(entry.desc)
         opts = QHBoxLayout()
@@ -954,50 +1042,66 @@ class CaptureWindow(QWidget):
         opts.addWidget(entry.extract)
         opts.addStretch()
         fl.addLayout(opts)
-        entry.widget = frame
-        for w in (entry.desc,):
-            w.textEdited.connect(self._apply_same_all)
+        entry.copy.setVisible(not link)  # a link has nothing to copy or read, and a picture no text
+        entry.extract.setVisible(not link and kind != "picture")
+        entry.desc.textEdited.connect(self._apply_same_all)
         for box in (entry.copy, entry.extract):
             box.toggled.connect(self._apply_same_all)
-        self.files.append(entry)
-        self.files_box.addWidget(frame)
         self._apply_same_all()
         self.refresh()
-        entry.desc.setFocus()
+        if focus:
+            entry.desc.setFocus()
+
+    def _keep(self, entry: FileEntry, on: bool) -> None:
+        """Keep, on an email's part: unticked, it's left out of the capture, and the email's layer 0 line says so."""
+        entry.row.keep = on
+        self._apply_same_all()
+        self._show_layer0()
+        self.refresh()
+
+    def _show_layer0(self) -> None:
+        rows = [e.row for e in self.files]
+        for e in self.files:
+            if e.layer0 is not None and e.row.email is not None:
+                e.layer0.setText(f"<b>Email layer 0</b>  {esc(email_layer0_line(e.row.email, rows))} "
+                                 "Each part has its own row below; untick one to leave it out.")
 
     def _remove_file(self, entry: FileEntry, from_content: bool = True) -> None:
-        if entry in self.files:
-            self.files.remove(entry)
-        if entry.widget:
-            entry.widget.deleteLater()
+        # Removing an email removes the rows email layer 0 made for its parts.
+        gone = [entry, *(e for e in self.files if entry.row.email is not None and e.row.of is entry.row.email)]
+        for e in gone:
+            if e in self.files:
+                self.files.remove(e)
+            if e.widget:
+                e.widget.deleteLater()
         if from_content and entry.src == "pasted":
             lines = [line for line in self.content.toPlainText().split("\n") if line.strip().lower() != (entry.line or "").lower()]
             self._set_plain(self.content, "\n".join(lines))
-        if len(self.files) < 2:
+        if sum(e.desc is not None for e in self.files) < 2:
             self.same_all.setChecked(False)
         self.refresh()
 
     def _apply_same_all(self) -> None:
-        """With "Use the first file's…" on, the other rows follow the first."""
-        same = self.same_all.isChecked() and len(self.files) > 1
-        first = self.files[0] if self.files else None
-        for i, e in enumerate(self.files):
-            follows = same and i > 0
+        """With "Use the first file's…" on, the other described rows follow the first. An unticked part is left out."""
+        described = [e for e in self.files if e.desc is not None]
+        same = self.same_all.isChecked() and len(described) > 1
+        first = described[0] if described else None
+        for e in described:
+            follows = same and e is not first
             for w in (e.desc, e.copy, e.extract):
-                w.setEnabled(not follows)
-            if follows and first:
-                e.desc.setPlaceholderText("Same as the first file")
+                w.setEnabled(e.row.keep and not follows)
+            e.desc.setPlaceholderText("Left out" if not e.row.keep else "Same as the first file" if follows else e.what)
 
     def _file_rows(self) -> list[FileRow]:
-        first = self.files[0] if self.files else None
-        rows = []
-        for i, e in enumerate(self.files):
-            source = first if self.same_all.isChecked() and i > 0 else e
+        described = [e for e in self.files if e.desc is not None]
+        first = described[0] if described else None
+        for e in described:
+            source = first if self.same_all.isChecked() and e is not first else e
             e.row.description = source.desc.text()
-            e.row.save_a_copy = source.copy.isChecked()
-            e.row.extract = source.extract.isChecked()
-            rows.append(e.row)
-        return rows
+            # A choice a row doesn't offer (a link's, a picture's Extract information) stays off.
+            e.row.save_a_copy = source.copy.isChecked() and not e.copy.isHidden()
+            e.row.extract = source.extract.isChecked() and not e.extract.isHidden()
+        return [e.row for e in self.files]
 
     def _email_texts(self) -> list[str]:
         return [e.row.email.text() for e in self.files if e.row.email]
@@ -1121,7 +1225,7 @@ class CaptureWindow(QWidget):
         st = self._summary_types[self.prompt_type.currentIndex()]
         text = "\n\n".join(x for x in [self.content.toPlainText().strip(), *self._email_texts()] if x)
         cap = self.ctx.settings.extracted_text_cap_chars
-        file_texts = [(e.row.name, extract_text(Path(e.row.path), cap).text) for e in self.files if e.row.path]
+        file_texts = [(e.row.name, extract_text(Path(e.row.path), cap).text) for e in self.files if e.row.path and not is_link(e.row.path)]
         blocks = capture_blocks(st, self.ctx.model(), text, file_texts, self.task)
         if not blocks:
             self._fail("Type or paste something first. This summary type sends the capture's content text."

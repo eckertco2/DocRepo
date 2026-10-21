@@ -2,7 +2,7 @@
 
 DocRepo reads the emails selected in Outlook (the ones being dragged, or Add
 selected Outlook email) and .msg files dropped from File Explorer. It reads
-their subject, sender, recipients, time, plain-text body and attachments, and,
+their subject, sender, recipients, time, plain-text and HTML bodies and attachments, and,
 when the capture is saved, writes the email as email.msg and its attachments
 into the capture's folder. It never sends, moves or changes an email.
 
@@ -30,6 +30,7 @@ OL_MAIL = 43  # olMail: a mail item, not a meeting request or a report
 OL_MSG = 3  # olMSG: SaveAs as an Outlook .msg file
 OL_BY_VALUE = 1  # an attached file, not a link or an embedded item
 PR_ATTACHMENT_HIDDEN = "http://schemas.microsoft.com/mapi/proptag/0x7FFE000B"
+PR_ATTACH_CONTENT_ID = "http://schemas.microsoft.com/mapi/proptag/0x3712001F"  # how the HTML body shows a picture (cid:)
 OUTLOOK_WINDOW_CLASS = "rctrl_renwnd32"  # the class of Outlook's main window
 
 #: The well-known COM error codes, in words, for messages and the troubleshooting report.
@@ -143,11 +144,27 @@ def _when(value: object) -> str:
 
 
 def is_hidden(attachment: object) -> bool:
-    """Pictures in a signature come as hidden attachments; they're left out."""
+    """Whether Outlook hides the attachment from the email's list of attachments, as it does pictures in the body."""
     try:
         return bool(attachment.PropertyAccessor.GetProperty(PR_ATTACHMENT_HIDDEN))  # type: ignore[attr-defined]
     except Exception:  # noqa: BLE001 - the property is often simply missing
         return False
+
+
+def attachment_content_id(attachment: object) -> str:
+    """The attachment's content ID, which a picture in the HTML body points to as cid:<ID>; "" when it has none."""
+    try:
+        value = attachment.PropertyAccessor.GetProperty(PR_ATTACH_CONTENT_ID)  # type: ignore[attr-defined]
+    except Exception:  # noqa: BLE001 - the property is missing on ordinary attachments
+        return ""
+    return value.strip() if isinstance(value, str) else ""
+
+
+def attachment_size(attachment: object) -> int:
+    try:
+        return int(attachment.Size)  # type: ignore[attr-defined]
+    except Exception:  # noqa: BLE001
+        return 0
 
 
 def read_field(item: object, name: str, refused: list[str]) -> object:
@@ -166,7 +183,11 @@ def _text(value: object) -> str:
 
 def email_from_item(item: object) -> EmailItem:
     """An Outlook mail item as DocRepo's EmailItem. Saving it later calls Outlook's SaveAs and SaveAsFile.
-    A field Outlook refuses is left empty and named in ``refused``."""
+    A field Outlook refuses is left empty and named in ``refused``.
+
+    Every attached file is read with its size, content ID and hidden flag, and the HTML body too, so email layer 0
+    (``docrepo/layer0.py``) can tell attachments from pictures in the body and find the body's links. Embedded items,
+    such as an attached email, are left out."""
     i = item  # the COM object; attributes are Outlook's
     refused: list[str] = []
     attachments = []
@@ -174,13 +195,15 @@ def email_from_item(item: object) -> EmailItem:
     try:
         for n in range(1, (found.Count if found is not None else 0) + 1):  # type: ignore[attr-defined]
             a = found.Item(n)  # type: ignore[attr-defined]
-            if a.Type == OL_BY_VALUE and not is_hidden(a):
-                attachments.append(Attachment(a.FileName, lambda path, a=a: a.SaveAsFile(str(path))))
+            if a.Type == OL_BY_VALUE:
+                attachments.append(Attachment(a.FileName, lambda path, a=a: a.SaveAsFile(str(path)), size=attachment_size(a),
+                                              content_id=attachment_content_id(a), hidden=is_hidden(a)))
     except Exception as e:  # noqa: BLE001
         record_problem("reading the email's attachments", e)
         refused.append("Attachments")
     sent = read_field(i, "SentOn", [])  # a received email's SentOn; a draft has only ReceivedTime or neither
     body = read_field(i, "Body", refused)
+    html = read_field(i, "HTMLBody", refused)
     return EmailItem(
         subject=_text(read_field(i, "Subject", refused)) or "(no subject)",
         sender=_text(read_field(i, "SenderName", refused)),
@@ -190,6 +213,7 @@ def email_from_item(item: object) -> EmailItem:
         attachments=attachments,
         save_msg=lambda path: i.SaveAs(str(path), OL_MSG),  # type: ignore[attr-defined]
         refused=tuple(refused),
+        html=html if isinstance(html, str) else "",
     )
 
 

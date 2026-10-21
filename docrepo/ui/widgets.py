@@ -450,6 +450,8 @@ class CheckMenuButton(QPushButton):
         shown = self.empty if not names else ", ".join(names) if len(names) <= 2 else f"{names[0]} and {len(names) - 1} more"
         self.setText(f"{self.noun}: {shown}")
         self.setToolTip(", ".join(names) if len(names) > 2 else "")
+        # Room for the text and the menu's arrow: the stylesheet's padding isn't in the button's own size.
+        self.setMinimumWidth(self.fontMetrics().horizontalAdvance(self.text()) + 36)
 
     def _closed(self) -> None:
         if self.values() != self._shown:

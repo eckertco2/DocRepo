@@ -20,11 +20,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from docrepo import agenda, captures, edits, people, search, tasks
+from docrepo import agenda, captures, edits, layer0, people, search, tasks
 from docrepo.config import Settings
 from docrepo.dates import stamp
 from docrepo.db import next_id, transaction
 from docrepo.extract import extract_text, file_info
+from docrepo.links import NO_TEXT, is_link
 from docrepo.model import TODAY, Model
 from docrepo.pages import write_pages
 from docrepo.parse import ParseLabel, ParsePerson, Who, parse_capture
@@ -47,10 +48,14 @@ class SaveError(ValueError):
 
 @dataclass
 class Attachment:
-    """An Outlook email's attachment. ``save`` writes it to a path (Outlook's SaveAsFile)."""
+    """An Outlook email's attachment. ``save`` writes it to a path (Outlook's SaveAsFile). Email layer 0 reads its size,
+    its content ID (a picture in the body has one) and whether Outlook hides it."""
 
     name: str
     save: Callable[[Path], None]
+    size: int = 0
+    content_id: str = ""
+    hidden: bool = False
 
 
 @dataclass
@@ -65,6 +70,7 @@ class EmailItem:
     attachments: list[Attachment] = field(default_factory=list)
     save_msg: Callable[[Path], None] | None = None
     refused: tuple[str, ...] = ()  # fields Outlook didn't give DocRepo, such as "Body"
+    html: str = ""  # the HTML body, where email layer 0 finds the links and pictures
 
     def text(self) -> str:
         """The email as it goes into the content text: its header lines, then its body."""
@@ -75,7 +81,12 @@ class EmailItem:
 
 @dataclass
 class FileRow:
-    """A file or email added to the capture, with its description and choices. A file's ``path`` is its original."""
+    """A file, link or email added to the capture, with its description and choices. ``path`` is its original: a file's
+    path, or a link (``links.is_link``), which has nothing to copy or read, so its choices are always off.
+
+    An email's row (``email``) holds its text and becomes email.msg; it has no description of its own. Each part email
+    layer 0 finds in it (``part``: an attachment, a link or a picture) is a row of its own, ``of`` that email, kept only
+    while ``keep`` is ticked (mods log round 1, M0024)."""
 
     name: str
     path: str | None = None
@@ -83,6 +94,20 @@ class FileRow:
     save_a_copy: bool = False
     extract: bool = False
     email: EmailItem | None = None
+    part: layer0.Part | None = None
+    of: EmailItem | None = None
+    keep: bool = True
+
+    @property
+    def described(self) -> bool:
+        """Whether the row needs a description and becomes a document: not an email's own row, nor an unticked part."""
+        return self.email is None and self.keep
+
+
+def email_rows(email: EmailItem) -> list[FileRow]:
+    """An email's row, then a row for each part email layer 0 finds in it, ticked or not as layer 0 starts them."""
+    return [FileRow(email.subject, email=email),
+            *(FileRow(p.name, p.url or None, part=p, of=email, keep=p.keep) for p in layer0.find(email).parts)]
 
 
 @dataclass
@@ -178,8 +203,8 @@ def _check(draft: CaptureDraft, task_exists: bool) -> None:
     if targets and not is_new and not is_upd and not draft.task and not content:
         raise SaveError("A note on an agenda needs some content text: it's what goes on the agenda.", "content")
     for i, f in enumerate(draft.files):
-        if not f.description.strip():
-            more = " “Use the first file's description” fills every row from the first." if len(draft.files) > 1 else ""
+        if f.described and not f.description.strip():
+            more = " “Use the first file's description” fills every row from the first." if sum(r.described for r in draft.files) > 1 else ""
             raise SaveError(f"Describe each file before saving: what's in {f.name}?{more}", f"file:{i}")
 
 
@@ -187,6 +212,11 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
     """Save what's in the capture window. Raises SaveError, changing nothing, if something is missing."""
     if draft.from_capture:
         draft.types = {"new_task"}
+    for row in draft.files:
+        if is_link(row.path):
+            row.save_a_copy = row.extract = False  # DocRepo keeps only a link's address (mods log round 1, M0001)
+        if row.part and row.part.kind == "picture":
+            row.extract = False  # a picture has no text to read
     is_new, is_upd, is_note = ("new_task" in draft.types, "update" in draft.types, "note" in draft.types)
     t = draft.task
     task_row = conn.execute("SELECT title FROM tasks WHERE id = ?", (t,)).fetchone() if t else None
@@ -249,29 +279,37 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
             if not is_new and not keep and not changes and not targets:
                 raise SaveError("There's nothing to save yet. Change a field, add an agenda, or type the update in the content text.", "content")
         if capture_id:
-            first_file = next((a.name for e in emails for a in e.attachments), None) or next((f.name for f in draft.files if not f.email), None)
-            source_kind = "outlook_email" if emails else "file_path" if draft.files else "typed"
+            first_file = next((f.name for f in draft.files if f.described), None)
+            source_kind = "outlook_email" if emails else "file_path" if any(not is_link(f.path) for f in draft.files) else "typed"
             captures.add_capture(
                 conn, capture_id=capture_id, saved=when, source=source_kind,
                 types=[k for k in TYPE_ORDER if k in draft.types and (k != "update" or t)],
                 title=capture_title(source_kind, full_content, first_file, capture_id), task=t, created_task=created,
                 summary=summary or None, summary_type=draft.summary_type if summary else None,
+                email_layer_0=" ".join(email_layer0_line(e, draft.files) for e in emails) or None,
             )
             for row in draft.files:
                 desc = row.description.strip()
-                if row.email:
-                    for a in row.email.attachments:
-                        doc = captures.add_document(conn, name=a.name, description=desc, capture=capture_id)
-                        captures.add_attachment(conn, capture_id, a.name)
-                        captures.link_document(conn, capture_id, doc, save_a_copy=row.save_a_copy, extract=row.extract)
-                        documents.append((doc, row, a))
+                if not row.described:
+                    continue  # an email's own row is its text and email.msg; an unticked part is left out
+                if row.part and row.part.attachment:
+                    # An email's attachment or picture (email layer 0): saved in the capture's attachments folder.
+                    a = row.part.attachment
+                    doc = captures.add_document(conn, name=a.name, description=desc, capture=capture_id)
+                    captures.add_attachment(conn, capture_id, a.name)
+                    captures.link_document(conn, capture_id, doc, save_a_copy=row.save_a_copy, extract=row.extract)
+                    documents.append((doc, row, a))
                     continue
-                existing = conn.execute("SELECT id FROM documents WHERE lower(original) = lower(?)", (row.path,)).fetchone()
+                link = is_link(row.path)  # a link is matched exactly; a path in any case, as Windows does
+                same = "original = ?" if link else "lower(original) = lower(?)"
+                existing = conn.execute(f"SELECT id FROM documents WHERE {same}", (row.path,)).fetchone()
                 if existing:
                     doc = str(existing["id"])
                     conn.execute("UPDATE documents SET description = ? WHERE id = ?", (desc, doc))
                 else:
                     doc = captures.add_document(conn, name=row.name, description=desc, original=row.path)
+                    if link:
+                        conn.execute("UPDATE documents SET text_status = 'none', text_note = ? WHERE id = ?", (NO_TEXT, doc))
                 if conn.execute("SELECT 1 FROM capture_documents WHERE capture = ? AND document = ?", (capture_id, doc)).fetchone():
                     continue
                 captures.link_document(conn, capture_id, doc, save_a_copy=row.save_a_copy, extract=row.extract)
@@ -295,7 +333,7 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
     result = SaveResult(capture_id, created, t if is_upd else None, changes, added_people, "", agenda_targets=targets,
                         filed_capture=source_capture.id if source_capture else None, picked_task=t)
     if capture_id:
-        _write_files(conn, data_root, fs, settings, capture_id, full_content, documents, copies, created or t, result)
+        _write_files(conn, data_root, fs, settings, capture_id, full_content, emails, documents, copies, created or t, result)
         search.index_items(conn, data_root, captures=[capture_id], documents=[d for d, _, _ in documents])
     if source_capture and created:
         edits.rewrite_capture_md(conn, data_root, fs, source_capture.id, source_content, result.problems)
@@ -308,6 +346,12 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
     result.message = _message(conn, draft, result, targets, bool(draft.new_task.title.strip()))
     log.info("capture %s saved: %s", capture_id or "(none kept)", _log_line(draft, result, targets, [d for d, _, _ in documents]))
     return result
+
+
+def email_layer0_line(email: EmailItem, rows: list[FileRow]) -> str:
+    """Email layer 0's line for one email: the parts its rows kept, and what it and the unticked rows left out."""
+    parts = [r for r in rows if r.of is email and r.part]
+    return layer0.line(layer0.find(email), [r.part.kind for r in parts if r.keep], sum(not r.keep for r in parts))
 
 
 def _parsed_title(conn: sqlite3.Connection, source: str, at: datetime, settings: Settings) -> str:
@@ -326,7 +370,7 @@ def _parse_labels(model: Model) -> list[ParseLabel]:
 
 
 def _write_files(
-    conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, capture_id: str, content: str,
+    conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, capture_id: str, content: str, emails: list[EmailItem],
     documents: list[tuple[str, FileRow, Attachment | None]], copies: list[tuple[str, str]], holder: str | None, result: SaveResult,
 ) -> None:
     """Write the capture's files. Each step that fails is noted in ``result.problems`` and the log, and the rest go on."""
@@ -337,10 +381,10 @@ def _write_files(
         captures.write_capture_md(fs, data_root, model, capture_id, content)
     except OSError as e:
         result.problems.append(f"capture.md couldn't be written ({type(e).__name__}).")
-    for row in {id(r): r for _, r, _ in documents}.values():  # each email once
-        if row.email and row.email.save_msg:
+    for email in emails:
+        if email.save_msg:
             try:
-                row.email.save_msg(fs.checked_path(folder / "email.msg"))
+                email.save_msg(fs.checked_path(folder / "email.msg"))
             except Exception as e:  # noqa: BLE001 - Outlook can fail in many ways; the capture stays saved
                 result.problems.append(f"The email couldn't be saved as email.msg ({type(e).__name__}).")
                 log.warning("capture %s: email.msg not saved: %s", capture_id, type(e).__name__)
@@ -355,7 +399,7 @@ def _write_files(
             except Exception as e:  # noqa: BLE001
                 result.problems.append(f"The attachment {attachment.name} couldn't be saved ({type(e).__name__}).")
                 continue
-        elif row.path:
+        elif row.path and not is_link(row.path):
             sources[doc] = Path(row.path)
     for doc, source in sources.items():
         _record_text(conn, data_root, fs, settings, doc, source, result)

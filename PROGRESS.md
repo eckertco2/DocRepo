@@ -15,6 +15,7 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.2 | Quick wins from the mods log, round 1: the deadline in Due's place, hiding the views, more hotkeys, filtering by several people and labels, sorting | Built 2026-10-20; hand-tested by the owner 2026-10-20; on GitHub 2026-10-20. Tested on the corporate computer 2026-10-20 |
 | 5.3 | Editing and daily use from the mods log, round 1: Edit task, Edit selected, labels on old tasks, Discard, Today | Built 2026-10-21; on GitHub 2026-10-21, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
 | 5.3.1 | PowerPoint text without python-pptx, so Pillow (flagged by the company's license policy) goes | Built 2026-10-21; on GitHub 2026-10-21. Next: the corporate computer, with release 5.3 |
+| 5.4 | Big features from the mods log, round 1: links as files, email layer 0 and the timeline | Built 2026-10-21, after the owner approved the mockups. Next: the hand test here, then GitHub, then the corporate computer |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
 ## Decisions
@@ -183,6 +184,48 @@ The corporate computer's JFrog scan flagged Pillow 13.0.0 under the company's co
 - The text is python-pptx's, compared on made-up decks, with two changes: text inside grouped shapes is read (python-pptx's top-level shapes missed it), and a line break inside a paragraph is a new line rather than a vertical tab.
 - `requirements.txt`: python-pptx, Pillow and XlsxWriter (python-pptx's other dependency) are gone. lxml and typing_extensions stay for python-docx.
 - `tests/test_extract.py`: the test deck is written by hand, as the test PDF is, and a deck with a DTD and an oversized part are refused (634 pass in all, 1 skipped, with the three packages uninstalled).
+
+## Release 5.4: big features from the mods log, round 1
+
+Stage 4 of the round 1 plan: links as files (M0001), email layer 0 (M0005, M0024) and the timeline view (M0019, with M0015's sorting by label). Email layer 0 and the timeline were mocked first and approved (decisions 9 to 13, as recommended). The meetings capture type (M0023) and Task an agent (M0017) are design work for later.
+
+### Links as files
+
+- `docrepo/links.py` (M0001): `is_link`, `link_name` and `NO_TEXT`. A link on a line of its own, or from **Add link…**, is a file row and then a document whose original is the address, with no text, no saved copy and no Extract information.
+- `docrepo/save.py`: a link is matched to its document exactly, gets `text_status` none, is never read or copied, and doesn't make a capture file_path. `docrepo/text.py` (`is_file_line`, `plain_text`) and `docrepo/parse.py` (`prep_text`) leave link lines out, as they do file path lines; the mockup's `model.js` and `parse.js` do the same, and every export is unchanged.
+- `docrepo/model.py`: the Files kind Link. `docrepo/pages.py`: a link's line in `Task.md`, as code. `docrepo/detail.py`: Copy link in the Files tab, and a link's page.
+- `docrepo/edits.py` (`source_of`) and `docrepo/ui/explorer.py`: File Explorer is never handed a link, which it would open in the browser.
+- `docrepo/ui/capture_window.py`: link rows, **Add link…**, and link lines in the content text. `docrepo/ui/browse_window.py`: **Copy link** on a link's page and from `copylink:`, double-click copies a link, and the Documents view marks links.
+- `GLOSSARY.md`: Link. `docrepo/ui/help_text.py`: the files and content notes, from the mockup's `HELP`.
+- `tests/test_links.py`: 8 tests.
+
+### Email layer 0
+
+- `docrepo/layer0.py`: `find` (an email's parts: attachments, the body's links, the body's pictures, and what it left out), `read_body` (Python's `html.parser`), `unwrap` (Safe Links), `line` (the layer 0 line) and `size_text`.
+- `docrepo/outlook.py`: the HTML body (`HTMLBody`, read field by field like the rest), and every attached file with its size, content ID (`PR_ATTACH_CONTENT_ID`) and hidden flag. Hidden attachments are no longer dropped here; layer 0 decides.
+- `docrepo/save.py`: `Attachment` gains `size`, `content_id` and `hidden`; `EmailItem` gains `html`; `FileRow` gains `part`, `of` and `keep`, and `described`; `email_rows` and `email_layer0_line`. An email's own row makes no document; each kept part does. `email.msg` is now saved for every email, including one with no attachments, which before was skipped.
+- `docrepo/db.py` (schema version 5): `captures.email_layer_0`. `docrepo/captures.py`, `docrepo/model.py`: the field, and `email_layer_0` in `capture.md`. `docrepo/detail.py`: the capture page's Email layer 0 row.
+- `docrepo/ui/capture_window.py`: the email's row with its layer 0 line, a row per part with Keep, indented under it.
+- `docrepo/diagnose.py`: the troubleshooting report counts attachments with a content ID, and what layer 0 would find in the body.
+- `tests/test_layer0.py`: 4 tests; `tests/test_outlook.py` and `tests/test_save.py` updated.
+
+### Timeline
+
+- `docrepo/timeline.py`: `build` (groups and rows for a range, grouping and filters), `Timeline` (its scale: months and week labels), `default_start`, `step` and `tooltip`. Ported from the mockup's `timeline.js`.
+- `docrepo/ui/timeline_view.py`: `TimelineChart` (painted with QPainter: names, bars, hatching, diamonds, dots, Today, tooltips, clicks) and `TimelineView` (its controls, the card, the legend, the undated tasks). `docrepo/views.py`: the Timeline view under Plan. `docrepo/ui/browse_window.py`: the view in the middle and right panes, opening a task or an Update from it.
+- `docrepo/ui/widgets.py`: `CheckMenuButton` makes room for its text, which the menu's arrow had clipped.
+- `tests/test_timeline.py`: 4 tests (651 pass in all, 1 skipped).
+
+## Decisions (release 5.4)
+
+- Decision 5 of the round 1 plan, as the owner chose: a link is only ever copied. DocRepo has no Open link anywhere, and its pages show addresses as text.
+- Only http and https lines are links; anything else on a line stays text.
+- A link's name is the file its address names, else its host, so SharePoint's long sharing links still read as "Pump datasheet.docx".
+- A capture whose only files are links is typed: its source names how it came in, and a link is pasted text.
+- Decisions 9 to 13 of the round 1 plan, as recommended: an email's parts have their own rows and descriptions, the email's row none, and an unticked part stays only inside `email.msg`; pictures are kept in the attachments folder, with Save a copy but no Extract information, and those under 10 KB start unticked; the layer 0 line goes in `capture.md` and on the capture page, not the content text; the timeline's first click shows a card, the second opens the task; nine weeks or six months, grouped by top-level task, label or person.
+- Decision 10 said hidden pictures are signatures. Outlook hides most pictures in the body, so layer 0 uses the body instead: a picture is an attachment the body shows by its content ID, and a hidden attachment the body doesn't show is left out. Small pictures, logos and signatures among them, start unticked. The corporate test checks this on real emails.
+- The timeline opens a task in the task tree (its second click, a double-click or Open task), as other views that aren't lists of tasks do; the Timeline view is one click away on the left.
+- Email layer 0 comes before phase 6 (document tracking), as running stage 4 decided (the plan's decision 6).
 
 ## The first Frogbot findings (2026-10-20)
 

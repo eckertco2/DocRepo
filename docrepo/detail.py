@@ -7,7 +7,8 @@ itself; none leaves DocRepo. A link's address says what it does:
 - ``task:T000008``, ``capture:C000001``, ``doc:D000001``, ``person:P001``, ``label:Safety`` open an item;
 - ``tab:notes``, ``scope:family``, ``order:new``, ``chap:T000009``, ``chapall:open``, ``more:C000012`` and
   ``orig:C000012`` change what the task page shows;
-- ``agenda:T000010`` opens an agenda, ``show:copy:3`` (or ``show:doc:``, ``show:capture:``) shows a file in File Explorer.
+- ``agenda:T000010`` opens an agenda, ``show:copy:3`` (or ``show:doc:``, ``show:capture:``) shows a file in File Explorer,
+  and ``copylink:D000001`` copies a link document's address (a link is only ever copied, never opened).
 
 Nothing here touches Qt, so the pages are tested as text. Ported from the mockup's ``detail.js``.
 """
@@ -22,6 +23,7 @@ from urllib.parse import quote
 
 from docrepo import capacity
 from docrepo.dates import days_text, long_date, monday_of, short, to_date
+from docrepo.links import NO_TEXT, is_link
 from docrepo.model import TODAY, TYPE_NAMES, Capture, Model, Task, is_person
 from docrepo.pages import num
 from docrepo.schedule import due_of, is_open, start_of
@@ -266,7 +268,9 @@ class Pages:
                         continue
                     seen.add(key)
                     d = self.m.documents.get(f.document)
-                    rows.append(f'<tr><td>{link(self.show_key(f), f.name, "Show it in File Explorer")} <span class="sub">{esc(f.kind)}</span>'
+                    name = (f'{link(f"doc:{f.document}", f.name, d.original if d else "")} · {link(f"copylink:{f.document}", "Copy link")}'
+                            if f.kind == "Link" else link(self.show_key(f), f.name, "Show it in File Explorer"))
+                    rows.append(f'<tr><td>{name} <span class="sub">{esc(f.kind)}</span>'
                                 f'{self.from_chip(f.task, t.id)}{"<br><span class=sub>" + esc(d.description) + "</span>" if d and d.description else ""}</td></tr>')
             return f'<table cellspacing="0" cellpadding="4">{"".join(rows)}</table>' if rows else '<p class="note">No files yet.</p>'
         kids = self.m.children_of(t.id)
@@ -416,11 +420,14 @@ class Pages:
         changes = [e for e in self.m.status if e.via == c.id]
         if changes:
             rows.append(("Changes", "<br>".join(esc(f"{e.field}: {e.from_value or 'None'} → {e.to_value or 'None'}") for e in changes)))
+        if c.email_layer_0:
+            rows.append(("Email layer 0", esc(c.email_layer_0)))
         if c.documents:
             files = []
             for cd in c.documents:
                 d = self.m.documents[cd.document]
-                choices = (" · Save a copy" if cd.save_a_copy else "") + (" · Extract information" if cd.extract else "")
+                choices = (" · Link" if is_link(d.original) else "") + (" · Save a copy" if cd.save_a_copy else "") + (
+                    " · Extract information" if cd.extract else "")
                 files.append(f'{link(f"doc:{d.id}", d.name)} <span class="sub">{d.id}{choices}</span>'
                              + (f'<br><span class="sub">{esc(d.description)}</span>' if d.description else ""))
             rows.append(("Files", "<br>".join(files)))
@@ -448,6 +455,13 @@ class Pages:
         versions = [v for v in m.versions if v.document == document_id]
         text = {"ok": f"Extracted, {d.text_chars or 0:,} characters", "partial": f"Cut at {d.text_chars or 0:,} characters",
                 "none": f"No text{': ' + d.text_note if d.text_note else ''}", "error": f"Couldn't be read{': ' + d.text_note if d.text_note else ''}"}
+        if is_link(d.original):
+            # A link (mods log round 1, M0001): only its address is kept, so it has no text, checks or saved copies.
+            rows = [("File description", esc(d.description) if d.description else none_text("None yet")), ("ID", d.id),
+                    ("Link", f"<span>{esc(d.original)}</span>"), ("Text", esc(f"No text: {NO_TEXT}")),
+                    ("Tasks", ", ".join(self.task_link(x) for x in tasks) or none_text("Not filed yet"))]
+            return (f'<p class="crumbs">Link {d.id}</p><h2>{esc(d.name)}</h2>{fields_table(rows)}'
+                    '<p class="note">Copy link puts the address on the clipboard, to paste into your browser. DocRepo never opens it.</p>')
         rows = [("File description", esc(d.description) if d.description else none_text("None yet")), ("ID", d.id),
                 ("Original", f"<span>{esc(d.original)}</span>" if d.original else f"Email attachment in {self.capture_link(d.capture)}" if d.capture else none_text()),
                 ("Status", esc(d.status)), ("Text", esc(text.get(d.text_status or "", "Not read yet"))),

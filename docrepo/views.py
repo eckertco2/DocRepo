@@ -53,6 +53,7 @@ VIEWS: tuple[ViewDef, ...] = (
     ViewDef("tasks", "Task tree"),
     *(ViewDef(x.id, x.label, "Lists", LIST_NOTES[x.id]) for x in LISTS),
     ViewDef("agenda", "Agendas", "Plan"),
+    ViewDef("timeline", "Timeline", "Plan"),  # mods log round 1, M0019: docrepo/timeline.py
     ViewDef("capacity", "Capacity", "Plan"),
     ViewDef("people", "People", "Manage"),
     ViewDef("labels", "Labels", "Manage"),

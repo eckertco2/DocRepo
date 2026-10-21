@@ -25,7 +25,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from types import TracebackType
 
-from docrepo import __version__, outlook
+from docrepo import __version__, layer0, outlook
 from docrepo.safe_fs import SafeFS
 
 log = logging.getLogger(__name__)
@@ -201,26 +201,38 @@ def outlook_check() -> tuple[list[Step], str]:
             steps.append(Step(f"Selected item {n}: its kind", False, outlook.describe(e)))
     if mail is None:
         return steps, version
+    html = ""
     for name in ("Subject", "SenderName", "To", "SentOn", "ReceivedTime", "Body", "HTMLBody"):
         try:
             value = getattr(mail, name)
             steps.append(Step(f"Read the email's {name}", True, "ok" if name in ("SentOn", "ReceivedTime") else f"ok, {_length(value)}"))
+            if name == "HTMLBody" and isinstance(value, str):
+                html = value
         except Exception as e:  # noqa: BLE001
             steps.append(Step(f"Read the email's {name}", False, outlook.describe(e)))
     try:
         found = mail.Attachments
-        files = hidden = other = 0
+        files = hidden = other = with_id = 0
         for n in range(1, found.Count + 1):
             a = found.Item(n)
             if a.Type != outlook.OL_BY_VALUE:
                 other += 1
-            elif outlook.is_hidden(a):
+                continue
+            with_id += bool(outlook.attachment_content_id(a))
+            if outlook.is_hidden(a):
                 hidden += 1
             else:
                 files += 1
-        steps.append(Step("Read the email's attachments", True, f"{found.Count}: {files} files, {hidden} hidden (signature pictures), {other} other"))
+        steps.append(Step("Read the email's attachments", True,
+                          f"{found.Count}: {files} files, {hidden} hidden, {other} other; {with_id} with a content ID (a picture the body can show)"))
     except Exception as e:  # noqa: BLE001
         steps.append(Step("Read the email's attachments", False, outlook.describe(e)))
+    # Email layer 0 (release 5.4): what it would find in the body, by counts only.
+    hrefs, cids = layer0.read_body(html)
+    mailto = sum(h.lower().startswith("mailto:") for h in hrefs)
+    safe = sum(layer0.unwrap(h)[1] for h in hrefs)
+    steps.append(Step("Email layer 0: the body's links and pictures", bool(html),
+                      f"{len(hrefs)} links ({mailto} email addresses, {safe} in Safe Links), {len(cids)} pictures" if html else "no HTML body"))
     try:
         has_save = callable(getattr(mail, "SaveAs", None))
         steps.append(Step("SaveAs is there (used on Save)", has_save, "yes, not tried here, so no file is left behind" if has_save else "no"))

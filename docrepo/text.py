@@ -8,6 +8,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from docrepo.links import is_link
+
 #: An email's header lines at the start of the content text.
 MAIL_HEAD = re.compile(r"^(?:(?:From|To|Cc|Sent|Date|Subject):.*\n)+\s*")
 _PATH_LINE = re.compile(r"^(\\\\|[A-Za-z]:\\)\S")
@@ -34,10 +36,15 @@ def is_path_line(line: str) -> bool:
     return bool(_PATH_LINE.match(line.strip()))
 
 
+def is_file_line(line: str) -> bool:
+    """True for a line the capture window makes a file row of: a file path, or a link on its own (mods log round 1, M0001)."""
+    return is_path_line(line) or is_link(line)
+
+
 def plain_text(content: str) -> str:
-    """The content text without an email's header lines or file path lines."""
+    """The content text without an email's header lines, or file path and link lines (those are its files)."""
     lines = MAIL_HEAD.sub("", content, count=1).split("\n")
-    return "\n".join(line for line in lines if not is_path_line(line)).strip()
+    return "\n".join(line for line in lines if not is_file_line(line)).strip()
 
 
 def sentences(text: str) -> list[Sentence]:

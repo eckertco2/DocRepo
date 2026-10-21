@@ -50,6 +50,7 @@ from docrepo.agenda import AgendaError
 from docrepo.captures import capture_folder, capture_md_path
 from docrepo.dates import long_date, short
 from docrepo.detail import CSS, PageState, Pages, chip, esc, state_chip
+from docrepo.links import is_link
 from docrepo.model import TODAY, Model, is_person
 from docrepo.people import PeopleError
 from docrepo.safe_fs import WriteRefused
@@ -62,6 +63,7 @@ from docrepo.ui.explorer import show_in_explorer
 from docrepo.ui.settings_view import SettingsView
 from docrepo.ui.task_forms import BulkEditDialog, LabelMatchDialog, TaskEditDialog
 from docrepo.ui.task_picker import TaskPicker
+from docrepo.ui.timeline_view import TimelineView
 from docrepo.ui.tree_view import GREY, KEY_ROLE, RowTree, tint
 from docrepo.ui.widgets import CheckMenuButton, FlowLayout, Option, label_options, people_options
 from docrepo.views import (
@@ -247,6 +249,10 @@ class BrowseWindow(QWidget):
         self.settings_view = SettingsView(self.ctx, self.say, lambda title, text: self.confirm(title, text),
                                           lambda path: self.reveal(path), lambda: self.open_import())
         self.middle.addWidget(self.settings_view)
+        self.timeline = TimelineView()  # mods log round 1, M0019
+        self.timeline.open_task.connect(lambda task_id: self.go_task(task_id))
+        self.timeline.update_task.connect(lambda task_id: self.open_capture(task=task_id, mode="update"))
+        self.middle.addWidget(self.timeline)
         self.split.addWidget(self.middle)
 
         detail = QWidget()
@@ -501,10 +507,14 @@ class BrowseWindow(QWidget):
         return self._filter_widget(b)
 
     def render_list(self) -> None:
-        self.detail.setVisible(self.view not in ("capacity", "settings"))
+        self.detail.setVisible(self.view not in ("capacity", "settings", "timeline"))
         if self.view == "capacity":
             self.middle.setCurrentIndex(1)
             self.render_capacity()
+            return
+        if self.view == "timeline":
+            self.middle.setCurrentWidget(self.timeline)
+            self.timeline.render(self.model(), self.today())
             return
         if self.view == "settings":
             self.middle.setCurrentIndex(2)
@@ -553,10 +563,12 @@ class BrowseWindow(QWidget):
                 item = self.tree.add_row(parent, None, [f"<b>{esc(n.label)}</b>"], QColor(GREY).lighter(135), selectable=False, span=True)
             elif n.kind == "doc":
                 d = m.documents[n.id]
+                link = is_link(d.original)
                 cells = [f'{esc(d.name)}<br><span class="sub">{esc(d.description or "No description yet")}</span>',
-                         chip(d.status, "st-ns" if d.status == "Current" else "st-pk"),
+                         chip("Link", "st-ns") if link else chip(d.status, "st-ns" if d.status == "Current" else "st-pk"),
                          f'<p align="right">{esc(short(date.fromisoformat(d.checked[:10]), self.today())) if d.checked else ""}</p>']
-                item = self.tree.add_row(parent, ("doc", n.id), cells, tint(n.group, n.depth), tip=f"Last checked {d.checked or 'not yet'}")
+                tip = f"{d.original} (double-click copies it)" if link else f"Last checked {d.checked or 'not yet'}"
+                item = self.tree.add_row(parent, ("doc", n.id), cells, tint(n.group, n.depth), tip=tip)
             else:
                 cells, tip = row(n) if row else (self._task_cells(n.id, n.depth, filtered and not n.match), full_path(m, n.id))
                 item = self.tree.add_row(parent, ("task", n.id), cells, tint(n.group, n.depth), tip=tip)
@@ -1117,6 +1129,9 @@ class BrowseWindow(QWidget):
 
     def _doc_actions(self, document_id: str) -> None:
         m = self.model()
+        if is_link(m.documents[document_id].original):
+            self._action("Copy link", lambda: self.copy_link(document_id), "Copy the address, to paste into your browser", primary=True)
+            return
         source = edits.source_of(self.ctx.data_root, m, document_id)
         self._action("Show in File Explorer", lambda: self.reveal(source) if source else None, "Show the original", source is not None)
         text = self.ctx.data_root / "Documents" / document_id / "extracted.txt"
@@ -1162,6 +1177,8 @@ class BrowseWindow(QWidget):
             self.show_agenda(rest)
         elif kind == "show":
             self.reveal_key(tuple(rest.split(":", 1)))
+        elif kind == "copylink":
+            self.copy_link(rest)
         elif kind in ("tab", "scope", "order"):
             setattr(st, kind, rest)
             self.render_detail(keep_scroll=kind != "tab")
@@ -1184,6 +1201,9 @@ class BrowseWindow(QWidget):
         elif kind == "capture" and item in m.captures:
             self.reveal(capture_md_path(root, m.captures[item]))
         elif kind == "doc" and item in m.documents:
+            if is_link(m.documents[item].original):
+                self.copy_link(item)  # a link has no file to show, and is never opened
+                return
             source = edits.source_of(root, m, item)
             if source:
                 self.reveal(source)
@@ -1511,6 +1531,14 @@ class BrowseWindow(QWidget):
         text = agenda_markdown(self.model(), target, self.today())
         QGuiApplication.clipboard().setText(text)
         self.say(f"Agenda copied ({len(text)} characters).")
+
+    def copy_link(self, document_id: str) -> None:
+        """Put a link's address on the clipboard. DocRepo only copies links; it never opens one (round 1 plan, decision 5)."""
+        d = self.model().documents.get(document_id)
+        if d is None or not is_link(d.original):
+            return
+        QGuiApplication.clipboard().setText(d.original.strip())
+        self.say(f"Copied the link to {d.name}. Paste it into your browser to open it.")
 
     def copy_prompt(self, task_id: str) -> None:
         if not self._summary_types:

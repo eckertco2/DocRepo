@@ -12,7 +12,7 @@ from docrepo.log_setup import setup_logging
 from docrepo.model import Model
 from docrepo.parse import Who
 from docrepo.sample import load_sample
-from docrepo.save import Attachment, CaptureDraft, EmailItem, FileRow, NewTaskFields, SaveError, copy_name, save_capture
+from docrepo.save import Attachment, CaptureDraft, EmailItem, FileRow, NewTaskFields, SaveError, copy_name, email_rows, save_capture
 
 AT = datetime(2026, 10, 16, 9, 30)
 SETTINGS = Settings(me="P001")
@@ -163,7 +163,11 @@ def test_an_outlook_email_and_its_attachments(env):
     email = EmailItem(subject="Revised coupling guard delivery", sender="Norvane Pumps (vendor)", sent="2026-10-15 16:02", to="Me",
                       body="The guard now ships on 14 Oct.", attachments=[Attachment("Guard drawing rev C.txt", write(b"Mounting holes: four M12"))],
                       save_msg=write(b"MSG"))
-    r = save(env, CaptureDraft(task="T000008", types={"note"}, files=[FileRow("Revised coupling guard delivery", description="Guard delivery news.", email=email)]))
+    rows = email_rows(email)  # the email's own row, then a row for its attachment (email layer 0)
+    assert [(r.name, r.email is email, r.part and r.part.kind) for r in rows] == [
+        ("Revised coupling guard delivery", True, None), ("Guard drawing rev C.txt", False, "attachment")]
+    rows[1].description = "Guard delivery news."
+    r = save(env, CaptureDraft(task="T000008", types={"note"}, files=rows))
     conn, root, _ = env
     folder = root / "Captures" / "2026" / "10" / r.capture_id
     assert (folder / "email.msg").read_bytes() == b"MSG"
@@ -171,10 +175,19 @@ def test_an_outlook_email_and_its_attachments(env):
     model = Model(conn)
     capture = model.captures[r.capture_id]
     assert (capture.source, capture.title, capture.attachments) == ("outlook_email", "Revised coupling guard delivery", ["Guard drawing rev C.txt"])
+    assert capture.email_layer_0 == "1 attachment kept."
     doc = model.documents[capture.documents[0].document]
     assert (doc.capture, doc.original, doc.description, doc.text_status) == (r.capture_id, None, "Guard delivery news.", "ok")
     text = capture_md(root, r.capture_id)
     assert "From: Norvane Pumps (vendor)\nSent: 2026-10-15 16:02\nTo: Me\nSubject: Revised coupling guard delivery\n\nThe guard now ships on 14 Oct." in text
+    assert '\nemail_layer_0: "1 attachment kept."\nsummary_type: null\n' in text
+
+
+def test_an_email_with_no_attachments_is_still_saved_as_email_msg(env):
+    email = EmailItem("Crane booked", "Priya Shah", "2026-10-15 16:02", "Me", "Booked for 20 Oct.", save_msg=lambda path: Path(path).write_bytes(b"MSG"))
+    r = save(env, CaptureDraft(task="T000008", types={"note"}, files=email_rows(email)))
+    assert (env[1] / "Captures" / "2026" / "10" / r.capture_id / "email.msg").read_bytes() == b"MSG"
+    assert Model(env[0]).captures[r.capture_id].email_layer_0 == "Nothing kept."
 
 
 def test_the_log_holds_ids_not_content(env):
