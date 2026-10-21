@@ -9,9 +9,9 @@ import json  # noqa: E402
 from datetime import datetime  # noqa: E402
 
 import pytest  # noqa: E402
-from PySide6.QtCore import QUrl  # noqa: E402
+from PySide6.QtCore import Qt, QUrl  # noqa: E402
 from PySide6.QtGui import QGuiApplication  # noqa: E402
-from PySide6.QtWidgets import QApplication, QPushButton  # noqa: E402
+from PySide6.QtWidgets import QApplication, QComboBox, QLabel, QPushButton  # noqa: E402
 
 from docrepo import captures, prompts  # noqa: E402
 from docrepo.config import Settings  # noqa: E402
@@ -273,18 +273,170 @@ def test_people_and_labels(browse, ctx):
     assert "Site safety" in (ctx.data_root / "Tasks" / "T000002" / "Task.md").read_text(encoding="utf-8")
 
 
-def test_task_edits(browse):
+def test_task_edits(browse, monkeypatch):
+    """The Edit task form (mods log round 1, M0008, M0011), and moves in the tree."""
+    from docrepo.ui.task_forms import TaskEditDialog
+    from docrepo.ui.widgets import Chip
+
     browse.go_task("T000012")
-    browse.save_task_text("T000012", "Rigging plan for the lift", "Mike writes the rigging plan.")
-    browse.save_task_labels("T000012", ["Safety", "Lifting"], ["Lifting"], False)
-    browse.move_task("T000012", "T000008", "T000001")
+    edit_menu = next(b for b in browse.actions.findChildren(QPushButton) if b.text() == "Edit").menu()
+    assert edit_menu.actions()[0].text() == "Edit task…   E"
+    dialog = TaskEditDialog(browse, browse.model(), "T000012", browse._label_options, browse._people_options)
+    assert (dialog.title.text(), dialog.state.currentText(), dialog.assignees.values(), dialog.start.value()) == (
+        "Rigging plan", "In progress", ["P004"], "2026-10-05")
+    assert not dialog.repeat_field.isVisibleTo(dialog)
+    dialog.title.setText("Rigging plan for the lift")
+    dialog.description.setPlainText("Mike writes the rigging plan.")
+    dialog.labels.add(Chip("Safety", "Safety"))
+    dialog.labels.add(Chip("Lifting", "Lifting", new=True))
+    dialog.inherit.setChecked(False)
+    dialog.leads.add(Chip("P003", "Tom Becker"))
+    dialog.due.set_value("2026-10-16")
+    dialog.lead_hours.setText("lots")
+    assert dialog.problem() == "Lead hours isn't a number of hours."
+    dialog.lead_hours.setText("4")
+    assert dialog.problem() is None
+    opened = []
+    browse.run_dialog = lambda d: opened.append(d.windowTitle()) or True
+    typed = dialog.values()
+    monkeypatch.setattr(TaskEditDialog, "values", lambda self: typed)
+    browse.page.setFocus()
+    browse._key("edit")  # E opens the form on the selected task
     m = Model(browse.conn)
     t = m.task("T000012")
-    assert (t.title, t.description, t.labels, t.inherit_labels) == ("Rigging plan for the lift", "Mike writes the rigging plan.",
-                                                                    ["Safety", "Lifting"], False)
-    assert m.parents_of("T000012") == ["T000001"] and any(lb.name == "Lifting" for lb in m.labels)
+    assert opened == ["Edit task T000012"]
+    assert (t.title, t.description, t.labels, t.inherit_labels, t.leads, t.lead_hours, t.due) == (
+        "Rigging plan for the lift", "Mike writes the rigging plan.", ["Safety", "Lifting"], False, ["P003"], 4.0, "2026-10-16")
+    assert any(lb.name == "Lifting" for lb in m.labels) and browse.status.text() == "7 changes in the status log."
+    browse.move_task("T000012", "T000008", "T000001")
+    assert Model(browse.conn).parents_of("T000012") == ["T000001"]
     browse.move_task("T000001", None, "T000012")
     assert "under itself" in browse.status.text()
+
+
+def test_select_and_edit_selected(browse):
+    """Mods log round 1 (M0009): Select puts a tick box on each task row; Edit selected changes the ticked ones after a preview."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QCheckBox
+
+    def checkable():
+        return [i for i in browse.tree.items() if i.data(0, Qt.ItemDataRole.CheckStateRole) is not None]
+
+    assert not checkable()
+    next(w for w in browse.filters.findChildren(QCheckBox) if w.text() == "Select").setChecked(True)
+    assert browse.selecting and len(checkable()) == len([k for k in rows(browse) if k and k[0] == "task"])
+    for item in checkable():
+        if item.data(0, KEY_ROLE) in (("task", "T000016"), ("task", "T000017")):
+            item.setCheckState(0, Qt.CheckState.Checked)  # as a click does
+    assert browse.ticked == {"T000016", "T000017"} and browse.edit_selected_button.text() == "Edit selected (2)…"
+    previews = []
+
+    def run(dialog):
+        dialog.state.setCurrentText("Parked")
+        dialog.dates["reminder"][0].setChecked(True)
+        dialog.dates["reminder"][1].set_value("2026-10-1")
+        dialog.refresh_preview()
+        assert "Reminder isn't a date" in dialog.preview.toPlainText() and not dialog.apply_button.isEnabled()
+        dialog.dates["reminder"][1].set_value("2026-10-12")
+        dialog.refresh_preview()
+        previews.append(dialog.preview.toPlainText())
+        return True
+
+    browse.run_dialog = run
+    browse.edit_selected_button.click()
+    assert previews[0].startswith("2 tasks change, 4 changes in their status logs.") and "State: Not started → Parked" in previews[0]
+    m = Model(browse.conn)
+    assert [(m.task(x).state, m.task(x).reminder) for x in ("T000016", "T000017")] == [("Parked", "2026-10-12")] * 2
+    assert browse.status.text() == "Changed 2 tasks: 4 changes in their status logs."
+    browse.tick_shown(False)
+    browse.tick_shown(True)  # the task tree opens collapsed: only the rows you can see
+    assert "T000001" in browse.ticked and "T000012" not in browse.ticked
+    browse.set_view("due")
+    assert browse.selecting and not browse.ticked and checkable()
+
+
+def test_a_new_labels_matching_tasks(browse):
+    """Mods log round 1 (M0014): saving a label with new keywords lists the open tasks that mention them."""
+    shown = []
+
+    def run(dialog):
+        keys = dialog.rows.keys()
+        shown.append(keys)
+        assert not dialog.apply_button.isEnabled()
+        for item in dialog.rows.items():
+            if item.data(0, KEY_ROLE) == ("task", "T000012"):
+                dialog.rows.add_tick(item, True)
+        assert dialog.ticked() == ["T000012"]
+        dialog.apply()
+        return True
+
+    browse.run_dialog = run
+    browse.set_view("labels")
+    browse.save_label(None, "Lifting", ["crane", "rigging"])
+    assert ("task", "T000012") in shown[0]
+    assert "Lifting" in Model(browse.conn).task("T000012").labels and browse.status.text() == "Changed 1 task: 1 change in its status log."
+    browse.save_label("Lifting", "Lifting", ["crane", "rigging"])  # the same keywords: nothing to list again
+    assert len(shown) == 1
+    browse.find_label_tasks("Line 2")
+    assert "No open task mentions Line 2's keywords" in browse.status.text()
+
+
+def test_discard_and_bring_back(browse):
+    """Mods log round 1 (M0021): Discard hides a task or capture made by mistake; the Discarded view brings it back."""
+    asked = []
+    browse.ask_reason = lambda title, text: asked.append(title) or "Typed twice"
+    browse.go_task("T000017")
+    edit_menu = next(b for b in browse.actions.findChildren(QPushButton) if b.text() == "Edit").menu()
+    assert edit_menu.actions()[-1].text() == "Discard…"
+    browse.discard_task("T000017")
+    assert asked == ["Discard task"] and ("task", "T000017") not in rows(browse) and browse.sel == ("task", "T000002")
+    assert "Discarded Rails need to be painted red." in browse.status.text()
+    browse.go_task("T000017")  # opening it from elsewhere shows it in the Discarded view
+    assert browse.view == "discarded" and rows(browse) == [("task", "T000017")] and "Typed twice" in browse.page.toPlainText()
+    labels = [b.text() for b in browse.actions.findChildren(QPushButton)]
+    assert labels == ["Bring back", "Open folder"]
+    browse.go_capture("C000022")
+    browse.discard_capture("C000022")
+    browse.set_view("discarded")
+    assert rows(browse) == [("task", "T000017"), ("capture", "C000022")]  # discarded at the same minute: tasks first
+    browse.bring_back_task("T000017")
+    assert browse.view == "tasks" and browse.sel == ("task", "T000017") and browse.status.text() == "Brought back Rails need to be painted red."
+    browse.ask_reason = lambda title, text: None  # Cancel
+    browse.discard_task("T000008")
+    assert not Model(browse.conn).task("T000008").discarded
+    browse.ask_reason = lambda title, text: ""
+    browse.discard_task("T000008")
+    assert "has subtasks" in browse.status.text()
+
+
+def test_the_today_list(browse, monkeypatch):
+    """Mods log round 1 (M0016): T puts the selected task on Today; Done asks whether to update it too."""
+    from docrepo.model import TODAY
+
+    browse.go_task("T000012")
+    browse.page.setFocus()
+    browse._key("today")
+    assert browse.status.text() == "Rigging plan is on Today. Its status log says so."
+    assert "On Today ✓" in [b.text() for b in browse.actions.findChildren(QPushButton)]
+    browse.set_view("today")
+    assert browse.view == "today" and browse.sel == ("task", "T000012") and ("task", "T000012") in rows(browse)
+    browse.today_note.setText("Sign the overtime sheets")
+    browse.add_today_note()
+    m = Model(browse.conn)
+    assert [(a.subject, a.note) for a in m.today_items()] == [("T000012", ""), (None, "Sign the overtime sheets")]
+    item = m.today_items()[0]
+    opened = []
+    monkeypatch.setattr(browse, "open_capture", lambda **options: opened.append(options))
+    browse.close_today_item(item.id, "Done")
+    assert browse.today_ask == "T000012" and "is done for today" in " ".join(w.text() for w in browse.filters.findChildren(QLabel))
+    assert "Done today" in browse.tree.topLevelItem(browse.tree.topLevelItemCount() - 2).data(0, Qt.ItemDataRole.UserRole + 1)
+    browse.answer_today("update")
+    assert opened == [{"task": "T000012", "mode": "update", "content": "Done today: "}] and browse.today_ask is None
+    browse.set_view("agenda")
+    pick = next(w for w in browse.filters.findChildren(QComboBox))
+    assert pick.itemData(0) == TODAY
+    pick.setCurrentIndex(0)
+    assert browse.view == "today"
 
 
 def test_settings(browse, ctx):

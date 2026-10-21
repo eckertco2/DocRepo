@@ -15,7 +15,7 @@ from pathlib import Path
 from docrepo.safe_fs import SafeFS
 
 DB_FILE = Path("System") / "docs.db"
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 #: Each kind of ID: its letter and how many digits follow it.
 ID_FORMATS = {"T": 6, "C": 6, "D": 6, "P": 3}
@@ -193,7 +193,8 @@ CREATE TABLE id_counters (
 
 #: Changes from one schema version to the next. Version 2 (phase 3): how each document's text was pulled out, and its
 #: size, modified time and checksum for the document checks; the app's daily state; reminders already shown.
-#: Version 3 (phase 4): the search index.
+#: Version 3 (phase 4): the search index. Version 4 (release 5.3): discarded tasks and captures, and agenda items closed
+#: as Done (the Today list).
 MIGRATIONS = {
     2: """
 ALTER TABLE documents ADD COLUMN text_status TEXT;
@@ -222,6 +223,32 @@ CREATE TABLE search_text (
     body TEXT NOT NULL,
     PRIMARY KEY (kind, id)
 );
+""",
+    4: """
+-- Discard (mods log round 1, M0021): a task or capture made by mistake is hidden, never deleted.
+-- discarded is when, and discard_reason why. Bringing it back clears both.
+ALTER TABLE tasks ADD COLUMN discarded TEXT;
+ALTER TABLE tasks ADD COLUMN discard_reason TEXT;
+ALTER TABLE captures ADD COLUMN discarded TEXT;
+ALTER TABLE captures ADD COLUMN discard_reason TEXT;
+-- Today (mods log round 1, M0016): the built-in agenda target today, whose items close as Done.
+-- SQLite can't change a CHECK, so agenda_items is made again with Done allowed, keeping its rows and IDs.
+CREATE TABLE agenda_items_new (
+    id        INTEGER PRIMARY KEY,
+    subject   TEXT REFERENCES tasks(id),
+    target    TEXT NOT NULL,
+    note      TEXT NOT NULL DEFAULT '',
+    added     TEXT NOT NULL,
+    added_by  TEXT NOT NULL,
+    closed    TEXT,
+    how       TEXT CHECK (how IN ('Discussed', 'Removed', 'Done')),
+    closed_by TEXT,
+    CHECK ((closed IS NULL) = (how IS NULL))
+);
+INSERT INTO agenda_items_new (id, subject, target, note, added, added_by, closed, how, closed_by)
+    SELECT id, subject, target, note, added, added_by, closed, how, closed_by FROM agenda_items;
+DROP TABLE agenda_items;
+ALTER TABLE agenda_items_new RENAME TO agenda_items;
 """,
 }
 

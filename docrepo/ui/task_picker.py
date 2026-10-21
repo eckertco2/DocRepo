@@ -3,8 +3,8 @@
 Hovering a task shows its subtasks; clicking a task picks it, even when it has
 subtasks (Qt menus normally only open the submenu, so these menus pick on click
 and on Enter). Typing switches to a flat list of matching tasks with their paths,
-which keeps it keyboard-only. Parked and closed tasks are hidden, but search
-still finds parked ones.
+which keeps it keyboard-only. Parked, closed and discarded tasks are hidden, but
+search still finds parked ones.
 """
 from __future__ import annotations
 
@@ -33,9 +33,9 @@ def full_path(model: Model, task_id: str) -> str:
 def recent_tasks(model: Model) -> list[str]:
     """The last tasks captures were saved to, newest first, leaving out closed ones."""
     out: list[str] = []
-    for c in sorted(model.captures.values(), key=lambda c: c.saved, reverse=True):
+    for c in sorted(model.live_captures(), key=lambda c: c.saved, reverse=True):
         tasks = model.capture_tasks(c)
-        if tasks and model.task(tasks[0]).state != "Closed" and tasks[0] not in out:
+        if tasks and model.task(tasks[0]).state != "Closed" and not model.task(tasks[0]).discarded and tasks[0] not in out:
             out.append(tasks[0])
         if len(out) == RECENT_COUNT:
             break
@@ -133,7 +133,7 @@ class TaskPicker(_Menu):
         m = self.model
         query = self.search.text().strip().lower()
         if query:
-            matches = [t for t in m.tasks.values() if t.state != "Closed" and (query in t.title.lower() or query in t.id.lower())]
+            matches = [t for t in m.tasks.values() if t.state != "Closed" and not t.discarded and (query in t.title.lower() or query in t.id.lower())]
             for t in matches[:SEARCH_LIMIT]:
                 self.add_task(t.id, with_path=True)
             if not matches:

@@ -7,7 +7,8 @@ the files (the ``rebuild`` command). It's a cache, like the capacity calendar.
 Tasks, people and labels are searched straight from their tables.
 
 A search matches items that hold every word typed, in any case, anywhere in
-their text: "seal ord" finds "Order a spare mechanical seal".
+their text: "seal ord" finds "Order a spare mechanical seal". Discarded tasks and
+captures aren't found.
 """
 from __future__ import annotations
 
@@ -136,10 +137,10 @@ def search(conn: sqlite3.Connection, model: Model, query: str) -> list[Result]:
     if len("".join(words)) < 2:
         return []
     m, out = model, []
-    tasks = [t for t in m.tasks.values() if _has_all(words, t.id, t.title, t.description, t.current_status, t.deadline_desc)]
+    tasks = [t for t in m.tasks.values() if not t.discarded and _has_all(words, t.id, t.title, t.description, t.current_status, t.deadline_desc)]
     for t in tasks[:LIMIT]:
         out.append(Result("Task", "task", t.id, t.title, f"{t.id} · {t.state}", snippet(f"{t.description}\n{t.current_status}", words)))
-    found = [(i, b) for i, b in _indexed(conn, "capture", words) if i in m.captures]
+    found = [(i, b) for i, b in _indexed(conn, "capture", words) if i in m.captures and not m.captures[i].discarded]
     for cid, body in sorted(found, key=lambda x: m.captures[x[0]].saved, reverse=True)[:LIMIT]:
         c = m.captures[cid]
         out.append(Result("Capture", "capture", c.id, c.title, f"{c.id} · {c.saved[:16]}", snippet(_after_title(body), words)))
@@ -147,7 +148,7 @@ def search(conn: sqlite3.Connection, model: Model, query: str) -> list[Result]:
     for did, body in docs[:LIMIT]:
         d = m.documents[did]
         out.append(Result("Document", "doc", d.id, d.name, f"{d.id} · {d.description or d.status}", snippet(_after_title(body), words)))
-    for f in [f for f in m.copies if _has_all(words, f.name)][:LIMIT]:
+    for f in [f for f in m.copies if not m.task(f.task).discarded and _has_all(words, f.name)][:LIMIT]:
         out.append(Result("Saved copy", "task", f.task, f.name, f"In {m.task(f.task).title}"))
     for p in [p for p in m.people.values() if _has_all(words, p.id, p.name, *p.aliases)][:LIMIT]:
         out.append(Result("Person", "person", p.id, p.name, ", ".join(p.aliases) + (" · retired" if p.status == "retired" else "")))

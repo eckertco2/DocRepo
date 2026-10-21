@@ -42,7 +42,7 @@ from PySide6.QtWidgets import (
 from docrepo import diagnose, outlook, paste
 from docrepo.db import RECURRENCES, STATES
 from docrepo.extract import extract_text, to_unc
-from docrepo.model import Model, is_person
+from docrepo.model import TODAY, Model, is_person
 from docrepo.parse import Found, Known, Who, parse_capture, quick_update
 from docrepo.prompts import capture_blocks, load_summary_types, prompt_text
 from docrepo.save import CaptureDraft, EmailItem, FileRow, NewTaskFields, SaveError, save_capture
@@ -51,7 +51,18 @@ from docrepo.ui.context import AppContext
 from docrepo.ui.mods_panel import ModsPanel
 from docrepo.ui.style import STYLE
 from docrepo.ui.task_picker import TaskPicker, full_path, path_text
-from docrepo.ui.widgets import Chip, ChipPicker, DateField, HoursField, InfoButton, Option, field, set_filled
+from docrepo.ui.widgets import (
+    Chip,
+    ChipPicker,
+    DateField,
+    HoursField,
+    InfoButton,
+    Option,
+    field,
+    label_options,
+    people_options,
+    set_filled,
+)
 
 log = logging.getLogger(__name__)
 
@@ -791,7 +802,9 @@ class CaptureWindow(QWidget):
             parts.append("keeps this as reference information on the new task")
         if targets:
             subject = "the new task" if new else name if upd and t else "this note"
-            parts.append(f"puts {subject} on the agenda of {and_list([f'<b>{esc(m.target_name(x))}</b>' for x in targets])}")
+            others = [f"<b>{esc(m.target_name(x))}</b>" for x in targets if x != TODAY]
+            where = ["<b>Today</b>"] * (TODAY in targets) + [f"the agenda of {and_list(others)}"] * bool(others)
+            parts.append(f"puts {subject} on {' and '.join(where)}")
         parts = [p for p in parts if p]
         if not parts:
             return "Pick a task, or uncheck Update."
@@ -814,26 +827,20 @@ class CaptureWindow(QWidget):
         (self.title if "new_task" in self.types else self.content).setFocus()
 
     def _label_options(self, text: str, picked: list[str]) -> list[Option]:
-        q = text.strip().lower()
-        return [Option(lb.name, lb.name, ", ".join(lb.keywords)) for lb in self.ctx.model().active_labels()
-                if lb.name not in picked and (not q or q in lb.name.lower())][:7]
+        return label_options(self.ctx.model(), text, picked)
 
     def _people_options(self, text: str, picked: list[str]) -> list[Option]:
-        q = text.strip().lower()
-        out = []
-        for p in self.ctx.model().active_people():
-            names = [p.name, *p.aliases]
-            if p.id not in picked and (not q or any(q in n.lower() for n in names)):
-                out.append(Option(p.id, p.name + (" (me)" if p.id == self.ctx.settings.me else ""), ", ".join(p.aliases)))
-        return out[:7]
+        return people_options(self.ctx.model(), self.ctx.settings.me, text, picked)
 
     def _agenda_options(self, text: str, picked: list[str]) -> list[Option]:
-        """Open meetings first, then people; typing also finds any open task. The task going on the agenda is left out."""
+        """Today first (mods log round 1, M0016), then open meetings and people; typing also finds any open task. The task
+        going on the agenda is left out."""
         m = self.ctx.model()
         q = text.strip().lower()
         subject = None if "new_task" in self.types else self.task
         today = self.ctx.now().date()
-        options = [Option(t.id, t.title, f"Meeting, next {m.meeting_when(t.id, today)}" if t.recurrence else "Meeting", ) for t in m.open_meetings()]
+        options = [Option(TODAY, "Today", "Your list for today")]
+        options += [Option(t.id, t.title, f"Meeting, next {m.meeting_when(t.id, today)}" if t.recurrence else "Meeting", ) for t in m.open_meetings()]
         options += [Option(p.id, p.name, " · ".join(["Person", *p.aliases])) for p in m.active_people() if p.id != self.ctx.settings.me]
         if q:
             options += [Option(t.id, t.title, path_text(m, t.id) or "Top-level task") for t in m.tasks.values() if is_open(t) and not t.meeting]

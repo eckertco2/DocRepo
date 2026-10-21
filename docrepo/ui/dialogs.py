@@ -1,22 +1,19 @@
-"""Small forms the browse tool opens: a person, a label, a task's title and description, and a task's labels."""
+"""Small forms the browse tool opens: a person and a label. A task's fields are edited in ``task_forms``."""
 from __future__ import annotations
 
 from collections.abc import Callable
 
 from PySide6.QtWidgets import (
-    QCheckBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
     QLabel,
     QLineEdit,
-    QPlainTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
 from docrepo.ui.style import STYLE
-from docrepo.ui.widgets import Chip, ChipPicker, Option
 
 
 def split_list(text: str) -> list[str]:
@@ -108,39 +105,3 @@ class LabelDialog(_Form):
         name = self.name.text().strip()
         return name, split_list(self.keywords.text()) or [name]
 
-
-class TaskTextDialog(_Form):
-    """A task's title and description, to fix a mistake. Both changes go into its status log."""
-
-    def __init__(self, parent: QWidget | None, title: str, description: str) -> None:
-        super().__init__(parent, "Title and description", "Fixes a task's title or description. Each change goes into its status log.")
-        self.title = QLineEdit(title)
-        self.description = QPlainTextEdit(description)
-        self.description.setMinimumHeight(140)
-        self.form.addRow("Title", self.title)
-        self.form.addRow("Description", self.description)
-        self.check = lambda: None if self.title.text().strip() else "A task needs a title."
-
-    def values(self) -> tuple[str, str]:
-        return self.title.text().strip(), self.description.toPlainText().strip()
-
-
-class TaskLabelsDialog(_Form):
-    """A task's own labels, and whether it inherits its parents'."""
-
-    def __init__(self, parent: QWidget | None, options: Callable[[str, list[str]], list[Option]], labels: list[str], inherit: bool,
-                 inherited: list[str]) -> None:
-        super().__init__(parent, "Labels", "A task's own labels come first, then its parents', unless it doesn't inherit them.")
-        self.labels = ChipPicker(options, "Search or add", "Create label “{}”")
-        self.labels.set_chips([Chip(name, name) for name in labels])
-        self.inherit = QCheckBox("Inherit parent labels")
-        self.inherit.setChecked(inherit)
-        self.form.addRow("Labels", self.labels)
-        self.form.addRow("", self.inherit)
-        if inherited:
-            self.form.addRow("", QLabel("Its parents have: " + ", ".join(inherited), objectName="hint"))
-
-    def values(self) -> tuple[list[str], list[str], bool]:
-        """(labels, new labels to create, inherit)."""
-        chips = self.labels.chips()
-        return [c.value for c in chips], [c.value for c in chips if c.new], self.inherit.isChecked()

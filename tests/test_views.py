@@ -106,7 +106,7 @@ def test_documents_in_tree_form(m):
 
 def test_view_counts(m):
     assert views.view_counts(m, TODAY, "P001") == {"unfiled": 3, "tasks": 13, "people": 6, "labels": 5, "docs": 4, "due": 2, "reminders": 3,
-                                                   "waiting": 8, "mine": 3, "urgent": 1, "unplanned": 3}
+                                                   "waiting": 8, "mine": 3, "urgent": 1, "unplanned": 3, "discarded": 0, "today": 0}
 
 
 def test_unfiled_rows_newest_first(m):

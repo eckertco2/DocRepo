@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QWidgetItem,
 )
 
+from docrepo.model import Model
 from docrepo.ui.help_text import HELP
 
 
@@ -247,6 +248,24 @@ class Chip:
     label: str
     new: bool = False
     filled: bool = False
+
+
+def label_options(model: Model, text: str, picked: list[str]) -> list[Option]:
+    """The labels a label picker suggests for what's typed: active ones not picked yet, by name."""
+    q = text.strip().lower()
+    return [Option(lb.name, lb.name, ", ".join(lb.keywords)) for lb in model.active_labels()
+            if lb.name not in picked and (not q or q in lb.name.lower())][:7]
+
+
+def people_options(model: Model, me: str | None, text: str, picked: list[str]) -> list[Option]:
+    """The people a people picker suggests for what's typed: active ones not picked yet, by name or alias."""
+    q = text.strip().lower()
+    out = []
+    for p in model.active_people():
+        names = [p.name, *p.aliases]
+        if p.id not in picked and (not q or any(q in n.lower() for n in names)):
+            out.append(Option(p.id, p.name + (" (me)" if p.id == me else ""), ", ".join(p.aliases)))
+    return out[:7]
 
 
 class ChipPicker(QWidget):

@@ -1,4 +1,4 @@
-"""Changes made in the browse tool: filing a capture, fixing one, clearing a reminder and closing an agenda item.
+"""Changes made in the browse tool: filing a capture, fixing one, clearing a reminder, closing an agenda item and editing a task.
 
 Each change happens in one database transaction, then its files are written:
 the capture's capture.md, any saved copies, the search index and the generated
@@ -15,13 +15,14 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from docrepo import agenda, captures, search, tasks
+from docrepo import agenda, bulk, captures, people, search, tasks
 from docrepo.config import Settings
 from docrepo.dates import stamp
 from docrepo.db import transaction
-from docrepo.model import Model
+from docrepo.model import TODAY, Model
 from docrepo.pages import write_pages
 from docrepo.safe_fs import SafeFS
+from docrepo.schedule import start_of
 from docrepo.text import capture_title
 
 log = logging.getLogger(__name__)
@@ -200,11 +201,159 @@ def close_agenda_item(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, ite
     return out
 
 
+def add_to_today(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, subject: str | None, note: str, at: datetime) -> Outcome:
+    """Put a task, or a note, on Today (mods log round 1, M0016). A task already there stays as it is."""
+    m = Model(conn)
+    if subject and any(a.subject == subject for a in m.today_items()):
+        return Outcome(f"{m.task(subject).title} is on Today already.")
+    agenda.add_item(conn, subject=subject, target=TODAY, note=" ".join(note.split()), added=stamp(at), added_by=BROWSE)
+    out = Outcome(f"{m.task(subject).title} is on Today. Its status log says so." if subject else "Note added to Today.")
+    write_all_pages(conn, data_root, fs, at, out.problems)
+    log.info("added to Today: %s", subject or "a note")
+    return out
+
+
+def close_today_item(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, item_id: int, how: str, at: datetime) -> Outcome:
+    """Mark a Today item Done, or take it off Today. Its task stays as it is."""
+    agenda.close_item(conn, item_id, how=how, closed=stamp(at), closed_by="Today")
+    m = Model(conn)
+    a = next(x for x in m.agenda if x.id == item_id)
+    what = m.task(a.subject).title if a.subject else "The note"
+    out = Outcome(f"{what}: {'done' if how == 'Done' else 'taken off Today'}." + (" Its status log says so." if a.subject else ""))
+    write_all_pages(conn, data_root, fs, at, out.problems)
+    log.info("Today item %d closed as %s", item_id, how)
+    return out
+
+
 def change_task(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, task_id: str, at: datetime, **changes) -> Outcome:
     """Change a task's fields from the browse tool, such as its title, description or labels."""
     logged = tasks.update_task(conn, settings, task_id, at=at, via=BROWSE, **changes)
     out = Outcome(f"{len(logged)} change{'s' if len(logged) != 1 else ''} in the status log." if logged else "Nothing changed.")
     write_all_pages(conn, data_root, fs, at, out.problems)
+    return out
+
+
+def edit_task(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, task_id: str, at: datetime, **values) -> Outcome:
+    """Save the Edit task form (mods log round 1, M0008, M0011): every field on one page, in one transaction.
+
+    Only the fields that differ change, each logged as "Browse tool". ``leads`` and ``assignees`` are Who's: someone not on
+    the people list is added to it, and a label not there yet is created. A Start left at the day the task was created
+    stays unset.
+    """
+    added: list[str] = []
+    with transaction(conn):
+        t = tasks.get_task(conn, task_id)
+        if values.get("start") == start_of(t).isoformat() and not t.start:
+            values.pop("start")
+        for name in values.get("labels", ()):
+            if conn.execute("SELECT 1 FROM labels WHERE name = ?", (name.strip(),)).fetchone() is None:
+                people.add_label(conn, name)
+        note = f"Added on {at.date().isoformat()} in the browse tool. Aliases and hours aren't set yet."
+        for key in ("leads", "assignees"):
+            if key in values:
+                ids = []
+                for w in values[key]:
+                    if w.id:
+                        ids.append(w.id)
+                        continue
+                    person_id, new = people.find_or_add(conn, w.name, note)
+                    if new:
+                        added.append(w.name.strip())
+                    ids.append(person_id)
+                values[key] = ids
+        logged = tasks.update_task(conn, settings, task_id, at=at, via=BROWSE, **values)
+    message = f"{len(logged)} change{'s' if len(logged) != 1 else ''} in the status log." if logged else "Nothing changed."
+    if added:
+        message += f" Added {', '.join(added)} to the people list."
+    out = Outcome(message)
+    write_all_pages(conn, data_root, fs, at, out.problems)
+    log.info("task %s edited in the browse tool: %d changes", task_id, len(logged))
+    return out
+
+
+def bulk_edit(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, task_ids: list[str], edit: bulk.BulkEdit,
+              at: datetime) -> Outcome:
+    """Edit selected (mods log round 1, M0009): the same change on several tasks, in one transaction."""
+    outcomes = bulk.run(conn, settings, task_ids, edit, at, BROWSE)
+    out = Outcome(bulk.summary(outcomes, done=True))
+    write_all_pages(conn, data_root, fs, at, out.problems)
+    log.info("edit selected: %d tasks, %d changes", len(outcomes), sum(len(o.changes) for o in outcomes))
+    return out
+
+
+# ---- discarding (mods log round 1, M0021) ----
+#: The reason given when none is typed.
+DISCARD_REASON = "Made by mistake"
+
+
+def discard_task(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, task_id: str, reason: str, at: datetime) -> Outcome:
+    """Discard a task made by mistake. It's hidden from the task tree, the lists, the pickers, search and the capacity
+    calendar, and kept in the Discarded view; nothing is deleted. A task with subtasks that aren't discarded, or with open
+    items on its own agenda, has to lose them first. It comes off the agendas it's on, as Removed."""
+    reason = " ".join(reason.split()) or DISCARD_REASON
+    with transaction(conn):
+        m = Model(conn)
+        t = m.tasks.get(task_id)
+        if t is None:
+            raise EditError(f"There's no task {task_id}.")
+        if any(not m.task(k).discarded for k in m.children_of(task_id)):
+            raise EditError(f"{t.title} has subtasks. Move them somewhere else, or discard them first.")
+        if m.open_items_for(task_id):
+            raise EditError(f"{t.title}'s agenda has open items. Mark them Discussed or Remove them first.")
+        removed = m.agendas_on(task_id)
+        for a in removed:
+            agenda.close_item(conn, a.id, how="Removed", closed=stamp(at), closed_by=BROWSE)
+        tasks.set_discarded(conn, settings, task_id, reason, at=at, via=BROWSE)
+    off = f" It's off {len(removed)} agenda{'s' if len(removed) > 1 else ''}." if removed else ""
+    out = Outcome(f"Discarded {t.title}.{off} It's in the Discarded view, where Bring back restores it.")
+    write_all_pages(conn, data_root, fs, at, out.problems)
+    log.info("task %s discarded", task_id)
+    return out
+
+
+def bring_back_task(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, task_id: str, at: datetime) -> Outcome:
+    """Bring a discarded task back, as it was. One whose parents are all discarded waits until one of them is back."""
+    m = Model(conn)
+    t = m.tasks.get(task_id)
+    if t is None:
+        raise EditError(f"There's no task {task_id}.")
+    parents = m.parents_of(task_id)
+    if parents and all(m.task(p).discarded for p in parents):
+        raise EditError(f"{t.title}'s parent is discarded too. Bring {m.task(parents[0]).title} back first.")
+    tasks.set_discarded(conn, settings, task_id, None, at=at, via=BROWSE)
+    out = Outcome(f"Brought back {t.title}.")
+    write_all_pages(conn, data_root, fs, at, out.problems)
+    log.info("task %s brought back", task_id)
+    return out
+
+
+def discard_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, capture_id: str, reason: str, at: datetime) -> Outcome:
+    """Discard a capture saved by mistake. It leaves its tasks' raw text logs, summaries and files, the Unfiled view and
+    search, and is kept in the Discarded view. Its folder and capture.md stay as they are, and changes it made to tasks
+    stay in their status logs."""
+    c = Model(conn).captures.get(capture_id)
+    if c is None:
+        raise EditError(f"There's no capture {capture_id}.")
+    if c.discarded:
+        raise EditError(f"{capture_id} is already discarded.")
+    with transaction(conn):
+        conn.execute("UPDATE captures SET discarded = ?, discard_reason = ? WHERE id = ?",
+                     (stamp(at), " ".join(reason.split()) or DISCARD_REASON, capture_id))
+    out = Outcome(f"Discarded {capture_id}. Its folder stays; it's in the Discarded view, where Bring back restores it.")
+    write_all_pages(conn, data_root, fs, at, out.problems)
+    log.info("capture %s discarded", capture_id)
+    return out
+
+
+def bring_back_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, capture_id: str, at: datetime) -> Outcome:
+    c = Model(conn).captures.get(capture_id)
+    if c is None or not c.discarded:
+        raise EditError(f"{capture_id} isn't discarded.")
+    with transaction(conn):
+        conn.execute("UPDATE captures SET discarded = NULL, discard_reason = NULL WHERE id = ?", (capture_id,))
+    out = Outcome(f"Brought back {capture_id}.")
+    write_all_pages(conn, data_root, fs, at, out.problems)
+    log.info("capture %s brought back", capture_id)
     return out
 
 

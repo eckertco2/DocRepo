@@ -25,7 +25,7 @@ from docrepo.config import Settings
 from docrepo.dates import stamp
 from docrepo.db import next_id, transaction
 from docrepo.extract import extract_text, file_info
-from docrepo.model import Model
+from docrepo.model import TODAY, Model
 from docrepo.pages import write_pages
 from docrepo.parse import ParseLabel, ParsePerson, Who, parse_capture
 from docrepo.safe_fs import SafeFS
@@ -216,12 +216,11 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
         def person(w: Who) -> str:
             if w.id:
                 return w.id
-            row = conn.execute("SELECT id FROM people WHERE lower(name) = lower(?)", (w.name.strip(),)).fetchone()
-            if row:
-                return str(row["id"])
             note = f"Added on {day} {'from ' + capture_id if capture_id else 'in the capture window'}. Aliases and hours aren't set yet."
-            added_people.append(w.name.strip())
-            return people.add_person(conn, w.name, added_note=note)
+            person_id, new = people.find_or_add(conn, w.name, note)
+            if new:
+                added_people.append(w.name.strip())
+            return person_id
 
         if is_new:
             nt = draft.new_task
@@ -411,7 +410,8 @@ def _message(conn: sqlite3.Connection, draft: CaptureDraft, r: SaveResult, targe
     if "note" in draft.types and not r.created_task and not r.updated_task:
         bits.append(f"Added to the raw text log of {t.title}." if t else "" if targets else "Kept as an unfiled capture, listed under Unfiled.")
     if targets:
-        bits.append(f"On the agenda of {_and_list([model.target_name(x) for x in targets])}.")
+        others = [model.target_name(x) for x in targets if x != TODAY]
+        bits.append("On " + " and ".join(["Today"] * (TODAY in targets) + [f"the agenda of {_and_list(others)}"] * bool(others)) + ".")
     text = (f"Saved {r.capture_id}. " if r.capture_id else "") + " ".join(b for b in bits if b)
     if r.added_people:
         text += f" Added {' and '.join(r.added_people)} to people."

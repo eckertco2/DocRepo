@@ -42,6 +42,9 @@ class Task:
     current_status: str
     created: str
     created_by: str
+    #: When it was discarded, and why (mods log round 1, M0021). A discarded task is hidden, never deleted.
+    discarded: str | None = None
+    discard_reason: str | None = None
     leads: list[str] = field(default_factory=list)
     assignees: list[str] = field(default_factory=list)
     labels: list[str] = field(default_factory=list)
@@ -86,6 +89,9 @@ class Capture:
     summary: str | None
     summary_type: str | None
     edited: str | None
+    #: When it was discarded, and why. A discarded capture leaves its task's logs, the views and search; its folder stays.
+    discarded: str | None = None
+    discard_reason: str | None = None
     documents: list[CaptureDocument] = field(default_factory=list)
     attachments: list[str] = field(default_factory=list)
 
@@ -187,6 +193,10 @@ class FileEntry:
     task: str
 
 
+#: Today (mods log round 1, M0016): the built-in agenda target that is the owner's list for the day.
+TODAY = "today"
+
+
 def is_person(item_id: str | None) -> bool:
     return bool(item_id and re.match(r"P\d", item_id))
 
@@ -197,7 +207,7 @@ def _unique(items: Iterable[str]) -> list[str]:
 
 _TASK_COLUMNS = (
     "id, title, state, closed, urgent, meeting, recurrence, repeat_until, start, due, deadline, deadline_desc, reminder, "
-    "lead_hours, assignee_hours, inherit_labels, description, current_status, created, created_by"
+    "lead_hours, assignee_hours, inherit_labels, description, current_status, created, created_by, discarded, discard_reason"
 )
 
 
@@ -274,7 +284,9 @@ class Model:
         return p.name if p else person_id
 
     def target_name(self, target: str) -> str:
-        """An agenda target's name: a person's name or a task's title."""
+        """An agenda target's name: Today, a person's name or a task's title."""
+        if target == TODAY:
+            return "Today"
         if is_person(target):
             return self.person_name(target)
         return self.tasks[target].title if target in self.tasks else target
@@ -356,20 +368,36 @@ class Model:
         return _unique(out)
 
     def is_unfiled(self, c: Capture) -> bool:
-        """No task, and no agenda item: it waits in the Unfiled view."""
-        return not self.capture_tasks(c) and not any(a.added_by == c.id for a in self.agenda)
+        """No task, and no agenda item: it waits in the Unfiled view. A discarded capture doesn't."""
+        return not c.discarded and not self.capture_tasks(c) and not any(a.added_by == c.id for a in self.agenda)
 
     def unfiled_captures(self) -> list[Capture]:
         return [c for c in self.captures.values() if self.is_unfiled(c)]
 
+    def live_captures(self) -> list[Capture]:
+        """Every capture that isn't discarded."""
+        return [c for c in self.captures.values() if not c.discarded]
+
     def notes_of(self, task_id: str) -> list[Capture]:
-        return [c for c in self.captures.values() if task_id in self.capture_tasks(c)]
+        return [c for c in self.live_captures() if task_id in self.capture_tasks(c)]
+
+    # ---- discarded tasks and captures (mods log round 1, M0021) ----
+    def discarded_tasks(self) -> list[Task]:
+        return [t for t in self.tasks.values() if t.discarded]
+
+    def discarded_captures(self) -> list[Capture]:
+        return [c for c in self.captures.values() if c.discarded]
+
+    def only_in_discarded(self, document_id: str) -> bool:
+        """True for a document that came in only with discarded captures, and has no saved copy."""
+        holding = [c for c in self.captures.values() if document_id in c.document_ids]
+        return bool(holding) and all(c.discarded for c in holding) and not any(f.document == document_id for f in self.copies)
 
     def document_holders(self, document_id: str) -> list[str]:
         """The tasks a document belongs to: those of the captures it came in with, and those it has saved copies in."""
         if self._holders is None:
             holders: dict[str, list[str]] = {}
-            for c in self.captures.values():
+            for c in self.live_captures():
                 for d in c.document_ids:
                     holders.setdefault(d, []).extend(self.capture_tasks(c))
             for f in self.copies:
@@ -389,7 +417,7 @@ class Model:
     def summaries_of(self, task_id: str) -> list[Summary]:
         """The task's summary log, oldest first: pasted summaries from its captures and its documents' versions."""
         out = [Summary(task_id, c.saved, c.summary_type, c.summary, c.id)
-               for c in self.captures.values() if c.summary and task_id in self.capture_tasks(c)]
+               for c in self.live_captures() if c.summary and task_id in self.capture_tasks(c)]
         out += [Summary(task_id, v.at, v.summary_type, v.summary, v.document) for v in self.versions_of(task_id) if v.summary]
         return sorted(out, key=lambda s: s.at)
 
@@ -426,16 +454,26 @@ class Model:
         return [t for t in self.tasks.values() if t.meeting and is_open(t)]
 
     def agenda_targets(self) -> list[str]:
-        """Open meetings first, then any other task or person with open items."""
+        """Open meetings first, then any other task or person with open items. Today has a view of its own."""
         out = [t.id for t in self.open_meetings()]
         for a in self.agenda:
-            if not a.closed and a.target not in out:
+            if not a.closed and a.target != TODAY and a.target not in out:
                 out.append(a.target)
         return out
 
+    # ---- Today (mods log round 1, M0016) ----
+    def today_items(self) -> list[AgendaItem]:
+        """Today's open items, the oldest first: they carry over until they're closed."""
+        return sorted(self.open_items_for(TODAY), key=lambda a: a.added)
+
+    def done_on(self, day: date) -> list[AgendaItem]:
+        """Today's items marked Done on ``day``, the latest first."""
+        done = [a for a in self.agenda if a.target == TODAY and a.how == "Done" and (a.closed or "")[:10] == day.isoformat()]
+        return sorted(done, key=lambda a: a.closed or "", reverse=True)
+
     def meeting_when(self, target: str, today: date) -> str:
-        """When a task target next happens, such as "Tue 13 Oct"; "" for a person."""
-        if is_person(target):
+        """When a task target next happens, such as "Tue 13 Oct"; "" for a person or Today."""
+        if is_person(target) or target == TODAY:
             return ""
         due = due_of(self.tasks[target], today)
         return long_date(due.date, today) if due else "no date set"

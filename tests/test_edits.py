@@ -156,6 +156,37 @@ def test_labels_and_inheriting(sample_root):
     assert [(e.field, e.to_value) for e in m.status_log_of("T000012")][-2:] == [("Labels", "Safety"), ("Inherit parent labels", "No")]
 
 
+def form_values(t) -> dict:
+    """The Edit task form's values for a task, as it opens."""
+    from docrepo.parse import Who
+    from docrepo.schedule import start_of
+
+    return dict(title=t.title, description=t.description, state=t.state, current_status=t.current_status, labels=list(t.labels),
+                inherit_labels=t.inherit_labels, leads=[Who(p) for p in t.leads], assignees=[Who(p) for p in t.assignees],
+                lead_hours=t.lead_hours, assignee_hours=t.assignee_hours, start=start_of(t).isoformat(), due=t.due, deadline=t.deadline,
+                deadline_desc=t.deadline_desc or "", reminder=t.reminder, recurrence=t.recurrence, repeat_until=t.repeat_until,
+                urgent=t.urgent, meeting=t.meeting)
+
+
+def test_the_edit_task_form_changes_only_what_differs(sample_root):
+    """Mods log round 1 (M0008, M0011): every field on one page, each change logged as Browse tool."""
+    from docrepo.parse import Who
+
+    conn, root, fs = sample_root
+    t = Model(conn).task("T000016")
+    assert edits.edit_task(conn, root, fs, SETTINGS, "T000016", AT, **form_values(t)).message == "Nothing changed."
+    values = form_values(t) | {"state": "In progress", "leads": [Who(name="Dana Kim")], "labels": ["Safety", "Holidays"]}
+    out = edits.edit_task(conn, root, fs, SETTINGS, "T000016", AT, **values)
+    assert out.message == "3 changes in the status log. Added Dana Kim to the people list." and not out.problems
+    m = Model(conn)
+    after, dana = m.task("T000016"), next(p for p in m.people.values() if p.name == "Dana Kim")
+    assert (after.state, after.leads, after.labels, after.start) == ("In progress", [dana.id], ["Safety", "Holidays"], None)
+    assert "in the browse tool" in dana.added_note and any(lb.name == "Holidays" for lb in m.labels)
+    assert [(e.field, e.via) for e in m.status if e.task == "T000016"] == [("State", "Browse tool"), ("Lead", "Browse tool"), ("Labels", "Browse tool")]
+    with pytest.raises(tasks.TaskError, match="needs a title"):
+        edits.edit_task(conn, root, fs, SETTINGS, "T000016", AT, **(values | {"title": " "}))
+
+
 def test_moving_a_task_in_the_tree(sample_root):
     conn, root, fs = sample_root
     out = edits.move_task(conn, root, fs, "T000012", "T000008", "T000001", AT)

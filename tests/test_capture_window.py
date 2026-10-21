@@ -189,6 +189,18 @@ def test_a_note_on_an_agenda(window, ctx):
     assert Model(ctx.conn).agenda[-1].note == "Ask about the holiday rota."
 
 
+def test_a_note_on_today(window, ctx):
+    """Mods log round 1 (M0016): Today comes first under Add to agenda."""
+    window.show_capture()
+    assert window._agenda_options("", [])[0].value == "today"
+    window.content.setPlainText("Sign the overtime sheets.")
+    window.agenda.add(Chip("today", "Today"))
+    window.agenda.add(Chip("T000010", "Business team meeting"))
+    assert window.does.text() == "Save puts this note on <b>Today</b> and the agenda of <b>Business team meeting</b>."
+    window.save()
+    assert [(a.target, a.note) for a in Model(ctx.conn).agenda[-2:]] == [("today", "Sign the overtime sheets."), ("T000010", "Sign the overtime sheets.")]
+
+
 def test_copy_prompt(window, ctx):
     window.set_task("T000008")
     window.content.setPlainText("Rev 2 of the procedure arrived.")

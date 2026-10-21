@@ -38,6 +38,8 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Agenda item**: a temporary link that puts a task, or a note with no task, on the agenda of a meeting, another task or a person. It's added with the capture window's Add to agenda option and stays open until it's closed by hand.
 - **Agenda target**: the meeting, task or person whose agenda an item is on.
 - **Agenda**: the open agenda items of one agenda target.
+- **Today**: the built-in agenda target that is the owner's to-do list for the day. Its items carry over until they're marked Done.
+- **Discard**: hiding a task or capture made by mistake, with a reason. Nothing is deleted, and Bring back restores it. It's how DocRepo "deletes" anything.
 - **Scope**: which tasks a view or prompt draws on: this task, with ancestors, with subtasks, or family. Family is all ancestors plus all descendants.
 - **Event**: a dated happening, such as an audit or a turnaround, entered as a task's Deadline. "Event" means nothing else.
 

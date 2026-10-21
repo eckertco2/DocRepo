@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from datetime import date
 
 from docrepo.dates import long_date, short, to_date
-from docrepo.model import Capture, Model, StatusEntry, Version, is_person
+from docrepo.model import TODAY, Capture, Model, StatusEntry, Version, is_person
 from docrepo.text import plain_text, sentences
 
 #: A capture's content text, by its ID ("" when its capture.md can't be read).
@@ -149,6 +149,8 @@ class Stories:
             return len(xs) > 1 or self._is_me(xs[0])
 
         if f == "Agenda":
+            if e.target == TODAY:  # mods log round 1, M0016
+                return "Added to Today." if is_none(before) else "Done for today." if after == "Done" else "Taken off Today."
             person = is_person(e.target)
             name = self.m.person_name(e.target) if person else after if is_none(before) else before
             if is_none(before):
@@ -199,6 +201,8 @@ class Stories:
                                         rm and f"Label{'s' if len(rm) > 1 else ''} {and_list(rm)} removed.") if x)
         if f == "Inherit parent labels":
             return "Inherits its parents' labels again." if after == "Yes" else "No longer inherits its parents' labels."
+        if f == "Discarded":  # mods log round 1, M0021: the value is the reason
+            return "Brought back." if is_none(after) else f"Discarded: {(after or '').rstrip('.')}."
         return f"{f}: {'cleared' if is_none(after) else after}."
 
     # ---- the status log, as updates ----

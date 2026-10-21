@@ -13,7 +13,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from docrepo.dates import day_diff, days_text, minutes, to_date
-from docrepo.model import TYPE_NAMES, Capture, FileEntry, Model, StatusEntry, Task, is_person
+from docrepo.model import TODAY, TYPE_NAMES, Capture, FileEntry, Model, StatusEntry, Task, is_person
 from docrepo.safe_fs import SafeFS
 from docrepo.schedule import due_of, is_open, start_of
 
@@ -92,6 +92,8 @@ class Pages:
 
         out = [f"# {t.title}", "", f"{_GENERATED}{self.generated}. Don't edit: DocRepo rewrites this page. Change the task in the browse tool.", ""]
         rows = [("ID", t.id), ("State", t.state + (f" ({t.closed})" if t.closed else ""))]
+        if t.discarded:
+            rows.append(("Discarded", f"{t.discarded[:10]}: {t.discard_reason}" if t.discard_reason else t.discarded[:10]))
         if t.urgent:
             rows.append(("Urgent", "Yes"))
         if t.meeting:
@@ -142,6 +144,8 @@ class Pages:
         return "\n".join(out)
 
     def _target(self, here: list[str], target: str) -> str:
+        if target == TODAY:
+            return "Today"
         return self.m.person_name(target) if is_person(target) else self._task_link(here, target)
 
     def _agenda_text(self, here: list[str], subject: str | None, note: str) -> str:
@@ -198,10 +202,15 @@ class Pages:
         for t in m.top_level():
             if is_open(t):
                 add(t.id, 0, None)
-        out += ["", "## Parked", "", *[f"- {link(t.id)} · {t.id}" for t in m.tasks.values() if t.state == "Parked"]]
-        recent = [t for t in m.tasks.values() if t.closed and day_diff(to_date(t.closed), self.today) <= 30]
+        out += ["", "## Parked", "", *[f"- {link(t.id)} · {t.id}" for t in m.tasks.values() if t.state == "Parked" and not t.discarded]]
+        recent = [t for t in m.tasks.values() if t.closed and not t.discarded and day_diff(to_date(t.closed), self.today) <= 30]
         out += ["", "## Closed in the last 30 days", "", *[f"- {link(t.id)} · {t.id} · closed {t.closed}" for t in recent]]
         out += ["", "## Agendas", ""]
+        # Today (mods log round 1, M0016) comes first, with the day an item was added when it carried over.
+        today_items = m.today_items()
+        if today_items:
+            out += ["### Today", "", *[f"- {self._agenda_text([], a.subject, a.note)}" + (f" · since {a.added[:10]}" if a.added[:10] < self.today.isoformat() else "")
+                                      for a in today_items], ""]
         for target in m.agenda_targets():
             items = m.open_items_for(target)
             if not items:

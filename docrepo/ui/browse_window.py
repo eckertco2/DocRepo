@@ -25,7 +25,9 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QComboBox,
+    QDialog,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QMenu,
@@ -43,24 +45,25 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo import capacity, db, edits, people, prompts, search
+from docrepo import bulk, capacity, db, edits, people, prompts, search
 from docrepo.agenda import AgendaError
 from docrepo.captures import capture_folder, capture_md_path
 from docrepo.dates import long_date, short
 from docrepo.detail import CSS, PageState, Pages, chip, esc, state_chip
-from docrepo.model import Model, is_person
+from docrepo.model import TODAY, Model, is_person
 from docrepo.people import PeopleError
 from docrepo.safe_fs import WriteRefused
 from docrepo.save import SaveResult
 from docrepo.schedule import DueDate
 from docrepo.tasks import TaskError
 from docrepo.ui.context import AppContext
-from docrepo.ui.dialogs import LabelDialog, PersonDialog, TaskLabelsDialog, TaskTextDialog
+from docrepo.ui.dialogs import LabelDialog, PersonDialog
 from docrepo.ui.explorer import show_in_explorer
 from docrepo.ui.settings_view import SettingsView
+from docrepo.ui.task_forms import BulkEditDialog, LabelMatchDialog, TaskEditDialog
 from docrepo.ui.task_picker import TaskPicker
 from docrepo.ui.tree_view import GREY, KEY_ROLE, RowTree, tint
-from docrepo.ui.widgets import CheckMenuButton, FlowLayout, Option
+from docrepo.ui.widgets import CheckMenuButton, FlowLayout, Option, label_options, people_options
 from docrepo.views import (
     LIST_IDS,
     SORTS,
@@ -75,6 +78,7 @@ from docrepo.views import (
     closed_items,
     collapse_level,
     current_target,
+    discarded_rows,
     documents_tree,
     due_cell,
     expand_level,
@@ -85,8 +89,10 @@ from docrepo.views import (
     meetings_for_menu,
     open_count,
     path_text,
+    since_text,
     sort_tree,
     task_tree,
+    today_groups,
     unfiled_rows,
     view_counts,
 )
@@ -110,6 +116,8 @@ QPushButton { padding: 3px 9px; }
 QPushButton#primary { background: #1d5e98; color: #ffffff; border: 1px solid #1d5e98; border-radius: 4px; padding: 4px 14px; }
 QPushButton#rowLink { border: none; color: #1d5e98; text-decoration: underline; padding: 0 4px; background: transparent; }
 """
+#: The views with Select mode, where tasks can be ticked for Edit selected.
+SELECT_VIEWS = ("tasks", *LIST_IDS)
 UNFILED_NOTE = ("Unfiled captures: saved without a task. Their folders are already in Captures. Filing one links it in docs.db and sets "
                 "the task in its capture.md; the folder doesn't move.")
 
@@ -128,12 +136,21 @@ class BrowseWindow(QWidget):
         self.reveal: Callable[[Path], bool] = show_in_explorer
         #: Asks a yes-or-no question. Tests replace it.
         self.confirm: Callable[[str, str], bool] = lambda title, text: QMessageBox.question(self, title, text) == QMessageBox.StandardButton.Yes
+        #: Shows a form and waits for it: true when it was saved. Tests replace it.
+        self.run_dialog: Callable[[QDialog], bool] = lambda dialog: bool(dialog.exec())
+        #: Asks why something is discarded: the reason, or None to cancel. Tests replace it.
+        self.ask_reason: Callable[[str, str], str | None] = self._ask_reason
         self.view = "tasks"
         self.sel: tuple[str, str] | None = None
         self.pin: str | None = None
         self.tree_filter = {"parked": False, "closed": False, "routine": True, "labels": [], "people": []}
         #: Each task view's sort order (views.SORTS); "default" is its own order.
         self.sorts: dict[str, str] = {}
+        #: Select mode (mods log round 1, M0009): tick boxes on the task tree's and the lists' rows, for Edit selected.
+        self.selecting = False
+        self.ticked: set[str] = set()
+        #: A task just marked Done on Today: the Today view asks whether to update it too (mods log round 1, M0016).
+        self.today_ask: str | None = None
         self.open: set[str] = set()
         self.doc_task: str | None = None
         self.doc_subs = True
@@ -152,7 +169,7 @@ class BrowseWindow(QWidget):
         self._placed = False
         self._build()
         for keys, handler in (("A", lambda: self._key("note")), ("N", lambda: self._key("new_task")), ("U", lambda: self._key("update")),
-                              ("G", lambda: self._key("agenda")),
+                              ("G", lambda: self._key("agenda")), ("E", lambda: self._key("edit")), ("T", lambda: self._key("today")),
                               ("Ctrl+F", self.search_box.setFocus), ("F5", self.refresh),
                               ("Ctrl+B", lambda: self.show_views_pane(not self.views_button.isChecked()))):
             QShortcut(QKeySequence(keys), self, handler)
@@ -220,6 +237,7 @@ class BrowseWindow(QWidget):
         lp.addWidget(head)
         self.tree = RowTree()
         self.tree.picked.connect(self._row_picked)
+        self.tree.ticked.connect(self._tick)
         self.tree.itemExpanded.connect(lambda item: self._expanded(item, True))
         self.tree.itemCollapsed.connect(lambda item: self._expanded(item, False))
         self.tree.itemDoubleClicked.connect(lambda item, _col: self.reveal_key(item.data(0, KEY_ROLE)))
@@ -495,8 +513,10 @@ class BrowseWindow(QWidget):
         self.middle.setCurrentIndex(0)
         self._clear_filters()
         self.filters.setVisible(True)
-        builder = {"tasks": self._tasks_view, "unfiled": self._unfiled_view, "agenda": self._agenda_view, "people": self._people_view,
-                   "labels": self._labels_view, "docs": self._docs_view, "search": self._search_view}.get(self.view)
+        builder = {"today": self._today_view, "tasks": self._tasks_view, "unfiled": self._unfiled_view, "agenda": self._agenda_view,
+                   "people": self._people_view,
+                   "labels": self._labels_view, "docs": self._docs_view, "search": self._search_view,
+                   "discarded": self._discarded_view}.get(self.view)
         self.tree.begin()
         try:
             if builder:
@@ -540,6 +560,8 @@ class BrowseWindow(QWidget):
             else:
                 cells, tip = row(n) if row else (self._task_cells(n.id, n.depth, filtered and not n.match), full_path(m, n.id))
                 item = self.tree.add_row(parent, ("task", n.id), cells, tint(n.group, n.depth), tip=tip)
+                if self.selecting and n.match and self.view in SELECT_VIEWS:
+                    self.tree.add_tick(item, n.id in self.ticked)
             self._add_nodes(n.children, item, filtered, expand_all, row)
             item.setExpanded(expand_all or n.id in self.open)
 
@@ -560,6 +582,7 @@ class BrowseWindow(QWidget):
         people_button.setToolTip(people_button.toolTip() or "Tasks any of the ticked people lead or are assigned")
         self._filter_widget(people_button)
         self._sort_box("tasks")
+        self._select_controls()
         nodes = task_tree(m, TreeFilter(parked=f["parked"], closed=f["closed"], routine=f["routine"], labels=tuple(f["labels"]),
                                         people=tuple(f["people"]), pin=self.pin))
         nodes = sort_tree(m, nodes, self.sorts.get("tasks", "default"), self.today())
@@ -591,6 +614,63 @@ class BrowseWindow(QWidget):
         self.sorts[view_id] = how
         self.render_list()
 
+    # ---- Select mode and Edit selected (mods log round 1, M0009) ----
+    def _select_controls(self) -> None:
+        self._check("Select", self.selecting, self.set_selecting, "Tick tasks in this list, then Edit selected changes them all at once")
+        if not self.selecting:
+            return
+        self._button("Select all shown", lambda: self.tick_shown(True), tip="Tick every task you can see in the list")
+        self.clear_ticks_button = self._button("Clear", lambda: self.tick_shown(False), tip="Untick them all")
+        self.edit_selected_button = self._button("", self.edit_selected, tip="Change the ticked tasks, after a preview")
+        self._sync_edit_selected()
+
+    def set_selecting(self, on: bool) -> None:
+        self.selecting = on
+        if not on:
+            self.ticked.clear()
+        self.render_list()
+
+    def _tick(self, key, on: bool) -> None:
+        if key[0] == "task":
+            (self.ticked.add if on else self.ticked.discard)(key[1])
+            self._sync_edit_selected()
+
+    def _sync_edit_selected(self) -> None:
+        n = len(self.ticked)
+        b = getattr(self, "edit_selected_button", None)
+        if b is not None and b.parent() is not None:
+            b.setText(f"Edit selected ({n})…" if n else "Edit selected…")
+            b.setEnabled(n > 0)
+        clear = getattr(self, "clear_ticks_button", None)
+        if clear is not None and clear.parent() is not None:
+            clear.setEnabled(n > 0)
+
+    def tick_shown(self, on: bool) -> None:
+        """Select all shown, or Clear: every task row you can see, not those under a collapsed task."""
+        if on:
+            self.ticked |= {item.data(0, KEY_ROLE)[1] for item in self.tree.items()
+                            if item.data(0, Qt.ItemDataRole.CheckStateRole) is not None and self.tree.is_shown(item)}
+        else:
+            self.ticked.clear()
+        self.render_list()
+
+    def ticked_in_order(self) -> list[str]:
+        """The ticked tasks, as the list shows them."""
+        shown = [k[1] for k in self.tree.keys() if k and k[0] == "task" and k[1] in self.ticked]
+        return list(dict.fromkeys(shown + sorted(self.ticked - set(shown))))
+
+    def edit_selected(self) -> None:
+        ids = self.ticked_in_order()
+        if not ids:
+            self.say("Tick some tasks first.", error=True)
+            return
+        dialog = BulkEditDialog(self, self.model(), ids, self._label_options, self._people_options,
+                                lambda e: bulk.preview(self.conn, self.ctx.settings, ids, e, self._now(), edits.BROWSE),
+                                lambda anchor, picked: self._pick_task(anchor, picked, ("None", "Leave them where they are")))
+        if self.run_dialog(dialog):
+            edit = dialog.edit()
+            self._do(lambda: edits.bulk_edit(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, ids, edit, self._now()))
+
     def _level(self, nodes: list[Node], direction: str) -> None:
         self.open = collapse_level(nodes, self.open) if direction == "collapse" else expand_level(nodes, self.open)
         self.render_list()
@@ -609,6 +689,7 @@ class BrowseWindow(QWidget):
         self.tree.set_columns(["Title", "State", "Reminder" if reminders else "Due", ""] if reminders else ["Title", "State", "Due"],
                               [0, 96, 96, 56] if reminders else None)
         self._sort_box(view_id)
+        self._select_controls()
         nodes = sort_tree(m, list_tree(m, task_list, self.today(), self.ctx.settings.me), self.sorts.get(view_id, "default"), self.today())
 
         def row(n: Node) -> tuple[list[str], str]:
@@ -646,6 +727,75 @@ class BrowseWindow(QWidget):
         if not rows:
             self.tree.add_row(None, None, ['<span class="sub">No unfiled captures.</span>'], selectable=False, span=True)
 
+    def _today_view(self) -> None:
+        """Today (mods log round 1, M0016): the day's list, items carried over first, then what's been done today."""
+        m, today = self.model(), self.today()
+        self._set_head("Today", VIEW_IDS["today"].note)
+        self.today_note = QLineEdit()
+        self.today_note.setPlaceholderText("Add a note to Today, such as Call Tom about the coupling")
+        self.today_note.setMinimumWidth(320)
+        self.today_note.returnPressed.connect(self.add_today_note)
+        self._filter_widget(self.today_note)
+        self._button("Add", self.add_today_note)
+        asked = m.tasks.get(self.today_ask) if self.today_ask else None
+        if asked:
+            self._filter_widget(QLabel(f"<b>{esc(asked.title)}</b> is done for today. Update the task too?"))
+            self._button("Update…", lambda: self.answer_today("update"))
+            self._button("Close the task…", lambda: self.answer_today("close"))
+            self._button("No", lambda: self.answer_today(None))
+        self.tree.set_columns(["Item", "State", "Due", ""], [0, 96, 96, 120])
+        grey = QColor(GREY).lighter(135)
+        for name, items in today_groups(m, today):
+            self.tree.add_row(None, None, [f"<b>{esc(name)}</b>"], grey, selectable=False, span=True)
+            for a in items:
+                t = m.tasks.get(a.subject) if a.subject else None
+                key = ("task", t.id) if t else ("capture", a.added_by) if a.added_by in m.captures else None
+                since = chip(f"since {since_text(a.added, today)}", "st-ns") + " " if a.added[:10] < today.isoformat() else ""
+                where = esc(path_text(m, t.id) or "Top-level task") if t else "A note"
+                note = f" · {esc(a.note)}" if t and a.note else ""
+                cell = due_cell(t, today) if t else None
+                colour = {"over": "color:#b0261e; font-weight:600", "soon": "color:#875700; font-weight:600"}.get(cell.cls if cell else "", "")
+                item = self.tree.add_row(None, key, [f'{esc(t.title if t else a.note)}<br><span class="sub">{since}{where}{note}</span>',
+                                                     state_chip(t.state) if t else chip("Note", "st-ns"),
+                                                     f'<p align="right" style="{colour}">{esc(cell.text)}</p>' if cell else ""],
+                                         tip=f"Added {long_date(date.fromisoformat(a.added[:10]), today)}")
+                self.tree.setItemWidget(item, 3, self._today_buttons(a.id))
+        done = m.done_on(today)
+        if done:
+            self.tree.add_row(None, None, ["<b>Done today</b>"], grey, selectable=False, span=True)
+            for a in done:
+                t = m.tasks.get(a.subject) if a.subject else None
+                self.tree.add_row(None, ("task", t.id) if t else None,
+                                  [f'<s><span style="color:#87919c">{esc(t.title if t else a.note)}</span></s><br>'
+                                   f'<span class="sub">Done at {esc((a.closed or "")[11:16])}</span>',
+                                   state_chip(t.state) if t else chip("Note", "st-ns"), ""])
+        if not m.today_items():
+            self.tree.add_row(None, None, ['<span class="sub">Nothing on Today. Select a task and press T, or type a note above.</span>'],
+                              selectable=False, span=True)
+
+    def _today_buttons(self, item_id: int) -> QWidget:
+        box = QWidget()
+        lay = QHBoxLayout(box)
+        lay.setContentsMargins(0, 0, 0, 0)
+        for label, how, tip in (("Done", "Done", "Take it off Today as done"), ("Remove", "Removed", "Take it off Today")):
+            b = QPushButton(label, objectName="rowLink")
+            b.setToolTip(tip)
+            b.clicked.connect(lambda _=False, h=how: self.close_today_item(item_id, h))
+            lay.addWidget(b)
+        lay.addStretch()
+        return box
+
+    def _discarded_view(self) -> None:
+        """Tasks and captures discarded as made by mistake (mods log round 1, M0021), the latest first."""
+        self._set_head("Discarded", VIEW_IDS["discarded"].note)
+        self.tree.set_columns(["Item", "Why", "Discarded"], [0, 180, 80])
+        rows = discarded_rows(self.model(), self.today())
+        for r in rows:
+            self.tree.add_row(None, (r.kind, r.id), [f'{esc(r.title)}<br><span class="sub">{esc(r.sub)}</span>', esc(r.reason),
+                                                      f'<p align="right">{esc(r.when)}</p>'])
+        if not rows:
+            self.tree.add_row(None, None, ['<span class="sub">Nothing is discarded.</span>'], selectable=False, span=True)
+
     def _agenda_view(self) -> None:
         m = self.model()
         target = current_target(m, self.target)
@@ -660,7 +810,7 @@ class BrowseWindow(QWidget):
         self._set_head("Agendas", "Open agenda items, grouped by the work they're about. Each stays open, carrying over, until you mark it "
                                   f"Discussed or Remove it.{when_text}")
         pick = QComboBox()
-        for x in m.agenda_targets():
+        for x in [TODAY, *m.agenda_targets()]:  # Today first; picking it opens the Today view
             pick.addItem(m.target_name(x) + (" (person)" if is_person(x) else ""), x)
         pick.setCurrentIndex(max(0, pick.findData(target)))
         pick.currentIndexChanged.connect(lambda _: self.show_agenda(pick.currentData()))
@@ -894,12 +1044,23 @@ class BrowseWindow(QWidget):
     # ---- the task page's actions ----
     def _task_actions(self, task_id: str) -> None:
         m, t = self.model(), self.model().task(task_id)
+        if t.discarded:
+            self._action("Bring back", lambda: self.bring_back_task(task_id), "Restore it as it was: back in the task tree, the lists and search",
+                         primary=True)
+            self._action("Open folder", lambda: self.reveal(self.ctx.data_root / "Tasks" / task_id), f"Open Tasks\\{task_id} in File Explorer")
+            return
         self._action("Add note   A", lambda: self.open_capture(task=task_id, mode="note"), "Add a note to this task's raw text log")
         self._action("Update   U", lambda: self.open_capture(task=task_id, mode="update"), "Update this task: its state, status, dates and more")
         self._action("New task   N", lambda: self.open_capture(task=task_id, mode="new_task"), "A new task under this one")
+        if any(a.subject == task_id for a in m.today_items()):
+            self._action("On Today ✓", lambda: self.show_agenda(TODAY), "It's on Today. Open the Today view.")
+        else:
+            self._action("Add to Today   T", lambda: self.add_to_today(task_id), "Put it on your list for today")
         if self.pages().has_agenda(t):
             self._action("Open agenda", lambda: self.show_agenda(task_id))
         agenda = QMenu(self)
+        agenda.addAction("Today   ·   your list for today, straight away (T)", lambda: self.add_to_today(task_id))
+        agenda.addSeparator()
         for meeting in meetings_for_menu(m, task_id):
             when = m.meeting_when(meeting.id, self.today())
             act = agenda.addAction(f"{meeting.title}   ·   {meeting.recurrence + ', next ' + when if meeting.recurrence else 'One-off, ' + when}")
@@ -908,8 +1069,7 @@ class BrowseWindow(QWidget):
         other.triggered.connect(lambda: self.open_capture(task=task_id, mode="update", agenda_focus=True))
         self._action("Add to agenda   G", tip="Put this task on an agenda", menu=agenda)
         edit = QMenu(self)
-        edit.addAction("Title and description…", lambda: self.edit_task_text(task_id))
-        edit.addAction("Labels…", lambda: self.edit_task_labels(task_id))
+        edit.addAction("Edit task…   E", lambda: self.edit_task(task_id))
         edit.addSeparator()
         parents = m.parents_of(task_id)
         for p in parents:
@@ -922,7 +1082,9 @@ class BrowseWindow(QWidget):
                 edit.addAction(f"Take out from under {m.task(p).title}", lambda x=p: self.move_task(task_id, x, None))
         elif parents:
             edit.addAction("Make it a top-level task", lambda: self.move_task(task_id, parents[0], None))
-        self._action("Edit", tip="Fix the title, description or labels, or move it in the tree", menu=edit)
+        edit.addSeparator()
+        edit.addAction("Discard…", lambda: self.discard_task(task_id))
+        self._action("Edit", tip="Edit any of its fields, move it in the tree, or discard it if it was made by mistake", menu=edit)
         self.summary_type = QComboBox()
         self.summary_type.setAccessibleName("Summary type")
         self.summary_type.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
@@ -937,9 +1099,14 @@ class BrowseWindow(QWidget):
     def _capture_actions(self, capture_id: str) -> None:
         m = self.model()
         c = m.captures[capture_id]
+        if c.discarded:
+            self._action("Bring back", lambda: self.bring_back_capture(capture_id), "Restore it to its tasks' logs and search", primary=True)
+            self._action("Show in File Explorer", lambda: self.reveal(capture_md_path(self.ctx.data_root, c)))
+            return
         readable = self._capture_text(capture_id) is not None
         self._action("Edit", lambda: self.start_capture_edit(capture_id), "Fix the content text or summary", readable)
         self._action("Show in File Explorer", lambda: self.reveal(capture_md_path(self.ctx.data_root, c)))
+        self._action("Discard…", lambda: self.discard_capture(capture_id), "Hide a capture saved by mistake. Its folder stays.")
         if m.is_unfiled(c):
             picked = self.file_to.get(capture_id)
             text = full_path(m, picked) if picked in m.tasks else "Pick a task"
@@ -969,6 +1136,8 @@ class BrowseWindow(QWidget):
     def _label_actions(self, name: str) -> None:
         label = next(lb for lb in self.model().labels if lb.name == name)
         self._action("Edit…", lambda: self.edit_label(name))
+        self._action("Find matching tasks…", lambda: self.find_label_tasks(name),
+                     "List the open tasks that mention its keywords but don't have it, to add it to those you tick")
         if label.status == "active":
             self._action("Retire", lambda: self.set_label_status(name, "retired"), "Hide this label from pickers. Its tasks keep it.")
         else:
@@ -1054,6 +1223,10 @@ class BrowseWindow(QWidget):
         m = self.model()
         if task_id not in m.tasks:
             return
+        if m.task(task_id).discarded:
+            self.view = "discarded"
+            self.select("task", task_id, tab, update_list=True)
+            return
         if self.view not in TASK_VIEWS:
             self.view = "tasks"
         if pin:
@@ -1076,12 +1249,17 @@ class BrowseWindow(QWidget):
         m = self.model()
         if capture_id not in m.captures:
             return
-        if m.is_unfiled(m.captures[capture_id]):
+        if m.captures[capture_id].discarded:
+            self.view = "discarded"
+        elif m.is_unfiled(m.captures[capture_id]):
             self.view = "unfiled"
         self.select("capture", capture_id, update_list=True)
 
     def show_agenda(self, target: str) -> None:
-        """The Agendas view for one target, with the target's page selected."""
+        """The Agendas view for one target, with the target's page selected. Today has a view of its own."""
+        if target == TODAY:
+            self.set_view("today")
+            return
         self.view, self.target = "agenda", target
         self.select("person" if is_person(target) else "task", target, update_list=True)
 
@@ -1094,6 +1272,7 @@ class BrowseWindow(QWidget):
             self.search_box.clear()
             self.search_box.blockSignals(False)
         self.view, self.cap_cell = view, None
+        self.ticked.clear()
         self._select_first()
         self.render_all()
 
@@ -1101,7 +1280,10 @@ class BrowseWindow(QWidget):
         """What a view selects when it opens."""
         m, v = self.model(), self.view
         new = None
-        if v == "unfiled":
+        if v == "today":
+            first = next((a.subject for a in m.today_items() if a.subject), None)
+            new = ("task", first) if first else None
+        elif v == "unfiled":
             caps = m.unfiled_captures()
             new = ("capture", caps[-1].id) if caps else None
         elif v == "docs":
@@ -1111,6 +1293,9 @@ class BrowseWindow(QWidget):
             new = ("person", me) if me in m.people else (("person", next(iter(m.people))) if m.people else None)
         elif v == "labels":
             new = ("label", m.labels[0].name) if m.labels else None
+        elif v == "discarded":
+            first = next(iter(discarded_rows(m, self.today())), None)
+            new = (first.kind, first.id) if first else None
         elif v == "agenda":
             target = current_target(m, self.target)
             new = (("person" if is_person(target) else "task"), target) if target else None
@@ -1119,8 +1304,9 @@ class BrowseWindow(QWidget):
             new = ("task", ts[0].id) if ts else None
         else:
             new = self.sel
-            if new is None and m.top_level():
-                new = ("task", m.top_level()[0].id)
+            tops = [t for t in m.top_level() if not t.discarded]
+            if new is None and tops:
+                new = ("task", tops[0].id)
         if new != self.sel:
             if new and new[0] == "task":
                 self.state = PageState(tab=self.state.tab, order=self.state.order)
@@ -1190,7 +1376,11 @@ class BrowseWindow(QWidget):
         if not (self.sel and self.sel[0] == "task"):
             self.say("Select a task first. The shortcut works on the task that's selected in the browse tool.")
             return
-        if mode == "agenda":
+        if mode == "edit":
+            self.edit_task(self.sel[1])
+        elif mode == "today":
+            self.add_to_today(self.sel[1])
+        elif mode == "agenda":
             self.open_capture(task=self.sel[1], mode="update", agenda_focus=True)
         else:
             self.open_capture(task=self.sel[1], mode=mode)
@@ -1284,6 +1474,37 @@ class BrowseWindow(QWidget):
             self.open_capture(task=item.subject, mode="update", content=f"Discussed at {self.model().target_name(item.target)}: ")
             self.say(f"{self.model().task(item.subject).title}: discussed. Type what was decided and save, or press Esc to skip.")
 
+    # ---- Today (mods log round 1, M0016) ----
+    def add_to_today(self, task_id: str) -> None:
+        """T, or Add to Today: the task goes on Today, and the window stays where it is."""
+        self._do(lambda: edits.add_to_today(self.conn, self.ctx.data_root, self.ctx.fs, task_id, "", self._now()), self.sel)
+
+    def add_today_note(self) -> None:
+        box = getattr(self, "today_note", None)
+        text = box.text().strip() if box is not None else ""
+        if not text:
+            self.say("Type the note first.", error=True)
+            return
+        if self._do(lambda: edits.add_to_today(self.conn, self.ctx.data_root, self.ctx.fs, None, text, self._now()), self.sel):
+            self.today_note.setFocus()
+
+    def close_today_item(self, item_id: int, how: str) -> None:
+        """Done or Remove on Today. Done on a task then asks, in the Today view, whether to update the task too."""
+        item = next((a for a in self.model().agenda if a.id == item_id), None)
+        if item is None:
+            return
+        self.today_ask = item.subject if how == "Done" else None
+        if not self._do(lambda: edits.close_today_item(self.conn, self.ctx.data_root, self.ctx.fs, item_id, how, self._now())):
+            self.today_ask = None
+            self.render_list()
+
+    def answer_today(self, answer: str | None) -> None:
+        """The answer to "Update the task too?": an Update capture starting "Done today: " or "Closed. ", or nothing."""
+        task_id, self.today_ask = self.today_ask, None
+        self.render_list()
+        if task_id and answer:
+            self.open_capture(task=task_id, mode="update", content="Done today: " if answer == "update" else "Closed. ")
+
     def copy_agenda(self, target: str) -> None:
         from docrepo.views import agenda_markdown
 
@@ -1305,39 +1526,62 @@ class BrowseWindow(QWidget):
                  + " Paste the answer into a capture's Summary.")
 
     # ---- tasks ----
-    def edit_task_text(self, task_id: str) -> None:
-        t = self.model().task(task_id)
-        dialog = TaskTextDialog(self, t.title, t.description)
-        if dialog.exec():
-            title, description = dialog.values()
-            self.save_task_text(task_id, title, description)
-
-    def save_task_text(self, task_id: str, title: str, description: str) -> None:
-        self._do(lambda: edits.change_task(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, task_id, self._now(),
-                                           title=title, description=description))
-
     def _label_options(self, text: str, picked: list[str]) -> list[Option]:
-        q = text.strip().lower()
-        return [Option(lb.name, lb.name, ", ".join(lb.keywords)) for lb in self.model().active_labels()
-                if lb.name not in picked and (not q or q in lb.name.lower())][:7]
+        return label_options(self.model(), text, picked)
 
-    def edit_task_labels(self, task_id: str) -> None:
-        m = self.model()
-        t = m.task(task_id)
-        inherited = [n for p in m.parents_of(task_id) for n, _ in m.labels_of(p)]
-        dialog = TaskLabelsDialog(self, self._label_options, t.labels, t.inherit_labels, list(dict.fromkeys(inherited)))
-        if dialog.exec():
-            labels, new, inherit = dialog.values()
-            self.save_task_labels(task_id, labels, new, inherit)
+    def _people_options(self, text: str, picked: list[str]) -> list[Option]:
+        return people_options(self.model(), self.ctx.settings.me, text, picked)
 
-    def save_task_labels(self, task_id: str, labels: list[str], new: list[str], inherit: bool) -> None:
-        def change():
-            for name in new:
-                if not any(lb.name.lower() == name.lower() for lb in Model(self.conn).labels):
-                    people.add_label(self.conn, name)
-            return edits.change_task(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, task_id, self._now(),
-                                     labels=labels, inherit_labels=inherit)
-        self._do(change)
+    def edit_task(self, task_id: str) -> None:
+        """Edit task (E): every field on one page (mods log round 1, M0008, M0011)."""
+        if task_id not in self.model().tasks:
+            return
+        dialog = TaskEditDialog(self, self.model(), task_id, self._label_options, self._people_options)
+        if self.run_dialog(dialog):
+            self.save_task_edit(task_id, dialog.values())
+
+    def save_task_edit(self, task_id: str, values: dict) -> None:
+        self._do(lambda: edits.edit_task(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, task_id, self._now(), **values))
+
+    # ---- discarding (mods log round 1, M0021) ----
+    def _ask_reason(self, title: str, text: str) -> str | None:
+        reason, ok = QInputDialog.getText(self, title, text, text=edits.DISCARD_REASON)
+        return reason if ok else None
+
+    def discard_task(self, task_id: str) -> None:
+        t = self.model().task(task_id)
+        reason = self.ask_reason("Discard task", f"Discard {t.title}? It's hidden from the task tree, the lists, the pickers, search and the "
+                                                 "capacity calendar, and kept in the Discarded view, where Bring back restores it. Nothing "
+                                                 "is deleted.\n\nWhy?")
+        if reason is None:
+            return
+        parent = next(iter(self.model().parents_of(task_id)), None)
+        if self._do(lambda: edits.discard_task(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, task_id, reason, self._now()),
+                    ("task", parent) if parent else None) is not None and not parent:
+            self.sel = None
+            self._select_first()
+            self.render_all()
+
+    def bring_back_task(self, task_id: str) -> None:
+        if self._do(lambda: edits.bring_back_task(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, task_id, self._now())):
+            message = self.status.text()
+            self.view = "tasks"
+            self.go_task(task_id)
+            self.say(message)
+
+    def discard_capture(self, capture_id: str) -> None:
+        reason = self.ask_reason("Discard capture", f"Discard {capture_id}? It leaves its tasks' raw text logs, the Unfiled view and "
+                                                    "search, and is kept in the Discarded view, where Bring back restores it. Its folder "
+                                                    "stays, and any changes it made to tasks stay in their status logs.\n\nWhy?")
+        if reason is None:
+            return
+        self._do(lambda: edits.discard_capture(self.conn, self.ctx.data_root, self.ctx.fs, capture_id, reason, self._now()), ("capture", capture_id))
+
+    def bring_back_capture(self, capture_id: str) -> None:
+        if self._do(lambda: edits.bring_back_capture(self.conn, self.ctx.data_root, self.ctx.fs, capture_id, self._now())):
+            message = self.status.text()
+            self.go_capture(capture_id)
+            self.say(message)
 
     def _pick_parent(self, task_id: str, old_parent: str | None, also: bool = False) -> None:
         anchor = self.actions
@@ -1393,6 +1637,9 @@ class BrowseWindow(QWidget):
             self.save_label(name, *dialog.values())
 
     def save_label(self, old_name: str | None, name: str, keywords: list[str]) -> None:
+        """Save a label. A new label, or new keywords, then lists the open tasks that mention them (mods log round 1, M0014)."""
+        before = next((lb.keywords for lb in self.model().labels if lb.name == old_name), None) if old_name else None
+
         def change():
             if old_name:
                 people.update_label(self.conn, old_name, new_name=name if name != old_name else None, keywords=keywords)
@@ -1403,6 +1650,20 @@ class BrowseWindow(QWidget):
             return out
         if self._do(change, ("label", name)):
             self.select("label", name, update_list=True)
+            if before is None or before != next(lb.keywords for lb in self.model().labels if lb.name == name):
+                self.find_label_tasks(name, quiet=True)
+
+    def find_label_tasks(self, name: str, quiet: bool = False) -> None:
+        """Find matching tasks: the open tasks that mention a label's keywords but don't have it, to tick and add it to.
+        ``quiet`` says nothing when there are none, as after saving a label."""
+        matches = bulk.label_matches(self.model(), name)
+        if not matches:
+            if not quiet:
+                self.say(f"No open task mentions {name}'s keywords without having the label already.")
+            return
+        dialog = LabelMatchDialog(self, self.model(), name, matches, lambda ids: self._do(lambda: edits.bulk_edit(
+            self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, ids, bulk.BulkEdit(add_labels=[name]), self._now())))
+        self.run_dialog(dialog)
 
     def set_label_status(self, name: str, status: str) -> None:
         def change():

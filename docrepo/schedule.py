@@ -42,7 +42,8 @@ class DueDate:
 
 
 def is_open(task: Dated) -> bool:
-    return task.state in ("Not started", "In progress")
+    """Not started or In progress, and not discarded (mods log round 1, M0021)."""
+    return task.state in ("Not started", "In progress") and not getattr(task, "discarded", None)
 
 
 def start_of(task: Dated) -> date:
@@ -71,8 +72,8 @@ def windows(task: Dated, until: date) -> list[tuple[date, date]]:
 
 
 def due_of(task: Dated, today: date) -> DueDate | None:
-    """Due, else Deadline. A routine task counts to the end of its next occurrence. Closed tasks have none."""
-    if task.state == "Closed":
+    """Due, else Deadline. A routine task counts to the end of its next occurrence. Closed and discarded tasks have none."""
+    if task.state == "Closed" or getattr(task, "discarded", None):
         return None
     if task.recurrence:
         for _first, last in windows(task, today + timedelta(days=NEXT_LOOKAHEAD_DAYS)):

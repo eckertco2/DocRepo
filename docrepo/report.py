@@ -14,7 +14,7 @@ from docrepo import capacity
 from docrepo.config import Settings
 from docrepo.dates import day_diff, short
 from docrepo.lists import LISTS, list_tasks
-from docrepo.model import AgendaItem, Model, is_person
+from docrepo.model import TODAY, AgendaItem, Model, is_person
 from docrepo.schedule import due_of, is_open
 
 
@@ -82,7 +82,7 @@ def build_report(conn: sqlite3.Connection, model: Model, today: date, settings: 
         return text + (f" ({(a.how or '').lower()} {a.closed[:10]})" if a.closed else "")
 
     for target in dict.fromkeys(a.target for a in m.agenda):
-        name = f"{target} {m.person_name(target)}" if is_person(target) else tl(target)
+        name = "Today" if target == TODAY else f"{target} {m.person_name(target)}" if is_person(target) else tl(target)
         open_items = "; ".join(item(a) for a in m.agenda if a.target == target and not a.closed) or "none"
         closed_items = "; ".join(item(a) for a in m.agenda if a.target == target and a.closed) or "none"
         out.append(f"| {name} | {open_items} | {closed_items} |")

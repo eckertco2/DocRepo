@@ -44,7 +44,11 @@ LIST_NOTES = {
     "unplanned": "Open tasks the capacity calendar can't place: people but no hours, or hours but no dates.",
 }
 
+TODAY_NOTE = ("Your list for today. Each item stays until you mark it Done, carrying over to the next day. Add a task with T while "
+              "browsing, or Add to Today on its page; add a note here, or from the capture window's Add to agenda.")
+
 VIEWS: tuple[ViewDef, ...] = (
+    ViewDef("today", "Today", note=TODAY_NOTE),  # mods log round 1, M0016
     ViewDef("unfiled", "Unfiled"),
     ViewDef("tasks", "Task tree"),
     *(ViewDef(x.id, x.label, "Lists", LIST_NOTES[x.id]) for x in LISTS),
@@ -53,22 +57,27 @@ VIEWS: tuple[ViewDef, ...] = (
     ViewDef("people", "People", "Manage"),
     ViewDef("labels", "Labels", "Manage"),
     ViewDef("docs", "Documents", "Manage"),
+    ViewDef("discarded", "Discarded", "Manage", "Tasks and captures discarded as made by mistake, newest first. Nothing is deleted: "
+                                                 "they're hidden from the other views, the lists, the pickers and search. Bring back "
+                                                 "restores one."),
     ViewDef("settings", "Settings", "Manage"),
 )
 VIEW_IDS = {v.id: v for v in VIEWS}
 LIST_IDS = {x.id: x for x in LISTS}
 #: Views that show tasks, so opening a task from them stays in them.
-TASK_VIEWS = ("tasks", *LIST_IDS, "agenda", "search")
+TASK_VIEWS = ("today", "tasks", *LIST_IDS, "agenda", "search")
 
 
 def view_counts(m: Model, today: date, me: str | None) -> dict[str, int]:
     """The numbers shown next to the views."""
     counts = {
+        "today": len(m.today_items()),
         "unfiled": len(m.unfiled_captures()),
         "tasks": sum(1 for t in m.tasks.values() if is_open(t)),
         "people": len(m.active_people()),
         "labels": len(m.active_labels()),
-        "docs": len(m.documents),
+        "docs": sum(1 for d in m.documents if not m.only_in_discarded(d)),
+        "discarded": len(m.discarded_tasks()) + len(m.discarded_captures()),
     }
     counts.update({x.id: len(list_tasks(m, x, today, me)) for x in LISTS})
     return counts
@@ -186,7 +195,8 @@ def task_tree(m: Model, f: TreeFilter) -> list[Node]:
     matches with any of the filter's labels and any of its people.
     """
     def pass_state(t: Task) -> bool:
-        return (f.parked or t.state != "Parked") and (f.closed or t.state != "Closed") and (f.routine or not t.recurrence)
+        return (not t.discarded and (f.parked or t.state != "Parked") and (f.closed or t.state != "Closed")
+                and (f.routine or not t.recurrence))
 
     def pass_filter(t: Task) -> bool:
         return ((not f.labels or any(name in f.labels for name, _ in m.labels_of(t.id)))
@@ -237,7 +247,7 @@ def last_updated(m: Model) -> dict[str, str]:
     out = {t.id: norm(t.created) for t in m.tasks.values()}
     for e in m.status:
         out[e.task] = max(out.get(e.task, ""), norm(e.at))
-    for c in m.captures.values():
+    for c in m.live_captures():
         for task_id in m.capture_tasks(c):
             out[task_id] = max(out.get(task_id, ""), norm(c.saved))
     return out
@@ -335,12 +345,12 @@ def documents_tree(m: Model, task_filter: str | None = None, include_subtasks: b
     def in_scope(task_id: str) -> bool:
         return scope is None or task_id in scope
 
-    tree = pruned_tree(m, lambda x: in_scope(x) and bool(by_task.get(x)))
+    tree = pruned_tree(m, lambda x: in_scope(x) and bool(by_task.get(x)) and not m.task(x).discarded)
     for node in walk(tree):
         if node.kind == "task" and in_scope(node.id):
             node.children[:0] = [Node(d, "doc", node.depth + 1, node.group) for d in by_task.get(node.id, [])]
     if scope is None:
-        unfiled = [d for d in m.documents if not m.document_holders(d)]
+        unfiled = [d for d in m.documents if not m.document_holders(d) and not m.only_in_discarded(d)]
         if unfiled:
             tree.append(Node("", "group", 0, -1, False, [Node(d, "doc", 1, -1) for d in unfiled], "Not filed yet"))
     return tree
@@ -388,6 +398,44 @@ def unfiled_rows(m: Model, today: date) -> list[CaptureRow]:
         saved = c.saved[11:16] if c.saved[:10] == today.isoformat() else short(to_date(c.saved), today)
         rows.append(CaptureRow(c.id, c.title, sub, SOURCE_NAMES.get(c.source, c.source), saved))
     return rows
+
+
+# ---- discarded tasks and captures (mods log round 1, M0021) ----
+@dataclass(frozen=True)
+class DiscardedRow:
+    kind: str  # task or capture
+    id: str
+    title: str
+    sub: str
+    reason: str
+    when: str  # when it was discarded, as a row shows it
+
+
+def discarded_rows(m: Model, today: date) -> list[DiscardedRow]:
+    """Discarded tasks and captures, the most recently discarded first."""
+    def when(at: str) -> str:
+        return at[11:16] if at[:10] == today.isoformat() else short(to_date(at), today)
+
+    items = [(t.discarded or "", DiscardedRow("task", t.id, t.title, f"Task {t.id} · {path_text(m, t.id) or 'Top-level task'}",
+                                              t.discard_reason or "", when(t.discarded or ""))) for t in m.discarded_tasks()]
+    items += [(c.discarded or "", DiscardedRow("capture", c.id, c.title, f"Capture {c.id} · saved {short(to_date(c.saved), today)}",
+                                               c.discard_reason or "", when(c.discarded or ""))) for c in m.discarded_captures()]
+    return [row for _, row in sorted(items, key=lambda x: x[0], reverse=True)]
+
+
+# ---- Today (mods log round 1, M0016) ----
+def since_text(added: str, today: date) -> str:
+    """When a carried-over item was added, as "since Mon": the weekday within the past week, else the date."""
+    day = to_date(added)
+    return ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")[day.weekday()] if day_diff(day, today) <= 6 else short(day, today)
+
+
+def today_groups(m: Model, today: date) -> list[tuple[str, list[AgendaItem]]]:
+    """Today's open items in their groups: those carried over from earlier days, then those added today."""
+    items = m.today_items()
+    carried = [a for a in items if a.added[:10] < today.isoformat()]
+    fresh = [a for a in items if a.added[:10] >= today.isoformat()]
+    return [g for g in (("Carried over", carried), ("Added today" if carried else "Today", fresh)) if g[1]]
 
 
 # ---- agendas ----
@@ -476,9 +524,11 @@ def open_count(m: Model, test: Callable[[Task], bool]) -> int:
 
 
 def label_tasks(m: Model, name: str) -> list[tuple[str, bool]]:
-    """The tasks with a label, as (task, inherited)."""
+    """The tasks with a label, as (task, inherited). Discarded tasks are left out."""
     out = []
     for t in m.tasks.values():
+        if t.discarded:
+            continue
         found = next((inh for n, inh in m.labels_of(t.id) if n == name), None)
         if found is not None:
             out.append((t.id, found))

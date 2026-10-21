@@ -214,6 +214,20 @@ def update_task(conn: sqlite3.Connection, settings: Settings, task_id: str, *, a
     return logged
 
 
+def set_discarded(conn: sqlite3.Connection, settings: Settings, task_id: str, reason: str | None, *, at: datetime, via: str) -> Change:
+    """Discard a task, with the reason (mods log round 1, M0021), or bring it back (``reason`` None). It's never deleted.
+    The status log shows "Discarded" with the reason; the capacity calendar leaves a discarded task out."""
+    with transaction(conn):
+        t = get_task(conn, task_id)
+        if bool(t.discarded) == bool(reason):
+            raise TaskError(f"{t.title} is {'already' if t.discarded else 'not'} discarded.")
+        conn.execute("UPDATE tasks SET discarded = ?, discard_reason = ? WHERE id = ?", (stamp(at) if reason else None, reason, task_id))
+        change = Change("Discarded", t.discard_reason or None, reason)
+        _log(conn, task_id, at, via, [change])
+        capacity.rebuild_task(conn, task_id, at.date(), settings)
+    return change
+
+
 def _log(conn: sqlite3.Connection, task_id: str, at: datetime, via: str, changes: list[Change]) -> None:
     conn.executemany(
         "INSERT INTO status_log (task, at, field, from_value, to_value, via) VALUES (?, ?, ?, ?, ?, ?)",
@@ -275,6 +289,28 @@ def move_parent(conn: sqlite3.Connection, task_id: str, old_parent: str | None, 
         change = Change("Parents", before, parent_titles(conn, task_id))
         if change.from_value != change.to_value:
             _log(conn, task_id, at, via, [change])
+    return change
+
+
+def set_parents(conn: sqlite3.Connection, task_id: str, parents: Sequence[str], *, at: datetime, via: str) -> Change | None:
+    """Put a task under exactly these parents (none makes it top-level), as one change. Returns it, or None if nothing changed.
+    A task can't end up under itself."""
+    parents = list(dict.fromkeys(parents))
+    with transaction(conn):
+        get_task(conn, task_id)
+        below = descendant_ids(conn, task_id)
+        for p in parents:
+            get_task(conn, p)
+            if p == task_id or p in below:
+                raise TaskError("That would put the task under itself.")
+        current = [r["parent"] for r in conn.execute("SELECT parent FROM task_parents WHERE child = ? ORDER BY id", (task_id,))]
+        if current == parents:
+            return None
+        before = parent_titles(conn, task_id)
+        conn.execute("DELETE FROM task_parents WHERE child = ?", (task_id,))
+        conn.executemany("INSERT INTO task_parents (child, parent) VALUES (?, ?)", [(task_id, p) for p in parents])
+        change = Change("Parents", before, parent_titles(conn, task_id))
+        _log(conn, task_id, at, via, [change])
     return change
 
 

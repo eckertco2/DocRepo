@@ -22,7 +22,7 @@ from urllib.parse import quote
 
 from docrepo import capacity
 from docrepo.dates import days_text, long_date, monday_of, short, to_date
-from docrepo.model import TYPE_NAMES, Capture, Model, Task, is_person
+from docrepo.model import TODAY, TYPE_NAMES, Capture, Model, Task, is_person
 from docrepo.pages import num
 from docrepo.schedule import due_of, is_open, start_of
 from docrepo.stories import Event, RawItem, Stories, clip
@@ -149,6 +149,8 @@ class Pages:
         return link(f"capture:{capture_id}", text or capture_id, f"Open capture {capture_id}")
 
     def target_link(self, target: str) -> str:
+        if target == TODAY:
+            return link(f"agenda:{TODAY}", "Today")
         return link(f"person:{target}", self.m.person_name(target)) if is_person(target) else self.task_link(target)
 
     def ref_link(self, via: str | None) -> str:
@@ -183,6 +185,12 @@ class Pages:
             note = f' <span class="sub">{esc(clip(a.note, 90))}</span>' if a.subject and a.note else ""
             lines.append((self.task_link(a.subject) if a.subject else esc(a.note)) + note)
         return box("<br>".join(lines))
+
+    def discarded_box(self, at: str, reason: str | None, hidden_from: str) -> str:
+        """The note on a discarded task's or capture's page (mods log round 1, M0021)."""
+        why = f": {esc(reason.rstrip('.'))}" if reason else ""
+        return box(f"<b>Discarded</b> {esc(self.long(at[:10]))}{why}. It's hidden from {esc(hidden_from)}. Nothing is deleted: Bring back "
+                   "restores it as it was.", "warn")
 
     # ---- the task page ----
     def has_agenda(self, t: Task) -> bool:
@@ -221,6 +229,8 @@ class Pages:
         if t.closed:
             rows.append(("Closed", esc(self.long(t.closed))))
         rows.append(("Created", f"{esc(self.long(t.created))} from {self.ref_link(t.created_by)}"))
+        if t.discarded:  # mods log round 1, M0021
+            crumbs += self.discarded_box(t.discarded, t.discard_reason, "the task tree, the lists, the pickers, search and the capacity calendar")
         return (f"{crumbs}<h2>{esc(t.title)}</h2><p>{chips}</p>{fields_table(rows)}{self.agenda_block(task_id)}"
                 f"{self.tab_bar(state)}{self.tab_body(t, state)}")
 
@@ -392,7 +402,7 @@ class Pages:
             if a.added_by == c.id:
                 what = esc(self.m.task(a.subject).title) if a.subject else "a note"
                 closed = f' <span class="sub">{esc((a.how or "").lower())} {self.day(a.closed)}</span>' if a.closed else ""
-                out.append(f"Put {what} on the agenda of {self.target_link(a.target)}{closed}")
+                out.append(f"Put {what} on {'' if a.target == TODAY else 'the agenda of '}{self.target_link(a.target)}{closed}")
         if not out:
             out.append("Kept as an unfiled capture, to file later" if self.m.is_unfiled(c) else "Nothing else")
         return "<br>".join(out)
@@ -420,6 +430,8 @@ class Pages:
             kept = f' <span class="sub">{old_versions} earlier version{"s" if old_versions != 1 else ""} kept</span>' if old_versions else ""
             rows.append(("Edited", esc(f"{self.long(c.edited)} {c.edited[11:16]}") + kept))
         unfiled = ""
+        if c.discarded:
+            unfiled = self.discarded_box(c.discarded, c.discard_reason, "its tasks' logs, the Unfiled view and search. Its folder stays")
         if self.m.is_unfiled(c):
             unfiled = box("<b>Unfiled.</b> Pick a task and File to task, or Make it a task, with the buttons above. Filing links it to the task "
                           "and sets the task in its capture.md; the folder stays where it is.", "info")

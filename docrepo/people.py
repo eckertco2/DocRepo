@@ -56,6 +56,14 @@ def add_person(
     return person_id
 
 
+def find_or_add(conn: sqlite3.Connection, name: str, added_note: str) -> tuple[str, bool]:
+    """The person with this name (any case), or someone new added with ``added_note``. Returns (their ID, whether they're new)."""
+    row = conn.execute("SELECT id FROM people WHERE lower(name) = lower(?)", (name.strip(),)).fetchone()
+    if row:
+        return str(row["id"]), False
+    return add_person(conn, name, added_note=added_note), True
+
+
 def update_person(
     conn: sqlite3.Connection, person_id: str, *, name: str | None = None, aliases: Sequence[str] | None = None,
     hours: float | None | object = _UNSET, status: str | None = None,

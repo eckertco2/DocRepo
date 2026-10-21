@@ -37,7 +37,7 @@ def roles_of(task: Task) -> list[tuple[str, float]]:
 def task_rows(task: Task, today: date, settings: Settings) -> dict[tuple[str, date], float]:
     """The task's hours per (person, day)."""
     roles = roles_of(task)
-    if task.state == "Parked" or not any(h for _, h in roles):
+    if task.state == "Parked" or task.discarded or not any(h for _, h in roles):
         return {}
     workdays = workday_numbers(settings.workdays)
     closed = to_date(task.closed) if task.closed else None

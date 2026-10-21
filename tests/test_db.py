@@ -35,14 +35,21 @@ def test_a_version_1_database_is_brought_up_to_date(data_root, fs):
     old = sqlite3.connect(data_root / "System" / "docs.db")
     old.executescript(db.SCHEMA)
     old.execute("INSERT INTO documents (id, name, original) VALUES ('D000001', 'a.pdf', 'C:\\a.pdf')")
+    old.execute("INSERT INTO people (id, name) VALUES ('P001', 'Me')")
+    old.execute("INSERT INTO agenda_items (id, subject, target, note, added, added_by) VALUES (7, NULL, 'P001', 'Ask about it', '2026-10-01 09:00', 'C000001')")
     old.execute("PRAGMA user_version = 1")
     old.commit()
     old.close()
     conn = db.connect(fs, data_root)
     try:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
         assert conn.execute("SELECT name, sha256, text_status FROM documents").fetchone()[:] == ("a.pdf", None, None)
         assert conn.execute("SELECT count(*) FROM search_text").fetchone()[0] == 0
+        assert conn.execute("SELECT count(*) FROM tasks WHERE discarded IS NOT NULL").fetchone()[0] == 0
+        # Version 4 made agenda_items again, keeping its rows and IDs, so an item can close as Done.
+        assert [tuple(r) for r in conn.execute("SELECT id, target, note FROM agenda_items")] == [(7, "P001", "Ask about it")]
+        conn.execute("UPDATE agenda_items SET closed = '2026-10-02 09:00', how = 'Done', closed_by = 'Today' WHERE id = 7")
+        assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
         db.set_state(conn, "daily", "2026-10-16")
         db.set_state(conn, "daily", "2026-10-17")
         assert db.get_state(conn, "daily") == "2026-10-17" and db.get_state(conn, "other") is None
