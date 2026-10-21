@@ -1,6 +1,7 @@
 """Pulling text out of files: each kind DocRepo reads, the cap, and files it can't read."""
 from __future__ import annotations
 
+import zipfile
 from pathlib import Path
 
 from docrepo.extract import extract_text, file_info, to_unc
@@ -56,16 +57,82 @@ def test_docx_paragraphs_and_tables(tmp_path):
     assert "Installation procedure, rev 2" in found.text and "Step 7.4 | Laser-align the coupling" in found.text
 
 
-def test_pptx_slides_and_notes(tmp_path):
-    from pptx import Presentation
+A = 'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"'
+P = 'xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"'
+R = 'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"'
+RELS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 
-    deck = Presentation()
-    slide = deck.slides.add_slide(deck.slide_layouts[1])
-    slide.shapes.title.text = "Turnaround plan"
-    slide.notes_slide.notes_text_frame.text = "Crane booked for 20 Oct"
-    deck.save(tmp_path / "plan.pptx")
+
+def rels(*items: tuple[str, str, str]) -> str:
+    """A relationships part: (ID, type's last word, target), or an external link when the type is "hyperlink"."""
+    out = "".join(f'<Relationship Id="{i}" Type="{RELS}/{kind}" Target="{target}"' + (' TargetMode="External"' if kind == "hyperlink" else "") + "/>"
+                  for i, kind, target in items)
+    return f'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">{out}</Relationships>'
+
+
+def box(*paragraphs: str) -> str:
+    """A text box: each paragraph's runs split at "|", and a line break where a paragraph has "/"."""
+    def para(text: str) -> str:
+        return "<a:p>" + "<a:br/>".join("".join(f"<a:r><a:t>{run}</a:t></a:r>" for run in line.split("|")) for line in text.split("/")) + "</a:p>"
+    return f"<p:sp><p:nvSpPr/><p:txBody><a:bodyPr/>{''.join(para(p) for p in paragraphs)}</p:txBody></p:sp>"
+
+
+def make_pptx(path: Path, slides: list[tuple[str, str | None]], order: list[int]) -> None:
+    """A .pptx written by hand, with no package: each slide's shapes and its notes (or None). ``order`` is the deck's
+    slide order, by slide number, which needn't be the order of the files."""
+    parts = {
+        "_rels/.rels": rels(("rId1", "officeDocument", "ppt/presentation.xml")),
+        "ppt/presentation.xml": f"<p:presentation {P} {R}><p:sldIdLst>" + "".join(f'<p:sldId id="{255 + n}" r:id="rId{n}"/>' for n in order)
+                                + "</p:sldIdLst></p:presentation>",
+        "ppt/_rels/presentation.xml.rels": rels(*[(f"rId{n}", "slide", f"slides/slide{n}.xml") for n in range(1, len(slides) + 1)]),
+    }
+    for n, (shapes, notes) in enumerate(slides, 1):
+        parts[f"ppt/slides/slide{n}.xml"] = f"<p:sld {A} {P}><p:cSld><p:spTree><p:nvGrpSpPr/>{shapes}</p:spTree></p:cSld></p:sld>"
+        links = [("rId9", "hyperlink", "https://example.com/plan")]
+        if notes is not None:
+            links.append(("rId2", "notesSlide", f"../notesSlides/notesSlide{n}.xml"))
+            image = '<p:sp><p:nvSpPr><p:nvPr><p:ph type="sldImg"/></p:nvPr></p:nvSpPr></p:sp>'
+            body = f'<p:sp><p:nvSpPr><p:cNvPr/><p:nvPr><p:ph type="body" idx="1"/></p:nvPr></p:nvSpPr><p:txBody><a:p><a:r><a:t>{notes}</a:t></a:r></a:p></p:txBody></p:sp>'
+            parts[f"ppt/notesSlides/notesSlide{n}.xml"] = f"<p:notes {A} {P}><p:cSld><p:spTree>{image}{body}</p:spTree></p:cSld></p:notes>"
+        parts[f"ppt/slides/_rels/slide{n}.xml.rels"] = rels(*links)
+    with zipfile.ZipFile(path, "w") as z:
+        for name, text in parts.items():
+            z.writestr(name, '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' + text)
+
+
+def test_pptx_slides_tables_groups_and_notes(tmp_path):
+    """Read with the standard library (python-pptx and its Pillow are gone): the deck's slide order, each shape's text,
+    tables row by row, text inside groups, line breaks, and the speaker notes."""
+    table = ("<p:graphicFrame><a:graphic><a:graphicData><a:tbl>"
+             "<a:tr><a:tc><a:txBody><a:p><a:r><a:t>Task</a:t></a:r></a:p></a:txBody></a:tc><a:tc><a:txBody><a:p><a:r><a:t>Owner</a:t></a:r></a:p></a:txBody></a:tc></a:tr>"
+             "<a:tr><a:tc><a:txBody><a:p><a:r><a:t>Rigging plan</a:t></a:r></a:p></a:txBody></a:tc><a:tc><a:txBody><a:p><a:r><a:t>Mike</a:t></a:r></a:p></a:txBody></a:tc></a:tr>"
+             "</a:tbl></a:graphicData></a:graphic></p:graphicFrame>")
+    slides = [
+        (box("Turnaround plan") + box("Isolate the reactor", "Laser-|align/the coupling"), "Crane booked for 20 Oct"),
+        (box("Who does what") + table + f"<p:grpSp><p:nvGrpSpPr/><p:grpSpPr/>{box('Inside a group')}</p:grpSp>", None),
+    ]
+    make_pptx(tmp_path / "plan.pptx", slides, order=[2, 1])
     found = extract_text(tmp_path / "plan.pptx", CAP)
-    assert "Slide 1" in found.text and "Turnaround plan" in found.text and "Notes: Crane booked for 20 Oct" in found.text
+    assert found.status == "ok"
+    assert found.text.split("\n") == ["Slide 1", "Who does what", "Task | Owner", "Rigging plan | Mike", "Inside a group",
+                                      "Slide 2", "Turnaround plan", "Isolate the reactor", "Laser-align", "the coupling",
+                                      "Notes: Crane booked for 20 Oct"]
+
+
+def test_a_pptx_built_to_trick_the_reader_is_refused(tmp_path, monkeypatch):
+    from docrepo import extract
+
+    make_pptx(tmp_path / "plan.pptx", [(box("Turnaround plan"), None)], order=[1])
+    with zipfile.ZipFile(tmp_path / "plan.pptx") as z:
+        parts = {n: z.read(n) for n in z.namelist()}
+    parts["ppt/slides/slide1.xml"] = b'<!DOCTYPE x [<!ENTITY e "boom">]>' + parts["ppt/slides/slide1.xml"].split(b"?>", 1)[1]
+    with zipfile.ZipFile(tmp_path / "dtd.pptx", "w") as z:
+        for name, data in parts.items():
+            z.writestr(name, data)
+    refused = extract_text(tmp_path / "dtd.pptx", CAP)
+    assert refused.status == "error" and "ValueError" in refused.note
+    monkeypatch.setattr(extract, "MAX_PART_BYTES", 100)
+    assert extract_text(tmp_path / "plan.pptx", CAP).status == "error"  # a part bigger than the limit
 
 
 def test_xlsx_sheets_and_cells(tmp_path):

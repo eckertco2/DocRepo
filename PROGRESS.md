@@ -14,6 +14,7 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.1 | Fixes from the mods log, round 1: Outlook emails, the troubleshooting report, Parse and populate, pasted lists | Built 2026-10-19; hand-tested by the owner 2026-10-20; on GitHub 2026-10-20. Tested on the corporate computer 2026-10-20 |
 | 5.2 | Quick wins from the mods log, round 1: the deadline in Due's place, hiding the views, more hotkeys, filtering by several people and labels, sorting | Built 2026-10-20; hand-tested by the owner 2026-10-20; on GitHub 2026-10-20. Tested on the corporate computer 2026-10-20 |
 | 5.3 | Editing and daily use from the mods log, round 1: Edit task, Edit selected, labels on old tasks, Discard, Today | Built 2026-10-21; on GitHub 2026-10-21, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
+| 5.3.1 | PowerPoint text without python-pptx, so Pillow (flagged by the company's license policy) goes | Built 2026-10-21; on GitHub 2026-10-21. Next: the corporate computer, with release 5.3 |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
 ## Decisions
@@ -174,6 +175,15 @@ Stage 3 of the round 1 plan: M0008, M0011, M0009, M0014, M0016 (with M0020) and 
 - In the Today view, Done and Remove are links at the end of each row, as Discussed and Remove are in the Agendas view, rather than the mockup's round button.
 - Today isn't one of the Agendas view's targets (`Model.agenda_targets`), but its picker offers Today first, which opens the Today view.
 
+## Release 5.3.1: PowerPoint text without python-pptx (2026-10-21)
+
+The corporate computer's JFrog scan flagged Pillow 13.0.0 under the company's copyleft license policy as GPL-2.0. Pillow's own license is MIT-CMU, but its license file carries the full GPL-2.0 text for the FreeType library it bundles, which is offered under the FreeType License or GPL-2.0. DocRepo never used Pillow: python-pptx required it, and loaded it on import.
+
+- `docrepo/extract.py`: `.pptx` files are read with the standard library (`zipfile`, `xml.etree.ElementTree`): the slides in `presentation.xml`'s order, each shape's text (inside groups too), tables row by row, and each notes page's body placeholder. A part with a DTD, or bigger than `MAX_PART_BYTES` (64 MB) unpacked, is refused, so a file built to trick the reader gets the status "error".
+- The text is python-pptx's, compared on made-up decks, with two changes: text inside grouped shapes is read (python-pptx's top-level shapes missed it), and a line break inside a paragraph is a new line rather than a vertical tab.
+- `requirements.txt`: python-pptx, Pillow and XlsxWriter (python-pptx's other dependency) are gone. lxml and typing_extensions stay for python-docx.
+- `tests/test_extract.py`: the test deck is written by hand, as the test PDF is, and a deck with a DTD and an oversized part are refused (634 pass in all, 1 skipped, with the three packages uninstalled).
+
 ## The first Frogbot findings (2026-10-20)
 
 The corporate computer's Frogbot scan of phase 5 found four things.
@@ -192,5 +202,5 @@ The corporate computer's Frogbot scan of phase 5 found four things.
 - Phases 2 and 3 passed the owner's hand tests on this computer and went to GitHub together on 2026-10-16 (brainstorm round 12).
 
 - `SPEC.md` covers phases 1 to 5 in full; later phases are summaries until they're built. The detailed design is in the parent workspace's `docs/task-model/brainstorm.md`.
-- Published to the GitHub repo `eckertco2/DocRepo` on 2026-10-09 (phase 1), on 2026-10-16 (the glossary, phases 2 and 3), on 2026-10-18 (phases 4 and 5), on 2026-10-20 (releases 5.1 and 5.2, and the fixes for the first Frogbot findings), and on 2026-10-21 (release 5.3).
+- Published to the GitHub repo `eckertco2/DocRepo` on 2026-10-09 (phase 1), on 2026-10-16 (the glossary, phases 2 and 3), on 2026-10-18 (phases 4 and 5), on 2026-10-20 (releases 5.1 and 5.2, and the fixes for the first Frogbot findings), and on 2026-10-21 (releases 5.3 and 5.3.1).
 - The route to the corporate computer works (2026-10-09): download, a security scan there, `pip install -r requirements.txt` with every pinned version available, and pytest passing.

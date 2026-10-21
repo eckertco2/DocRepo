@@ -9,6 +9,9 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import posixpath
+import xml.etree.ElementTree as ET
+import zipfile
 from dataclasses import dataclass
 from datetime import datetime
 from email import policy
@@ -19,7 +22,7 @@ log = logging.getLogger(__name__)
 
 TEXT_SUFFIXES = {".txt", ".md", ".csv", ".log", ".json", ".xml", ".ini"}
 #: What each kind of file is read with, for the help text and SPEC.
-READERS = {".pdf": "pypdf", ".docx": "python-docx", ".pptx": "python-pptx", ".xlsx": "openpyxl", ".xlsm": "openpyxl", ".eml": "email"}
+READERS = {".pdf": "pypdf", ".docx": "python-docx", ".pptx": "zipfile", ".xlsx": "openpyxl", ".xlsm": "openpyxl", ".eml": "email"}
 
 
 @dataclass(frozen=True)
@@ -76,22 +79,100 @@ def _docx(path: Path) -> str:
     return "\n".join(parts).strip()
 
 
-def _pptx(path: Path) -> str:
-    from pptx import Presentation
+# ---- .pptx, read with the standard library ----
+# A .pptx is a zip of XML parts. Reading it here, rather than with python-pptx, keeps out python-pptx's
+# dependencies, Pillow among them, whose bundled licenses a company scan flagged.
+_A = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+_P = "{http://schemas.openxmlformats.org/presentationml/2006/main}"
+_R = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+_REL = "{http://schemas.openxmlformats.org/package/2006/relationships}"
+#: The largest XML part read from a .pptx, so a file built to unpack to gigabytes is refused.
+MAX_PART_BYTES = 64 * 1024 * 1024
 
-    parts = []
-    for number, slide in enumerate(Presentation(str(path)).slides, 1):
-        parts.append(f"Slide {number}")
-        for shape in slide.shapes:
-            if getattr(shape, "has_text_frame", False) and shape.has_text_frame:
-                parts.append(shape.text_frame.text)
-            if getattr(shape, "has_table", False) and shape.has_table:
-                for row in shape.table.rows:
-                    parts.append(" | ".join(cell.text.strip() for cell in row.cells))
-        if slide.has_notes_slide and slide.notes_slide.notes_text_frame is not None:
-            notes = slide.notes_slide.notes_text_frame.text.strip()
-            if notes:
-                parts.append(f"Notes: {notes}")
+
+def _has(z: zipfile.ZipFile, name: str) -> bool:
+    try:
+        z.getinfo(name)
+    except KeyError:
+        return False
+    return True
+
+
+def _xml(z: zipfile.ZipFile, name: str) -> ET.Element:
+    """An XML part of the zip. A part with a DTD is refused: Office never writes one, and it's how entity tricks work."""
+    if z.getinfo(name).file_size > MAX_PART_BYTES:
+        raise ValueError(f"{name} is too big to read")
+    data = z.read(name)
+    if b"<!DOCTYPE" in data:
+        raise ValueError(f"{name} has a DTD")
+    return ET.fromstring(data)
+
+
+def _rels(z: zipfile.ZipFile, part: str) -> dict[str, tuple[str, str]]:
+    """A part's relationships: their IDs, each with its type and the name of the part it points to."""
+    folder, name = posixpath.split(part)
+    rels_name = posixpath.join(folder, "_rels", name + ".rels")
+    if not _has(z, rels_name):
+        return {}
+    out = {}
+    for rel in _xml(z, rels_name).iter(f"{_REL}Relationship"):
+        if rel.get("TargetMode") == "External":
+            continue
+        target = rel.get("Target", "")
+        full = target.lstrip("/") if target.startswith("/") else posixpath.normpath(posixpath.join(folder, target))
+        out[rel.get("Id", "")] = (rel.get("Type", ""), full)
+    return out
+
+
+def _text_body(body: ET.Element | None) -> str:
+    """A text box's text: a line for each paragraph, and a line break inside one kept as a new line."""
+    if body is None:
+        return ""
+    lines = []
+    for paragraph in body.iter(f"{_A}p"):
+        bits = [(el.text or "") if el.tag == f"{_A}t" else "\n" for el in paragraph.iter() if el.tag in (f"{_A}t", f"{_A}br")]
+        lines.append("".join(bits))
+    return "\n".join(lines)
+
+
+def _shapes(tree: ET.Element, parts: list[str]) -> None:
+    """The text of a slide's shapes, in order: text boxes, tables row by row, and the shapes inside groups."""
+    for shape in tree:
+        if shape.tag == f"{_P}sp":
+            parts.append(_text_body(shape.find(f"{_P}txBody")))
+        elif shape.tag == f"{_P}grpSp":
+            _shapes(shape, parts)
+        elif shape.tag == f"{_P}graphicFrame":
+            for row in shape.iter(f"{_A}tr"):
+                parts.append(" | ".join(_text_body(cell.find(f"{_A}txBody")).strip() for cell in row.iter(f"{_A}tc")))
+
+
+def _notes(z: zipfile.ZipFile, part: str) -> str:
+    """A notes page's speaker notes: the text of its body placeholder."""
+    for shape in _xml(z, part).iter(f"{_P}sp"):
+        placeholder = shape.find(f"{_P}nvSpPr/{_P}nvPr/{_P}ph")
+        if placeholder is not None and placeholder.get("type") == "body":
+            return _text_body(shape.find(f"{_P}txBody")).strip()
+    return ""
+
+
+def _pptx(path: Path) -> str:
+    """Each slide's text in the deck's order, under "Slide 1" and so on, then its speaker notes as "Notes: …"."""
+    parts: list[str] = []
+    with zipfile.ZipFile(path) as z:
+        main = next((t for kind, t in _rels(z, "").values() if kind.endswith("/officeDocument")), "ppt/presentation.xml")
+        slides = _rels(z, main)
+        for number, slide_id in enumerate(_xml(z, main).iter(f"{_P}sldId"), 1):
+            part = slides.get(slide_id.get(f"{_R}id", ""), ("", ""))[1]
+            if not _has(z, part):
+                continue
+            parts.append(f"Slide {number}")
+            tree = _xml(z, part).find(f"{_P}cSld/{_P}spTree")
+            if tree is not None:
+                _shapes(tree, parts)
+            notes = next((t for kind, t in _rels(z, part).values() if kind.endswith("/notesSlide") and _has(z, t)), None)
+            if notes and (text := _notes(z, notes)):
+                parts.append(f"Notes: {text}")
     return "\n".join(p for p in parts if p).strip()
 
 
