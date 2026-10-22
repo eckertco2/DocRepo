@@ -16,7 +16,8 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.3 | Editing and daily use from the mods log, round 1: Edit task, Edit selected, labels on old tasks, Discard, Today | Built 2026-10-21; on GitHub 2026-10-21, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
 | 5.3.1 | PowerPoint text without python-pptx, so Pillow (flagged by the company's license policy) goes | Built 2026-10-21; on GitHub 2026-10-21. Next: the corporate computer, with release 5.3 |
 | 5.4 | Big features from the mods log, round 1: links as files, email layer 0 and the timeline | Built 2026-10-21, after the owner approved the mockups; on GitHub 2026-10-21, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
-| 5.5 | Small fixes from the mods log, round 2: Ctrl+Enter in the forms, an optional file description, editing mods log entries, double-click, and what's due this week on Today | Built 2026-10-21; on GitHub 2026-10-21, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
+| 5.5 | Small fixes from the mods log, round 2: Ctrl+Enter in the forms, an optional file description, editing mods log entries, double-click, and what's due this week on Today | Built 2026-10-21; on GitHub 2026-10-21; hand-tested by the owner 2026-10-21. Next: testing on the corporate computer |
+| 5.6 | The capture window and Today from the mods log, round 2: Agenda and Today beside the capture types, what Parse and populate found beside the content text, Expand, quick tasks, one letter per topic, Find in this view | Built 2026-10-21, after the owner approved the mockup. Next: the owner's hand test here, GitHub, and testing on the corporate computer |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
 ## Decisions
@@ -249,6 +250,30 @@ The owner's second mods log copy (M0025 to M0052, 2026-10-21) is planned in the 
 - An edited mods log entry keeps its ID and time, and its heading keeps only the day of the latest edit. Only open entries can be edited, since the panel lists only those.
 - A form asks before closing only when something changed. Edit selected counts as changed when anything is set, and the matching tasks when any is ticked.
 - With nothing on Today, "Nothing on Today" comes before Due in the next 7 days.
+
+## Release 5.6: the capture window and Today, from the mods log, round 2
+
+Stage 6 of the round 2 plan: M0037, M0042, M0046 and M0048's phase 1 (the capture window), M0039 and M0040 (quick tasks), and M0036 and M0026 (keys and Find). It was mocked in the browse tool mockup first, and the owner approved the mock (decisions 32 to 36, as recommended).
+
+- `docrepo/ui/capture_window.py` (M0037, M0042, M0046, M0048): 940 px wide. The capture types' line wraps (`FlowLayout`) and holds Agenda: the **Today** button (`today_on`, `set_today`) and the agenda picker, which no longer offers Today. Title, the content text and Parse and populate sit left of the found list (`main_layout`, under it below `NARROW`), which shows a placeholder until Parse and populate runs, and Clear. Expand (`toggle_expand`, F11) hides `lower` (the files, Copy prompt, the summary and the New task and Update fields) behind a line saying so, and fills the screen. Alt+N, Alt+T, Alt+U, Alt+A and Alt+D (`_alt_type`, `_alt_agenda`, `_alt_today`), and F1. The draft's agenda is `_targets()`; `_quick()` marks a quick task. `open_with_hotkey("today")`.
+- `docrepo/quick.py` (M0039): the built-in Quick tasks, `parent_id`, `ensure_parent` and `is_parent`. `docrepo/save.py`: `CaptureDraft.quick`; a new task with no task picked that goes on Today goes under Quick tasks; `quick_task_draft`, `add_quick_task` and `note_to_task`; Save's message names the parent of a quick task.
+- `docrepo/agenda.py` (M0040): `set_note` and `make_task`. `docrepo/edits.py`: `edit_today_note`, and `edit_task`'s `parents` (`tasks.set_parents`). `docrepo/ui/task_forms.py`: Edit task's Parents field (`put_under`, `remove_parent`), with the task picker from the browse tool.
+- `docrepo/ui/browse_window.py` (M0036, M0026, M0039, M0040): the letters N, T, U, A, D and E; **Keys** and F1 (`docrepo/ui/keymap.py`, `KeyMapDialog`); Find in this view (`open_find`, `close_find`, `_apply_find`; `views.find_text`; `tree_view.DIM_ROLE` fades a parent kept for context); Ctrl+Shift+F to the search box. Today's box has a Task and Note switch (`today_kind`, `add_today_item`, `add_today_task`); its items have Edit and Note, or Edit and Make it a task (`edit_today_note`, `make_today_task`; `ask_text` is replaceable in tests).
+- `docrepo/timeline.py`: Quick tasks itself isn't named among the undated tasks.
+- `docrepo/hotkey.py`, `docrepo/config.py`, `docrepo/app.py`, `docrepo/ui/settings_view.py` (M0036, M0039): `today_hotkey`; `hotkey.SUGGESTED` and Settings' Use the suggested keys.
+- `docrepo/ui/style.py`: the Today button, the divider, and the found list before it has found anything. `docrepo/ui/widgets.py`: `set_filled` sets other style properties too.
+- `docrepo/ui/help_text.py`: the types, agenda, content and parse notes, from the mockup's `HELP`. The mockup's `files.js` and `examples.md` gain `today_hotkey`; the regenerated file's checksum equals `exportChecksum("examples.md")`.
+- `GLOSSARY.md`: Quick task, Quick tasks. `README.md`: everyday use.
+- `tests/`: `test_quick.py`, and new tests in `test_capture_window.py` and `test_browse_window.py` (671 pass in all, 1 skipped). The capture window's test fixture now hides its window before deleting it: a window left showing took focus in a later test and read a closed database.
+
+## Decisions (release 5.6)
+
+- Decisions 16 to 18 of the round 2 plan, as the owner chose: a quick task is a real task under the built-in Quick tasks; one letter per topic, which moves the browse tool's N, A, G and T to T, N, A and D; Ctrl+Shift and the letter for the global hotkeys (the owner's choice over Ctrl+Alt, knowing Outlook uses some of them); Ctrl+F finds in this view and Ctrl+Shift+F searches everything.
+- Decisions 32 to 36, from the approved mock, as recommended: the 940 px window with Agenda on the capture types' line and the found list beside the content text; Expand on F11 and a button; Today's box makes a quick task unless switched to Note, and Quick tasks itself stays off the timeline; Find matches a task's ID, title, description, current status, labels and people, and isn't on the timeline or capacity; the direct hotkeys stay off until set, with the suggested keys a click away.
+- Quick tasks is known by its creator, "DocRepo", rather than a stored ID, so it survives a rename; a discarded one is replaced the next time a quick task needs it.
+- A quick task from Today's box is a capture of its one line, as from the capture window, so its story begins with the capture and the line is its description. Make it a task saves that capture, then moves the note's item to the new task, keeping when it was added.
+- Only known people are kept from a quick task's line: a one-liner doesn't add people.
+- The capture types' line wraps instead of scrolling; Expand's button says Expand and Back, since Segoe UI has no arrow glyphs for it.
 
 ## The first Frogbot findings (2026-10-20)
 

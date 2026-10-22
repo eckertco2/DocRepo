@@ -39,6 +39,8 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Agenda target**: the meeting, task or person whose agenda an item is on.
 - **Agenda**: the open agenda items of one agenda target.
 - **Today**: the built-in agenda target that is the owner's to-do list for the day. Its items carry over until they're marked Done.
+- **Quick task**: a task made from one line and put on Today, from Today's box, the Today hotkey, or a new task with no task picked that goes on Today. It's an ordinary task.
+- **Quick tasks**: the built-in top-level task that quick tasks wait under until Edit task puts them under their real task. DocRepo makes it the first time it's needed.
 - **Discard**: hiding a task or capture made by mistake, with a reason. Nothing is deleted, and Bring back restores it. It's how DocRepo "deletes" anything.
 - **Scope**: which tasks a view or prompt draws on: this task, with ancestors, with subtasks, or family. Family is all ancestors plus all descendants.
 - **Event**: a dated happening, such as an audit or a turnaround, entered as a task's Deadline. "Event" means nothing else.

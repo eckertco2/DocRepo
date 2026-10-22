@@ -229,6 +229,15 @@ def close_today_item(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, item
     return out
 
 
+def edit_today_note(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, item_id: int, note: str, at: datetime) -> Outcome:
+    """Change a note's text on Today (mods log round 2, M0040)."""
+    agenda.set_note(conn, item_id, note)
+    out = Outcome("Note changed.")
+    write_all_pages(conn, data_root, fs, at, out.problems)
+    log.info("Today note %d edited", item_id)
+    return out
+
+
 def change_task(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, task_id: str, at: datetime, **changes) -> Outcome:
     """Change a task's fields from the browse tool, such as its title, description or labels."""
     logged = tasks.update_task(conn, settings, task_id, at=at, via=BROWSE, **changes)
@@ -242,9 +251,10 @@ def edit_task(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: S
 
     Only the fields that differ change, each logged as "Browse tool". ``leads`` and ``assignees`` are Who's: someone not on
     the people list is added to it, and a label not there yet is created. A Start left at the day the task was created
-    stays unset.
+    stays unset. ``parents`` puts the task under exactly those tasks (mods log round 2, M0040), as one Parents change.
     """
     added: list[str] = []
+    parents = values.pop("parents", None)
     with transaction(conn):
         t = tasks.get_task(conn, task_id)
         if values.get("start") == start_of(t).isoformat() and not t.start:
@@ -266,6 +276,9 @@ def edit_task(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: S
                     ids.append(person_id)
                 values[key] = ids
         logged = tasks.update_task(conn, settings, task_id, at=at, via=BROWSE, **values)
+        moved = tasks.set_parents(conn, task_id, parents, at=at, via=BROWSE) if parents is not None else None
+        if moved:
+            logged.append(moved)
     message = f"{len(logged)} change{'s' if len(logged) != 1 else ''} in the status log." if logged else "Nothing changed."
     if added:
         message += f" Added {', '.join(added)} to the people list."

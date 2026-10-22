@@ -88,9 +88,10 @@ class FormDialog(QDialog):
         super().reject()
 
 
-def set_filled(widget: QWidget, filled: bool) -> None:
-    """Mark a field Parse and populate filled; the style sheet highlights it until it's edited."""
-    widget.setProperty("filled", filled)
+def set_filled(widget: QWidget, filled: bool, name: str = "filled", value: bool | None = None) -> None:
+    """Mark a field Parse and populate filled; the style sheet highlights it until it's edited. ``name`` and ``value`` set
+    another style property instead, such as the found list's "empty"."""
+    widget.setProperty(name, filled if value is None else value)
     widget.style().unpolish(widget)
     widget.style().polish(widget)
 

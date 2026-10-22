@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from docrepo import quick
 from docrepo.bulk import BulkEdit, LabelMatch, TaskOutcome, summary
 from docrepo.db import RECURRENCES, STATES
 from docrepo.detail import CSS, esc
@@ -38,9 +39,11 @@ from docrepo.schedule import start_of
 from docrepo.ui.style import STYLE
 from docrepo.ui.task_picker import full_path, path_text
 from docrepo.ui.tree_view import RowTree
-from docrepo.ui.widgets import Chip, ChipPicker, DateField, FormDialog, HoursField, InfoButton, Option, field
+from docrepo.ui.widgets import Chip, ChipPicker, DateField, FlowLayout, FormDialog, HoursField, InfoButton, Option, field
 
 Options = Callable[[str, list[str]], list[Option]]
+#: Opens the task picker under a widget; the callback gets the picked task's ID, or None.
+PickTask = Callable[[QWidget, Callable[[str | None], None]], None]
 LEAVE = "Leave as it is"
 
 
@@ -54,11 +57,14 @@ def chips_people(chips: ChipPicker) -> list[Who]:
 
 
 class TaskEditDialog(FormDialog):
-    """Edit task: a task's title, description, state, current status, labels, people and hours, dates, recurrence and flags."""
+    """Edit task: a task's title, description, state, current status, parents (mods log round 2, M0040), labels, people and
+    hours, dates, recurrence and flags."""
 
-    def __init__(self, parent: QWidget | None, m: Model, task_id: str, labels: Options, people: Options) -> None:
+    def __init__(self, parent: QWidget | None, m: Model, task_id: str, labels: Options, people: Options, pick_task: PickTask | None = None) -> None:
         super().__init__(parent)
         t = m.task(task_id)
+        self.m, self.task_id, self._pick_task = m, task_id, pick_task
+        self.parents: list[str] = list(m.parents_of(task_id))
         self.setWindowTitle(f"Edit task {task_id}")
         self.setObjectName("capture")
         self.setStyleSheet(STYLE)
@@ -87,6 +93,18 @@ class TaskEditDialog(FormDialog):
         self.status = QPlainTextEdit(t.current_status)
         self.status.setFixedHeight(56)
         g.addWidget(field("Current status", self.status, "status"))
+        # Parents: a quick task is filed here, out of Quick tasks (mods log round 2, M0040).
+        self.parents_box = QWidget()
+        self.parents_layout = FlowLayout(self.parents_box, spacing=6)
+        self.parents_hint = QLabel(objectName="hint")
+        self.parents_hint.setWordWrap(True)
+        box = QWidget()
+        bl = QVBoxLayout(box)
+        bl.setContentsMargins(0, 0, 0, 0)
+        bl.addWidget(self.parents_box)
+        bl.addWidget(self.parents_hint)
+        g.addWidget(field("Parents", box, sub="none makes it a top-level task"))
+        self._draw_parents()
 
         self.labels = ChipPicker(labels, "Search or add", "Create label “{}”")
         self.labels.set_chips([Chip(name, name) for name in t.labels])
@@ -159,6 +177,40 @@ class TaskEditDialog(FormDialog):
     def _sync(self) -> None:
         self.repeat_field.setVisible(self.recurrence.currentIndex() > 0)
 
+    def _draw_parents(self) -> None:
+        while self.parents_layout.count():
+            w = self.parents_layout.takeAt(0).widget()
+            if w is not None:
+                w.deleteLater()
+        for p in self.parents:
+            b = QPushButton(f"{full_path(self.m, p)}  ×")
+            b.setToolTip(f"Take it out from under {self.m.task(p).title}")
+            b.clicked.connect(lambda _=False, p=p: self.remove_parent(p))
+            self.parents_layout.addWidget(b)
+        if not self.parents:
+            self.parents_layout.addWidget(QLabel("None: a top-level task", objectName="hint"))
+        self.put_button = QPushButton("Put under a task…")
+        self.put_button.setEnabled(self._pick_task is not None)
+        self.put_button.clicked.connect(lambda: self._pick_task(self.put_button, self.put_under) if self._pick_task else None)
+        self.parents_layout.addWidget(self.put_button)
+        only_quick = len(self.parents) == 1 and quick.is_parent(self.m.task(self.parents[0]))
+        self.parents_hint.setText("It's a quick task. Putting it under a task takes it out of Quick tasks." if only_quick else "")
+        self.parents_hint.setVisible(only_quick)
+
+    def put_under(self, task_id: str | None) -> None:
+        """Put the task under another task as well; a quick task's only parent, Quick tasks, is replaced."""
+        if not task_id or task_id in self.parents:
+            return
+        if len(self.parents) == 1 and quick.is_parent(self.m.task(self.parents[0])):
+            self.parents = [task_id]
+        else:
+            self.parents.append(task_id)
+        self._draw_parents()
+
+    def remove_parent(self, task_id: str) -> None:
+        self.parents = [p for p in self.parents if p != task_id]
+        self._draw_parents()
+
     def save(self) -> None:
         self._accept()
 
@@ -196,6 +248,7 @@ class TaskEditDialog(FormDialog):
             "assignee_hours": self.asg_hours.value(), "start": self.start.value(), "due": self.due.value(), "deadline": self.deadline.value(),
             "deadline_desc": self.deadline_desc.text(), "reminder": self.reminder.value(), "recurrence": recurrence,
             "repeat_until": self.repeat.value() if recurrence else None, "urgent": self.urgent.isChecked(), "meeting": self.meeting.isChecked(),
+            "parents": list(self.parents),
         }
 
 

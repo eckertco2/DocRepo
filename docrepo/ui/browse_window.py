@@ -12,7 +12,9 @@ Ported from the mockup's ``views.js`` and ``detail.js``; SPEC section 8 describe
 """
 from __future__ import annotations
 
+import html
 import logging
+import re
 import sqlite3
 from collections.abc import Callable
 from datetime import date
@@ -55,7 +57,7 @@ from docrepo.links import is_link
 from docrepo.model import TODAY, Model, is_person
 from docrepo.people import PeopleError
 from docrepo.safe_fs import WriteRefused
-from docrepo.save import SaveResult
+from docrepo.save import SaveError, SaveResult, add_quick_task, note_to_task
 from docrepo.schedule import DueDate
 from docrepo.tasks import TaskError
 from docrepo.ui.context import AppContext
@@ -65,7 +67,8 @@ from docrepo.ui.settings_view import SettingsView
 from docrepo.ui.task_forms import BulkEditDialog, LabelMatchDialog, TaskEditDialog
 from docrepo.ui.task_picker import TaskPicker
 from docrepo.ui.timeline_view import TimelineView
-from docrepo.ui.tree_view import GREY, KEY_ROLE, RowTree, tint
+from docrepo.ui.keymap import KeyMapDialog
+from docrepo.ui.tree_view import DIM_ROLE, GREY, HTML_ROLE, KEY_ROLE, RowTree, tint
 from docrepo.ui.widgets import SAVE_KEYS, CheckMenuButton, FlowLayout, Option, label_options, people_options
 from docrepo.views import (
     LIST_IDS,
@@ -85,6 +88,7 @@ from docrepo.views import (
     documents_tree,
     due_cell,
     due_this_week,
+    find_text,
     expand_level,
     full_path,
     list_date,
@@ -145,6 +149,7 @@ class BrowseWindow(QWidget):
         self.run_dialog: Callable[[QDialog], bool] = lambda dialog: bool(dialog.exec())
         #: Asks why something is discarded: the reason, or None to cancel. Tests replace it.
         self.ask_reason: Callable[[str, str], str | None] = self._ask_reason
+        self.ask_text: Callable[[str, str, str], str | None] = self._ask_text
         self.view = "tasks"
         self.sel: tuple[str, str] | None = None
         self.pin: str | None = None
@@ -156,6 +161,7 @@ class BrowseWindow(QWidget):
         self.ticked: set[str] = set()
         #: A task just marked Done on Today: the Today view asks whether to update it too (mods log round 1, M0016).
         self.today_ask: str | None = None
+        self.today_kind = "task"  # what Today's box makes: a quick task, or a note
         self.open: set[str] = set()
         self.doc_task: str | None = None
         self.doc_subs = True
@@ -174,9 +180,10 @@ class BrowseWindow(QWidget):
         self._contents: dict[str, tuple[int, str]] = {}
         self._placed = False
         self._build()
-        for keys, handler in (("A", lambda: self._key("note")), ("N", lambda: self._key("new_task")), ("U", lambda: self._key("update")),
-                              ("G", lambda: self._key("agenda")), ("E", lambda: self._key("edit")), ("T", lambda: self._key("today")),
-                              ("Ctrl+F", self.search_box.setFocus), ("F5", self.refresh),
+        # One letter per topic (mods log round 2, M0036): N note, T new task, U update, A agenda, E edit, D Today.
+        for keys, handler in (("N", lambda: self._key("note")), ("T", lambda: self._key("new_task")), ("U", lambda: self._key("update")),
+                              ("A", lambda: self._key("agenda")), ("E", lambda: self._key("edit")), ("D", lambda: self._key("today")),
+                              ("Ctrl+F", self.open_find), ("Ctrl+Shift+F", self.search_box.setFocus), ("F1", self.show_keys), ("F5", self.refresh),
                               ("Ctrl+B", lambda: self.show_views_pane(not self.views_button.isChecked()))):
             QShortcut(QKeySequence(keys), self, handler)
         if capture is not None:
@@ -195,7 +202,7 @@ class BrowseWindow(QWidget):
         self.views_button.setToolTip("Hide or show the list of views on the left   (Ctrl+B)")
         bl.addWidget(self.views_button)
         self.search_box = QLineEdit()
-        self.search_box.setPlaceholderText("Search tasks, captures, documents and people   (Ctrl+F)")
+        self.search_box.setPlaceholderText("Search everything: tasks, captures, documents and people   (Ctrl+Shift+F)")
         self.search_box.setClearButtonEnabled(True)
         self._search_timer = QTimer(self)
         self._search_timer.setSingleShot(True)
@@ -206,11 +213,14 @@ class BrowseWindow(QWidget):
         bl.addWidget(self.search_box, 1)
         new = QPushButton("New capture", objectName="primary")
         new.clicked.connect(lambda: self.open_capture())
-        self.tb_new = QPushButton("New task   N")
+        self.tb_new = QPushButton("New task   T")
         self.tb_new.clicked.connect(lambda: self.capture_for_selected("new_task"))
         self.tb_update = QPushButton("Update   U")
         self.tb_update.clicked.connect(lambda: self.capture_for_selected("update"))
-        for w in (new, self.tb_new, self.tb_update):
+        keys = QPushButton("Keys   F1")
+        keys.setToolTip("Every key, in one list")
+        keys.clicked.connect(self.show_keys)
+        for w in (new, self.tb_new, self.tb_update, keys):
             bl.addWidget(w)
         outer.addWidget(bar)
 
@@ -238,7 +248,20 @@ class BrowseWindow(QWidget):
         self.pane_note.setWordWrap(True)
         self.filters = QWidget()
         self.filters_layout = FlowLayout(self.filters, spacing=8)
-        for w in (self.pane_title, self.pane_note, self.filters):
+        # Find in this view (mods log round 2, M0026): Ctrl+F; it narrows the list as you type, and Esc clears it.
+        self.find_bar = QWidget()
+        fb = QHBoxLayout(self.find_bar)
+        fb.setContentsMargins(0, 0, 0, 0)
+        self.find_box = QLineEdit()
+        self.find_box.setPlaceholderText("Find in this view   Esc clears")
+        self.find_box.setAccessibleName("Find in this view")
+        self.find_box.textChanged.connect(lambda _: self.render_list())
+        self.find_box.installEventFilter(self)
+        fb.addWidget(self.find_box, 1)
+        self.find_count = QLabel(objectName="paneNote")
+        fb.addWidget(self.find_count)
+        self.find_bar.hide()
+        for w in (self.pane_title, self.pane_note, self.filters, self.find_bar):
             hl.addWidget(w)
         lp.addWidget(head)
         self.tree = RowTree()
@@ -543,6 +566,77 @@ class BrowseWindow(QWidget):
         finally:
             self.tree.end(self.sel)
         self.filters.setVisible(self.filters_layout.count() > 0)
+        self._apply_find()
+
+    # ---- Find in this view (mods log round 2, M0026) ----
+    def open_find(self) -> None:
+        """Ctrl+F: a box above the list that narrows the view you're in as you type."""
+        if self.view in ("timeline", "capacity", "settings"):
+            self.say("The timeline and capacity have their own filters. Find in this view works on Today, the task tree, the lists, "
+                     "Unfiled, Agendas, People, Labels, Documents and Discarded. Ctrl+Shift+F searches everything.")
+            return
+        self.find_bar.show()
+        self.find_box.setFocus()
+        self.find_box.selectAll()
+
+    def close_find(self) -> None:
+        """Esc in the box, or another view: clear it, and the list shows everything again."""
+        self.find_box.blockSignals(True)
+        self.find_box.clear()
+        self.find_box.blockSignals(False)
+        self.find_bar.hide()
+        self.find_count.clear()
+
+    def _apply_find(self) -> None:
+        """Keep the rows that hold every word typed, each with its parents, faded, for context; closed branches open while
+        finding. A task is found by its ID, title, description, current status, labels and people too."""
+        words = self.find_box.text().lower().split() if not self.find_bar.isHidden() else []
+        if not words:
+            self.find_count.clear()
+            return
+        m = self.model()
+
+        def text_of(item) -> str:
+            key = item.data(0, KEY_ROLE)
+            cells = " ".join(item.data(i, HTML_ROLE) or "" for i in range(self.tree.columnCount()))
+            text = html.unescape(re.sub(r"<[^>]+>", " ", cells)).lower()
+            return text + (" " + find_text(m, key[1]) if key and key[0] == "task" and key[1] in m.tasks else "")
+
+        hits = 0
+
+        def visit(item) -> bool:
+            nonlocal hits
+            hit = item.data(0, KEY_ROLE) is not None and all(w in text_of(item) for w in words)
+            hits += hit
+            kept = [visit(item.child(i)) for i in range(item.childCount())]
+            keep = hit or any(kept)
+            item.setHidden(not keep)
+            item.setData(0, DIM_ROLE, True if keep and not hit else None)
+            if any(kept):
+                item.setExpanded(True)
+            return keep
+
+        building, self.tree._building = self.tree._building, True  # opening branches here isn't remembered
+        try:
+            root = self.tree.invisibleRootItem()
+            for i in range(root.childCount()):
+                visit(root.child(i))
+            # A heading row (Today's groups) stays when a row under it does.
+            heading = None
+            for i in range(root.childCount()):
+                item = root.child(i)
+                if item.data(0, KEY_ROLE) is None and not item.childCount():
+                    heading = item
+                elif heading is not None and not item.isHidden():
+                    heading.setHidden(False)
+                    heading.setData(0, DIM_ROLE, None)
+        finally:
+            self.tree._building = building
+        self.find_count.setText(f"{hits} match{'es' if hits != 1 else ''}" if hits else "Nothing in this view matches")
+
+    def show_keys(self) -> None:
+        """F1: every key, in one list (mods log round 2, M0036)."""
+        self.run_dialog(KeyMapDialog(self, self.ctx.settings.hotkey))
 
     # ---- rows ----
     def _task_cells(self, task_id: str, depth: int, context: bool = False, extra: str = "", when: DueDate | None = None,
@@ -750,19 +844,28 @@ class BrowseWindow(QWidget):
         """Today (mods log round 1, M0016): the day's list, items carried over first, then what's been done today."""
         m, today = self.model(), self.today()
         self._set_head("Today", VIEW_IDS["today"].note)
+        # The box makes a quick task, or a note with the switch (mods log round 2, M0039).
+        for kind, label in (("task", "Task"), ("note", "Note")):
+            b = QPushButton(label)
+            b.setCheckable(True)
+            b.setChecked(self.today_kind == kind)
+            b.setToolTip("The box makes a quick task, under Quick tasks" if kind == "task" else "The box adds a note to Today")
+            b.clicked.connect(lambda _=False, k=kind: self.set_today_kind(k))
+            self._filter_widget(b)
         self.today_note = QLineEdit()
-        self.today_note.setPlaceholderText("Add a note to Today, such as Call Tom about the coupling")
+        self.today_note.setPlaceholderText("A quick task, such as Call the vendor about seals by Fri" if self.today_kind == "task"
+                                           else "A note for today, such as Sign the overtime sheets")
         self.today_note.setMinimumWidth(320)
-        self.today_note.returnPressed.connect(self.add_today_note)
+        self.today_note.returnPressed.connect(self.add_today_item)
         self._filter_widget(self.today_note)
-        self._button("Add", self.add_today_note)
+        self._button("Add", self.add_today_item)
         asked = m.tasks.get(self.today_ask) if self.today_ask else None
         if asked:
             self._filter_widget(QLabel(f"<b>{esc(asked.title)}</b> is done for today. Update the task too?"))
             self._button("Update…", lambda: self.answer_today("update"))
             self._button("Close the task…", lambda: self.answer_today("close"))
             self._button("No", lambda: self.answer_today(None))
-        self.tree.set_columns(["Item", "State", "Due", ""], [0, 96, 96, 120])
+        self.tree.set_columns(["Item", "State", "Due", ""], [0, 96, 96, 220])
         grey = QColor(GREY).lighter(135)
         for name, items in today_groups(m, today):
             self.tree.add_row(None, None, [f"<b>{esc(name)}</b>"], grey, selectable=False, span=True)
@@ -778,9 +881,9 @@ class BrowseWindow(QWidget):
                                                      state_chip(t.state) if t else chip("Note", "st-ns"),
                                                      f'<p align="right" style="{colour}">{esc(cell.text)}</p>' if cell else ""],
                                          tip=f"Added {long_date(date.fromisoformat(a.added[:10]), today)}")
-                self.tree.setItemWidget(item, 3, self._today_buttons(a.id))
+                self.tree.setItemWidget(item, 3, self._today_buttons(a.id, t.id if t else None))
         if not m.today_items():
-            self.tree.add_row(None, None, ['<span class="sub">Nothing on Today. Select a task and press T, or type a note above.</span>'],
+            self.tree.add_row(None, None, ['<span class="sub">Nothing on Today. Select a task and press D, or type a quick task above.</span>'],
                               selectable=False, span=True)
         self._today_due_rows(m, today, grey)
         done = m.done_on(today)
@@ -811,7 +914,7 @@ class BrowseWindow(QWidget):
             item = self.tree.add_row(None, ("task", t.id), [f'{esc(t.title)}<br><span class="sub">{esc(path_text(m, t.id) or "Top-level task")}</span>',
                                                           state_chip(t.state), f'<p align="right" style="{colour}">{esc(cell.text)}</p>' if cell else ""])
             add = QPushButton("Add to Today", objectName="rowLink")
-            add.setToolTip("Put it on Today (T)")
+            add.setToolTip("Put it on Today (D)")
             add.clicked.connect(lambda _=False, i=t.id: self.add_to_today(i))
             holder = QWidget()
             lay = QHBoxLayout(holder)
@@ -828,10 +931,21 @@ class BrowseWindow(QWidget):
         db.set_state(self.conn, TODAY_MINE_KEY, "1" if on else "0")
         self.render_list()
 
-    def _today_buttons(self, item_id: int) -> QWidget:
+    def _today_buttons(self, item_id: int, task_id: str | None) -> QWidget:
+        """A Today item's links. A task has Edit (Edit task, where Parents files a quick task) and Note; a note has Edit and
+        Make it a task (mods log round 2, M0040). Then Done and Remove."""
         box = QWidget()
         lay = QHBoxLayout(box)
         lay.setContentsMargins(0, 0, 0, 0)
+        links = ((("Edit", lambda: self.edit_task(task_id), "Edit task, such as putting it under its real task (E)"),
+                  ("Note", lambda: self.open_capture(task=task_id, mode="note"), "Add a note, with files, to the task (N)")) if task_id else
+                 (("Edit", lambda: self.edit_today_note(item_id), "Change the note's text"),
+                  ("Make it a task", lambda: self.make_today_task(item_id), "Make it a quick task, under Quick tasks, in the note's place")))
+        for label, clicked, tip in links:
+            b = QPushButton(label, objectName="rowLink")
+            b.setToolTip(tip)
+            b.clicked.connect(lambda _=False, c=clicked: c())
+            lay.addWidget(b)
         for label, how, tip in (("Done", "Done", "Take it off Today as done"), ("Remove", "Removed", "Take it off Today")):
             b = QPushButton(label, objectName="rowLink")
             b.setToolTip(tip)
@@ -1104,17 +1218,17 @@ class BrowseWindow(QWidget):
                          primary=True)
             self._action("Open folder", lambda: self.reveal(self.ctx.data_root / "Tasks" / task_id), f"Open Tasks\\{task_id} in File Explorer")
             return
-        self._action("Add note   A", lambda: self.open_capture(task=task_id, mode="note"), "Add a note to this task's raw text log")
+        self._action("Add note   N", lambda: self.open_capture(task=task_id, mode="note"), "Add a note to this task's raw text log")
         self._action("Update   U", lambda: self.open_capture(task=task_id, mode="update"), "Update this task: its state, status, dates and more")
-        self._action("New task   N", lambda: self.open_capture(task=task_id, mode="new_task"), "A new task under this one")
+        self._action("New task   T", lambda: self.open_capture(task=task_id, mode="new_task"), "A new task under this one")
         if any(a.subject == task_id for a in m.today_items()):
             self._action("On Today ✓", lambda: self.show_agenda(TODAY), "It's on Today. Open the Today view.")
         else:
-            self._action("Add to Today   T", lambda: self.add_to_today(task_id), "Put it on your list for today")
+            self._action("Add to Today   D", lambda: self.add_to_today(task_id), "Put it on your list for today")
         if self.pages().has_agenda(t):
             self._action("Open agenda", lambda: self.show_agenda(task_id))
         agenda = QMenu(self)
-        agenda.addAction("Today   ·   your list for today, straight away (T)", lambda: self.add_to_today(task_id))
+        agenda.addAction("Today   ·   your list for today, straight away (D)", lambda: self.add_to_today(task_id))
         agenda.addSeparator()
         for meeting in meetings_for_menu(m, task_id):
             when = m.meeting_when(meeting.id, self.today())
@@ -1122,7 +1236,7 @@ class BrowseWindow(QWidget):
             act.triggered.connect(lambda _=False, x=meeting.id: self.open_capture(task=task_id, mode="update", agenda=[x]))
         other = agenda.addAction("Someone else or another task…")
         other.triggered.connect(lambda: self.open_capture(task=task_id, mode="update", agenda_focus=True))
-        self._action("Add to agenda   G", tip="Put this task on an agenda", menu=agenda)
+        self._action("Add to agenda   A", tip="Put this task on an agenda", menu=agenda)
         edit = QMenu(self)
         edit.addAction("Edit task…   E", lambda: self.edit_task(task_id))
         edit.addSeparator()
@@ -1346,6 +1460,7 @@ class BrowseWindow(QWidget):
             self.search_box.blockSignals(False)
         self.view, self.cap_cell = view, None
         self.ticked.clear()
+        self.close_find()
         self._select_first()
         self.render_all()
 
@@ -1399,9 +1514,14 @@ class BrowseWindow(QWidget):
             self.view = self.before_search
             self.render_all()
 
-    def eventFilter(self, watched, event) -> bool:  # noqa: N802 - Esc in the search box clears it
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802 - Esc in the search box, or in Find, clears it
         if watched is self.search_box and event.type() == event.Type.KeyPress and event.key() == Qt.Key.Key_Escape:
             self.search_box.clear()
+            return True
+        if watched is getattr(self, "find_box", None) and event.type() == event.Type.KeyPress and event.key() == Qt.Key.Key_Escape:
+            self.close_find()
+            self.render_list()
+            self.tree.setFocus()
             return True
         return super().eventFilter(watched, event)
 
@@ -1444,8 +1564,8 @@ class BrowseWindow(QWidget):
         self.capture.show_capture(**options)
 
     def capture_for_selected(self, mode: str) -> None:
-        """A note, a new task under it or an update for the selected task; "agenda" (G) is an update with the cursor in
-        Add to agenda (mods log round 1, M0020)."""
+        """A note (N), a new task under it (T) or an update (U) for the selected task; "agenda" (A) is an update with the
+        cursor in Add to agenda (mods log round 1, M0020; the letters from round 2, M0036)."""
         if not (self.sel and self.sel[0] == "task"):
             self.say("Select a task first. The shortcut works on the task that's selected in the browse tool.")
             return
@@ -1558,6 +1678,54 @@ class BrowseWindow(QWidget):
         """T, or Add to Today: the task goes on Today, and the window stays where it is."""
         self._do(lambda: edits.add_to_today(self.conn, self.ctx.data_root, self.ctx.fs, task_id, "", self._now()), self.sel)
 
+    def set_today_kind(self, kind: str) -> None:
+        """Today's box makes a quick task ("task") or a note ("note")."""
+        self.today_kind = kind
+        self.render_list()
+        self.today_note.setFocus()
+
+    def add_today_item(self) -> None:
+        """Add, or Enter, in Today's box: a quick task, or a note, as its switch says."""
+        if self.today_kind == "note":
+            self.add_today_note()
+        else:
+            self.add_today_task()
+
+    def add_today_task(self) -> None:
+        """A quick task on Today from the box (mods log round 2, M0039), read by Parse and populate."""
+        box = getattr(self, "today_note", None)
+        text = box.text().strip() if box is not None else ""
+        if not text:
+            self.say("Type the task first.", error=True)
+            return
+        if self._save_quick(lambda: add_quick_task(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, text, self._now())):
+            self.today_note.setFocus()
+
+    def make_today_task(self, item_id: int) -> None:
+        """Make it a task, on a note on Today (mods log round 2, M0040): a quick task in the note's place."""
+        self._save_quick(lambda: note_to_task(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, item_id, self._now()))
+
+    def _save_quick(self, make: Callable[[], SaveResult]) -> SaveResult | None:
+        try:
+            result = make()
+        except (SaveError, TaskError, AgendaError, WriteRefused, OSError, sqlite3.Error, ValueError) as e:
+            self.say(str(e), error=True)
+            return None
+        self.refresh(render=False)
+        self.sel = ("task", result.created_task)
+        self.render_all()
+        self.say(result.message + (" Problems: " + " ".join(result.problems) if result.problems else ""), bool(result.problems))
+        return result
+
+    def edit_today_note(self, item_id: int) -> None:
+        """Edit, on a note on Today (mods log round 2, M0040): change its text."""
+        item = next((a for a in self.model().agenda if a.id == item_id), None)
+        if item is None:
+            return
+        text = self.ask_text("Edit the note", "The note on Today:", item.note)
+        if text is not None and text.strip() != item.note:
+            self._do(lambda: edits.edit_today_note(self.conn, self.ctx.data_root, self.ctx.fs, item_id, text, self._now()), self.sel)
+
     def add_today_note(self) -> None:
         box = getattr(self, "today_note", None)
         text = box.text().strip() if box is not None else ""
@@ -1623,12 +1791,17 @@ class BrowseWindow(QWidget):
         """Edit task (E): every field on one page (mods log round 1, M0008, M0011)."""
         if task_id not in self.model().tasks:
             return
-        dialog = TaskEditDialog(self, self.model(), task_id, self._label_options, self._people_options)
+        dialog = TaskEditDialog(self, self.model(), task_id, self._label_options, self._people_options,
+                                lambda anchor, picked: self._pick_task(anchor, picked, None))
         if self.run_dialog(dialog):
             self.save_task_edit(task_id, dialog.values())
 
     def save_task_edit(self, task_id: str, values: dict) -> None:
         self._do(lambda: edits.edit_task(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, task_id, self._now(), **values))
+
+    def _ask_text(self, title: str, label: str, text: str) -> str | None:
+        value, ok = QInputDialog.getText(self, title, label, text=text)
+        return value if ok else None
 
     # ---- discarding (mods log round 1, M0021) ----
     def _ask_reason(self, title: str, text: str) -> str | None:

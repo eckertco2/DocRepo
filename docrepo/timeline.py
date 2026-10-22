@@ -15,6 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, timedelta
 
+from docrepo import quick
 from docrepo.dates import add_months, long_date, monday_of, to_date
 from docrepo.model import Model, Task
 from docrepo.schedule import due_of, is_open, start_of, windows
@@ -172,7 +173,9 @@ def build(m: Model, today: date, start: date, weeks: int, group: str = "top", la
         none = [x for x in on if not of(x)]
         if none and not picked:
             groups.append(Group("No label" if by_label else "No one", sorted_rows(none)))
-    undated = tuple(t.id for t in m.tasks.values() if is_open(t) and match(t) and not t.deadline and not windows(t, today + _FAR))
+    # The built-in Quick tasks (mods log round 2) has no dates of its own, so it's left out of them.
+    undated = tuple(t.id for t in m.tasks.values()
+                    if is_open(t) and match(t) and not t.deadline and not windows(t, today + _FAR) and not quick.is_parent(t))
     return Timeline(start, weeks, tuple(groups), undated)
 
 

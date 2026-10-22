@@ -14,6 +14,8 @@ from docrepo.detail import CSS
 
 KEY_ROLE = Qt.ItemDataRole.UserRole
 HTML_ROLE = Qt.ItemDataRole.UserRole + 1
+#: A row kept only for context, drawn faded: a parent of what Find in this view found (mods log round 2, M0026).
+DIM_ROLE = Qt.ItemDataRole.UserRole + 2
 
 GROUP_COLOURS = ("#3b78c4", "#2e9483", "#c08419", "#8460c2")
 GREY = "#b8c1cb"
@@ -74,6 +76,8 @@ class HtmlDelegate(QStyledItemDelegate):
             left = style.subElementRect(QStyle.SubElement.SE_ItemViewItemText, opt, opt.widget).left()
         doc = self._doc(html, opt.rect.right() - left - 6, opt)
         painter.save()
+        if index.siblingAtColumn(0).data(DIM_ROLE):
+            painter.setOpacity(0.5)
         top = opt.rect.top() + max(0, (opt.rect.height() - doc.size().height()) / 2)
         painter.translate(left + 3, top)
         ctx = QAbstractTextDocumentLayout.PaintContext()

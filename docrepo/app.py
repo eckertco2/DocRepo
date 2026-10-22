@@ -148,6 +148,7 @@ class CaptureApp(QObject):
             hotkey.HOTKEY_IDS["new_task_hotkey"]: lambda: self.window.open_with_hotkey("new_task"),
             hotkey.HOTKEY_IDS["update_hotkey"]: lambda: self.window.open_with_hotkey("update"),
             hotkey.HOTKEY_IDS["agenda_hotkey"]: lambda: self.window.open_with_hotkey("agenda"),
+            hotkey.HOTKEY_IDS["today_hotkey"]: lambda: self.window.open_with_hotkey("today"),
         }
         self.register_hotkey()
         self.timer = QTimer(self)

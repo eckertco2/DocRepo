@@ -52,6 +52,11 @@ QLabel#does { background: #dbe8f5; border-left: 3px solid #1d5e98; padding: 6px 
 QLabel#error { background: #fbe3e1; color: #b0261e; padding: 6px 10px; border-radius: 4px; }
 QLabel#tip { background: #dbe8f5; border: 1px solid #9dc0e3; border-radius: 5px; padding: 6px 9px; font-size: 9pt; }
 QFrame#found { background: #fcefcf; border: 1px solid #875700; border-radius: 6px; }
+QFrame#found[empty="true"] { background: #f4f6f8; border: 1px dashed #b8c1cb; }
+QFrame#divider { color: #d6dce3; }
+QPushButton#today { border: 1px solid #b8c1cb; border-radius: 11px; background: #ffffff; padding: 2px 10px; }
+QPushButton#today:checked { background: #1d5e98; border-color: #1d5e98; color: #ffffff; }
+QPushButton#today:disabled { color: #b8c1cb; border-color: #d6dce3; }
 QFrame#fileRow { border: 1px solid #d6dce3; border-radius: 5px; }
 QGroupBox { background: #f4f6f8; border: 1px solid #d6dce3; border-radius: 6px; margin-top: 14px; padding: 10px 10px 8px 10px; }
 QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 3px; color: #87919c; font-size: 8.5pt; font-weight: 600; }

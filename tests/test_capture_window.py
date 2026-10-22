@@ -47,6 +47,7 @@ def window(ctx):
     w = CaptureWindow(ctx)
     w.show_capture()
     yield w
+    w.hide()  # a window left showing can take focus in a later test, after its database is closed
     w.deleteLater()
 
 
@@ -195,11 +196,12 @@ def test_a_note_on_an_agenda(window, ctx):
 
 
 def test_a_note_on_today(window, ctx):
-    """Mods log round 1 (M0016): Today comes first under Add to agenda."""
+    """Mods log round 1 (M0016), with Today a button beside the capture types (round 2, M0037): one click, or Alt+D."""
     window.show_capture()
-    assert window._agenda_options("", [])[0].value == "today"
+    assert "today" not in [o.value for o in window._agenda_options("", [])]  # it has its own button
     window.content.setPlainText("Sign the overtime sheets.")
-    window.agenda.add(Chip("today", "Today"))
+    window._alt_today()
+    assert window.today_button.isChecked() and window.today_on
     window.agenda.add(Chip("T000010", "Business team meeting"))
     assert window.does.text() == "Save puts this note on <b>Today</b> and the agenda of <b>Business team meeting</b>."
     window.save()
@@ -282,7 +284,7 @@ def test_a_capture_types_hotkey_opens_the_window_for_it(window, ctx):
     window.reset_draft()
     window.set_task("T000008")
     window.open_with_hotkey("agenda")  # a task already picked: Update at once, ready for Add to agenda
-    assert window.types == {"update"} and window.agenda_field.isVisibleTo(window)
+    assert window.types == {"update"} and window.agenda.isEnabled()
 
 
 def test_set_hotkey_command(tmp_path, capsys):
@@ -433,3 +435,67 @@ def test_editing_a_mods_log_entry_from_the_panel(window, ctx):
     entries = mods.read_log(ctx.data_root)
     assert [(e.id, e.text, e.edited) for e in entries] == [("M0001", "Make the window wider, with the found list beside the text.", "2026-10-08")]
     assert window.mods.editing is None and window.mods.save_button.text() == "Save" and ctx.messages[-1][1] == r"M0001 is updated in Mods\mods-log.md."
+
+
+def test_the_found_list_sits_beside_the_content_text(window):
+    """Mods log round 2 (M0042): what Parse and populate found is beside the content text, under it when narrow."""
+    from PySide6.QtWidgets import QBoxLayout
+
+    window.resize(940, 700)
+    assert window.main_layout.direction() == QBoxLayout.Direction.LeftToRight
+    assert window.found_box.isVisibleTo(window) and "Alt+P reads the content text" in window.found_label.text()
+    window.set_task("T000008")
+    window.set_type("update", True)
+    window.content.setPlainText("Closed. The coupling is in.")
+    window.parse()
+    assert "Current status" in window.found_label.text() and window.clear_found.isVisibleTo(window)
+    window.clear_found.click()
+    assert "Alt+P reads the content text" in window.found_label.text()
+    window._arrange(600)
+    assert window.main_layout.direction() == QBoxLayout.Direction.TopToBottom
+    window._arrange(940)
+    assert window.main_layout.direction() == QBoxLayout.Direction.LeftToRight
+
+
+def test_alt_and_the_topics_letter(window):
+    """Mods log round 2 (M0036): Alt+N, Alt+T and Alt+U tick the capture types; Alt+A goes to the agenda picker."""
+    window._alt_type("new_task")
+    assert window.types == {"new_task"}
+    window._alt_type("note")
+    assert window.types == {"new_task", "note"}
+    window._alt_type("new_task")
+    assert window.types == {"note"}
+    window.set_task("T000008")  # a note on a picked task can't go on an agenda
+    window._alt_agenda()
+    assert window.error.text().startswith("With a task picked, check New task or Update") and not window.today_button.isEnabled()
+    window._alt_today()
+    assert not window.today_on
+
+
+def test_expand_folds_the_rest_away(window, ctx):
+    """Mods log round 2 (M0046, M0048 phase 1): F11 makes the content text fill the window; the rest folds away and comes back."""
+    window.set_task("T000008")
+    window._show_summary(True)
+    window.summary.setPlainText("A short summary.")
+    window.toggle_expand()
+    assert window.expanded and not window.lower.isVisibleTo(window) and window.folded.isVisibleTo(window)
+    assert "Copy prompt and the summary" in window.folded.text() and window.expand_button.text().startswith("Back")
+    assert window.draft().summary == "A short summary."  # folded away, not lost
+    window.toggle_expand()
+    assert not window.expanded and window.lower.isVisibleTo(window) and not window.folded.isVisibleTo(window)
+
+
+def test_a_quick_task_from_the_capture_window(window, ctx):
+    """Mods log round 2 (M0039): a new task with no task picked that goes on Today waits under Quick tasks."""
+    from docrepo import quick
+
+    window.open_with_hotkey("today")  # Ctrl+Shift+D
+    assert window.types == {"new_task"} and window.today_on and window._quick()
+    assert window.task_button.text() == "None: a quick task, under Quick tasks"
+    assert "a quick task, under <b>Quick tasks</b>" in window.does.text()
+    window.title.setText("Order seal kits")
+    window.save()
+    m = Model(ctx.conn)
+    t = next(x for x in m.tasks.values() if x.title == "Order seal kits")
+    assert m.parents_of(t.id) == [quick.parent_id(ctx.conn)] and [a.subject for a in m.today_items()] == [t.id]
+    assert ctx.messages[-1][1].endswith("under Quick tasks. On Today.")

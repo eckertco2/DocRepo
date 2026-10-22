@@ -684,3 +684,101 @@ def test_ctrl_enter_and_esc_in_a_capture_edit(browse):
     browse.start_capture_edit("C000017")
     _shortcut(form, "Escape").activated.emit()  # nothing changed: it closes without asking
     assert browse.editing is None and asked == ["Edit capture C000017"]
+
+
+def test_one_letter_per_topic(browse, monkeypatch):
+    """Mods log round 2 (M0036): N note, T new task, U update, A agenda, D Today and E edit act on the selected task; F1 lists them."""
+    from PySide6.QtGui import QShortcut
+
+    keys = {s.key().toString(): s for s in browse.findChildren(QShortcut)}
+    assert {"N", "T", "U", "A", "D", "E", "Ctrl+F", "Ctrl+Shift+F", "F1"} <= set(keys) and "G" not in keys
+    assert browse.tb_new.text() == "New task   T"
+    opened = []
+    monkeypatch.setattr(browse, "open_capture", lambda **options: opened.append(options))
+    browse.go_task("T000012")
+    browse.page.setFocus()
+    for k in ("N", "T", "U", "A"):
+        keys[k].activated.emit()
+    assert [(o["mode"], o.get("agenda_focus", False)) for o in opened] == [("note", False), ("new_task", False), ("update", False), ("update", True)]
+    keys["D"].activated.emit()
+    assert browse.status.text() == "Rigging plan is on Today. Its status log says so."
+    shown = []
+    browse.run_dialog = lambda d: shown.append(d.windowTitle()) or False
+    keys["F1"].activated.emit()
+    keys["E"].activated.emit()
+    assert shown == ["Keys", "Edit task T000012"]
+    labels = [b.text() for b in browse.actions.findChildren(QPushButton)]
+    assert {"Add note   N", "New task   T", "Add to agenda   A"} <= set(labels)
+
+
+def test_find_in_this_view(browse):
+    """Mods log round 2 (M0026): Ctrl+F narrows the view you're in; a tree keeps its parents, faded, and opens closed branches."""
+    from docrepo.ui.tree_view import DIM_ROLE
+
+    browse.set_view("tasks")
+    browse.open_find()
+    assert browse.find_bar.isVisibleTo(browse)
+    browse.find_box.setText("rigging plan")
+    rows = {i.data(0, KEY_ROLE): i for i in browse.tree.items()}
+    rig, top = rows[("task", "T000012")], rows[("task", "T000001")]
+    assert not rig.isHidden() and not rig.data(0, DIM_ROLE) and browse.tree.is_shown(rig)
+    assert not top.isHidden() and top.data(0, DIM_ROLE)  # a parent, kept for context
+    assert rows[("task", "T000019")].isHidden() and browse.find_count.text().endswith(("match", "matches"))
+    browse.find_box.setText("Mike Ortiz")  # people count too
+    assert not rows_after(browse)[("task", "T000012")].isHidden()
+    browse.find_box.setText("nothing like this")
+    assert browse.find_count.text() == "Nothing in this view matches"
+    browse.set_view("today")  # another view clears it
+    assert browse.find_bar.isHidden() and browse.find_box.text() == ""
+    browse.set_view("timeline")
+    browse.open_find()
+    assert browse.find_bar.isHidden() and "own filters" in browse.status.text()
+
+
+def rows_after(w) -> dict:
+    return {i.data(0, KEY_ROLE): i for i in w.tree.items()}
+
+
+def test_quick_tasks_on_today(browse):
+    """Mods log round 2 (M0039, M0040): Today's box makes a quick task, or a note; a note can be edited or made a task, and
+    Edit task's Parents files a quick task under its real task."""
+    from docrepo import quick
+    from docrepo.ui.task_forms import TaskEditDialog
+
+    browse.set_view("today")
+    browse.today_note.setText("Call the vendor about seals by Fri")
+    browse.add_today_item()
+    m = Model(browse.conn)
+    t = next(x for x in m.tasks.values() if x.title == "Call the vendor about seals")
+    parent = quick.parent_id(browse.conn)
+    assert (t.due, m.parents_of(t.id), browse.sel) == ("2026-10-09", [parent], ("task", t.id)) and "under Quick tasks" in browse.status.text()
+    browse.set_today_kind("note")
+    browse.today_note.setText("Sign the overtime sheets")
+    browse.add_today_item()
+    note = next(a for a in Model(browse.conn).today_items() if not a.subject)
+    browse.ask_text = lambda title, label, text: "Sign the overtime sheets by noon"
+    browse.edit_today_note(note.id)
+    assert next(a for a in Model(browse.conn).agenda if a.id == note.id).note == "Sign the overtime sheets by noon"
+    browse.make_today_task(note.id)
+    m = Model(browse.conn)
+    made = next(a for a in m.agenda if a.id == note.id).subject
+    assert m.task(made).title == "Sign the overtime sheets by noon" and m.parents_of(made) == [parent]
+    dialog = TaskEditDialog(browse, browse.model(), t.id, browse._label_options, browse._people_options, lambda anchor, picked: picked("T000008"))
+    assert dialog.parents_hint.text().startswith("It's a quick task")
+    dialog.put_button.click()
+    assert dialog.parents == ["T000008"] and dialog.changed()
+    browse.save_task_edit(t.id, dialog.values())
+    assert Model(browse.conn).parents_of(t.id) == ["T000008"] and browse.status.text() == "1 change in the status log."
+
+
+def test_the_suggested_hotkeys(browse):
+    """Mods log round 2 (M0036): Use the suggested keys fills each empty hotkey box with Ctrl+Shift and its letter."""
+    browse.set_view("settings")
+    view = browse.settings_view
+    view.more_hotkeys["browse_hotkey"].setText("Ctrl+Alt+B")
+    view.suggest_hotkeys()
+    assert {k: box.text() for k, box in view.more_hotkeys.items()} == {
+        "browse_hotkey": "Ctrl+Alt+B", "note_hotkey": "Ctrl+Shift+N", "new_task_hotkey": "Ctrl+Shift+T", "update_hotkey": "Ctrl+Shift+U",
+        "agenda_hotkey": "Ctrl+Shift+A", "today_hotkey": "Ctrl+Shift+D"}
+    assert browse.status.text() == "Filled 5 hotkeys. Save settings to use them."
+    assert view.save() == ["browse_hotkey", "note_hotkey", "new_task_hotkey", "update_hotkey", "agenda_hotkey", "today_hotkey"]

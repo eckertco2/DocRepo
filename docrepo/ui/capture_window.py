@@ -1,10 +1,13 @@
 """The capture window: the hotkey window where everything enters DocRepo.
 
-Top to bottom: the task picker, the capture types (Note, New task, Update), a
-line saying what Save will do, the title (New task only), the content text,
-Parse and populate with what it found, the files, Add to agenda, Copy prompt and
-the summary, then the New task and Update fields. A "?" button opens the mods
-log. Esc hides the window and keeps the draft; Ctrl+Enter saves; Alt+P parses.
+Top to bottom: the task picker, the capture types (Note, New task, Update) with
+Agenda and Today beside them, a line saying what Save will do, then the title
+(New task only) and the content text, with what Parse and populate found beside
+them, then the files, Copy prompt and the summary, and the New task and Update
+fields. A "?" button opens the mods log. Esc hides the window and keeps the
+draft; Ctrl+Enter saves; Alt+P parses; Alt+N, Alt+T and Alt+U tick the capture
+types, Alt+A goes to the agenda picker and Alt+D to Today; F11 expands the
+content text; F1 lists the keys (mods log round 2, M0036, M0037, M0042, M0046).
 
 Ported from the browse tool mockup's ``capture.js``; SPEC section 7 describes it.
 """
@@ -21,6 +24,7 @@ from typing import Any
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QCursor, QDragEnterEvent, QDropEvent, QGuiApplication, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QBoxLayout,
     QCheckBox,
     QComboBox,
     QFileDialog,
@@ -34,6 +38,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QStackedWidget,
     QToolButton,
     QVBoxLayout,
@@ -61,6 +66,7 @@ from docrepo.save import (
 )
 from docrepo.schedule import is_open, start_of
 from docrepo.ui.context import AppContext
+from docrepo.ui.keymap import KeyMapDialog
 from docrepo.ui.mods_panel import ModsPanel
 from docrepo.ui.style import STYLE
 from docrepo.ui.task_picker import TaskPicker, full_path, path_text
@@ -68,6 +74,7 @@ from docrepo.ui.widgets import (
     Chip,
     ChipPicker,
     DateField,
+    FlowLayout,
     HoursField,
     InfoButton,
     Option,
@@ -82,7 +89,12 @@ log = logging.getLogger(__name__)
 #: A line of the content text that is a file path adds that file; deleting the line removes it. A link on a line of its
 #: own does the same (``links.LINK_LINE``).
 PATH_LINE = re.compile(r"^(?:\\\\[^\\\s][^\\]*\\.+|[A-Za-z]:\\.+)\.[A-Za-z0-9]{1,5}$")
-WIDTH = 640
+WIDTH = 940
+#: Below this width, what Parse and populate found goes under the content text instead of beside it.
+NARROW = 700
+#: The placeholder in the found list, before Parse and populate runs.
+FOUND_EMPTY = ("<span style='color:#5a6571'>Alt+P reads the content text and fills the fields. What it finds is listed here, beside "
+               "the text, so you can check it without scrolling.</span>")
 
 
 def and_list(items: list[str]) -> str:
@@ -199,13 +211,19 @@ class CaptureWindow(QWidget):
         self._setting = False  # True while the window fills fields itself, so it doesn't count as typing
         self._after_pick: str | None = None  # "update" or "agenda" when that hotkey opened the task picker
         self._summary_types: list = []
+        self.expanded = False  # Expand (F11): the content text fills the window (mods log round 2, M0046, M0048 phase 1)
+        self.today_on = False  # Today, beside the capture types (M0037)
         self._path_timer = QTimer(self)
         self._path_timer.setSingleShot(True)
         self._path_timer.setInterval(350)
         self._path_timer.timeout.connect(self._sync_paths)
         self._build()
         self.reset_draft()
-        for keys, handler in (("Ctrl+Return", self.save), ("Ctrl+Enter", self.save), ("Alt+P", self.parse)):
+        for keys, handler in (("Ctrl+Return", self.save), ("Ctrl+Enter", self.save), ("Alt+P", self.parse),
+                              # One letter per topic (mods log round 2, M0036)
+                              ("Alt+N", lambda: self._alt_type("note")), ("Alt+T", lambda: self._alt_type("new_task")),
+                              ("Alt+U", lambda: self._alt_type("update")), ("Alt+A", self._alt_agenda), ("Alt+D", self._alt_today),
+                              ("F11", self.toggle_expand), ("F1", self.show_keys)):
             QShortcut(QKeySequence(keys), self, handler)
 
     # ================= building the window =================
@@ -247,7 +265,7 @@ class CaptureWindow(QWidget):
         footer = QWidget(objectName="footer")
         fl = QHBoxLayout(footer)
         fl.setContentsMargins(14, 8, 14, 8)
-        footer_hint = QLabel("Ctrl+Enter saves. Esc hides the window and keeps the draft.", objectName="hint")
+        footer_hint = QLabel("Ctrl+Enter saves. Esc hides the window and keeps the draft. F1 lists the keys.", objectName="hint")
         footer_hint.setWordWrap(True)
         fl.addWidget(footer_hint, 1)
         clear = QPushButton("Clear")
@@ -269,19 +287,37 @@ class CaptureWindow(QWidget):
         self.task_button.clicked.connect(self._open_picker)
         b.addWidget(field("Task", self.task_button, "task"))
         # Capture types
-        types = QHBoxLayout()
+        types_box = QWidget()
+        types = FlowLayout(types_box, spacing=8)  # one line, wrapping when the window is narrow
         types.addWidget(QLabel("Capture types", objectName="fieldLabel"))
         self.type_boxes: dict[str, QCheckBox] = {}
-        for key, label in (("note", "Note"), ("new_task", "New task"), ("update", "Update")):
+        for key, label, letter in (("note", "Note", "N"), ("new_task", "New task", "T"), ("update", "Update", "U")):
             box = QCheckBox(label)
+            box.setToolTip(f"Alt+{letter}")
             box.clicked.connect(lambda checked, k=key: self.set_type(k, checked))
             self.type_boxes[key] = box
             types.addWidget(box)
+            types.addWidget(QLabel(f"Alt+{letter}", objectName="hotkey"))
         types_note = QLabel()
         types.addWidget(InfoButton("types", types_note))
-        types.addStretch()
-        b.addLayout(types)
+        line = QFrame()
+        line.setFrameShape(QFrame.Shape.VLine)
+        line.setObjectName("divider")
+        types.addWidget(line)
+        types.addWidget(QLabel("Agenda", objectName="fieldLabel"))
+        agenda_note = QLabel()
+        types.addWidget(InfoButton("agenda", agenda_note))
+        self.today_button = QPushButton("Today   Alt+D")
+        self.today_button.setCheckable(True)
+        self.today_button.setObjectName("today")
+        self.today_button.clicked.connect(self.set_today)
+        types.addWidget(self.today_button)
+        self.agenda = ChipPicker(self._agenda_options, "Meetings, people or tasks   Alt+A")
+        self.agenda.changed.connect(self.refresh)
+        types.addWidget(self.agenda)
+        b.addWidget(types_box)
         b.addWidget(types_note)
+        b.addWidget(agenda_note)
         self.does = QLabel(objectName="does")
         self.does.setWordWrap(True)
         b.addWidget(self.does)
@@ -289,49 +325,74 @@ class CaptureWindow(QWidget):
         self.error.setWordWrap(True)
         self.error.hide()
         b.addWidget(self.error)
-        # Title and content text
+        # Title and content text on the left, what Parse and populate found on the right (M0042)
+        self.main = QWidget()
+        self.main_layout = QBoxLayout(QBoxLayout.Direction.LeftToRight, self.main)
+        self.main_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_layout.setSpacing(12)
+        left = QWidget()
+        lc = QVBoxLayout(left)
+        lc.setContentsMargins(0, 0, 0, 0)
+        lc.setSpacing(10)
+        self.main_layout.addWidget(left, 8)
+        b.addWidget(self.main)
         self.title = QLineEdit()
         self.title.textEdited.connect(lambda: self._touch("new.title", self.title))
         self.title.textChanged.connect(lambda _: self._apply_same_all())  # empty descriptions name the new task
         self.title_field = field("Title", self.title, "title", "or leave it empty to take it from the content text")
-        b.addWidget(self.title_field)
+        lc.addWidget(self.title_field)
         self.content = ContentEdit()
-        self.content.setMinimumHeight(110)
+        self.content.setMinimumHeight(140)
         self.content.textChanged.connect(self._content_changed)
         self.content.dropped.connect(self.dropped)
         self.content_field = field("Content text", self.content, "content")
-        b.addWidget(self.content_field)
+        lc.addWidget(self.content_field, 1)
         hint = QLabel("Type or paste. Drop files or Outlook emails anywhere on this window. Start with “Closed.” or another state for a quick update.",
                       objectName="hint")
         hint.setWordWrap(True)
-        b.addWidget(hint)
-        # Parse and populate
+        lc.addWidget(hint)
+        # Parse and populate, and Expand (M0046, M0048 phase 1)
         row = QHBoxLayout()
         self.parse_button = QPushButton("Parse and populate   Alt+P")
         self.parse_button.clicked.connect(self.parse)
         row.addWidget(self.parse_button)
         parse_note = QLabel()
         row.addWidget(InfoButton("parse", parse_note))
-        parse_hint = QLabel("Fills the fields below from the content text.", objectName="hint")
-        parse_hint.setWordWrap(True)
-        row.addWidget(parse_hint, 1)
-        b.addLayout(row)
-        b.addWidget(parse_note)
+        row.addStretch()
+        self.expand_button = QPushButton("Expand   F11")
+        self.expand_button.setToolTip("Make the content text fill the window, for taking notes in a meeting")
+        self.expand_button.clicked.connect(self.toggle_expand)
+        row.addWidget(self.expand_button)
+        lc.addLayout(row)
+        lc.addWidget(parse_note)
         self.found_box = QFrame(objectName="found")
         fbl = QVBoxLayout(self.found_box)
         top = QHBoxLayout()
         top.addWidget(QLabel("<b>Parse and populate found</b>"))
         top.addStretch()
-        hide_found = QPushButton("Hide", objectName="link")
-        hide_found.clicked.connect(lambda: self.found_box.hide())
-        top.addWidget(hide_found)
+        self.clear_found = QPushButton("Clear", objectName="link")
+        self.clear_found.clicked.connect(self._clear_found)
+        top.addWidget(self.clear_found)
         fbl.addLayout(top)
         self.found_label = QLabel()
         self.found_label.setWordWrap(True)
         self.found_label.setTextFormat(Qt.TextFormat.RichText)
+        self.found_label.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.found_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)  # it wraps to the room it has
         fbl.addWidget(self.found_label)
-        self.found_box.hide()
-        b.addWidget(self.found_box)
+        fbl.addStretch()
+        self.main_layout.addWidget(self.found_box, 5)
+        # Below the content text: what Expand folds away
+        self.folded = QLabel(objectName="hint")
+        self.folded.setWordWrap(True)
+        self.folded.hide()
+        b.addWidget(self.folded)
+        self.lower = QWidget()
+        self.lower_layout = QVBoxLayout(self.lower)
+        self.lower_layout.setContentsMargins(0, 0, 0, 0)
+        self.lower_layout.setSpacing(10)
+        b.addWidget(self.lower)
+        b = self.lower_layout
         # Files
         self.files_box = QVBoxLayout()
         self.files_box.setSpacing(5)
@@ -357,11 +418,6 @@ class CaptureWindow(QWidget):
         self.copy_hint = QLabel(objectName="hint")
         self.copy_hint.setWordWrap(True)
         b.addWidget(self.copy_hint)
-        # Add to agenda
-        self.agenda = ChipPicker(self._agenda_options, "Search meetings, people and tasks")
-        self.agenda.changed.connect(self.refresh)
-        self.agenda_field = field("Add to agenda", self.agenda, "agenda")
-        b.addWidget(self.agenda_field)
         # Copy prompt and the summary
         row = QHBoxLayout()
         self.prompt_type = QComboBox()
@@ -383,7 +439,7 @@ class CaptureWindow(QWidget):
         b.addWidget(self.add_summary)
         self._build_new_fields()
         self._build_update_fields()
-        b.addStretch()
+        self.body.addStretch()
 
     def _build_new_fields(self) -> None:
         self.new_group = QGroupBox()
@@ -442,7 +498,7 @@ class CaptureWindow(QWidget):
         more.addWidget(field("Assignee hours", self.n_asg_hours), 3, 1)
         self.n_more.hide()
         g.addWidget(self.n_more)
-        self.body.addWidget(self.new_group)
+        self.lower_layout.addWidget(self.new_group)
         self._watch("new", {"due": self.n_due, "deadline": self.n_deadline, "deadline_desc": self.n_deadline_desc, "urgent": self.n_urgent,
                             "meeting": self.n_meeting, "state": self.n_state, "start": self.n_start, "reminder": self.n_reminder,
                             "recurrence": self.n_recurrence, "repeat_until": self.n_repeat, "lead_hours": self.n_lead_hours,
@@ -492,7 +548,7 @@ class CaptureWindow(QWidget):
         self.changes_label = QLabel(objectName="hint")
         self.changes_label.setWordWrap(True)
         g.addWidget(self.changes_label)
-        self.body.addWidget(self.upd_group)
+        self.lower_layout.addWidget(self.upd_group)
         self._watch("upd", {"state": self.u_state, "current_status": self.u_status, "due": self.u_due, "deadline": self.u_deadline,
                             "deadline_desc": self.u_deadline_desc, "lead_hours": self.u_lead_hours, "assignee_hours": self.u_asg_hours,
                             "start": self.u_start, "reminder": self.u_reminder, "recurrence": self.u_recurrence, "repeat_until": self.u_repeat,
@@ -545,7 +601,8 @@ class CaptureWindow(QWidget):
                 self.content.setTextCursor(cursor)
             if agenda is not None:
                 m = self.ctx.model()
-                self.agenda.set_chips([Chip(x, m.target_name(x)) for x in agenda])
+                self.today_on = TODAY in agenda  # Today is its own button, beside the capture types
+                self.agenda.set_chips([Chip(x, m.target_name(x)) for x in agenda if x != TODAY])
         self.error.hide()
         self.refresh()
         self.show_mods(mods)
@@ -558,12 +615,16 @@ class CaptureWindow(QWidget):
         target.setFocus()
 
     def open_with_hotkey(self, kind: str) -> None:
-        """A capture type's own hotkey (mods log round 1, M0010 and M0020): "note", "new_task", "update" or "agenda".
+        """A capture type's own hotkey (mods log round 1, M0010 and M0020): "note", "new_task", "update" or "agenda", or
+        "today" for a quick task on Today (round 2, M0039).
         Note and New task open with that type checked. Update and Add to agenda need a task: with the draft's task,
         Update is checked at once (and for Add to agenda, the cursor goes there); with none, the task picker opens,
         and picking a task does the same."""
         if kind in ("note", "new_task"):
             self.show_capture(mode=kind)
+            return
+        if kind == "today":  # a quick task on Today (mods log round 2, M0039): New task, Today on, the cursor in Title
+            self.show_capture(mode="new_task", agenda=[TODAY, *self.agenda.values()])
             return
         agenda = kind == "agenda"
         if self.task:
@@ -576,9 +637,76 @@ class CaptureWindow(QWidget):
     def _place(self) -> None:
         screen = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
         area = screen.availableGeometry()
-        height = min(int(area.height() * 0.88), max(560, self.sizeHint().height()))
-        self.resize(WIDTH, height)
-        self.move(area.x() + (area.width() - WIDTH) // 2, area.y() + max(16, int(area.height() * 0.05)))
+        if self.expanded:  # most of the screen, for meeting notes
+            self.setGeometry(area.adjusted(16, 16, -16, -16))
+            return
+        width = min(WIDTH, area.width() - 32)
+        height = min(int(area.height() * 0.88), max(600, self.sizeHint().height()))
+        self.resize(width, height)
+        self.move(area.x() + (area.width() - width) // 2, area.y() + max(16, int(area.height() * 0.05)))
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._arrange(self.width())
+
+    def _arrange(self, width: int) -> None:
+        """Narrow, what Parse and populate found goes under the content text instead of beside it."""
+        self.main_layout.setDirection(QBoxLayout.Direction.TopToBottom if width < NARROW else QBoxLayout.Direction.LeftToRight)
+
+    def toggle_expand(self) -> None:
+        """Expand (F11, mods log round 2, M0046, M0048 phase 1): the content text fills the window, and the files, Copy
+        prompt and the New task and Update fields fold away until it's turned off."""
+        if self.pages.currentIndex() == 1:
+            return
+        self.expanded = not self.expanded
+        self.lower.setVisible(not self.expanded)
+        self.content.setMinimumHeight(360 if self.expanded else 140)
+        self.expand_button.setText("Back   F11" if self.expanded else "Expand   F11")
+        self.refresh()
+        if self.isVisible():
+            self._place()
+        self.content.setFocus()
+
+    def show_keys(self) -> None:
+        """F1: every key, in one list (mods log round 2, M0036)."""
+        KeyMapDialog(self, self.ctx.settings.hotkey).exec()
+
+    # ---- Alt and the topic's letter (mods log round 2, M0036) ----
+    def _alt_type(self, key: str) -> None:
+        if self.pages.currentIndex() == 0 and not self.from_capture:
+            self.set_type(key, key not in self.types)
+
+    def _alt_agenda(self) -> None:
+        if self.pages.currentIndex() != 0:
+            return
+        if self._agenda_shown():
+            self.agenda.edit.setFocus()
+        else:
+            self._fail("With a task picked, check New task or Update to put something on an agenda.", self.content)
+
+    def _alt_today(self) -> None:
+        if self.pages.currentIndex() == 0:
+            self.set_today(not self.today_on)
+
+    def set_today(self, on: bool) -> None:
+        """Today, beside the capture types (mods log round 2, M0037): on or off in one click."""
+        if on and not self._agenda_shown():
+            self.today_button.setChecked(False)
+            self._fail("With a task picked, check New task or Update to put something on Today.", self.content)
+            return
+        self.today_on = on
+        self.error.hide()
+        self.refresh()
+
+    def _targets(self) -> list[str]:
+        """The agenda targets Save puts the capture on: Today first, then the picker's."""
+        if not self._agenda_shown():
+            return []
+        return [TODAY] * self.today_on + [x for x in self.agenda.values() if x != TODAY]
+
+    def _quick(self) -> bool:
+        """A new task with no task picked that goes on Today is a quick task, under Quick tasks (mods log round 2, M0039)."""
+        return "new_task" in self.types and not self.task and not self.from_capture and TODAY in self._targets()
 
     def hide_capture(self) -> None:
         self.hide()
@@ -637,6 +765,7 @@ class CaptureWindow(QWidget):
         self._setting = True
         self.task: str | None = None
         self.from_capture: str | None = None
+        self.today_on = False
         self.types: set[str] = {"note"}
         self.note_auto = True
         self.touched: set[str] = set()
@@ -664,7 +793,7 @@ class CaptureWindow(QWidget):
             set_filled(w.line if isinstance(w, DateField) else w, False)
         self._setting = False
         self._show_summary(False)
-        self.found_box.hide()
+        self._clear_found()
         self.error.hide()
         self.refresh()
 
@@ -693,7 +822,7 @@ class CaptureWindow(QWidget):
             self._drop_type("update")
         if "update" in self.types:
             self.prefill()
-        self.found_box.hide()
+        self._clear_found()
         self.error.hide()
         self.refresh()
 
@@ -714,7 +843,7 @@ class CaptureWindow(QWidget):
         if key == "update" and checked:
             self.prefill()
         self.error.hide()
-        self.found_box.hide()
+        self._clear_found()
         self.refresh()
         if key == "new_task" and checked:
             self.title.setFocus()
@@ -767,7 +896,8 @@ class CaptureWindow(QWidget):
             box.setChecked(key in self.types)
             box.setEnabled(not self.from_capture)
         self._setting = False
-        self.task_button.setText(full_path(m, t.id) if t else ("None: a new top-level task" if new else "None: keep it unfiled"))
+        self.task_button.setText(full_path(m, t.id) if t else ("None: a quick task, under Quick tasks" if self._quick() else
+                                                                "None: a new top-level task" if new else "None: keep it unfiled"))
         self.title_field.setVisible(new)
         self.content_field.property("label").setText("Content text" + ("  <span style='color:#87919c'>becomes the new task's description</span>" if new else ""))
         self.parse_button.setEnabled(new or upd or bool(t))
@@ -782,9 +912,19 @@ class CaptureWindow(QWidget):
             self.upd_group.setTitle(f"UPDATE {t.title.upper()}")
         self.u_repeat_field.setVisible(self.u_recurrence.currentIndex() > 0)
         shown = self._agenda_shown()
-        self.agenda_field.setVisible(shown)
-        self.agenda_field.property("label").setText("Add to agenda  <span style='color:#87919c'>" + (
-            "puts the new task on it" if new else "puts the picked task on it" if upd and t else "puts this note on it") + "</span>")
+        what = "the new task" if new else "the picked task" if upd and t else "this note"
+        self.today_button.setEnabled(shown)
+        self.today_button.setChecked(self.today_on and shown)
+        self.today_button.setToolTip(f"Put {what} on Today   (Alt+D)" if shown else "With a task picked, check New task or Update to put something on Today")
+        self.agenda.setEnabled(shown)
+        self.agenda.setToolTip(f"Put {what} on a meeting's, a task's or a person's agenda   (Alt+A)" if shown else
+                               "With a task picked, check New task or Update to put something on an agenda")
+        if self.expanded:
+            folded = [f"{len(self.files)} file{'s' if len(self.files) != 1 else ''}"] * bool(self.files) + ["Copy prompt and the summary"]
+            folded += ["the New task fields"] * new + ["the Update fields"] * (upd and bool(t))
+            self.folded.setText(f"While expanded, {and_list(folded)} {'are' if len(folded) > 1 else 'is'} folded away. Drop files on the "
+                                "window as usual. F11 brings them back.")
+        self.folded.setVisible(self.expanded)
         self.files_label.setVisible(bool(self.files))
         self.same_all.setVisible(sum(e.desc is not None for e in self.files) > 1)
         self._apply_same_all()  # the placeholders name the task
@@ -818,11 +958,13 @@ class CaptureWindow(QWidget):
         new, upd, note = ("new_task" in self.types, "update" in self.types, "note" in self.types)
         parts = []
         if new:
-            parts.append(f"creates {'a subtask under ' + name if t else 'a top-level task'}" + (", with this content text as its description" if text else ""))
+            what = ("a subtask under " + name if t else "a quick task, under <b>Quick tasks</b> until you put it under its real task" if self._quick()
+                    else "a top-level task")
+            parts.append(f"creates {what}" + (", with this content text as its description" if text else ""))
         if upd and t:
             parts.append(f"updates {name}: " + (f"{n_changes} changed field{'s go' if n_changes > 1 else ' goes'} into its status log" if n_changes
                                                    else "this goes into its status log" if text else "nothing has changed yet"))
-        targets = self.agenda.values() if self._agenda_shown() else []
+        targets = self._targets()
         if note and not new:
             parts.append(f"adds this to the raw text log of {name}" if t else "" if targets else "keeps this as an unfiled capture, to file later")
         if note and new:
@@ -860,14 +1002,13 @@ class CaptureWindow(QWidget):
         return people_options(self.ctx.model(), self.ctx.settings.me, text, picked)
 
     def _agenda_options(self, text: str, picked: list[str]) -> list[Option]:
-        """Today first (mods log round 1, M0016), then open meetings and people; typing also finds any open task. The task
-        going on the agenda is left out."""
+        """Open meetings and people; typing also finds any open task. The task going on the agenda is left out. Today has
+        its own button beside the capture types (mods log round 2, M0037)."""
         m = self.ctx.model()
         q = text.strip().lower()
         subject = None if "new_task" in self.types else self.task
         today = self.ctx.now().date()
-        options = [Option(TODAY, "Today", "Your list for today")]
-        options += [Option(t.id, t.title, f"Meeting, next {m.meeting_when(t.id, today)}" if t.recurrence else "Meeting", ) for t in m.open_meetings()]
+        options = [Option(t.id, t.title, f"Meeting, next {m.meeting_when(t.id, today)}" if t.recurrence else "Meeting", ) for t in m.open_meetings()]
         options += [Option(p.id, p.name, " · ".join(["Person", *p.aliases])) for p in m.active_people() if p.id != self.ctx.settings.me]
         if q:
             options += [Option(t.id, t.title, path_text(m, t.id) or "Top-level task") for t in m.tasks.values() if is_open(t) and not t.meeting]
@@ -1220,6 +1361,12 @@ class CaptureWindow(QWidget):
             self._setting = False
             set_filled(target, True)
 
+    def _clear_found(self) -> None:
+        """The found list, before Parse and populate runs (or after Clear)."""
+        self.found_label.setText(FOUND_EMPTY)
+        self.clear_found.hide()
+        set_filled(self.found_box, False, "empty", True)
+
     def _show_found(self, found: list[tuple[str, Found]]) -> None:
         if not found:
             self.found_label.setText("<span style='color:#5a6571'>Nothing found. Fill in the fields by hand.</span>")
@@ -1232,7 +1379,8 @@ class CaptureWindow(QWidget):
                 items.append(f"<li><b>{esc(lead + f.field)}</b> {esc(value)} <span style='color:#5a6571'>from “{esc(source)}”{extra}</span></li>")
             self.found_label.setText(f"<ul style='margin:0'>{''.join(items)}</ul><span style='color:#5a6571'>Filled fields stay highlighted "
                                      "until you edit them. Nothing is saved until you press Save.</span>")
-        self.found_box.show()
+        self.clear_found.show()
+        set_filled(self.found_box, False, "empty", False)
 
     # ================= Copy prompt =================
     def _load_summary_types(self) -> None:
@@ -1340,12 +1488,12 @@ class CaptureWindow(QWidget):
             lead_hours=self.n_lead_hours.value(), assignee_hours=self.n_asg_hours.value(),
         )
         t = self.ctx.model().tasks.get(self.task) if self.task else None
-        summary_type = self._summary_types[self.prompt_type.currentIndex()].name if self.summary_field.isVisible() and self._summary_types else None
+        summary_type = self._summary_types[self.prompt_type.currentIndex()].name if not self.summary_field.isHidden() and self._summary_types else None
         return CaptureDraft(
             content=self.content.toPlainText(), task=self.task, types=set(self.types), files=self._file_rows(),
-            agenda=self.agenda.values(), summary=self.summary.toPlainText() if self.summary_field.isVisible() else "",
+            agenda=self._targets(), summary=self.summary.toPlainText() if not self.summary_field.isHidden() else "",
             summary_type=summary_type, new_task=new, update=self.update_changes(t) if "update" in self.types else {},
-            from_capture=self.from_capture,
+            from_capture=self.from_capture, quick=self._quick(),
         )
 
     def save(self) -> None:

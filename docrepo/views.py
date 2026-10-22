@@ -44,9 +44,9 @@ LIST_NOTES = {
     "unplanned": "Open tasks the capacity calendar can't place: people but no hours, or hours but no dates.",
 }
 
-TODAY_NOTE = ("Your list for today. Each item stays until you mark it Done, carrying over to the next day. Add a task with T while "
-              "browsing, or Add to Today on its page; add a note here, or from the capture window's Add to agenda. Below it, the "
-              "tasks due in the next 7 days that aren't on it yet.")
+TODAY_NOTE = ("Your list for today. Each item stays until you mark it Done, carrying over to the next day. Put a task on it with D "
+              "while browsing, or Add to Today on its page. The box makes a quick task (under Quick tasks until you file it), or a "
+              "note; Ctrl+Shift+D does the same from anywhere. Below it, the tasks due in the next 7 days that aren't on it yet.")
 
 VIEWS: tuple[ViewDef, ...] = (
     ViewDef("today", "Today", note=TODAY_NOTE),  # mods log round 1, M0016
@@ -438,6 +438,14 @@ def today_groups(m: Model, today: date) -> list[tuple[str, list[AgendaItem]]]:
     carried = [a for a in items if a.added[:10] < today.isoformat()]
     fresh = [a for a in items if a.added[:10] >= today.isoformat()]
     return [g for g in (("Carried over", carried), ("Added today" if carried else "Today", fresh)) if g[1]]
+
+
+def find_text(m: Model, task_id: str) -> str:
+    """What Find in this view looks through for a task (mods log round 2, M0026): its ID, title, description, current
+    status, labels (inherited ones too) and people, in lower case."""
+    t = m.task(task_id)
+    names = [m.person_name(p) for p in dict.fromkeys([*t.leads, *t.assignees])]
+    return " ".join([t.id, t.title, t.description, t.current_status, *(name for name, _ in m.labels_of(task_id)), *names]).lower()
 
 
 def due_this_week(m: Model, today: date, me: str | None, mine_only: bool = False) -> list[Task]:

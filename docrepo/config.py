@@ -114,12 +114,14 @@ class Settings:
     schema_version: int = 1
     me: str | None = None
     hotkey: str = "Ctrl+Shift+Space"
-    # More hotkeys (mods log round 1), each off until set: the browse tool, each capture type, and Add to agenda.
+    # More hotkeys (mods log round 1), each off until set: the browse tool, each capture type, and Add to agenda; and a
+    # quick task on Today (round 2, M0039).
     browse_hotkey: str = ""
     note_hotkey: str = ""
     new_task_hotkey: str = ""
     update_hotkey: str = ""
     agenda_hotkey: str = ""
+    today_hotkey: str = ""
     backup_dir: str | None = None
     backup_every_days: int = 7
     backup_keep: int = 8

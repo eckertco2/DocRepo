@@ -16,11 +16,11 @@ import re
 import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
-from docrepo import agenda, captures, edits, layer0, people, search, tasks
+from docrepo import agenda, captures, edits, layer0, people, quick, search, tasks
 from docrepo.config import Settings
 from docrepo.dates import stamp
 from docrepo.db import next_id, transaction
@@ -154,6 +154,9 @@ class CaptureDraft:
     update: dict[str, Any] = field(default_factory=dict)
     #: Make it a task: the unfiled capture the new task is made from. It's filed to the new task; no new capture is kept.
     from_capture: str | None = None
+    #: A quick task (mods log round 2, M0039): with no task picked, the new task goes under the built-in Quick tasks. A new
+    #: task with no task picked that goes on Today is one too.
+    quick: bool = False
 
     def agenda_shown(self) -> bool:
         """Add to agenda applies with New task, with Update on a picked task, or with no task picked."""
@@ -186,6 +189,24 @@ def copy_name(day: str, name: str, taken: set[str]) -> str:
         candidate = f"{base[: 100 - len(ext) - 4]} ({n}){ext}"
         n += 1
     return candidate
+
+
+def quick_task_draft(model: Model, settings: Settings, line: str, today: date, on_today: bool = True) -> CaptureDraft:
+    """A quick task from one line (mods log round 2, M0039): Parse and populate reads it as a new task, so "Call the vendor
+    about seals by Fri" gets its title and Due date. Only people already on the list are kept: a one-liner adds no one.
+    ``on_today`` puts it on Today; Make it a task, on a note already there, leaves that to the note's own item."""
+    r = parse_capture(line, "new_task", today, _parse_people(model, settings), _parse_labels(model), settings.event_words)
+
+    def iso(d: date | None) -> str | None:
+        return d.isoformat() if d else None
+
+    fields = NewTaskFields(
+        title=r.title or first_sentence(plain_text(line)) or line.strip(), labels=list(r.labels), leads=[w for w in r.leads if w.id],
+        assignees=[w for w in r.assignees if w.id], due=iso(r.due), deadline=iso(r.deadline), deadline_desc=r.deadline_desc or None,
+        reminder=iso(r.reminder), start=iso(r.start), recurrence=r.recurrence or None, urgent=r.urgent,
+        lead_hours=float(r.lead_hours) if r.lead_hours else None, assignee_hours=float(r.assignee_hours) if r.assignee_hours else None,
+    )
+    return CaptureDraft(content=line.strip(), types={"new_task"}, agenda=[TODAY] if on_today else [], new_task=fields, quick=True)
 
 
 def _and_list(items: list[str]) -> str:
@@ -242,6 +263,7 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
     copies: list[tuple[str, str]] = []  # (document ID, file name) for saved copies
     changes: list[tasks.Change] = []
     created = None
+    quick_task = is_new and not t and not draft.from_capture and (draft.quick or TODAY in targets)
     holder_title = task_row["title"] if task_row else None  # the task the files belong to, for descriptions left empty
     with transaction(conn):
         capture_id = next_id(conn, "C") if keep else None
@@ -264,8 +286,9 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
             source = full_content
             title = nt.title.strip() or _parsed_title(conn, source, at, settings) or first_sentence(plain_text(source)) or "Untitled task"
             holder_title = title
+            parents = [t] if t else [quick.ensure_parent(conn, settings, at)] if quick_task else []
             created = tasks.create_task(
-                conn, settings, title=title, at=at, created_by=via, parents=[t] if t else [], description=plain_text(source),
+                conn, settings, title=title, at=at, created_by=via, parents=parents, description=plain_text(source),
                 state=nt.state, start=nt.start if nt.start and nt.start != day else None, due=nt.due, deadline=nt.deadline,
                 deadline_desc=nt.deadline_desc, reminder=nt.reminder, recurrence=nt.recurrence, repeat_until=nt.repeat_until,
                 urgent=nt.urgent, meeting=nt.meeting, leads=[person(w) for w in nt.leads], assignees=[person(w) for w in nt.assignees],
@@ -351,6 +374,30 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
         result.problems.append(f"The generated pages weren't all updated ({type(e).__name__}).")
     result.message = _message(conn, draft, result, targets, bool(draft.new_task.title.strip()))
     log.info("capture %s saved: %s", capture_id or "(none kept)", _log_line(draft, result, targets, [d for d, _, _ in documents]))
+    return result
+
+
+def add_quick_task(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, line: str, at: datetime) -> SaveResult:
+    """A quick task on Today from Today's box (mods log round 2, M0039): a capture of the one line, which makes the task
+    under Quick tasks and puts it on Today."""
+    if not line.strip():
+        raise SaveError("Type the task first.", "content")
+    return save_capture(conn, data_root, fs, settings, quick_task_draft(Model(conn), settings, line, at.date()), at)
+
+
+def note_to_task(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, item_id: int, at: datetime) -> SaveResult:
+    """Make it a task, on a note on Today (mods log round 2, M0040): the note's text makes a quick task, which takes the
+    note's place on Today, so it still carries over from the day the note was added."""
+    a = next((x for x in Model(conn).agenda if x.id == item_id), None)
+    if a is None or a.target != TODAY or a.subject or a.closed:
+        raise SaveError("That isn't an open note on Today.", "content")
+    result = save_capture(conn, data_root, fs, settings, quick_task_draft(Model(conn), settings, a.note, at.date(), on_today=False), at)
+    agenda.make_task(conn, item_id, result.created_task)
+    try:
+        write_pages(Model(conn), data_root, fs, at.date(), at)
+    except OSError as e:
+        result.problems.append(f"The generated pages weren't all updated ({type(e).__name__}).")
+    result.message += " It's on Today in the note's place."
     return result
 
 
@@ -453,7 +500,8 @@ def _message(conn: sqlite3.Connection, draft: CaptureDraft, r: SaveResult, targe
         bits.append(f"Created {new.id}, {new.title}{f', under {t.title}' if t else ''}, and filed {r.filed_capture} to it.")
     elif r.created_task:
         new = model.task(r.created_task)
-        bits.append(f"Created {new.id}, {new.title}{f', under {t.title}' if t else ''}." + ("" if typed_title else " The title came from the content text."))
+        under = t.title if t else model.task(model.parents_of(new.id)[0]).title if model.parents_of(new.id) else ""  # a quick task's
+        bits.append(f"Created {new.id}, {new.title}{f', under {under}' if under else ''}." + ("" if typed_title else " The title came from the content text."))
     if r.updated_task and t:
         n = len(r.changes)
         bits.append(f"{n} change{'s' if n != 1 else ''} in the status log of {t.title}." if n else f"Added to the status log of {t.title}." if r.capture_id else "")

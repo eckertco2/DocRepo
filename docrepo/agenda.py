@@ -50,6 +50,33 @@ def add_item(conn: sqlite3.Connection, *, subject: str | None, target: str, note
     return int(cur.lastrowid)
 
 
+def _open_note(conn: sqlite3.Connection, item_id: int) -> None:
+    row = conn.execute("SELECT subject, closed FROM agenda_items WHERE id = ?", (item_id,)).fetchone()
+    if row is None:
+        raise AgendaError(f"There's no agenda item {item_id}.")
+    if row["subject"] or row["closed"]:
+        raise AgendaError(f"Agenda item {item_id} isn't an open note.")
+
+
+def set_note(conn: sqlite3.Connection, item_id: int, note: str) -> None:
+    """Change an open note's text (mods log round 2, M0040)."""
+    if not note.strip():
+        raise AgendaError("A note needs some text.")
+    with transaction(conn):
+        _open_note(conn, item_id)
+        conn.execute("UPDATE agenda_items SET note = ? WHERE id = ?", (" ".join(note.split()), item_id))
+
+
+def make_task(conn: sqlite3.Connection, item_id: int, task_id: str) -> None:
+    """Make it a task (mods log round 2, M0040): an open note becomes an item for ``task_id``, made from its text. It keeps
+    when it was added, so it still carries over from that day."""
+    with transaction(conn):
+        _open_note(conn, item_id)
+        if not _exists(conn, "tasks", task_id):
+            raise AgendaError(f"There's no task {task_id}.")
+        conn.execute("UPDATE agenda_items SET subject = ?, note = '' WHERE id = ?", (task_id, item_id))
+
+
 def close_item(conn: sqlite3.Connection, item_id: int, *, how: str, closed: str, closed_by: str) -> None:
     """Close an open agenda item as Discussed or Removed, or a Today item as Done or Removed."""
     with transaction(conn):

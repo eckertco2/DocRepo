@@ -530,6 +530,7 @@ Settings.
   "new_task_hotkey": "",
   "update_hotkey": "",
   "agenda_hotkey": "",
+  "today_hotkey": "",
   "backup_dir": "C:\\Users\\<user>\\Documents\\DocRepoBackups",
   "backup_every_days": 7,
   "backup_keep": 8,

@@ -254,6 +254,10 @@ class SettingsView(QWidget):
             box.setPlaceholderText("Off")
             self.more_hotkeys[setting] = box
             more_form.addRow(label, box)
+        suggest = QPushButton("Use the suggested keys")
+        suggest.setToolTip("Fills each empty box with Ctrl+Shift and its letter: " + ", ".join(hotkey.SUGGESTED.values()))
+        suggest.clicked.connect(self.suggest_hotkeys)
+        more_form.addRow("", suggest)
         self.backup = QLineEdit()
         self.backup.setPlaceholderText("Not set: no backups are made")
         browse = QPushButton("Browse…")
@@ -300,8 +304,10 @@ class SettingsView(QWidget):
         self.check.setRange(5, 24 * 60)
         self.check.setSuffix(" minutes")
         rows = [("Me", self.me, "Who “I” and “me” are in captures."), ("Hotkey", self.hotkey, "Opens the capture window. It needs Ctrl, Alt or Win."),
-                ("More hotkeys", more, "Each is off until you set it. Update and Add to agenda use the task picked in the capture window, "
-                                       "or open the task picker. Pause hotkeys in the tray menu pauses them all."),
+                ("More hotkeys", more, "Each is off until you set it, or Use the suggested keys fills the empty ones with Ctrl+Shift and the "
+                                       "topic's letter (F1 lists them); then Save settings. While DocRepo runs, a hotkey is taken from other "
+                                       "programs, such as Outlook's Ctrl+Shift+N for a new note. Update and Add to agenda use the task picked "
+                                       "in the capture window, or open the task picker. Pause hotkeys in the tray menu pauses them all."),
                 ("Backup folder", backup_row, "Where backups go: a copy of docs.db and a mirror of the data root's files. Outside the data root."),
                 ("Backups", backup_when, "How often DocRepo backs up, at its first start of the day, and how many copies of docs.db it keeps."),
                 ("Reminders at", self.reminder, "Each day's reminders show as notifications from this time."),
@@ -343,6 +349,15 @@ class SettingsView(QWidget):
         buttons.addStretch()
         lay.addLayout(buttons)
         lay.addStretch()
+
+    def suggest_hotkeys(self) -> None:
+        """Use the suggested keys (mods log round 2, M0036): each empty hotkey box gets Ctrl+Shift and its letter. Nothing is
+        saved until Save settings."""
+        filled = [setting for setting, box in self.more_hotkeys.items() if not box.text().strip() and setting in hotkey.SUGGESTED]
+        for setting in filled:
+            self.more_hotkeys[setting].setText(hotkey.SUGGESTED[setting])
+        self.message(f"Filled {len(filled)} hotkey{'s' if len(filled) != 1 else ''}. Save settings to use them." if filled
+                     else "Every hotkey box already has keys.")
 
     # ---- filling and reading the form ----
     def load(self) -> None:
