@@ -8,7 +8,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from datetime import datetime  # noqa: E402
 
 import pytest  # noqa: E402
-from PySide6.QtGui import QGuiApplication  # noqa: E402
+from PySide6.QtCore import QEvent, Qt  # noqa: E402
+from PySide6.QtGui import QGuiApplication, QKeyEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from docrepo import capacity, db, hotkey, mods, prompts  # noqa: E402
@@ -133,19 +134,23 @@ def test_an_update_changes_only_what_differs(window, ctx):
     assert (entry.field, entry.from_value, entry.to_value, entry.via) == ("Due", "2026-10-23", "2026-10-30", "Capture window")
 
 
-def test_files_need_a_description(window, ctx, tmp_path):
+def test_a_file_description_is_optional(window, ctx, tmp_path):
     report = tmp_path / "Pump curve.txt"
     report.write_text("Design point 38 kW", encoding="utf-8")
-    window.set_task("T000008")
     window.add_paths([str(report)])
     assert len(window.files) == 1 and window.files_label.isVisible()
-    window.save()
-    assert window.error.text().startswith("Describe each file before saving") and window.isVisible()
-    window.files[0].desc.setText("Pump curve at 62 rpm.")
+    assert window.files[0].desc.placeholderText() == "What's in this file? Left empty: Pump curve.txt"
+    window.set_task("T000008")  # the placeholder follows the task, and a new task's title
+    assert window.files[0].desc.placeholderText().endswith("Left empty: Installation – Attached document – Pump curve.txt")
+    window.set_type("new_task", True)
+    window.title.setText("Check the pump curve")
+    assert window.files[0].desc.placeholderText().endswith("Left empty: Check the pump curve – Attached document – Pump curve.txt")
+    window.set_type("new_task", False)
     window.files[0].copy.setChecked(True)
     window.save()
-    assert (ctx.data_root / "Tasks" / "T000008" / "Files" / "2026-10-08 Pump curve.txt").exists()
-    assert Model(ctx.conn).documents["D000005"].description == "Pump curve at 62 rpm."
+    assert not window.isVisible()
+    assert (ctx.data_root / "Tasks" / "T000008" / "Files" / "2026-10-08 Pump curve.txt").exists()  # named from the file, not the description
+    assert Model(ctx.conn).documents["D000005"].description == "Installation – Attached document – Pump curve.txt"
 
 
 def test_a_pasted_path_line_adds_the_file(window, tmp_path):
@@ -411,3 +416,20 @@ def test_drops_that_bring_no_file_say_why(window, tmp_path):
     folder.mkdir()
     _drop(window.content.viewport(), _mime([folder], EXPLORER_FORMATS))
     assert "Drawings is a folder" in window.error.text() and not window.files
+
+
+def test_editing_a_mods_log_entry_from_the_panel(window, ctx):
+    """Mods log round 2 (M0047): Edit puts an open entry back in the box; Save replaces it, and Esc first stops an edit."""
+    mods.add_entry(ctx.fs, ctx.data_root, "Capture window", "Make the window wider.", datetime(2026, 10, 8, 9, 0))
+    window.show_capture(mods=True)
+    window.mods.start_edit(mods.read_log(ctx.data_root)[0])
+    assert (window.mods.editing, window.mods.text.toPlainText(), window.mods.save_button.text()) == ("M0001", "Make the window wider.", "Save M0001")
+    assert window.mods.cancel_button.isVisibleTo(window.mods)
+    window.keyPressEvent(QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier))
+    assert window.mods.editing is None and window.pages.currentIndex() == 1  # still on the panel
+    window.mods.start_edit(mods.read_log(ctx.data_root)[0])
+    window.mods.text.setPlainText("Make the window wider, with the found list beside the text.")
+    window.save()  # Ctrl+Enter on the panel saves the edit
+    entries = mods.read_log(ctx.data_root)
+    assert [(e.id, e.text, e.edited) for e in entries] == [("M0001", "Make the window wider, with the found list beside the text.", "2026-10-08")]
+    assert window.mods.editing is None and window.mods.save_button.text() == "Save" and ctx.messages[-1][1] == r"M0001 is updated in Mods\mods-log.md."

@@ -1,14 +1,19 @@
-"""Small widgets the capture window is built from: date fields, hours fields, chip pickers and "i" buttons."""
+"""Small widgets the capture window is built from: date fields, hours fields, chip pickers and "i" buttons. Also the
+browse tool's forms' base, ``FormDialog``."""
 from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
+from typing import Any
 
 from PySide6.QtCore import QDate, QPoint, QRect, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QKeyEvent
+from PySide6.QtGui import QKeyEvent, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QAbstractButton,
     QCalendarWidget,
+    QComboBox,
+    QDialog,
     QHBoxLayout,
     QLabel,
     QLayout,
@@ -17,6 +22,8 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMenu,
+    QMessageBox,
+    QPlainTextEdit,
     QPushButton,
     QSizePolicy,
     QToolButton,
@@ -28,6 +35,57 @@ from PySide6.QtWidgets import (
 
 from docrepo.model import Model
 from docrepo.ui.help_text import HELP
+
+
+SAVE_KEYS = ("Ctrl+Return", "Ctrl+Enter")
+
+
+class FormDialog(QDialog):
+    """A browse tool form. Ctrl+Enter saves it and closes it, as in the capture window (mods log round 2, M0035); Esc,
+    Cancel or the window's close button closes it, asking first when something was changed.
+
+    A form overrides ``save`` (check, then ``accept``) and, when its boxes aren't enough to tell, ``snapshot``, and calls
+    ``mark_clean`` once it's filled. ``ask_discard`` is replaceable, so tests don't open a message box.
+    """
+
+    KEYS_HINT = "Ctrl+Enter saves. Esc closes, asking first if you've changed something."
+
+    def __init__(self, parent: QWidget | None) -> None:
+        super().__init__(parent)
+        for keys in SAVE_KEYS:
+            QShortcut(QKeySequence(keys), self, self.save)
+        self._clean: Any = None
+        self.ask_discard: Callable[[], bool] = lambda: QMessageBox.question(
+            self, self.windowTitle(), "Close without saving your changes?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes
+
+    def save(self) -> None:
+        self.accept()
+
+    def snapshot(self) -> Any:
+        """What's in the form's boxes, to tell whether anything changed since ``mark_clean``."""
+        out: list[Any] = []
+        for w in self.findChildren(QWidget):
+            if isinstance(w, QLineEdit):
+                out.append(w.text())
+            elif isinstance(w, QPlainTextEdit):
+                out.append(w.toPlainText())
+            elif isinstance(w, QComboBox):
+                out.append(w.currentIndex())
+            elif isinstance(w, QAbstractButton) and w.isCheckable():
+                out.append(w.isChecked())
+        return out
+
+    def mark_clean(self) -> None:
+        self._clean = self.snapshot()
+
+    def changed(self) -> bool:
+        return self.snapshot() != self._clean
+
+    def reject(self) -> None:
+        if self.changed() and not self.ask_discard():
+            return
+        super().reject()
 
 
 def set_filled(widget: QWidget, filled: bool) -> None:

@@ -60,3 +60,23 @@ def test_mods_log_checks_its_input(data_root, fs):
         mods.add_entry(fs, data_root, "Somewhere", "x", datetime(2026, 10, 8))
     with pytest.raises(ValueError):
         mods.mark_done(fs, data_root, "M0009", date(2026, 10, 8))
+
+
+def test_editing_a_mods_log_entry(data_root, fs):
+    """Mods log round 2 (M0047): an entry's note and area can be replaced; its heading then says when it was edited."""
+    mods.add_entry(fs, data_root, "Capture window", "Make the window wider.", datetime(2026, 10, 8, 9, 0))
+    mods.add_entry(fs, data_root, "Browse tool", "Add an Urgent filter.", datetime(2026, 10, 8, 9, 5))
+    entry = mods.edit_entry(fs, data_root, "M0001", "General", "Make the window wider, so the found list fits beside the text.", date(2026, 10, 9))
+    assert (entry.id, entry.at, entry.edited) == ("M0001", "2026-10-08 09:00", "2026-10-09")
+    text = (data_root / "Mods" / "mods-log.md").read_text(encoding="utf-8")
+    assert "## M0001 · 2026-10-08 09:00 · General · open · edited 2026-10-09\n\nMake the window wider, so the found list fits beside the text.\n" in text
+    mods.mark_done(fs, data_root, "M0001", date(2026, 10, 10))
+    first, second = mods.read_log(data_root)
+    assert (first.done, first.edited, first.area, second.edited) == ("2026-10-10", "2026-10-09", "General", None)
+    assert "## M0001 · 2026-10-08 09:00 · General · done 2026-10-10 · edited 2026-10-09" in mods.log_text(data_root)
+    # Saving it unchanged changes nothing, not even the edited day.
+    mods.edit_entry(fs, data_root, "M0002", "Browse tool", "Add an Urgent filter.", date(2026, 10, 11))
+    assert mods.read_log(data_root)[1].edited is None
+    for bad in (("M0002", "General", " "), ("M0002", "Somewhere", "x"), ("M0009", "General", "x")):
+        with pytest.raises(ValueError):
+            mods.edit_entry(fs, data_root, *bad, date(2026, 10, 11))

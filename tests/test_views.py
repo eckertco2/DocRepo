@@ -181,3 +181,14 @@ def test_capacity_grid(sample_conn, m):
 def test_label_tasks_mark_inherited_ones(m):
     tasks = dict(views.label_tasks(m, "Safety"))
     assert tasks["T000002"] is False and tasks["T000017"] is True
+
+
+def test_due_in_the_next_7_days_on_today(m, sample_conn):
+    """Mods log round 2 (M0050): the Overdue and next 7 days list's tasks that aren't on Today yet; Mine only keeps mine."""
+    from docrepo import agenda
+    from docrepo.model import TODAY as ON_TODAY
+
+    assert [t.id for t in views.due_this_week(m, TODAY, "P001")] == ["T000019", "T000012"]
+    assert [t.id for t in views.due_this_week(m, TODAY, "P001", mine_only=True)] == ["T000019"]  # I lead it
+    agenda.add_item(sample_conn, subject="T000019", target=ON_TODAY, note="", added="2026-10-08 08:00:00", added_by="Browse tool")
+    assert [t.id for t in views.due_this_week(Model(sample_conn), TODAY, "P001")] == ["T000012"]

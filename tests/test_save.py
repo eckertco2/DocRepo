@@ -142,12 +142,21 @@ def test_files_are_recorded_copied_and_their_text_saved(env, tmp_path):
     assert (root / "Tasks" / "T000008" / "Files" / "2026-10-16 Pump curve (2).txt").exists()
 
 
-def test_each_file_needs_a_description(env, tmp_path):
-    rows = [FileRow("a.txt", str(tmp_path / "a.txt"), "First"), FileRow("b.txt", str(tmp_path / "b.txt"), " ")]
-    with pytest.raises(SaveError) as e:
-        save(env, CaptureDraft(task="T000008", types={"note"}, files=rows))
-    assert e.value.focus == "file:1"
-    assert env[0].execute("SELECT count(*) FROM captures").fetchone()[0] == 24
+def test_a_description_left_empty_names_the_task(env, tmp_path):
+    # Mods log round 2, M0041: a description is optional; an empty one names the task, the kind of row and the file.
+    rows = [FileRow("a.txt", str(tmp_path / "a.txt"), "First"), FileRow("b.txt", str(tmp_path / "b.txt"), " "),
+            FileRow("Pump datasheet.docx", "https://example.sharepoint.com/sites/eng/Pump%20datasheet.docx", "")]
+    r = save(env, CaptureDraft(task="T000008", types={"note"}, files=rows))
+    m = Model(env[0])
+    assert [m.documents[d.document].description for d in m.captures[r.capture_id].documents] == [
+        "First", "Installation – Attached document – b.txt", "Installation – Attached link – Pump datasheet.docx"]
+    # A new task's files name the new task; with no task at all, it's just the file name.
+    r = save(env, CaptureDraft(content="Order the seals.", task="T000008", types={"new_task"}, files=[FileRow("c.txt", str(tmp_path / "c.txt"))]))
+    new = Model(env[0])
+    assert new.documents[new.captures[r.capture_id].documents[0].document].description == f"{new.task(r.created_task).title} – Attached document – c.txt"
+    r = save(env, CaptureDraft(content="For later.", files=[FileRow("d.txt", str(tmp_path / "d.txt"))]))
+    last = Model(env[0])
+    assert last.documents[last.captures[r.capture_id].documents[0].document].description == "d.txt"
 
 
 def test_a_missing_file_still_saves_the_capture(env, tmp_path):

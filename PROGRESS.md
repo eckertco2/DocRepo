@@ -16,6 +16,7 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.3 | Editing and daily use from the mods log, round 1: Edit task, Edit selected, labels on old tasks, Discard, Today | Built 2026-10-21; on GitHub 2026-10-21, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
 | 5.3.1 | PowerPoint text without python-pptx, so Pillow (flagged by the company's license policy) goes | Built 2026-10-21; on GitHub 2026-10-21. Next: the corporate computer, with release 5.3 |
 | 5.4 | Big features from the mods log, round 1: links as files, email layer 0 and the timeline | Built 2026-10-21, after the owner approved the mockups; on GitHub 2026-10-21, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
+| 5.5 | Small fixes from the mods log, round 2: Ctrl+Enter in the forms, an optional file description, editing mods log entries, double-click, and what's due this week on Today | Built 2026-10-21. Next: the owner's hand test here, GitHub, and testing on the corporate computer |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
 ## Decisions
@@ -226,6 +227,28 @@ Stage 4 of the round 1 plan: links as files (M0001), email layer 0 (M0005, M0024
 - Decision 10 said hidden pictures are signatures. Outlook hides most pictures in the body, so layer 0 uses the body instead: a picture is an attachment the body shows by its content ID, and a hidden attachment the body doesn't show is left out. Small pictures, logos and signatures among them, start unticked. The corporate test checks this on real emails.
 - The timeline opens a task in the task tree (its second click, a double-click or Open task), as other views that aren't lists of tasks do; the Timeline view is one click away on the left.
 - Email layer 0 comes before phase 6 (document tracking), as running stage 4 decided (the plan's decision 6).
+
+## Release 5.5: small fixes from the mods log, round 2
+
+The owner's second mods log copy (M0025 to M0052, 2026-10-21) is planned in the parent workspace's `docs/mods/round-2-plan.md`. This release is its stage 5: M0035, M0041, M0047, M0043 (its first part) and M0050. Its item 24 (M0027, signature pictures) waits for release 5.4's corporate test.
+
+- `docrepo/ui/widgets.py` (M0035): `FormDialog`, the base of the browse tool's forms: Ctrl+Enter (`SAVE_KEYS`) calls the form's `save`, and `reject` asks first (`ask_discard`) when `changed`, by `snapshot` against `mark_clean`. `docrepo/ui/task_forms.py` (Edit task, Edit selected, a label's matching tasks) and `docrepo/ui/dialogs.py` (a person, a label) build on it, each with a line saying so by its buttons. `docrepo/ui/browse_window.py`: Ctrl+Enter and Esc in a capture's Edit, which asks before dropping a change.
+- `docrepo/save.py` (M0041): `default_description`. Saving no longer asks for descriptions; an empty one gets the default, naming the new task or the picked task (`holder_title`). `docrepo/ui/capture_window.py`: each description box's placeholder shows its default (`_default_desc`), following the task, the capture types and Title. The `file:` focus for a missing description is gone.
+- `docrepo/mods.py`, `docrepo/ui/mods_panel.py` (M0047): `edit_entry` and `ModEntry.edited`; a heading ends "· edited YYYY-MM-DD". The panel's Edit, Save M00nn and Cancel edit; in the capture window, Esc on the panel stops an edit before going back.
+- `docrepo/ui/browse_window.py` (M0043): `double_click`.
+- `docrepo/views.py`, `docrepo/ui/browse_window.py` (M0050): `due_this_week`, `_today_due_rows`, `set_today_mine` and `TODAY_MINE_KEY`.
+- `docrepo/ui/help_text.py`: the files note, from the mockup's `HELP`. The mockup's `capture.js` (the default description and its placeholder) and `today.js` (Due in the next 7 days) show the same; `browse-mockup.html` was rebuilt locally, not republished. Its exports are unchanged.
+- `README.md`: everyday use.
+- `tests/`: new tests in `test_save.py`, `test_capture_window.py`, `test_prompts_mods.py`, `test_views.py` and `test_browse_window.py`; `test_layer0.py` no longer expects a missing description to stop a save (658 pass in all, 1 skipped).
+
+## Decisions (release 5.5)
+
+- Decisions 14 and 15 of the round 2 plan, and item 22's double-click, as the owner chose (2026-10-21): an empty description becomes "*task* – Attached document – *file name*" ("Attached link", "Attached picture"), or the file name with no task; Today's Due in the next 7 days shows everyone's tasks, with a Mine only switch kept in docs.db; double-clicking a task opens or closes its subtasks.
+- A file already tracked still starts with its description in the box. Only an empty box gets the default, which becomes the document's description.
+- Saved copies were already named from the file's own name, so the default descriptions don't lengthen them.
+- An edited mods log entry keeps its ID and time, and its heading keeps only the day of the latest edit. Only open entries can be edited, since the panel lists only those.
+- A form asks before closing only when something changed. Edit selected counts as changed when anything is set, and the matching tasks when any is ticked.
+- With nothing on Today, "Nothing on Today" comes before Due in the next 7 days.
 
 ## The first Frogbot findings (2026-10-20)
 

@@ -573,3 +573,114 @@ def test_the_app_backs_up_on_its_own_thread(ctx, tmp_path, monkeypatch):
         assert backup.last_backup(ctx.conn) and not backup.is_due(ctx.conn, ctx.settings, ctx.now())
     finally:
         capture_app.quit()
+
+
+def _item(w, key):
+    return next(item for item in w.tree.items() if item.data(0, KEY_ROLE) == key)
+
+
+def test_today_shows_what_is_due_this_week(browse):
+    """Mods log round 2 (M0050): Due in the next 7 days, under Today's items, each with Add to Today; Mine only is remembered."""
+    from PySide6.QtWidgets import QCheckBox
+
+    from docrepo import db
+
+    browse.set_view("today")
+    assert rows(browse).count(("task", "T000019")) == 1 and ("task", "T000012") in rows(browse)
+    add = browse.tree.itemWidget(_item(browse, ("task", "T000012")), 3).findChild(QPushButton)
+    assert add.text() == "Add to Today"
+    add.click()
+    m = Model(browse.conn)
+    assert [a.subject for a in m.today_items()] == ["T000012"] and rows(browse).count(("task", "T000012")) == 1  # now on Today, not below
+    mine = next(b for b in browse.filters.findChildren(QCheckBox) if b.text() == "Mine only")
+    mine.setChecked(True)
+    assert db.get_state(browse.conn, "today_due_mine") == "1"
+    browse.set_view("tasks")
+    browse.set_view("today")
+    mine = next(b for b in browse.filters.findChildren(QCheckBox) if b.text() == "Mine only")
+    assert mine.isChecked() and ("task", "T000019") in rows(browse)  # I lead it
+    mine.setChecked(False)
+    assert db.get_state(browse.conn, "today_due_mine") == "0"
+
+
+def test_double_click_opens_a_tasks_subtasks(browse, ctx):
+    """Mods log round 2 (M0043): double-clicking a task opens or closes its subtasks, not File Explorer; other rows still show their file."""
+    item = _item(browse, ("task", "T000001"))
+    was = item.isExpanded()
+    browse.double_click(item)
+    assert item.isExpanded() != was and browse.revealed == []
+    browse.double_click(item)
+    assert item.isExpanded() == was
+    browse.set_view("unfiled")
+    browse.double_click(next(browse.tree.items()))
+    assert len(browse.revealed) == 1 and browse.revealed[0].name == "capture.md"
+
+
+def _shortcut(widget, keys: str):
+    from PySide6.QtGui import QKeySequence, QShortcut
+
+    return next(s for s in widget.findChildren(QShortcut) if s.key() == QKeySequence(keys))
+
+
+def test_ctrl_enter_saves_the_forms_and_esc_asks_first(browse):
+    """Mods log round 2 (M0035): Ctrl+Enter saves and closes the browse tool's forms; Esc closes, asking first when something changed."""
+    from docrepo.ui.dialogs import LabelDialog, PersonDialog
+    from docrepo.ui.task_forms import BulkEditDialog, TaskEditDialog
+
+    dialog = TaskEditDialog(browse, browse.model(), "T000012", browse._label_options, browse._people_options)
+    closed: list[int] = []
+    dialog.finished.connect(closed.append)
+    asked: list[bool] = []
+    dialog.ask_discard = lambda: asked.append(True) or False
+    dialog.reject()  # nothing changed: it closes without asking
+    assert closed == [0] and asked == []
+    dialog = TaskEditDialog(browse, browse.model(), "T000012", browse._label_options, browse._people_options)
+    dialog.finished.connect(closed.append)
+    dialog.ask_discard = lambda: asked.append(True) or False
+    dialog.title.setText("Rigging plan for the lift")
+    dialog.reject()  # changed: it asks, and No keeps it open
+    assert closed == [0] and asked == [True]
+    dialog.title.setText("")
+    _shortcut(dialog, "Ctrl+Return").activated.emit()  # a form that can't be saved stays open and says why
+    assert closed == [0] and dialog.error.text() == "A task needs a title."
+    dialog.title.setText("Rigging plan for the lift")
+    _shortcut(dialog, "Ctrl+Enter").activated.emit()
+    assert closed == [0, 1] and dialog.values()["title"] == "Rigging plan for the lift"
+
+    person = PersonDialog(browse, "Dana Kim")
+    person.finished.connect(closed.append)
+    person.hours.setText("lots")
+    _shortcut(person, "Ctrl+Return").activated.emit()
+    assert closed == [0, 1] and person.error.isVisibleTo(person)
+    person.hours.setText("36")
+    _shortcut(person, "Ctrl+Return").activated.emit()
+    assert closed == [0, 1, 1]
+    label = LabelDialog(browse, "Safety", ["safety"])
+    label.ask_discard = lambda: False
+    label.keywords.setText("safety, guard")
+    label.reject()
+    assert label.result() == 0 and label.changed()
+
+    bulk = BulkEditDialog(browse, browse.model(), ["T000012"], browse._label_options, browse._people_options, lambda e: [],
+                          lambda anchor, picked: None)
+    bulk.finished.connect(closed.append)
+    assert not bulk.changed()
+    _shortcut(bulk, "Ctrl+Return").activated.emit()  # nothing set: nothing to apply, so it stays open
+    assert closed == [0, 1, 1]
+
+
+def test_ctrl_enter_and_esc_in_a_capture_edit(browse):
+    """Mods log round 2 (M0035): in the capture edit form, Ctrl+Enter saves and Esc cancels, asking first when something changed."""
+    browse.go_capture("C000017")
+    browse.start_capture_edit("C000017")
+    form = browse.detail_stack.widget(1)
+    asked: list[str] = []
+    browse.confirm = lambda title, text: asked.append(title) or False
+    browse.edit_content.setPlainText("Vendor drawings came in late.")
+    _shortcut(form, "Escape").activated.emit()
+    assert asked == ["Edit capture C000017"] and browse.editing == "C000017"  # No keeps the edit open
+    _shortcut(form, "Ctrl+Return").activated.emit()
+    assert browse.editing is None and "previous version" in browse.status.text()
+    browse.start_capture_edit("C000017")
+    _shortcut(form, "Escape").activated.emit()  # nothing changed: it closes without asking
+    assert browse.editing is None and asked == ["Edit capture C000017"]

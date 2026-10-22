@@ -16,7 +16,6 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
-    QDialog,
     QDialogButtonBox,
     QGridLayout,
     QHBoxLayout,
@@ -39,7 +38,7 @@ from docrepo.schedule import start_of
 from docrepo.ui.style import STYLE
 from docrepo.ui.task_picker import full_path, path_text
 from docrepo.ui.tree_view import RowTree
-from docrepo.ui.widgets import Chip, ChipPicker, DateField, HoursField, InfoButton, Option, field
+from docrepo.ui.widgets import Chip, ChipPicker, DateField, FormDialog, HoursField, InfoButton, Option, field
 
 Options = Callable[[str, list[str]], list[Option]]
 LEAVE = "Leave as it is"
@@ -54,7 +53,7 @@ def chips_people(chips: ChipPicker) -> list[Who]:
     return [Who(name=c.value) if c.new else Who(c.value) for c in chips.chips()]
 
 
-class TaskEditDialog(QDialog):
+class TaskEditDialog(FormDialog):
     """Edit task: a task's title, description, state, current status, labels, people and hours, dates, recurrence and flags."""
 
     def __init__(self, parent: QWidget | None, m: Model, task_id: str, labels: Options, people: Options) -> None:
@@ -146,15 +145,25 @@ class TaskEditDialog(QDialog):
         self.error.setWordWrap(True)
         self.error.hide()
         outer.addWidget(self.error)
+        footer = QHBoxLayout()
+        footer.addWidget(QLabel(self.KEYS_HINT, objectName="hint"), 1)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self._accept)
         buttons.rejected.connect(self.reject)
-        outer.addWidget(buttons)
+        footer.addWidget(buttons)
+        outer.addLayout(footer)
         self._sync()
+        self.mark_clean()
         self.title.setFocus()
 
     def _sync(self) -> None:
         self.repeat_field.setVisible(self.recurrence.currentIndex() > 0)
+
+    def save(self) -> None:
+        self._accept()
+
+    def snapshot(self) -> dict[str, Any]:
+        return self.values()
 
     def problem(self) -> str | None:
         """What's wrong with the form, if anything: the first field that can't be saved."""
@@ -209,7 +218,7 @@ def _preview_html(m: Model, outcomes: list[TaskOutcome]) -> str:
     return "".join(parts)
 
 
-class BulkEditDialog(QDialog):
+class BulkEditDialog(FormDialog):
     """Edit selected (mods log round 1, M0009): changes only what's set here, on every ticked task, after a preview.
 
     ``preview(edit)`` gives what an edit would do, without doing it; ``pick_task(anchor, picked)`` opens the task picker.
@@ -298,7 +307,7 @@ class BulkEditDialog(QDialog):
         self.preview.document().setDefaultStyleSheet(CSS)
         outer.addWidget(self.preview, 1)
         buttons = QHBoxLayout()
-        buttons.addStretch()
+        buttons.addWidget(QLabel("Ctrl+Enter applies. Esc closes, asking first if you've set something.", objectName="hint"), 1)
         self.apply_button = QPushButton("Apply", objectName="primary")
         self.apply_button.clicked.connect(self.accept)
         cancel = QPushButton("Cancel")
@@ -312,6 +321,14 @@ class BulkEditDialog(QDialog):
         self._timer.timeout.connect(self.refresh_preview)
         self._sync_parent()
         self.refresh_preview()
+
+    def save(self) -> None:
+        self.refresh_preview()  # a change made a moment ago may not be in the preview yet
+        if self.apply_button.isEnabled():
+            self.accept()
+
+    def changed(self) -> bool:
+        return not self.edit().empty
 
     def set_parent(self, task_id: str | None) -> None:
         self.parent_task = task_id
@@ -364,7 +381,7 @@ class BulkEditDialog(QDialog):
         self.apply_button.setEnabled(any(o.changes for o in self.outcomes))
 
 
-class LabelMatchDialog(QDialog):
+class LabelMatchDialog(FormDialog):
     """A label's matching tasks (mods log round 1, M0014): open tasks that mention its keywords but don't have it. Tick the
     ones to label; nothing is labelled until Apply. ``apply(task_ids)`` adds the label to them."""
 
@@ -397,6 +414,7 @@ class LabelMatchDialog(QDialog):
         self.rows.end()
         lay.addWidget(self.rows, 1)
         buttons = QHBoxLayout()
+        buttons.addWidget(QLabel("Ctrl+Enter applies.", objectName="hint"))
         for text, on in (("Tick all", True), ("Clear", False)):
             b = QPushButton(text)
             b.clicked.connect(lambda _=False, on=on: self.tick_all(on))
@@ -410,6 +428,12 @@ class LabelMatchDialog(QDialog):
         buttons.addWidget(close)
         lay.addLayout(buttons)
         self._sync()
+
+    def save(self) -> None:
+        self.apply()
+
+    def changed(self) -> bool:
+        return bool(self.ticked())
 
     def ticked(self) -> list[str]:
         from PySide6.QtCore import Qt

@@ -15,7 +15,7 @@ from docrepo import layer0  # noqa: E402
 from docrepo.captures import capture_folder  # noqa: E402
 from docrepo.config import Settings  # noqa: E402
 from docrepo.model import Model  # noqa: E402
-from docrepo.save import Attachment, CaptureDraft, EmailItem, SaveError, email_rows, save_capture  # noqa: E402
+from docrepo.save import Attachment, CaptureDraft, EmailItem, email_rows, save_capture  # noqa: E402
 from docrepo.ui.capture_window import CaptureWindow  # noqa: E402
 from docrepo.ui.context import AppContext  # noqa: E402
 
@@ -84,9 +84,6 @@ def test_saving_an_email_with_its_parts(sample_root):
     conn, root, fs = sample_root
     rows = email_rows(sample_email())
     assert rows[0].email and not rows[0].described and [r.keep for r in rows[1:]] == [True, True, True, True, True, False]
-    with pytest.raises(SaveError) as e:
-        save_capture(conn, root, fs, SETTINGS, CaptureDraft(task="T000008", types={"note"}, files=rows), AT)
-    assert e.value.focus == "file:1"  # the first part needs a description; the email's own row never does
     for r, text in zip(rows[1:], ("Drawing.", "Packing list.", "Install guide.", "Checklist.", "Photo of the guard.", "")):
         r.description, r.save_a_copy, r.extract = text, True, True
     rows[3].keep = False  # leave the install guide out

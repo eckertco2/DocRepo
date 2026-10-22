@@ -41,6 +41,7 @@ from PySide6.QtWidgets import (
     QTableWidgetItem,
     QTextBrowser,
     QTextEdit,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -65,7 +66,7 @@ from docrepo.ui.task_forms import BulkEditDialog, LabelMatchDialog, TaskEditDial
 from docrepo.ui.task_picker import TaskPicker
 from docrepo.ui.timeline_view import TimelineView
 from docrepo.ui.tree_view import GREY, KEY_ROLE, RowTree, tint
-from docrepo.ui.widgets import CheckMenuButton, FlowLayout, Option, label_options, people_options
+from docrepo.ui.widgets import SAVE_KEYS, CheckMenuButton, FlowLayout, Option, label_options, people_options
 from docrepo.views import (
     LIST_IDS,
     SORTS,
@@ -83,6 +84,7 @@ from docrepo.views import (
     discarded_rows,
     documents_tree,
     due_cell,
+    due_this_week,
     expand_level,
     full_path,
     list_date,
@@ -103,6 +105,7 @@ log = logging.getLogger(__name__)
 
 WINDOW_TITLE = "DocRepo"
 VIEWS_HIDDEN_KEY = "browse_views_hidden"
+TODAY_MINE_KEY = "today_due_mine"  # Mine only, on Today's Due in the next 7 days (mods log round 2, M0050)
 STYLE = """
 QWidget#browse { background: #ffffff; color: #1a1f25; font-family: "Segoe UI"; font-size: 10pt; }
 QWidget#toolbar { background: #f4f6f8; border-bottom: 1px solid #d6dce3; }
@@ -165,6 +168,7 @@ class BrowseWindow(QWidget):
         self.state = PageState()
         self.file_to: dict[str, str] = {}
         self.editing: str | None = None
+        self._edit_start: tuple[str, str] = ("", "")  # the capture edit's text and summary as it opened
         self.dirty = True
         self._model: Model | None = None
         self._contents: dict[str, tuple[int, str]] = {}
@@ -242,7 +246,7 @@ class BrowseWindow(QWidget):
         self.tree.ticked.connect(self._tick)
         self.tree.itemExpanded.connect(lambda item: self._expanded(item, True))
         self.tree.itemCollapsed.connect(lambda item: self._expanded(item, False))
-        self.tree.itemDoubleClicked.connect(lambda item, _col: self.reveal_key(item.data(0, KEY_ROLE)))
+        self.tree.itemDoubleClicked.connect(lambda item, _col: self.double_click(item))
         lp.addWidget(self.tree, 1)
         self.middle.addWidget(list_page)
         self.middle.addWidget(self._build_capacity())
@@ -338,8 +342,8 @@ class BrowseWindow(QWidget):
         self.edit_summary = QPlainTextEdit()
         self.edit_summary.setPlaceholderText("No summary")
         lay.addWidget(self.edit_summary, 1)
-        note = QLabel("Saving rewrites capture.md and keeps the previous version in the capture's _old versions folder. Nothing is lost.",
-                      objectName="hint")
+        note = QLabel("Saving rewrites capture.md and keeps the previous version in the capture's _old versions folder. Nothing is lost. "
+                      "Ctrl+Enter saves; Esc cancels.", objectName="hint")
         note.setWordWrap(True)
         lay.addWidget(note)
         row = QHBoxLayout()
@@ -351,6 +355,9 @@ class BrowseWindow(QWidget):
         row.addWidget(cancel)
         row.addStretch()
         lay.addLayout(row)
+        # As in the browse tool's other forms (mods log round 2, M0035), while typing in this one.
+        for keys, handler in ((SAVE_KEYS[0], self.save_capture_edit), (SAVE_KEYS[1], self.save_capture_edit), ("Escape", self.cancel_capture_edit)):
+            QShortcut(QKeySequence(keys), form, handler, context=Qt.ShortcutContext.WidgetWithChildrenShortcut)
         return form
 
     # ================= showing =================
@@ -772,6 +779,10 @@ class BrowseWindow(QWidget):
                                                      f'<p align="right" style="{colour}">{esc(cell.text)}</p>' if cell else ""],
                                          tip=f"Added {long_date(date.fromisoformat(a.added[:10]), today)}")
                 self.tree.setItemWidget(item, 3, self._today_buttons(a.id))
+        if not m.today_items():
+            self.tree.add_row(None, None, ['<span class="sub">Nothing on Today. Select a task and press T, or type a note above.</span>'],
+                              selectable=False, span=True)
+        self._today_due_rows(m, today, grey)
         done = m.done_on(today)
         if done:
             self.tree.add_row(None, None, ["<b>Done today</b>"], grey, selectable=False, span=True)
@@ -781,9 +792,41 @@ class BrowseWindow(QWidget):
                                   [f'<s><span style="color:#87919c">{esc(t.title if t else a.note)}</span></s><br>'
                                    f'<span class="sub">Done at {esc((a.closed or "")[11:16])}</span>',
                                    state_chip(t.state) if t else chip("Note", "st-ns"), ""])
-        if not m.today_items():
-            self.tree.add_row(None, None, ['<span class="sub">Nothing on Today. Select a task and press T, or type a note above.</span>'],
+
+    def _today_due_rows(self, m: Model, today: date, grey: QColor) -> None:
+        """Due in the next 7 days (mods log round 2, M0050): tasks overdue or due soon that aren't on Today, each with Add
+        to Today. Mine only, remembered in app_state, leaves those I neither lead nor am assigned to."""
+        mine = db.get_state(self.conn, TODAY_MINE_KEY) == "1"
+        box = QCheckBox("Mine only")
+        box.setToolTip("Only tasks you lead or are assigned to, in Due in the next 7 days")
+        box.setChecked(mine)
+        box.toggled.connect(self.set_today_mine)
+        self._filter_widget(box)
+        tasks = due_this_week(m, today, self.ctx.settings.me, mine)
+        self.tree.add_row(None, None, ["<b>Due in the next 7 days</b>" + (" <span class=\"sub\">· yours</span>" if mine else "")],
+                          grey, selectable=False, span=True)
+        for t in tasks:
+            cell = due_cell(t, today)
+            colour = {"over": "color:#b0261e; font-weight:600", "soon": "color:#875700; font-weight:600"}.get(cell.cls if cell else "", "")
+            item = self.tree.add_row(None, ("task", t.id), [f'{esc(t.title)}<br><span class="sub">{esc(path_text(m, t.id) or "Top-level task")}</span>',
+                                                          state_chip(t.state), f'<p align="right" style="{colour}">{esc(cell.text)}</p>' if cell else ""])
+            add = QPushButton("Add to Today", objectName="rowLink")
+            add.setToolTip("Put it on Today (T)")
+            add.clicked.connect(lambda _=False, i=t.id: self.add_to_today(i))
+            holder = QWidget()
+            lay = QHBoxLayout(holder)
+            lay.setContentsMargins(0, 0, 0, 0)
+            lay.addWidget(add)
+            lay.addStretch()
+            self.tree.setItemWidget(item, 3, holder)
+        if not tasks:
+            self.tree.add_row(None, None, ['<span class="sub">Nothing else is due in the next 7 days' + (" for you." if mine else ".") + "</span>"],
                               selectable=False, span=True)
+
+    def set_today_mine(self, on: bool) -> None:
+        """Mine only, on Today's Due in the next 7 days. The choice is kept in docs.db's app_state."""
+        db.set_state(self.conn, TODAY_MINE_KEY, "1" if on else "0")
+        self.render_list()
 
     def _today_buttons(self, item_id: int) -> QWidget:
         box = QWidget()
@@ -1190,6 +1233,16 @@ class BrowseWindow(QWidget):
             st.chapters = set(self.model().tasks) if rest == "open" else set()
             self.render_detail(keep_scroll=True)
 
+    def double_click(self, item: QTreeWidgetItem) -> None:
+        """Double-clicking a task opens or closes its subtasks; it no longer shows the task's folder in File Explorer (mods log
+        round 2, M0043), which Open folder still does. Other rows show what they point to, as before."""
+        key = item.data(0, KEY_ROLE)
+        if key and key[0] == "task":
+            if item.childCount():
+                item.setExpanded(not item.isExpanded())
+            return
+        self.reveal_key(key)
+
     def reveal_key(self, key) -> None:
         """Show what a row or link points to in File Explorer."""
         if not key:
@@ -1458,10 +1511,16 @@ class BrowseWindow(QWidget):
         self.edit_title.setText(f"Edit capture {capture_id}")
         self.edit_content.setPlainText(self._capture_text(capture_id) or "")
         self.edit_summary.setPlainText(c.summary or "")
+        self._edit_start = (self.edit_content.toPlainText(), self.edit_summary.toPlainText())
         self.render_detail()
         self.edit_content.setFocus()
 
     def cancel_capture_edit(self) -> None:
+        if not self.editing:
+            return
+        changed = (self.edit_content.toPlainText(), self.edit_summary.toPlainText()) != self._edit_start
+        if changed and not self.confirm(f"Edit capture {self.editing}", "Close without saving your changes?"):
+            return
         self.editing = None
         self.render_detail()
 

@@ -104,6 +104,13 @@ class FileRow:
         return self.email is None and self.keep
 
 
+def default_description(row: FileRow, task_title: str | None) -> str:
+    """What a description left empty becomes (mods log round 2, M0041): "*task* – Attached document – *file name*", with
+    "Attached link" or "Attached picture" for those, or just the file name when the capture has no task."""
+    kind = "picture" if row.part and row.part.kind == "picture" else "link" if is_link(row.path) else "document"
+    return f"{task_title.strip()} – Attached {kind} – {row.name}" if task_title and task_title.strip() else row.name
+
+
 def email_rows(email: EmailItem) -> list[FileRow]:
     """An email's row, then a row for each part email layer 0 finds in it, ticked or not as layer 0 starts them."""
     return [FileRow(email.subject, email=email),
@@ -202,10 +209,6 @@ def _check(draft: CaptureDraft, task_exists: bool) -> None:
         raise SaveError("There's nothing to save yet. Type or paste something, or add a file or an email.", "content")
     if targets and not is_new and not is_upd and not draft.task and not content:
         raise SaveError("A note on an agenda needs some content text: it's what goes on the agenda.", "content")
-    for i, f in enumerate(draft.files):
-        if f.described and not f.description.strip():
-            more = " “Use the first file's description” fills every row from the first." if sum(r.described for r in draft.files) > 1 else ""
-            raise SaveError(f"Describe each file before saving: what's in {f.name}?{more}", f"file:{i}")
 
 
 def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, draft: CaptureDraft, at: datetime) -> SaveResult:
@@ -239,6 +242,7 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
     copies: list[tuple[str, str]] = []  # (document ID, file name) for saved copies
     changes: list[tasks.Change] = []
     created = None
+    holder_title = task_row["title"] if task_row else None  # the task the files belong to, for descriptions left empty
     with transaction(conn):
         capture_id = next_id(conn, "C") if keep else None
         via = capture_id or draft.from_capture or "Capture window"
@@ -259,6 +263,7 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
                     people.add_label(conn, name)
             source = full_content
             title = nt.title.strip() or _parsed_title(conn, source, at, settings) or first_sentence(plain_text(source)) or "Untitled task"
+            holder_title = title
             created = tasks.create_task(
                 conn, settings, title=title, at=at, created_by=via, parents=[t] if t else [], description=plain_text(source),
                 state=nt.state, start=nt.start if nt.start and nt.start != day else None, due=nt.due, deadline=nt.deadline,
@@ -289,9 +294,10 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
                 email_layer_0=" ".join(email_layer0_line(e, draft.files) for e in emails) or None,
             )
             for row in draft.files:
-                desc = row.description.strip()
                 if not row.described:
                     continue  # an email's own row is its text and email.msg; an unticked part is left out
+                desc = row.description.strip() or default_description(row, holder_title)
+                row.description = desc
                 if row.part and row.part.attachment:
                     # An email's attachment or picture (email layer 0): saved in the capture's attachments folder.
                     a = row.part.attachment

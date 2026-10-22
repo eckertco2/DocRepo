@@ -45,7 +45,8 @@ LIST_NOTES = {
 }
 
 TODAY_NOTE = ("Your list for today. Each item stays until you mark it Done, carrying over to the next day. Add a task with T while "
-              "browsing, or Add to Today on its page; add a note here, or from the capture window's Add to agenda.")
+              "browsing, or Add to Today on its page; add a note here, or from the capture window's Add to agenda. Below it, the "
+              "tasks due in the next 7 days that aren't on it yet.")
 
 VIEWS: tuple[ViewDef, ...] = (
     ViewDef("today", "Today", note=TODAY_NOTE),  # mods log round 1, M0016
@@ -437,6 +438,15 @@ def today_groups(m: Model, today: date) -> list[tuple[str, list[AgendaItem]]]:
     carried = [a for a in items if a.added[:10] < today.isoformat()]
     fresh = [a for a in items if a.added[:10] >= today.isoformat()]
     return [g for g in (("Carried over", carried), ("Added today" if carried else "Today", fresh)) if g[1]]
+
+
+def due_this_week(m: Model, today: date, me: str | None, mine_only: bool = False) -> list[Task]:
+    """Today's Due in the next 7 days (mods log round 2, M0050): the Overdue and next 7 days list's tasks, soonest first,
+    that aren't on Today yet. With Mine only, those I lead or am assigned to."""
+    on_today = {a.subject for a in m.today_items() if a.subject}
+    due = next(x for x in LISTS if x.id == "due")
+    return [t for t in list_tasks(m, due, today, me)
+            if t.id not in on_today and (not mine_only or me in t.leads or me in t.assignees)]
 
 
 # ---- agendas ----

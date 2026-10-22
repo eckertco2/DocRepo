@@ -48,7 +48,17 @@ from docrepo.links import is_link, link_name
 from docrepo.model import TODAY, Model, is_person
 from docrepo.parse import Found, Known, Who, parse_capture, quick_update
 from docrepo.prompts import capture_blocks, load_summary_types, prompt_text
-from docrepo.save import CaptureDraft, EmailItem, FileRow, NewTaskFields, SaveError, email_layer0_line, email_rows, save_capture
+from docrepo.save import (
+    CaptureDraft,
+    EmailItem,
+    FileRow,
+    NewTaskFields,
+    SaveError,
+    default_description,
+    email_layer0_line,
+    email_rows,
+    save_capture,
+)
 from docrepo.schedule import is_open, start_of
 from docrepo.ui.context import AppContext
 from docrepo.ui.mods_panel import ModsPanel
@@ -98,7 +108,7 @@ class FileEntry:
     extract: QCheckBox | None = None
     keep: QCheckBox | None = None  # an email's part: whether it's kept
     layer0: QLabel | None = None  # an email's row: what email layer 0 kept and left out
-    what: str = ""  # the description's placeholder
+    what: str = ""  # the description's question, the start of its placeholder
 
 
 def read_drop(mime) -> tuple[str, list[str]]:
@@ -282,6 +292,7 @@ class CaptureWindow(QWidget):
         # Title and content text
         self.title = QLineEdit()
         self.title.textEdited.connect(lambda: self._touch("new.title", self.title))
+        self.title.textChanged.connect(lambda _: self._apply_same_all())  # empty descriptions name the new task
         self.title_field = field("Title", self.title, "title", "or leave it empty to take it from the content text")
         b.addWidget(self.title_field)
         self.content = ContentEdit()
@@ -586,7 +597,9 @@ class CaptureWindow(QWidget):
 
     def keyPressEvent(self, event) -> None:  # noqa: N802
         if event.key() == Qt.Key.Key_Escape:
-            if self.pages.currentIndex() == 1:
+            if self.pages.currentIndex() == 1 and self.mods.editing:
+                self.mods.cancel_edit()  # Esc first stops an edit, then goes back to the capture
+            elif self.pages.currentIndex() == 1:
                 self.show_mods(False)
             else:
                 self.hide()
@@ -774,7 +787,8 @@ class CaptureWindow(QWidget):
             "puts the new task on it" if new else "puts the picked task on it" if upd and t else "puts this note on it") + "</span>")
         self.files_label.setVisible(bool(self.files))
         self.same_all.setVisible(sum(e.desc is not None for e in self.files) > 1)
-        where = "the new task's Files folder" if new else f"Tasks\\{t.id}\\Files\\" if t else "the task's Files folder once the capture is filed"
+        self._apply_same_all()  # the placeholders name the task
+        where ="the new task's Files folder" if new else f"Tasks\\{t.id}\\Files\\" if t else "the task's Files folder once the capture is filed"
         has_files = any(e.copy is not None and not e.copy.isHidden() for e in self.files)  # rows that offer Save a copy
         self.copy_hint.setText(f"Save a copy puts the file in {where}, named with today's date. Extract information marks it for the later processing stage."
                                if has_files else "")
@@ -1030,10 +1044,8 @@ class CaptureWindow(QWidget):
             self._show_layer0()
             self.refresh()
             return
-        entry.what = ("What's at this link? Required" if link else "What does this picture show? Required" if kind == "picture"
-                      else "What's in this file? Required")
+        entry.what = ("What's at this link?" if link else "What does this picture show?" if kind == "picture" else "What's in this file?")
         entry.desc = QLineEdit(doc.description or "" if doc else "")
-        entry.desc.setPlaceholderText(entry.what)
         entry.desc.setAccessibleName(f"Description of {row.name}")
         fl.addWidget(entry.desc)
         opts = QHBoxLayout()
@@ -1082,7 +1094,10 @@ class CaptureWindow(QWidget):
         self.refresh()
 
     def _apply_same_all(self) -> None:
-        """With "Use the first file's…" on, the other described rows follow the first. An unticked part is left out."""
+        """With "Use the first file's…" on, the other described rows follow the first. An unticked part is left out.
+        A description box left empty shows what Save will put there (mods log round 2, M0041)."""
+        if not hasattr(self, "same_all"):
+            return  # still being built
         described = [e for e in self.files if e.desc is not None]
         same = self.same_all.isChecked() and len(described) > 1
         first = described[0] if described else None
@@ -1090,7 +1105,17 @@ class CaptureWindow(QWidget):
             follows = same and e is not first
             for w in (e.desc, e.copy, e.extract):
                 w.setEnabled(e.row.keep and not follows)
-            e.desc.setPlaceholderText("Left out" if not e.row.keep else "Same as the first file" if follows else e.what)
+            e.desc.setPlaceholderText("Left out" if not e.row.keep else "Same as the first file" if follows
+                                      else f"{e.what} Left empty: {self._default_desc(e.row)}")
+
+    def _default_desc(self, row: FileRow) -> str:
+        """The description Save gives a row left empty: the new task's title, or the picked task's."""
+        if "new_task" in self.types:
+            title = self.title.text().strip() or "(the new task's title)"
+        else:
+            t = self.ctx.model().tasks.get(self.task) if self.task else None
+            title = t.title if t else None
+        return default_description(row, title)
 
     def _file_rows(self) -> list[FileRow]:
         described = [e for e in self.files if e.desc is not None]
@@ -1334,11 +1359,7 @@ class CaptureWindow(QWidget):
         try:
             result = save_capture(self.ctx.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, draft, self.ctx.now())
         except SaveError as e:
-            focus = {"task": self.task_button, "title": self.title, "content": self.content}.get(e.focus)
-            if e.focus.startswith("file:"):
-                index = int(e.focus.split(":")[1])
-                focus = self.files[index].desc if index < len(self.files) else self.content
-            self._fail(str(e), focus)
+            self._fail(str(e), {"task": self.task_button, "title": self.title, "content": self.content}.get(e.focus))
             return
         finally:
             QGuiApplication.restoreOverrideCursor()

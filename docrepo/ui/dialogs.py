@@ -4,7 +4,6 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from PySide6.QtWidgets import (
-    QDialog,
     QDialogButtonBox,
     QFormLayout,
     QLabel,
@@ -14,6 +13,7 @@ from PySide6.QtWidgets import (
 )
 
 from docrepo.ui.style import STYLE
+from docrepo.ui.widgets import FormDialog
 
 
 def split_list(text: str) -> list[str]:
@@ -21,7 +21,7 @@ def split_list(text: str) -> list[str]:
     return [x.strip() for x in text.split(",") if x.strip()]
 
 
-class _Form(QDialog):
+class _Form(FormDialog):
     def __init__(self, parent: QWidget | None, title: str, note: str = "") -> None:
         super().__init__(parent)
         self.setWindowTitle(title)
@@ -39,11 +39,17 @@ class _Form(QDialog):
         self.error.setWordWrap(True)
         self.error.hide()
         self.layout_.addWidget(self.error)
+        keys = QLabel(self.KEYS_HINT, objectName="hint")
+        keys.setWordWrap(True)
+        self.layout_.addWidget(keys)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self._accept)
         buttons.rejected.connect(self.reject)
         self.layout_.addWidget(buttons)
         self.check: Callable[[], str | None] = lambda: None
+
+    def save(self) -> None:
+        self._accept()
 
     def _accept(self) -> None:
         problem = self.check()
@@ -70,6 +76,7 @@ class PersonDialog(_Form):
         self.form.addRow("Aliases", self.aliases)
         self.form.addRow("Hours a week", self.hours)
         self.check = self._problem
+        self.mark_clean()
 
     def _problem(self) -> str | None:
         if not self.name.text().strip():
@@ -100,6 +107,7 @@ class LabelDialog(_Form):
         self.form.addRow("Name", self.name)
         self.form.addRow("Keywords", self.keywords)
         self.check = lambda: None if self.name.text().strip() else "A label needs a name."
+        self.mark_clean()
 
     def values(self) -> tuple[str, list[str]]:
         name = self.name.text().strip()
