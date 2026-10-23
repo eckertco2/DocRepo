@@ -97,6 +97,11 @@ class Capture:
     email_layer_0: str | None = None
     #: Whether its content text in capture.md is markup (mods log round 2, M0045; ``docrepo.markup``), not plain text.
     formatted: bool = False
+    #: Items and meeting notes (mods log round 2, M0048 phase 2, M0052; release 5.8): the notes an item came from, what
+    #: it is (task, note, update or decision; "notes" for a meeting's notes), and the meeting the notes made.
+    from_notes: str | None = None
+    item: str | None = None
+    meeting: str | None = None
     documents: list[CaptureDocument] = field(default_factory=list)
     attachments: list[str] = field(default_factory=list)
 

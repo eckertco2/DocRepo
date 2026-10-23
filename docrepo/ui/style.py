@@ -60,6 +60,17 @@ QLabel#error { background: #fbe3e1; color: #b0261e; padding: 6px 10px; border-ra
 QLabel#tip { background: #dbe8f5; border: 1px solid #9dc0e3; border-radius: 5px; padding: 6px 9px; font-size: 9pt; }
 QFrame#found { background: #fcefcf; border: 1px solid #875700; border-radius: 6px; }
 QFrame#found[empty="true"] { background: #f4f6f8; border: 1px dashed #b8c1cb; }
+QFrame#items, QFrame#agendaPanel { background: #f4f6f8; border: 1px solid #d6dce3; border-radius: 6px; }
+QFrame#items[empty="true"] { border-style: dashed; border-color: #b8c1cb; }
+QFrame#itemCard { background: #ffffff; border: 1px solid #d6dce3; border-left: 3px solid #b8c1cb; border-radius: 4px; }
+QFrame#itemCard[kind="task"] { border-left-color: #3b78c4; }
+QFrame#itemCard[kind="note"] { border-left-color: #2e9483; }
+QFrame#itemCard[kind="update"] { border-left-color: #c08419; }
+QFrame#itemCard[kind="decision"] { border-left-color: #8460c2; }
+QFrame#itemCard[kind="self"] { border-left-color: #1d5e98; }
+QFrame#itemCard QLabel { background: transparent; border: none; }
+QListWidget#refPopup { background: #ffffff; border: 1px solid #b8c1cb; border-radius: 4px; }
+QListWidget#refPopup::item:selected { background: #dbe8f5; color: #1a1f25; }
 QFrame#divider { color: #d6dce3; }
 QPushButton#today { border: 1px solid #b8c1cb; border-radius: 11px; background: #ffffff; padding: 2px 10px; }
 QPushButton#today:checked { background: #1d5e98; border-color: #1d5e98; color: #ffffff; }

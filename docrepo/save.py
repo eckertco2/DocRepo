@@ -20,9 +20,9 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
-from docrepo import agenda, captures, edits, layer0, markup, people, quick, search, tasks
+from docrepo import agenda, captures, edits, items, layer0, markup, people, quick, search, tasks
 from docrepo.config import Settings
-from docrepo.dates import stamp
+from docrepo.dates import long_date, short, stamp
 from docrepo.db import next_id, transaction
 from docrepo.extract import extract_text, file_info
 from docrepo.links import NO_TEXT, is_link
@@ -159,11 +159,26 @@ class CaptureDraft:
     quick: bool = False
     #: The content text is markup (mods log round 2, M0045; ``docrepo.markup``): it has formatting or lists.
     formatted: bool = False
+    #: Meeting notes (release 5.8): the notes go on the meeting the picked task decides (``meeting_case``). This time's
+    #: meeting of a regular meeting, or a new meeting, is made, named ``meeting_name`` (empty: the name it starts with).
+    meeting: bool = False
+    meeting_name: str = ""
+    #: The meeting's agenda items ticked or unticked as discussed by hand, by ID; the rest follow the notes.
+    agenda_ticks: dict[int, bool] = field(default_factory=dict)
+    #: The item cards' changes, by item key: {"0": {"off": True}, "2": {"title": "…", "due": "2026-10-23"}}.
+    item_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
+    #: Names picked from the @ and # lists, or kept with their IDs in the text: {"@tom becker": "P003", "#rigging plan": "T000012"}.
+    refs: dict[str, str] = field(default_factory=dict)
 
     def words(self) -> str:
         """The content text's words, without its marks: what titles, descriptions and Parse and populate read."""
         content = self.content.strip()
         return markup.to_plain(content).strip() if self.formatted else content
+
+    def lines(self) -> str:
+        """The content text's words, line for line with the content text as it's kept: what items are read from."""
+        content = self.content.strip()
+        return markup.to_plain(content) if self.formatted else content
 
     def agenda_shown(self) -> bool:
         """Add to agenda applies with New task, with Update on a picked task, or with no task picked."""
@@ -182,6 +197,29 @@ class SaveResult:
     agenda_targets: list[str] = field(default_factory=list)
     filed_capture: str | None = None  # Make it a task: the capture filed to the new task
     picked_task: str | None = None  # the task picked in the window
+    # Release 5.8: the meeting the notes made, or went on; the items' captures; how many of each kind; agenda items discussed.
+    meeting: str | None = None
+    items: list[str] = field(default_factory=list)
+    made: dict[str, int] = field(default_factory=dict)
+    discussed: int = 0
+
+
+def meeting_case(model: Model, task_id: str | None) -> str:
+    """Which meeting the notes go on (release 5.8): "regular" (this time's meeting, made as a subtask of the picked
+    regular meeting), "oneoff" (the picked one-off meeting, as it is) or "new" (a new meeting, under the picked task)."""
+    t = model.tasks.get(task_id) if task_id else None
+    return "new" if not t or not t.meeting else "regular" if t.recurrence else "oneoff"
+
+
+def meeting_name(model: Model, task_id: str | None, today: date) -> str:
+    """The name the meeting starts with: a regular meeting's with today's date, a one-off meeting's own, else none."""
+    case = meeting_case(model, task_id)
+    return f"{model.task(task_id).title} {short(today, today)}" if case == "regular" else model.task(task_id).title if case == "oneoff" else ""
+
+
+def item_names(model: Model, settings: Settings, refs: dict[str, str] | None = None) -> items.Names:
+    """The people and tasks the content text's operators can name."""
+    return items.names_of(model, _parse_people(model, settings), refs)
 
 
 def copy_name(day: str, name: str, taken: set[str]) -> str:
@@ -248,17 +286,33 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
             row.save_a_copy = row.extract = False  # DocRepo keeps only a link's address (mods log round 1, M0001)
         if row.part and row.part.kind == "picture":
             row.extract = False  # a picture has no text to read
+    if draft.meeting:
+        draft.types, draft.agenda = {"note"}, []  # meeting notes are a note on the meeting
     is_new, is_upd, is_note = ("new_task" in draft.types, "update" in draft.types, "note" in draft.types)
     t = draft.task
     task_row = conn.execute("SELECT title FROM tasks WHERE id = ?", (t,)).fetchone() if t else None
     _check(draft, task_row is not None)
+    model0 = Model(conn)
+    case = meeting_case(model0, t) if draft.meeting else ""
+    meet_name = (draft.meeting_name.strip() or meeting_name(model0, t, at.date())) if draft.meeting else ""
+    if draft.meeting and not meet_name:
+        raise SaveError("Name the meeting first: Save makes it as a task.", "meeting")
     words = draft.words()
     formatted = draft.formatted and bool(words)
     content = draft.content.strip() if formatted else words
     emails = [f.email for f in draft.files if f.email]
+    # Items (release 5.8): read from the content text's words, never from an email. capture.md keeps each @ and # with
+    # its ID; titles read the words without the operators.
+    names = item_names(model0, settings, draft.refs)
+    reading = None if draft.from_capture else items.read(
+        draft.lines(), names, at.date(), labels=_parse_labels(model0), events=settings.event_words,
+        home=bool(t) or is_new or draft.meeting, new_task=is_new, overrides=draft.item_overrides)
+    own = items.self_fields(reading, names) if reading and is_new else None
     # capture.md keeps the markup, with each email's text escaped so it reads as itself; the rest reads the words.
-    full_content = "\n\n".join([content] * bool(content) + [markup.escape(e.text()) if formatted else e.text() for e in emails])
+    full_content = "\n\n".join([items.store(content, names, formatted)] * bool(content)
+                               + [markup.escape(e.text()) if formatted else e.text() for e in emails])
     full_words = "\n\n".join([words] * bool(words) + [e.text() for e in emails])
+    title_words = "\n\n".join([items.words(words, names)] * bool(words) + [e.text() for e in emails])
     summary = draft.summary.strip()
     targets = list(dict.fromkeys(draft.agenda)) if draft.agenda_shown() else []
     keep = bool(content or draft.files or summary) and not draft.from_capture
@@ -295,16 +349,32 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
                 if conn.execute("SELECT 1 FROM labels WHERE name = ?", (name.strip(),)).fetchone() is None:
                     people.add_label(conn, name)
             source = full_words
-            title = nt.title.strip() or _parsed_title(conn, source, at, settings) or first_sentence(plain_text(source)) or "Untitled task"
+            # With operators on its first line (release 5.8), that line without them gives the title, and its @ and #
+            # fill the new task's people and parents.
+            title = (nt.title.strip() or _parsed_title(conn, own.text if own and own.any else title_words, at, settings)
+                     or first_sentence(plain_text(title_words)) or "Untitled task")
             holder_title = title
             parents = [t] if t else [quick.ensure_parent(conn, settings, at)] if quick_task else []
+            parents += [p for p in (own.tasks if own else []) if p not in parents]
+            leads = list(dict.fromkeys([person(w) for w in nt.leads] + [person(x.who()) for x in (own.leads if own else [])]))
+            assignees = list(dict.fromkeys([person(w) for w in nt.assignees] + [person(x.who()) for x in (own.assignees if own else [])]))
             created = tasks.create_task(
                 conn, settings, title=title, at=at, created_by=via, parents=parents, description=plain_text(source),
                 state=nt.state, start=nt.start if nt.start and nt.start != day else None, due=nt.due, deadline=nt.deadline,
                 deadline_desc=nt.deadline_desc, reminder=nt.reminder, recurrence=nt.recurrence, repeat_until=nt.repeat_until,
-                urgent=nt.urgent, meeting=nt.meeting, leads=[person(w) for w in nt.leads], assignees=[person(w) for w in nt.assignees],
+                urgent=nt.urgent, meeting=nt.meeting, leads=leads, assignees=assignees,
                 lead_hours=nt.lead_hours, assignee_hours=nt.assignee_hours, labels=nt.labels, inherit_labels=nt.inherit_labels,
             )
+        # Meeting notes (release 5.8): this time's meeting of a regular meeting, or a new meeting, is made first, and
+        # the notes go on it. It stays In progress until it's closed by hand.
+        agenda_task = t if draft.meeting and case != "new" else None  # the meeting whose agenda the notes worked through
+        meeting_made = None
+        if draft.meeting and case != "oneoff":
+            meeting_made = tasks.create_task(
+                conn, settings, title=meet_name, at=at, created_by=via, parents=[t] if t else [], state="In progress", meeting=True, due=day,
+                description=f"{task_row['title'] + ', ' if task_row else ''}{long_date(at.date(), at.date())}. Its notes are in its raw text log.")
+            t = meeting_made
+            holder_title = meet_name
         if source_capture and created:
             filed_copies = edits.file_capture_records(conn, source_capture.id, created, at)
             if summary and not source_capture.summary:
@@ -323,9 +393,11 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
             captures.add_capture(
                 conn, capture_id=capture_id, saved=when, source=source_kind,
                 types=[k for k in TYPE_ORDER if k in draft.types and (k != "update" or t)],
-                title=capture_title(source_kind, full_words, first_file, capture_id), task=t, created_task=created, formatted=formatted,
+                title=f"Notes of {meet_name}" if draft.meeting else capture_title(source_kind, title_words, first_file, capture_id),
+                task=t, created_task=created, formatted=formatted,
                 summary=summary or None, summary_type=draft.summary_type if summary else None,
                 email_layer_0=" ".join(email_layer0_line(e, draft.files) for e in emails) or None,
+                item="notes" if draft.meeting else None, meeting=meeting_made,
             )
             for row in draft.files:
                 if not row.described:
@@ -369,12 +441,35 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
         note_text = "" if is_new else plain_text(words)
         for target in targets:
             agenda.add_item(conn, subject=subject, target=target, note=note_text, added=when, added_by=via)
+        item_files: list[tuple[str, str, bool]] = []  # (item capture, its block, whether it's markup)
+        made: dict[str, int] = {}
+        if capture_id and reading:
+            item_files, made = _save_items(conn, settings, reading, names, content, formatted, capture_id, created or t, when, at, person)
+        # Meeting notes: the agenda items the notes worked through close as Discussed.
+        discussed = 0
+        if agenda_task and capture_id:
+            for a in Model(conn).open_items_for(agenda_task):
+                if draft.agenda_ticks.get(a.id, items.discussed(reading, a.subject) if reading else False):
+                    agenda.close_item(conn, a.id, how="Discussed", closed=when, closed_by=capture_id)
+                    discussed += 1
 
     result = SaveResult(capture_id, created, t if is_upd else None, changes, added_people, "", agenda_targets=targets,
-                        filed_capture=source_capture.id if source_capture else None, picked_task=t)
+                        filed_capture=source_capture.id if source_capture else None, picked_task=draft.task,
+                        meeting=t if draft.meeting else None, items=[cid for cid, _, _ in item_files], made=made, discussed=discussed)
     if capture_id:
+        model = Model(conn)
+        if names.people != (now := _parse_people(model, settings)):  # someone was added: their @ is kept with their ID too
+            names = items.names_of(model, now, draft.refs)
+            full_content = "\n\n".join([items.store(content, names, formatted)] * bool(content)
+                                       + [markup.escape(e.text()) if formatted else e.text() for e in emails])
         _write_files(conn, data_root, fs, settings, capture_id, full_content, emails, documents, copies, created or t, result)
-        search.index_items(conn, data_root, captures=[capture_id], documents=[d for d, _, _ in documents])
+        for cid, block, block_formatted in item_files:
+            try:
+                fs.makedirs(captures.capture_folder(data_root, cid, model.captures[cid].saved))
+                captures.write_capture_md(fs, data_root, model, cid, items.store(block, names, block_formatted))
+            except OSError as e:
+                result.problems.append(f"{cid}'s capture.md couldn't be written ({type(e).__name__}).")
+        search.index_items(conn, data_root, captures=[capture_id, *result.items], documents=[d for d, _, _ in documents])
     if source_capture and created:
         edits.rewrite_capture_md(conn, data_root, fs, source_capture.id, source_content, result.problems)
         edits.copy_files(conn, data_root, fs, created, filed_copies, result.problems)
@@ -386,6 +481,55 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
     result.message = _message(conn, draft, result, targets, bool(draft.new_task.title.strip()))
     log.info("capture %s saved: %s", capture_id or "(none kept)", _log_line(draft, result, targets, [d for d, _, _ in documents]))
     return result
+
+
+def _save_items(conn: sqlite3.Connection, settings: Settings, reading: items.Reading, names: items.Names, content: str, formatted: bool,
+                notes_id: str, home: str | None, when: str, at: datetime, person: Callable[[Who], str]) -> tuple[list[tuple[str, str]], dict[str, int]]:
+    """Each ticked item as a small capture of its own, linked to the notes (release 5.8). A task item makes its task,
+    under the capture's task (or meeting, or new task) and its # tasks; a note, an update or a decision is filed to each
+    of its tasks. Returns each item's capture with its block as written (and whether that's markup), and how many of
+    each kind were made."""
+    lines = content.split("\n")
+    files: list[tuple[str, str, bool]] = []
+    made: dict[str, int] = {}
+    item_task: dict[str, str] = {}  # a task item's task, by its key, for the items listed under it
+    day = at.date().isoformat()
+    for it in (x for x in reading.items if x.on):
+        block = "\n".join(lines[n] for n in it.lines if n < len(lines))
+        block_formatted = formatted and markup.is_formatted(block)
+        text = block if block_formatted or not formatted else markup.to_plain(block)
+        where: list[str] = []
+        for w in it.where:
+            ref = (quick.ensure_parent(conn, settings, at) if w.kind == "quick" else home if w.kind == "home"
+                   else item_task.get(w.ref or "") if w.kind == "item" else w.ref)
+            if ref and ref not in where:
+                where.append(ref)
+        title = it.title or items.KIND_NAMES[it.kind]
+        if it.kind == "task":
+            cid = next_id(conn, "C")
+            task_id = tasks.create_task(
+                conn, settings, title=title, at=at, created_by=cid, parents=where, description=it.text, due=it.due, deadline=it.deadline,
+                deadline_desc=it.deadline_desc or None, reminder=it.reminder, recurrence=it.recurrence or None,
+                start=it.start if it.start and it.start != day else None, urgent=it.urgent, leads=[person(x.who()) for x in it.leads],
+                assignees=[person(x.who()) for x in it.assignees], lead_hours=float(it.lead_hours) if it.lead_hours else None,
+                assignee_hours=float(it.assignee_hours) if it.assignee_hours else None, labels=it.labels)
+            item_task[it.key] = task_id
+            captures.add_capture(conn, capture_id=cid, saved=when, source="typed", types=["new_task"], title=title, task=where[0] if where else None,
+                                 created_task=task_id, formatted=block_formatted, from_notes=notes_id, item="task")
+            files.append((cid, text, block_formatted))
+        else:
+            for task_id in where:
+                cid = next_id(conn, "C")
+                if it.kind == "update":
+                    changes = {"state": it.state} if it.state else {}
+                    if it.text:
+                        changes["current_status"] = it.text
+                    tasks.update_task(conn, settings, task_id, at=at, via=cid, **changes)
+                captures.add_capture(conn, capture_id=cid, saved=when, source="typed", types=["update" if it.kind == "update" else "note"],
+                                     title=title, task=task_id, formatted=block_formatted, from_notes=notes_id, item=it.kind)
+                files.append((cid, text, block_formatted))
+        made[it.kind] = made.get(it.kind, 0) + 1
+    return files, {k: made[k] for k in items.KIND_NAMES if k in made}
 
 
 def add_quick_task(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, line: str, at: datetime) -> SaveResult:
@@ -516,11 +660,22 @@ def _message(conn: sqlite3.Connection, draft: CaptureDraft, r: SaveResult, targe
     if r.updated_task and t:
         n = len(r.changes)
         bits.append(f"{n} change{'s' if n != 1 else ''} in the status log of {t.title}." if n else f"Added to the status log of {t.title}." if r.capture_id else "")
-    if "note" in draft.types and not r.created_task and not r.updated_task:
+    if "note" in draft.types and not r.created_task and not r.updated_task and not r.meeting:
         bits.append(f"Added to the raw text log of {t.title}." if t else "" if targets else "Kept as an unfiled capture, listed under Unfiled.")
     if targets:
         others = [model.target_name(x) for x in targets if x != TODAY]
         bits.append("On " + " and ".join(["Today"] * (TODAY in targets) + [f"the agenda of {_and_list(others)}"] * bool(others)) + ".")
+    # Meeting notes and items (release 5.8).
+    if r.meeting:
+        m = model.task(r.meeting)
+        if r.meeting != draft.task:
+            bits.insert(0, f"Made the meeting {m.title}{f', under {t.title}' if t else ''}.")
+        bits.append(f"Added to the raw text log of {m.title}.")
+    counts = [f"{n} {items.KIND_NAMES[k].lower()}{'s' if n > 1 else ''}" for k, n in r.made.items() if n]
+    if counts:
+        bits.append(f"Made {_and_list(counts)} from its items.")
+    if r.discussed:
+        bits.append(f"{r.discussed} agenda item{'s' if r.discussed > 1 else ''} closed as Discussed.")
     text = (f"Saved {r.capture_id}. " if r.capture_id else "") + " ".join(b for b in bits if b)
     if r.added_people:
         text += f" Added {' and '.join(r.added_people)} to people."
@@ -540,6 +695,12 @@ def _log_line(draft: CaptureDraft, r: SaveResult, targets: list[str], documents:
         parts.append(f"agenda items for {', '.join(targets)}")
     if documents:
         parts.append(f"documents {', '.join(documents)}")
+    if r.meeting:
+        parts.append(f"meeting {r.meeting}")
+    if r.items:
+        parts.append(f"items {', '.join(r.items)}")
+    if r.discussed:
+        parts.append(f"{r.discussed} agenda items discussed")
     if r.problems:
         parts.append(f"{len(r.problems)} problems with files")
     return "; ".join(parts) or "unfiled"

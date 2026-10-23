@@ -15,7 +15,7 @@ from pathlib import Path
 from docrepo.safe_fs import SafeFS
 
 DB_FILE = Path("System") / "docs.db"
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 #: Each kind of ID: its letter and how many digits follow it.
 ID_FORMATS = {"T": 6, "C": 6, "D": 6, "P": 3}
@@ -257,6 +257,13 @@ ALTER TABLE captures ADD COLUMN email_layer_0 TEXT;
     6: """
 -- Formatted content text (mods log round 2, M0045): the capture's content text in capture.md is markup (docrepo/markup.py).
 ALTER TABLE captures ADD COLUMN formatted INTEGER NOT NULL DEFAULT 0;
+""",
+    7: """
+-- Items and meeting notes (mods log round 2, M0048 phase 2, M0052, release 5.8): an item's notes and what it is (task,
+-- note, update or decision, or "notes" for a meeting's notes), and the meeting the notes made.
+ALTER TABLE captures ADD COLUMN from_notes TEXT REFERENCES captures(id);
+ALTER TABLE captures ADD COLUMN item TEXT;
+ALTER TABLE captures ADD COLUMN meeting TEXT REFERENCES tasks(id);
 """,
 }
 

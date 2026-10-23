@@ -9,7 +9,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-from docrepo import markup
+from docrepo import items, markup
 from docrepo.db import next_id, note_used_id, transaction
 from docrepo.model import Capture, Model
 from docrepo.safe_fs import SafeFS
@@ -22,10 +22,12 @@ def add_capture(
     conn: sqlite3.Connection, *, saved: str, source: str, types: list[str], title: str, task: str | None = None,
     created_task: str | None = None, summary: str | None = None, summary_type: str | None = None,
     filed_to: str | None = None, filed: str | None = None, edited: str | None = None, capture_id: str | None = None,
-    email_layer_0: str | None = None, formatted: bool = False,
+    email_layer_0: str | None = None, formatted: bool = False, from_notes: str | None = None, item: str | None = None,
+    meeting: str | None = None,
 ) -> str:
     """Record a capture. ``saved`` is a stored time (``YYYY-MM-DD HH:MM:SS``). Returns its ID. ``formatted`` says its
-    content text is markup (mods log round 2, M0045)."""
+    content text is markup (mods log round 2, M0045). ``from_notes``, ``item`` and ``meeting``: an item, the notes it
+    came from and what it is, or the meeting the notes made (release 5.8)."""
     if source not in SOURCES:
         raise ValueError(f"Unknown capture source {source!r}.")
     unknown = [t for t in types if t not in CAPTURE_TYPES]
@@ -38,9 +40,9 @@ def add_capture(
             capture_id = next_id(conn, "C")
         conn.execute(
             "INSERT INTO captures (id, saved, source, task, types, created_task, filed_to, filed, title, summary, summary_type, edited,"
-            " email_layer_0, formatted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " email_layer_0, formatted, from_notes, item, meeting) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (capture_id, saved, source, task, ",".join(types), created_task, filed_to, filed, title, summary, summary_type, edited,
-             email_layer_0, int(formatted)),
+             email_layer_0, int(formatted), from_notes, item, meeting),
         )
     return capture_id
 
@@ -151,6 +153,16 @@ def capture_md(model: Model, capture_id: str, content: str) -> str:
         front["email_layer_0"] = c.email_layer_0
     if c.formatted:  # the content text below is markup (mods log round 2, M0045), not plain text
         front["content_format"] = "markdown"
+    # Items and meeting notes (release 5.8): the meeting the notes made, the items they made, an item's notes and kind.
+    if c.meeting:
+        front["meeting"] = c.meeting
+    made = [x.id for x in model.captures.values() if x.from_notes == c.id]
+    if made:
+        front["items"] = made
+    if c.from_notes:
+        front["from_notes"] = c.from_notes
+    if c.item:
+        front["item"] = c.item
     front["summary_type"] = c.summary_type
     lines = ["---", *[f"{k}: {json.dumps(v, ensure_ascii=False, separators=(',', ':'))}" for k, v in front.items()], "---", "", content]
     if c.summary:
@@ -185,5 +197,8 @@ def read_content(data_root: Path, c: Capture) -> str | None:
 
 
 def plain(c: Capture, content: str | None) -> str | None:
-    """A capture's content text in words: a formatted capture's markup without its marks (mods log round 2, M0045)."""
-    return markup.to_plain(content) if content is not None and c.formatted else content
+    """A capture's content text in words: a formatted capture's markup without its marks (mods log round 2, M0045), and
+    each @ and # as its name, without the ID capture.md keeps (release 5.8)."""
+    if content is None:
+        return None
+    return items.unstore(markup.to_plain(content) if c.formatted else content)

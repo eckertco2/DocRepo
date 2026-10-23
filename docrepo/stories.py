@@ -18,7 +18,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date
 
-from docrepo import markup
+from docrepo import items, markup
 from docrepo.dates import long_date, short, to_date
 from docrepo.model import TODAY, Capture, Model, StatusEntry, Version, is_person
 from docrepo.text import is_file_line, plain_text, sentences
@@ -109,6 +109,8 @@ class RawItem:
     original_label: str  # what the toggle for the original says
     documents: tuple[tuple[str, str, str], ...] = ()  # (id, name, description) of the capture's files
     formatted: bool = False  # ``text`` is markup (mods log round 2, M0045; ``docrepo.markup``)
+    from_notes: str | None = None  # an item (release 5.8): the notes it came from, and the notes' task
+    from_title: str = ""
 
 
 class Stories:
@@ -364,16 +366,21 @@ class Stories:
     def words_of(self, c: Capture) -> str:
         """A capture's content text in words: a formatted capture's markup without its marks."""
         content = self.content_of(c.id)
-        return markup.to_plain(content) if c.formatted else content
+        return items.unstore(markup.to_plain(content) if c.formatted else content)
 
     def capture_body(self, c: Capture) -> str:
         """The text under a capture's title: for typed text, what follows its first sentence; for an email, its body. A
-        formatted capture's is markup: its lines but its file lines, and but its first when that's just its title."""
+        formatted capture's is markup: its lines but its file lines, and but its first when that's just its title.
+        Release 5.8: meeting notes show all their text, and an item its block when it's more than its one line."""
+        content = items.unstore(self.content_of(c.id))
+        if c.from_notes or c.item == "notes":
+            whole = content.strip("\n") if c.formatted else plain_text(content)
+            return "" if c.from_notes and "\n" not in whole.strip() else whole
         if c.formatted:
-            lines = [line for line in self.content_of(c.id).split("\n") if not is_file_line(markup.to_plain(line))]
+            lines = [line for line in content.split("\n") if not is_file_line(markup.to_plain(line))]
             kept = "\n".join(lines).strip("\n")
             return kept if c.source == "outlook_email" else markup.without_title_line(kept, c.title)
-        text = plain_text(self.content_of(c.id))
+        text = plain_text(content)
         if c.source == "outlook_email":
             return text
         found = sentences(text)
@@ -392,7 +399,7 @@ class Stories:
         sender = re.search(r"^From:\s*(.+)$", content, re.M) if c.source == "outlook_email" else None
         is_update = c.has("update") and c.task == task_id
         kind = (f"Email from {sender.group(1).strip()}" if sender else "Email") if c.source == "outlook_email" \
-            else "File" if c.source == "file_path" else "Update" if is_update else "Note"
+            else "File" if c.source == "file_path" else "Update" if is_update else "Decision" if c.item == "decision" else "Note"
         # What the capture did here, in the story's words: "Due date moved to Fri 23 Oct.", "Closed."
         said = []
         for e in self.m.status:
@@ -407,8 +414,11 @@ class Stories:
                else ("" if c.source == "typed" else "Update: ") + update if is_update
                else f"Filed {short(to_date(c.filed), self.today)}" if c.filed_to == task_id and c.filed else "")
         docs = tuple((d, self.m.documents[d].name, self.m.documents[d].description or "") for d in c.document_ids if d in self.m.documents)
+        notes = self.m.captures.get(c.from_notes) if c.from_notes else None
+        held = self.m.capture_tasks(notes) if notes else []
         return RawItem(c.saved, " · ".join(x for x in (kind, did) if x), c.title, c.id, None, self.capture_body(c), c.summary,
-                       c.summary_type, "The email" if c.source == "outlook_email" else "The full text", docs, c.formatted)
+                       c.summary_type, "The email" if c.source == "outlook_email" else "The full text", docs, c.formatted,
+                       notes.id if notes else None, (self.m.task(held[0]).title if held else notes.id) if notes else "")
 
     def version_item(self, v: Version) -> RawItem:
         d = self.m.documents[v.document]

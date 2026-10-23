@@ -6,7 +6,7 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 
 - **Capture window**: the hotkey window where everything enters DocRepo. The browse tool's Add note, Update and New task buttons open it with a task already picked.
 - **Capture**: one saved use of the capture window: its input plus the record of its outputs, with an ID such as C000187. It names both the act and the saved record; closing the window without saving leaves no capture.
-- **Capture type**: what a capture is for, chosen in the window: Note, New task or Update. One capture can be several types at once, and Meeting notes is a later type.
+- **Capture type**: what a capture is for, chosen in the window: Note, New task or Update. One capture can be several types at once. Meeting notes (release 5.8) isn't a type: it's the window's way of taking a meeting's notes, which are a note on the meeting.
 - **Note**: reference information linked to a task without changing its status, typed by hand or in files. It becomes part of the task's raw text log.
 - **New task**: a capture type that creates a task. The task is a subtask when a parent task is picked, and a top-level task when none is.
 - **Update**: a capture with the Update box checked, also called a status update. It changes the task's state or another field, or adds an entry to its status log.
@@ -15,6 +15,10 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Capture output**: everything a capture creates or changes: a new task, changes to a task, a link to a task, documents, saved copies and summary entries. One capture can have several outputs.
 - **Content text**: the text typed or pasted into the capture window's main box, kept with the capture once it's saved.
 - **Formatted content text**: content text with bold, italic, underline, strikethrough, highlights or lists (release 5.7). Its capture.md keeps it as Markdown; everything that reads its words reads it without the marks.
+- **Operator**: `@`, `@L.`, `@__`, `#` or `**` in the content text, saying what a line makes (release 5.8): a person, a lead, no one yet, a task it belongs to, or its kind.
+- **Item**: a line of the content text (with the list items under it) that an operator makes into a task, a note, an update or a decision. Saving keeps each as a small capture of its own, linked to the capture it came from (its notes).
+- **Heading**: a line that's only `#` tasks. It covers the lines under it, until the next heading.
+- **Meeting notes**: the capture window taking a meeting's notes (Alt+M): expanded, with the meeting's name and its agenda beside the text. The notes are kept on the meeting, and their items made when they're saved.
 - **Unfiled capture**: a capture with no task linked yet.
 - **Filing**: linking an unfiled capture to a task later. The capture's folder doesn't move.
 - **Unfiled**: the browse tool's view of unfiled captures, newest first, and the matching section of `Contents.md`.

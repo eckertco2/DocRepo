@@ -19,6 +19,7 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.5 | Small fixes from the mods log, round 2: Ctrl+Enter in the forms, an optional file description, editing mods log entries, double-click, and what's due this week on Today | Built 2026-10-21; on GitHub 2026-10-21; hand-tested by the owner 2026-10-21. Next: testing on the corporate computer |
 | 5.6 | The capture window and Today from the mods log, round 2: Agenda and Today beside the capture types, what Parse and populate found beside the content text, Expand, quick tasks, one letter per topic, Find in this view | Built 2026-10-21, after the owner approved the mockup; on GitHub 2026-10-21, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
 | 5.7 | Formatted content text from the mods log, round 2: bold, italic, underline, strikethrough, highlights and lists in the content text, kept as Markdown in capture.md | Built 2026-10-23; on GitHub 2026-10-23, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
+| 5.8 | Items and meeting notes from the mods log, round 2: @, # and ** make tasks, notes, updates and decisions in any capture, and Meeting notes takes a meeting's notes with its agenda | Built 2026-10-23, after the owner approved the mockup. Next: the owner's hand test, then GitHub and the corporate computer |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
 ## Decisions
@@ -298,6 +299,27 @@ Stage 10's item 36 of the round 2 plan (M0045, round 1's item 17): the first hal
 - Everything that reads content text for its words reads it without the marks, so a star never reaches a title, search or Parse and populate. A list item keeps its "- " or number there, as pasted lists have since release 5.1.
 - A backslash escapes only the characters that would otherwise mean something; before anything else it's a backslash, so a path such as `C:\Docs\a.pdf` reads the same in capture.md as on screen.
 - A highlight pasted in another colour becomes the nearest of the three, and a near-white background none.
+
+## Release 5.8: items and meeting notes, from the mods log, round 2
+
+Stage 10's item 35 of the round 2 plan (M0048 phase 2, M0049, M0052, with M0023), the second half of stage 10. It was mocked in the browse tool mockup first, and the owner approved the mock (decisions 37 to 40, 42 and 44 to 52).
+
+- `docrepo/items.py` (new): the operators (`scan`): `@` people by name or alias (a new name otherwise), `@L.`, `@__`, `#` tasks by title or ID, and the `**` types, kept as `@[Name](P003)` and `#[Title](T000012)` in capture.md (`store`, `unstore`, `refs_of`; `Names` prefers the IDs a capture had or the window picked). `clean` gives a line without its operators, `read` the lines, blocks, headings and items, with where each goes and the cards' changes; `self_fields`, `line_kinds`, `parse_text`, `discussed`, `typing`, `options` and `words`. `docrepo/markup.py`: `replace_spans`, which puts the IDs into a formatted capture's markup, keeping its marks.
+- `docrepo/db.py`: schema version 7, `captures.from_notes`, `item` and `meeting`. `docrepo/model.py`: those on `Capture`. `docrepo/captures.py`: `add_capture(from_notes=, item=, meeting=)`, capture.md's `meeting`, `items`, `from_notes` and `item`, and `plain` shows names, not IDs.
+- `docrepo/save.py`: `CaptureDraft.meeting`, `meeting_name`, `agenda_ticks`, `item_overrides`, `refs` and `lines()`; `meeting_case`, `meeting_name`, `item_names`; Save makes the meeting, the capture and then each item (`_save_items`), closes the discussed agenda items, writes each capture.md with IDs (a person the save added too), and says what it made. A new task's own first line fills its people and parents, and gives its title without the operators; a capture's title reads its words without operators.
+- `docrepo/edits.py`: `edit_capture` takes the text as shown and keeps each `@` and `#` with its ID again, the capture's own IDs first; meeting notes and items keep their titles.
+- `docrepo/stories.py`, `docrepo/detail.py`: the raw text log's Decision and "from the notes of", an item's block only when it's more than its line, meeting notes in full; the capture page's What Save did names the meeting, the items and the agenda items discussed, and shows names, not IDs.
+- `docrepo/ui/items_panel.py` (new): `OperatorHighlighter` (colours that are never saved), `ItemCards` and `ItemCard`, `AgendaPanel`, `RefPopup` and `where_text`.
+- `docrepo/ui/capture_window.py`: the items read again 250 ms after you stop typing (`read_items`), the cards (their changes in `item_ov`), the `@` and `#` list (`_ref_list`, `_pick_ref`; `ContentEdit.list_keys`), Parse and populate reading only the lines that aren't items, Meeting notes (`toggle_meeting`, Alt+M; the meeting row, `_fill_meet_name`, the agenda panel, `start_from_agenda`, `agenda_ticks`), and the draft that keeps itself (`keep_draft`, `restore_draft`, `forget_draft`, `clear`; `System\capture-draft.json`). `docrepo/ui/browse_window.py`: Meeting notes on an open meeting's page and in the Agendas view, M on the selected task, and Edit showing names. `docrepo/ui/keymap.py`: M. `docrepo/ui/style.py`: the cards, the panels and the list. `docrepo/ui/help_text.py`: the items, meeting notes and agenda panel notes, from the mockup's `HELP`.
+- `tests/`: `test_items.py`, `test_meeting.py` and `test_meeting_window.py`, and `test_db.py` (731 pass in all, 1 skipped).
+
+## Decisions (release 5.8)
+
+- Decisions 37 to 40 and 42 of the round 2 plan (the operators everywhere, `**` rather than one star, the rules, no lead without `@L.`, Quick tasks for a task with nowhere else to go, the three meeting cases, titles and descriptions, cards that can be changed), and 44 to 52 as mocked: every `@` makes a task; a heading lasts until the next heading; plain lines under a heading are one note; a task item under a task item is its subtask; people come only from the operators; several `#` tasks mean a capture on each; titles drop operators at a line's ends; meeting notes are named after their meeting and Start from the agenda puts notes on their own first; the draft keeps itself in the data root.
+- Names are matched by name or alias, the longest first, and a picked or kept ID comes ahead of the lists, so two tasks with the same title, or a renamed person, stay right. A name that isn't on the people list is a new person only when the capture is saved.
+- An item's capture keeps its block as written, so its raw text log entry reads as the notes did; a one-line item shows only its title there, which already says it.
+- The colours in the content text come from a syntax highlighter, so they're never part of the text's formatting and never saved.
+- The draft goes in the data root (`System\capture-draft.json`), one of the three places DocRepo writes; saving or Clear empties it rather than deleting it.
 
 ## The first Frogbot findings (2026-10-20)
 

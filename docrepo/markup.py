@@ -146,6 +146,27 @@ def _segments(text: str) -> list[tuple[str, frozenset[str], str | None]]:
     return out
 
 
+def replace_spans(text: str, spans: list[tuple[int, int, str]]) -> str:
+    """A line's text (after any list marker) with spans of its words replaced, each (start, end, new words) in its plain
+    text; the new words take the marks of the first character they replace (release 5.8: names kept with their IDs)."""
+    chars = [(ch, marks, colour) for part, marks, colour in _segments(text) for ch in part]
+    pieces: list[tuple[str, frozenset[str], str | None]] = []
+    i = 0
+    for start, end, new in sorted(spans):
+        pieces.extend(chars[i:start])
+        if start < len(chars):
+            pieces.append((new, chars[start][1], chars[start][2]))
+        i = end
+    pieces.extend(chars[i:])
+    merged: list[tuple[str, frozenset[str], str | None]] = []
+    for t, marks, colour in pieces:
+        if merged and merged[-1][1] == marks and merged[-1][2] == colour:
+            merged[-1] = (merged[-1][0] + t, marks, colour)
+        else:
+            merged.append((t, marks, colour))
+    return marks_text([(escape_inline(t), marks, colour) for t, marks, colour in merged])
+
+
 def to_plain(markup: str) -> str:
     """The plain text: marks dropped, escapes undone. A list item keeps its marker and indent ("  - item")."""
     lines = []

@@ -48,7 +48,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo import bulk, capacity, db, edits, people, prompts, search
+from docrepo import bulk, capacity, db, edits, items, people, prompts, search
 from docrepo.agenda import AgendaError
 from docrepo.captures import capture_folder, capture_md_path
 from docrepo.dates import long_date, short
@@ -58,7 +58,7 @@ from docrepo.model import TODAY, Model, is_person
 from docrepo.people import PeopleError
 from docrepo.safe_fs import WriteRefused
 from docrepo.save import SaveError, SaveResult, add_quick_task, note_to_task
-from docrepo.schedule import DueDate
+from docrepo.schedule import DueDate, is_open
 from docrepo.tasks import TaskError
 from docrepo.ui.context import AppContext
 from docrepo.ui.dialogs import LabelDialog, PersonDialog
@@ -182,9 +182,11 @@ class BrowseWindow(QWidget):
         self._contents: dict[str, tuple[int, str]] = {}
         self._placed = False
         self._build()
-        # One letter per topic (mods log round 2, M0036): N note, T new task, U update, A agenda, E edit, D Today.
+        # One letter per topic (mods log round 2, M0036): N note, T new task, U update, A agenda, E edit, D Today, and
+        # M meeting notes (release 5.8).
         for keys, handler in (("N", lambda: self._key("note")), ("T", lambda: self._key("new_task")), ("U", lambda: self._key("update")),
                               ("A", lambda: self._key("agenda")), ("E", lambda: self._key("edit")), ("D", lambda: self._key("today")),
+                              ("M", lambda: self._key("meeting")),
                               ("Ctrl+F", self.open_find), ("Ctrl+Shift+F", self.search_box.setFocus), ("F1", self.show_keys), ("F5", self.refresh),
                               ("Ctrl+B", lambda: self.show_views_pane(not self.views_button.isChecked()))):
             QShortcut(QKeySequence(keys), self, handler)
@@ -989,6 +991,9 @@ class BrowseWindow(QWidget):
         self._filter_widget(QLabel("Agenda for"))
         self._filter_widget(pick)
         self._button("Copy as Markdown", lambda: self.copy_agenda(target))
+        meeting = m.tasks.get(target)
+        if meeting and meeting.meeting and is_open(meeting):  # release 5.8
+            self._button("Meeting notes", lambda: self.open_capture(task=target, meeting=True))
         self.tree.set_columns(["Item", "State", "Added", ""], [0, 96, 70, 130])
         grey = QColor(GREY).lighter(135)
         for name, items in agenda_groups(m, target):
@@ -1228,6 +1233,8 @@ class BrowseWindow(QWidget):
             self._action("On Today ✓", lambda: self.show_agenda(TODAY), "It's on Today. Open the Today view.")
         else:
             self._action("Add to Today   D", lambda: self.add_to_today(task_id), "Put it on your list for today")
+        if t.meeting and is_open(t):  # release 5.8
+            self._action("Meeting notes   M", lambda: self.open_capture(task=task_id, meeting=True), "Take this meeting's notes, with its agenda beside them")
         if self.pages().has_agenda(t):
             self._action("Open agenda", lambda: self.show_agenda(task_id))
         agenda = QMenu(self)
@@ -1578,6 +1585,8 @@ class BrowseWindow(QWidget):
             self.add_to_today(self.sel[1])
         elif mode == "agenda":
             self.open_capture(task=self.sel[1], mode="update", agenda_focus=True)
+        elif mode == "meeting":  # M: meeting notes for it, its own if it's a meeting (release 5.8)
+            self.open_capture(task=self.sel[1], meeting=True)
         else:
             self.open_capture(task=self.sel[1], mode=mode)
 
@@ -1633,7 +1642,8 @@ class BrowseWindow(QWidget):
         self.editing = capture_id
         self.edit_title.setText(f"Edit capture {capture_id}")
         self.edit_content.clear()
-        self.edit_content.set_value(self._capture_text(capture_id) or "", c.formatted)
+        # Each @ and # shows by its name; saving keeps them with their IDs again (release 5.8, edits.edit_capture).
+        self.edit_content.set_value(items.unstore(self._capture_text(capture_id) or ""), c.formatted)
         self.edit_summary.setPlainText(c.summary or "")
         self._edit_start = (self.edit_content.value(), self.edit_summary.toPlainText())
         self.render_detail()

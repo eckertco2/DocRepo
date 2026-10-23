@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from urllib.parse import quote
 
-from docrepo import capacity, markup
+from docrepo import capacity, items, markup
 from docrepo.dates import days_text, long_date, monday_of, short, to_date
 from docrepo.links import NO_TEXT, is_link
 from docrepo.model import TODAY, TYPE_NAMES, Capture, Model, Task, is_person
@@ -359,7 +359,9 @@ class Pages:
     def raw_item(self, r: RawItem, state: PageState) -> str:
         key = r.capture or f"V{r.document}{r.at}"
         title = self.capture_link(r.capture, r.title) if r.capture else link(f"doc:{r.document}", r.title)
-        out = f'<p><span class="lead">{esc(r.lead)}</span><br><b>{title}</b>'
+        # An item (release 5.8) says whose notes it came from.
+        notes = f' <span class="lead">· from the notes of</span> {self.capture_link(r.from_notes, r.from_title)}' if r.from_notes else ""
+        out = f'<p><span class="lead">{esc(r.lead)}</span>{notes}<br><b>{title}</b>'
 
         def shown(text: str) -> str:
             return markup.to_line_html(text) if r.formatted else multiline(text)
@@ -408,7 +410,20 @@ class Pages:
             out.append(f"Added to the raw text log of {self.task_link(c.task)}")
         if c.filed_to:
             out.append(f"Filed to {self.task_link(c.filed_to)}")
+        # Meeting notes and items (release 5.8).
+        if c.meeting:
+            out.insert(0, f"Made the meeting {self.task_link(c.meeting)}")
+        if c.from_notes:
+            out.append(f"An item from the notes in {self.capture_link(c.from_notes)}")
+        made = [x for x in self.m.captures.values() if x.from_notes == c.id]
+        if made:
+            def what(x: Capture) -> str:
+                return (f"task {self.task_link(x.created_task)}" if x.created_task else
+                        f"{'decision on' if x.item == 'decision' else 'update to' if x.item == 'update' else 'note on'} {self.task_link(x.task)}" if x.task else esc(x.title))
+            out.append(f"Made {len(made)} item{'s' if len(made) > 1 else ''}: " + ", ".join(f'{self.capture_link(x.id)} <span class="sub">{what(x)}</span>' for x in made))
         for a in self.m.agenda:
+            if a.closed_by == c.id and a.added_by != c.id:
+                out.append(f"Discussed {esc(self.m.task(a.subject).title) if a.subject else 'a note'} from the agenda of {self.target_link(a.target)}")
             if a.added_by == c.id:
                 what = esc(self.m.task(a.subject).title) if a.subject else "a note"
                 closed = f' <span class="sub">{esc((a.how or "").lower())} {self.day(a.closed)}</span>' if a.closed else ""
@@ -448,6 +463,7 @@ class Pages:
         if self.m.is_unfiled(c):
             unfiled = box("<b>Unfiled.</b> Pick a task and File to task, or Make it a task, with the buttons above. Filing links it to the task "
                           "and sets the task in its capture.md; the folder stays where it is.", "info")
+        content = items.unstore(content) if content else content  # each @ and # by its name (release 5.8)
         shown = markup.to_html(content) if content and c.formatted else f'<span class="text">{multiline(content or "")}</span>'
         text = (box(f'<span class="sub">CONTENT TEXT</span><br>{shown}') if content
                 else box('<span class="sub">CONTENT TEXT</span><br><span class="sub">None</span>') if content == ""

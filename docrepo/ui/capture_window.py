@@ -9,20 +9,35 @@ draft; Ctrl+Enter saves; Alt+P parses; Alt+N, Alt+T and Alt+U tick the capture
 types, Alt+A goes to the agenda picker and Alt+D to Today; F11 expands the
 content text; F1 lists the keys (mods log round 2, M0036, M0037, M0042, M0046).
 
+Release 5.8 (M0048 phase 2, M0049, M0052): the content text's operators make items, with a card for each beside it
+(``docrepo.items``, ``items_panel``), and Meeting notes (Alt+M) takes a meeting's notes, with its agenda beside them.
+The draft saves itself every 30 seconds to the data root, and comes back after a crash or a restart.
+
 Ported from the browse tool mockup's ``capture.js``; SPEC section 7 describes it.
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QCursor, QDragEnterEvent, QDropEvent, QGuiApplication, QKeySequence, QShortcut
+from PySide6.QtCore import QPoint, Qt, QTimer, Signal
+from PySide6.QtGui import (
+    QCursor,
+    QDragEnterEvent,
+    QDropEvent,
+    QGuiApplication,
+    QKeySequence,
+    QShortcut,
+    QTextBlockFormat,
+    QTextCharFormat,
+    QTextCursor,
+)
 from PySide6.QtWidgets import (
     QBoxLayout,
     QCheckBox,
@@ -45,7 +60,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo import diagnose, outlook
+from docrepo import diagnose, items, outlook
 from docrepo.db import RECURRENCES, STATES
 from docrepo.extract import extract_text, to_unc
 from docrepo.layer0 import size_text
@@ -62,10 +77,14 @@ from docrepo.save import (
     default_description,
     email_layer0_line,
     email_rows,
+    item_names,
+    meeting_case,
+    meeting_name,
     save_capture,
 )
 from docrepo.schedule import is_open, start_of
 from docrepo.ui.context import AppContext
+from docrepo.ui.items_panel import AgendaPanel, ItemCards, OperatorHighlighter, RefPopup, where_text
 from docrepo.ui.keymap import KeyMapDialog
 from docrepo.ui.mods_panel import ModsPanel
 from docrepo.ui.rich_edit import FormatBar, RichEdit
@@ -93,6 +112,9 @@ PATH_LINE = re.compile(r"^(?:\\\\[^\\\s][^\\]*\\.+|[A-Za-z]:\\.+)\.[A-Za-z0-9]{1
 WIDTH = 940
 #: Below this width, what Parse and populate found goes under the content text instead of beside it.
 NARROW = 700
+#: The draft the capture window keeps every 30 seconds (release 5.8), in the data root.
+DRAFT_FILE = Path("System") / "capture-draft.json"
+DRAFT_EVERY_MS = 30_000
 #: The placeholder in the found list, before Parse and populate runs.
 FOUND_EMPTY = ("<span style='color:#5a6571'>Alt+P reads the content text and fills the fields. What it finds is listed here, beside "
                "the text, so you can check it without scrolling.</span>")
@@ -185,6 +207,22 @@ class ContentEdit(RichEdit):
         else:
             super().dropEvent(event)
 
+    #: The @ and # list's keys (release 5.8): given a key, True when the open list used it.
+    list_keys: Callable[[int], bool] | None = None
+    #: Called when the box loses the keyboard, to close that list.
+    left: Callable[[], None] | None = None
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        if self.list_keys and not event.modifiers() & ~Qt.KeyboardModifier.KeypadModifier and self.list_keys(event.key()):
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def focusOutEvent(self, event) -> None:  # noqa: N802
+        super().focusOutEvent(event)
+        if self.left:
+            self.left()
+
 
 class CaptureWindow(QWidget):
     """The capture window. It's made once at start-up and shown or hidden, so it opens at once."""
@@ -208,13 +246,30 @@ class CaptureWindow(QWidget):
         self._path_timer.setSingleShot(True)
         self._path_timer.setInterval(350)
         self._path_timer.timeout.connect(self._sync_paths)
+        # Items and meeting notes (release 5.8): the content text is read again a moment after you stop typing.
+        self.meeting_on = False
+        self.reading: items.Reading | None = None
+        self._names: items.Names | None = None
+        self._typing: items.Typing | None = None
+        self._highlighting = False
+        self._items_timer = QTimer(self)
+        self._items_timer.setSingleShot(True)
+        self._items_timer.setInterval(250)
+        self._items_timer.timeout.connect(self.read_items)
+        # The draft keeps itself every 30 seconds, in the data root, and comes back after a crash or a restart.
+        self.draft_dirty = False
+        self._draft_timer = QTimer(self)
+        self._draft_timer.setInterval(DRAFT_EVERY_MS)
+        self._draft_timer.timeout.connect(self.keep_draft)
         self._build()
         self.reset_draft()
+        self.restore_draft()
+        self._draft_timer.start()
         for keys, handler in (("Ctrl+Return", self.save), ("Ctrl+Enter", self.save), ("Alt+P", self.parse),
                               # One letter per topic (mods log round 2, M0036)
                               ("Alt+N", lambda: self._alt_type("note")), ("Alt+T", lambda: self._alt_type("new_task")),
                               ("Alt+U", lambda: self._alt_type("update")), ("Alt+A", self._alt_agenda), ("Alt+D", self._alt_today),
-                              ("F11", self.toggle_expand), ("F1", self.show_keys)):
+                              ("Alt+M", self.toggle_meeting), ("F11", self.toggle_expand), ("F1", self.show_keys)):
             QShortcut(QKeySequence(keys), self, handler)
 
     # ================= building the window =================
@@ -259,8 +314,11 @@ class CaptureWindow(QWidget):
         footer_hint = QLabel("Ctrl+Enter saves. Esc hides the window and keeps the draft. F1 lists the keys.", objectName="hint")
         footer_hint.setWordWrap(True)
         fl.addWidget(footer_hint, 1)
+        self.draft_label = QLabel("The draft saves itself every 30 seconds.", objectName="hint")
+        self.draft_label.setToolTip(f"In {DRAFT_FILE} in the data root. After a crash or a restart, the capture window opens with it.")
+        fl.addWidget(self.draft_label)
         clear = QPushButton("Clear")
-        clear.clicked.connect(self.reset_draft)
+        clear.clicked.connect(self.clear)
         fl.addWidget(clear)
         save = QPushButton("Save", objectName="primary")
         save.clicked.connect(self.save)
@@ -277,8 +335,28 @@ class CaptureWindow(QWidget):
         self.task_button.setStyleSheet("text-align: left; padding: 5px 9px;")
         self.task_button.clicked.connect(self._open_picker)
         b.addWidget(field("Task", self.task_button, "task"))
+        # Meeting notes (release 5.8): the meeting's name takes the capture types' place.
+        self.meeting_row = QWidget()
+        mr = QHBoxLayout(self.meeting_row)
+        mr.setContentsMargins(0, 0, 0, 0)
+        mr.addWidget(QLabel("Meeting", objectName="fieldLabel"))
+        self.meet_name = QLineEdit()
+        self.meet_name.setPlaceholderText("Name the meeting, such as “Pump vendor call”")
+        self.meet_name.setAccessibleName("Meeting")
+        self.meet_name.textEdited.connect(self._meet_typed)
+        mr.addWidget(self.meet_name, 1)
+        meet_note = QLabel()
+        mr.addWidget(InfoButton("meetmode", meet_note))
+        b.addWidget(self.meeting_row)
+        self.meet_what = QLabel(objectName="hint")
+        self.meet_what.setWordWrap(True)
+        b.addWidget(self.meet_what)
+        b.addWidget(meet_note)
+        self.meeting_row.hide()
+        self.meet_what.hide()
+        self._meet_name_typed = False
         # Capture types
-        types_box = QWidget()
+        types_box = self.types_box = QWidget()
         types = FlowLayout(types_box, spacing=8)  # one line, wrapping when the window is narrow
         types.addWidget(QLabel("Capture types", objectName="fieldLabel"))
         self.type_boxes: dict[str, QCheckBox] = {}
@@ -336,14 +414,17 @@ class CaptureWindow(QWidget):
         self.content.setMinimumHeight(140)
         self.content.textChanged.connect(self._content_changed)
         self.content.dropped.connect(self.dropped)
+        self.content.cursorPositionChanged.connect(self._ref_list)
+        self.content.list_keys = lambda key: self.ref_popup.handle_key(key)
+        self.content.left = lambda: self.ref_popup.hide()
+        self.highlighter = OperatorHighlighter(self.content.document())
         self.content_field = field("Content text", self.content, "content")
         self.format_bar = FormatBar(self.content)
         self.content_field.layout().insertWidget(self.content_field.layout().indexOf(self.content), self.format_bar)
         lc.addWidget(self.content_field, 1)
-        hint = QLabel("Type or paste. Drop files or Outlook emails anywhere on this window. Start with “Closed.” or another state for a quick update.",
-                      objectName="hint")
-        hint.setWordWrap(True)
-        lc.addWidget(hint)
+        self.content_hint = QLabel(objectName="hint")
+        self.content_hint.setWordWrap(True)
+        lc.addWidget(self.content_hint)
         # Parse and populate, and Expand (M0046, M0048 phase 1)
         row = QHBoxLayout()
         self.parse_button = QPushButton("Parse and populate   Alt+P")
@@ -352,6 +433,11 @@ class CaptureWindow(QWidget):
         parse_note = QLabel()
         row.addWidget(InfoButton("parse", parse_note))
         row.addStretch()
+        self.meeting_button = QPushButton("Meeting notes   Alt+M")
+        self.meeting_button.setCheckable(True)
+        self.meeting_button.setToolTip("Take meeting notes: Expand, plus the meeting's name and its agenda")
+        self.meeting_button.clicked.connect(lambda _=False: self.toggle_meeting())
+        row.addWidget(self.meeting_button)
         self.expand_button = QPushButton("Expand   F11")
         self.expand_button.setToolTip("Make the content text fill the window, for taking notes in a meeting")
         self.expand_button.clicked.connect(self.toggle_expand)
@@ -374,7 +460,31 @@ class CaptureWindow(QWidget):
         self.found_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)  # it wraps to the room it has
         fbl.addWidget(self.found_label)
         fbl.addStretch()
-        self.main_layout.addWidget(self.found_box, 5)
+        # Beside the content text: the meeting's agenda, the items, and what Parse and populate found (release 5.8).
+        side = QWidget()
+        sl = QVBoxLayout(side)
+        sl.setContentsMargins(0, 0, 0, 0)
+        sl.setSpacing(8)
+        self.agenda_panel = AgendaPanel()
+        agenda_panel_note = QLabel()
+        self.agenda_panel.info_slot.insertWidget(1, InfoButton("agendaPanel", agenda_panel_note))
+        self.agenda_panel.ticked.connect(self._agenda_ticked)
+        self.agenda_panel.start.connect(self.start_from_agenda)
+        self.agenda_panel.hide()
+        sl.addWidget(self.agenda_panel)
+        sl.addWidget(agenda_panel_note)
+        self.item_cards = ItemCards()
+        items_note = QLabel()
+        self.item_cards.info_slot.insertWidget(1, InfoButton("items", items_note))
+        self.item_cards.changed.connect(self._item_changed)
+        self.item_cards.go.connect(self._go_line)
+        sl.addWidget(self.item_cards)
+        sl.addWidget(items_note)
+        sl.addWidget(self.found_box)
+        sl.addStretch()
+        self.main_layout.addWidget(side, 5)
+        self.ref_popup = RefPopup(self)
+        self.ref_popup.picked.connect(self._pick_ref)
         # Below the content text: what Expand folds away
         self.folded = QLabel(objectName="hint")
         self.folded.setWordWrap(True)
@@ -574,15 +684,19 @@ class CaptureWindow(QWidget):
 
     # ================= showing and hiding =================
     def show_capture(self, task: str | None = None, mode: str | None = None, content: str | None = None, mods: bool = False,
-                     agenda: list[str] | None = None, agenda_focus: bool = False, from_capture: str | None = None) -> None:
+                     agenda: list[str] | None = None, agenda_focus: bool = False, from_capture: str | None = None, meeting: bool = False) -> None:
         """Open the window. ``mode`` checks only that capture type ("note", "new_task" or "update"). ``agenda`` picks
-        agenda targets under Add to agenda. ``from_capture`` starts Make it a task from an unfiled capture."""
+        agenda targets under Add to agenda. ``from_capture`` starts Make it a task from an unfiled capture. ``meeting``
+        turns on meeting notes (release 5.8), for the picked task's meeting."""
         self._load_summary_types()
+        self._names = None  # people and tasks may have changed in the browse tool
         if from_capture:
             self.make_task_from(from_capture)
         else:
             if task:
                 self.set_task(task)
+            if meeting and not self.meeting_on:
+                self.toggle_meeting(focus=False)
             if mode:
                 self.types, self.note_auto = {mode}, mode == "note"
                 if mode == "update":
@@ -603,9 +717,10 @@ class CaptureWindow(QWidget):
         self.show()
         self.raise_()
         self.activateWindow()
-        target = (self.mods.text if mods else self.agenda.edit if agenda_focus
+        target = (self.mods.text if mods else self.agenda.edit if agenda_focus else self.meet_name if self.meeting_on and not self.meet_name.text()
                   else self.title if "new_task" in self.types and not self.title.text() else self.content)
         target.setFocus()
+        self.read_items()
 
     def open_with_hotkey(self, kind: str) -> None:
         """A capture type's own hotkey (mods log round 1, M0010 and M0020): "note", "new_task", "update" or "agenda", or
@@ -651,14 +766,259 @@ class CaptureWindow(QWidget):
         prompt and the New task and Update fields fold away until it's turned off."""
         if self.pages.currentIndex() == 1:
             return
-        self.expanded = not self.expanded
+        self._set_expanded(not self.expanded)
+        self.content.setFocus()
+
+    def _set_expanded(self, on: bool) -> None:
+        self.expanded = on
         self.lower.setVisible(not self.expanded)
         self.content.setMinimumHeight(360 if self.expanded else 140)
         self.expand_button.setText("Back   F11" if self.expanded else "Expand   F11")
         self.refresh()
         if self.isVisible():
             self._place()
+
+    # ---- meeting notes (release 5.8) ----
+    def toggle_meeting(self, focus: bool = True) -> None:
+        """Meeting notes (Alt+M): Expand, plus the meeting's name and its agenda. The task picked at the top decides the
+        meeting (``save.meeting_case``)."""
+        if self.pages.currentIndex() == 1:
+            return
+        if self.from_capture:
+            self._fail("Make it a task can't take meeting notes.", self.content)
+            return
+        self.meeting_on = not self.meeting_on
+        if self.meeting_on:
+            self.types, self.note_auto, self.today_on = {"note"}, True, False
+            self.agenda.set_chips([])
+            self.agenda_ticks: dict[int, bool] = {}
+            self._meet_name_typed = False
+            self._fill_meet_name()
+        if self.expanded != self.meeting_on:
+            self._set_expanded(self.meeting_on)
+        self.error.hide()
+        self._clear_found()
+        self.read_items()
+        if focus:
+            (self.meet_name if self.meeting_on and not self.meet_name.text() else self.content).setFocus()
+
+    def _fill_meet_name(self) -> None:
+        """The meeting's name, unless you typed one: a regular meeting's with today's date, a one-off's own, else empty."""
+        m = self.ctx.model()
+        case = meeting_case(m, self.task)
+        if not self._meet_name_typed:
+            self.meet_name.setText(meeting_name(m, self.task, self.ctx.now().date()))
+        self.meet_name.setReadOnly(case == "oneoff")
+        t = m.tasks.get(self.task) if self.task else None
+        self.meet_what.setText(f"This time's meeting: a new subtask of {t.title}, In progress until you close it." if case == "regular" else
+                               "This meeting, as it is." if case == "oneoff" else
+                               f"A new meeting under {t.title}." if t else "A new top-level meeting. Pick a task at the top to put it under one.")
+
+    def _meet_typed(self, _: str) -> None:
+        self._meet_name_typed = True
+        self.refresh()
+
+    def _agenda_ticked(self, item_id: int, on: bool) -> None:
+        self.agenda_ticks[item_id] = on
+        self.refresh()
+
+    def _show_agenda(self) -> None:
+        """The agenda panel: the meeting's open agenda items, each ticked once it's discussed."""
+        self.agenda_panel.setVisible(self.meeting_on)
+        if not self.meeting_on:
+            return
+        m = self.ctx.model()
+        meeting = self.task if meeting_case(m, self.task) != "new" else None
+        self.agenda_panel.show_agenda(m, meeting, m.open_items_for(meeting) if meeting else [], self._discussed)
+
+    def _discussed(self, a: Any) -> bool:
+        if a.id in self.agenda_ticks:
+            return self.agenda_ticks[a.id]
+        return items.discussed(self.reading, a.subject) if self.reading else False
+
+    def start_from_agenda(self) -> None:
+        """Each open agenda item goes into the notes: a note on its own as an "Agenda:" line, then each task as a # heading."""
+        m = self.ctx.model()
+        if not self.task or meeting_case(m, self.task) == "new":
+            return
+        have = {line.strip() for line in self.content.plain().split("\n")}
+        open_items = m.open_items_for(self.task)
+        add = [f"Agenda: {a.note}" for a in open_items if not a.subject] + [f"#{m.task(a.subject).title}" for a in open_items if a.subject]
+        for a in open_items:
+            if a.subject:
+                self.ref_ids["#" + m.task(a.subject).title.lower()] = a.subject  # the heading names that very task
+        add = [line for line in add if line not in have]
+        if not add:
+            self._fail("Every open item is in the notes already.", self.content)
+            return
+        cursor = self.content.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        if self.content.toPlainText().strip():
+            cursor.insertBlock(QTextBlockFormat(), QTextCharFormat())
+            cursor.insertBlock(QTextBlockFormat(), QTextCharFormat())
+        elif cursor.block().textList() is not None:
+            cursor.block().textList().remove(cursor.block())
+        cursor.insertText("\n\n".join(add) + "\n")
+        self.content.setTextCursor(cursor)
         self.content.setFocus()
+        self.read_items()
+
+    # ---- items (release 5.8) ----
+    def names(self) -> items.Names:
+        if self._names is None:
+            self._names = item_names(self.ctx.model(), self.ctx.settings, self.ref_ids)
+        return self._names
+
+    def read_items(self) -> None:
+        """Read the content text's items again: the colours, the cards, the agenda and Save's line."""
+        if not hasattr(self, "item_cards"):
+            return
+        self._items_timer.stop()
+        new = "new_task" in self.types and not self.meeting_on and not self.from_capture
+        if self.from_capture:
+            self.reading = None
+        else:
+            m = self.ctx.model()
+            self.reading = items.read(self.content.plain(), self.names(), self.ctx.now().date(), labels=self.ctx.parse_labels(m),
+                                      events=self.ctx.settings.event_words, home=bool(self.task) or new or self.meeting_on, new_task=new,
+                                      overrides=self.item_ov)
+        self._highlighting = True
+        try:
+            self.highlighter.set_reading(self.reading)
+        finally:
+            self._highlighting = False
+        if not self.item_cards.editing():
+            own = items.self_fields(self.reading, self.names()) if self.reading and new else None
+            home = self._home_name()
+            self.item_cards.show_items(self.reading, own, lambda it: where_text(it, home, self.names(), self.reading), self.names())
+        self.item_cards.setVisible(not self.from_capture)
+        self._show_agenda()
+        self.refresh()
+
+    def _home_name(self) -> str:
+        """What the items go under, in words: the meeting, the new task or the picked task."""
+        if self.meeting_on:
+            return self.meet_name.text().strip() or "the meeting"
+        if "new_task" in self.types:
+            return f"“{self.title.text().strip()}”" if self.title.text().strip() else "the new task"
+        t = self.ctx.model().tasks.get(self.task) if self.task else None
+        return t.title if t else ""
+
+    def _item_changed(self, key: str, what: str, value: Any) -> None:
+        """A card's change: it stays, even when its line is edited later."""
+        self.item_ov.setdefault(key, {})[what] = value
+        if what == "off":
+            self.read_items()
+        else:
+            self.refresh()
+
+    def _go_line(self, n: int) -> None:
+        block = self.content.document().findBlockByNumber(n)
+        if block.isValid():
+            cursor = self.content.textCursor()
+            cursor.setPosition(block.position())
+            self.content.setTextCursor(cursor)
+        self.content.setFocus()
+
+    def _ref_list(self) -> None:
+        """The @ or # list, while a name is being typed after one."""
+        if not hasattr(self, "ref_popup"):
+            return
+        cursor = self.content.textCursor()
+        t = None
+        if not cursor.hasSelection() and not self.from_capture and self.content.hasFocus():
+            t = items.typing(cursor.block().text()[:cursor.positionInBlock()])
+        options = items.options(t, self.names()) if t else []
+        if not options:
+            self.ref_popup.hide()
+            self._typing = None
+            return
+        if t.sigil == "#":
+            m = self.ctx.model()
+            options = [replace(o, sub=path_text(m, o.ref) or "Top-level task") if o.ref in m.tasks else o for o in options]
+        self._typing = t
+        at = self.content.viewport().mapTo(self, self.content.cursorRect(cursor).bottomLeft()) + QPoint(0, 3)
+        at.setX(max(4, min(at.x(), self.width() - self.ref_popup.width() - 4)))
+        self.ref_popup.show_options(options, at)
+
+    def _pick_ref(self, option: items.Option) -> None:
+        """Put the picked name in, with a space after it; a picked one's ID is kept, ahead of names alike."""
+        t = self._typing
+        self.ref_popup.hide()
+        if not t:
+            return
+        cursor = self.content.textCursor()
+        cursor.setPosition(cursor.position() - (cursor.positionInBlock() - t.start), QTextCursor.MoveMode.KeepAnchor)
+        cursor.insertText(t.sigil + option.value + " ")
+        self.content.setTextCursor(cursor)
+        if option.ref:
+            self.ref_ids[("#" if t.sigil == "#" else "@") + option.value.lower()] = option.ref
+            self._names = None
+        self._typing = None
+        self.read_items()
+
+    # ---- the draft keeps itself (release 5.8) ----
+    def _draft_path(self) -> Path:
+        return self.ctx.data_root / DRAFT_FILE
+
+    def keep_draft(self) -> None:
+        """Every 30 seconds, when something changed: the draft goes to System\\capture-draft.json in the data root."""
+        if not self.draft_dirty:
+            return
+        content, formatted = self.content.value()
+        if not content.strip():
+            return
+        data = {"saved": self.ctx.now().isoformat(timespec="seconds"), "task": self.task, "types": sorted(self.types), "title": self.title.text(),
+                "content": content, "formatted": formatted, "meeting": self.meeting_on,
+                "meeting_name": self.meet_name.text() if self._meet_name_typed else "", "refs": self.ref_ids}
+        try:
+            self.ctx.fs.write_text(self._draft_path(), json.dumps(data, ensure_ascii=False, indent=1))
+        except OSError as e:
+            self.draft_label.setText(f"The draft couldn't be kept ({type(e).__name__}).")
+            return
+        self.draft_dirty = False
+        self.draft_label.setText(f"Draft kept at {self.ctx.now():%H:%M:%S}.")
+
+    def restore_draft(self) -> None:
+        """After a crash or a restart: the window opens with the draft it kept."""
+        try:
+            data = json.loads(self._draft_path().read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        if not isinstance(data, dict) or not str(data.get("content") or "").strip():
+            return
+        m = self.ctx.model()
+        self._setting = True
+        task = data.get("task")
+        self.task = task if task in m.tasks else None
+        self.types = {k for k in data.get("types") or [] if k in self.type_boxes} or {"note"}
+        self.note_auto = self.types == {"note"}
+        self.title.setText(str(data.get("title") or ""))
+        self.content.set_value(str(data["content"]), bool(data.get("formatted")))
+        self.ref_ids = {str(k): str(v) for k, v in (data.get("refs") or {}).items()}
+        self._setting = False
+        if data.get("meeting"):
+            self.toggle_meeting(focus=False)
+            if data.get("meeting_name"):
+                self.meet_name.setText(str(data["meeting_name"]))
+                self._meet_name_typed = True
+        self.draft_label.setText(f"The draft from {str(data.get('saved', ''))[11:16]} came back.")
+        self.read_items()
+
+    def forget_draft(self) -> None:
+        """Once the capture is saved or cleared, the kept draft is emptied."""
+        self.draft_dirty = False
+        if self._draft_path().exists():
+            try:
+                self.ctx.fs.write_text(self._draft_path(), "{}")
+            except OSError:
+                pass
+        self.draft_label.setText("The draft saves itself every 30 seconds.")
+
+    def clear(self) -> None:
+        """Clear: a fresh capture, and no kept draft."""
+        self.reset_draft()
+        self.forget_draft()
 
     def show_keys(self) -> None:
         """F1: every key, in one list (mods log round 2, M0036)."""
@@ -666,7 +1026,7 @@ class CaptureWindow(QWidget):
 
     # ---- Alt and the topic's letter (mods log round 2, M0036) ----
     def _alt_type(self, key: str) -> None:
-        if self.pages.currentIndex() == 0 and not self.from_capture:
+        if self.pages.currentIndex() == 0 and not self.from_capture and not self.meeting_on:  # meeting notes are a note
             self.set_type(key, key not in self.types)
 
     def _alt_agenda(self) -> None:
@@ -784,11 +1144,22 @@ class CaptureWindow(QWidget):
         self.same_all.setChecked(False)
         for w in self.__dict__.get("_fields", {}).values():
             set_filled(w.line if isinstance(w, DateField) else w, False)
+        # Items and meeting notes (release 5.8)
+        self.ref_ids: dict[str, str] = {}  # names picked from the @ and # lists, with their IDs
+        self.item_ov: dict[str, dict[str, Any]] = {}  # the cards' changes, by item key
+        self.agenda_ticks: dict[int, bool] = {}  # agenda items ticked or unticked by hand
+        self._names = None
+        self._meet_name_typed = False
+        self.meet_name.clear()
+        if self.meeting_on:
+            self.meeting_on = False
+            if self.expanded:
+                self._set_expanded(False)
         self._setting = False
         self._show_summary(False)
         self._clear_found()
         self.error.hide()
-        self.refresh()
+        self.read_items()
 
     def make_task_from(self, capture_id: str) -> None:
         """Make it a task: a new task from an unfiled capture. Saving creates it and files the capture to it."""
@@ -817,9 +1188,12 @@ class CaptureWindow(QWidget):
             self._drop_type("update")
         if "update" in self.types:
             self.prefill()
+        if self.meeting_on:  # another task picked: another meeting
+            self.agenda_ticks = {}
+            self._fill_meet_name()
         self._clear_found()
         self.error.hide()
-        self.refresh()
+        self.read_items()
 
     def set_type(self, key: str, checked: bool) -> None:
         """Check or uncheck a capture type. Checking New task or Update unchecks Note, unless Note was checked by hand."""
@@ -839,7 +1213,7 @@ class CaptureWindow(QWidget):
             self.prefill()
         self.error.hide()
         self._clear_found()
-        self.refresh()
+        self.read_items()  # with New task, the first line is the new task itself
         if key == "new_task" and checked:
             self.title.setFocus()
 
@@ -937,6 +1311,19 @@ class CaptureWindow(QWidget):
             self.does.setText(f"Save creates {'a subtask under <b>' + esc(t.title) + '</b>' if t else 'a top-level task'} from "
                               f"{self.from_capture}, with this content text as its description, and files {self.from_capture} to it. "
                               "The capture's own text stays as it was.")
+        # Meeting notes (release 5.8): the meeting's name takes the capture types' place.
+        self.types_box.setVisible(not self.meeting_on)
+        self.meeting_row.setVisible(self.meeting_on)
+        self.meet_what.setVisible(self.meeting_on)
+        self.meeting_button.setChecked(self.meeting_on)
+        self.meeting_button.setEnabled(not self.from_capture)
+        self.content_field.property("label").setText("Meeting notes" if self.meeting_on else self.content_field.property("label").text())
+        self.content_hint.setText(
+            f"The content text of {self.from_capture}. It stays in that capture." if self.from_capture else
+            "Each line with an operator becomes an item when you save: @Tom a task for Tom, #Rigging plan a note on it, **Closed. an update, "
+            "**Decision. a decision. Type @ or # for a list." if self.meeting_on else
+            "Type or paste. Drop files or Outlook emails anywhere on this window. Start with “Closed.” or another state for a quick update. "
+            "@, # and ** make items (Items, on the right).")
 
     @staticmethod
     def _short(value: Any) -> str:
@@ -949,6 +1336,17 @@ class CaptureWindow(QWidget):
     def _does(self, m: Model, n_changes: int) -> str:
         t = m.tasks.get(self.task) if self.task else None
         name = f"<b>{esc(t.title)}</b>" if t else ""
+        # The items each line with an operator makes (release 5.8).
+        its = [it for it in self.reading.items if it.on] if self.reading and not self.from_capture else []
+        counts = [f"{n} {label.lower()}{'s' if n > 1 else ''}" for k, label in items.KIND_NAMES.items() if (n := sum(it.kind == k for it in its))]
+        items_text = f" From its items it makes {and_list(counts)}." if counts else ""
+        if self.meeting_on:
+            case, typed = meeting_case(m, self.task), self.meet_name.text().strip()
+            meeting = f"<b>{esc(typed)}</b>" if typed else "the meeting (name it first)"
+            done = sum(self._discussed(a) for a in m.open_items_for(self.task)) if case != "new" else 0
+            return (f"Save keeps these notes on {name}." if case == "oneoff" else
+                    f"Save makes {meeting}, a meeting {'under ' + name if t else 'at the top level'}, In progress until you close it, and keeps "
+                    "these notes on it.") + items_text + (f" {done} agenda item{'s close' if done > 1 else ' closes'} as Discussed." if done else "")
         text = bool(self.content.toPlainText().strip())
         new, upd, note = ("new_task" in self.types, "update" in self.types, "note" in self.types)
         parts = []
@@ -972,7 +1370,7 @@ class CaptureWindow(QWidget):
         parts = [p for p in parts if p]
         if not parts:
             return "Pick a task, or uncheck Update."
-        return "Save " + parts[0] + "." + (" It also " + and_list(parts[1:]) + "." if len(parts) > 1 else "")
+        return "Save " + parts[0] + "." + (" It also " + and_list(parts[1:]) + "." if len(parts) > 1 else "") + items_text
 
     # ================= the task picker and other pickers =================
     def _open_picker(self) -> None:
@@ -1020,8 +1418,12 @@ class CaptureWindow(QWidget):
         self._setting = False
 
     def _content_changed(self) -> None:
+        if self._highlighting:  # the operators' colours, not a change to the text
+            return
         self._path_timer.start()
+        self._items_timer.start()
         if not self._setting:
+            self.draft_dirty = True
             self.refresh()
 
     def _sync_paths(self) -> None:
@@ -1275,6 +1677,9 @@ class CaptureWindow(QWidget):
             return
         m = self.ctx.model()
         content = self.content.plain()  # its words: list items keep "- ", marks are dropped
+        self.read_items()
+        if self.reading:  # the items' lines are theirs: Parse and populate reads the rest (release 5.8)
+            content = items.parse_text(self.reading, self.names())
         if "new_task" not in self.types and "update" not in self.types:
             if self.task and quick_update(content):
                 self.types.add("update")
@@ -1492,6 +1897,8 @@ class CaptureWindow(QWidget):
             agenda=self._targets(), summary=self.summary.toPlainText() if not self.summary_field.isHidden() else "",
             summary_type=summary_type, new_task=new, update=self.update_changes(t) if "update" in self.types else {},
             from_capture=self.from_capture, quick=self._quick(),
+            meeting=self.meeting_on, meeting_name=self.meet_name.text() if self.meeting_on else "", agenda_ticks=dict(self.agenda_ticks),
+            item_overrides={k: dict(v) for k, v in self.item_ov.items()}, refs=dict(self.ref_ids),
         )
 
     def save(self) -> None:
@@ -1505,13 +1912,14 @@ class CaptureWindow(QWidget):
         try:
             result = save_capture(self.ctx.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, draft, self.ctx.now())
         except SaveError as e:
-            self._fail(str(e), {"task": self.task_button, "title": self.title, "content": self.content}.get(e.focus))
+            self._fail(str(e), {"task": self.task_button, "title": self.title, "content": self.content, "meeting": self.meet_name}.get(e.focus))
             return
         finally:
             QGuiApplication.restoreOverrideCursor()
         problems = (" Problems: " + " ".join(result.problems)) if result.problems else ""
         self.ctx.notify("Saved", result.message + problems)
         self.reset_draft()
+        self.forget_draft()
         self.hide()
         self.saved.emit(result)
 

@@ -15,13 +15,14 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from docrepo import agenda, bulk, captures, markup, people, search, tasks
+from docrepo import agenda, bulk, captures, items, markup, people, search, tasks
 from docrepo.config import Settings
 from docrepo.dates import stamp
 from docrepo.db import transaction
 from docrepo.links import is_link
 from docrepo.model import TODAY, Model
 from docrepo.pages import write_pages
+from docrepo.parse import ParsePerson
 from docrepo.safe_fs import SafeFS
 from docrepo.schedule import start_of
 from docrepo.text import capture_title
@@ -154,7 +155,9 @@ def edit_capture(
     at: datetime, formatted: bool | None = None,
 ) -> Outcome:
     """Fix a capture's content text or summary. The previous capture.md is kept in its _old versions folder first.
-    ``formatted`` says whether ``content`` is markup (mods log round 2, M0045); None keeps what the capture was."""
+    ``formatted`` says whether ``content`` is markup (mods log round 2, M0045); None keeps what the capture was.
+    ``content`` is as it's shown, each @ and # by its name (release 5.8): they're kept with their IDs again, the IDs
+    the capture had coming first, so a person or task renamed since stays linked."""
     model = Model(conn)
     c = model.captures.get(capture_id)
     if c is None:
@@ -162,11 +165,13 @@ def edit_capture(
     old = captures.read_content(data_root, c)
     if old is None:
         raise EditError(f"{capture_id}'s capture.md can't be read, so it can't be edited here.")
-    content, summary = content.rstrip(), summary.strip()
     formatted = c.formatted if formatted is None else formatted
+    people = [ParsePerson(p.id, p.name, tuple(p.aliases), p.status) for p in model.people.values()]
+    names = items.names_of(model, people, items.refs_of(old))
+    content, summary = items.store(content.rstrip(), names, formatted), summary.strip()
     if content == old.rstrip() and formatted == c.formatted and summary == (c.summary or ""):
         return Outcome("Nothing changed.")
-    words = markup.to_plain(content) if formatted else content
+    words = items.unstore(markup.to_plain(content) if formatted else content)
     if not words.strip() and not c.documents:
         raise EditError("The content text can't be empty for a capture with no files.")
     folder = captures.capture_folder(data_root, c.id, c.saved)
@@ -177,7 +182,8 @@ def edit_capture(
     first_doc = next((model.documents[d].name for d in c.document_ids if d in model.documents), None)
     with transaction(conn):
         conn.execute("UPDATE captures SET edited = ?, title = ?, summary = ?, summary_type = ?, formatted = ? WHERE id = ?",
-                     (stamp(at), capture_title(c.source, words, first_doc, c.id), summary or None,
+                     # Meeting notes and items keep their titles; any other is listed by its words, without operators.
+                     (stamp(at), c.title if c.item else capture_title(c.source, items.words(words, names), first_doc, c.id), summary or None,
                       (summary_type or c.summary_type) if summary else None, int(formatted), capture_id))
     out = Outcome(f"Saved {capture_id}. The previous version is in its _old versions folder.")
     rewrite_capture_md(conn, data_root, fs, capture_id, content, out.problems)
