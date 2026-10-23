@@ -45,7 +45,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo import diagnose, outlook, paste
+from docrepo import diagnose, outlook
 from docrepo.db import RECURRENCES, STATES
 from docrepo.extract import extract_text, to_unc
 from docrepo.layer0 import size_text
@@ -68,6 +68,7 @@ from docrepo.schedule import is_open, start_of
 from docrepo.ui.context import AppContext
 from docrepo.ui.keymap import KeyMapDialog
 from docrepo.ui.mods_panel import ModsPanel
+from docrepo.ui.rich_edit import FormatBar, RichEdit
 from docrepo.ui.style import STYLE
 from docrepo.ui.task_picker import TaskPicker, full_path, path_text
 from docrepo.ui.widgets import (
@@ -157,8 +158,9 @@ def _accept_copy(event) -> None:
     event.accept()
 
 
-class ContentEdit(QPlainTextEdit):
-    """The content text box. Files and Outlook emails can be dropped on it; ``dropped`` sends read_drop's answer."""
+class ContentEdit(RichEdit):
+    """The content text box, with formatting and lists (mods log round 2, M0045). Files and Outlook emails can be dropped
+    on it; ``dropped`` sends read_drop's answer."""
 
     dropped = Signal(str, list)
 
@@ -182,17 +184,6 @@ class ContentEdit(QPlainTextEdit):
             self.dropped.emit(kind, paths)
         else:
             super().dropEvent(event)
-
-    def insertFromMimeData(self, source) -> None:  # noqa: N802 - Qt's name; pasting, and dropping text
-        """Lists keep their bullets: OneNote's are only in the clipboard's HTML (mods log round 1, M0022)."""
-        as_list = source.hasHtml() and paste.has_list(source.html())
-        diagnose.note_drag("paste", list(source.formats()), 0, 0, "a list, from its HTML" if as_list else "text")
-        if as_list:
-            self.insertPlainText(paste.html_to_text(source.html()))
-        elif source.hasText():
-            self.insertPlainText(paste.bullets_to_dashes(source.text()))
-        else:
-            super().insertFromMimeData(source)
 
 
 class CaptureWindow(QWidget):
@@ -346,6 +337,8 @@ class CaptureWindow(QWidget):
         self.content.textChanged.connect(self._content_changed)
         self.content.dropped.connect(self.dropped)
         self.content_field = field("Content text", self.content, "content")
+        self.format_bar = FormatBar(self.content)
+        self.content_field.layout().insertWidget(self.content_field.layout().indexOf(self.content), self.format_bar)
         lc.addWidget(self.content_field, 1)
         hint = QLabel("Type or paste. Drop files or Outlook emails anywhere on this window. Start with “Closed.” or another state for a quick update.",
                       objectName="hint")
@@ -799,7 +792,7 @@ class CaptureWindow(QWidget):
 
     def make_task_from(self, capture_id: str) -> None:
         """Make it a task: a new task from an unfiled capture. Saving creates it and files the capture to it."""
-        from docrepo.captures import read_content
+        from docrepo.captures import plain, read_content
         from docrepo.text import first_sentence, plain_text
 
         m = self.ctx.model()
@@ -808,8 +801,10 @@ class CaptureWindow(QWidget):
         self.reset_draft()
         self.from_capture = capture_id
         self.types, self.note_auto = {"new_task"}, False
-        self._set_plain(self.content, content)
-        sentence = first_sentence(plain_text(content), 400)
+        self._setting = True
+        self.content.set_value(content, c.formatted)
+        self._setting = False
+        sentence = first_sentence(plain_text(plain(c, content) or ""), 400)
         title = parse_capture(sentence, "new_task", self.ctx.now().date(), self.ctx.parse_people(m), [], []).title if sentence else ""
         self.title.setText(title or c.title)
         self.refresh()
@@ -1227,9 +1222,10 @@ class CaptureWindow(QWidget):
                 self.files.remove(e)
             if e.widget:
                 e.widget.deleteLater()
-        if from_content and entry.src == "pasted":
-            lines = [line for line in self.content.toPlainText().split("\n") if line.strip().lower() != (entry.line or "").lower()]
-            self._set_plain(self.content, "\n".join(lines))
+        if from_content and entry.src == "pasted" and entry.line:
+            self._setting = True
+            self.content.remove_line(entry.line)  # the rest keeps its formatting
+            self._setting = False
         if sum(e.desc is not None for e in self.files) < 2:
             self.same_all.setChecked(False)
         self.refresh()
@@ -1278,7 +1274,7 @@ class CaptureWindow(QWidget):
         if self.pages.currentIndex() == 1:
             return
         m = self.ctx.model()
-        content = self.content.toPlainText()
+        content = self.content.plain()  # its words: list items keep "- ", marks are dropped
         if "new_task" not in self.types and "update" not in self.types:
             if self.task and quick_update(content):
                 self.types.add("update")
@@ -1396,7 +1392,8 @@ class CaptureWindow(QWidget):
             self._fail("There are no summary types in Config\\prompts.", self.prompt_type)
             return
         st = self._summary_types[self.prompt_type.currentIndex()]
-        text = "\n\n".join(x for x in [self.content.toPlainText().strip(), *self._email_texts()] if x)
+        # The markup, as saved: an LLM reads Markdown's bold and lists (mods log round 2, M0045).
+        text = "\n\n".join(x for x in [self.content.value()[0].strip(), *self._email_texts()] if x)
         cap = self.ctx.settings.extracted_text_cap_chars
         file_texts = [(e.row.name, extract_text(Path(e.row.path), cap).text) for e in self.files if e.row.path and not is_link(e.row.path)]
         blocks = capture_blocks(st, self.ctx.model(), text, file_texts, self.task)
@@ -1489,8 +1486,9 @@ class CaptureWindow(QWidget):
         )
         t = self.ctx.model().tasks.get(self.task) if self.task else None
         summary_type = self._summary_types[self.prompt_type.currentIndex()].name if not self.summary_field.isHidden() and self._summary_types else None
+        content, formatted = self.content.value()
         return CaptureDraft(
-            content=self.content.toPlainText(), task=self.task, types=set(self.types), files=self._file_rows(),
+            content=content, formatted=formatted, task=self.task, types=set(self.types), files=self._file_rows(),
             agenda=self._targets(), summary=self.summary.toPlainText() if not self.summary_field.isHidden() else "",
             summary_type=summary_type, new_task=new, update=self.update_changes(t) if "update" in self.types else {},
             from_capture=self.from_capture, quick=self._quick(),

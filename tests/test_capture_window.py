@@ -399,12 +399,15 @@ def test_a_pasted_onenote_list_keeps_its_bullets(window):
     mime.setText("Pump 7 walkdown\nCheck the coupling guard\nBolts torqued")  # OneNote's plain text: no bullets
     mime.setHtml(ONENOTE)
     window.content.insertFromMimeData(mime)
-    assert window.content.toPlainText().startswith("Pump 7 walkdown\n- Check the coupling guard\n  - Bolts torqued\n")
+    # A real list now (release 5.7), kept as markup; Parse and populate reads its words, with the markers.
+    text, formatted = window.content.value()
+    assert formatted and text.startswith("Pump 7 walkdown\n- Check the coupling guard\n  - Bolts torqued\n")
+    assert window.content.plain().startswith("Pump 7 walkdown\n- Check the coupling guard\n")
     window.content.clear()
     plain = QMimeData()
     plain.setText("•\tGuard\n•\tBolts")
     window.content.insertFromMimeData(plain)
-    assert window.content.toPlainText() == "- Guard\n- Bolts"
+    assert window.content.value() == ("- Guard\n- Bolts", False)  # plain text pasted stays plain text
 
 
 def test_drops_that_bring_no_file_say_why(window, tmp_path):
@@ -499,3 +502,36 @@ def test_a_quick_task_from_the_capture_window(window, ctx):
     t = next(x for x in m.tasks.values() if x.title == "Order seal kits")
     assert m.parents_of(t.id) == [quick.parent_id(ctx.conn)] and [a.subject for a in m.today_items()] == [t.id]
     assert ctx.messages[-1][1].endswith("under Quick tasks. On Today.")
+
+
+def test_formatted_content_text(window, ctx, tmp_path):
+    """Release 5.7 (mods log round 2, M0045): the content text box keeps formatting and lists, saved as markup."""
+    from docrepo import captures
+
+    window.set_task("T000008")
+    window.content.setPlainText("Guard fitted and signed off")
+    cursor = window.content.textCursor()
+    cursor.setPosition(0)
+    cursor.setPosition(5, cursor.MoveMode.KeepAnchor)  # "Guard"
+    window.content.setTextCursor(cursor)
+    ctrl_b = QKeyEvent(QEvent.Type.ShortcutOverride, Qt.Key.Key_B, Qt.KeyboardModifier.ControlModifier, "")
+    assert QApplication.sendEvent(window.content, ctrl_b) and ctrl_b.isAccepted()  # it's the box's key, not a shortcut
+    window.content.keyPressEvent(QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_B, Qt.KeyboardModifier.ControlModifier, ""))
+    assert window.format_bar.buttons["b"].isChecked()
+    report = tmp_path / "Checklist.txt"
+    report.write_text("Area 3", encoding="utf-8")
+    cursor.movePosition(cursor.MoveOperation.End)
+    window.content.setTextCursor(cursor)
+    window.content.insertPlainText(f"\n{report}")
+    window._sync_paths()
+    window._remove_file(window.files[0])  # the path line goes; the formatting stays
+    assert window.content.value() == ("**Guard** fitted and signed off", True)
+    window.save()
+    c = Model(ctx.conn).captures["C000026"]
+    assert c.formatted and c.title == "Guard fitted and signed off"
+    assert captures.read_content(ctx.data_root, c) == "**Guard** fitted and signed off"
+    window.show_capture()
+    window.content.insertPlainText("Next one")
+    assert window.content.value() == ("Next one", False)  # the next capture starts with no formatting
+    window.make_task_from("C000026")
+    assert window.content.value() == ("**Guard** fitted and signed off", True) and window.title.text() == "Guard fitted and signed off"

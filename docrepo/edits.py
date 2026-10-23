@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from docrepo import agenda, bulk, captures, people, search, tasks
+from docrepo import agenda, bulk, captures, markup, people, search, tasks
 from docrepo.config import Settings
 from docrepo.dates import stamp
 from docrepo.db import transaction
@@ -151,9 +151,10 @@ def old_version_name(at: datetime, taken: set[str]) -> str:
 
 def edit_capture(
     conn: sqlite3.Connection, data_root: Path, fs: SafeFS, capture_id: str, content: str, summary: str, summary_type: str | None,
-    at: datetime,
+    at: datetime, formatted: bool | None = None,
 ) -> Outcome:
-    """Fix a capture's content text or summary. The previous capture.md is kept in its _old versions folder first."""
+    """Fix a capture's content text or summary. The previous capture.md is kept in its _old versions folder first.
+    ``formatted`` says whether ``content`` is markup (mods log round 2, M0045); None keeps what the capture was."""
     model = Model(conn)
     c = model.captures.get(capture_id)
     if c is None:
@@ -162,9 +163,11 @@ def edit_capture(
     if old is None:
         raise EditError(f"{capture_id}'s capture.md can't be read, so it can't be edited here.")
     content, summary = content.rstrip(), summary.strip()
-    if content == old.rstrip() and summary == (c.summary or ""):
+    formatted = c.formatted if formatted is None else formatted
+    if content == old.rstrip() and formatted == c.formatted and summary == (c.summary or ""):
         return Outcome("Nothing changed.")
-    if not content.strip() and not c.documents:
+    words = markup.to_plain(content) if formatted else content
+    if not words.strip() and not c.documents:
         raise EditError("The content text can't be empty for a capture with no files.")
     folder = captures.capture_folder(data_root, c.id, c.saved)
     old_dir = folder / "_old versions"
@@ -173,9 +176,9 @@ def edit_capture(
     fs.copy_file(folder / "capture.md", keep)  # if this fails, nothing is changed
     first_doc = next((model.documents[d].name for d in c.document_ids if d in model.documents), None)
     with transaction(conn):
-        conn.execute("UPDATE captures SET edited = ?, title = ?, summary = ?, summary_type = ? WHERE id = ?",
-                     (stamp(at), capture_title(c.source, content, first_doc, c.id), summary or None,
-                      (summary_type or c.summary_type) if summary else None, capture_id))
+        conn.execute("UPDATE captures SET edited = ?, title = ?, summary = ?, summary_type = ?, formatted = ? WHERE id = ?",
+                     (stamp(at), capture_title(c.source, words, first_doc, c.id), summary or None,
+                      (summary_type or c.summary_type) if summary else None, int(formatted), capture_id))
     out = Outcome(f"Saved {capture_id}. The previous version is in its _old versions folder.")
     rewrite_capture_md(conn, data_root, fs, capture_id, content, out.problems)
     search.index_items(conn, data_root, captures=[capture_id])

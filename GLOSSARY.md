@@ -14,6 +14,7 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Capture metadata**: what DocRepo records on its own: the ID, the time saved, the source and email headers.
 - **Capture output**: everything a capture creates or changes: a new task, changes to a task, a link to a task, documents, saved copies and summary entries. One capture can have several outputs.
 - **Content text**: the text typed or pasted into the capture window's main box, kept with the capture once it's saved.
+- **Formatted content text**: content text with bold, italic, underline, strikethrough, highlights or lists (release 5.7). Its capture.md keeps it as Markdown; everything that reads its words reads it without the marks.
 - **Unfiled capture**: a capture with no task linked yet.
 - **Filing**: linking an unfiled capture to a task later. The capture's folder doesn't move.
 - **Unfiled**: the browse tool's view of unfiled captures, newest first, and the matching section of `Contents.md`.

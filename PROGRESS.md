@@ -18,6 +18,7 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.4 | Big features from the mods log, round 1: links as files, email layer 0 and the timeline | Built 2026-10-21, after the owner approved the mockups; on GitHub 2026-10-21, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
 | 5.5 | Small fixes from the mods log, round 2: Ctrl+Enter in the forms, an optional file description, editing mods log entries, double-click, and what's due this week on Today | Built 2026-10-21; on GitHub 2026-10-21; hand-tested by the owner 2026-10-21. Next: testing on the corporate computer |
 | 5.6 | The capture window and Today from the mods log, round 2: Agenda and Today beside the capture types, what Parse and populate found beside the content text, Expand, quick tasks, one letter per topic, Find in this view | Built 2026-10-21, after the owner approved the mockup; on GitHub 2026-10-21, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
+| 5.7 | Formatted content text from the mods log, round 2: bold, italic, underline, strikethrough, highlights and lists in the content text, kept as Markdown in capture.md | Built 2026-10-23. Next: the owner's hand test, then GitHub and the corporate computer |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
 ## Decisions
@@ -274,6 +275,29 @@ Stage 6 of the round 2 plan: M0037, M0042, M0046 and M0048's phase 1 (the captur
 - A quick task from Today's box is a capture of its one line, as from the capture window, so its story begins with the capture and the line is its description. Make it a task saves that capture, then moves the note's item to the new task, keeping when it was added.
 - Only known people are kept from a quick task's line: a one-liner doesn't add people.
 - The capture types' line wraps instead of scrolling; Expand's button says Expand and Back, since Segoe UI has no arrow glyphs for it.
+
+## Release 5.7: formatted content text, from the mods log, round 2
+
+Stage 10's item 36 of the round 2 plan (M0045, round 1's item 17): the first half of stage 10. The second half, release 5.8 (items made by `@`, `#` and `**` in any capture, and meeting mode), is mocked for the owner's review before it's built.
+
+- `docrepo/markup.py` (new): the format (SPEC 6.5). `escape`, `escape_inline` and `escape_line_start` write plain text as markup that reads as the same text; `from_list_lines` turns release 5.1's "- item" lines into real list items; `marks_text` writes a line from its segments, changing only the marks that change, so stars never run together into other marks; `to_plain`, `is_formatted`, `inline_html`, `to_html` (paragraphs and nested lists), `to_line_html` (lines, for the raw text log), `clip` (by lines) and `without_title_line`.
+- `docrepo/ui/rich_edit.py` (new): `RichEdit`, a QTextEdit with the formatting keys and lists (Tab, Shift+Tab, Enter on an empty item, Backspace at an item's start, "- " and "1. " to start one); its keys are taken before any shortcut (`ShortcutOverride`), so they work in the browse tool too. `value()` gives (markup, True) when anything is formatted, else (plain text, False); `plain()`, `set_value`, `remove_line`, `clear` (which drops the formatting the cursor was in). Pasted HTML is read through a QTextDocument (`document_markup`), keeping only the marks and lists, with Word's and Outlook's `mso-list` paragraphs read by `paste.html_to_text` (`paste.has_mso_list`). `FormatBar`: B, I, U, S, Highlight (with Yellow, Green, Pink and No highlight), bullets and numbers, checked to show where the cursor is.
+- `docrepo/db.py`: schema version 6, `captures.formatted`. `docrepo/model.py`: `Capture.formatted`. `docrepo/captures.py`: `add_capture(formatted=)`, `content_format: "markdown"` in capture.md, and `plain(c, content)` for a capture's words.
+- `docrepo/save.py`: `CaptureDraft.formatted` and `words()`. capture.md keeps the markup, with an email's text escaped; the checks, the title, a new task's title and description, Parse and populate's title and an agenda note read the words.
+- `docrepo/edits.py`: `edit_capture(formatted=)` sets or clears `formatted`, and the title comes from the words. `docrepo/search.py`: a capture is indexed by its words.
+- `docrepo/stories.py`: `RawItem.formatted`; `words_of`; a formatted capture's body keeps its markup, without its file lines, and without its first line when that's its title. `docrepo/detail.py`: the raw text log shows it with `markup.to_line_html` and folds it by lines; the capture page with `markup.to_html`.
+- `docrepo/ui/capture_window.py`: `ContentEdit` is a `RichEdit` (dropping files and emails as before), with the `FormatBar` above it. The draft takes `value()`; Parse and populate reads `plain()`, and Copy prompt sends the markup, as the browse tool's does; removing a pasted path line keeps the rest's formatting; Make it a task shows the capture's formatting. `docrepo/ui/browse_window.py`: the capture page's Edit uses a `RichEdit` and `FormatBar`. `docrepo/ui/style.py`: `FORMAT_BAR_STYLE`, in both windows.
+- `docrepo/ui/help_text.py`: the content note, from the mockup's `HELP`. The mockup's exports are unchanged.
+- `tests/`: `test_markup.py` and `test_formatted.py`, and new or changed tests in `test_capture_window.py`, `test_browse_window.py` and `test_db.py` (702 pass in all, 1 skipped).
+
+## Decisions (release 5.7)
+
+- Decision 41 of the round 2 plan: bold, italic, underline, strikethrough, three highlight colours and lists; no text colours or sizes. Decision 43: release 5.7 first, then 5.8 mocked before it's built.
+- Formatted content text is kept as Markdown in capture.md, which stays readable in any editor and is what Copilot reads best; HTML would have needed cleaning and isn't readable. Underline and highlights have no Markdown of their own, so they're the HTML tags most Markdown readers know (`<u>`, `<mark>`).
+- Only a capture with formatting is kept as markup, and says so (`content_format`, `formatted`). Plain captures, and every capture before release 5.7, stay plain text, so nothing old is read as markup and nothing needs converting.
+- Everything that reads content text for its words reads it without the marks, so a star never reaches a title, search or Parse and populate. A list item keeps its "- " or number there, as pasted lists have since release 5.1.
+- A backslash escapes only the characters that would otherwise mean something; before anything else it's a backslash, so a path such as `C:\Docs\a.pdf` reads the same in capture.md as on screen.
+- A highlight pasted in another colour becomes the nearest of the three, and a near-white background none.
 
 ## The first Frogbot findings (2026-10-20)
 

@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from urllib.parse import quote
 
-from docrepo import capacity
+from docrepo import capacity, markup
 from docrepo.dates import days_text, long_date, monday_of, short, to_date
 from docrepo.links import NO_TEXT, is_link
 from docrepo.model import TODAY, TYPE_NAMES, Capture, Model, Task, is_person
@@ -360,18 +360,24 @@ class Pages:
         key = r.capture or f"V{r.document}{r.at}"
         title = self.capture_link(r.capture, r.title) if r.capture else link(f"doc:{r.document}", r.title)
         out = f'<p><span class="lead">{esc(r.lead)}</span><br><b>{title}</b>'
+
+        def shown(text: str) -> str:
+            return markup.to_line_html(text) if r.formatted else multiline(text)
+
         if r.summary:
             out += f'<br><span class="lead">Summary · {esc(r.summary_type or "")}</span><br>{multiline(r.summary)}'
             if r.text:
                 if key in state.originals:
-                    out += f'<br>{link(f"orig:{key}", "Hide " + r.original_label.lower())}<br><span class="sub">{multiline(r.text)}</span>'
+                    out += f'<br>{link(f"orig:{key}", "Hide " + r.original_label.lower())}<br><span class="sub">{shown(r.text)}</span>'
                 else:
                     out += f'<br>{link(f"orig:{key}", "Show " + r.original_label.lower())}'
         elif r.text:
-            if len(r.text) > FOLD_CHARS and key not in state.expanded:
-                out += f'<br>{multiline(clip(r.text, FOLD_CHARS))} {link(f"more:{key}", "Show all")}'
+            # A formatted capture's text is markup (mods log round 2, M0045): shown with its formatting, folded at a line.
+            short_text = markup.clip(r.text, FOLD_CHARS) if r.formatted else clip(r.text, FOLD_CHARS)
+            if short_text != r.text and key not in state.expanded:
+                out += f'<br>{shown(short_text)} {link(f"more:{key}", "Show all")}'
             else:
-                out += f"<br>{multiline(r.text)}" + (f' {link(f"more:{key}", "Show less")}' if len(r.text) > FOLD_CHARS else "")
+                out += f"<br>{shown(r.text)}" + (f' {link(f"more:{key}", "Show less")}' if short_text != r.text else "")
         if r.documents:
             out += '<br><span class="facts">Files: ' + ", ".join(link(f"doc:{d}", name, desc) for d, name, desc in r.documents) + "</span>"
         return out + "</p>"
@@ -442,7 +448,8 @@ class Pages:
         if self.m.is_unfiled(c):
             unfiled = box("<b>Unfiled.</b> Pick a task and File to task, or Make it a task, with the buttons above. Filing links it to the task "
                           "and sets the task in its capture.md; the folder stays where it is.", "info")
-        text = (box(f'<span class="sub">CONTENT TEXT</span><br><span class="text">{multiline(content)}</span>') if content
+        shown = markup.to_html(content) if content and c.formatted else f'<span class="text">{multiline(content or "")}</span>'
+        text = (box(f'<span class="sub">CONTENT TEXT</span><br>{shown}') if content
                 else box('<span class="sub">CONTENT TEXT</span><br><span class="sub">None</span>') if content == ""
                 else box("This capture's capture.md couldn't be read, so its content text can't be shown.", "warn"))
         return f'<p class="crumbs">Capture {c.id}</p><h2>{esc(c.title)}</h2>{unfiled}{fields_table(rows)}<p></p>{text}'

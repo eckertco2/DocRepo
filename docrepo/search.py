@@ -18,7 +18,7 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
-from docrepo.captures import read_content
+from docrepo.captures import plain, read_content
 from docrepo.db import transaction
 from docrepo.model import Model
 
@@ -54,7 +54,7 @@ def _put(conn: sqlite3.Connection, kind: str, item_id: str, body: str) -> None:
 
 def capture_body(model: Model, data_root: Path, capture_id: str) -> str:
     c = model.captures[capture_id]
-    return "\n".join(x for x in (c.id, c.title, c.summary or "", read_content(data_root, c) or "") if x)
+    return "\n".join(x for x in (c.id, c.title, c.summary or "", plain(c, read_content(data_root, c)) or "") if x)
 
 
 def document_body(model: Model, data_root: Path, document_id: str) -> str:

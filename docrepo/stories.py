@@ -18,9 +18,10 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date
 
+from docrepo import markup
 from docrepo.dates import long_date, short, to_date
 from docrepo.model import TODAY, Capture, Model, StatusEntry, Version, is_person
-from docrepo.text import plain_text, sentences
+from docrepo.text import is_file_line, plain_text, sentences
 
 #: A capture's content text, by its ID ("" when its capture.md can't be read).
 ContentOf = Callable[[str], str]
@@ -107,6 +108,7 @@ class RawItem:
     summary_type: str | None
     original_label: str  # what the toggle for the original says
     documents: tuple[tuple[str, str, str], ...] = ()  # (id, name, description) of the capture's files
+    formatted: bool = False  # ``text`` is markup (mods log round 2, M0045; ``docrepo.markup``)
 
 
 class Stories:
@@ -269,7 +271,7 @@ class Stories:
         """A capture's own words: the first paragraph of typed text, cut at a sentence end; else its title."""
         if c.source != "typed":
             return c.title
-        p = re.split(r"\n\s*\n", self.content_of(c.id))[0].strip()
+        p = re.split(r"\n\s*\n", self.words_of(c))[0].strip()
         if len(p) <= limit:
             return p
         cut = p[:limit]
@@ -359,8 +361,18 @@ class Stories:
         return out
 
     # ---- the raw text log ----
+    def words_of(self, c: Capture) -> str:
+        """A capture's content text in words: a formatted capture's markup without its marks."""
+        content = self.content_of(c.id)
+        return markup.to_plain(content) if c.formatted else content
+
     def capture_body(self, c: Capture) -> str:
-        """The text under a capture's title: for typed text, what follows its first sentence; for an email, its body."""
+        """The text under a capture's title: for typed text, what follows its first sentence; for an email, its body. A
+        formatted capture's is markup: its lines but its file lines, and but its first when that's just its title."""
+        if c.formatted:
+            lines = [line for line in self.content_of(c.id).split("\n") if not is_file_line(markup.to_plain(line))]
+            kept = "\n".join(lines).strip("\n")
+            return kept if c.source == "outlook_email" else markup.without_title_line(kept, c.title)
         text = plain_text(self.content_of(c.id))
         if c.source == "outlook_email":
             return text
@@ -376,7 +388,7 @@ class Stories:
         return out
 
     def note_item(self, c: Capture, task_id: str) -> RawItem:
-        content = self.content_of(c.id)
+        content = self.words_of(c)
         sender = re.search(r"^From:\s*(.+)$", content, re.M) if c.source == "outlook_email" else None
         is_update = c.has("update") and c.task == task_id
         kind = (f"Email from {sender.group(1).strip()}" if sender else "Email") if c.source == "outlook_email" \
@@ -396,7 +408,7 @@ class Stories:
                else f"Filed {short(to_date(c.filed), self.today)}" if c.filed_to == task_id and c.filed else "")
         docs = tuple((d, self.m.documents[d].name, self.m.documents[d].description or "") for d in c.document_ids if d in self.m.documents)
         return RawItem(c.saved, " · ".join(x for x in (kind, did) if x), c.title, c.id, None, self.capture_body(c), c.summary,
-                       c.summary_type, "The email" if c.source == "outlook_email" else "The full text", docs)
+                       c.summary_type, "The email" if c.source == "outlook_email" else "The full text", docs, c.formatted)
 
     def version_item(self, v: Version) -> RawItem:
         d = self.m.documents[v.document]

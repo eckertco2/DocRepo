@@ -95,6 +95,8 @@ class Capture:
     discard_reason: str | None = None
     #: Email layer 0's line (mods log round 1, M0024): what it kept from the email and what it left out.
     email_layer_0: str | None = None
+    #: Whether its content text in capture.md is markup (mods log round 2, M0045; ``docrepo.markup``), not plain text.
+    formatted: bool = False
     documents: list[CaptureDocument] = field(default_factory=list)
     attachments: list[str] = field(default_factory=list)
 
@@ -260,6 +262,7 @@ class Model:
         for r in q("SELECT * FROM captures ORDER BY id"):
             values = {k: r[k] for k in r.keys()}
             values["types"] = values["types"].split(",") if values["types"] else []
+            values["formatted"] = bool(values.get("formatted"))
             self.captures[r["id"]] = Capture(**values)
         for r in q("SELECT * FROM capture_documents ORDER BY capture, pos"):
             self.captures[r["capture"]].documents.append(CaptureDocument(r["document"], bool(r["save_a_copy"]), bool(r["extract"])))

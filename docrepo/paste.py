@@ -24,6 +24,12 @@ def has_list(html: str) -> bool:
     return bool(re.search(r"<li[\s>]|mso-list\s*:", html, re.I))
 
 
+def has_mso_list(html: str) -> bool:
+    """Whether clipboard HTML holds Word's or Outlook's list paragraphs, which aren't real lists in HTML. Release 5.7's
+    formatted content text reads every other kind of HTML as it is (``rich_edit``), and these as release 5.1 does."""
+    return bool(re.search(r"mso-list\s*:", html, re.I))
+
+
 class _ListText(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)

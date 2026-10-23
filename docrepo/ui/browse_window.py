@@ -62,8 +62,10 @@ from docrepo.schedule import DueDate
 from docrepo.tasks import TaskError
 from docrepo.ui.context import AppContext
 from docrepo.ui.dialogs import LabelDialog, PersonDialog
+from docrepo.ui.rich_edit import FormatBar, RichEdit
 from docrepo.ui.explorer import show_in_explorer
 from docrepo.ui.settings_view import SettingsView
+from docrepo.ui.style import FORMAT_BAR_STYLE
 from docrepo.ui.task_forms import BulkEditDialog, LabelMatchDialog, TaskEditDialog
 from docrepo.ui.task_picker import TaskPicker
 from docrepo.ui.timeline_view import TimelineView
@@ -124,7 +126,7 @@ QTextBrowser { border: none; }
 QPushButton { padding: 3px 9px; }
 QPushButton#primary { background: #1d5e98; color: #ffffff; border: 1px solid #1d5e98; border-radius: 4px; padding: 4px 14px; }
 QPushButton#rowLink { border: none; color: #1d5e98; text-decoration: underline; padding: 0 4px; background: transparent; }
-"""
+""" + FORMAT_BAR_STYLE
 #: The views with Select mode, where tasks can be ticked for Edit selected.
 SELECT_VIEWS = ("tasks", *LIST_IDS)
 UNFILED_NOTE = ("Unfiled captures: saved without a task. Their folders are already in Captures. Filing one links it in docs.db and sets "
@@ -359,7 +361,8 @@ class BrowseWindow(QWidget):
         self.edit_title = QLabel(objectName="paneTitle")
         lay.addWidget(self.edit_title)
         lay.addWidget(QLabel("Content text", objectName="hint"))
-        self.edit_content = QPlainTextEdit()
+        self.edit_content = RichEdit()  # with formatting and lists (mods log round 2, M0045)
+        lay.addWidget(FormatBar(self.edit_content))
         lay.addWidget(self.edit_content, 3)
         lay.addWidget(QLabel("Summary", objectName="hint"))
         self.edit_summary = QPlainTextEdit()
@@ -1629,16 +1632,17 @@ class BrowseWindow(QWidget):
         c = self.model().captures[capture_id]
         self.editing = capture_id
         self.edit_title.setText(f"Edit capture {capture_id}")
-        self.edit_content.setPlainText(self._capture_text(capture_id) or "")
+        self.edit_content.clear()
+        self.edit_content.set_value(self._capture_text(capture_id) or "", c.formatted)
         self.edit_summary.setPlainText(c.summary or "")
-        self._edit_start = (self.edit_content.toPlainText(), self.edit_summary.toPlainText())
+        self._edit_start = (self.edit_content.value(), self.edit_summary.toPlainText())
         self.render_detail()
         self.edit_content.setFocus()
 
     def cancel_capture_edit(self) -> None:
         if not self.editing:
             return
-        changed = (self.edit_content.toPlainText(), self.edit_summary.toPlainText()) != self._edit_start
+        changed = (self.edit_content.value(), self.edit_summary.toPlainText()) != self._edit_start
         if changed and not self.confirm(f"Edit capture {self.editing}", "Close without saving your changes?"):
             return
         self.editing = None
@@ -1650,9 +1654,10 @@ class BrowseWindow(QWidget):
             return
         types = prompts.load_summary_types(self.ctx.data_root)
         default_type = types[0].name if types else None
+        content, formatted = self.edit_content.value()
         try:
-            out = edits.edit_capture(self.conn, self.ctx.data_root, self.ctx.fs, capture_id, self.edit_content.toPlainText(),
-                                     self.edit_summary.toPlainText(), default_type, self._now())
+            out = edits.edit_capture(self.conn, self.ctx.data_root, self.ctx.fs, capture_id, content,
+                                     self.edit_summary.toPlainText(), default_type, self._now(), formatted)
         except (edits.EditError, WriteRefused, OSError) as e:
             self.say(str(e), error=True)
             return

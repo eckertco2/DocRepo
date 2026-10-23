@@ -40,7 +40,14 @@ def use_light_theme(app: QGuiApplication) -> None:
     app.setPalette(light_palette())
 
 
-STYLE = """
+#: The formatting buttons above a content text box (``rich_edit.FormatBar``), in both windows.
+FORMAT_BAR_STYLE = """
+QWidget#formatBar QToolButton { border: 1px solid transparent; border-radius: 3px; padding: 1px 6px; color: #1a1f25; }
+QWidget#formatBar QToolButton:hover { border-color: #b8c1cb; }
+QWidget#formatBar QToolButton:checked { background: #dbe8f5; border-color: #9dc0e3; }
+"""
+
+STYLE = FORMAT_BAR_STYLE + """
 QWidget#capture { background: #ffffff; color: #1a1f25; font-family: "Segoe UI"; font-size: 10pt; }
 QWidget#header { background: #f4f6f8; border-bottom: 1px solid #d6dce3; }
 QLabel#appName { font-weight: 600; }

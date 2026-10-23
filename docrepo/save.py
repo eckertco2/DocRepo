@@ -20,7 +20,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
-from docrepo import agenda, captures, edits, layer0, people, quick, search, tasks
+from docrepo import agenda, captures, edits, layer0, markup, people, quick, search, tasks
 from docrepo.config import Settings
 from docrepo.dates import stamp
 from docrepo.db import next_id, transaction
@@ -157,6 +157,13 @@ class CaptureDraft:
     #: A quick task (mods log round 2, M0039): with no task picked, the new task goes under the built-in Quick tasks. A new
     #: task with no task picked that goes on Today is one too.
     quick: bool = False
+    #: The content text is markup (mods log round 2, M0045; ``docrepo.markup``): it has formatting or lists.
+    formatted: bool = False
+
+    def words(self) -> str:
+        """The content text's words, without its marks: what titles, descriptions and Parse and populate read."""
+        content = self.content.strip()
+        return markup.to_plain(content).strip() if self.formatted else content
 
     def agenda_shown(self) -> bool:
         """Add to agenda applies with New task, with Update on a picked task, or with no task picked."""
@@ -215,7 +222,7 @@ def _and_list(items: list[str]) -> str:
 
 def _check(draft: CaptureDraft, task_exists: bool) -> None:
     is_new, is_upd = "new_task" in draft.types, "update" in draft.types
-    content = draft.content.strip()
+    content = draft.words()
     has_body = bool(content or draft.files)
     targets = draft.agenda if draft.agenda_shown() else []
     if draft.task and not task_exists:
@@ -245,9 +252,13 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
     t = draft.task
     task_row = conn.execute("SELECT title FROM tasks WHERE id = ?", (t,)).fetchone() if t else None
     _check(draft, task_row is not None)
-    content = draft.content.strip()
+    words = draft.words()
+    formatted = draft.formatted and bool(words)
+    content = draft.content.strip() if formatted else words
     emails = [f.email for f in draft.files if f.email]
-    full_content = "\n\n".join([content] * bool(content) + [e.text() for e in emails])
+    # capture.md keeps the markup, with each email's text escaped so it reads as itself; the rest reads the words.
+    full_content = "\n\n".join([content] * bool(content) + [markup.escape(e.text()) if formatted else e.text() for e in emails])
+    full_words = "\n\n".join([words] * bool(words) + [e.text() for e in emails])
     summary = draft.summary.strip()
     targets = list(dict.fromkeys(draft.agenda)) if draft.agenda_shown() else []
     keep = bool(content or draft.files or summary) and not draft.from_capture
@@ -283,7 +294,7 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
             for name in nt.labels:
                 if conn.execute("SELECT 1 FROM labels WHERE name = ?", (name.strip(),)).fetchone() is None:
                     people.add_label(conn, name)
-            source = full_content
+            source = full_words
             title = nt.title.strip() or _parsed_title(conn, source, at, settings) or first_sentence(plain_text(source)) or "Untitled task"
             holder_title = title
             parents = [t] if t else [quick.ensure_parent(conn, settings, at)] if quick_task else []
@@ -312,7 +323,7 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
             captures.add_capture(
                 conn, capture_id=capture_id, saved=when, source=source_kind,
                 types=[k for k in TYPE_ORDER if k in draft.types and (k != "update" or t)],
-                title=capture_title(source_kind, full_content, first_file, capture_id), task=t, created_task=created,
+                title=capture_title(source_kind, full_words, first_file, capture_id), task=t, created_task=created, formatted=formatted,
                 summary=summary or None, summary_type=draft.summary_type if summary else None,
                 email_layer_0=" ".join(email_layer0_line(e, draft.files) for e in emails) or None,
             )
@@ -355,7 +366,7 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
                         captures.add_saved_copy(conn, task=holder, name=name, document=doc, from_capture=capture_id)
                         copies.append((doc, name))
         subject = created if is_new else t if is_upd else None
-        note_text = "" if is_new else plain_text(draft.content)
+        note_text = "" if is_new else plain_text(words)
         for target in targets:
             agenda.add_item(conn, subject=subject, target=target, note=note_text, added=when, added_by=via)
 

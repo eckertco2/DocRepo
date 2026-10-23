@@ -9,6 +9,7 @@ import json
 import sqlite3
 from pathlib import Path
 
+from docrepo import markup
 from docrepo.db import next_id, note_used_id, transaction
 from docrepo.model import Capture, Model
 from docrepo.safe_fs import SafeFS
@@ -21,9 +22,10 @@ def add_capture(
     conn: sqlite3.Connection, *, saved: str, source: str, types: list[str], title: str, task: str | None = None,
     created_task: str | None = None, summary: str | None = None, summary_type: str | None = None,
     filed_to: str | None = None, filed: str | None = None, edited: str | None = None, capture_id: str | None = None,
-    email_layer_0: str | None = None,
+    email_layer_0: str | None = None, formatted: bool = False,
 ) -> str:
-    """Record a capture. ``saved`` is a stored time (``YYYY-MM-DD HH:MM:SS``). Returns its ID."""
+    """Record a capture. ``saved`` is a stored time (``YYYY-MM-DD HH:MM:SS``). Returns its ID. ``formatted`` says its
+    content text is markup (mods log round 2, M0045)."""
     if source not in SOURCES:
         raise ValueError(f"Unknown capture source {source!r}.")
     unknown = [t for t in types if t not in CAPTURE_TYPES]
@@ -36,9 +38,9 @@ def add_capture(
             capture_id = next_id(conn, "C")
         conn.execute(
             "INSERT INTO captures (id, saved, source, task, types, created_task, filed_to, filed, title, summary, summary_type, edited,"
-            " email_layer_0) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " email_layer_0, formatted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (capture_id, saved, source, task, ",".join(types), created_task, filed_to, filed, title, summary, summary_type, edited,
-             email_layer_0),
+             email_layer_0, int(formatted)),
         )
     return capture_id
 
@@ -147,6 +149,8 @@ def capture_md(model: Model, capture_id: str, content: str) -> str:
     ]
     if c.email_layer_0:  # what email layer 0 kept and left out (mods log round 1, M0024), for later layers
         front["email_layer_0"] = c.email_layer_0
+    if c.formatted:  # the content text below is markup (mods log round 2, M0045), not plain text
+        front["content_format"] = "markdown"
     front["summary_type"] = c.summary_type
     lines = ["---", *[f"{k}: {json.dumps(v, ensure_ascii=False, separators=(',', ':'))}" for k, v in front.items()], "---", "", content]
     if c.summary:
@@ -172,8 +176,14 @@ def split_capture_md(text: str, summary: str | None) -> str:
 
 
 def read_content(data_root: Path, c: Capture) -> str | None:
-    """A capture's content text, read from its capture.md. None if the file can't be read."""
+    """A capture's content text, read from its capture.md, as it's kept: markup when the capture is formatted (``plain``
+    gives its words). None if the file can't be read."""
     try:
         return split_capture_md(capture_md_path(data_root, c).read_text(encoding="utf-8"), c.summary)
     except (OSError, UnicodeDecodeError):
         return None
+
+
+def plain(c: Capture, content: str | None) -> str | None:
+    """A capture's content text in words: a formatted capture's markup without its marks (mods log round 2, M0045)."""
+    return markup.to_plain(content) if content is not None and c.formatted else content

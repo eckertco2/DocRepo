@@ -782,3 +782,26 @@ def test_the_suggested_hotkeys(browse):
         "agenda_hotkey": "Ctrl+Shift+A", "today_hotkey": "Ctrl+Shift+D"}
     assert browse.status.text() == "Filled 5 hotkeys. Save settings to use them."
     assert view.save() == ["browse_hotkey", "note_hotkey", "new_task_hotkey", "update_hotkey", "agenda_hotkey", "today_hotkey"]
+
+
+def test_fixing_a_capture_with_formatting(browse, ctx):
+    """Release 5.7 (mods log round 2, M0045): Edit keeps, adds and takes off formatting; Ctrl+B in the box is bold, not the views."""
+    from PySide6.QtCore import QEvent, Qt
+    from PySide6.QtGui import QKeyEvent
+    from PySide6.QtWidgets import QApplication
+
+    browse.go_capture("C000017")
+    browse.start_capture_edit("C000017")
+    browse.edit_content.set_value("Vendor drawings came in **late**.\n- package due 23 Oct", True)
+    ctrl_b = QKeyEvent(QEvent.Type.ShortcutOverride, Qt.Key.Key_B, Qt.KeyboardModifier.ControlModifier, "")
+    assert QApplication.sendEvent(browse.edit_content, ctrl_b) and ctrl_b.isAccepted()
+    browse.save_capture_edit()
+    c = Model(browse.conn).captures["C000017"]
+    assert c.formatted and c.title == "Vendor drawings came in late"
+    assert "<b>late</b>" in browse.page.toHtml() or "font-weight" in browse.page.toHtml()
+    browse.start_capture_edit("C000017")
+    assert browse.edit_content.value() == ("Vendor drawings came in **late**.\n- package due 23 Oct", True)
+    browse.edit_content.set_value("Vendor drawings came in late.", False)
+    browse.save_capture_edit()
+    c = Model(browse.conn).captures["C000017"]
+    assert not c.formatted and captures.read_content(ctx.data_root, c) == "Vendor drawings came in late."
