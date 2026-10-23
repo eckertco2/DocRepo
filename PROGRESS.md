@@ -19,7 +19,7 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.5 | Small fixes from the mods log, round 2: Ctrl+Enter in the forms, an optional file description, editing mods log entries, double-click, and what's due this week on Today | Built 2026-10-21; on GitHub 2026-10-21; hand-tested by the owner 2026-10-21. Next: testing on the corporate computer |
 | 5.6 | The capture window and Today from the mods log, round 2: Agenda and Today beside the capture types, what Parse and populate found beside the content text, Expand, quick tasks, one letter per topic, Find in this view | Built 2026-10-21, after the owner approved the mockup; on GitHub 2026-10-21, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
 | 5.7 | Formatted content text from the mods log, round 2: bold, italic, underline, strikethrough, highlights and lists in the content text, kept as Markdown in capture.md | Built 2026-10-23; on GitHub 2026-10-23, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
-| 5.8 | Items and meeting notes from the mods log, round 2: @, # and ** make tasks, notes, updates and decisions in any capture, and Meeting notes takes a meeting's notes with its agenda | Built 2026-10-23, after the owner approved the mockup. Next: the owner's hand test, then GitHub and the corporate computer |
+| 5.8 | Items and meeting notes from the mods log, round 2: @, # and ** make tasks, notes, updates and decisions in any capture, and Meeting notes takes a meeting's notes with its agenda | Built 2026-10-23, after the owner approved the mockup; on GitHub 2026-10-23, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
 ## Decisions
@@ -339,5 +339,5 @@ The corporate computer's Frogbot scan of phase 5 found four things.
 - Phases 2 and 3 passed the owner's hand tests on this computer and went to GitHub together on 2026-10-16 (brainstorm round 12).
 
 - `SPEC.md` covers phases 1 to 5 in full; later phases are summaries until they're built. The detailed design is in the parent workspace's `docs/task-model/brainstorm.md`.
-- Published to the GitHub repo `eckertco2/DocRepo` on 2026-10-09 (phase 1), on 2026-10-16 (the glossary, phases 2 and 3), on 2026-10-18 (phases 4 and 5), on 2026-10-20 (releases 5.1 and 5.2, and the fixes for the first Frogbot findings), on 2026-10-21 (releases 5.3, 5.3.1, 5.4, 5.5 and 5.6), and on 2026-10-23 (release 5.7).
+- Published to the GitHub repo `eckertco2/DocRepo` on 2026-10-09 (phase 1), on 2026-10-16 (the glossary, phases 2 and 3), on 2026-10-18 (phases 4 and 5), on 2026-10-20 (releases 5.1 and 5.2, and the fixes for the first Frogbot findings), on 2026-10-21 (releases 5.3, 5.3.1, 5.4, 5.5 and 5.6), and on 2026-10-23 (releases 5.7 and 5.8).
 - The route to the corporate computer works (2026-10-09): download, a security scan there, `pip install -r requirements.txt` with every pinned version available, and pytest passing.
