@@ -6,7 +6,7 @@ from datetime import date, datetime
 
 import pytest
 
-from docrepo import prompts, search
+from docrepo import people, prompts, search, tasks
 from docrepo.captures import read_content
 from docrepo.config import Settings
 from docrepo.detail import PageState, Pages
@@ -139,3 +139,20 @@ def test_copy_prompt_sends_content_text_and_file_text(sample_root):
     every = prompts.SummaryType("all.md", "All", ("raw_text_all",), "self", "Summarize.")
     labels = [label for label, _ in prompts.task_blocks(every, m, "T000008", content_of=lambda cid: "x")]
     assert labels[0].startswith("Raw text log, Installation, 2026-09-22 10:31") and any("Installation procedure.docx changed" in x for x in labels)
+
+
+def test_release_59_fields_on_the_pages(sample_root):
+    """Release 5.9: a person's email, group and role; a task's Plant event and reference fields; a parent label's page."""
+    conn, root, _ = sample_root
+    tasks.update_task(conn, Settings(me="P001"), "T000012", at=datetime(2026, 10, 8, 9, 0), via="Browse tool", plant_event=True,
+                      references={"Work order #": "48213"})
+    people.add_label(conn, "Production line")
+    people.update_label(conn, "Line 1", parent="Production line")
+    m = Model(conn)
+    pages = Pages(m, TODAY, lambda cid: read_content(root, m.captures[cid]) or "", "P001", conn)
+    assert "Email tom.becker@example.com Group Maintenance Role Planner" in text(pages.person_page("P003"))
+    task = text(pages.task_page("T000012", PageState()))
+    assert "In progress Plant event" in task and "Work order # 48213" in task
+    parent = text(pages.label_page("Production line"))
+    assert "Labels under it Line 1" in parent and "a heading: tasks get one of its labels, not it" in parent
+    assert text(pages.label_page("Line 1")).startswith("Label › Production line Line 1 Under Production line")

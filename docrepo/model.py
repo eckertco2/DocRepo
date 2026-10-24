@@ -16,7 +16,7 @@ from datetime import date
 
 from docrepo.dates import long_date
 from docrepo.links import is_link
-from docrepo.schedule import due_of, is_open
+from docrepo.schedule import due_of, is_open, start_of
 
 TYPE_NAMES = {"note": "Note", "new_task": "New task", "update": "Update"}
 
@@ -46,9 +46,13 @@ class Task:
     #: When it was discarded, and why (mods log round 1, M0021). A discarded task is hidden, never deleted.
     discarded: str | None = None
     discard_reason: str | None = None
+    #: A plant event (mods log round 2, M0028): an outage or turnaround, drawn as a band across the timeline.
+    plant_event: bool = False
     leads: list[str] = field(default_factory=list)
     assignees: list[str] = field(default_factory=list)
     labels: list[str] = field(default_factory=list)
+    #: Its reference fields (M0034), named in Settings, such as a change record's number: {name: value}.
+    references: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -59,6 +63,10 @@ class Person:
     status: str
     added_note: str | None
     aliases: list[str] = field(default_factory=list)
+    #: Release 5.9 (mods log round 2, M0031, M0033, M0038): an email address DocRepo only keeps, one group, and a role.
+    email: str | None = None
+    group: str | None = None
+    role: str | None = None
 
 
 @dataclass
@@ -67,6 +75,8 @@ class Label:
     name: str
     status: str
     keywords: list[str] = field(default_factory=list)
+    #: The label it's under (mods log round 2, M0051): one level, so a parent label is a heading with sublabels.
+    parent: int | None = None
 
 
 @dataclass
@@ -217,7 +227,7 @@ def _unique(items: Iterable[str]) -> list[str]:
 
 _TASK_COLUMNS = (
     "id, title, state, closed, urgent, meeting, recurrence, repeat_until, start, due, deadline, deadline_desc, reminder, "
-    "lead_hours, assignee_hours, inherit_labels, description, current_status, created, created_by, discarded, discard_reason"
+    "lead_hours, assignee_hours, inherit_labels, description, current_status, created, created_by, discarded, discard_reason, plant_event"
 )
 
 
@@ -231,13 +241,16 @@ def load_tasks(conn: sqlite3.Connection, task_ids: Iterable[str] | None = None) 
     for r in conn.execute(f"SELECT {_TASK_COLUMNS} FROM tasks{where} ORDER BY id", params):
         tasks[r["id"]] = Task(**{k: r[k] for k in r.keys()})
         t = tasks[r["id"]]
-        t.urgent, t.meeting, t.inherit_labels = bool(t.urgent), bool(t.meeting), bool(t.inherit_labels)
+        t.urgent, t.meeting, t.inherit_labels, t.plant_event = bool(t.urgent), bool(t.meeting), bool(t.inherit_labels), bool(t.plant_event)
     for r in conn.execute("SELECT task, person, role FROM task_people ORDER BY id"):
         if r["task"] in tasks:
             (tasks[r["task"]].leads if r["role"] == "lead" else tasks[r["task"]].assignees).append(r["person"])
     for r in conn.execute("SELECT tl.task, l.name FROM task_labels tl JOIN labels l ON l.id = tl.label ORDER BY tl.id"):
         if r["task"] in tasks:
             tasks[r["task"]].labels.append(r["name"])
+    for r in conn.execute("SELECT task, name, value FROM task_references ORDER BY task, rowid"):
+        if r["task"] in tasks:
+            tasks[r["task"]].references[r["name"]] = r["value"]
     return tasks
 
 
@@ -248,12 +261,13 @@ class Model:
         q = conn.execute
         self.tasks = load_tasks(conn)
         self.people: dict[str, Person] = {
-            r["id"]: Person(r["id"], r["name"], r["hours_per_week"], r["status"], r["added_note"])
+            r["id"]: Person(r["id"], r["name"], r["hours_per_week"], r["status"], r["added_note"], email=r["email"], group=r["person_group"],
+                            role=r["role"])
             for r in q("SELECT * FROM people ORDER BY id")
         }
         for r in q("SELECT person, alias FROM person_aliases ORDER BY person, pos"):
             self.people[r["person"]].aliases.append(r["alias"])
-        labels = {r["id"]: Label(r["id"], r["name"], r["status"]) for r in q("SELECT * FROM labels ORDER BY id")}
+        labels = {r["id"]: Label(r["id"], r["name"], r["status"], parent=r["parent"]) for r in q("SELECT * FROM labels ORDER BY id")}
         for r in q("SELECT label, keyword FROM label_keywords ORDER BY label, pos"):
             labels[r["label"]].keywords.append(r["keyword"])
         self.labels: list[Label] = list(labels.values())
@@ -307,6 +321,42 @@ class Model:
 
     def active_labels(self) -> list[Label]:
         return [label for label in self.labels if label.status == "active"]
+
+    # ---- groups, label nesting and plant events (release 5.9) ----
+    def groups(self) -> list[str]:
+        """The groups active people are in, A to Z (mods log round 2, M0033)."""
+        return sorted({p.group for p in self.active_people() if p.group}, key=str.lower)
+
+    def group_people(self, group: str) -> list[str]:
+        """The active people in a group."""
+        return [p.id for p in self.active_people() if p.group == group]
+
+    def label(self, name: str) -> Label | None:
+        return next((lb for lb in self.labels if lb.name.lower() == name.lower()), None)
+
+    def parent_label(self, name: str) -> str | None:
+        """The label a sublabel is under (M0051)."""
+        lb = self.label(name)
+        parent = next((x for x in self.labels if lb and x.id == lb.parent), None)
+        return parent.name if parent else None
+
+    def sublabels(self, name: str, active: bool = True) -> list[str]:
+        """The labels under a parent label."""
+        lb = self.label(name)
+        return [x.name for x in self.labels if lb and x.parent == lb.id and (x.status == "active" or not active)]
+
+    def is_parent_label(self, name: str) -> bool:
+        """A label with labels under it: a heading that tasks don't get on their own."""
+        return bool(self.sublabels(name, active=False))
+
+    def label_path(self, name: str) -> str:
+        """A label as pickers show it: "Production line › Line 1"."""
+        parent = self.parent_label(name)
+        return f"{parent} › {name}" if parent else name
+
+    def plant_events(self) -> list[Task]:
+        """The plant events (M0028): tasks with Plant event ticked, but discarded ones, soonest first."""
+        return sorted((t for t in self.tasks.values() if t.plant_event and not t.discarded), key=lambda t: (start_of(t), t.title.lower()))
 
     # ---- the tree ----
     def parents_of(self, task_id: str) -> list[str]:

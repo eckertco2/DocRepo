@@ -24,14 +24,16 @@ from docrepo.pages import num
 FIELDS = (
     ("state", "State"), ("current_status", "Current status"), ("due", "Due"), ("deadline", "Deadline"),
     ("deadline_desc", "Deadline description"), ("leads", "Lead"), ("assignees", "Assignees"), ("lead_hours", "Lead hours"),
-    ("assignee_hours", "Assignee hours"), ("urgent", "Urgent"), ("meeting", "Meeting"), ("start", "Start"),
+    ("assignee_hours", "Assignee hours"), ("urgent", "Urgent"), ("meeting", "Meeting"), ("plant_event", "Plant event"), ("start", "Start"),
     ("reminder", "Reminder"), ("recurrence", "Recurrence"), ("repeat_until", "Repeat until"), ("title", "Title"),
     ("description", "Description"), ("labels", "Labels"), ("inherit_labels", "Inherit parent labels"),
 )
 FIELD_NAMES = dict(FIELDS)
 DATE_FIELDS = ("due", "deadline", "start", "reminder", "repeat_until")
 TEXT_FIELDS = ("title", "current_status", "deadline_desc", "description")
-FLAG_FIELDS = ("urgent", "meeting", "inherit_labels")
+FLAG_FIELDS = ("urgent", "meeting", "inherit_labels", "plant_event")
+#: Reference fields (mods log round 2, M0034, release 5.9): named in Settings, each logged under its own name.
+REFERENCES = "references"
 HOUR_FIELDS = ("lead_hours", "assignee_hours")
 ROLES = {"leads": "lead", "assignees": "assignee"}
 
@@ -118,6 +120,31 @@ def _apply_lists(conn: sqlite3.Connection, task_id: str, key: str, value: list[s
         conn.executemany("INSERT INTO task_labels (task, label) SELECT ?, id FROM labels WHERE name = ?", [(task_id, n) for n in value])
 
 
+def _references(value: Any) -> dict[str, str]:
+    """Reference field values by name, trimmed; an empty value clears that field."""
+    out: dict[str, str] = {}
+    for name, v in dict(value or {}).items():
+        name = str(name).strip()
+        if not name:
+            raise TaskError("A reference field needs a name.")
+        out[name] = str(v or "").strip()
+    return out
+
+
+def _apply_references(conn: sqlite3.Connection, task_id: str, task_refs: dict[str, str], new: dict[str, str]) -> list[Change]:
+    """Set a task's reference fields; returns their status log entries."""
+    logged = []
+    for name, value in new.items():
+        old = task_refs.get(name, "")
+        if old == value:
+            continue
+        logged.append(Change(name, old or None, value or None))
+        conn.execute("DELETE FROM task_references WHERE task = ? AND name = ?", (task_id, name))
+        if value:
+            conn.execute("INSERT INTO task_references (task, name, value) VALUES (?, ?, ?)", (task_id, name, value))
+    return logged
+
+
 def _apply_columns(conn: sqlite3.Connection, task_id: str, columns: dict[str, Any]) -> None:
     """Set a task's own fields in one statement, so the table's checks see them all changed together."""
     if columns:
@@ -139,7 +166,7 @@ def create_task(
     reminder: str | None = None, recurrence: str | None = None, repeat_until: str | None = None,
     urgent: bool = False, meeting: bool = False, leads: Sequence[str] = (), assignees: Sequence[str] = (),
     lead_hours: float | None = None, assignee_hours: float | None = None, labels: Sequence[str] = (),
-    inherit_labels: bool = True,
+    inherit_labels: bool = True, plant_event: bool = False, references: dict[str, str] | None = None,
 ) -> str:
     """Create a task, under ``parents`` if any are given (a top-level task if not). Returns its ID.
 
@@ -149,7 +176,7 @@ def create_task(
         "title": title, "state": state, "current_status": current_status, "start": start, "due": due,
         "deadline": deadline, "deadline_desc": deadline_desc, "reminder": reminder, "recurrence": recurrence,
         "repeat_until": repeat_until, "urgent": urgent, "meeting": meeting, "lead_hours": lead_hours,
-        "assignee_hours": assignee_hours, "inherit_labels": inherit_labels,
+        "assignee_hours": assignee_hours, "inherit_labels": inherit_labels, "plant_event": plant_event,
     }
     with transaction(conn):
         values = {k: _normalize(conn, k, v) for k, v in values.items()}
@@ -168,6 +195,7 @@ def create_task(
         for key, ids in people.items():
             _apply_lists(conn, task_id, key, ids)
         _apply_lists(conn, task_id, "labels", label_names)
+        _apply_references(conn, task_id, {}, _references(references))
         conn.executemany("INSERT INTO task_parents (child, parent) VALUES (?, ?)", [(task_id, p) for p in dict.fromkeys(parents)])
         capacity.rebuild_task(conn, task_id, at.date(), settings)
     return task_id
@@ -187,11 +215,12 @@ def update_task(conn: sqlite3.Connection, settings: Settings, task_id: str, *, a
     Closing a task records the day it closed; reopening clears it. Clearing the
     recurrence clears Repeat until too.
     """
-    unknown = sorted(set(changes) - set(FIELD_NAMES))
+    unknown = sorted(set(changes) - set(FIELD_NAMES) - {REFERENCES})
     if unknown:
         raise TaskError(f"Not task fields: {', '.join(unknown)}.")
     with transaction(conn):
         task = get_task(conn, task_id)
+        refs = _references(changes.pop(REFERENCES, None))
         new = {k: _normalize(conn, k, v) for k, v in changes.items()}
         if "recurrence" in new and not new["recurrence"]:
             new["repeat_until"] = None
@@ -209,6 +238,7 @@ def update_task(conn: sqlite3.Connection, settings: Settings, task_id: str, *, a
         if "state" in columns:
             columns["closed"] = at.date().isoformat() if columns["state"] == "Closed" else None
         _apply_columns(conn, task_id, columns)
+        logged += _apply_references(conn, task_id, task.references, refs)
         _log(conn, task_id, at, via, logged)
         capacity.rebuild_task(conn, task_id, at.date(), settings)
     return logged

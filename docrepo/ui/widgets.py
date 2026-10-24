@@ -310,10 +310,24 @@ class Chip:
 
 
 def label_options(model: Model, text: str, picked: list[str]) -> list[Option]:
-    """The labels a label picker suggests for what's typed: active ones not picked yet, by name."""
+    """The labels a label picker suggests for what's typed: active ones not picked yet, by name. A sublabel shows as
+    "Production line › Line 1", and typing either name finds it; a parent label is a heading, never offered on its own
+    (release 5.9, mods log round 2, M0051)."""
     q = text.strip().lower()
-    return [Option(lb.name, lb.name, ", ".join(lb.keywords)) for lb in model.active_labels()
-            if lb.name not in picked and (not q or q in lb.name.lower())][:7]
+    return [Option(lb.name, model.label_path(lb.name), ", ".join(lb.keywords)) for lb in model.active_labels()
+            if lb.name not in picked and not model.is_parent_label(lb.name) and (not q or q in model.label_path(lb.name).lower())][:7]
+
+
+def label_filter(model: Model) -> tuple[list[tuple[str, str]], list[tuple[str, list[str]]]]:
+    """A Labels filter's choices and sets: each label a task can have, and each parent label, which ticks its sublabels."""
+    choices = [(model.label_path(lb.name), lb.name) for lb in model.active_labels() if not model.is_parent_label(lb.name)]
+    sets = [(f"{lb.name}: all", model.sublabels(lb.name)) for lb in model.active_labels() if model.is_parent_label(lb.name)]
+    return choices, sets
+
+
+def people_filter(model: Model) -> tuple[list[tuple[str, str]], list[tuple[str, list[str]]]]:
+    """A People filter's choices and sets: each active person, and each group first, which ticks its people (M0033)."""
+    return [(p.name, p.id) for p in model.active_people()], [(f"Group: {g}", model.group_people(g)) for g in model.groups()]
 
 
 def people_options(model: Model, me: str | None, text: str, picked: list[str]) -> list[Option]:
@@ -481,13 +495,23 @@ class CheckMenuButton(QPushButton):
 
     chosen = Signal(list)
 
-    def __init__(self, noun: str, empty: str, choices: list[tuple[str, str]], picked: list[str]) -> None:
+    def __init__(self, noun: str, empty: str, choices: list[tuple[str, str]], picked: list[str],
+                 sets: list[tuple[str, list[str]]] = ()) -> None:
         super().__init__()
         self.noun, self.empty = noun, empty
         self.picks = _StayOpenMenu(self)
         clear = self.picks.addAction(empty)
         clear.triggered.connect(lambda: [a.setChecked(False) for a in self.choices])
         self.picks.addSeparator()
+        # Sets first (release 5.9): a group of people, or a parent label's sublabels. Ticking one ticks all of them.
+        self.sets = []
+        for label, members in sets:
+            action = self.picks.addAction(label)
+            action.setCheckable(True)
+            action.triggered.connect(lambda on, ms=members: self._tick_set(ms, on))
+            self.sets.append((action, list(members)))
+        if self.sets:
+            self.picks.addSeparator()
         self.choices = []
         for label, value in choices:
             action = self.picks.addAction(label)
@@ -504,7 +528,15 @@ class CheckMenuButton(QPushButton):
     def values(self) -> list[str]:
         return [a.data() for a in self.choices if a.isChecked()]
 
+    def _tick_set(self, members: list[str], on: bool) -> None:
+        for a in self.choices:
+            if a.data() in members:
+                a.setChecked(on)
+
     def _name(self) -> None:
+        picked = set(self.values())
+        for action, members in self.sets:  # a set shows ticked when all of it is
+            action.setChecked(bool(members) and set(members) <= picked)
         names = [a.text() for a in self.choices if a.isChecked()]
         shown = self.empty if not names else ", ".join(names) if len(names) <= 2 else f"{names[0]} and {len(names) - 1} more"
         self.setText(f"{self.noun}: {shown}")

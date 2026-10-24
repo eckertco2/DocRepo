@@ -136,6 +136,8 @@ class NewTaskFields:
     repeat_until: str | None = None
     lead_hours: float | None = None
     assignee_hours: float | None = None
+    plant_event: bool = False  # release 5.9
+    references: dict[str, str] = field(default_factory=dict)  # reference field values by name (release 5.9)
 
 
 @dataclass
@@ -364,6 +366,7 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
                 deadline_desc=nt.deadline_desc, reminder=nt.reminder, recurrence=nt.recurrence, repeat_until=nt.repeat_until,
                 urgent=nt.urgent, meeting=nt.meeting, leads=leads, assignees=assignees,
                 lead_hours=nt.lead_hours, assignee_hours=nt.assignee_hours, labels=nt.labels, inherit_labels=nt.inherit_labels,
+                plant_event=nt.plant_event, references=nt.references,
             )
         # Meeting notes (release 5.8): this time's meeting of a regular meeting, or a new meeting, is made first, and
         # the notes go on it. It stays In progress until it's closed by hand.
@@ -512,7 +515,7 @@ def _save_items(conn: sqlite3.Connection, settings: Settings, reading: items.Rea
                 deadline_desc=it.deadline_desc or None, reminder=it.reminder, recurrence=it.recurrence or None,
                 start=it.start if it.start and it.start != day else None, urgent=it.urgent, leads=[person(x.who()) for x in it.leads],
                 assignees=[person(x.who()) for x in it.assignees], lead_hours=float(it.lead_hours) if it.lead_hours else None,
-                assignee_hours=float(it.assignee_hours) if it.assignee_hours else None, labels=it.labels)
+                assignee_hours=float(it.assignee_hours) if it.assignee_hours else None, labels=it.labels, plant_event=it.plant_event)
             item_task[it.key] = task_id
             captures.add_capture(conn, capture_id=cid, saved=when, source="typed", types=["new_task"], title=title, task=where[0] if where else None,
                                  created_task=task_id, formatted=block_formatted, from_notes=notes_id, item="task")

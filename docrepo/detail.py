@@ -205,7 +205,8 @@ class Pages:
             for chain in m.chains_of(task_id))
         labels = "".join(f' <a href="{esc(label_href(name))}" title="{"Inherited from a parent" if inherited else "Set on this task"}">'
                          f'{chip(name, "inh" if inherited else "lbl")}</a>' for name, inherited in m.labels_of(task_id))
-        chips = state_chip(t.state) + self.markers_html(t) + (" " + chip("Meeting", "routine") if t.meeting else "") + labels + f' &nbsp;<span class="sub">{t.id}</span>'
+        chips = (state_chip(t.state) + self.markers_html(t) + (" " + chip("Meeting", "routine") if t.meeting else "")
+                 + (" " + chip("Plant event", "new") if t.plant_event else "") + labels + f' &nbsp;<span class="sub">{t.id}</span>')
         routine = bool(t.recurrence)
         rows = [
             ("Description", multiline(t.description) if t.description else none_text("None")),
@@ -225,6 +226,7 @@ class Pages:
             nxt = due_of(t, self.today)
             rows.append(("Recurrence", f"{esc(t.recurrence)}, {'until ' + esc(self.long(t.repeat_until)) if t.repeat_until else 'no end date'}."
                          + (f" Next: {esc(long_date(nxt.date, self.today))}" if nxt else "")))
+        rows += [(name, esc(value)) for name, value in t.references.items()]  # reference fields (release 5.9, M0034); Copy is above
         on = m.agendas_on(task_id)
         if on:
             rows.append(("On agendas", "<br>".join(f'{self.target_link(a.target)} <span class="sub">since {self.day(a.added)}</span>' for a in on)))
@@ -510,7 +512,11 @@ class Pages:
         assigned = [t.id for t in m.tasks.values() if is_open(t) and person_id in t.assignees]
         this_week, next_week = self.scheduled(person_id)
         chips = (" " + chip("me", "st-ip") if person_id == self.me else "") + (" " + chip("retired", "st-cl") if p.status == "retired" else "")
-        rows = [("Aliases", esc(", ".join(p.aliases)) or none_text()), ("Hours a week", num(p.hours) if p.hours is not None else none_text("Not set")),
+        rows = [("Aliases", esc(", ".join(p.aliases)) or none_text()),
+                # Release 5.9 (mods log round 2, M0031, M0033, M0038): DocRepo only keeps the address; Copy email copies it.
+                ("Email", esc(p.email) if p.email else none_text("None")), ("Group", esc(p.group) if p.group else none_text("None")),
+                ("Role", esc(p.role) if p.role else none_text("None")),
+                ("Hours a week", num(p.hours) if p.hours is not None else none_text("Not set")),
                 ("Status", esc(p.status)), ("Scheduled", f"{this_week:.1f} h this week, {next_week:.1f} h next week"),
                 ("Leads", ", ".join(self.task_link(x) for x in leads) or "None"), ("Assigned", ", ".join(self.task_link(x) for x in assigned) or "None")]
         added = f'<p class="note">{esc(p.added_note)}</p>' if p.added_note else ""
@@ -518,10 +524,22 @@ class Pages:
 
     def label_page(self, name: str) -> str:
         label = next(lb for lb in self.m.labels if lb.name == name)
+        subs = self.m.sublabels(name, active=False)
+        # Nested labels (release 5.9, M0051): a parent label lists its sublabels' tasks, under each sublabel.
+        if subs:
+            rows = [("Keywords", esc(", ".join(label.keywords)) or none_text()), ("Status", esc(label.status)),
+                    ("Labels under it", ", ".join(link(label_href(s), s) for s in subs))]
+            for s in subs:
+                tasks = label_tasks(self.m, s)
+                rows.append((s, "<br>".join(self.task_link(t) + (' <span class="sub">inherited</span>' if inh else "") for t, inh in tasks) or none_text()))
+            return (f'<p class="crumbs">Label</p><h2>{esc(label.name)}</h2>{fields_table(rows)}'
+                    '<p class="note">A label with labels under it is a heading: tasks get one of its labels, not it.</p>')
         tasks = label_tasks(self.m, name)
-        rows = [("Keywords", esc(", ".join(label.keywords)) or none_text()), ("Status", esc(label.status)),
+        parent = self.m.parent_label(name)
+        rows = [*([("Under", link(label_href(parent), parent))] if parent else []),
+                ("Keywords", esc(", ".join(label.keywords)) or none_text()), ("Status", esc(label.status)),
                 ("Tasks", "<br>".join(self.task_link(t) + (' <span class="sub">inherited</span>' if inh else "") for t, inh in tasks) or none_text())]
-        return f'<p class="crumbs">Label</p><h2>{esc(label.name)}</h2>{fields_table(rows)}'
+        return f'<p class="crumbs">{"Label › " + esc(parent) if parent else "Label"}</p><h2>{esc(label.name)}</h2>{fields_table(rows)}'
 
     # ---- capacity ----
     def capacity_detail(self, rows: list[CapacityRow], weeks: list[date], cell: tuple[str, int] | None, unestimated: list[str],

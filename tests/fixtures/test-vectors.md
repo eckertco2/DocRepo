@@ -358,6 +358,20 @@ Made-up versions of what Parse and populate missed in DocRepo's first use (2026-
 | Update | Scaffold is up and insulation is off | Current status "Scaffold is up and insulation is off". |
 | Update | Closed. Mike confirmed he doesn't want extra coverage. | State Closed. Current status "Mike confirmed he doesn't want extra coverage.". |
 
+### Reference fields (release 5.9)
+
+Read with two made-up reference fields in Settings, "Work order #" and "Permit no.": a field's name (without its # or no.), then a number. The first for each field counts. The other sections are read with none.
+
+| Capture type | Content text | Fills |
+|---|---|---|
+| New task | Swap the seal on Pump 3, work order 48213, by Friday. | Title "Swap the seal on Pump 3, work order 48213". Due 2026-10-09. Work order # 48213. |
+| New task | Work order #48213: replace the gasket. | Title "Work order #48213: replace the gasket". Work order # 48213. |
+| New task | Replace the gasket under work order no. 48213, permit 7781. | Title "Replace the gasket under work order no. 48213, permit 7781". Work order # 48213. Permit no. 7781. |
+| New task | Work order: 2026-0142 for the guard rail. | Title "Work order: 2026-0142 for the guard rail". Labels [Safety]. Work order # 2026-0142. |
+| New task | Raise a work order for the crane. | Title "Raise a work order for the crane". |
+| New task | Work orders 4 and 5 are closed. | Title "Work orders 4 and 5 are closed". |
+| Update | Permit no. 7781 is signed off. Work order # 48213 closes Friday. | Current status "Permit no. 7781 is signed off.". Due 2026-10-09. Work order # 48213. Permit no. 7781. |
+
 ### Date phrases
 
 Each phrase on its own, as `findDates` reads it with today = 2026-10-08, a Thursday. A range's first day becomes the Start.

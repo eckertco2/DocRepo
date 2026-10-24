@@ -98,6 +98,8 @@ class Pages:
             rows.append(("Urgent", "Yes"))
         if t.meeting:
             rows.append(("Meeting", "Yes"))
+        if t.plant_event:  # release 5.9, mods log round 2, M0028
+            rows.append(("Plant event", "Yes"))
         if t.recurrence:
             rows.append(("Recurrence", t.recurrence + (f" until {t.repeat_until}" if t.repeat_until else ", no end date")))
         rows += [
@@ -111,6 +113,7 @@ class Pages:
         ]
         if t.reminder:
             rows.append(("Reminder", t.reminder))
+        rows += list(t.references.items())  # its reference fields (release 5.9, M0034)
         on = self.m.agendas_on(t.id)
         if on:
             rows.append(("On agendas", ", ".join(self._target(here, a.target) for a in on)))
@@ -227,7 +230,7 @@ class Pages:
         out += ["", "## People", "", "| Name | Aliases | Hours per week |", "|---|---|---|",
                 *[f"| {_cell(p.name)} | {_cell(', '.join(p.aliases))} | {num(p.hours) if p.hours is not None else 'Not set'} |" for p in m.active_people()]]
         out += ["", "## Labels", "", "| Label | Keywords |", "|---|---|",
-                *[f"| {_cell(label.name)} | {_cell(', '.join(label.keywords))} |" for label in m.active_labels()], ""]
+                *[f"| {_cell(m.label_path(label.name))} | {_cell(', '.join(label.keywords))} |" for label in m.active_labels()], ""]  # a sublabel with its parent
         return "\n".join(out)
 
 

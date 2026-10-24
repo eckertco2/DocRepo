@@ -21,7 +21,7 @@ from docrepo.model import Model
 from docrepo.schedule import is_open
 
 #: The fields Edit selected sets the same on every task. A date set to None is cleared.
-SET_FIELDS = ("state", "due", "deadline", "reminder")
+SET_FIELDS = ("state", "due", "deadline", "reminder", "plant_event")  # Plant event: release 5.9, M0028
 #: Where a label's keywords are looked for, with their names in the list of matches.
 SEARCHED = (("title", "Title"), ("description", "Description"), ("current_status", "Current status"))
 

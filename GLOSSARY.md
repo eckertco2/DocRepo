@@ -38,6 +38,9 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Raw text log**: the corpus of all reference information entered for a task, including the text of its status updates and the content text of all captures associated with that task.
 - **Task description**: the content text of the capture that created the task. There's no separate Description box.
 - **Label**: a category on a task, such as Safety. A task can have several, and subtasks can inherit them.
+- **Parent label**: a label with labels under it (its **sublabels**), such as Production line over Line 1 and Line 2. It's a heading: tasks get its sublabels, not it. Labels nest one level only.
+- **Plant event**: a task with Plant event ticked, such as an outage or a turnaround, which the timeline shades from its Start to its Due so other work can be seen against it.
+- **Reference field**: a field every task has for a number from another system, such as a change record's. Its name is set in Settings.
 - **Routine task**: a task with Recurrence set. Its occurrences aren't checked off one by one, and closing the task ends the recurrence.
 - **Meeting**: any task with Meeting checked, one-off or routine.
 - **Agenda item**: a temporary link that puts a task, or a note with no task, on the agenda of a meeting, another task or a person. It's added with the capture window's Add to agenda option and stays open until it's closed by hand.
@@ -48,7 +51,7 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Quick tasks**: the built-in top-level task that quick tasks wait under until Edit task puts them under their real task. DocRepo makes it the first time it's needed.
 - **Discard**: hiding a task or capture made by mistake, with a reason. Nothing is deleted, and Bring back restores it. It's how DocRepo "deletes" anything.
 - **Scope**: which tasks a view or prompt draws on: this task, with ancestors, with subtasks, or family. Family is all ancestors plus all descendants.
-- **Event**: a dated happening, such as an audit or a turnaround, entered as a task's Deadline. "Event" means nothing else.
+- **Event**: a dated happening, such as an audit or a turnaround, entered as a task's Deadline. "Event" means nothing else, except in "plant event".
 
 ## 3. People and hours
 
@@ -56,6 +59,8 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Lead**: a person driving a task. A task can have several.
 - **Assignee**: a person doing a task's work. A task can have several.
 - **Participants**: a task's leads and assignees together.
+- **Group**: the team a person is in, such as Maintenance. One each, at most; filters and the capacity view can use it.
+- **Role**: what a person does, such as Planner, shown after their name.
 - **Me**: the person marked as DocRepo's owner. "I" and "me" in a capture mean them.
 - **Lead hours, Assignee hours**: estimated hours for each person in that role: a total for a one-time task, per occurrence for a routine one.
 - **Capacity calendar**: hours per person, workday and task, built from task fields. It's a cache that can be rebuilt at any time.

@@ -56,7 +56,7 @@ def load_sample(conn: sqlite3.Connection, data: dict[str, Any] | None = None) ->
             raise SampleError("docs.db already holds data. Load the sample data only into a new, empty data root.")
         for p in data["people"]:
             people.add_person(conn, p["name"], aliases=p["aliases"], hours=p["hours"], added_note=p.get("added"),
-                              status=p["status"], person_id=p["id"])
+                              status=p["status"], person_id=p["id"], email=p.get("email"), group=p.get("group"), role=p.get("role"))
         for label in data["labels"]:
             people.add_label(conn, label["name"], label["keywords"])
         for t in data["tasks"]:

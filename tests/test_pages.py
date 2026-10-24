@@ -79,3 +79,13 @@ def test_days_until_due_on_the_page_follows_today(sample_conn):
     model = Model(sample_conn)
     page = Pages(model, date(2026, 11, 2), SAMPLE_AS_OF).task_page(model.task("T000008"))
     assert "| Due | 2026-10-30 (3 d overdue) |" in page
+
+
+def test_plant_events_and_reference_fields_on_the_page(sample_conn):
+    """Release 5.9 (M0028, M0034): a Plant event row after State, and each reference field after Deadline."""
+    tasks.update_task(sample_conn, Settings(me="P001"), "T000012", at=SAMPLE_AS_OF, via="Browse tool", plant_event=True,
+                      references={"Work order #": "48213"})
+    model = Model(sample_conn)
+    page = Pages(model, TODAY, SAMPLE_AS_OF).task_page(model.task("T000012"))
+    assert "| State | In progress |\n| Plant event | Yes |\n| Parents |" in page
+    assert "| Deadline | None |\n| Work order # | 48213 |\n" in page

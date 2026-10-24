@@ -137,7 +137,9 @@ def search(conn: sqlite3.Connection, model: Model, query: str) -> list[Result]:
     if len("".join(words)) < 2:
         return []
     m, out = model, []
-    tasks = [t for t in m.tasks.values() if not t.discarded and _has_all(words, t.id, t.title, t.description, t.current_status, t.deadline_desc)]
+    # A task's reference fields (release 5.9, M0034) are found too, by their values: "work order 48213" finds Work order # 48213.
+    tasks = [t for t in m.tasks.values() if not t.discarded and _has_all(words, t.id, t.title, t.description, t.current_status, t.deadline_desc,
+                                                                          *(f"{k} {v}" for k, v in t.references.items()))]
     for t in tasks[:LIMIT]:
         out.append(Result("Task", "task", t.id, t.title, f"{t.id} · {t.state}", snippet(f"{t.description}\n{t.current_status}", words)))
     found = [(i, b) for i, b in _indexed(conn, "capture", words) if i in m.captures and not m.captures[i].discarded]
@@ -150,8 +152,10 @@ def search(conn: sqlite3.Connection, model: Model, query: str) -> list[Result]:
         out.append(Result("Document", "doc", d.id, d.name, f"{d.id} · {d.description or d.status}", snippet(_after_title(body), words)))
     for f in [f for f in m.copies if not m.task(f.task).discarded and _has_all(words, f.name)][:LIMIT]:
         out.append(Result("Saved copy", "task", f.task, f.name, f"In {m.task(f.task).title}"))
-    for p in [p for p in m.people.values() if _has_all(words, p.id, p.name, *p.aliases)][:LIMIT]:
-        out.append(Result("Person", "person", p.id, p.name, ", ".join(p.aliases) + (" · retired" if p.status == "retired" else "")))
+    # People by their email, group and role too (release 5.9, M0031, M0033, M0038).
+    for p in [p for p in m.people.values() if _has_all(words, p.id, p.name, *p.aliases, p.email, p.group, p.role)][:LIMIT]:
+        sub = " · ".join(x for x in (", ".join(p.aliases), p.group, p.role) if x)
+        out.append(Result("Person", "person", p.id, p.name, sub + (" · retired" if p.status == "retired" else "")))
     for lb in [lb for lb in m.labels if _has_all(words, lb.name, *lb.keywords)][:LIMIT]:
         out.append(Result("Label", "label", lb.name, lb.name, "Keywords: " + ", ".join(lb.keywords)))
     return out

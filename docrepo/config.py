@@ -132,6 +132,9 @@ class Settings:
     capacity_horizon_years: int = 5
     workdays: list[str] = field(default_factory=lambda: ["Mon", "Tue", "Wed", "Thu", "Fri"])
     event_words: list[str] = field(default_factory=lambda: ["turnaround", "shutdown", "audit", "inspection", "outage", "walkthrough"])
+    #: Reference fields every task has (mods log round 2, M0034, release 5.9), such as a change record's number. Named
+    #: here, never in the code, so DocRepo names no company system.
+    reference_fields: list[str] = field(default_factory=list)
 
     @classmethod
     def load(cls, data_root: Path) -> Settings:

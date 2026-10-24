@@ -17,7 +17,7 @@ import logging
 import re
 import sqlite3
 from collections.abc import Callable
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -70,14 +70,16 @@ from docrepo.ui.task_forms import BulkEditDialog, LabelMatchDialog, TaskEditDial
 from docrepo.ui.task_picker import TaskPicker
 from docrepo.ui.timeline_view import TimelineView
 from docrepo.ui.keymap import KeyMapDialog
+from docrepo.timeline import bands as timeline_bands
 from docrepo.ui.tree_view import DIM_ROLE, GREY, HTML_ROLE, KEY_ROLE, RowTree, tint
-from docrepo.ui.widgets import SAVE_KEYS, CheckMenuButton, FlowLayout, Option, label_options, people_options
+from docrepo.ui.widgets import SAVE_KEYS, CheckMenuButton, FlowLayout, Option, label_filter, label_options, people_filter, people_options
 from docrepo.views import (
     LIST_IDS,
     SORTS,
     TASK_VIEWS,
     VIEW_IDS,
     VIEWS,
+    CapacityRow,
     Node,
     TreeFilter,
     agenda_groups,
@@ -158,6 +160,7 @@ class BrowseWindow(QWidget):
         self.tree_filter = {"parked": False, "closed": False, "routine": True, "labels": [], "people": []}
         #: Each task view's sort order (views.SORTS); "default" is its own order.
         self.sorts: dict[str, str] = {}
+        self.list_groups: dict[str, str] = {}  # each list's Group by: a parent label (release 5.9)
         #: Select mode (mods log round 1, M0009): tick boxes on the task tree's and the lists' rows, for Edit selected.
         self.selecting = False
         self.ticked: set[str] = set()
@@ -337,6 +340,11 @@ class BrowseWindow(QWidget):
             b.clicked.connect(lambda _=False, s=step: self._move_capacity(s))
             nav.addWidget(b)
         nav.addStretch()
+        # Release 5.9: people under their groups' headings (M0033). A week with a plant event says so at its top (M0028).
+        self.cap_by_group = QCheckBox("Group by group")
+        self.cap_by_group.setToolTip("Put people under their groups' headings")
+        self.cap_by_group.toggled.connect(lambda _: self.render_capacity())
+        nav.addWidget(self.cap_by_group)
         self.cap_table = QTableWidget()
         self.cap_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.cap_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -692,10 +700,12 @@ class BrowseWindow(QWidget):
         self._check("Show closed", f["closed"], lambda on: self._set_filter("closed", on))
         self._check("Show routine", f["routine"], lambda on: self._set_filter("routine", on), "Recurring tasks, such as meetings, and their subtasks")
         # Several labels and people at once (mods log round 1, M0018): a task matches with any of each.
-        labels = CheckMenuButton("Labels", "any", [(lb.name, lb.name) for lb in m.active_labels()], f["labels"])
+        # A parent label ticks its sublabels, and a group its people (release 5.9).
+        choices, sets = label_filter(m)
+        labels = CheckMenuButton("Labels", "any", choices, f["labels"], sets)
         labels.chosen.connect(lambda values: self._set_filter("labels", values))
         self._filter_widget(labels)
-        people_button = CheckMenuButton("People", "anyone", [(p.name, p.id) for p in m.active_people()], f["people"])
+        people_button = CheckMenuButton("People", "anyone", people_filter(m)[0], f["people"], people_filter(m)[1])
         people_button.chosen.connect(lambda values: self._set_filter("people", values))
         people_button.setToolTip(people_button.toolTip() or "Tasks any of the ticked people lead or are assigned")
         self._filter_widget(people_button)
@@ -807,8 +817,12 @@ class BrowseWindow(QWidget):
         self.tree.set_columns(["Title", "State", "Reminder" if reminders else "Due", ""] if reminders else ["Title", "State", "Due"],
                               [0, 96, 96, 56] if reminders else None)
         self._sort_box(view_id)
+        grouped = self._group_box(view_id)
         self._select_controls()
         nodes = sort_tree(m, list_tree(m, task_list, self.today(), self.ctx.settings.me), self.sorts.get(view_id, "default"), self.today())
+        if grouped:  # under each sublabel's heading (release 5.9, M0051)
+            self._grouped_list(view_id, grouped, nodes)
+            return
 
         def row(n: Node) -> tuple[list[str], str]:
             if not n.match:
@@ -828,6 +842,53 @@ class BrowseWindow(QWidget):
                     b.clicked.connect(lambda _=False, tid=key[1]: self.clear_reminder(tid))
                     self.tree.setItemWidget(item, 3, b)
         if not nodes:
+            self.tree.add_row(None, None, ['<span class="sub">Nothing here right now.</span>'], selectable=False, span=True)
+
+    def _group_box(self, view_id: str) -> str | None:
+        """The lists' Group by (release 5.9, M0051): a parent label, putting each task under its sublabel's heading. Shown
+        when there's a parent label. Returns the parent label picked, if any."""
+        m = self.model()
+        parents = [lb.name for lb in m.active_labels() if m.is_parent_label(lb.name)]
+        if not parents:
+            return None
+        box = QComboBox()
+        box.setAccessibleName("Group by")
+        box.addItem("No grouping", "")
+        for name in parents:
+            box.addItem(f"Group by {name}", name)
+        picked = self.list_groups.get(view_id, "")
+        box.setCurrentIndex(max(0, box.findData(picked)))
+        box.setToolTip("Put each task under its sublabel's heading")
+        box.currentIndexChanged.connect(lambda _: self._set_list_group(view_id, box.currentData()))
+        self._filter_widget(box)
+        return picked if picked in parents else None
+
+    def _set_list_group(self, view_id: str, parent: str) -> None:
+        self.list_groups[view_id] = parent
+        self.render_list()
+
+    def _grouped_list(self, view_id: str, parent: str, nodes: list[Node]) -> None:
+        """A list grouped by a parent label: its matching tasks under each sublabel, then "No …" last."""
+        m = self.model()
+        order: list[str] = []
+
+        def walk(ns: list[Node]) -> None:
+            for n in ns:
+                if n.match and n.id not in order:
+                    order.append(n.id)
+                walk(n.children)
+
+        walk(nodes)
+        subs = m.sublabels(parent)
+        grey = QColor(GREY).lighter(135)
+        for name, ids in [*((s, [x for x in order if any(n == s for n, _ in m.labels_of(x))]) for s in subs),
+                          (f"No {parent.lower()}", [x for x in order if not any(n in subs for n, _ in m.labels_of(x))])]:
+            if not ids:
+                continue
+            self.tree.add_row(None, None, [f"<b>{esc(name)}</b> &nbsp;<span class=\"sub\">{len(ids)}</span>"], grey, selectable=False, span=True)
+            for x in ids:
+                self.tree.add_row(None, ("task", x), self._task_cells(x, 0), tip=full_path(m, x))
+        if not order:
             self.tree.add_row(None, None, ['<span class="sub">Nothing here right now.</span>'], selectable=False, span=True)
 
     def _matching(self, task_list):
@@ -1039,14 +1100,16 @@ class BrowseWindow(QWidget):
         self._set_head("People", "Stored in docs.db. Tasks store a person's ID, so renaming someone changes nothing else.")
         self._check("Show retired", self.retired["people"], lambda on: self._set_retired("people", on))
         self._button("Add person", self.add_person)
-        self.tree.set_columns(["Name", "Aliases", "Hours a week", "Open tasks"], [0, 140, 90, 76])
+        # Group and role (mods log round 2, M0033, M0038): the aliases go under the name.
+        self.tree.set_columns(["Name", "Group", "Role", "Hours a week", "Open tasks"], [0, 120, 130, 90, 76])
         for p in m.people.values():
             if p.status != "active" and not self.retired["people"]:
                 continue
             chips = (" " + chip("me", "st-ip") if p.id == self.ctx.settings.me else "") + (" " + chip("retired", "st-cl") if p.status == "retired" else "") + \
                 (" " + chip("new", "new") if p.added_note else "")
+            aliases = f'<br><span class="sub">{esc(", ".join(p.aliases))}</span>' if p.aliases else ""
             count = open_count(m, lambda t, pid=p.id: pid in (*t.leads, *t.assignees))
-            self.tree.add_row(None, ("person", p.id), [esc(p.name) + chips, esc(", ".join(p.aliases)),
+            self.tree.add_row(None, ("person", p.id), [esc(p.name) + chips + aliases, esc(p.group or ""), esc(p.role or ""),
                                                         f'<p align="right">{"–" if p.hours is None else f"{p.hours:g}"}</p>', f'<p align="right">{count}</p>'])
 
     def _labels_view(self) -> None:
@@ -1055,12 +1118,22 @@ class BrowseWindow(QWidget):
         self._check("Show retired", self.retired["labels"], lambda on: self._set_retired("labels", on))
         self._button("Add label", self.add_label)
         self.tree.set_columns(["Label", "Keywords", "Open tasks"], [0, 200, 76])
-        for lb in m.labels:
+
+        def add(lb, parent_item=None):
             if lb.status != "active" and not self.retired["labels"]:
-                continue
-            count = open_count(m, lambda t, name=lb.name: any(n == name for n, _ in m.labels_of(t.id)))
+                return
+            # A parent label (release 5.9, M0051) counts the open tasks with any of its sublabels.
+            names = {lb.name, *m.sublabels(lb.name, active=False)}
+            count = open_count(m, lambda t, ns=names: any(n in ns for n, _ in m.labels_of(t.id)))
             retired = " " + chip("retired", "st-cl") if lb.status == "retired" else ""
-            self.tree.add_row(None, ("label", lb.name), [esc(lb.name) + retired, esc(", ".join(lb.keywords)), f'<p align="right">{count}</p>'])
+            item = self.tree.add_row(parent_item, ("label", lb.name), [esc(lb.name) + retired, esc(", ".join(lb.keywords)), f'<p align="right">{count}</p>'])
+            for sub in (x for x in m.labels if x.parent == lb.id):
+                add(sub, item)
+            item.setExpanded(True)
+
+        for lb in m.labels:
+            if lb.parent is None or not any(x.id == lb.parent for x in m.labels):
+                add(lb)
 
     def _set_retired(self, which: str, on: bool) -> None:
         self.retired[which] = on
@@ -1110,13 +1183,44 @@ class BrowseWindow(QWidget):
         m, today = self.model(), self.today()
         weeks = capacity_weeks(today, self.cap_offset)
         rows = capacity_grid(self.conn, m, weeks)
+        # Grouped (release 5.9): each group's people under its heading, then those with no group.
+        lines: list[CapacityRow | str] = list(rows)
+        if self.cap_by_group.isChecked():
+            group_of = {p.id: p.group or "" for p in m.people.values()}
+            lines = []
+            for g in [*m.groups(), ""]:
+                members = [r for r in rows if group_of.get(r.person, "") == g]
+                if members:
+                    lines += [g or "No group", *members]
         t = self.cap_table
         t.clear()
-        t.setRowCount(len(rows))
+        t.clearSpans()
+        t.setRowCount(len(lines))
         t.setColumnCount(len(weeks) + 1)
-        t.setHorizontalHeaderLabels(["Person", *[short(w, today) for w in weeks]])
+        # A week with a plant event names it under its date (M0028).
+        bands = timeline_bands(m, weeks[0], weeks[-1] + timedelta(days=7))
+        heads = []
+        for w in weeks:
+            names = [b.title for b in bands if b.start <= w + timedelta(days=6) and b.end >= w]
+            heads.append(short(w, today) + ("\n" + ", ".join(names) if names else ""))
+        t.setHorizontalHeaderLabels(["Person", *heads])
+        for i, w in enumerate(weeks):
+            if "\n" in heads[i]:
+                t.horizontalHeaderItem(i + 1).setBackground(QColor("#f3e6cc"))
+                t.horizontalHeaderItem(i + 1).setToolTip("A plant event this week: " + heads[i].split("\n", 1)[1])
         colours = {"u1": "#e2f2e6", "u2": "#fcefcf", "u3": "#fbe3e1"}
-        for r, row in enumerate(rows):
+        self._cap_line_rows = lines
+        for r, row in enumerate(lines):
+            if isinstance(row, str):  # a group's heading
+                head = QTableWidgetItem(row)
+                f = head.font()
+                f.setBold(True)
+                head.setFont(f)
+                head.setBackground(QColor(GREY).lighter(135))
+                head.setFlags(Qt.ItemFlag.ItemIsEnabled)
+                t.setItem(r, 0, head)
+                t.setSpan(r, 0, 1, len(weeks) + 1)
+                continue
             head = QTableWidgetItem(f"{row.name}\n{'%g h a week' % row.hours_a_week if row.hours_a_week else 'Hours not set'}")
             t.setItem(r, 0, head)
             for i, c in enumerate(row.cells):
@@ -1136,9 +1240,10 @@ class BrowseWindow(QWidget):
         self.cap_detail.setHtml(self.pages().capacity_detail(rows, weeks, self.cap_cell, unestimated, unscheduled))
 
     def _capacity_clicked(self, row: int, column: int) -> None:
-        if column == 0 or row >= len(self._cap_rows):
+        lines = getattr(self, "_cap_line_rows", self._cap_rows)
+        if column == 0 or row >= len(lines) or isinstance(lines[row], str):
             return
-        self.cap_cell = (self._cap_rows[row].person, column - 1)
+        self.cap_cell = (lines[row].person, column - 1)
         self.render_capacity()
 
     def _move_capacity(self, step: int) -> None:
@@ -1264,6 +1369,16 @@ class BrowseWindow(QWidget):
         edit.addSeparator()
         edit.addAction("Discard…", lambda: self.discard_task(task_id))
         self._action("Edit", tip="Edit any of its fields, move it in the tree, or discard it if it was made by mistake", menu=edit)
+        # Copy (release 5.9): its people's email addresses, for Outlook's To box (M0031), and each reference field (M0034).
+        t = m.task(task_id)
+        copy = QMenu(self)
+        people_ids = [*t.leads, *t.assignees]
+        if any(m.people[p].email for p in people_ids if p in m.people):
+            copy.addAction("Emails of its lead and assignees", lambda: self.copy_emails(people_ids))
+        for name, value in t.references.items():
+            copy.addAction(f"{name} {value}", lambda n=name: self.copy_reference(task_id, n))
+        if copy.actions():
+            self._action("Copy", tip="Copy its people's email addresses or a reference field", menu=copy)
         self.summary_type = QComboBox()
         self.summary_type.setAccessibleName("Summary type")
         self.summary_type.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
@@ -1307,6 +1422,8 @@ class BrowseWindow(QWidget):
     def _person_actions(self, person_id: str) -> None:
         p = self.model().people[person_id]
         self._action("Edit…", lambda: self.edit_person(person_id))
+        if p.email:
+            self._action("Copy email", lambda: self.copy_emails([person_id]), "Copy their address. DocRepo never sends email.")
         if p.status == "active":
             self._action("Retire", lambda: self.set_person_status(person_id, "retired"), "Hide this person from pickers and lists. Nothing is deleted.",
                          person_id != self.ctx.settings.me)
@@ -1774,6 +1891,24 @@ class BrowseWindow(QWidget):
         QGuiApplication.clipboard().setText(text)
         self.say(f"Agenda copied ({len(text)} characters).")
 
+    def copy_emails(self, person_ids: list[str]) -> None:
+        """Copy email addresses, for Outlook's To box (mods log round 2, M0031). DocRepo never sends email."""
+        m = self.model()
+        found = [m.people[p].email for p in dict.fromkeys(person_ids) if p in m.people and m.people[p].email]
+        missing = [m.people[p].name for p in dict.fromkeys(person_ids) if p in m.people and not m.people[p].email]
+        if not found:
+            self.say("No email address is set" + (f" for {', '.join(missing)}." if missing else "."), error=True)
+            return
+        QGuiApplication.clipboard().setText("; ".join(found))
+        self.say(f"Copied {len(found)} email address{'es' if len(found) > 1 else ''}. Paste into Outlook's To box."
+                 + (f" No address set for {', '.join(missing)}." if missing else ""))
+
+    def copy_reference(self, task_id: str, name: str) -> None:
+        """Copy a reference field's value (mods log round 2, M0034)."""
+        value = self.model().task(task_id).references.get(name, "")
+        QGuiApplication.clipboard().setText(value)
+        self.say(f"Copied {name} {value}.")
+
     def copy_link(self, document_id: str) -> None:
         """Put a link's address on the clipboard. DocRepo only copies links; it never opens one (round 1 plan, decision 5)."""
         d = self.model().documents.get(document_id)
@@ -1807,7 +1942,8 @@ class BrowseWindow(QWidget):
         if task_id not in self.model().tasks:
             return
         dialog = TaskEditDialog(self, self.model(), task_id, self._label_options, self._people_options,
-                                lambda anchor, picked: self._pick_task(anchor, picked, None))
+                                lambda anchor, picked: self._pick_task(anchor, picked, None),
+                                reference_fields=self.ctx.settings.reference_fields, today=self.today())
         if self.run_dialog(dialog):
             self.save_task_edit(task_id, dialog.values())
 
@@ -1867,21 +2003,25 @@ class BrowseWindow(QWidget):
 
     # ---- people and labels ----
     def add_person(self) -> None:
-        dialog = PersonDialog(self, new=True)
-        if dialog.exec():
-            self.save_person(None, *dialog.values())
+        dialog = PersonDialog(self, new=True, groups=self.model().groups())
+        if self.run_dialog(dialog):
+            self.save_person(None, *dialog.values(), **dialog.details())
 
     def edit_person(self, person_id: str) -> None:
         p = self.model().people[person_id]
-        dialog = PersonDialog(self, p.name, p.aliases, p.hours)
-        if dialog.exec():
-            self.save_person(person_id, *dialog.values())
+        dialog = PersonDialog(self, p.name, p.aliases, p.hours, email=p.email, group=p.group, role=p.role, groups=self.model().groups())
+        if self.run_dialog(dialog):
+            self.save_person(person_id, *dialog.values(), **dialog.details())
 
-    def save_person(self, person_id: str | None, name: str, aliases: list[str], hours: float | None) -> None:
+    def save_person(self, person_id: str | None, name: str, aliases: list[str], hours: float | None,
+                    email: str | None = None, group: str | None = None, role: str | None = None) -> None:
+        """Save a person. ``email``, ``group`` and ``role`` (release 5.9): None leaves them as they are, "" clears them."""
+        details = {k: v for k, v in (("email", email), ("group", group), ("role", role)) if v is not None}
+
         def change():
-            pid = person_id or people.add_person(self.conn, name, aliases=aliases, hours=hours)
+            pid = person_id or people.add_person(self.conn, name, aliases=aliases, hours=hours, **details)
             if person_id:
-                people.update_person(self.conn, person_id, name=name, aliases=aliases, hours=hours)
+                people.update_person(self.conn, person_id, name=name, aliases=aliases, hours=hours, **details)
             out = edits.Outcome(f"Saved {name} ({pid}).")
             edits.write_all_pages(self.conn, self.ctx.data_root, self.ctx.fs, self._now(), out.problems)
             self._saved_person = pid
@@ -1900,26 +2040,34 @@ class BrowseWindow(QWidget):
             return edits.Outcome(f"{name} is {'retired: hidden from pickers and lists' if status == 'retired' else 'active again'}.")
         self._do(change)
 
+    def _parent_choices(self) -> list[str]:
+        """The labels another can go under: active ones that aren't under one themselves (one level, mods log round 2, M0051)."""
+        return [lb.name for lb in self.model().active_labels() if lb.parent is None]
+
     def add_label(self) -> None:
-        dialog = LabelDialog(self, new=True)
-        if dialog.exec():
-            self.save_label(None, *dialog.values())
+        dialog = LabelDialog(self, new=True, parents=self._parent_choices())
+        if self.run_dialog(dialog):
+            self.save_label(None, *dialog.values(), under=dialog.under())
 
     def edit_label(self, name: str) -> None:
-        label = next(lb for lb in self.model().labels if lb.name == name)
-        dialog = LabelDialog(self, label.name, label.keywords)
-        if dialog.exec():
-            self.save_label(name, *dialog.values())
+        m = self.model()
+        label = m.label(name)
+        dialog = LabelDialog(self, label.name, label.keywords, under=m.parent_label(name), parents=self._parent_choices(),
+                             has_sublabels=m.is_parent_label(name))
+        if self.run_dialog(dialog):
+            self.save_label(name, *dialog.values(), under=dialog.under())
 
-    def save_label(self, old_name: str | None, name: str, keywords: list[str]) -> None:
-        """Save a label. A new label, or new keywords, then lists the open tasks that mention them (mods log round 1, M0014)."""
+    def save_label(self, old_name: str | None, name: str, keywords: list[str], under: str | None | object = ...) -> None:
+        """Save a label. A new label, or new keywords, then lists the open tasks that mention them (mods log round 1, M0014).
+        ``under`` (release 5.9): the label it goes under, None for none; left out, it stays where it is."""
         before = next((lb.keywords for lb in self.model().labels if lb.name == old_name), None) if old_name else None
 
         def change():
             if old_name:
-                people.update_label(self.conn, old_name, new_name=name if name != old_name else None, keywords=keywords)
+                people.update_label(self.conn, old_name, new_name=name if name != old_name else None, keywords=keywords,
+                                    **({} if under is ... else {"parent": under}))
             else:
-                people.add_label(self.conn, name, keywords)
+                people.add_label(self.conn, name, keywords, parent=None if under is ... else under)
             out = edits.Outcome(f"Saved the label {name}.")
             edits.write_all_pages(self.conn, self.ctx.data_root, self.ctx.fs, self._now(), out.problems)
             return out

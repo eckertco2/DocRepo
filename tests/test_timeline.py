@@ -12,7 +12,7 @@ from PySide6.QtCore import QPointF, Qt  # noqa: E402
 from PySide6.QtGui import QMouseEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from docrepo import timeline  # noqa: E402
+from docrepo import people, tasks, timeline  # noqa: E402
 from docrepo.config import Settings  # noqa: E402
 from docrepo.model import Model  # noqa: E402
 from docrepo.ui.browse_window import BrowseWindow  # noqa: E402
@@ -63,6 +63,39 @@ def test_grouped_by_top_level_task(sample_conn):
     later = timeline.build(m, date(2026, 10, 20), timeline.default_start(date(2026, 10, 20)), 9)
     assert [r.task for g in later.groups for r in g.rows if r.late] == ["T000012", "T000019", "T000017"]  # due 14, 9 and 16 Oct, still open
     assert "Lead: Me\nAssignees: Tom Becker, Mike Ortiz" in timeline.tooltip(m, "T000008", TODAY)
+
+
+def test_plant_events_are_bands_and_name_the_dates_in_them(sample_conn):
+    """Release 5.9 (M0028): a plant event is shaded down the whole chart, whatever the filters, and a date inside one
+    is named under the dates where they're picked."""
+    event = tasks.create_task(sample_conn, Settings(me="P001"), title="Spring outage", at=datetime(2026, 10, 8, 9, 0), created_by="Excel import",
+                              start="2026-11-03", due="2026-11-14", plant_event=True)
+    m = Model(sample_conn)
+    tl = timeline.build(m, TODAY, timeline.default_start(TODAY), 9, labels=("Safety",))
+    assert tl.events == (timeline.Band(event, "Spring outage", date(2026, 11, 3), date(2026, 11, 14)),)
+    assert timeline.bands(m, date(2026, 9, 28), date(2026, 11, 3)) == ()
+    tasks.update_task(sample_conn, Settings(me="P001"), event, at=datetime(2026, 10, 8, 9, 0), via="Browse tool", recurrence="Monthly")
+    assert [b.start for b in timeline.bands(Model(sample_conn), date(2026, 11, 1), date(2027, 1, 1))] == [date(2026, 11, 3), date(2026, 12, 3)]
+    assert timeline.during(m, date(2026, 11, 14)).task == event and timeline.during(m, date(2026, 11, 15)) is None
+    assert timeline.during(m, date(2026, 11, 5), event) is None  # its own dates don't count
+    assert (timeline.during_text(m, [("Start", "2026-10-30"), ("Due", "2026-11-06"), ("Deadline", "not a date")], TODAY)
+            == "Due falls during Spring outage, Tue 3 Nov to Sat 14 Nov.")
+
+
+def test_grouped_by_group_or_by_a_parent_label(sample_conn):
+    """Release 5.9: by the people's groups (M0033), or under each sublabel of a parent label (M0051)."""
+    people.add_label(sample_conn, "Production line")
+    for name in ("Line 1", "Line 2"):
+        people.update_label(sample_conn, name, parent="Production line")
+    m = Model(sample_conn)
+    assert timeline.group_choices(m)[3:] == [("group", "group"), ("parent:Production line", "Production line")]
+    start = timeline.default_start(TODAY)
+    by_group = timeline.build(m, TODAY, start, 9, "group", people=("P005",))
+    assert rows(by_group) == [("Engineering", ["T000019"]), ("Purchasing", ["T000019"])]  # under each of its people's groups
+    assert [g.name for g in timeline.build(m, TODAY, start, 9, "group").groups] == ["Engineering", "Maintenance", "Purchasing", "No group"]
+    lines = timeline.build(m, TODAY, start, 9, "parent:Production line")
+    assert [g.name for g in lines.groups] == ["Line 1", "No production line"]
+    assert rows(timeline.build(m, TODAY, start, 9, "parent:Production line", labels=("Line 1",)))[0][1][:2] == ["T000001", "T000009"]
 
 
 def test_grouped_by_label_or_person_and_filtered(sample_conn):

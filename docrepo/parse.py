@@ -89,6 +89,7 @@ class ParseResult:
     assignees: list[Who] = field(default_factory=list)
     lead_hours: str = ""
     assignee_hours: str = ""
+    refs: dict[str, str] = field(default_factory=dict)  # reference field name: value (release 5.9)
     found: list[Found] = field(default_factory=list)
 
 
@@ -1002,8 +1003,10 @@ URGENT = re.compile(r"\b(?:urgent(?:ly)?|asap|immediately|right away|as soon as 
 NOT_URGENT = re.compile(r"\b(?:not|no|non|nothing|isn['’]t|wasn['’]t|never|less)\s*-?\s*(?:that\s+|very\s+|too\s+|so\s+)?\Z", I)
 #: The order fields are listed in, in what Parse and populate found.
 FIELD_ORDER = ("title", "state", "status", "due", "deadline", "deadline_desc", "reminder", "start", "recurrence", "urgent", "labels",
-               "leads", "assignees", "lead_hours", "assignee_hours")
-UPDATE_KEYS = ("state", "status", "due", "deadline", "deadline_desc")
+               "leads", "assignees", "lead_hours", "assignee_hours", "refs")
+UPDATE_KEYS = ("state", "status", "due", "deadline", "deadline_desc", "refs")
+#: A reference field's name without its "#" or "no." (release 5.9): "Work order #" is found as "work order 48213".
+REF_SUFFIX = re.compile(r"\s*(?:#|no\.?|number)\s*\Z", I)
 NEW_TASK_KEYS = tuple(k for k in FIELD_ORDER if k != "status")
 
 
@@ -1019,12 +1022,13 @@ class Known:
 
 def parse_capture(
     content: str, capture_type: str, today: date, people: Sequence[ParsePerson], labels: Sequence[ParseLabel],
-    events: Sequence[str] = EVENT_WORDS, known: Known = Known(),
+    events: Sequence[str] = EVENT_WORDS, known: Known = Known(), refs: Sequence[str] = (),
 ) -> ParseResult:
     """Read the content text and return the values for one capture type, "new_task" or "update".
 
     ``found`` lists each value with the phrase it came from, for the window to show
     before Save. A new task's description is its content text, so there's none to fill.
+    ``refs`` are the reference fields' names, from Settings (release 5.9).
     """
     r = ParseResult()
     names = {p.id: p.name for p in people}
@@ -1198,6 +1202,14 @@ def parse_capture(
                 r.labels.append(label.name)
                 note("labels", "Label", label.name, m.group(0))
                 break
+    # Reference fields (release 5.9, mods log round 2, M0034): a field's name, then a number. "Work order #" reads
+    # "work order 48213", "Work order #48213" and "work order no. 48213"; the first for each field counts.
+    for name in refs:
+        base = REF_SUFFIX.sub("", name).strip()
+        m = re.search(rf"(?<!\w){esc(base)}\s*(?:#|no\.?|number)?\s*[:#-]?\s*(\d(?:[\w-]*\w)?)", text, I) if base else None
+        if m:
+            r.refs[name] = m.group(1)
+            note("refs", name, m.group(1), m.group(0))
     found_people = find_people(text, people)
     r.leads, r.assignees = found_people.leads, found_people.assignees
 

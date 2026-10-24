@@ -7,7 +7,10 @@
       "me": true,
       "aliases": [],
       "hours": 40,
-      "status": "active"
+      "status": "active",
+      "email": "me@example.com",
+      "group": "Engineering",
+      "role": "Project engineer"
     },
     {
       "id": "P002",
@@ -17,7 +20,10 @@
         "PS"
       ],
       "hours": 40,
-      "status": "active"
+      "status": "active",
+      "email": "priya.shah@example.com",
+      "group": "Engineering",
+      "role": "Reliability engineer"
     },
     {
       "id": "P003",
@@ -27,7 +33,10 @@
         "Thomas"
       ],
       "hours": 40,
-      "status": "active"
+      "status": "active",
+      "email": "tom.becker@example.com",
+      "group": "Maintenance",
+      "role": "Planner"
     },
     {
       "id": "P004",
@@ -37,7 +46,10 @@
         "Michael"
       ],
       "hours": 32,
-      "status": "active"
+      "status": "active",
+      "email": "mike.ortiz@example.com",
+      "group": "Maintenance",
+      "role": "Millwright"
     },
     {
       "id": "P005",
@@ -47,7 +59,10 @@
         "Tyler N."
       ],
       "hours": 40,
-      "status": "active"
+      "status": "active",
+      "email": "tyler.nguyen@example.com",
+      "group": "Purchasing",
+      "role": "Buyer"
     },
     {
       "id": "P006",

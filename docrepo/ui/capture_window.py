@@ -60,7 +60,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo import diagnose, items, outlook
+from docrepo import diagnose, items, outlook, timeline
 from docrepo.db import RECURRENCES, STATES
 from docrepo.extract import extract_text, to_unc
 from docrepo.layer0 import size_text
@@ -84,7 +84,7 @@ from docrepo.save import (
 )
 from docrepo.schedule import is_open, start_of
 from docrepo.ui.context import AppContext
-from docrepo.ui.items_panel import AgendaPanel, ItemCards, OperatorHighlighter, RefPopup, where_text
+from docrepo.ui.items_panel import AgendaPanel, ItemCards, OperatorHighlighter, RefPopup, _drop, where_text
 from docrepo.ui.keymap import KeyMapDialog
 from docrepo.ui.mods_panel import ModsPanel
 from docrepo.ui.rich_edit import FormatBar, RichEdit
@@ -570,16 +570,17 @@ class CaptureWindow(QWidget):
         g.addLayout(grid)
         self.n_deadline_desc = QLineEdit()
         g.addWidget(field("Deadline description", self.n_deadline_desc, "deadlineDesc"))
+        self.n_during = self._during_label(g)
         flags = QHBoxLayout()
-        self.n_urgent, self.n_meeting = QCheckBox("Urgent"), QCheckBox("Meeting")
-        for box, key in ((self.n_urgent, "urgent"), (self.n_meeting, "meeting")):
+        self.n_urgent, self.n_meeting, self.n_plant = QCheckBox("Urgent"), QCheckBox("Meeting"), QCheckBox("Plant event")
+        for box, key in ((self.n_urgent, "urgent"), (self.n_meeting, "meeting"), (self.n_plant, "plantEvent")):
             flags.addWidget(box)
             note = QLabel()
             flags.addWidget(InfoButton(key, note))
             g.addWidget(note)
         flags.addStretch()
         g.addLayout(flags)
-        self.n_more_button = QPushButton("More fields: state, start, reminder, recurrence and hours ▸", objectName="moreLink")
+        self.n_more_button = QPushButton("More fields ▸", objectName="moreLink")
         self.n_more_button.clicked.connect(lambda: self._toggle_more(self.n_more, self.n_more_button))
         g.addWidget(self.n_more_button)
         self.n_more = QWidget()
@@ -599,13 +600,16 @@ class CaptureWindow(QWidget):
         more.addWidget(self.n_repeat_field, 2, 0)
         more.addWidget(field("Lead hours", self.n_lead_hours, "hours"), 3, 0)
         more.addWidget(field("Assignee hours", self.n_asg_hours), 3, 1)
+        self.n_refs_grid = QGridLayout()  # the reference fields' boxes (release 5.9), built by _sync_refs
+        more.addLayout(self.n_refs_grid, 4, 0, 1, 2)
+        self.n_refs: dict[str, QLineEdit] = {}
         self.n_more.hide()
         g.addWidget(self.n_more)
         self.lower_layout.addWidget(self.new_group)
         self._watch("new", {"due": self.n_due, "deadline": self.n_deadline, "deadline_desc": self.n_deadline_desc, "urgent": self.n_urgent,
-                            "meeting": self.n_meeting, "state": self.n_state, "start": self.n_start, "reminder": self.n_reminder,
-                            "recurrence": self.n_recurrence, "repeat_until": self.n_repeat, "lead_hours": self.n_lead_hours,
-                            "assignee_hours": self.n_asg_hours})
+                            "meeting": self.n_meeting, "plant_event": self.n_plant, "state": self.n_state, "start": self.n_start,
+                            "reminder": self.n_reminder, "recurrence": self.n_recurrence, "repeat_until": self.n_repeat,
+                            "lead_hours": self.n_lead_hours, "assignee_hours": self.n_asg_hours})
 
     def _build_update_fields(self) -> None:
         self.upd_group = QGroupBox()
@@ -625,7 +629,8 @@ class CaptureWindow(QWidget):
         grid2.addWidget(field("Deadline", self.u_deadline, "deadline"), 0, 0)
         grid2.addWidget(field("Deadline description", self.u_deadline_desc, "deadlineDesc"), 0, 1)
         g.addLayout(grid2)
-        self.u_more_button = QPushButton("More fields: people, hours, start, reminder, recurrence, urgent and meeting ▸", objectName="moreLink")
+        self.u_during = self._during_label(g)
+        self.u_more_button = QPushButton("More fields ▸", objectName="moreLink")
         self.u_more_button.clicked.connect(lambda: self._toggle_more(self.u_more, self.u_more_button))
         g.addWidget(self.u_more_button)
         self.u_more = QWidget()
@@ -637,15 +642,18 @@ class CaptureWindow(QWidget):
         self.u_start, self.u_reminder, self.u_repeat = DateField(), DateField(), DateField()
         self.u_recurrence = QComboBox()
         self.u_recurrence.addItems(["No recurrence", *RECURRENCES])
-        self.u_urgent, self.u_meeting = QCheckBox("Urgent"), QCheckBox("Meeting")
+        self.u_urgent, self.u_meeting, self.u_plant = QCheckBox("Urgent"), QCheckBox("Meeting"), QCheckBox("Plant event")
         self.u_repeat_field = field("Repeat until", self.u_repeat, "repeatUntil")
         cells = [(field("Lead", self.u_leads, "leads"), 0, 0), (field("Assignees", self.u_assignees, "assignees"), 0, 1),
                  (field("Lead hours", self.u_lead_hours, "hours"), 1, 0), (field("Assignee hours", self.u_asg_hours), 1, 1),
                  (field("Start", self.u_start, "start"), 2, 0), (field("Reminder", self.u_reminder, "reminder"), 2, 1),
                  (field("Recurrence", self.u_recurrence, "recurrence"), 3, 0), (self.u_repeat_field, 3, 1),
-                 (self.u_urgent, 4, 0), (self.u_meeting, 4, 1)]
+                 (self.u_urgent, 4, 0), (self.u_meeting, 4, 1), (self.u_plant, 5, 0)]
         for w, r, c in cells:
             more.addWidget(w, r, c)
+        self.u_refs_grid = QGridLayout()  # the reference fields' boxes (release 5.9), built by _sync_refs
+        more.addLayout(self.u_refs_grid, 6, 0, 1, 2)
+        self.u_refs: dict[str, QLineEdit] = {}
         self.u_more.hide()
         g.addWidget(self.u_more)
         self.changes_label = QLabel(objectName="hint")
@@ -655,9 +663,51 @@ class CaptureWindow(QWidget):
         self._watch("upd", {"state": self.u_state, "current_status": self.u_status, "due": self.u_due, "deadline": self.u_deadline,
                             "deadline_desc": self.u_deadline_desc, "lead_hours": self.u_lead_hours, "assignee_hours": self.u_asg_hours,
                             "start": self.u_start, "reminder": self.u_reminder, "recurrence": self.u_recurrence, "repeat_until": self.u_repeat,
-                            "urgent": self.u_urgent, "meeting": self.u_meeting})
+                            "urgent": self.u_urgent, "meeting": self.u_meeting, "plant_event": self.u_plant})
         for chips in (self.u_leads, self.u_assignees):
             chips.changed.connect(self.refresh)
+
+    @staticmethod
+    def _during_label(g: QVBoxLayout) -> QLabel:
+        """The line under a group's dates naming the plant event they fall in (release 5.9), filled by refresh."""
+        label = QLabel(objectName="hint")
+        label.setWordWrap(True)
+        label.hide()
+        g.addWidget(label)
+        return label
+
+    def _sync_refs(self) -> None:
+        """One box per reference field named in Settings (release 5.9), under More fields in New task and Update.
+        They're rebuilt when Settings changes the names; the More fields links name them."""
+        names = list(self.ctx.settings.reference_fields)
+        if names != getattr(self, "_ref_names", None):
+            self._ref_names = names
+            fields = self.__dict__.setdefault("_fields", {})
+            for prefix, grid, boxes in (("new", self.n_refs_grid, self.n_refs), ("upd", self.u_refs_grid, self.u_refs)):
+                for name in boxes:
+                    fields.pop(f"{prefix}.ref:{name}", None)
+                    self.touched.discard(f"{prefix}.ref:{name}")
+                _drop(grid)
+                boxes.clear()
+                for i, name in enumerate(names):
+                    boxes[name] = QLineEdit()
+                    grid.addWidget(field(name, boxes[name], "references" if i == 0 else None), i // 2, i % 2)
+                self._watch(prefix, {f"ref:{name}": box for name, box in boxes.items()})
+        for button, words in ((self.n_more_button, ["state", "start", "reminder", "recurrence", "hours"]),
+                              (self.u_more_button, ["people", "hours", "start", "reminder", "recurrence", "urgent", "meeting", "plant event"])):
+            words += names
+            button.setText(f"More fields: {', '.join(words[:-1])} and {words[-1]} {button.text()[-1]}")
+
+    def _show_during(self, m: Model) -> None:
+        """Under New task's and Update's dates: each that falls in a plant event (release 5.9, M0028)."""
+        today = self.ctx.now().date()
+        for label, start, due, deadline, task_id, on in (
+                (self.n_during, self.n_start, self.n_due, self.n_deadline, None, "new_task" in self.types),
+                (self.u_during, self.u_start, self.u_due, self.u_deadline, self.task, "update" in self.types and bool(self.task))):
+            text = timeline.during_text(m, [("Start", start.value()), ("Due", due.value()), ("Deadline", deadline.value())],
+                                        today, task_id) if on else ""
+            label.setText(text)
+            label.setVisible(bool(text))
 
     def _watch(self, prefix: str, widgets: dict[str, QWidget]) -> None:
         """Note when the owner edits a field, so Parse and populate never overwrites it."""
@@ -690,6 +740,7 @@ class CaptureWindow(QWidget):
         turns on meeting notes (release 5.8), for the picked task's meeting."""
         self._load_summary_types()
         self._names = None  # people and tasks may have changed in the browse tool
+        self._sync_refs()  # and the reference fields, in Settings
         if from_capture:
             self.make_task_from(from_capture)
         else:
@@ -1136,8 +1187,11 @@ class CaptureWindow(QWidget):
         self.n_start.set_value(self.ctx.now().date().isoformat())
         for c in (self.n_labels, self.n_leads, self.n_assignees, self.u_leads, self.u_assignees, self.agenda):
             c.set_chips([])
-        for box in (self.n_urgent, self.n_meeting, self.u_urgent, self.u_meeting):
+        for box in (self.n_urgent, self.n_meeting, self.n_plant, self.u_urgent, self.u_meeting, self.u_plant):
             box.setChecked(False)
+        self._sync_refs()
+        for box in (*self.n_refs.values(), *self.u_refs.values()):
+            box.clear()
         self.n_inherit.setChecked(True)
         self.n_state.setCurrentText("Not started")
         self.n_recurrence.setCurrentIndex(0)
@@ -1246,6 +1300,9 @@ class CaptureWindow(QWidget):
         self.u_repeat.set_value(t.repeat_until)
         self.u_urgent.setChecked(t.urgent)
         self.u_meeting.setChecked(t.meeting)
+        self.u_plant.setChecked(t.plant_event)
+        for name, box in self.u_refs.items():
+            box.setText(t.references.get(name, ""))
         for key, w in self.__dict__.get("_fields", {}).items():
             if key.startswith("upd."):
                 self.touched.discard(key)
@@ -1265,6 +1322,7 @@ class CaptureWindow(QWidget):
             box.setChecked(key in self.types)
             box.setEnabled(not self.from_capture)
         self._setting = False
+        self._show_during(m)
         self.task_button.setText(full_path(m, t.id) if t else ("None: a quick task, under Quick tasks" if self._quick() else
                                                                 "None: a new top-level task" if new else "None: keep it unfiled"))
         self.title_field.setVisible(new)
@@ -1303,10 +1361,11 @@ class CaptureWindow(QWidget):
                                if has_files else "")
         self.copy_hint.setVisible(has_files)
         changes = self.update_changes(t) if upd and t else {}
+        parts = [(k.replace('_', ' '), v) for k, v in changes.items() if k != "references"] + list(changes.get("references", {}).items())
         self.changes_label.setText(
-            "Status log: " + "; ".join(f"{k.replace('_', ' ')} → {self._short(v)}" for k, v in changes.items())
-            if changes else "Prefilled with the task's current values. Each change goes into its status log.")
-        self.does.setText(self._does(m, len(changes)))
+            "Status log: " + "; ".join(f"{k} → {self._short(v)}" for k, v in parts)
+            if parts else "Prefilled with the task's current values. Each change goes into its status log.")
+        self.does.setText(self._does(m, len(parts)))
         if self.from_capture:
             self.does.setText(f"Save creates {'a subtask under <b>' + esc(t.title) + '</b>' if t else 'a top-level task'} from "
                               f"{self.from_capture}, with this content text as its description, and files {self.from_capture} to it. "
@@ -1699,7 +1758,7 @@ class CaptureWindow(QWidget):
             known = Known(start=date.fromisoformat(self.n_start.value()) if self.n_start.is_valid() and self.n_start.value() else today,
                           due=_as_date(typed("due", self.n_due)), deadline=_as_date(typed("deadline", self.n_deadline)),
                           recurrence=self.n_recurrence.currentText() if self.n_recurrence.currentIndex() else "")
-            r = parse_capture(text, "new_task", today, people, labels, events, known)
+            r = parse_capture(text, "new_task", today, people, labels, events, known, refs=self.ctx.settings.reference_fields)
             self._fill("new", r)
             for name in r.labels:
                 if name not in self.n_labels.values():
@@ -1709,11 +1768,11 @@ class CaptureWindow(QWidget):
                     value = w.id or w.name
                     if value not in chips.values():
                         chips.set_chips([*chips.chips(), Chip(value, m.person_name(w.id) if w.id else w.name, new=w.is_new, filled=True)])
-            if any(f.key in ("start", "recurrence", "reminder", "state", "lead_hours", "assignee_hours") and not f.why for f in r.found):
+            if any(f.key in ("start", "recurrence", "reminder", "state", "lead_hours", "assignee_hours", "refs") and not f.why for f in r.found):
                 self._set_more(self.n_more, self.n_more_button, True)
             found += [("", f) for f in r.found]
         if "update" in self.types and self.task:
-            r = parse_capture(text, "update", today, people, labels, events)
+            r = parse_capture(text, "update", today, people, labels, events, refs=self.ctx.settings.reference_fields)
             if "new_task" in self.types:  # the dates and first sentence belong to the new task; Update takes only a quick update's
                 r.found = [f for f in r.found if f.key == "state" or (f.key == "status" and r.state)]
                 if not r.state:
@@ -1721,6 +1780,8 @@ class CaptureWindow(QWidget):
                 r.due = r.deadline = None
                 r.deadline_desc = ""
             self._fill("upd", r)
+            if any(f.key == "refs" and not f.why for f in r.found):
+                self._set_more(self.u_more, self.u_more_button, True)
             found += [("Update: " if "new_task" in self.types else "", f) for f in r.found]
         self._show_found(found)
         self.refresh()
@@ -1731,7 +1792,7 @@ class CaptureWindow(QWidget):
         for f in r.found:
             if f.key in ("labels", "leads", "assignees") or f.why:
                 continue
-            key = "current_status" if f.key == "status" else f.key
+            key = "current_status" if f.key == "status" else f"ref:{f.field}" if f.key == "refs" else f.key
             name = f"{prefix}.{key}"
             widget = title_widget.get(name) or fields.get(name)
             if widget is None:
@@ -1739,7 +1800,7 @@ class CaptureWindow(QWidget):
             if name in self.touched:
                 f.why = "Not filled: you typed in this field."
                 continue
-            value = getattr(r, f.key)
+            value = r.refs[f.field] if f.key == "refs" else getattr(r, f.key)
             self._setting = True
             if isinstance(widget, DateField):
                 widget.set_value(value.isoformat() if value else None)
@@ -1849,6 +1910,7 @@ class CaptureWindow(QWidget):
             "assignee_hours": self.u_asg_hours.value() if self.u_asg_hours.is_valid() else None,
             "start": self.u_start.value(), "reminder": self.u_reminder.value(), "recurrence": recurrence,
             "repeat_until": self.u_repeat.value() if recurrence else None, "urgent": self.u_urgent.isChecked(), "meeting": self.u_meeting.isChecked(),
+            "plant_event": self.u_plant.isChecked(), "references": {name: box.text().strip() for name, box in self.u_refs.items()},
         }
 
     def update_changes(self, t: Any) -> dict[str, Any]:
@@ -1859,9 +1921,14 @@ class CaptureWindow(QWidget):
             "state": t.state, "current_status": t.current_status, "due": t.due, "deadline": t.deadline, "deadline_desc": t.deadline_desc,
             "leads": [Who(p) for p in t.leads], "assignees": [Who(p) for p in t.assignees], "lead_hours": t.lead_hours,
             "assignee_hours": t.assignee_hours, "start": start_of(t).isoformat(), "reminder": t.reminder, "recurrence": t.recurrence,
-            "repeat_until": t.repeat_until, "urgent": t.urgent, "meeting": t.meeting,
+            "repeat_until": t.repeat_until, "urgent": t.urgent, "meeting": t.meeting, "plant_event": t.plant_event,
         }
-        return {k: v for k, v in self.update_values().items() if v != current[k]}
+        values = self.update_values()
+        out = {k: v for k, v in values.items() if k != "references" and v != current[k]}
+        refs = {name: v for name, v in values["references"].items() if v != t.references.get(name, "")}
+        if refs:  # only the reference fields that changed (release 5.9)
+            out["references"] = refs
+        return out
 
     def _check_fields(self) -> bool:
         groups = []
@@ -1887,7 +1954,8 @@ class CaptureWindow(QWidget):
             deadline=self.n_deadline.value(), deadline_desc=self.n_deadline_desc.text().strip() or None, urgent=self.n_urgent.isChecked(),
             meeting=self.n_meeting.isChecked(), state=self.n_state.currentText(), start=self.n_start.value(), reminder=self.n_reminder.value(),
             recurrence=recurrence, repeat_until=self.n_repeat.value() if recurrence else None,
-            lead_hours=self.n_lead_hours.value(), assignee_hours=self.n_asg_hours.value(),
+            lead_hours=self.n_lead_hours.value(), assignee_hours=self.n_asg_hours.value(), plant_event=self.n_plant.isChecked(),
+            references={name: box.text().strip() for name, box in self.n_refs.items() if box.text().strip()},
         )
         t = self.ctx.model().tasks.get(self.task) if self.task else None
         summary_type = self._summary_types[self.prompt_type.currentIndex()].name if not self.summary_field.isHidden() and self._summary_types else None

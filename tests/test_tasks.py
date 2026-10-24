@@ -132,3 +132,20 @@ def test_ids_are_never_reused(conn):
     first = tasks.create_task(conn, SETTINGS, title="A", at=AT, created_by="x")
     conn.execute("DELETE FROM tasks WHERE id = ?", (first,))
     assert tasks.create_task(conn, SETTINGS, title="B", at=AT, created_by="x") == "T000002"
+
+
+def test_reference_fields_and_plant_events(conn):
+    """Release 5.9 (mods log round 2, M0034, M0028): reference field values by name, and the Plant event tick box."""
+    t = tasks.create_task(conn, SETTINGS, title="Swap the seal", at=AT, created_by="C000001", references={"Work order #": " 48213 ", "Permit no.": ""})
+    event = tasks.create_task(conn, SETTINGS, title="Spring outage", at=AT, created_by="C000002", start="2026-11-03", due="2026-11-14", plant_event=True)
+    m = Model(conn)
+    assert m.task(t).references == {"Work order #": "48213"} and not m.task(t).plant_event
+    assert m.task(event).plant_event and [x.id for x in m.plant_events()] == [event]
+    changes = tasks.update_task(conn, SETTINGS, t, at=AT, via="Browse tool", references={"Work order #": "48213", "Permit no.": "7781"}, plant_event=True)
+    assert [(c.field, c.from_value, c.to_value) for c in changes] == [("Plant event", "No", "Yes"), ("Permit no.", None, "7781")]
+    tasks.update_task(conn, SETTINGS, t, at=AT, via="Browse tool", references={"Work order #": ""})
+    assert Model(conn).task(t).references == {"Permit no.": "7781"}
+    log = [(e.field, e.from_value, e.to_value) for e in Model(conn).status_log_of(t)]
+    assert ("Work order #", "48213", None) in log and ("Permit no.", None, "7781") in log
+    with pytest.raises(TaskError, match="needs a name"):
+        tasks.update_task(conn, SETTINGS, t, at=AT, via="Browse tool", references={" ": "1"})

@@ -85,3 +85,15 @@ def test_a_labels_matching_tasks(sample_conn):
     assert "T000012" not in {x.task for x in bulk.label_matches(Model(conn), "Lifting")}  # it has it now
     assert bulk.keyword_pattern("pump").search("Two pumps failed") and not bulk.keyword_pattern("pump").search("pumpkin")
     assert bulk.label_matches(m, "No such label") == []
+
+
+def test_plant_event_ticked_or_unticked_for_several(sample_conn):
+    """Release 5.9 (M0028): Edit selected ticks or unticks Plant event; a task that already has it isn't changed."""
+    conn = sample_conn
+    done = bulk.run(conn, SETTINGS, ["T000012", "T000016"], bulk.BulkEdit(fields={"plant_event": True}), AT, VIA)
+    assert bulk.summary(done, done=True) == "Changed 2 tasks: 2 changes in their status logs."
+    assert ("Plant event", "No", "Yes") in logged(conn, "T000012")
+    again = bulk.preview(conn, SETTINGS, ["T000012"], bulk.BulkEdit(fields={"plant_event": True}), AT, VIA)
+    assert not again[0].changes
+    bulk.run(conn, SETTINGS, ["T000016"], bulk.BulkEdit(fields={"plant_event": False}), AT, VIA)
+    assert [t.id for t in Model(conn).plant_events()] == ["T000012"]

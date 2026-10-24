@@ -19,8 +19,27 @@ from docrepo import quick
 from docrepo.dates import add_months, long_date, monday_of, to_date
 from docrepo.model import Model, Task
 from docrepo.schedule import due_of, is_open, start_of, windows
+from docrepo.stories import and_list
 
-GROUPS = (("top", "Top-level task"), ("label", "Label"), ("person", "Person"))
+GROUPS = (("top", "Top-level task"), ("label", "Label"), ("person", "Person"), ("group", "Group"))
+#: Grouping by a parent label (release 5.9, mods log round 2, M0051): "parent:" and its name.
+PARENT = "parent:"
+
+
+def group_choices(m: Model) -> list[tuple[str, str]]:
+    """What the timeline can group by, as (key, name in "Group by …"): the fixed ways, then each parent label."""
+    return [*((k, label.lower()) for k, label in GROUPS),
+            *((PARENT + lb.name, lb.name) for lb in m.active_labels() if m.is_parent_label(lb.name))]
+
+
+@dataclass(frozen=True)
+class Band:
+    """A plant event (release 5.9, M0028), shaded down the whole chart from its start to its end, whatever the filters."""
+
+    task: str
+    title: str
+    start: date
+    end: date  # its last day
 #: The ranges the view offers, in weeks.
 RANGES = ((9, "9 weeks"), (26, "6 months"))
 #: How far a routine task is looked ahead for occurrences, and an undated task for any window at all.
@@ -59,6 +78,7 @@ class Timeline:
     weeks: int
     groups: tuple[Group, ...]
     undated: tuple[str, ...]  # open tasks with no dates at all, which aren't on it
+    events: tuple[Band, ...] = ()  # the plant events in view
 
     @property
     def end(self) -> date:
@@ -149,13 +169,21 @@ def build(m: Model, today: date, start: date, weeks: int, group: str = "top", la
             if rows:
                 groups.append(Group(top.title, tuple(rows), colours[top.id]))
     else:
-        by_label = group == "label"
-        picked = labels if by_label else people
-        keys = [(lb.name, lb.name) for lb in m.active_labels()] if by_label else [(p.id, p.name) for p in m.active_people()]
+        by_label, by_group = group == "label", group == "group"
+        parent = group[len(PARENT):] if group.startswith(PARENT) else None
+        picked = labels if by_label or parent else () if by_group else people
+        if parent:  # under each of its sublabels' headings (release 5.9)
+            keys = [(x, x) for x in m.sublabels(parent)]
+        elif by_group:  # under each group of people (release 5.9)
+            keys = [(g, g) for g in m.groups()]
+        else:
+            keys = [(lb.name, lb.name) for lb in m.active_labels()] if by_label else [(p.id, p.name) for p in m.active_people()]
 
         def of(task_id: str) -> list[str]:
             t = m.task(task_id)
-            return [name for name, _ in m.labels_of(task_id)] if by_label else [*dict.fromkeys((*t.leads, *t.assignees))]
+            if by_group:
+                return [*dict.fromkeys(m.people[p].group for p in (*t.leads, *t.assignees) if p in m.people and m.people[p].group)]
+            return [name for name, _ in m.labels_of(task_id)] if by_label or parent else [*dict.fromkeys((*t.leads, *t.assignees))]
 
         def first(task_id: str) -> date:
             wins, dl = marks(m.task(task_id), start, end)
@@ -170,13 +198,50 @@ def build(m: Model, today: date, start: date, weeks: int, group: str = "top", la
             ids = [x for x in on if key in of(x)]
             if ids:
                 groups.append(Group(name, sorted_rows(ids)))
-        none = [x for x in on if not of(x)]
+        sub = set(m.sublabels(parent)) if parent else None
+        none = [x for x in on if not (set(of(x)) & sub if sub is not None else of(x))]
         if none and not picked:
-            groups.append(Group("No label" if by_label else "No one", sorted_rows(none)))
+            groups.append(Group(f"No {parent.lower()}" if parent else "No label" if by_label else "No group" if by_group else "No one", sorted_rows(none)))
     # The built-in Quick tasks (mods log round 2) has no dates of its own, so it's left out of them.
     undated = tuple(t.id for t in m.tasks.values()
                     if is_open(t) and match(t) and not t.deadline and not windows(t, today + _FAR) and not quick.is_parent(t))
-    return Timeline(start, weeks, tuple(groups), undated)
+    return Timeline(start, weeks, tuple(groups), undated, bands(m, start, end))
+
+
+def bands(m: Model, start: date, end: date) -> tuple[Band, ...]:
+    """The plant events (release 5.9, M0028) that reach into [start, end): from their Start to their Due (or Deadline),
+    and a routine one each time it comes round."""
+    return tuple(Band(t.id, t.title, a, b) for t in m.plant_events() for a, b in windows(t, end) if b >= start and a < end)
+
+
+def during_text(m: Model, dates: list[tuple[str, str | None]], today: date, task_id: str | None = None) -> str:
+    """The line under a form's dates naming the plant events they fall in, such as "Start and Due fall during Spring
+    outage, Tue 3 Nov to Sat 14 Nov." (release 5.9, M0028). ``dates`` are (name, YYYY-MM-DD or None); the task's own
+    event isn't counted."""
+    hits: dict[Band, list[str]] = {}
+    for name, value in dates:
+        try:
+            day = date.fromisoformat(value) if value else None
+        except ValueError:
+            continue
+        band = during(m, day, task_id)
+        if band:
+            hits.setdefault(band, []).append(name)
+    return " ".join(f"{and_list(names)} {'falls' if len(names) == 1 else 'fall'} during {band.title}, "
+                    f"{long_date(band.start, today)} to {long_date(band.end, today)}." for band, names in hits.items())
+
+
+def during(m: Model, day: date | None, task_id: str | None = None) -> Band | None:
+    """The plant event a day falls in, if any, for the line under a date field (release 5.9, M0028)."""
+    if day is None:
+        return None
+    for t in m.plant_events():
+        if t.id == task_id:
+            continue
+        for a, b in windows(t, day + timedelta(days=1)):
+            if a <= day <= b:
+                return Band(t.id, t.title, a, b)
+    return None
 
 
 def tooltip(m: Model, task_id: str, today: date) -> str:

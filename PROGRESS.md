@@ -20,6 +20,7 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.6 | The capture window and Today from the mods log, round 2: Agenda and Today beside the capture types, what Parse and populate found beside the content text, Expand, quick tasks, one letter per topic, Find in this view | Built 2026-10-21, after the owner approved the mockup; on GitHub 2026-10-21, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
 | 5.7 | Formatted content text from the mods log, round 2: bold, italic, underline, strikethrough, highlights and lists in the content text, kept as Markdown in capture.md | Built 2026-10-23; on GitHub 2026-10-23, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
 | 5.8 | Items and meeting notes from the mods log, round 2: @, # and ** make tasks, notes, updates and decisions in any capture, and Meeting notes takes a meeting's notes with its agenda | Built 2026-10-23, after the owner approved the mockup; on GitHub 2026-10-23, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
+| 5.9 | People, labels and task fields from the mods log, round 2: email, group and role for people, reference fields named in Settings, nested labels, and plant events | Built 2026-10-23, with decisions 19 to 22 as the owner took them; on GitHub 2026-10-23, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
 ## Decisions
@@ -321,6 +322,27 @@ Stage 10's item 35 of the round 2 plan (M0048 phase 2, M0049, M0052, with M0023)
 - The colours in the content text come from a syntax highlighter, so they're never part of the text's formatting and never saved.
 - The draft goes in the data root (`System\capture-draft.json`), one of the three places DocRepo writes; saving or Clear empties it rather than deleting it.
 
+## Release 5.9: people, labels and task fields, from the mods log, round 2
+
+Stage 7 of the round 2 plan (items 28 to 31: M0031, M0033, M0038, M0034, M0051, M0028), with decisions 19 to 22. It wasn't mocked first: the owner took the decisions from the plan.
+
+- `docrepo/db.py`: schema version 8: `email`, `person_group` and `role` on people, `parent` on labels, `plant_event` on tasks, and `task_references`. `docrepo/model.py`: `Person.email`, `group` and `role`; `Label.parent`; `Task.plant_event` and `references`; `groups`, `group_people`, `label`, `parent_label`, `sublabels`, `is_parent_label`, `label_path` and `plant_events`.
+- `docrepo/people.py`: `add_person` and `update_person` take email (checked as an address), group and role; `add_label` and `update_label` take the parent label, one level only. `docrepo/tasks.py`: `create_task(plant_event=, references=)`, and `update_task` logs Plant event and each reference field by its name. `docrepo/bulk.py`: Edit selected sets Plant event. `docrepo/config.py`: `reference_fields`.
+- `docrepo/parse.py`: Parse and populate reads each reference field (`parse_capture(refs=)`), from the mockup's `parse.js`; `tests/fixtures/test-vectors.md` gains a Reference fields section, read with two made-up field names. `docrepo/items.py`: `**event.` makes a task with Plant event ticked, its end date its Due (as the mockup's `items.js`).
+- `docrepo/timeline.py`: Group by group and by a parent label (`group_choices`), the plant events in view (`Timeline.events`, `bands`), and the line that names a plant event a date falls in (`during`, `during_text`). `docrepo/ui/timeline_view.py`: the bands, their tooltip and the legend.
+- `docrepo/pages.py`, `docrepo/detail.py`, `docrepo/search.py`: Plant event and the reference fields in `Task.md`, on the task page and in search; a person's email, group and role; a label's parent, and a parent label's sublabels and their tasks.
+- `docrepo/ui/browse_window.py`: the People view's Group and Role columns, Copy email and Copy (emails and reference fields), the Labels view as a tree, the lists' Group by a parent label, capacity's Group by group and plant event weeks, and the forms' new fields. `docrepo/ui/widgets.py`: `CheckMenuButton` sets (a group's people, a parent label's sublabels), `label_filter` and `people_filter`, and label pickers with paths. `docrepo/ui/dialogs.py`: the person form's Email, Group and Role, and the label form's Under. `docrepo/ui/settings_view.py`: Reference fields. `docrepo/ui/task_forms.py`: Edit task's Plant event, reference field boxes and plant event line; Edit selected's Plant event. `docrepo/ui/capture_window.py`: New task's Plant event, Update's under More fields, a box for each reference field under More fields (`_sync_refs`), and the plant event line under the dates. `docrepo/ui/help_text.py`: the Plant event and reference field notes, from the mockup's `HELP`.
+- `docrepo/sample/sample-data.json`: made-up email addresses (`example.com`), groups and roles for the sample people.
+- `tests/`: release 5.9's tests in `test_people_agenda.py`, `test_tasks.py`, `test_timeline.py`, `test_capture_window.py`, `test_items.py`, `test_detail.py`, `test_pages.py`, `test_search.py`, `test_bulk.py`, `test_browse_window.py` and `test_parse_vectors.py` (753 pass in all, 1 skipped).
+
+## Decisions (release 5.9)
+
+- Decisions 19 to 22 of the round 2 plan: one group per person; reference fields named in Settings, so the public code names no company system; labels nest one level; a Plant event tick box and the `**event.` operator, with no reading of event words.
+- A `**event.` item's end date is its Due: its own name ("Spring outage") is an event word, so Parse and populate reads the date as a Deadline, which for a plant event is the end of it.
+- A reference field's value is any text; Parse and populate reads only a number after its name. Search finds a value, or the name and value.
+- DocRepo never sends email: it keeps addresses and copies them, joined by "; " for Outlook's To box.
+- A plant event's band and the line under the dates use the same windows as the capacity calendar, so a routine plant event counts each time it comes round.
+
 ## The first Frogbot findings (2026-10-20)
 
 The corporate computer's Frogbot scan of phase 5 found four things.
@@ -339,5 +361,5 @@ The corporate computer's Frogbot scan of phase 5 found four things.
 - Phases 2 and 3 passed the owner's hand tests on this computer and went to GitHub together on 2026-10-16 (brainstorm round 12).
 
 - `SPEC.md` covers phases 1 to 5 in full; later phases are summaries until they're built. The detailed design is in the parent workspace's `docs/task-model/brainstorm.md`.
-- Published to the GitHub repo `eckertco2/DocRepo` on 2026-10-09 (phase 1), on 2026-10-16 (the glossary, phases 2 and 3), on 2026-10-18 (phases 4 and 5), on 2026-10-20 (releases 5.1 and 5.2, and the fixes for the first Frogbot findings), on 2026-10-21 (releases 5.3, 5.3.1, 5.4, 5.5 and 5.6), and on 2026-10-23 (releases 5.7 and 5.8).
+- Published to the GitHub repo `eckertco2/DocRepo` on 2026-10-09 (phase 1), on 2026-10-16 (the glossary, phases 2 and 3), on 2026-10-18 (phases 4 and 5), on 2026-10-20 (releases 5.1 and 5.2, and the fixes for the first Frogbot findings), on 2026-10-21 (releases 5.3, 5.3.1, 5.4, 5.5 and 5.6), and on 2026-10-23 (releases 5.7, 5.8 and 5.9).
 - The route to the corporate computer works (2026-10-09): download, a security scan there, `pip install -r requirements.txt` with every pinned version available, and pytest passing.

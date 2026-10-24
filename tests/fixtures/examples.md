@@ -553,7 +553,8 @@ Settings.
     "inspection",
     "outage",
     "walkthrough"
-  ]
+  ],
+  "reference_fields": []
 }
 ```
 

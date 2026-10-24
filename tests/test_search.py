@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from docrepo import search
+from docrepo import search, tasks
 from docrepo.config import Settings
 from docrepo.model import Model
 from docrepo.save import CaptureDraft, save_capture
@@ -62,3 +62,14 @@ def test_snippet():
     assert search.snippet("a" * 100 + " needle " + "b" * 200, ["needle"]).startswith("…aaaa")
     assert search.snippet("short text", ["text"]) == "short text"
     assert search.snippet("nothing here", ["zzz"]) == ""
+
+
+def test_it_finds_reference_fields_and_people_by_email_group_and_role(sample_root):
+    """Release 5.9: a task by its reference field values, and a person by email, group or role."""
+    conn, _, _ = sample_root
+    tasks.update_task(conn, Settings(me="P001"), "T000012", at=datetime(2026, 10, 8, 9, 0), via="Browse tool", references={"Work order #": "48213"})
+    assert found(conn, "48213") == [("Task", "T000012")]
+    assert found(conn, "work order 48213") == [("Task", "T000012")]
+    assert found(conn, "millwright") == [("Person", "P004")]
+    assert found(conn, "tom.becker@example") == [("Person", "P003")]
+    assert [r.sub for r in search.search(conn, Model(conn), "Purchasing")] == ["Tyler, Tyler N. · Purchasing · Buyer"]

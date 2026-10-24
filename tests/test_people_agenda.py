@@ -61,3 +61,47 @@ def test_agenda_items_need_a_real_target_and_something_to_discuss(sample_conn):
         agenda.add_item(sample_conn, subject="T000010", target="T000010", note="", added="2026-10-08 15:00:00", added_by="x")
     with pytest.raises(AgendaError, match="Discussed or Removed"):
         agenda.close_item(sample_conn, 1, how="Done", closed="2026-10-08 15:00:00", closed_by="x")
+
+
+def test_email_group_and_role(sample_conn):
+    """Release 5.9 (mods log round 2, M0031, M0033, M0038): an email address DocRepo only keeps, one group, and a role."""
+    conn = sample_conn
+    m = Model(conn)
+    tom = m.people["P003"]
+    assert (tom.email, tom.group, tom.role) == ("tom.becker@example.com", "Maintenance", "Planner")
+    assert m.groups() == ["Engineering", "Maintenance", "Purchasing"]
+    assert m.group_people("Maintenance") == ["P003", "P004"]
+    new = people.add_person(conn, "Dana Ruiz", email=" dana.ruiz@example.com ", group=" Quality ", role="Inspector")
+    p = Model(conn).people[new]
+    assert (p.email, p.group, p.role) == ("dana.ruiz@example.com", "Quality", "Inspector")
+    people.update_person(conn, new, group="Maintenance", role="")
+    people.update_person(conn, new, name="Dana Ruiz-Lee")  # only what's given changes
+    p = Model(conn).people[new]
+    assert (p.name, p.email, p.group, p.role) == ("Dana Ruiz-Lee", "dana.ruiz@example.com", "Maintenance", None)
+    assert Model(conn).groups() == ["Engineering", "Maintenance", "Purchasing"]
+    with pytest.raises(PeopleError, match="isn't an email address"):
+        people.update_person(conn, new, email="dana at example")
+    people.update_person(conn, new, email=None)
+    assert Model(conn).people[new].email is None
+
+
+def test_labels_nest_one_level(sample_conn):
+    """Release 5.9 (M0051): a label can be under a parent label, one level only."""
+    conn = sample_conn
+    people.add_label(conn, "Production line", ["production line"])
+    people.update_label(conn, "Line 1", parent="Production line")
+    people.add_label(conn, "Line 3", parent="production line")
+    m = Model(conn)
+    assert m.sublabels("Production line") == ["Line 1", "Line 3"] and m.is_parent_label("Production line")
+    assert (m.parent_label("Line 3"), m.label_path("Line 3"), m.label_path("Line 2")) == ("Production line", "Production line › Line 3", "Line 2")
+    with pytest.raises(PeopleError, match="one level"):
+        people.add_label(conn, "Line 1 north", parent="Line 1")  # Line 1 is under another label
+    with pytest.raises(PeopleError, match="has labels under it"):
+        people.update_label(conn, "Production line", parent="Safety")
+    with pytest.raises(PeopleError, match="under itself"):
+        people.update_label(conn, "Safety", parent="Safety")
+    people.update_label(conn, "Line 3", status="retired")
+    assert Model(conn).sublabels("Production line") == ["Line 1"]
+    assert Model(conn).sublabels("Production line", active=False) == ["Line 1", "Line 3"]
+    people.update_label(conn, "Line 1", parent=None)
+    assert Model(conn).parent_label("Line 1") is None

@@ -9,7 +9,8 @@ first.
 """
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from datetime import date
 from typing import Any
 
 from PySide6.QtCore import QTimer
@@ -29,7 +30,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo import quick
+from docrepo import quick, timeline
 from docrepo.bulk import BulkEdit, LabelMatch, TaskOutcome, summary
 from docrepo.db import RECURRENCES, STATES
 from docrepo.detail import CSS, esc
@@ -60,10 +61,12 @@ class TaskEditDialog(FormDialog):
     """Edit task: a task's title, description, state, current status, parents (mods log round 2, M0040), labels, people and
     hours, dates, recurrence and flags."""
 
-    def __init__(self, parent: QWidget | None, m: Model, task_id: str, labels: Options, people: Options, pick_task: PickTask | None = None) -> None:
+    def __init__(self, parent: QWidget | None, m: Model, task_id: str, labels: Options, people: Options, pick_task: PickTask | None = None,
+                 reference_fields: Sequence[str] = (), today: date | None = None) -> None:
         super().__init__(parent)
         t = m.task(task_id)
         self.m, self.task_id, self._pick_task = m, task_id, pick_task
+        self.today = today or date.today()
         self.parents: list[str] = list(m.parents_of(task_id))
         self.setWindowTitle(f"Edit task {task_id}")
         self.setObjectName("capture")
@@ -146,17 +149,34 @@ class TaskEditDialog(FormDialog):
         for w, r, c in cells:
             grid.addWidget(w, r, c)
         g.addLayout(grid)
+        # A date inside a plant event says so (release 5.9, mods log round 2, M0028).
+        self.during = QLabel(objectName="hint")
+        self.during.setWordWrap(True)
+        g.addWidget(self.during)
+        for w in (self.start, self.due, self.deadline):
+            w.edited.connect(self._show_during)
+        self._show_during()
         flags = QHBoxLayout()
-        self.urgent, self.meeting = QCheckBox("Urgent"), QCheckBox("Meeting")
+        self.urgent, self.meeting, self.plant_event = QCheckBox("Urgent"), QCheckBox("Meeting"), QCheckBox("Plant event")
         self.urgent.setChecked(t.urgent)
         self.meeting.setChecked(t.meeting)
-        for box, key in ((self.urgent, "urgent"), (self.meeting, "meeting")):
+        self.plant_event.setChecked(t.plant_event)
+        for box, key in ((self.urgent, "urgent"), (self.meeting, "meeting"), (self.plant_event, "plantEvent")):
             flags.addWidget(box)
             note = QLabel()
             flags.addWidget(InfoButton(key, note))
             g.addWidget(note)
         flags.addStretch()
         g.addLayout(flags)
+        # Reference fields (release 5.9, M0034): a box for each one named in Settings.
+        self.references: dict[str, QLineEdit] = {}
+        if reference_fields:
+            refs = QGridLayout()
+            for i, name in enumerate(reference_fields):
+                box = QLineEdit(t.references.get(name, ""))
+                self.references[name] = box
+                refs.addWidget(field(name, box, "references" if i == 0 else None), i // 2, i % 2)
+            g.addLayout(refs)
         g.addStretch()
 
         self.error = QLabel(objectName="error")
@@ -176,6 +196,12 @@ class TaskEditDialog(FormDialog):
 
     def _sync(self) -> None:
         self.repeat_field.setVisible(self.recurrence.currentIndex() > 0)
+
+    def _show_during(self) -> None:
+        text = timeline.during_text(self.m, [("Start", self.start.value()), ("Due", self.due.value()), ("Deadline", self.deadline.value())],
+                                    self.today, self.task_id)
+        self.during.setText(text)
+        self.during.setVisible(bool(text))
 
     def _draw_parents(self) -> None:
         while self.parents_layout.count():
@@ -248,7 +274,8 @@ class TaskEditDialog(FormDialog):
             "assignee_hours": self.asg_hours.value(), "start": self.start.value(), "due": self.due.value(), "deadline": self.deadline.value(),
             "deadline_desc": self.deadline_desc.text(), "reminder": self.reminder.value(), "recurrence": recurrence,
             "repeat_until": self.repeat.value() if recurrence else None, "urgent": self.urgent.isChecked(), "meeting": self.meeting.isChecked(),
-            "parents": list(self.parents),
+            "plant_event": self.plant_event.isChecked(), "parents": list(self.parents),
+            **({"references": {name: box.text() for name, box in self.references.items()}} if self.references else {}),
         }
 
 
@@ -307,6 +334,11 @@ class BulkEditDialog(FormDialog):
         self.state = QComboBox()
         self.state.addItems([LEAVE, *STATES])
         grid.addWidget(field("State", self.state, "state"), 1, 0)
+        # Plant event (release 5.9, mods log round 2, M0028): tick or untick it on every task.
+        self.plant_event = QComboBox()
+        self.plant_event.addItems([LEAVE, "Tick it", "Untick it"])
+        self.plant_event.currentIndexChanged.connect(self._changed)
+        grid.addWidget(field("Plant event", self.plant_event, "plantEvent"), 1, 1)
         self.people: dict[str, tuple[QComboBox, ChipPicker]] = {}
         for row, (key, label, help_key) in enumerate((("leads", "Lead", "leads"), ("assignees", "Assignees", "assignees")), start=2):
             how = QComboBox()
@@ -407,6 +439,8 @@ class BulkEditDialog(FormDialog):
         e = BulkEdit(add_labels=self.add_labels.values(), remove_labels=self.remove_labels.values())
         if self.state.currentIndex():
             e.fields["state"] = self.state.currentText()
+        if self.plant_event.currentIndex():
+            e.fields["plant_event"] = self.plant_event.currentIndex() == 1
         for key, (on, date) in self.dates.items():
             if on.isChecked():
                 e.fields[key] = date.value()

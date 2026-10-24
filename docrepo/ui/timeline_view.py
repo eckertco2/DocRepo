@@ -30,7 +30,7 @@ from docrepo.model import Model
 from docrepo.schedule import due_of, start_of
 from docrepo.timeline import Row, Timeline
 from docrepo.ui.tree_view import GROUP_COLOURS
-from docrepo.ui.widgets import CheckMenuButton, FlowLayout
+from docrepo.ui.widgets import CheckMenuButton, FlowLayout, label_filter, people_filter
 from docrepo.views import markers
 
 FG, MUTED, LINE, LINE_STRONG = "#1a1f25", "#5a6571", "#d6dce3", "#b8c1cb"
@@ -92,6 +92,12 @@ class TimelineChart(QWidget):
     def _mid(self, day: date) -> float:
         return (self._x(day) + self._x(day + timedelta(days=1))) / 2
 
+    def band_at(self, x: float) -> timeline.Band | None:
+        """The plant event across this point of the chart, if any."""
+        if self.tl is None:
+            return None
+        return next((b for b in self.tl.events if self._x(b.start) <= x < self._x(b.end + timedelta(days=1))), None)
+
     def row_at(self, y: float) -> Row | None:
         for top, item in self.items:
             if isinstance(item, Row) and top <= y < top + self.ROW_H:
@@ -138,6 +144,16 @@ class TimelineChart(QWidget):
                            f"{item.name}   {item.count}")
                 continue
             self._paint_row(p, top, item, base, small, now_in)
+        # Plant events (release 5.9, M0028): a shaded band down the whole chart, named at its top, whatever the filters.
+        for band in tl.events:
+            x0, x1 = self._x(band.start), self._x(band.end + timedelta(days=1))
+            p.fillRect(QRectF(x0, self.HEAD_H, max(2.0, x1 - x0), self.height() - self.HEAD_H), QColor(192, 132, 25, 38))
+            p.setPen(QPen(QColor(192, 132, 25, 140), 1, Qt.PenStyle.DashLine))
+            p.drawLine(QPointF(x0, self.HEAD_H), QPointF(x0, self.height()))
+            p.drawLine(QPointF(x1, self.HEAD_H), QPointF(x1, self.height()))
+            p.setFont(small)
+            p.setPen(QColor("#875700"))
+            p.drawText(QRectF(x0 + 3, self.HEAD_H + 1, max(40.0, x1 - x0 + 160), 14), Qt.AlignmentFlag.AlignLeft, band.title)
         p.end()
 
     def _paint_row(self, p: QPainter, top: int, r: Row, base: QFont, small: QFont, now_in: bool) -> None:
@@ -211,7 +227,10 @@ class TimelineChart(QWidget):
     def event(self, e) -> bool:  # noqa: D102 - hovering a row shows its dates and people
         if e.type() == QEvent.Type.ToolTip and self.model is not None:
             r = self.row_at(e.pos().y())
-            if r is None:
+            band = self.band_at(e.pos().x()) if r is None or e.pos().y() < self.HEAD_H + 16 else None
+            if band is not None:  # a plant event's name and dates (release 5.9)
+                QToolTip.showText(e.globalPos(), f"{band.title}\nPlant event, {short(band.start, self.today)} to {short(band.end, self.today)}", self)
+            elif r is None:
                 QToolTip.hideText()
             else:
                 QToolTip.showText(e.globalPos(), timeline.tooltip(self.model, r.task, self.today), self)
@@ -274,7 +293,8 @@ class TimelineView(QWidget):
             '<span style="background-color:#89aedb">&nbsp;&nbsp;&nbsp;&nbsp;</span> In progress',
             '<span style="background-color:#ced9ee; border:1px solid #3b78c4">&nbsp;&nbsp;&nbsp;&nbsp;</span> Not started',
             '<span style="color:#b0261e"><b>▌</b></span> Late', "◆ Deadline", '<span style="color:#3b78c4">●</span> Routine: each occurrence',
-            '<span style="color:#1d5e98"><b>│</b></span> Today')), objectName="hint")
+            '<span style="color:#1d5e98"><b>│</b></span> Today', '<span style="background-color:#f3e6cc">&nbsp;&nbsp;&nbsp;&nbsp;</span> Plant event')),
+            objectName="hint")
         lay.addWidget(legend)
         self.undated = QLabel(objectName="hint")
         self.undated.setWordWrap(True)
@@ -307,15 +327,18 @@ class TimelineView(QWidget):
         assert m is not None
         group = QComboBox()
         group.setAccessibleName("Group by")
-        for key, label in timeline.GROUPS:
-            group.addItem(f"Group by {label.lower()}", key)
-        group.setCurrentIndex([k for k, _ in timeline.GROUPS].index(self.group))
+        for key, label in timeline.group_choices(m):
+            group.addItem(f"Group by {label}", key)
+        group.setCurrentIndex(max(0, group.findData(self.group)))
         group.currentIndexChanged.connect(lambda _: self._set("group", group.currentData()))
         lay.addWidget(group)
-        labels = CheckMenuButton("Labels", "any", [(lb.name, lb.name) for lb in m.active_labels()], self.labels)
+        # A parent label ticks its sublabels, and a group its people (release 5.9).
+        choices, sets = label_filter(m)
+        labels = CheckMenuButton("Labels", "any", choices, self.labels, sets)
         labels.chosen.connect(lambda values: self._set("labels", values))
         lay.addWidget(labels)
-        people = CheckMenuButton("People", "anyone", [(p.name, p.id) for p in m.active_people()], self.people)
+        choices, sets = people_filter(m)
+        people = CheckMenuButton("People", "anyone", choices, self.people, sets)
         people.chosen.connect(lambda values: self._set("people", values))
         lay.addWidget(people)
         routine = QCheckBox("Show routine")

@@ -12,6 +12,7 @@ added email), and only after a space, a "(" or the start of a line, so an addres
 - ``**t``, ``**n``: a task, or a note, said outright. ``**Closed.``, ``**Done.``, ``**Parked.``, ``**In progress.``,
   ``**Started.``: an update to the ``#`` task with that state; the rest is its current status. ``**u``: an update with
   no state change. ``**Decision.``: a decision, on the ``#`` task, else on the capture's task or meeting.
+  ``**event.``: a task with Plant event ticked (release 5.9, decision 22): ``**event. Spring outage, 3 to 14 Nov``.
 
 A ``**`` type wins; else an ``@`` makes a task; else a ``#`` alone makes a note; a block with none stays in the notes.
 ``**`` and a space is never an operator, and ``#`` is a link only when it names a task, so "Pump #3" stays text.
@@ -33,7 +34,7 @@ from docrepo.parse import EVENT_WORDS, STATE_WORDS, ParseLabel, ParsePerson, Who
 from docrepo.text import first_sentence
 
 KIND_NAMES = {"task": "Task", "note": "Note", "update": "Update", "decision": "Decision"}
-TYPE_RE = re.compile(rf"^\*\*(?:([tnu])(?![A-Za-z0-9_])|(decision)\b[.:]?|({STATE_WORDS})\b[.:]?)", re.I)
+TYPE_RE = re.compile(rf"^\*\*(?:([tnu])(?![A-Za-z0-9_])|(decision)\b[.:]?|({STATE_WORDS})\b[.:]?|(event)\b[.:]?)", re.I)
 LIST_RE = re.compile(r"^([ \t]*)([-*•]|\d+[.)])\s+")
 #: An @ or # kept with its ID in capture.md.
 STORED = re.compile(r"(@L\.|@|#)\[([^\]\n]+)\]\(([PT]\d+)\)", re.I)
@@ -102,6 +103,7 @@ class Token:
     name: str = ""  # the person's name (a new person's as written)
     lead: bool = False  # @L.
     none: bool = False  # @__
+    event: bool = False  # **event.: a task that's a plant event
     size: int = 0
 
     @property
@@ -124,6 +126,8 @@ def _type(rest: str) -> Token | None:
     m = TYPE_RE.match(rest)
     if not m:
         return None
+    if m.group(4):
+        return Token("type", item_type="task", event=True, size=m.end())
     kind = {"t": "task", "n": "note", "u": "update"}[m.group(1).lower()] if m.group(1) else "decision" if m.group(2) else "update"
     state = quick_update(m.group(3) + ".").state if m.group(3) else ""
     return Token("type", item_type=kind, state=state, size=m.end())
@@ -278,6 +282,7 @@ class Item:
     recurrence: str = ""
     reminder: str | None = None
     start: str | None = None
+    plant_event: bool = False  # made by **event. (release 5.9)
     where: list[Where] = field(default_factory=list)
     on: bool = True
     changed: bool = False
@@ -390,13 +395,17 @@ def read(content: str, names: Names, today: date, *, labels: Sequence[ParseLabel
                   list(b.lines), b.owner is None, state=typ.state if typ else "", assignees=[x for x in people if not x.lead and not x.none],
                   leads=[x for x in people if x.lead and not x.none], none=any(x.none for x in people), tasks=ctx_tasks(b),
                   parent_item=parent_item.key if parent_item and parent_item.kind == "task" else None,
-                  parent_self=b.parent is not None and blocks[b.parent].is_self)
+                  parent_self=b.parent is not None and blocks[b.parent].is_self, plant_event=bool(typ and typ.event))
         if kind == "task":
             r = parse_capture(it.text, "new_task", today, names.people, labels, events)
             it.title = r.title or first_sentence(it.text) or "Untitled task"
             it.due, it.deadline, it.deadline_desc, it.urgent = _iso(r.due), _iso(r.deadline), r.deadline_desc, r.urgent
             it.labels, it.lead_hours, it.assignee_hours = list(r.labels), r.lead_hours, r.assignee_hours
             it.recurrence, it.reminder, it.start = r.recurrence, _iso(r.reminder), _iso(r.start)
+            # A plant event runs from its Start to its Due: the end date its own name made a Deadline ("Spring outage,
+            # 3 to 14 Nov") is its Due.
+            if it.plant_event and it.deadline and not it.due:
+                it.due, it.deadline, it.deadline_desc = it.deadline, None, ""
         else:
             it.title = first_sentence(_MARKER.sub("", it.text)) or (it.state if kind == "update" and it.state else "")
         # Where it goes. A task: under the item it's listed under, else the capture's task (or meeting, or new task),

@@ -92,6 +92,10 @@ def check_values(ctx: AppContext, values: dict[str, Any]) -> dict[str, Any]:
     if not out.get("workdays"):
         raise SettingsProblem("Pick at least one workday, or the capacity calendar has no days to spread hours over.")
     out["event_words"] = [w.strip().lower() for w in out.get("event_words", []) if w.strip()]
+    names = [w.strip() for w in out.get("reference_fields", []) if w.strip()]
+    if len({n.lower() for n in names}) < len(names):
+        raise SettingsProblem("Give each reference field its own name.")
+    out["reference_fields"] = names
     if out.get("me") and out["me"] not in Model(ctx.conn).people:
         raise SettingsProblem(f"There's no person {out['me']}.")
     return out
@@ -292,6 +296,8 @@ class SettingsView(QWidget):
         self.horizon.setSuffix(" years")
         self.events = QLineEdit()
         self.events.setPlaceholderText("Comma-separated")
+        self.references = QLineEdit()  # release 5.9, mods log round 2, M0034
+        self.references.setPlaceholderText("Comma-separated, such as Change #")
         self.cap = QSpinBox()
         self.cap.setRange(1_000, 5_000_000)
         self.cap.setSingleStep(10_000)
@@ -314,6 +320,9 @@ class SettingsView(QWidget):
                 ("Workdays", days, "The capacity calendar spreads hours over these days."),
                 ("Capacity horizon", self.horizon, "How far ahead routine tasks fill the capacity calendar."),
                 ("Event words", self.events, "Words Parse and populate reads as events, for deadlines."),
+                ("Reference fields", self.references, "Fields every task gets, such as a change record's number. Each shows on the task's "
+                                                    "page with Copy, is found by search, and Parse and populate reads its name followed by "
+                                                    "a number. Removing a name takes its box away; values a task already has still show."),
                 ("Extracted text", self.cap, "The most text kept from each file."),
                 ("Copy prompt warns", self.warn, "Copy prompt warns when a prompt is longer than this."),
                 ("Document checks", self.check, "How often tracked documents are checked for changes (a later version).")]
@@ -381,6 +390,7 @@ class SettingsView(QWidget):
             box.setChecked(d in s.workdays)
         self.horizon.setValue(s.capacity_horizon_years)
         self.events.setText(", ".join(s.event_words))
+        self.references.setText(", ".join(s.reference_fields))
         self.cap.setValue(s.extracted_text_cap_chars)
         self.warn.setValue(s.prompt_warn_chars)
         self.check.setValue(s.doc_check_minutes)
@@ -396,6 +406,7 @@ class SettingsView(QWidget):
             "backup_dir": self.backup.text(),
             "reminder_time": self.reminder.time().toString("HH:mm"), "workdays": [d for d, box in self.workdays.items() if box.isChecked()],
             "capacity_horizon_years": self.horizon.value(), "event_words": [w for w in self.events.text().split(",")],
+            "reference_fields": [w for w in self.references.text().split(",")],
             "extracted_text_cap_chars": self.cap.value(), "prompt_warn_chars": self.warn.value(), "doc_check_minutes": self.check.value(),
             "backup_every_days": self.backup_days.value(), "backup_keep": self.backup_keep.value(),
         }

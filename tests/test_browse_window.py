@@ -19,7 +19,7 @@ from docrepo.model import Model  # noqa: E402
 from docrepo.ui.browse_window import BrowseWindow  # noqa: E402
 from docrepo.ui.capture_window import CaptureWindow  # noqa: E402
 from docrepo.ui.context import AppContext  # noqa: E402
-from docrepo.ui.tree_view import KEY_ROLE  # noqa: E402
+from docrepo.ui.tree_view import HTML_ROLE, KEY_ROLE  # noqa: E402
 
 NOW = datetime(2026, 10, 8, 14, 10)
 
@@ -805,3 +805,93 @@ def test_fixing_a_capture_with_formatting(browse, ctx):
     browse.save_capture_edit()
     c = Model(browse.conn).captures["C000017"]
     assert not c.formatted and captures.read_content(ctx.data_root, c) == "Vendor drawings came in late."
+
+
+def test_release_59_people_labels_reference_fields_and_capacity(browse, ctx):
+    """Release 5.9: people's email, group and role, Copy emails, nested labels in the Labels view, pickers and filters,
+    reference fields named in Settings, and the capacity view grouped by group with plant event weeks named."""
+    from docrepo import tasks
+    from docrepo.ui.widgets import CheckMenuButton, label_filter, label_options, people_filter
+
+    browse.set_view("people")
+    browse.save_person(None, "Dana Kim", ["Dana"], 36, email="dana.kim@example.com", group="Quality", role="Inspector")
+    dana = next(p for p in Model(browse.conn).people.values() if p.name == "Dana Kim")
+    browse.save_person(dana.id, "Dana Kim", ["Dana"], 32)  # None leaves email, group and role as they are
+    dana = Model(browse.conn).people[dana.id]
+    assert (dana.email, dana.group, dana.role, dana.hours) == ("dana.kim@example.com", "Quality", "Inspector", 32)
+    assert browse.tree.columnCount() == 5
+    browse.copy_emails(["P003", "P004", "P006"])
+    assert QGuiApplication.clipboard().text() == "tom.becker@example.com; mike.ortiz@example.com"
+    assert browse.status.text() == "Copied 2 email addresses. Paste into Outlook's To box. No address set for Todd."
+    choices, sets = people_filter(Model(browse.conn))
+    assert ("Group: Maintenance", ["P003", "P004"]) in sets
+    browse.set_view("labels")
+    browse.save_label(None, "Production line", ["production line"])
+    for name in ("Line 1", "Line 2"):
+        browse.save_label(name, name, [name.lower()], under="Production line")
+    m = Model(browse.conn)
+    assert m.sublabels("Production line") == ["Line 1", "Line 2"] and "Line 1" not in browse._parent_choices()
+    assert [o.label for o in label_options(m, "line", [])] == ["Production line › Line 1", "Production line › Line 2"]
+    assert [o.label for o in label_options(m, "production", [])] == ["Production line › Line 1", "Production line › Line 2"]
+    assert label_filter(m)[1] == [("Production line: all", ["Line 1", "Line 2"])]
+    browse.set_view("tasks")
+    labels = next(w for w in browse.filters.findChildren(CheckMenuButton) if w.noun == "Labels")
+    labels.sets[0][0].trigger()  # ticks both sublabels
+    assert labels.values() == ["Line 1", "Line 2"] and labels.sets[0][0].isChecked()
+    # Reference fields: named in Settings, a box each in Edit task.
+    browse.set_view("settings")
+    browse.settings_view.references.setText("Work order #, Permit no.")
+    assert "reference_fields" in browse.settings_view.save()
+    assert ctx.settings.reference_fields == ["Work order #", "Permit no."]
+    tasks.update_task(browse.conn, ctx.settings, "T000012", at=NOW, via="Browse tool", references={"Work order #": "48213"})
+    tasks.create_task(browse.conn, ctx.settings, title="Spring outage", at=NOW, created_by="Excel import", start="2026-10-19",
+                      due="2026-10-23", plant_event=True)
+    browse.refresh()
+    browse.copy_reference("T000012", "Work order #")
+    assert QGuiApplication.clipboard().text() == "48213"
+    # Capacity: each group's people under its heading, and a plant event's weeks named.
+    browse.set_view("capacity")
+    browse.cap_by_group.setChecked(True)
+    heads = [x if isinstance(x, str) else x.person for x in browse._cap_line_rows]
+    assert heads[:4] == ["Engineering", "P001", "P002", "Maintenance"] and heads[-2:] == ["No group", "P006"]
+    weeks = [browse.cap_table.horizontalHeaderItem(i).text() for i in range(1, browse.cap_table.columnCount())]
+    assert [w.split("\n")[1] for w in weeks if "\n" in w] == ["Spring outage"]
+
+
+def test_edit_task_and_edit_selected_have_plant_event_and_reference_fields(browse, ctx):
+    """Release 5.9: Edit task's Plant event tick box and a box per reference field, with the line naming a plant event
+    its dates fall in; Edit selected ticks or unticks Plant event."""
+    from docrepo import tasks
+    from docrepo.ui.task_forms import BulkEditDialog, TaskEditDialog
+
+    tasks.create_task(browse.conn, ctx.settings, title="Spring outage", at=NOW, created_by="Excel import", start="2026-10-12",
+                      due="2026-10-16", plant_event=True)
+    browse.refresh()
+    dialog = TaskEditDialog(browse, browse.model(), "T000012", browse._label_options, browse._people_options,
+                            reference_fields=["Work order #"], today=NOW.date())
+    assert dialog.during.text() == "Due falls during Spring outage, Mon 12 Oct to Fri 16 Oct."
+    dialog.references["Work order #"].setText("48213")
+    dialog.plant_event.setChecked(True)
+    values = dialog.values()
+    assert values["references"] == {"Work order #": "48213"} and values["plant_event"] is True
+    plain = TaskEditDialog(browse, browse.model(), "T000012", browse._label_options, browse._people_options)
+    assert "references" not in plain.values()  # no reference fields in Settings: no boxes, nothing changed
+    bulk = BulkEditDialog(browse, browse.model(), ["T000012"], browse._label_options, browse._people_options, lambda e: [],
+                          lambda anchor, picked: None)
+    bulk.plant_event.setCurrentIndex(2)
+    assert bulk.edit().fields == {"plant_event": False}
+
+
+def test_a_list_grouped_by_a_parent_label(browse):
+    """Release 5.9 (M0051): with a parent label, the lists gain a Group by that puts each task under its sublabel's heading."""
+    import re
+
+    assert browse._group_box("due") is None  # no parent label yet: no Group by
+    browse.save_label(None, "Production line", ["production line"])
+    for name in ("Line 1", "Line 2"):
+        browse.save_label(name, name, [name.lower()], under="Production line")
+    browse.set_view("due")
+    browse._set_list_group("due", "Production line")
+    heads = [re.sub(r"<[^>]+>|&nbsp;", " ", item.data(0, HTML_ROLE)).split()[:-1] for item in browse.tree.items() if item.data(0, KEY_ROLE) is None]
+    assert heads == [["Line", "1"]]  # both tasks in the list are under Reactor impeller upgrade, which has Line 1
+    assert rows(browse) == [None, ("task", "T000019"), ("task", "T000012")]

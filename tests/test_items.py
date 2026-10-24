@@ -155,3 +155,14 @@ def test_capture_md_keeps_ids(model):
     renamed = items.Names([ParsePerson("P003", "Thomas Becker", ("Tom",))], [items.RefTask("T000012", "Rigging plan")], items.refs_of(stored))
     assert items.store("@Tom Becker has it", renamed) == "@[Thomas Becker](P003) has it"
     assert items.words("- @Tom to send it, see #Rigging plan", names) == "- Send it, see Rigging plan"
+
+
+def test_an_event_line_is_a_plant_event(model):
+    """Release 5.9 (decision 22): **event. makes a task with Plant event ticked. The end date the event's own name
+    made a Deadline is its Due, so it runs from its Start to its Due."""
+    r = items.read("**event. Spring outage, 3 to 14 Nov\n**Event: Fall turnaround from 2 Nov to 6 Nov @Tom\n**events are fun",
+                   names_of(model), TODAY)
+    assert [(it.kind, it.plant_event, it.title, it.start, it.due, it.deadline) for it in r.items] == [
+        ("task", True, "Spring outage", "2026-11-03", "2026-11-14", None), ("task", True, "Fall turnaround", "2026-11-02", "2026-11-06", None)]
+    assert [x.id for x in r.items[1].assignees] == ["P003"]
+    assert not items.read("@Tom book the outage crane by 14 Nov", names_of(model), TODAY).items[0].plant_event  # no reading of event words

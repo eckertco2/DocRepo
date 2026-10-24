@@ -123,7 +123,8 @@ class ItemCard(QFrame):
         lay.setContentsMargins(8, 5, 6, 6)
         lay.setSpacing(3)
         top = QHBoxLayout()
-        self.tick = QCheckBox(items.KIND_NAMES[it.kind] + (f": {it.state}" if it.state else ""))
+        name = "Plant event" if it.plant_event else items.KIND_NAMES[it.kind]
+        self.tick = QCheckBox(name + (f": {it.state}" if it.state else ""))
         self.tick.setChecked(it.on)
         self.tick.setEnabled(not it.problem)
         self.tick.setToolTip("Untick to skip it")
@@ -138,7 +139,7 @@ class ItemCard(QFrame):
         top.addWidget(line)
         lay.addLayout(top)
         self.title = QLineEdit(it.title)
-        self.title.setAccessibleName(f"{items.KIND_NAMES[it.kind]} title")
+        self.title.setAccessibleName(f"{name} title")
         self.title.setEnabled(it.on)
         self.title.textEdited.connect(lambda text: self.changed.emit(self.key, "title", text))
         lay.addWidget(self.title)
@@ -220,8 +221,8 @@ class ItemCards(QFrame):
             "Each line with an operator is a card. Untick one to skip it, or change its title or due date here: your change stays "
             "even when you edit the line." if its or (own and own.any) else
             "In any capture, <b>@Tom</b> makes a task for Tom, <b>@L.Tom</b> makes him its lead, <b>@__</b> a task for no one yet, "
-            "<b>#Rigging plan</b> files a note to that task, and <b>**Closed.</b>, <b>**u</b>, <b>**n</b>, <b>**t</b> or <b>**Decision.</b> "
-            "say what a line is. Type @ or # for a list.")
+            "<b>#Rigging plan</b> files a note to that task, and <b>**Closed.</b>, <b>**u</b>, <b>**n</b>, <b>**t</b>, <b>**Decision.</b> "
+            "or <b>**event.</b> say what a line is. Type @ or # for a list.")
         self.setProperty("empty", not its and not (own and own.any))
         self.style().unpolish(self)
         self.style().polish(self)

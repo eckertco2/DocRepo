@@ -535,3 +535,50 @@ def test_formatted_content_text(window, ctx, tmp_path):
     assert window.content.value() == ("Next one", False)  # the next capture starts with no formatting
     window.make_task_from("C000026")
     assert window.content.value() == ("**Guard** fitted and signed off", True) and window.title.text() == "Guard fitted and signed off"
+
+
+def test_reference_fields_and_plant_events_in_the_capture_window(window, ctx):
+    """Release 5.9 (M0034, M0028): a box per reference field under More fields, filled by Parse and populate, and a
+    Plant event tick box beside Urgent and Meeting. A date inside a plant event is named under the dates."""
+    ctx.settings.reference_fields = ["Work order #"]
+    window.show_capture()
+    assert list(window.n_refs) == ["Work order #"] and list(window.u_refs) == ["Work order #"]
+    assert window.n_more_button.text() == "More fields: state, start, reminder, recurrence, hours and Work order # ▸"
+    window.set_type("new_task", True)
+    window.content.setPlainText("Spring outage prep under work order 48213, due Oct 30.")
+    window.parse()
+    assert window.n_refs["Work order #"].text() == "48213" and window.n_more.isVisible()
+    assert "<b>Work order #</b> 48213" in window.found_label.text()
+    window.n_plant.setChecked(True)
+    window.save()
+    new = Model(ctx.conn).task("T000020")
+    assert new.plant_event and new.references == {"Work order #": "48213"} and new.due == "2026-10-30"
+    # An update: the task's values are prefilled, and only a changed reference is logged.
+    window.set_task("T000008")
+    window.set_type("update", True)
+    assert window.update_changes(Model(ctx.conn).task("T000008")) == {}
+    window.u_refs["Work order #"].setText("50001")
+    window.u_due.set_value("2026-10-27")
+    window.refresh()
+    assert window.update_changes(Model(ctx.conn).task("T000008")) == {"due": "2026-10-27", "references": {"Work order #": "50001"}}
+    assert "Work order # → 50001" in window.changes_label.text()
+    assert window.u_during.text() == "Start, Due and Deadline fall during Spring outage prep under work order 48213, Thu 8 Oct to Fri 30 Oct."
+    window.save()
+    assert Model(ctx.conn).task("T000008").references == {"Work order #": "50001"}
+    ctx.settings.reference_fields = []
+    window.show_capture()
+    assert window.n_refs == {} and window.n_more_button.text()[:-2] == "More fields: state, start, reminder, recurrence and hours"
+
+
+def test_an_event_line_makes_a_plant_event(window, ctx):
+    """Release 5.9 (decision 22): **event. makes its line a task with Plant event ticked, from its Start to its Due."""
+    window.set_task("T000010")
+    window.content.setPlainText("Planning review.\n**event. Spring outage, 3 to 14 Nov")
+    window.read_items()
+    card = window.item_cards.cards[0]
+    assert card.tick.text() == "Plant event" and card.title.text() == "Spring outage"
+    window.save()
+    m = Model(ctx.conn)
+    event = next(t for t in m.tasks.values() if t.title == "Spring outage")
+    assert event.plant_event and (event.start, event.due, event.deadline) == ("2026-11-03", "2026-11-14", None)
+    assert m.parents_of(event.id) == ["T000010"]

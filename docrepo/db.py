@@ -15,7 +15,7 @@ from pathlib import Path
 from docrepo.safe_fs import SafeFS
 
 DB_FILE = Path("System") / "docs.db"
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 #: Each kind of ID: its letter and how many digits follow it.
 ID_FORMATS = {"T": 6, "C": 6, "D": 6, "P": 3}
@@ -264,6 +264,21 @@ ALTER TABLE captures ADD COLUMN formatted INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE captures ADD COLUMN from_notes TEXT REFERENCES captures(id);
 ALTER TABLE captures ADD COLUMN item TEXT;
 ALTER TABLE captures ADD COLUMN meeting TEXT REFERENCES tasks(id);
+""",
+    8: """
+-- People, labels and task fields (mods log round 2, M0028, M0031, M0033, M0034, M0038, M0051, release 5.9): a person's
+-- email, group and role, a label's parent label, a task's Plant event tick, and its reference fields, named in Settings.
+ALTER TABLE people ADD COLUMN email TEXT;
+ALTER TABLE people ADD COLUMN person_group TEXT;
+ALTER TABLE people ADD COLUMN role TEXT;
+ALTER TABLE labels ADD COLUMN parent INTEGER REFERENCES labels(id);
+ALTER TABLE tasks ADD COLUMN plant_event INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE task_references (
+    task  TEXT NOT NULL REFERENCES tasks(id),
+    name  TEXT NOT NULL,
+    value TEXT NOT NULL,
+    PRIMARY KEY (task, name)
+);
 """,
 }
 

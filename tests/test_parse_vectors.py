@@ -58,24 +58,34 @@ def show(r: ParseResult) -> str:
         r.start and f"Start {r.start}", r.recurrence and f"Recurrence {r.recurrence}", r.urgent and "Urgent",
         r.labels and f"Labels [{', '.join(r.labels)}]", r.leads and f"Lead [{who(r.leads)}]",
         r.assignees and f"Assignees [{who(r.assignees)}]", r.lead_hours and f"Lead hours {r.lead_hours}",
-        r.assignee_hours and f"Assignee hours {r.assignee_hours}", *[re.sub(r"\.\Z", "", f.why) for f in r.found if f.why],
+        r.assignee_hours and f"Assignee hours {r.assignee_hours}", ". ".join(f"{k} {v}" for k, v in r.refs.items()),
+        *[re.sub(r"\.\Z", "", f.why) for f in r.found if f.why],
     ]
     parts = [p for p in parts if p]
     return ". ".join(parts) + "." if parts else "Nothing."
 
 
-CAPTURE_ROWS = section_rows("## Parse and populate", "### Date phrases")
+CAPTURE_ROWS = section_rows("## Parse and populate", "### Reference fields")
+#: Release 5.9's reference fields, read with two made-up field names.
+REF_ROWS = section_rows("### Reference fields", "### Date phrases")
+REFS = ("Work order #", "Permit no.")
 DATE_ROWS = section_rows("### Date phrases", None)
 
 
 def test_the_vectors_were_read():
-    assert len(CAPTURE_ROWS) > 140 and len(DATE_ROWS) > 90
+    assert len(CAPTURE_ROWS) > 140 and len(REF_ROWS) > 5 and len(DATE_ROWS) > 90
 
 
 @pytest.mark.parametrize("kind, content, expected", CAPTURE_ROWS, ids=[row[1][:60] for row in CAPTURE_ROWS])
 def test_parse_and_populate(kind, content, expected):
     capture_type = "new_task" if kind == "New task" else "update"
     assert show(parse_capture(content, capture_type, TODAY, PEOPLE, LABELS)) == expected
+
+
+@pytest.mark.parametrize("kind, content, expected", REF_ROWS, ids=[row[1][:60] for row in REF_ROWS])
+def test_reference_fields(kind, content, expected):
+    capture_type = "new_task" if kind == "New task" else "update"
+    assert show(parse_capture(content, capture_type, TODAY, PEOPLE, LABELS, refs=REFS)) == expected
 
 
 @pytest.mark.parametrize("phrase, expected", DATE_ROWS, ids=[row[0] for row in DATE_ROWS])
