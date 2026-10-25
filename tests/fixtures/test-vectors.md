@@ -358,6 +358,19 @@ Made-up versions of what Parse and populate missed in DocRepo's first use (2026-
 | Update | Scaffold is up and insulation is off | Current status "Scaffold is up and insulation is off". |
 | Update | Closed. Mike confirmed he doesn't want extra coverage. | State Closed. Current status "Mike confirmed he doesn't want extra coverage.". |
 
+### Plant events (mods log round 3)
+
+"Plant event" and "major event" tick Plant event, unless denied or done before, for or during one, and a plant event's end date is its Due. The event words alone don't.
+
+| Capture type | Content text | Fills |
+|---|---|---|
+| New task | Plant event: Spring outage, 2 to 6 Nov. | Title "Spring outage". Due 2026-11-06. Start 2026-11-02. Plant event. |
+| New task | The line 2 rebuild is a major event, 9 to 20 Nov. | Title "The line 2 rebuild is a major event". Due 2026-11-20. Start 2026-11-09. Plant event. Labels [Line 2]. |
+| New task | Prep the scaffolding for the plant event. | Title "Prep the scaffolding for the plant event". |
+| New task | Not a plant event, just a weekend shutdown of line 1. | Title "Not a plant event, just a weekend shutdown of line 1". Labels [Line 1]. |
+| New task | Major event planning meeting with Tom on Friday. | Title "Major event planning meeting with Tom". Due 2026-10-09. Assignees [Tom Becker]. |
+| Update | Now a plant event: the dates moved to 16 to 20 Nov. | Current status "Now a plant event: the dates moved to 16 to 20 Nov.". Due 2026-11-20. Plant event. |
+
 ### Reference fields (release 5.9)
 
 Read with two made-up reference fields in Settings, "Work order #" and "Permit no.": a field's name (without its # or no.), then a number. The first for each field counts. The other sections are read with none.

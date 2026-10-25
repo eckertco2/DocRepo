@@ -149,6 +149,7 @@ class CaptureApp(QObject):
             hotkey.HOTKEY_IDS["update_hotkey"]: lambda: self.window.open_with_hotkey("update"),
             hotkey.HOTKEY_IDS["agenda_hotkey"]: lambda: self.window.open_with_hotkey("agenda"),
             hotkey.HOTKEY_IDS["today_hotkey"]: lambda: self.window.open_with_hotkey("today"),
+            hotkey.HOTKEY_IDS["pin_hotkey"]: self.window.toggle_pin,
         }
         self.register_hotkey()
         self.timer = QTimer(self)
@@ -208,7 +209,9 @@ class CaptureApp(QObject):
             self.window.hotkey_label.setText(self.ctx.settings.hotkey)
 
     def toggle_window(self) -> None:
-        if self.window.isVisible() and self.window.isActiveWindow():
+        if self.window.pinned:  # the main hotkey brings a pinned capture back in full (mods log round 3, M0054)
+            self.window.unpin()
+        elif self.window.isVisible() and self.window.isActiveWindow():
             self.window.hide()
         else:
             self.window.show_capture()

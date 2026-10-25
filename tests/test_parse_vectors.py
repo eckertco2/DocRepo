@@ -55,7 +55,7 @@ def show(r: ParseResult) -> str:
         r.title and f'Title "{r.title}"', r.state and f"State {r.state}", r.status and f'Current status "{r.status}"',
         r.due and f"Due {r.due}", r.deadline and f"Deadline {r.deadline}",
         r.deadline_desc and f'Deadline description "{r.deadline_desc}"', r.reminder and f"Reminder {r.reminder}",
-        r.start and f"Start {r.start}", r.recurrence and f"Recurrence {r.recurrence}", r.urgent and "Urgent",
+        r.start and f"Start {r.start}", r.recurrence and f"Recurrence {r.recurrence}", r.urgent and "Urgent", r.plant_event and "Plant event",
         r.labels and f"Labels [{', '.join(r.labels)}]", r.leads and f"Lead [{who(r.leads)}]",
         r.assignees and f"Assignees [{who(r.assignees)}]", r.lead_hours and f"Lead hours {r.lead_hours}",
         r.assignee_hours and f"Assignee hours {r.assignee_hours}", ". ".join(f"{k} {v}" for k, v in r.refs.items()),

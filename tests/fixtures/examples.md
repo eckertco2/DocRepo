@@ -531,6 +531,7 @@ Settings.
   "update_hotkey": "",
   "agenda_hotkey": "",
   "today_hotkey": "",
+  "pin_hotkey": "",
   "backup_dir": "C:\\Users\\<user>\\Documents\\DocRepoBackups",
   "backup_every_days": 7,
   "backup_keep": 8,

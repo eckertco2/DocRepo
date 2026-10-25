@@ -1653,14 +1653,32 @@ class BrowseWindow(QWidget):
             self.render_detail(keep_scroll=True)
 
     def double_click(self, item: QTreeWidgetItem) -> None:
-        """Double-clicking a task opens or closes its subtasks; it no longer shows the task's folder in File Explorer (mods log
-        round 2, M0043), which Open folder still does. Other rows show what they point to, as before."""
+        """Double-clicking a row opens its edit form (mods log round 3, M0056; decision 57): Edit task for a task, wherever
+        it's listed, Edit for a capture (a note on Today edits the note), and Edit… for a person or a label. A document has
+        no form yet, so it still shows its file, or copies a link's address. Subtasks open and close by the row's arrow and
+        the Right, Left, + and − keys."""
         key = item.data(0, KEY_ROLE)
-        if key and key[0] == "task":
-            if item.childCount():
-                item.setExpanded(not item.isExpanded())
+        if not key:
             return
-        self.reveal_key(key)
+        kind, ident = key
+        m = self.model()
+        if kind == "task":
+            t = m.tasks.get(ident)
+            if t is not None and not t.discarded:
+                self.edit_task(ident)
+        elif kind == "capture":
+            note = next((a for a in m.today_items() if a.subject is None and a.added_by == ident), None) if self.view == TODAY else None
+            c = m.captures.get(ident)
+            if note is not None:
+                self.edit_today_note(note.id)
+            elif c is not None and not c.discarded and self._capture_text(ident) is not None:
+                self.start_capture_edit(ident)
+        elif kind == "person":
+            self.edit_person(ident)
+        elif kind == "label":
+            self.edit_label(ident)
+        else:
+            self.reveal_key(key)
 
     def reveal_key(self, key) -> None:
         """Show what a row or link points to in File Explorer."""

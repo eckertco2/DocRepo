@@ -19,7 +19,7 @@ KEYS = {"space": 0x20, "enter": 0x0D, "tab": 0x09, "insert": 0x2D, "ins": 0x2D, 
 
 
 #: Each hotkey: its setting in settings.json and what it does. Only the first has a default; the others (mods log round 1:
-#: M0002, M0010, M0020; round 2: M0039) are off until set. A hotkey's Windows ID is its place here, from 1.
+#: M0002, M0010, M0020; round 2: M0039; round 3: M0053) are off until set. A hotkey's Windows ID is its place here, from 1.
 HOTKEYS: tuple[tuple[str, str], ...] = (
     ("hotkey", "Open the capture window"),
     ("browse_hotkey", "Open the browse tool"),
@@ -28,6 +28,7 @@ HOTKEYS: tuple[tuple[str, str], ...] = (
     ("update_hotkey", "An update"),
     ("agenda_hotkey", "Add to agenda"),
     ("today_hotkey", "A quick task on Today"),
+    ("pin_hotkey", "Pin the capture window, or bring it back"),
 )
 HOTKEY_IDS = {setting: n for n, (setting, _label) in enumerate(HOTKEYS, 1)}
 #: The keys Settings offers for the others (mods log round 2, M0036): Ctrl+Shift and the topic's letter, as the owner chose.

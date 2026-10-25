@@ -139,3 +139,77 @@ def test_removing_a_line_keeps_the_rest(edit):
     edit.set_value("**Bold** first\nC:\\Docs\\a.pdf\n- item", True)
     edit.remove_line("c:\\docs\\A.pdf")
     assert edit.value() == ("**Bold** first\n- item", True)
+
+
+def _press(edit, keys: str) -> None:
+    """Press ``keys`` ("Ctrl+.", "Alt+Shift+Up") in the box, as the keyboard would."""
+    from PySide6.QtGui import QKeySequence
+
+    combo = QKeySequence(keys)[0]
+    edit.keyPressEvent(QKeyEvent(QKeyEvent.Type.KeyPress, combo.key(), combo.keyboardModifiers(), ""))
+
+
+def test_onenotes_keys(edit):
+    """Mods log round 3 (M0055, decisions 55 and 56): OneNote's list and formatting keys, with release 5.7's still working,
+    and a 20 px list level."""
+    from docrepo.ui.rich_edit import INDENT
+
+    edit.setPlainText("Guard fitted")
+    _press(edit, "Ctrl+.")
+    assert edit.value() == ("- Guard fitted", True)
+    _press(edit, "Ctrl+/")
+    assert edit.value() == ("1. Guard fitted", True)
+    _press(edit, "Ctrl+/")
+    _press(edit, "Ctrl+Shift+L")  # release 5.7's key for bullets
+    assert edit.value() == ("- Guard fitted", True)
+    cursor = edit.textCursor()
+    cursor.setPosition(0)
+    cursor.setPosition(5, cursor.MoveMode.KeepAnchor)  # "Guard"
+    edit.setTextCursor(cursor)
+    _press(edit, "Ctrl+-")
+    _press(edit, "Ctrl+Alt+H")
+    assert edit.value() == ('- ~~<mark class="yellow">Guard</mark>~~ fitted', True)
+    assert edit.document().indentWidth() == INDENT == 20
+
+
+def test_ctrl_up_and_down_go_by_paragraph(edit):
+    edit.setPlainText("First line\nSecond line\nThird")
+    cursor = edit.textCursor()
+    cursor.setPosition(15)  # inside "Second line"
+    edit.setTextCursor(cursor)
+    _press(edit, "Ctrl+Up")
+    assert edit.textCursor().position() == 11  # the start of its own paragraph
+    _press(edit, "Ctrl+Up")
+    assert edit.textCursor().position() == 0  # then the one above
+    _press(edit, "Ctrl+Down")
+    _press(edit, "Ctrl+Shift+Down")
+    assert edit.textCursor().selectedText() == "Second line "
+    _press(edit, "Ctrl+Down")
+    _press(edit, "Ctrl+Down")
+    assert edit.textCursor().atEnd()
+
+
+def test_alt_shift_up_and_down_move_a_line_with_its_items(edit):
+    edit.set_value("Walkdown\n- Guard\n  - bolts\n- **Rails**\nDone.", True)
+    block = edit.document().findBlockByNumber(3)  # "Rails"
+    cursor = edit.textCursor()
+    cursor.setPosition(block.position() + 2)
+    edit.setTextCursor(cursor)
+    _press(edit, "Alt+Shift+Up")  # above Guard, which takes its own item with it
+    assert edit.value() == ("Walkdown\n- **Rails**\n- Guard\n  - bolts\nDone.", True)
+    assert edit.textCursor().block().text() == "Rails" and edit.textCursor().positionInBlock() == 2
+    block = edit.document().findBlockByNumber(2)  # "Guard", with "bolts" under it
+    cursor.setPosition(block.position())
+    edit.setTextCursor(cursor)
+    _press(edit, "Alt+Shift+Down")
+    assert edit.value() == ("Walkdown\n- **Rails**\nDone.\n- Guard\n  - bolts", True)
+    edit.undo()  # one Ctrl+Z puts it back
+    assert edit.value() == ("Walkdown\n- **Rails**\n- Guard\n  - bolts\nDone.", True)
+    edit.setPlainText("one\ntwo")
+    cursor = edit.textCursor()
+    cursor.setPosition(5)
+    edit.setTextCursor(cursor)
+    _press(edit, "Alt+Shift+Up")
+    assert edit.value() == ("two\none", False)  # plain text stays plain
+    _press(edit, "Alt+Shift+Up")
+    assert edit.value() == ("two\none", False)  # nothing above the first line

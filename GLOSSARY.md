@@ -104,6 +104,7 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Show hints**: the setting that shows the help text, the **i** buttons and the key badges in every window. Off by default.
 - **Key tips**: the labels that show each control's key while Alt (letter keys) or Ctrl (Ctrl shortcuts) is held.
 - **Command palette**: the box Ctrl+K opens, listing every action and view, narrowed as you type.
+- **Pinned window**: the capture window shrunk to a small window at the bottom right (Pin, F12), for dropping files, emails and links on. It's the same capture.
 
 ## 7. Retired words
 

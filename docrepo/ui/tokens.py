@@ -254,6 +254,12 @@ QWidget#capture QScrollArea, QWidget#capture QScrollArea > QWidget > QWidget { b
 QWidget#footer { background: $base; border-top: 1px solid $stroke; }
 QFrame#editor { background: $content; border: 1px solid $stroke; border-bottom: 1px solid $control; border-radius: 4px; }
 QFrame#editor QTextEdit, QFrame#editor QPlainTextEdit { border: none; border-radius: 0; background: transparent; padding: 6px 8px; }
+/* the pinned capture window (mods log round 3, M0053): a drop zone that lights up while something is dragged over it */
+QWidget#pinWindow { background: $content; border: 1px solid $stroke_strong; }
+QLabel#pinTitle { font-weight: 600; }
+QWidget#pinWindow QTextEdit { padding: 4px 6px; }
+QFrame#dropZone { background: $base; border: 1px dashed $stroke_strong; border-radius: 6px; }
+QFrame#dropZone[over="true"] { background: $selected; border: 1px solid $accent; }
 QWidget#formatBar { border-bottom: 1px solid $stroke; }
 QWidget#formatBar QToolButton { color: $text2; padding: 3px 6px; min-width: 16px; }
 QWidget#formatBar QToolButton:hover { color: $text; background: $hover; border-color: $stroke; }
@@ -306,6 +312,7 @@ h2 { font-size: ${subtitle}pt; font-weight: 600; margin-top: 2px; margin-bottom:
 .sub { color: $text2; font-size: ${caption}pt; }
 .faint { color: $text2; }
 .k { color: $text2; padding-right: 12px; }
+.fk { color: $text2; font-size: ${caption}pt; }
 .note { color: $text2; font-size: ${caption}pt; }
 .box { background-color: $base; }
 .info { background-color: $selected; }

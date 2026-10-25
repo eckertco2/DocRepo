@@ -603,17 +603,25 @@ def test_today_shows_what_is_due_this_week(browse):
     assert db.get_state(browse.conn, "today_due_mine") == "0"
 
 
-def test_double_click_opens_a_tasks_subtasks(browse, ctx):
-    """Mods log round 2 (M0043): double-clicking a task opens or closes its subtasks, not File Explorer; other rows still show their file."""
+def test_double_click_opens_the_rows_edit_form(browse, ctx):
+    """Mods log round 3 (M0056, decision 57): double-clicking a row opens its edit form, not its subtasks or File Explorer;
+    a document still shows its file."""
+    opened = []
+    for name in ("edit_task", "start_capture_edit", "edit_person", "edit_label", "edit_today_note"):
+        setattr(browse, name, lambda x, name=name: opened.append((name, x)))
     item = _item(browse, ("task", "T000001"))
     was = item.isExpanded()
     browse.double_click(item)
-    assert item.isExpanded() != was and browse.revealed == []
-    browse.double_click(item)
-    assert item.isExpanded() == was
-    browse.set_view("unfiled")
-    browse.double_click(next(browse.tree.items()))
-    assert len(browse.revealed) == 1 and browse.revealed[0].name == "capture.md"
+    assert opened == [("edit_task", "T000001")] and item.isExpanded() == was and browse.revealed == []
+    for view, kind, form in (("unfiled", "capture", "start_capture_edit"), ("people", "person", "edit_person"), ("labels", "label", "edit_label")):
+        browse.set_view(view)
+        row = next(i for i in browse.tree.items() if (i.data(0, KEY_ROLE) or ("",))[0] == kind)
+        browse.double_click(row)
+        assert opened[-1] == (form, row.data(0, KEY_ROLE)[1])
+    browse.copy_link = lambda doc: opened.append(("copy_link", doc))
+    browse.set_view("docs")
+    browse.double_click(next(i for i in browse.tree.items() if (i.data(0, KEY_ROLE) or ("",))[0] == "doc"))
+    assert len(browse.revealed) == 1 or opened[-1][0] == "copy_link"  # a file shows in File Explorer; a link's address is copied
 
 
 def _shortcut(widget, keys: str):
@@ -779,7 +787,7 @@ def test_the_suggested_hotkeys(browse):
     view.suggest_hotkeys()
     assert {k: box.text() for k, box in view.more_hotkeys.items()} == {
         "browse_hotkey": "Ctrl+Alt+B", "note_hotkey": "Ctrl+Shift+N", "new_task_hotkey": "Ctrl+Shift+T", "update_hotkey": "Ctrl+Shift+U",
-        "agenda_hotkey": "Ctrl+Shift+A", "today_hotkey": "Ctrl+Shift+D"}
+        "agenda_hotkey": "Ctrl+Shift+A", "today_hotkey": "Ctrl+Shift+D", "pin_hotkey": ""}  # Pin has no suggested key (round 3)
     assert browse.status.text() == "Filled 5 hotkeys. Save settings to use them."
     assert view.save() == ["browse_hotkey", "note_hotkey", "new_task_hotkey", "update_hotkey", "agenda_hotkey", "today_hotkey"]
 

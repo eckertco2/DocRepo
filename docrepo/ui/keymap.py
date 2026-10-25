@@ -27,12 +27,24 @@ OTHER_KEYS = (
     ("Ctrl+Enter", "Saves: the capture window, the mods log and every form"),
     ("Esc", "Hides the capture window, closes a form (asking first if you changed something), or clears Find"),
     ("F11", "Expands the capture window's content text"),
+    ("F12", "Pins the capture window at the bottom right, to drop files, emails and links on; the main hotkey brings it back"),
     ("Ctrl+B", "Hides the views on the left of the browse tool"),
     ("F5", "Reads docs.db again"),
     ("Ctrl+K", "The command palette: every action and view, narrowed as you type"),
     ("Alt, held", "Shows each control's letter key in the window"),
     ("Ctrl, held", "Shows the Ctrl shortcuts in the window, after half a second"),
     ("F1", "This list"),
+)
+#: The content text's keys, as OneNote's (mods log round 3, M0055).
+EDITOR_KEYS = (
+    ("Ctrl+B, Ctrl+I, Ctrl+U", "Bold, italic, underline"),
+    ("Ctrl+-", "Strikethrough"),
+    ("Ctrl+Alt+H", "Highlight"),
+    ("Ctrl+.", "Bulleted list, or type “- ” or “* ” at a line's start"),
+    ("Ctrl+/", "Numbered list, or type “1. ”"),
+    ("Tab, Shift+Tab", "A list item in or out a level; also Alt+Shift+Right and Alt+Shift+Left"),
+    ("Ctrl+Up, Ctrl+Down", "To the paragraph above or below; with Shift, selects as it goes"),
+    ("Alt+Shift+Up, Alt+Shift+Down", "Moves the line up or down, with the list items under it"),
 )
 
 
@@ -43,12 +55,14 @@ def key_map_html(main_hotkey: str = "Ctrl+Shift+Space") -> str:
 
     rows = "".join(f"<tr><td><b>{k}</b></td>{cell(topic)}{cell(g)}{cell(b)}{cell(c)}</tr>" for k, topic, g, b, c in KEY_MAP)
     other = "".join(f"<tr><td><b>{esc(main_hotkey if k == 'Ctrl+Shift+Space' else k)}</b></td><td>{esc(w)}</td></tr>" for k, w in OTHER_KEYS)
+    editor = "".join(f"<tr><td><b>{esc(k)}</b></td><td>{esc(w)}</td></tr>" for k, w in EDITOR_KEYS)
     return ("<p class='note'>One letter per topic. In the browse tool the letter alone acts on the selected task (not while you type in "
             "a box); in the capture window it's Alt and the letter; anywhere in Windows it's Ctrl+Shift and the letter, once you set "
             "it in Settings. While DocRepo runs, a global hotkey is taken from other programs, such as Outlook's Ctrl+Shift+N for a new note.</p>"
             "<table cellspacing='0' cellpadding='4' width='100%'><tr><th align='left'>Key</th><th align='left'>Topic</th>"
             "<th align='left'>Global hotkey</th><th align='left'>Browse tool</th><th align='left'>Capture window</th></tr>"
-            f"{rows}</table><p></p><table cellspacing='0' cellpadding='4'>{other}</table>")
+            f"{rows}</table><p></p><table cellspacing='0' cellpadding='4'>{other}</table>"
+            f"<p><b>In the content text</b>, as in OneNote</p><table cellspacing='0' cellpadding='4'>{editor}</table>")
 
 
 class KeyMapDialog(QDialog):

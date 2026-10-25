@@ -38,6 +38,7 @@ h2 { font-size: 15pt; font-weight: 600; margin-top: 2px; margin-bottom: 4px; }
 .sub { color: #5a6571; font-size: 9pt; }
 .faint { color: #87919c; }
 .k { color: #5a6571; padding-right: 12px; }
+.fk { color: #5a6571; font-size: 9pt; }
 .note { color: #5a6571; font-size: 9pt; }
 .box { background-color: #f4f6f8; }
 .info { background-color: #dbe8f5; }
@@ -107,6 +108,29 @@ def none_text(text: str = "None") -> str:
 def fields_table(rows: list[tuple[str, str]]) -> str:
     cells = "".join(f'<tr><td class="k" width="118" valign="top">{esc(k)}</td><td valign="top">{v}</td></tr>' for k, v in rows)
     return f'<table cellspacing="0" cellpadding="3">{cells}</table>'
+
+
+#: The task page's grid of short fields (mods log round 3, M0058): this many to a row.
+FACT_COLUMNS = 3
+
+
+def facts_grid(groups: list[list[tuple[str, str]]], columns: int = FACT_COLUMNS) -> str:
+    """Short fields in a grid, each a small grey label over its value, ``columns`` to a row, each group starting a row
+    of its own."""
+    width = 100 // columns
+    rows = []
+    for group in groups:
+        for i in range(0, len(group), columns):
+            cells = [f'<td width="{width}%" valign="top" style="padding: 0 16px 12px 0"><span class="fk">{esc(k)}</span><br>{v}</td>'
+                     for k, v in group[i:i + columns]]
+            cells += [f'<td width="{width}%"></td>'] * (columns - len(cells))
+            rows.append(f"<tr>{''.join(cells)}</tr>")
+    return f'<table width="100%" cellspacing="0" cellpadding="0">{"".join(rows)}</table>'
+
+
+def text_block(label: str, value: str) -> str:
+    """A long field, full width: its small grey label, then its text."""
+    return f'<p style="margin: 4px 0 2px 0"><span class="fk">{esc(label)}</span></p><p style="margin: 0 0 10px 0">{value}</p>'
 
 
 def box(inner: str, cls: str = "box") -> str:
@@ -208,34 +232,36 @@ class Pages:
         chips = (state_chip(t.state) + self.markers_html(t) + (" " + chip("Meeting", "routine") if t.meeting else "")
                  + (" " + chip("Plant event", "new") if t.plant_event else "") + labels + f' &nbsp;<span class="sub">{t.id}</span>')
         routine = bool(t.recurrence)
-        rows = [
-            ("Description", multiline(t.description) if t.description else none_text("None")),
-            ("Current status", multiline(t.current_status) if t.current_status else none_text("None yet")),
-            ("Lead", self.roles(t.leads, t.lead_hours, routine)),
-            ("Assignees", self.roles(t.assignees, t.assignee_hours, routine)),
+        dash = none_text("—")  # an empty short field, so a missing date is still seen
+        # The short fields in a grid: the people on a row of their own, then the dates and the rest; the long ones under
+        # it, full width (mods log round 3, M0058, decision 59).
+        people = [("Lead", self.roles(t.leads, t.lead_hours, routine)), ("Assignees", self.roles(t.assignees, t.assignee_hours, routine))]
+        dates = [
             ("Start", esc(long_date(start_of(t), self.today)) + ("" if t.start else ' <span class="sub">date entered</span>')),
             ("Due", f'{esc(self.long(t.due))} <span class="sub">{days_text(to_date(t.due), self.today)}</span>' if t.due
              # With no Due, the deadline shows in its place, marked (mods log round 1, M0003); nothing changes in docs.db.
              else f'{esc(self.long(t.deadline))} <span class="sub">(deadline) {days_text(to_date(t.deadline), self.today)}</span>'
-             if t.deadline and not routine else none_text()),
+             if t.deadline and not routine else dash),
             ("Deadline", f'{esc(self.long(t.deadline))}{", " + esc(t.deadline_desc) if t.deadline_desc else ""} '
-                         f'<span class="sub">{days_text(to_date(t.deadline), self.today)}</span>' if t.deadline else none_text()),
-            ("Reminder", f'{esc(self.long(t.reminder))} <span class="sub">{rem_text(to_date(t.reminder), self.today)}</span>' if t.reminder else none_text()),
+                         f'<span class="sub">{days_text(to_date(t.deadline), self.today)}</span>' if t.deadline else dash),
+            ("Reminder", f'{esc(self.long(t.reminder))} <span class="sub">{rem_text(to_date(t.reminder), self.today)}</span>' if t.reminder else dash),
         ]
         if t.recurrence:
             nxt = due_of(t, self.today)
-            rows.append(("Recurrence", f"{esc(t.recurrence)}, {'until ' + esc(self.long(t.repeat_until)) if t.repeat_until else 'no end date'}."
-                         + (f" Next: {esc(long_date(nxt.date, self.today))}" if nxt else "")))
-        rows += [(name, esc(value)) for name, value in t.references.items()]  # reference fields (release 5.9, M0034); Copy is above
+            dates.append(("Recurrence", f"{esc(t.recurrence)}, {'until ' + esc(self.long(t.repeat_until)) if t.repeat_until else 'no end date'}."
+                          + (f" Next: {esc(long_date(nxt.date, self.today))}" if nxt else "")))
+        other = [(name, esc(value)) for name, value in t.references.items()]  # reference fields (release 5.9, M0034); Copy is above
         on = m.agendas_on(task_id)
         if on:
-            rows.append(("On agendas", "<br>".join(f'{self.target_link(a.target)} <span class="sub">since {self.day(a.added)}</span>' for a in on)))
+            other.append(("On agendas", "<br>".join(f'{self.target_link(a.target)} <span class="sub">since {self.day(a.added)}</span>' for a in on)))
         if t.closed:
-            rows.append(("Closed", esc(self.long(t.closed))))
-        rows.append(("Created", f"{esc(self.long(t.created))} from {self.ref_link(t.created_by)}"))
+            other.append(("Closed", esc(self.long(t.closed))))
+        other.append(("Created", f"{esc(self.long(t.created))} from {self.ref_link(t.created_by)}"))
+        long_text = (text_block("Current status", multiline(t.current_status) if t.current_status else none_text("None yet"))
+                     + text_block("Description", multiline(t.description) if t.description else none_text("None")))
         if t.discarded:  # mods log round 1, M0021
             crumbs += self.discarded_box(t.discarded, t.discard_reason, "the task tree, the lists, the pickers, search and the capacity calendar")
-        return (f"{crumbs}<h2>{esc(t.title)}</h2><p>{chips}</p>{fields_table(rows)}{self.agenda_block(task_id)}"
+        return (f"{crumbs}<h2>{esc(t.title)}</h2><p>{chips}</p>{facts_grid([people, dates + other])}{long_text}{self.agenda_block(task_id)}"
                 f"{self.tab_bar(state)}{self.tab_body(t, state)}")
 
     def tab_bar(self, state: PageState) -> str:

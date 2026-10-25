@@ -166,3 +166,14 @@ def test_an_event_line_is_a_plant_event(model):
         ("task", True, "Spring outage", "2026-11-03", "2026-11-14", None), ("task", True, "Fall turnaround", "2026-11-02", "2026-11-06", None)]
     assert [x.id for x in r.items[1].assignees] == ["P003"]
     assert not items.read("@Tom book the outage crane by 14 Nov", names_of(model), TODAY).items[0].plant_event  # no reading of event words
+
+
+def test_the_words_plant_event_make_a_plant_event(model):
+    """Mods log round 3 (M0059, decision 58): a task item that says "plant event" or "major event" is one, and **event
+    on a new task's own line ticks the new task's own Plant event."""
+    r = items.read("Walkdown done.\n- @Tom plan the line 2 rebuild, a major event, 9 to 20 Nov", names_of(model), TODAY)
+    assert [(it.plant_event, it.start, it.due) for it in r.items] == [(True, "2026-11-09", "2026-11-20")]
+    r = items.read("**event Spring outage, 3 to 14 Nov\nScope agreed.", names_of(model), TODAY, new_task=True)
+    own = items.self_fields(r, names_of(model))
+    assert own.plant_event and r.items == []
+    assert not items.self_fields(items.read("Spring outage, 3 to 14 Nov", names_of(model), TODAY, new_task=True), names_of(model)).plant_event

@@ -102,6 +102,11 @@ QWidget#footer { background: #f4f6f8; border-top: 1px solid #d6dce3; }
 QListWidget#suggestions { border: 1px solid #b8c1cb; border-radius: 4px; }
 QLabel#help { color: #5a6571; font-size: 8.5pt; }
 QFrame#editor { border: none; }
+QWidget#pinWindow { background: #ffffff; border: 1px solid #b8c1cb; }
+QWidget#pinWindow QTextEdit { border: 1px solid #b8c1cb; border-radius: 4px; padding: 4px 6px; }
+QLabel#pinTitle { font-weight: 600; }
+QFrame#dropZone { background: #f4f6f8; border: 1px dashed #87919c; border-radius: 6px; }
+QFrame#dropZone[over="true"] { background: #e8f0f8; border: 1px solid #1d5e98; }
 """
 #: Release 5.9's style sheet, the Classic look's.
 CLASSIC_STYLE = STYLE

@@ -366,7 +366,7 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
                 deadline_desc=nt.deadline_desc, reminder=nt.reminder, recurrence=nt.recurrence, repeat_until=nt.repeat_until,
                 urgent=nt.urgent, meeting=nt.meeting, leads=leads, assignees=assignees,
                 lead_hours=nt.lead_hours, assignee_hours=nt.assignee_hours, labels=nt.labels, inherit_labels=nt.inherit_labels,
-                plant_event=nt.plant_event, references=nt.references,
+                plant_event=nt.plant_event or bool(own and own.plant_event), references=nt.references,
             )
         # Meeting notes (release 5.8): this time's meeting of a regular meeting, or a new meeting, is made first, and
         # the notes go on it. It stays In progress until it's closed by hand.

@@ -84,6 +84,7 @@ class ParseResult:
     start: date | None = None
     recurrence: str = ""
     urgent: bool = False
+    plant_event: bool = False  # "plant event" or "major event" (mods log round 3, M0059)
     labels: list[str] = field(default_factory=list)
     leads: list[Who] = field(default_factory=list)
     assignees: list[Who] = field(default_factory=list)
@@ -590,6 +591,7 @@ LEAD_INS = [
     re.compile(r"^(?:so|ok|okay|um|uh|alright|basically|also|and|then)\b[\s,]+", I),  # dictated fillers
     re.compile(r"^(?:new\s+task|action\s+item|todo|to-do)\b\s*[:\-–,]?\s*", I),
     re.compile(r"^(?:re|fwd?|fw)\s*:\s*", I),  # an email subject's prefixes
+    re.compile(r"^(?:plant|major)\s+event\s*[:\-–,]\s*", I),  # "Plant event: Spring outage" (mods log round 3, M0059)
     re.compile(r"^(?:urgent|fyi|note|nb|todo|to do|reminder|p\.?s\.?|asap|(?:high|top|low)\s+priority|not\s+urgent|non-?urgent|non-?critical)"
                r"\s*(?:[:\-–!]+|\s-)\s*", I),
     re.compile(r"^@\S+\s+"),
@@ -1001,10 +1003,15 @@ BREAK = re.compile(r"[,;]|\s(?:and|but|or|while|whereas)\s", I)
 REMIND = re.compile(r"\b(?:remind|reminder|ping|nudge|follow\s+up|check\s+in\s+with)\b", I)
 URGENT = re.compile(r"\b(?:urgent(?:ly)?|asap|immediately|right away|as soon as possible|critical(?!\s+path)|(?:high|top|highest)\s+priority)\b", I)
 NOT_URGENT = re.compile(r"\b(?:not|no|non|nothing|isn['’]t|wasn['’]t|never|less)\s*-?\s*(?:that\s+|very\s+|too\s+|so\s+)?\Z", I)
+#: "Plant event" and "major event" make the task a plant event (mods log round 3, M0059, decision 58), unless it's denied
+#: or done before, for or during one ("prep the scaffolding for the plant event"). The event words alone still don't.
+PLANT_EVENT = re.compile(r"\b(?:plant|major)\s+event\b(?!\s+(?:planning|prep|preparation|meeting|review|readiness)\b)", I)
+NOT_PLANT_EVENT = re.compile(r"\b(?:not|no|isn['’]t|wasn['’]t|never|before|for|during|after|ahead\s+of|until|till|by|prior\s+to)\s+"
+                             r"(?:(?:a|an|the|our|this|that|next|each|every)\s+)?\Z", I)
 #: The order fields are listed in, in what Parse and populate found.
-FIELD_ORDER = ("title", "state", "status", "due", "deadline", "deadline_desc", "reminder", "start", "recurrence", "urgent", "labels",
-               "leads", "assignees", "lead_hours", "assignee_hours", "refs")
-UPDATE_KEYS = ("state", "status", "due", "deadline", "deadline_desc", "refs")
+FIELD_ORDER = ("title", "state", "status", "due", "deadline", "deadline_desc", "reminder", "start", "recurrence", "urgent", "plant_event",
+               "labels", "leads", "assignees", "lead_hours", "assignee_hours", "refs")
+UPDATE_KEYS = ("state", "status", "due", "deadline", "deadline_desc", "plant_event", "refs")
 #: A reference field's name without its "#" or "no." (release 5.9): "Work order #" is found as "work order 48213".
 REF_SUFFIX = re.compile(r"\s*(?:#|no\.?|number)\s*\Z", I)
 NEW_TASK_KEYS = tuple(k for k in FIELD_ORDER if k != "status")
@@ -1195,6 +1202,9 @@ def parse_capture(
     if urgent:
         r.urgent = True
         note("urgent", "Urgent", "Yes", urgent.group(0))
+    plant = next((m for m in PLANT_EVENT.finditer(text) if not NOT_PLANT_EVENT.search(text[max(0, m.start() - 30):m.start()])), None)
+    if plant:
+        as_plant_event(r, plant.group(0))
     for label in labels:
         for keyword in label.keywords or (label.name,):
             m = re.search(rf"(?<!\w){esc(keyword)}(?:s|es|ing|ed)?(?!\w)", text, I)
@@ -1246,6 +1256,18 @@ def parse_capture(
             setattr(r, key, getattr(empty, key))
     r.found = sorted((f for f in r.found if f.key in keys), key=lambda f: FIELD_ORDER.index(f.key))
     return r
+
+
+def as_plant_event(r: ParseResult, source: str) -> None:
+    """Tick Plant event (mods log round 3, M0059). A plant event runs from its Start to its Due: the end date its own name
+    made a Deadline ("Plant event: Spring outage, 2 to 6 Nov") is its Due, as for a **event item."""
+    r.plant_event = True
+    r.found.append(Found("plant_event", "Plant event", "Yes", source))
+    if r.deadline and not r.due:
+        r.due, r.deadline, r.deadline_desc = r.deadline, None, ""
+        r.found = [Found("due", "Due", f.value, f.source, f.calc, f.why) if f.key == "deadline" else f
+                   for f in r.found if f.key != "deadline_desc"]
+    r.found.sort(key=lambda f: FIELD_ORDER.index(f.key) if f.key in FIELD_ORDER else len(FIELD_ORDER))
 
 
 def _fill_hours(r: ParseResult, text: str, hours: list[HoursHit], people: Sequence[ParsePerson], today: date, known: Known,

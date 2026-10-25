@@ -305,6 +305,7 @@ class SelfFields:
     tasks: list[str]
     text: str
     any: bool
+    plant_event: bool = False  # **event on the new task's own line (mods log round 3, M0059)
 
 
 def _tasks_of(toks: list[Token]) -> list[str]:
@@ -402,6 +403,7 @@ def read(content: str, names: Names, today: date, *, labels: Sequence[ParseLabel
             it.due, it.deadline, it.deadline_desc, it.urgent = _iso(r.due), _iso(r.deadline), r.deadline_desc, r.urgent
             it.labels, it.lead_hours, it.assignee_hours = list(r.labels), r.lead_hours, r.assignee_hours
             it.recurrence, it.reminder, it.start = r.recurrence, _iso(r.reminder), _iso(r.start)
+            it.plant_event = it.plant_event or r.plant_event  # "plant event" in its block, as for the new task (M0059)
             # A plant event runs from its Start to its Due: the end date its own name made a Deadline ("Spring outage,
             # 3 to 14 Nov") is its Due.
             if it.plant_event and it.deadline and not it.due:
@@ -442,7 +444,8 @@ def self_fields(r: Reading, names: Names) -> SelfFields | None:
         return None
     L = r.lines[r.self_block.owner]
     people = [x for x in L.toks if x.kind == "person" and not x.none]
-    return SelfFields([x for x in people if x.lead], [x for x in people if not x.lead], _tasks_of(L.toks), clean(L.text, L.toks, names), bool(L.toks))
+    return SelfFields([x for x in people if x.lead], [x for x in people if not x.lead], _tasks_of(L.toks), clean(L.text, L.toks, names), bool(L.toks),
+                      any(x.kind == "type" and x.event for x in L.toks))
 
 
 def line_kinds(r: Reading) -> dict[int, str]:

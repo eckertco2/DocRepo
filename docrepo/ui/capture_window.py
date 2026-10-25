@@ -67,7 +67,7 @@ from docrepo.extract import extract_text, to_unc
 from docrepo.layer0 import size_text
 from docrepo.links import is_link, link_name
 from docrepo.model import TODAY, Model, is_person
-from docrepo.parse import Found, Known, Who, parse_capture, quick_update
+from docrepo.parse import Found, Known, Who, as_plant_event, parse_capture, quick_update
 from docrepo.prompts import capture_blocks, load_summary_types, prompt_text
 from docrepo.save import (
     CaptureDraft,
@@ -92,7 +92,7 @@ from docrepo.ui.keymap import KeyMapDialog
 from docrepo.ui.look import LOOK, Help, KeyBadge, KeyTips, set_hints, tip
 from docrepo.ui.mods_panel import ModsPanel
 from docrepo.ui.palette import Command, CommandPalette
-from docrepo.ui.rich_edit import FormatBar, RichEdit
+from docrepo.ui.rich_edit import KEYS as FORMAT_KEYS, FormatBar, RichEdit
 from docrepo.ui.style import style_sheet
 from docrepo.ui.task_picker import TaskPicker, full_path, path_text
 from docrepo.ui.widgets import (
@@ -170,9 +170,10 @@ class FileEntry:
     what: str = ""  # the description's question, the start of its placeholder
 
 
-def read_drop(mime) -> tuple[str, list[str]]:
+def read_drop(mime, links: bool = False) -> tuple[str, list[str]]:
     """What a drop holds: ("files", paths) for files that have a place on disk; ("outlook", []) for an email dragged
-    from Outlook; ("virtual", []) for files only another program holds, such as one inside a zip folder; ("", []) for
+    from Outlook; ("virtual", []) for files only another program holds, such as one inside a zip folder; with ``links``,
+    ("links", addresses) for web links dragged from a browser or an email (mods log round 3, M0053); ("", []) for
     anything else (text, which the content text box takes as text).
 
     Files come first: File Explorer's drags carry the same "virtual file" format as Outlook's (FileGroupDescriptorW)
@@ -186,13 +187,16 @@ def read_drop(mime) -> tuple[str, list[str]]:
         return "outlook", []
     if any("FileGroupDescriptor" in f for f in formats):
         return "virtual", []
+    web = [u.toString() for u in mime.urls() if u.scheme() in ("http", "https")] if links else []
+    if web:
+        return "links", web
     return "", []
 
 
-def note_drag(stage: str, mime) -> str:
+def note_drag(stage: str, mime, links: bool = False) -> str:
     """read_drop's answer, after noting the drag for the troubleshooting report: its formats' names and how many
     URLs it carried, never their paths or contents."""
-    kind, _paths = read_drop(mime)
+    kind, _paths = read_drop(mime, links)
     urls = mime.urls()
     diagnose.note_drag(stage, list(mime.formats()), len(urls), sum(1 for u in urls if u.isLocalFile()), kind)
     return kind
@@ -209,22 +213,24 @@ class ContentEdit(RichEdit):
     on it; ``dropped`` sends read_drop's answer."""
 
     dropped = Signal(str, list)
+    #: Whether a web link dropped on it is added as a link, as the pinned window's box does, rather than typed in.
+    take_links = False
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # noqa: N802 - Qt's name
-        if note_drag("enter", event.mimeData()):
+        if note_drag("enter", event.mimeData(), self.take_links):
             _accept_copy(event)
         else:
             super().dragEnterEvent(event)
 
     def dragMoveEvent(self, event) -> None:  # noqa: N802
-        if read_drop(event.mimeData())[0]:
+        if read_drop(event.mimeData(), self.take_links)[0]:
             _accept_copy(event)
         else:
             super().dragMoveEvent(event)
 
     def dropEvent(self, event: QDropEvent) -> None:  # noqa: N802
-        note_drag("drop", event.mimeData())
-        kind, paths = read_drop(event.mimeData())
+        note_drag("drop", event.mimeData(), self.take_links)
+        kind, paths = read_drop(event.mimeData(), self.take_links)
         if kind:
             _accept_copy(event)
             self.dropped.emit(kind, paths)
@@ -265,6 +271,9 @@ class CaptureWindow(QWidget):
         self._after_pick: str | None = None  # "update" or "agenda" when that hotkey opened the task picker
         self._summary_types: list = []
         self.expanded = False  # Expand (F11): the content text fills the window (mods log round 2, M0046, M0048 phase 1)
+        self.pinned = False  # Pin (F12): the small window at the bottom right (mods log round 3, M0053, M0054)
+        self.pin_window = None  # made the first time it's pinned (docrepo/ui/pin_window.py)
+        self._saving = False
         self.today_on = False  # Today, beside the capture types (M0037)
         self._path_timer = QTimer(self)
         self._path_timer.setSingleShot(True)
@@ -298,8 +307,8 @@ class CaptureWindow(QWidget):
                               # One letter per topic (mods log round 2, M0036)
                               ("Alt+N", lambda: self._alt_type("note")), ("Alt+T", lambda: self._alt_type("new_task")),
                               ("Alt+U", lambda: self._alt_type("update")), ("Alt+A", self._alt_agenda), ("Alt+D", self._alt_today),
-                              ("Alt+M", self.toggle_meeting), ("F11", self.toggle_expand), ("F1", self.show_keys),
-                              ("Ctrl+K", self.open_palette)):
+                              ("Alt+M", self.toggle_meeting), ("F11", self.toggle_expand), ("F12", self.toggle_pin),
+                              ("F1", self.show_keys), ("Ctrl+K", self.open_palette)):
             QShortcut(QKeySequence(keys), self, handler)
 
     # ================= building the window =================
@@ -387,6 +396,10 @@ class CaptureWindow(QWidget):
         self.expand_button = self._icon_button("expand", "Expand the content text", "F11", "F11")
         self.expand_button.clicked.connect(self.toggle_expand)
         row1.addWidget(self.expand_button)
+        self.pin_button = self._icon_button("pin", "Pin: a small window at the bottom right, to drop files, emails and links on",
+                                            "F12", "F12")
+        self.pin_button.clicked.connect(self.pin)
+        row1.addWidget(self.pin_button)
         mods_button = self._icon_button("feedback", "Mods log: note a change you want in DocRepo")
         mods_button.clicked.connect(lambda: self.show_mods(True))
         row1.addWidget(mods_button)
@@ -462,8 +475,7 @@ class CaptureWindow(QWidget):
         self.content.left = lambda: self.ref_popup.hide()
         self.highlighter = OperatorHighlighter(self.content.document())
         self.format_bar = FormatBar(self.content)
-        for key, keys in (("b", "Ctrl+B"), ("i", "Ctrl+I"), ("u", "Ctrl+U"), ("s", "Ctrl+Shift+X"), ("mark", "Ctrl+Shift+H"),
-                          ("ul", "Ctrl+Shift+L"), ("ol", "Ctrl+Shift+O")):
+        for key, keys in FORMAT_KEYS.items():
             self.keytips.add(self.format_bar.buttons[key], keys, ctrl=True)
         editor = QFrame(objectName="editor")  # one outlined box: the formatting toolbar along its top, then the text
         el = QVBoxLayout(editor)
@@ -472,6 +484,8 @@ class CaptureWindow(QWidget):
         self.format_bar.layout().setContentsMargins(4, 2, 4, 2)
         el.addWidget(self.format_bar)
         el.addWidget(self.content, 1)
+        if not LOOK.classic:
+            self.format_bar.show_on_use(editor)
         self.content_field = field("Content text", editor, "content")
         self.content_field.property("label").setVisible(LOOK.show_help)  # the editor speaks for itself; its placeholder says what to type
         lc.addWidget(self.content_field, 1)
@@ -676,6 +690,7 @@ class CaptureWindow(QWidget):
                Command("Capture", "Parse and populate", self.parse, "Alt+P"),
                Command("Capture", "Meeting notes", self.toggle_meeting, "Alt+M"),
                Command("Capture", "Expand", self.toggle_expand, "F11"),
+               Command("Capture", "Pin it at the bottom right", self.pin, "F12"),
                Command("Attach", "Files", self._pick_files),
                Command("Attach", "A link", self.add_link),
                Command("Attach", "The email selected in Outlook", self.add_outlook)]
@@ -910,7 +925,8 @@ class CaptureWindow(QWidget):
                      agenda: list[str] | None = None, agenda_focus: bool = False, from_capture: str | None = None, meeting: bool = False) -> None:
         """Open the window. ``mode`` checks only that capture type ("note", "new_task" or "update"). ``agenda`` picks
         agenda targets under Add to agenda. ``from_capture`` starts Make it a task from an unfiled capture. ``meeting``
-        turns on meeting notes (release 5.8), for the picked task's meeting."""
+        turns on meeting notes (release 5.8), for the picked task's meeting. A pinned capture comes back in full."""
+        self._close_pin()
         self._load_summary_types()
         self._names = None  # people and tasks may have changed in the browse tool
         self._sync_refs()  # and the reference fields, in Settings
@@ -1350,6 +1366,50 @@ class CaptureWindow(QWidget):
     def hide_capture(self) -> None:
         self.hide()
 
+    # ---- pinned (mods log round 3, M0053, M0054) ----
+    def toggle_pin(self) -> None:
+        """F12 and the Pin hotkey: pin the capture, or bring the full window back."""
+        if self.pinned:
+            self.unpin()
+        else:
+            self.pin()
+
+    def pin(self) -> None:
+        """The capture as a small window at the bottom right, on top of the others, to drop files, emails and links on."""
+        if self.pages.currentIndex() != 0:
+            self.show_mods(False)
+        if self.pin_window is None:
+            from docrepo.ui.pin_window import PinWindow  # here, as it builds on this module
+
+            self.pin_window = PinWindow(self)
+        self._load_summary_types()
+        self.pin_window.show_message("")
+        self.pin_window.sync()
+        self.pin_window.place()
+        self.pinned = True
+        self.hide()
+        self.pin_window.show()
+        self.pin_window.raise_()
+        self.pin_window.activateWindow()
+        cursor = self.pin_window.text.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)  # ready to add a line
+        self.pin_window.text.setTextCursor(cursor)
+        self.pin_window.text.setFocus()
+
+    def unpin(self) -> None:
+        """Back to the full window, on the same capture (the main hotkey, F12, or the pinned window's open button)."""
+        self.show_capture()
+
+    def _close_pin(self) -> None:
+        self.pinned = False
+        if self.pin_window is not None:
+            self.pin_window.hide()
+
+    def hide_pinned(self) -> None:
+        """Esc on the pinned window: it hides, and the capture stays as a draft; the main hotkey opens it in full."""
+        self._close_pin()
+        self.keep_draft()
+
     def show_mods(self, on: bool) -> None:
         self.pages.setCurrentIndex(1 if on else 0)
         if on:
@@ -1374,29 +1434,37 @@ class CaptureWindow(QWidget):
         super().keyPressEvent(event)
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # noqa: N802 - files can be dropped anywhere on the window
-        if note_drag("enter", event.mimeData()):
+        if note_drag("enter", event.mimeData(), links=True):
             _accept_copy(event)
 
     def dragMoveEvent(self, event) -> None:  # noqa: N802
-        if read_drop(event.mimeData())[0]:
+        if read_drop(event.mimeData(), links=True)[0]:
             _accept_copy(event)
 
     def dropEvent(self, event: QDropEvent) -> None:  # noqa: N802
-        note_drag("drop", event.mimeData())
-        kind, paths = read_drop(event.mimeData())
+        note_drag("drop", event.mimeData(), links=True)
+        kind, paths = read_drop(event.mimeData(), links=True)
         if kind:
             _accept_copy(event)
             self.dropped(kind, paths)
 
     def dropped(self, kind: str, paths: list[str]) -> None:
-        """What a drop on the window or the content text brought: files, an Outlook email, or files DocRepo can't read."""
+        """What a drop on the window, the content text or the pinned window brought: files, an Outlook email, web links,
+        or files DocRepo can't read."""
+        if self.pin_window is not None:
+            self.pin_window.show_message("")
         if kind == "files":
             self.add_paths(paths)
+        elif kind == "links":
+            for url in paths:
+                self.add_link_url(url)
         elif kind == "outlook":
             self.add_outlook()
         elif kind == "virtual":
             self._fail("These files come from a program that doesn't hand DocRepo a file it can read, such as a zip folder. "
                        "Save or extract them to a folder first, then drop them from there.", self.content)
+        if self.pinned:
+            self.pin_window.sync()
 
     # ================= the draft =================
     def reset_draft(self) -> None:
@@ -1630,6 +1698,8 @@ class CaptureWindow(QWidget):
             "Type or paste. Drop files or Outlook emails anywhere on this window. Start with “Closed.” or another state for a quick update. "
             "@, # and ** make items (Items, on the right).")
         self._fit_timer.start()
+        if self.pinned:
+            self.pin_window.sync()
 
     @staticmethod
     def _short(value: Any) -> str:
@@ -2006,6 +2076,9 @@ class CaptureWindow(QWidget):
                           due=_as_date(typed("due", self.n_due)), deadline=_as_date(typed("deadline", self.n_deadline)),
                           recurrence=self.n_recurrence.currentText() if self.n_recurrence.currentIndex() else "")
             r = parse_capture(text, "new_task", today, people, labels, events, known, refs=self.ctx.settings.reference_fields)
+            own = items.self_fields(self.reading, self.names()) if self.reading else None
+            if own and own.plant_event and not r.plant_event:  # **event on its own line (mods log round 3, M0059)
+                as_plant_event(r, "**event")
             self._fill("new", r)
             for name in r.labels:
                 if name not in self.n_labels.values():
@@ -2015,7 +2088,8 @@ class CaptureWindow(QWidget):
                     value = w.id or w.name
                     if value not in chips.values():
                         chips.set_chips([*chips.chips(), Chip(value, m.person_name(w.id) if w.id else w.name, new=w.is_new, filled=True)])
-            if any(f.key in ("start", "recurrence", "reminder", "state", "lead_hours", "assignee_hours", "refs") and not f.why for f in r.found):
+            if any(f.key in ("start", "recurrence", "reminder", "state", "lead_hours", "assignee_hours", "plant_event", "refs") and not f.why
+                   for f in r.found):
                 self._set_more(self.n_more, self.n_more_button, True)
             found += [("", f) for f in r.found]
         if "update" in self.types and self.task:
@@ -2027,7 +2101,7 @@ class CaptureWindow(QWidget):
                 r.due = r.deadline = None
                 r.deadline_desc = ""
             self._fill("upd", r)
-            if any(f.key == "refs" and not f.why for f in r.found):
+            if any(f.key in ("plant_event", "refs") and not f.why for f in r.found):
                 self._set_more(self.u_more, self.u_more_button, True)
             found += [("Update: " if "new_task" in self.types else "", f) for f in r.found]
         self._show_found(found)
@@ -2143,6 +2217,11 @@ class CaptureWindow(QWidget):
 
     # ================= Save =================
     def _fail(self, message: str, focus: QWidget | None = None) -> None:
+        if self.pinned and not self._saving:  # a problem with something dropped shows on the pinned window
+            self.pin_window.show_message(message)
+            return
+        if self.pinned:  # Save couldn't save: the full window shows where to fix it
+            self.unpin()
         self.error.setText(message)
         self.error.show()
         self.scroll.ensureWidgetVisible(self.error)
@@ -2226,21 +2305,26 @@ class CaptureWindow(QWidget):
         if self.pages.currentIndex() == 1:
             self.mods.save()
             return
-        if not self._check_fields():
-            return
-        draft = self.draft()
-        QGuiApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        self._saving = True
         try:
-            result = save_capture(self.ctx.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, draft, self.ctx.now())
-        except SaveError as e:
-            self._fail(str(e), {"task": self.task_button, "title": self.title, "content": self.content, "meeting": self.meet_name}.get(e.focus))
-            return
-        finally:
+            if not self._check_fields():
+                return
+            draft = self.draft()
+            QGuiApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+            try:
+                result = save_capture(self.ctx.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, draft, self.ctx.now())
+            except SaveError as e:
+                QGuiApplication.restoreOverrideCursor()
+                self._fail(str(e), {"task": self.task_button, "title": self.title, "content": self.content, "meeting": self.meet_name}.get(e.focus))
+                return
             QGuiApplication.restoreOverrideCursor()
+        finally:
+            self._saving = False
         problems = (" Problems: " + " ".join(result.problems)) if result.problems else ""
         self.ctx.notify("Saved", result.message + problems)
         self.reset_draft()
         self.forget_draft()
+        self._close_pin()
         self.hide()
         self.saved.emit(result)
 

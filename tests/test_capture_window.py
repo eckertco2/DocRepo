@@ -572,6 +572,26 @@ def test_reference_fields_and_plant_events_in_the_capture_window(window, ctx):
     assert window.n_refs == {} and window.n_more_button.text()[:-2] == "More fields: state, start, reminder, recurrence and hours"
 
 
+def test_parse_ticks_plant_event(window, ctx):
+    """Mods log round 3 (M0059, decision 58): Parse and populate ticks Plant event from "plant event" or "major event",
+    or from **event on the new task's own line, as a field it filled; the event's end date is its Due."""
+    window.set_task("T000010")
+    window.set_type("new_task", True)
+    window.content.setPlainText("Plant event: Spring outage, 2 to 6 Nov.")
+    window.parse()
+    assert window.n_plant.isChecked() and window.n_plant.property("filled") and window.n_more.isVisibleTo(window)
+    assert window.title.text() == "Spring outage" and (window.n_start.value(), window.n_due.value()) == ("2026-11-02", "2026-11-06")
+    window.clear()
+    window.set_task("T000010")
+    window.set_type("new_task", True)
+    window.content.setPlainText("**event Fall turnaround, 2 to 6 Nov")
+    window.parse()
+    assert window.n_plant.isChecked() and "Plant event" in window.found_label.text()
+    window.save()
+    t = next(t for t in Model(ctx.conn).tasks.values() if t.title == "Fall turnaround")
+    assert t.plant_event and t.due == "2026-11-06"
+
+
 def test_an_event_line_makes_a_plant_event(window, ctx):
     """Release 5.9 (decision 22): **event. makes its line a task with Plant event ticked, from its Start to its Due."""
     window.set_task("T000010")

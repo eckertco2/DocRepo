@@ -28,6 +28,9 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.14 | The visual overhaul, O5: the browse window's top bar, sidebar, command bar, empty detail pane, capacity colours and timeline legend | Built 2026-10-24, with the others of the overhaul; on GitHub 2026-10-25, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
 | 5.15 | The visual overhaul, O6: Settings as cards, with Look and Show hints | Built 2026-10-24, with the others of the overhaul; on GitHub 2026-10-25, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
 | 5.16 | The visual overhaul, O7: the command palette (Ctrl+K) | Built 2026-10-24, with the others of the overhaul; on GitHub 2026-10-25, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
+| 5.17 | The capture window and double-click, from the mods log, round 3: the pinned window, OneNote's keys and 20 px indents in the content text, and double-click opening Edit | Built 2026-10-25, with decisions 53 to 60; on GitHub 2026-10-25, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
+| 5.18 | Plant events in Parse and populate, from the mods log, round 3 | Built 2026-10-25, with decisions 53 to 60; on GitHub 2026-10-25, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
+| 5.19 | The visual overhaul, O8: the task page's fields in a grid, from the mods log, round 3 | Built 2026-10-25, with decisions 53 to 60; on GitHub 2026-10-25, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
 ## Decisions
@@ -376,6 +379,29 @@ The overhaul's stages O1 to O7, built together at the owner's request, from the 
 - Help that guards against a mistake stays in view: the mods log's note to leave out names and work details, and the import's note that the workbook is only read.
 - Without RapidFuzz, the palette matches a word whose letters come in order ("edt" finds Edit), so the tests pass either way.
 - Left for later: the formatting buttons only on hover, filter chips and Display options in each view's header, row actions on hover, a marker tooltip for auto-filled fields, Capacity's 80% and 100% as settings, and grey for a person who is away (DocRepo doesn't record time away yet).
+
+## Releases 5.17 to 5.19: the third mods log (2026-10-25)
+
+From the third copy of the mods log (M0053 to M0060), planned in the parent workspace's `docs/mods/round-3-plan.md` (items 39 to 43, decisions 53 to 60), and built straight away without mocks, at the owner's request. M0057 (Copy prompt) was only logged, and M0060 (people from emails) waits for the email reader's refinement, as the owner asked.
+
+- **5.17, the pinned window (M0053, M0054):** `docrepo/ui/pin_window.py`: `PinWindow` (the top line with the task's name and the open and close buttons, a `ContentEdit` on the capture window's own document, the drop zone, the problem line, moving it by its top line) and `DropZone`, `what_was_added`. `docrepo/ui/capture_window.py`: the Pin icon and F12, `pin`, `unpin`, `toggle_pin`, `hide_pinned`, `_close_pin`; `show_capture` and a save bring a pinned capture back; `_fail` shows a drop's problem on the pinned window, and a save's in the full window; `read_drop` and `note_drag` take web links where the window asks for them (`links`), and `ContentEdit.take_links`. `docrepo/app.py`: the main hotkey unpins, and `pin_hotkey`. `docrepo/hotkey.py` and `docrepo/config.py`: `pin_hotkey`, off until set, with no suggested key. `docrepo/ui/icons/pin.svg`. Styles for `#pinWindow` and `#dropZone` in both looks.
+- **5.17, the content text (M0055):** `docrepo/ui/rich_edit.py`: `INDENT` (20 px), `KEYS`, OneNote's keys beside release 5.7's, `to_paragraph` (Ctrl+Up and Ctrl+Down), `move_lines` and `_unit` (Alt+Shift+Up and Alt+Shift+Down, through the markup, as one undo step), and `FormatBar.show_on_use`. `docrepo/ui/keymap.py`: F12 and the content text's keys. `docrepo/ui/help_text.py`: the content text's help.
+- **5.17, double-click (M0056):** `BrowseWindow.double_click` opens Edit task, a capture's Edit, a note on Today's Edit, or a person's or label's Edit…; documents as before.
+- **5.18, plant events (M0059):** `docrepo/parse.py` (from the mockup's `parse.js`): `PLANT_EVENT`, `NOT_PLANT_EVENT`, `as_plant_event`, the `plant_event` field (New task and Update) and a "Plant event:" lead-in. `docrepo/items.py`: `SelfFields.plant_event`, and a task item that says "plant event". `docrepo/save.py`: the new task's own `**event`. The capture window ticks Plant event as a filled field and opens More fields.
+- **5.19, the task page (M0058):** `docrepo/detail.py`: `facts_grid` and `text_block`; the task page's short fields in a grid of three, people first, then the long text.
+- **The mockup and its exports:** `parse.js`, `items.js` and `export.js` (a Plant events section of the test vectors, 6 captures), and `settings.json`'s `pin_hotkey`; `test-vectors.md` and `examples.md` match the mockup's exports by checksum.
+- `tests/`: `test_pin_window.py`; the content text's keys and line moves (`test_markup.py`); double-click (`test_browse_window.py`); plant events (`test_items.py`, `test_capture_window.py`, the vectors); `test_config.py`'s field list and the suggested hotkeys (777 pass in all, 1 skipped).
+
+## Decisions (releases 5.17 to 5.19)
+
+- Decisions 53 to 60 (the parent workspace's `docs/mods/round-3-plan.md`): 53, 55, 56 and 57 as recommended; 54, 58 and 59 as proposed, without mocks (decision 60).
+- The pinned window shares the capture window's text document, so there's one capture, never two to keep in step; its box has no `@` and `#` lists.
+- A web link dropped on the content text box is still typed in, as before; on the rest of the window, or the pinned window, it's added as a link.
+- Ctrl+Shift+N isn't the content text's clear-formatting key, as OneNote's is: it's the suggested note hotkey, which Windows hands to DocRepo first.
+- Alt+Shift+Up and Down move a line with the list items under it, as DocRepo reads a block, by rewriting the text through its markup in one edit, so one Ctrl+Z puts it back.
+- The formatting buttons keep their room while hidden, so the text and the rows below never jump when the cursor leaves the box.
+- "Plant event" and "major event" count only in the singular, and not before planning, prep, preparation, meeting, review or readiness, so "major events planning meeting" isn't one; the event words alone still don't (decision 22).
+- The task page's people take a row of their own; the dates and the rest share rows, so a lone field doesn't leave a row nearly empty.
 
 ## The first Frogbot findings (2026-10-20)
 
