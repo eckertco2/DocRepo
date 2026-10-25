@@ -33,7 +33,7 @@ from docrepo.schedule import due_of, is_open
 from docrepo.ui.browse_window import BrowseWindow
 from docrepo.ui.capture_window import CaptureWindow
 from docrepo.ui.context import AppContext
-from docrepo.ui.style import use_light_theme
+from docrepo.ui.style import apply_look
 
 log = logging.getLogger(__name__)
 
@@ -341,8 +341,7 @@ def run(data_root: Path, settings: Settings, fs: SafeFS, browse: bool = False) -
     qt = QApplication.instance() or QApplication(sys.argv)
     qt.setQuitOnLastWindowClosed(False)
     qt.setApplicationName("DocRepo")
-    qt.setFont(QFont("Segoe UI", 9))
-    use_light_theme(qt)  # DocRepo's windows are light; Windows' dark mode would mix dark controls into them
+    apply_look(qt, settings.look, settings.show_hints)  # the new look or the Classic one; light, whatever Windows is set to
     lock = QLockFile(str(fs.checked_path(data_root / LOCK_FILE)))
     lock.setStaleLockTime(0)
     if not lock.tryLock(200):

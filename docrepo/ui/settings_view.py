@@ -20,6 +20,8 @@ from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
     QFormLayout,
+    QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -39,6 +41,7 @@ from docrepo.model import Model
 from docrepo.pages import write_pages
 from docrepo.safe_fs import WriteRefused
 from docrepo.ui.context import AppContext
+from docrepo.ui.look import Help, set_hints
 
 log = logging.getLogger(__name__)
 
@@ -96,6 +99,8 @@ def check_values(ctx: AppContext, values: dict[str, Any]) -> dict[str, Any]:
     if len({n.lower() for n in names}) < len(names):
         raise SettingsProblem("Give each reference field its own name.")
     out["reference_fields"] = names
+    if out.get("look", "new") not in ("new", "classic"):
+        raise SettingsProblem("The look is the new one or the Classic one.")
     if out.get("me") and out["me"] not in Model(ctx.conn).people:
         raise SettingsProblem(f"There's no person {out['me']}.")
     return out
@@ -176,6 +181,17 @@ class ReportDialog(QDialog):
         lay.addLayout(buttons)
 
 
+def _row(*widgets: QWidget) -> QWidget:
+    """Controls side by side, 8 px apart, as one cell of a settings card."""
+    box = QWidget()
+    lay = QHBoxLayout(box)
+    lay.setContentsMargins(0, 0, 0, 0)
+    lay.setSpacing(8)
+    for w in widgets:
+        lay.addWidget(w)
+    return box
+
+
 class SettingsView(QWidget):
     """The form. ``message`` shows a line in the browse tool's status line."""
 
@@ -190,31 +206,34 @@ class SettingsView(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
         body = QWidget()
         scroll.setWidget(body)
         outer.addWidget(scroll)
-        lay = QVBoxLayout(body)
-        lay.setContentsMargins(14, 10, 14, 14)
-        head = QLabel("<b style='font-size:12pt'>Settings</b><br><span style='color:#5a6571'>Kept in Config\\settings.json in the data root. "
-                      "The data root's own location is kept in %LOCALAPPDATA%\\DocRepo\\location.json.</span>")
-        head.setWordWrap(True)
-        lay.addWidget(head)
+        # The visual overhaul's O6: Windows' settings cards, at most 1000 px wide. Each row has its name and a line on what it
+        # does on the left, and its control on the right, as wide as what goes in it.
+        page = QWidget()
+        page.setMaximumWidth(1000)
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(24, 16, 24, 24)
+        lay.setSpacing(8)
+        holder = QHBoxLayout(body)
+        holder.setContentsMargins(0, 0, 0, 0)
+        holder.addWidget(page, 1)
+        holder.addStretch(0)
+        lay.addWidget(QLabel("Settings", objectName="paneTitle"))
+        lay.addWidget(Help("Kept in Config\\settings.json in the data root. The data root's own location is kept in "
+                           "%LOCALAPPDATA%\\DocRepo\\location.json."))
 
+        # ---- the data root and start-up ----
         self.where = QLabel()
         self.where.setWordWrap(True)
+        self.where.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         change = QPushButton("Change data root…")
         change.clicked.connect(self.change_data_root)
         rebuild = QPushButton("Rebuild pages, calendar and search")
         rebuild.setToolTip("Rebuilds the capacity calendar, every Task.md and Contents.md, and the search index from docs.db and the files")
         rebuild.clicked.connect(lambda: self.message(rebuild_everything(self.ctx)))
-        row = QHBoxLayout()
-        row.addWidget(change)
-        row.addWidget(rebuild)
-        row.addStretch()
-        lay.addWidget(self.where)
-        lay.addLayout(row)
-
-        # Starting when the owner signs in, and the one-time import of the project list
         self.startup_status = QLabel()
         self.startup_status.setWordWrap(True)
         make = QPushButton("Make the Startup shortcut")
@@ -223,52 +242,61 @@ class SettingsView(QWidget):
         imp = QPushButton("Import projects from Excel…")
         imp.setToolTip("A one-time import of your project list: each row becomes a top-level task")
         imp.clicked.connect(lambda: open_import())
-        row = QHBoxLayout()
-        row.addWidget(make)
-        row.addWidget(imp)
-        row.addStretch()
-        lay.addWidget(self.startup_status)
-        lay.addLayout(row)
+        self._card(lay, "Data root and start-up", [
+            (self.where, "", _row(change, rebuild)),
+            (self.startup_status, "", _row(make)),
+            ("Import your project list", "A one-time import: each row of the Excel workbook becomes a top-level task.", _row(imp)),
+        ])
 
-        # The troubleshooting report, to bring to the personal computer
-        trouble = QLabel("<b>Troubleshooting:</b> a report of DocRepo's versions, a step-by-step check of reading the email selected "
-                         "in Outlook, recent drags onto the capture window and recent problems. It leaves out email text, names and "
-                         "addresses, to bring to the personal computer. Select an email in Outlook first.")
-        trouble.setWordWrap(True)
-        report = QPushButton("Troubleshooting report…")
-        report.setToolTip("Saved in System\\diagnostics in the data root, and shown here to copy")
-        report.clicked.connect(self.troubleshooting_report)
-        row = QHBoxLayout()
-        row.addWidget(report)
-        row.addStretch()
-        lay.addWidget(trouble)
-        lay.addLayout(row)
+        # ---- the look (decisions 7 and 15) ----
+        self.look = QComboBox()
+        self.look.addItem("New look", "new")
+        self.look.addItem("Classic look (release 5.9)", "classic")
+        self.look.setFixedWidth(240)
+        self.hints = QCheckBox("Show hints")
+        self.hints.setToolTip("Help text, the ⓘ buttons and key badges, in every window, at once")
+        self.hints.toggled.connect(self._hints_toggled)
+        self._card(lay, "Look", [
+            ("Look", "The new look, or release 5.9's while you get used to it. It changes when DocRepo next starts.", self.look),
+            ("Hints", "Help text under fields, the ⓘ buttons and the keys beside controls. Hold Alt to see the letter keys, or Ctrl "
+                      "for the Ctrl shortcuts, at any time.", self.hints),
+        ])
 
-        form = QFormLayout()
-        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        # ---- hotkeys ----
         self.me = QComboBox()
+        self.me.setFixedWidth(240)
         self.hotkey = QLineEdit()
         self.hotkey.setPlaceholderText("Such as Ctrl+Shift+Space")
+        self.hotkey.setFixedWidth(240)
         more = QWidget()
         more_form = QFormLayout(more)
         more_form.setContentsMargins(0, 0, 0, 0)
+        more_form.setHorizontalSpacing(12)
+        more_form.setVerticalSpacing(8)
         self.more_hotkeys: dict[str, QLineEdit] = {}
         for setting, label in hotkey.HOTKEYS[1:]:
             box = QLineEdit()
             box.setPlaceholderText("Off")
+            box.setFixedWidth(200)
             self.more_hotkeys[setting] = box
             more_form.addRow(label, box)
         suggest = QPushButton("Use the suggested keys")
         suggest.setToolTip("Fills each empty box with Ctrl+Shift and its letter: " + ", ".join(hotkey.SUGGESTED.values()))
         suggest.clicked.connect(self.suggest_hotkeys)
         more_form.addRow("", suggest)
+        self._card(lay, "You and your hotkeys", [
+            ("Me", "Who “I” and “me” are in captures.", self.me),
+            ("Hotkey", "Opens the capture window. It needs Ctrl, Alt or Win.", self.hotkey),
+            ("More hotkeys", "Each is off until you set it; Use the suggested keys fills the empty ones with Ctrl+Shift and the topic's "
+                             "letter. While DocRepo runs, a hotkey is taken from other programs, such as Outlook's Ctrl+Shift+N. Pause "
+                             "hotkeys in the tray menu pauses them all.", more),
+        ])
+
+        # ---- backups ----
         self.backup = QLineEdit()
         self.backup.setPlaceholderText("Not set: no backups are made")
         browse = QPushButton("Browse…")
         browse.clicked.connect(self._pick_backup)
-        backup_row = QHBoxLayout()
-        backup_row.addWidget(self.backup, 1)
-        backup_row.addWidget(browse)
         self.backup_days = QSpinBox()
         self.backup_days.setRange(1, 90)
         self.backup_days.setPrefix("every ")
@@ -280,24 +308,49 @@ class SettingsView(QWidget):
         self.backup_status.setWordWrap(True)
         now = QPushButton("Back up now")
         now.clicked.connect(self.backup_now)
-        backup_when = QHBoxLayout()
-        for w in (self.backup_days, QLabel("keeping"), self.backup_keep, now):
-            backup_when.addWidget(w)
-        backup_when.addStretch()
+        folder = QWidget()
+        fl = QHBoxLayout(folder)
+        fl.setContentsMargins(0, 0, 0, 0)
+        fl.setSpacing(8)
+        fl.addWidget(self.backup, 1)
+        fl.addWidget(browse)
+        folder.setMinimumWidth(380)
+        self._card(lay, "Backups", [
+            ("Backup folder", "Where backups go: a copy of docs.db and a mirror of the data root's files. Outside the data root.", folder),
+            ("How often", "At DocRepo's first start of the day, and how many copies of docs.db it keeps.",
+             _row(self.backup_days, QLabel("keeping"), self.backup_keep)),
+            (self.backup_status, "", _row(now)),
+        ])
+
+        # ---- calendar and reminders ----
         self.reminder = QTimeEdit()
         self.reminder.setDisplayFormat("HH:mm")
+        self.reminder.setFixedWidth(96)
         self.workdays = {d: QCheckBox(d) for d in WEEKDAYS}
-        days = QHBoxLayout()
-        for box in self.workdays.values():
-            days.addWidget(box)
-        days.addStretch()
         self.horizon = QSpinBox()
         self.horizon.setRange(1, 10)
         self.horizon.setSuffix(" years")
+        self.horizon.setFixedWidth(120)
+        self._card(lay, "Calendar and reminders", [
+            ("Reminders at", "Each day's reminders show as notifications from this time.", self.reminder),
+            ("Workdays", "The capacity calendar spreads hours over these days.", _row(*self.workdays.values())),
+            ("Capacity horizon", "How far ahead routine tasks fill the capacity calendar.", self.horizon),
+        ])
+
+        # ---- Parse and populate ----
         self.events = QLineEdit()
         self.events.setPlaceholderText("Comma-separated")
+        self.events.setMinimumWidth(380)
         self.references = QLineEdit()  # release 5.9, mods log round 2, M0034
         self.references.setPlaceholderText("Comma-separated, such as Change #")
+        self.references.setMinimumWidth(380)
+        self._card(lay, "Parse and populate", [
+            ("Event words", "Words Parse and populate reads as events, for deadlines.", self.events),
+            ("Reference fields", "Fields every task gets, such as a change record's number. Each shows on the task's page with Copy, is "
+                                 "found by search, and Parse and populate reads its name followed by a number.", self.references),
+        ])
+
+        # ---- files and prompts ----
         self.cap = QSpinBox()
         self.cap.setRange(1_000, 5_000_000)
         self.cap.setSingleStep(10_000)
@@ -309,47 +362,31 @@ class SettingsView(QWidget):
         self.check = QSpinBox()
         self.check.setRange(5, 24 * 60)
         self.check.setSuffix(" minutes")
-        rows = [("Me", self.me, "Who “I” and “me” are in captures."), ("Hotkey", self.hotkey, "Opens the capture window. It needs Ctrl, Alt or Win."),
-                ("More hotkeys", more, "Each is off until you set it, or Use the suggested keys fills the empty ones with Ctrl+Shift and the "
-                                       "topic's letter (F1 lists them); then Save settings. While DocRepo runs, a hotkey is taken from other "
-                                       "programs, such as Outlook's Ctrl+Shift+N for a new note. Update and Add to agenda use the task picked "
-                                       "in the capture window, or open the task picker. Pause hotkeys in the tray menu pauses them all."),
-                ("Backup folder", backup_row, "Where backups go: a copy of docs.db and a mirror of the data root's files. Outside the data root."),
-                ("Backups", backup_when, "How often DocRepo backs up, at its first start of the day, and how many copies of docs.db it keeps."),
-                ("Reminders at", self.reminder, "Each day's reminders show as notifications from this time."),
-                ("Workdays", days, "The capacity calendar spreads hours over these days."),
-                ("Capacity horizon", self.horizon, "How far ahead routine tasks fill the capacity calendar."),
-                ("Event words", self.events, "Words Parse and populate reads as events, for deadlines."),
-                ("Reference fields", self.references, "Fields every task gets, such as a change record's number. Each shows on the task's "
-                                                    "page with Copy, is found by search, and Parse and populate reads its name followed by "
-                                                    "a number. Removing a name takes its box away; values a task already has still show."),
-                ("Extracted text", self.cap, "The most text kept from each file."),
-                ("Copy prompt warns", self.warn, "Copy prompt warns when a prompt is longer than this."),
-                ("Document checks", self.check, "How often tracked documents are checked for changes (a later version).")]
-        for label, widget, hint in rows:
-            box = QWidget()
-            bl = QVBoxLayout(box)
-            bl.setContentsMargins(0, 0, 0, 4)
-            bl.setSpacing(1)
-            if isinstance(widget, QHBoxLayout):
-                bl.addLayout(widget)
-            else:
-                bl.addWidget(widget)
-            note = QLabel(hint)
-            note.setStyleSheet("color:#5a6571; font-size:8.5pt")
-            note.setWordWrap(True)
-            bl.addWidget(note)
-            form.addRow(label, box)
-        lay.addLayout(form)
-        lay.addWidget(self.backup_status)
-        self.error = QLabel()
-        self.error.setStyleSheet("background:#fbe3e1; color:#b0261e; padding:6px 10px")
+        for w in (self.cap, self.warn, self.check):
+            w.setFixedWidth(180)
+        self._card(lay, "Files and prompts", [
+            ("Extracted text", "The most text kept from each file.", self.cap),
+            ("Copy prompt warns", "Copy prompt warns when a prompt is longer than this.", self.warn),
+            ("Document checks", "How often tracked documents are checked for changes (a later version).", self.check),
+        ])
+
+        # ---- the troubleshooting report, to bring to the personal computer ----
+        report = QPushButton("Troubleshooting report…")
+        report.setToolTip("Saved in System\\diagnostics in the data root, and shown here to copy")
+        report.clicked.connect(self.troubleshooting_report)
+        self._card(lay, "Troubleshooting", [
+            ("Troubleshooting report", "DocRepo's versions, a check of reading the email selected in Outlook, recent drags and recent "
+                                       "problems. It leaves out email text, names and addresses. Select an email in Outlook first.", report),
+        ])
+
+        self.error = QLabel(objectName="error")
         self.error.setWordWrap(True)
         self.error.hide()
+        lay.addSpacing(8)
         lay.addWidget(self.error)
         buttons = QHBoxLayout()
-        save = QPushButton("Save settings")
-        save.setStyleSheet("background:#1d5e98; color:white; padding:4px 14px")
+        buttons.setSpacing(8)
+        save = QPushButton("Save settings", objectName="primary")
         save.clicked.connect(self.save)
         undo = QPushButton("Undo changes")
         undo.clicked.connect(self.load)
@@ -358,6 +395,40 @@ class SettingsView(QWidget):
         buttons.addStretch()
         lay.addLayout(buttons)
         lay.addStretch()
+
+    def _card(self, lay: QVBoxLayout, title: str, rows: list) -> None:
+        """A group of settings: its heading, then a card with a row for each: its name and what it does, then its control."""
+        lay.addSpacing(16)
+        lay.addWidget(QLabel(title, objectName="heading"))
+        card = QWidget(objectName="settingsCard")
+        card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
+        grid = QGridLayout(card)
+        grid.setContentsMargins(16, 4, 16, 4)
+        grid.setHorizontalSpacing(24)
+        grid.setVerticalSpacing(0)
+        grid.setColumnStretch(0, 1)
+        for i, (name, what, control) in enumerate(rows):
+            left = QWidget()
+            ll = QVBoxLayout(left)
+            ll.setContentsMargins(0, 12, 0, 12)
+            ll.setSpacing(2)
+            ll.addWidget(QLabel(name) if isinstance(name, str) else name)
+            if what:
+                note = QLabel(what, objectName="hint")
+                note.setWordWrap(True)
+                ll.addWidget(note)
+            grid.addWidget(left, 2 * i, 0)
+            grid.addWidget(control, 2 * i, 1, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            if i < len(rows) - 1:
+                line = QFrame()
+                line.setFrameShape(QFrame.Shape.HLine)
+                line.setObjectName("divider")
+                grid.addWidget(line, 2 * i + 1, 0, 1, 2)
+        lay.addWidget(card)
+
+    def _hints_toggled(self, on: bool) -> None:
+        """Show hints applies at once, in every window (decision 7); Save settings keeps it."""
+        set_hints(on)
 
     def suggest_hotkeys(self) -> None:
         """Use the suggested keys (mods log round 2, M0036): each empty hotkey box gets Ctrl+Shift and its letter. Nothing is
@@ -396,6 +467,10 @@ class SettingsView(QWidget):
         self.check.setValue(s.doc_check_minutes)
         self.backup_days.setValue(s.backup_every_days)
         self.backup_keep.setValue(s.backup_keep)
+        self.look.setCurrentIndex(max(0, self.look.findData(s.look)))
+        self.hints.blockSignals(True)
+        self.hints.setChecked(s.show_hints)
+        self.hints.blockSignals(False)
         self.startup_status.setText(f"<b>Start when you sign in:</b> {startup.status()}")
         self.show_backup_status()
         self.error.hide()
@@ -409,6 +484,7 @@ class SettingsView(QWidget):
             "reference_fields": [w for w in self.references.text().split(",")],
             "extracted_text_cap_chars": self.cap.value(), "prompt_warn_chars": self.warn.value(), "doc_check_minutes": self.check.value(),
             "backup_every_days": self.backup_days.value(), "backup_keep": self.backup_keep.value(),
+            "look": self.look.currentData(), "show_hints": self.hints.isChecked(),
         }
 
     def save(self) -> list[str]:
@@ -425,6 +501,7 @@ class SettingsView(QWidget):
         else:
             n = sum(1 for k in changed if k in hotkey.HOTKEY_IDS)
             later = f" The hotkey{'s work' if n > 1 else ' works'} from now on." if n else ""
+            later += " The look changes the next time DocRepo starts." if "look" in changed else ""
             self.message(f"Saved {len(changed)} setting{'s' if len(changed) > 1 else ''} to settings.json.{later}")
         return changed
 

@@ -29,6 +29,7 @@ from docrepo.detail import esc
 from docrepo.model import Model
 from docrepo.schedule import due_of, start_of
 from docrepo.timeline import Row, Timeline
+from docrepo.ui.look import LOOK, Help
 from docrepo.ui.tree_view import GROUP_COLOURS
 from docrepo.ui.widgets import CheckMenuButton, FlowLayout, label_filter, people_filter
 from docrepo.views import markers
@@ -259,10 +260,9 @@ class TimelineView(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(12, 8, 12, 8)
         lay.addWidget(QLabel("Timeline", objectName="paneTitle"))
-        note = QLabel("Open tasks over the coming weeks: a bar from Start to Due, a diamond for a deadline, a dot for each occurrence "
-                      "of a routine task. Parked and closed tasks are left out. Click a row to see its dates and people; click it "
-                      "again to open it.", objectName="paneNote")
-        note.setWordWrap(True)
+        note = Help("Open tasks over the coming weeks: a bar from Start to Due, a diamond for a deadline, a dot for each occurrence "
+                    "of a routine task. Parked and closed tasks are left out. Click a row to see its dates and people; click it "
+                    "again to open it.")
         lay.addWidget(note)
         self.controls = QWidget()
         self.controls_layout = FlowLayout(self.controls, spacing=8)
@@ -280,6 +280,7 @@ class TimelineView(QWidget):
         self.update_button.clicked.connect(lambda: self.sel and self.update_task.emit(self.sel))
         cl.addWidget(self.open_button)
         cl.addWidget(self.update_button)
+        self.legend_slot = lay.count()  # the legend goes here, under the controls (the visual overhaul's O5)
         lay.addWidget(self.card)
         self.chart = TimelineChart()
         self.chart.picked.connect(self._pick)
@@ -295,7 +296,10 @@ class TimelineView(QWidget):
             '<span style="color:#b0261e"><b>▌</b></span> Late', "◆ Deadline", '<span style="color:#3b78c4">●</span> Routine: each occurrence',
             '<span style="color:#1d5e98"><b>│</b></span> Today', '<span style="background-color:#f3e6cc">&nbsp;&nbsp;&nbsp;&nbsp;</span> Plant event')),
             objectName="hint")
-        lay.addWidget(legend)
+        if LOOK.classic:
+            lay.addWidget(legend)
+        else:
+            lay.insertWidget(self.legend_slot, legend)
         self.undated = QLabel(objectName="hint")
         self.undated.setWordWrap(True)
         self.undated.linkActivated.connect(lambda href: self.open_task.emit(href.partition(":")[2]))

@@ -126,7 +126,7 @@ def test_meeting_notes(window, ctx):
 def test_meeting_notes_with_no_meeting_picked(window):
     window.toggle_meeting()
     assert window.meet_name.text() == "" and window.meet_name.hasFocus() is window.meet_name.hasFocus()
-    assert window.agenda_panel.title.text() == "<b>Agenda</b>" and "A new meeting has no agenda yet" in window.agenda_panel.hint.text()
+    assert not window.agenda_panel.isVisibleTo(window)  # a new meeting has no agenda, so no panel (the visual overhaul's O3)
     window.content.setPlainText("Pump vendor call.")
     window.save()
     assert "Name the meeting first" in window.error.text() and window.isVisible()
@@ -167,7 +167,7 @@ def test_the_browse_tool_opens_meeting_notes(ctx, monkeypatch):
         opened = []
         monkeypatch.setattr(browse, "open_capture", lambda **options: opened.append(options))
         browse.go_task("T000010")
-        button = next(b for b in browse.actions.findChildren(QPushButton) if b.text() == "Meeting notes   M")
+        button = next(b for b in browse.actions.findChildren(QPushButton) if b.text() == "Meeting notes")  # its key, M, is in its tooltip
         button.click()
         browse.go_task("T000012")
         assert "Meeting notes   M" not in [b.text() for b in browse.actions.findChildren(QPushButton)]

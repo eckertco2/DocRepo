@@ -6,8 +6,8 @@ from __future__ import annotations
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QPushButton, QTextBrowser, QVBoxLayout, QWidget
 
-from docrepo.detail import CSS, esc
-from docrepo.ui.style import STYLE
+from docrepo.detail import esc
+from docrepo.ui.style import page_css, style_sheet
 
 #: Each letter: its topic, then what it does as a global hotkey, in the browse tool and in the capture window.
 KEY_MAP = (
@@ -29,6 +29,9 @@ OTHER_KEYS = (
     ("F11", "Expands the capture window's content text"),
     ("Ctrl+B", "Hides the views on the left of the browse tool"),
     ("F5", "Reads docs.db again"),
+    ("Ctrl+K", "The command palette: every action and view, narrowed as you type"),
+    ("Alt, held", "Shows each control's letter key in the window"),
+    ("Ctrl, held", "Shows the Ctrl shortcuts in the window, after half a second"),
     ("F1", "This list"),
 )
 
@@ -55,11 +58,11 @@ class KeyMapDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Keys")
         self.setObjectName("capture")
-        self.setStyleSheet(STYLE)
+        self.setStyleSheet(style_sheet())
         self.resize(760, 520)
         lay = QVBoxLayout(self)
         page = QTextBrowser()
-        page.document().setDefaultStyleSheet(CSS)
+        page.document().setDefaultStyleSheet(page_css())
         page.setHtml(key_map_html(main_hotkey))
         lay.addWidget(page, 1)
         row = QHBoxLayout()

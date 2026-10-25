@@ -1,4 +1,8 @@
-"""The windows' look: close to the browse tool mockup, on top of Windows' own widgets.
+"""The windows' look.
+
+The new look (the visual overhaul, releases 5.10 to 5.16) is Qt's Fusion style with a palette, a style sheet and page
+styles all made from the design tokens in ``tokens``. The Classic look is release 5.9's: Windows' own widgets with the
+colours below, kept selectable in Settings (decision 15). ``apply_look`` sets either one up when DocRepo starts.
 
 DocRepo's colours are light. With Windows in dark mode, Qt would draw its own
 controls dark and mix them with those light colours, so ``use_light_theme``
@@ -7,7 +11,11 @@ keeps the whole app light, whatever Windows is set to.
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QGuiApplication, QPalette
+from PySide6.QtGui import QColor, QFont, QGuiApplication, QPalette
+from PySide6.QtWidgets import QApplication
+
+from docrepo.ui import tokens
+from docrepo.ui.look import LOOK, configure
 
 #: The light palette, from the mockup's light colours.
 LIGHT = {
@@ -92,4 +100,52 @@ QPushButton#primary:hover { background: #174d7d; }
 QPushButton#link, QPushButton#moreLink { border: none; color: #1d5e98; text-decoration: underline; text-align: left; padding: 0; }
 QWidget#footer { background: #f4f6f8; border-top: 1px solid #d6dce3; }
 QListWidget#suggestions { border: 1px solid #b8c1cb; border-radius: 4px; }
+QLabel#help { color: #5a6571; font-size: 8.5pt; }
+QFrame#editor { border: none; }
 """
+#: Release 5.9's style sheet, the Classic look's.
+CLASSIC_STYLE = STYLE
+
+
+_QSS_CACHE: list[str] = []
+
+
+def style_sheet() -> str:
+    """The style sheet a window sets on itself: the Classic look's, or the new look's from the tokens. When DocRepo runs,
+    the new look's is set once on the application instead (``apply_look``), so this is empty: Qt parses it only once."""
+    if LOOK.classic:
+        return CLASSIC_STYLE
+    if LOOK.app_sheet:
+        return ""
+    if not _QSS_CACHE:
+        _QSS_CACHE.append(tokens.qss())
+    app = QApplication.instance()
+    if app is not None:  # the first window to ask puts it on the application, for every window after it
+        app.setStyleSheet(_QSS_CACHE[0])
+        LOOK.app_sheet = True
+        return ""
+    return _QSS_CACHE[0]
+
+
+def page_css() -> str:
+    """The HTML styles of the browse tool's pages and list cells, and the forms' previews."""
+    from docrepo.detail import CSS as CLASSIC_CSS
+
+    return CLASSIC_CSS if LOOK.classic else tokens.CSS
+
+
+def apply_look(app: QGuiApplication, look: str = "new", hints: bool = False) -> None:
+    """Set the look up from Settings, once the application exists and before any window is made."""
+    configure(look, hints)
+    if LOOK.classic:
+        app.setFont(QFont("Segoe UI", 9))
+        use_light_theme(app)
+        return
+    hints_ = app.styleHints()
+    if hasattr(hints_, "setColorScheme"):  # Qt 6.8: light, whatever Windows is set to (a dark theme comes later, decision 14)
+        hints_.setColorScheme(Qt.ColorScheme.Light)
+    app.setStyle("Fusion")
+    app.setPalette(tokens.palette())
+    app.setFont(tokens.ui_font())
+    LOOK.app_sheet = False
+    style_sheet()  # sets the new look's style sheet on the application, once

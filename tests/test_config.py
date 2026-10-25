@@ -81,7 +81,7 @@ def test_settings_file_has_the_documented_fields(tmp_path):
     data = json.loads((root / "Config" / "settings.json").read_text(encoding="utf-8"))
     assert list(data) == [
         "schema_version", "me", "hotkey", "browse_hotkey", "note_hotkey", "new_task_hotkey", "update_hotkey", "agenda_hotkey", "today_hotkey", "backup_dir", "backup_every_days", "backup_keep", "doc_check_minutes", "reminder_time",
-        "extracted_text_cap_chars", "prompt_warn_chars", "capacity_horizon_years", "workdays", "event_words", "reference_fields",
+        "extracted_text_cap_chars", "prompt_warn_chars", "capacity_horizon_years", "workdays", "event_words", "reference_fields", "look", "show_hints",
     ]
 
 

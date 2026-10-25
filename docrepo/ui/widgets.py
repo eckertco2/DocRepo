@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
-from PySide6.QtCore import QDate, QPoint, QRect, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QDate, QEvent, QPoint, QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QKeyEvent, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractButton,
@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
 
 from docrepo.model import Model
 from docrepo.ui.help_text import HELP
+from docrepo.ui.look import LOOK, _Gate
 
 
 SAVE_KEYS = ("Ctrl+Return", "Ctrl+Enter")
@@ -157,11 +158,12 @@ class FlowLayout(QLayout):
         return y + line - rect.y()
 
 
-class InfoButton(QToolButton):
-    """The small "i" button that shows what a field is for."""
+class InfoButton(_Gate, QToolButton):
+    """The small "i" button that shows what a field is for. Shown only with Show hints on, or in the Classic look."""
 
     def __init__(self, key: str, note: QLabel) -> None:
         super().__init__()
+        self._init_gate()
         self.setText("i")
         self.setObjectName("info")
         self.setCheckable(True)
@@ -173,6 +175,8 @@ class InfoButton(QToolButton):
         note.setObjectName("tip")
         note.hide()
         self.toggled.connect(note.setVisible)
+        if not LOOK.show_help:
+            QToolButton.setVisible(self, False)
 
 
 def field(label: str, widget: QWidget | None, help_key: str | None = None, sub: str = "") -> QWidget:
@@ -180,9 +184,10 @@ def field(label: str, widget: QWidget | None, help_key: str | None = None, sub: 
     box = QWidget()
     layout = QVBoxLayout(box)
     layout.setContentsMargins(0, 0, 0, 0)
-    layout.setSpacing(3)
+    layout.setSpacing(3 if LOOK.classic else 6)
     row = QHBoxLayout()
     row.setSpacing(6)
+    sub = sub if LOOK.show_help else ""  # a label's own hint, such as "a description for each", only with Show hints
     text = QLabel(f"{label} <span style='color:#87919c'>{sub}</span>" if sub else label)
     text.setObjectName("fieldLabel")
     if widget is not None:
@@ -201,10 +206,54 @@ def field(label: str, widget: QWidget | None, help_key: str | None = None, sub: 
     return box
 
 
+def section(layout: QVBoxLayout, title: str) -> QLabel:
+    """A form's section heading (the visual overhaul's O4): bold, with 32 px above it, in place of a group box."""
+    layout.addSpacing(16)
+    label = QLabel(title, objectName="heading")
+    layout.addWidget(label)
+    return label
+
+
+def dialog_buttons(dialog: QWidget, commit: str, on_commit: Callable[[], None], on_cancel: Callable[[], None],
+                   note: QWidget | None = None, cancel: str = "Cancel") -> QHBoxLayout:
+    """A form's buttons, Windows' way: the commit button first, then Cancel, at the right, the same width; the commit button
+    is the window's one accent button. ``dialog.commit_button`` is the commit button."""
+    row = QHBoxLayout()
+    row.setSpacing(8)
+    if note is not None:
+        row.addWidget(note, 1)
+    row.addStretch()
+    button = QPushButton(commit, objectName="primary")
+    button.setDefault(True)
+    button.setMinimumWidth(96)
+    button.clicked.connect(lambda _=False: on_commit())
+    close = QPushButton(cancel)
+    close.setMinimumWidth(96)
+    close.clicked.connect(lambda _=False: on_cancel())
+    row.addWidget(button)
+    row.addWidget(close)
+    dialog.commit_button = button  # type: ignore[attr-defined]
+    return row
+
+
+def fit_dialog(dialog: QWidget, body: QWidget, width: int, chrome: int = 140) -> None:
+    """Size a form to its content, up to most of the screen, so it scrolls only on a small screen (decision 3)."""
+    from PySide6.QtGui import QGuiApplication
+
+    screen = dialog.screen() or QGuiApplication.primaryScreen()
+    limit = int(screen.availableGeometry().height() * 0.85) if screen else 900
+    dialog.resize(width, min(limit, body.sizeHint().height() + chrome))
+
+
 class DateField(QWidget):
-    """A date as YYYY-MM-DD, typed or picked from a calendar. Empty means none."""
+    """A date, typed or picked from a calendar. Empty means none. Its value is always YYYY-MM-DD.
+
+    In the new look (the visual overhaul's O4) it reads like the rest of DocRepo, "Fri 9 Oct 2026", while you're not in
+    it, and shows YYYY-MM-DD while you type in it; the calendar button is inside the field, which is as wide as a date.
+    """
 
     edited = Signal()
+    WIDTH = 176  # the new look's width: a date in words, and the calendar button
 
     def __init__(self) -> None:
         super().__init__()
@@ -214,11 +263,7 @@ class DateField(QWidget):
         self.line = QLineEdit()
         self.line.setPlaceholderText("YYYY-MM-DD")
         self.line.textEdited.connect(self._typed)
-        button = QToolButton()
-        button.setText("▾")
-        button.setToolTip("Pick a date")
-        button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        menu = QMenu(button)
+        menu = QMenu(self)
         self.calendar = QCalendarWidget()
         self.calendar.setGridVisible(False)
         self.calendar.clicked.connect(self._picked)
@@ -227,25 +272,54 @@ class DateField(QWidget):
         menu.addAction(action)
         menu.addAction("No date", lambda: self._set_by_user(None))
         menu.aboutToShow.connect(self._sync_calendar)
-        button.setMenu(menu)
         self._menu = menu
         layout.addWidget(self.line, 1)
-        layout.addWidget(button)
+        if LOOK.classic:
+            button = QToolButton()
+            button.setText("▾")
+            button.setToolTip("Pick a date")
+            button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+            button.setMenu(menu)
+            layout.addWidget(button)
+        else:
+            from docrepo.ui.icons import icon  # icons are drawn once there's an application, so not at import
+
+            pick = self.line.addAction(icon("calendar"), QLineEdit.ActionPosition.TrailingPosition)
+            pick.setToolTip("Pick a date")
+            pick.triggered.connect(lambda: menu.popup(self.line.mapToGlobal(self.line.rect().bottomLeft())))
+            self.line.installEventFilter(self)
+            self.setMaximumWidth(self.WIDTH)
+        self._show_timer = QTimer(self)  # after a focus change, by a timer that goes with the field
+        self._show_timer.setSingleShot(True)
+        self._show_timer.setInterval(0)
+        self._show_timer.timeout.connect(self._show)
 
     def value(self) -> str | None:
-        return self.line.text().strip() or None
+        """YYYY-MM-DD, or what was typed when it isn't a date (``is_valid`` says so), or None."""
+        day = parse_day(self.line.text())
+        return day.isoformat() if day else (self.line.text().strip() or None)
 
     def is_valid(self) -> bool:
         text = self.line.text().strip()
-        if not text:
-            return True
-        try:
-            return len(text) == 10 and bool(date.fromisoformat(text))
-        except ValueError:
-            return False
+        return not text or parse_day(text) is not None
 
     def set_value(self, value: str | None) -> None:
         self.line.setText(value or "")
+        self._show()
+
+    def _show(self) -> None:
+        """The new look: the date in words while you're not in the field, YYYY-MM-DD while you are. A date that isn't one
+        is left as typed, so you can see what to fix."""
+        if LOOK.classic:
+            return
+        day = parse_day(self.line.text())
+        if day is not None:
+            self.line.setText(day.isoformat() if self.line.hasFocus() else f"{day:%a} {day.day} {day:%b %Y}")
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802 - Qt's name
+        if watched is self.line and event.type() in (QEvent.Type.FocusIn, QEvent.Type.FocusOut):
+            self._show_timer.start()
+        return False
 
     def _typed(self) -> None:
         set_filled(self.line, False)
@@ -262,6 +336,22 @@ class DateField(QWidget):
     def _sync_calendar(self) -> None:
         if self.is_valid() and self.value():
             self.calendar.setSelectedDate(QDate.fromString(self.value(), "yyyy-MM-dd"))
+
+
+def parse_day(text: str) -> date | None:
+    """A date typed as YYYY-MM-DD, or shown in words as "Fri 9 Oct 2026"; None when it's neither."""
+    text = text.strip()
+    if len(text) == 10 and text[4:5] == "-":
+        try:
+            return date.fromisoformat(text)
+        except ValueError:
+            return None
+    for form in ("%a %d %b %Y", "%d %b %Y"):
+        try:
+            return datetime.strptime(text, form).date()
+        except ValueError:
+            continue
+    return None
 
 
 class HoursField(QLineEdit):

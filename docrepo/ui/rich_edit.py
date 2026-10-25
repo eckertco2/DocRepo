@@ -19,6 +19,11 @@ from PySide6.QtGui import QBrush, QColor, QFont, QKeySequence, QTextCharFormat, 
 from PySide6.QtWidgets import QHBoxLayout, QMenu, QTextEdit, QToolButton, QWidget
 
 from docrepo import markup
+from docrepo.ui.icons import icon
+from docrepo.ui.look import LOOK
+
+#: The new look's icons on the format bar (decision 4): the highlight and the lists.
+ICONS = {"mark": "highlight", "ul": "bullets", "ol": "numbers"}
 
 NUMBERED = (QTextListFormat.Style.ListDecimal, QTextListFormat.Style.ListLowerAlpha, QTextListFormat.Style.ListUpperAlpha,
             QTextListFormat.Style.ListLowerRoman, QTextListFormat.Style.ListUpperRoman)
@@ -319,6 +324,7 @@ class RichEdit(QTextEdit):
         self.setTextCursor(cursor)
 
 
+
 class FormatBar(QWidget):
     """The buttons above a RichEdit, each with its key in its tooltip."""
 
@@ -331,12 +337,16 @@ class FormatBar(QWidget):
         lay.setSpacing(2)
         self.buttons: dict[str, QToolButton] = {}
         for key, text, tip, action, checkable in (
-                ("b", "B", "Bold   Ctrl+B", edit.toggle_bold, True), ("i", "I", "Italic   Ctrl+I", edit.toggle_italic, True),
-                ("u", "U", "Underline   Ctrl+U", edit.toggle_underline, True), ("s", "S", "Strikethrough   Ctrl+Shift+X", edit.toggle_strike, True),
-                ("mark", "Highlight", "Highlight   Ctrl+Shift+H (yellow; the arrow for others)", edit.toggle_highlight, True),
-                ("ul", "• List", "Bulleted list   Ctrl+Shift+L, or type “- ”. Tab and Shift+Tab change the level.", lambda: edit.toggle_list(False), True),
-                ("ol", "1. List", "Numbered list   Ctrl+Shift+O, or type “1. ”", lambda: edit.toggle_list(True), True)):
+                ("b", "B", "Bold (Ctrl+B)", edit.toggle_bold, True), ("i", "I", "Italic (Ctrl+I)", edit.toggle_italic, True),
+                ("u", "U", "Underline (Ctrl+U)", edit.toggle_underline, True), ("s", "S", "Strikethrough (Ctrl+Shift+X)", edit.toggle_strike, True),
+                ("mark", "Highlight", "Highlight (Ctrl+Shift+H): yellow, or the arrow for green and pink", edit.toggle_highlight, True),
+                ("ul", "• List", "Bulleted list (Ctrl+Shift+L), or type “- ”. Tab and Shift+Tab change the level.", lambda: edit.toggle_list(False), True),
+                ("ol", "1. List", "Numbered list (Ctrl+Shift+O), or type “1. ”", lambda: edit.toggle_list(True), True)):
             b = QToolButton(text=text)
+            if not LOOK.classic and key in ICONS:  # the new look: icons for the highlight and the lists, their names in the tooltip
+                b.setText("")
+                b.setIcon(icon(ICONS[key]))
+                b.setAccessibleName(tip.split(" (")[0])
             b.setToolTip(tip)
             b.setCheckable(checkable)
             b.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # the cursor stays in the text

@@ -43,6 +43,7 @@ from PySide6.QtWidgets import (
     QTableWidgetItem,
     QTextBrowser,
     QTextEdit,
+    QToolButton,
     QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
@@ -52,7 +53,7 @@ from docrepo import bulk, capacity, db, edits, items, people, prompts, search
 from docrepo.agenda import AgendaError
 from docrepo.captures import capture_folder, capture_md_path
 from docrepo.dates import long_date, short
-from docrepo.detail import CSS, PageState, Pages, chip, esc, state_chip
+from docrepo.detail import PageState, Pages, chip, esc, state_chip
 from docrepo.links import is_link
 from docrepo.model import TODAY, Model, is_person
 from docrepo.people import PeopleError
@@ -65,13 +66,17 @@ from docrepo.ui.dialogs import LabelDialog, PersonDialog
 from docrepo.ui.rich_edit import FormatBar, RichEdit
 from docrepo.ui.explorer import show_in_explorer
 from docrepo.ui.settings_view import SettingsView
-from docrepo.ui.style import FORMAT_BAR_STYLE
+from docrepo.ui import tokens
+from docrepo.ui.icons import icon
+from docrepo.ui.look import LOOK, Help, KeyTips, set_hints, tip, with_key
+from docrepo.ui.palette import Command, CommandPalette
+from docrepo.ui.style import FORMAT_BAR_STYLE, page_css, style_sheet
 from docrepo.ui.task_forms import BulkEditDialog, LabelMatchDialog, TaskEditDialog
 from docrepo.ui.task_picker import TaskPicker
 from docrepo.ui.timeline_view import TimelineView
 from docrepo.ui.keymap import KeyMapDialog
 from docrepo.timeline import bands as timeline_bands
-from docrepo.ui.tree_view import DIM_ROLE, GREY, HTML_ROLE, KEY_ROLE, RowTree, tint
+from docrepo.ui.tree_view import DIM_ROLE, GREY, HTML_ROLE, KEY_ROLE, RowTree, edge, tint
 from docrepo.ui.widgets import SAVE_KEYS, CheckMenuButton, FlowLayout, Option, label_filter, label_options, people_filter, people_options
 from docrepo.views import (
     LIST_IDS,
@@ -114,6 +119,7 @@ log = logging.getLogger(__name__)
 WINDOW_TITLE = "DocRepo"
 VIEWS_HIDDEN_KEY = "browse_views_hidden"
 TODAY_MINE_KEY = "today_due_mine"  # Mine only, on Today's Due in the next 7 days (mods log round 2, M0050)
+NAV_FOLDED_KEY = "browse_nav_folded"  # the sidebar's folded groups (the visual overhaul's decision 10)
 STYLE = """
 QWidget#browse { background: #ffffff; color: #1a1f25; font-family: "Segoe UI"; font-size: 10pt; }
 QWidget#toolbar { background: #f4f6f8; border-bottom: 1px solid #d6dce3; }
@@ -144,7 +150,7 @@ class BrowseWindow(QWidget):
         self.capture = capture
         self.setObjectName("browse")
         self.setWindowTitle(WINDOW_TITLE)
-        self.setStyleSheet(STYLE)
+        self.setStyleSheet(STYLE if LOOK.classic else style_sheet())
         #: Shows a file in File Explorer. Tests replace it.
         self.reveal: Callable[[Path], bool] = show_in_explorer
         #: Asks a yes-or-no question. Tests replace it.
@@ -191,7 +197,7 @@ class BrowseWindow(QWidget):
                               ("A", lambda: self._key("agenda")), ("E", lambda: self._key("edit")), ("D", lambda: self._key("today")),
                               ("M", lambda: self._key("meeting")),
                               ("Ctrl+F", self.open_find), ("Ctrl+Shift+F", self.search_box.setFocus), ("F1", self.show_keys), ("F5", self.refresh),
-                              ("Ctrl+B", lambda: self.show_views_pane(not self.views_button.isChecked()))):
+                              ("Ctrl+B", lambda: self.show_views_pane(not self.views_button.isChecked())), ("Ctrl+K", self.open_palette)):
             QShortcut(QKeySequence(keys), self, handler)
         if capture is not None:
             capture.saved.connect(self.capture_saved)
@@ -203,13 +209,27 @@ class BrowseWindow(QWidget):
         outer.setSpacing(0)
         bar = QWidget(objectName="toolbar")
         bl = QHBoxLayout(bar)
-        bl.setContentsMargins(10, 6, 10, 6)
-        self.views_button = QPushButton("≡ Views")
+        bl.setContentsMargins(10, 8, 12, 8)
+        bl.setSpacing(8)
+        self.keytips = KeyTips(self)
+        if LOOK.classic:
+            self.views_button = QPushButton("≡ Views")
+        else:  # the visual overhaul's O5: an icon button folds the sidebar
+            self.views_button = QToolButton(objectName="iconButton")
+            self.views_button.setIcon(icon("sidebar"))
+            self.views_button.setFixedSize(tokens.ICON_BUTTON, tokens.ICON_BUTTON)
+            self.views_button.setAccessibleName("Views")
         self.views_button.setCheckable(True)
-        self.views_button.setToolTip("Hide or show the list of views on the left   (Ctrl+B)")
+        tip(self.views_button, "Hide or show the list of views on the left", "Ctrl+B")
+        self.keytips.add(self.views_button, "Ctrl+B", ctrl=True)
         bl.addWidget(self.views_button)
         self.search_box = QLineEdit()
-        self.search_box.setPlaceholderText("Search everything: tasks, captures, documents and people   (Ctrl+Shift+F)")
+        self.search_box.setPlaceholderText("Search everything: tasks, captures, documents and people" + ("   (Ctrl+Shift+F)" if LOOK.classic else ""))
+        tip(self.search_box, "Search everything", "Ctrl+Shift+F")
+        if not LOOK.classic:
+            self.search_box.addAction(icon("search"), QLineEdit.ActionPosition.LeadingPosition)
+            self.search_box.setMaximumWidth(560)
+        self.keytips.add(self.search_box, "Ctrl+Shift+F", ctrl=True)
         self.search_box.setClearButtonEnabled(True)
         self._search_timer = QTimer(self)
         self._search_timer.setSingleShot(True)
@@ -218,17 +238,35 @@ class BrowseWindow(QWidget):
         self.search_box.textChanged.connect(lambda _: self._search_timer.start())
         self.search_box.installEventFilter(self)
         bl.addWidget(self.search_box, 1)
+        if not LOOK.classic:
+            bl.addStretch(0)
         new = QPushButton("New capture", objectName="primary")
+        if not LOOK.classic:
+            new.setIcon(icon("add", tokens.colour("on_accent")))
+        tip(new, "A new note, task or update in the capture window", self.ctx.settings.hotkey)
         new.clicked.connect(lambda: self.open_capture())
-        self.tb_new = QPushButton("New task   T")
+        self.tb_new = QPushButton(with_key("New task", "T"))
         self.tb_new.clicked.connect(lambda: self.capture_for_selected("new_task"))
-        self.tb_update = QPushButton("Update   U")
+        self.tb_update = QPushButton(with_key("Update", "U"))
         self.tb_update.clicked.connect(lambda: self.capture_for_selected("update"))
-        keys = QPushButton("Keys   F1")
+        keys = QPushButton(with_key("Keys", "F1"))
         keys.setToolTip("Every key, in one list")
         keys.clicked.connect(self.show_keys)
         for w in (new, self.tb_new, self.tb_update, keys):
             bl.addWidget(w)
+        if not LOOK.classic:  # New task and Update act on the selected task: they're on its command bar; the keys are in More
+            for w in (self.tb_new, self.tb_update, keys):
+                w.hide()
+            more = QToolButton(objectName="iconButton")
+            more.setIcon(icon("more"))
+            more.setFixedSize(tokens.ICON_BUTTON, tokens.ICON_BUTTON)
+            more.setAccessibleName("More")
+            more.setToolTip("Keys, the command palette and Show hints")
+            more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+            self.top_menu = QMenu(more)
+            self.top_menu.aboutToShow.connect(self._fill_top_menu)
+            more.setMenu(self.top_menu)
+            bl.addWidget(more)
         outer.addWidget(bar)
 
         self.split = QSplitter(Qt.Orientation.Horizontal)
@@ -238,7 +276,12 @@ class BrowseWindow(QWidget):
         self.nav.setHeaderHidden(True)
         self.nav.setRootIsDecorated(False)
         self.nav.setIndentation(0)
-        self.nav.picked.connect(lambda key: self.set_view(key[1]))
+        self.nav.picked.connect(lambda key: self.set_view(key[1]) if key[0] == "view" else None)
+        self.nav.itemClicked.connect(lambda item, _col: self._nav_clicked(item))
+        if not LOOK.classic:
+            self.nav.cell_pad = 10
+            self.nav.setRootIsDecorated(False)
+            self.nav.set_columns(["View", ""], [0, 40])
         self.split.addWidget(self.nav)
 
         self.middle = QStackedWidget()
@@ -248,11 +291,11 @@ class BrowseWindow(QWidget):
         lp.setSpacing(0)
         head = QWidget(objectName="paneHead")
         hl = QVBoxLayout(head)
-        hl.setContentsMargins(12, 8, 12, 6)
-        hl.setSpacing(4)
+        hl.setContentsMargins(12, 8, 12, 6) if LOOK.classic else hl.setContentsMargins(16, 12, 16, 10)
+        hl.setSpacing(4 if LOOK.classic else 8)
         self.pane_title = QLabel(objectName="paneTitle")
-        self.pane_note = QLabel(objectName="paneNote")
-        self.pane_note.setWordWrap(True)
+        self.pane_note = Help()  # what the view is: with Show hints (decision 7)
+        self.pane_note.setObjectName("paneNote")
         self.filters = QWidget()
         self.filters_layout = FlowLayout(self.filters, spacing=8)
         # Find in this view (mods log round 2, M0026): Ctrl+F; it narrows the list as you type, and Esc clears it.
@@ -260,7 +303,8 @@ class BrowseWindow(QWidget):
         fb = QHBoxLayout(self.find_bar)
         fb.setContentsMargins(0, 0, 0, 0)
         self.find_box = QLineEdit()
-        self.find_box.setPlaceholderText("Find in this view   Esc clears")
+        self.find_box.setPlaceholderText("Find in this view   Esc clears" if LOOK.classic else "Find in this view")
+        tip(self.find_box, "Find in this view. Esc clears it.", "Ctrl+F")
         self.find_box.setAccessibleName("Find in this view")
         self.find_box.textChanged.connect(lambda _: self.render_list())
         self.find_box.installEventFilter(self)
@@ -294,15 +338,15 @@ class BrowseWindow(QWidget):
         dl.setContentsMargins(0, 0, 0, 0)
         dl.setSpacing(0)
         self.actions = QWidget(objectName="actions")
-        self.actions_layout = FlowLayout(self.actions, spacing=6)
-        self.actions_layout.setContentsMargins(14, 8, 14, 4)
+        self.actions_layout = FlowLayout(self.actions, spacing=6 if LOOK.classic else 4)
+        self.actions_layout.setContentsMargins(14, 8, 14, 4) if LOOK.classic else self.actions_layout.setContentsMargins(16, 10, 16, 2)
         dl.addWidget(self.actions)
         self.detail_stack = QStackedWidget()
         self.page = QTextBrowser()
         self.page.setOpenLinks(False)
         self.page.setOpenExternalLinks(False)
-        self.page.document().setDefaultStyleSheet(CSS)
-        self.page.document().setDocumentMargin(14)
+        self.page.document().setDefaultStyleSheet(page_css())
+        self.page.document().setDocumentMargin(14 if LOOK.classic else 16)
         self.page.anchorClicked.connect(self.on_link)
         self.detail_stack.addWidget(self.page)
         self.detail_stack.addWidget(self._build_edit_form())
@@ -331,9 +375,8 @@ class BrowseWindow(QWidget):
         lay = QVBoxLayout(page)
         lay.setContentsMargins(12, 8, 12, 8)
         title = QLabel("Capacity", objectName="paneTitle")
-        note = QLabel("Scheduled hours per person and week, spread over each task's workdays, from work_calendar in docs.db. "
-                      "Parked tasks don't count. Click a cell to see which tasks fill it.", objectName="paneNote")
-        note.setWordWrap(True)
+        note = Help("Scheduled hours per person and week, spread over each task's workdays. Parked tasks don't count. Click a cell "
+                    "to see which tasks fill it.")
         nav = QHBoxLayout()
         for text, step in (("◀ Earlier", -1), ("This week", 0), ("Later ▶", 1)):
             b = QPushButton(text)
@@ -352,10 +395,11 @@ class BrowseWindow(QWidget):
         self.cap_table.verticalHeader().setVisible(False)
         self.cap_detail = QTextBrowser()
         self.cap_detail.setOpenLinks(False)
-        self.cap_detail.document().setDefaultStyleSheet(CSS)
+        self.cap_detail.document().setDefaultStyleSheet(page_css())
         self.cap_detail.anchorClicked.connect(self.on_link)
-        legend = QLabel(" ".join(f'<span style="background-color:{c}">&nbsp;{t}&nbsp;</span>'
-                                 for t, c in (("Under 80%", "#e2f2e6"), ("80 to 100%", "#fcefcf"), ("Over 100%", "#fbe3e1"))))
+        legend = QLabel(" ".join(f'<span style="background-color:{c}">&nbsp;{t}&nbsp;</span>' for t, c in (
+            (("Under 80%", "#e2f2e6"), ("80 to 100%", "#fcefcf"), ("Over 100%", "#fbe3e1")) if LOOK.classic else
+            (("Under 80%", tokens.colour("content")), ("80 to 100%", tokens.colour("selected")), ("Over 100%", tokens.colour("critical_bg"))))))
         for w in (title, note):
             lay.addWidget(w)
         lay.addLayout(nav)
@@ -370,17 +414,16 @@ class BrowseWindow(QWidget):
         lay.setContentsMargins(14, 10, 14, 14)
         self.edit_title = QLabel(objectName="paneTitle")
         lay.addWidget(self.edit_title)
-        lay.addWidget(QLabel("Content text", objectName="hint"))
+        lay.addWidget(QLabel("Content text", objectName="fieldLabel"))
         self.edit_content = RichEdit()  # with formatting and lists (mods log round 2, M0045)
         lay.addWidget(FormatBar(self.edit_content))
         lay.addWidget(self.edit_content, 3)
-        lay.addWidget(QLabel("Summary", objectName="hint"))
+        lay.addWidget(QLabel("Summary", objectName="fieldLabel"))
         self.edit_summary = QPlainTextEdit()
         self.edit_summary.setPlaceholderText("No summary")
         lay.addWidget(self.edit_summary, 1)
-        note = QLabel("Saving rewrites capture.md and keeps the previous version in the capture's _old versions folder. Nothing is lost. "
-                      "Ctrl+Enter saves; Esc cancels.", objectName="hint")
-        note.setWordWrap(True)
+        note = Help("Saving rewrites capture.md and keeps the previous version in the capture's _old versions folder. Nothing is lost. "
+                    "Ctrl+Enter saves; Esc cancels.")
         lay.addWidget(note)
         row = QHBoxLayout()
         save = QPushButton("Save", objectName="primary")
@@ -499,6 +542,9 @@ class BrowseWindow(QWidget):
 
     # ================= the views pane =================
     def render_nav(self) -> None:
+        if not LOOK.classic:
+            self._render_nav_new()
+            return
         counts = view_counts(self.model(), self.today(), self.ctx.settings.me)
         self.nav.begin()
         section = ""
@@ -511,6 +557,95 @@ class BrowseWindow(QWidget):
             label = f"<b>{esc(v.label)}</b>" if v.id == self.view else esc(v.label)
             self.nav.add_row(None, ("view", v.id), [label, f'<p align="right" class="sub">{count}</p>' if count is not None else ""])
         self.nav.end(("view", self.view) if self.view != "search" else None)
+
+    def _render_nav_new(self) -> None:
+        """The new look's sidebar (decision 10): today's order and groups, each group folding and staying as you left it (in
+        docs.db), and Settings at the bottom."""
+        counts = view_counts(self.model(), self.today(), self.ctx.settings.me)
+        folded = set(filter(None, (db.get_state(self.ctx.conn, NAV_FOLDED_KEY) or "").split(",")))
+        self.nav.begin()
+        group = None
+        for v in VIEWS:
+            if v.id == "settings":
+                continue
+            if v.section and (group is None or group.data(0, KEY_ROLE) != ("section", v.section)):
+                closed = v.section in folded
+                arrow = "›" if closed else "⌄"
+                group = self.nav.add_row(None, ("section", v.section),
+                                         [f'<span class="sub">{esc(v.section)}</span>', f'<p align="right" class="sub">{arrow}</p>'], selectable=False)
+                group.setToolTip(0, f"Fold or unfold {v.section}")
+            count = counts.get(v.id)
+            parent = group if v.section else None
+            self.nav.add_row(parent, ("view", v.id), [esc(v.label), f'<p align="right" class="sub">{count}</p>' if count else ""])
+            if parent is not None:
+                parent.setExpanded(v.section not in folded)
+        self.nav.add_row(None, ("view", "settings"), [esc("Settings"), ""])
+        self.nav.end(("view", self.view) if self.view != "search" else None)
+
+    def _nav_clicked(self, item) -> None:
+        """A group's heading in the sidebar folds or unfolds it; the choice is kept in docs.db's app_state."""
+        key = item.data(0, KEY_ROLE)
+        if not key or key[0] != "section":
+            return
+        item.setExpanded(not item.isExpanded())
+        folded = set(filter(None, (db.get_state(self.ctx.conn, NAV_FOLDED_KEY) or "").split(",")))
+        (folded.discard if item.isExpanded() else folded.add)(key[1])
+        db.set_state(self.ctx.conn, NAV_FOLDED_KEY, ",".join(sorted(folded)))
+        item.setData(1, HTML_ROLE, f'<p align="right" class="sub">{"⌄" if item.isExpanded() else "›"}</p>')
+
+    # ---- the command palette (the visual overhaul's O7) ----
+    def palette_commands(self) -> list[Command]:
+        """Every command the palette offers here: the selected task's, then the views, then the window's own."""
+        out: list[Command] = []
+        task = self.model().tasks.get(self.sel[1]) if self.sel and self.sel[0] == "task" else None
+        if task is not None and not task.discarded:
+            tid = task.id
+            out += [Command("Task", "Add a note", lambda: self.open_capture(task=tid, mode="note"), "N"),
+                    Command("Task", "Update", lambda: self.open_capture(task=tid, mode="update"), "U"),
+                    Command("Task", "New task under it", lambda: self.open_capture(task=tid, mode="new_task"), "T"),
+                    Command("Task", "Add to Today", lambda: self.add_to_today(tid), "D"),
+                    Command("Task", "Add to an agenda", lambda: self.open_capture(task=tid, mode="update", agenda_focus=True), "A"),
+                    Command("Task", "Edit task", lambda: self.edit_task(tid), "E")]
+            if task.meeting:
+                out.append(Command("Task", "Meeting notes", lambda: self.open_capture(task=tid, meeting=True), "M"))
+            out += [Command("Task", "Copy prompt", lambda: self.copy_prompt(tid)),
+                    Command("Task", "Open folder", lambda: self.reveal(self.ctx.data_root / "Tasks" / tid))]
+        out += [Command("View", v.label, lambda v=v.id: self.set_view(v)) for v in VIEWS]
+        out += [Command("", "New capture", lambda: self.open_capture(), self.ctx.settings.hotkey),
+                Command("", "Search everything", self.search_box.setFocus, "Ctrl+Shift+F"),
+                Command("", "Find in this view", self.open_find, "Ctrl+F"),
+                Command("", "Show or hide the views", lambda: self.show_views_pane(not self.views_button.isChecked()), "Ctrl+B"),
+                Command("", "Read docs.db again", self.refresh, "F5"),
+                Command("", "Keys", self.show_keys, "F1"),
+                Command("", "Hide hints" if LOOK.hints else "Show hints", lambda: self._set_hints(not LOOK.hints))]
+        return out
+
+    def open_palette(self) -> None:
+        """Ctrl+K: every action and view, narrowed as you type (decision 6)."""
+        self._palette = CommandPalette(self, self.palette_commands())
+        self._palette.open_over(self)
+
+    def _fill_top_menu(self) -> None:
+        """The top bar's More: every key, the command palette and Show hints."""
+        menu = self.top_menu
+        menu.clear()
+        menu.addAction(icon("keyboard"), "Keys\tF1", self.show_keys)
+        if hasattr(self, "open_palette"):
+            menu.addAction(icon("search"), "Command palette\tCtrl+K", self.open_palette)
+        menu.addSeparator()
+        hints = menu.addAction("Show hints", lambda: self._set_hints(not LOOK.hints))
+        hints.setCheckable(True)
+        hints.setChecked(LOOK.hints)
+
+    def _set_hints(self, on: bool) -> None:
+        """Show hints, at once in every window, and kept in Settings (decision 7)."""
+        set_hints(on)
+        self.ctx.settings.show_hints = on
+        try:
+            self.ctx.settings.save(self.ctx.fs, self.ctx.data_root)
+        except OSError as e:
+            log.warning("Couldn't keep Show hints in settings.json: %s", e)
+        self.render_all()
 
     def show_views_pane(self, on: bool) -> None:
         """Show or hide the views on the left (mods log round 1, M0012). The choice is kept in docs.db's app_state."""
@@ -682,10 +817,10 @@ class BrowseWindow(QWidget):
                          chip("Link", "st-ns") if link else chip(d.status, "st-ns" if d.status == "Current" else "st-pk"),
                          f'<p align="right">{esc(short(date.fromisoformat(d.checked[:10]), self.today())) if d.checked else ""}</p>']
                 tip = f"{d.original} (double-click copies it)" if link else f"Last checked {d.checked or 'not yet'}"
-                item = self.tree.add_row(parent, ("doc", n.id), cells, tint(n.group, n.depth), tip=tip)
+                item = self.tree.add_row(parent, ("doc", n.id), cells, tint(n.group, n.depth), tip=tip, edge=edge(n.group, n.depth))
             else:
                 cells, tip = row(n) if row else (self._task_cells(n.id, n.depth, filtered and not n.match), full_path(m, n.id))
-                item = self.tree.add_row(parent, ("task", n.id), cells, tint(n.group, n.depth), tip=tip)
+                item = self.tree.add_row(parent, ("task", n.id), cells, tint(n.group, n.depth), tip=tip, edge=edge(n.group, n.depth))
                 if self.selecting and n.match and self.view in SELECT_VIEWS:
                     self.tree.add_tick(item, n.id in self.ticked)
             self._add_nodes(n.children, item, filtered, expand_all, row)
@@ -1208,7 +1343,10 @@ class BrowseWindow(QWidget):
             if "\n" in heads[i]:
                 t.horizontalHeaderItem(i + 1).setBackground(QColor("#f3e6cc"))
                 t.horizontalHeaderItem(i + 1).setToolTip("A plant event this week: " + heads[i].split("\n", 1)[1])
-        colours = {"u1": "#e2f2e6", "u2": "#fcefcf", "u3": "#fbe3e1"}
+        # Decision 18: neutral under 80%, the accent's tint from 80% to 100%, red over 100% (the Classic look: green, amber, red).
+        colours = ({"u1": "#e2f2e6", "u2": "#fcefcf", "u3": "#fbe3e1"} if LOOK.classic else
+                   {"u2": tokens.colour("selected"), "u3": tokens.colour("critical_bg")})
+        t.setShowGrid(LOOK.classic)
         self._cap_line_rows = lines
         for r, row in enumerate(lines):
             if isinstance(row, str):  # a group's heading
@@ -1224,11 +1362,17 @@ class BrowseWindow(QWidget):
             head = QTableWidgetItem(f"{row.name}\n{'%g h a week' % row.hours_a_week if row.hours_a_week else 'Hours not set'}")
             t.setItem(r, 0, head)
             for i, c in enumerate(row.cells):
-                text = f"{c.hours:.1f}" + (f"\n{round(c.use * 100)}%" if c.hours and c.use is not None else "") if c.hours else "–"
+                sep = "\n" if LOOK.classic else "  ·  "
+                text = f"{c.hours:.1f}" + (f"{sep}{round(c.use * 100)}%" if c.hours and c.use is not None else "") if c.hours else "–"
                 item = QTableWidgetItem(text)
-                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter if LOOK.classic else Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 if c.cls in colours:
                     item.setBackground(QColor(colours[c.cls]))
+                if c.cls == "u3" and not LOOK.classic:  # over 100%: red and bold, so it never needs colour alone
+                    item.setForeground(QColor(tokens.colour("critical")))
+                    f = item.font()
+                    f.setBold(True)
+                    item.setFont(f)
                 item.setToolTip(f"{row.name}, week of {long_date(weeks[i], today)}: {c.hours:.1f} h")
                 t.setItem(r, i + 1, item)
         t.resizeRowsToContents()
@@ -1254,11 +1398,22 @@ class BrowseWindow(QWidget):
     # ================= the detail pane =================
     def _clear_actions(self) -> None:
         _empty(self.actions_layout)
+        self.keytips.clear("actions")
 
     def _action(self, label: str, clicked: Callable[[], None] | None = None, tip: str = "", enabled: bool = True,
-                menu: QMenu | None = None, primary: bool = False) -> QPushButton:
-        b = QPushButton(label, objectName="primary" if primary else "")
-        b.setToolTip(tip)
+                menu: QMenu | None = None, primary: bool = False, icon_name: str | None = None, key: str = "") -> QPushButton:
+        """A command on the detail pane's bar. In the new look it's a subtle button with an icon and its key in the tooltip
+        (and under Alt); in the Classic look the key is in its label."""
+        if LOOK.classic and key:
+            label = f"{label}   {key}"
+        b = QPushButton(label, objectName="primary" if primary else "" if LOOK.classic else "subtle")
+        b.setToolTip(f"{tip} ({key})" if key and tip and not LOOK.classic else tip)
+        if icon_name and not LOOK.classic:
+            b.setIcon(icon(icon_name))
+        if menu is not None and not LOOK.classic:
+            b.setProperty("menu", True)
+        if key and not LOOK.classic:
+            self.keytips.add(b, key, group="actions")
         b.setEnabled(enabled)
         if menu is not None:
             b.setMenu(menu)
@@ -1281,7 +1436,11 @@ class BrowseWindow(QWidget):
         if not s or not self._exists(s):
             self.actions.hide()
             self.page.setHtml('<p class="note">Pick a task, capture or document to see it here.</p>')
+            if not LOOK.classic and self.view not in ("capacity", "settings", "timeline"):
+                self.detail.hide()  # the list takes the room until something is picked
             return
+        if not LOOK.classic and self.view not in ("capacity", "settings", "timeline"):
+            self.detail.show()
         self.actions.show()
         pages = self.pages()
         kind, item = s
@@ -1331,16 +1490,20 @@ class BrowseWindow(QWidget):
                          primary=True)
             self._action("Open folder", lambda: self.reveal(self.ctx.data_root / "Tasks" / task_id), f"Open Tasks\\{task_id} in File Explorer")
             return
-        self._action("Add note   N", lambda: self.open_capture(task=task_id, mode="note"), "Add a note to this task's raw text log")
-        self._action("Update   U", lambda: self.open_capture(task=task_id, mode="update"), "Update this task: its state, status, dates and more")
-        self._action("New task   T", lambda: self.open_capture(task=task_id, mode="new_task"), "A new task under this one")
+        self._action("Add note" if LOOK.classic else "Note", lambda: self.open_capture(task=task_id, mode="note"),
+                     "Add a note to this task's raw text log", icon_name="note", key="N")
+        self._action("Update", lambda: self.open_capture(task=task_id, mode="update"), "Update this task: its state, status, dates and more",
+                     icon_name="update", key="U")
+        self._action("New task", lambda: self.open_capture(task=task_id, mode="new_task"), "A new task under this one", icon_name="add", key="T")
         if any(a.subject == task_id for a in m.today_items()):
-            self._action("On Today ✓", lambda: self.show_agenda(TODAY), "It's on Today. Open the Today view.")
+            self._action("On Today ✓", lambda: self.show_agenda(TODAY), "It's on Today. Open the Today view.", icon_name="sun")
         else:
-            self._action("Add to Today   D", lambda: self.add_to_today(task_id), "Put it on your list for today")
+            self._action("Add to Today" if LOOK.classic else "Today", lambda: self.add_to_today(task_id), "Put it on your list for today",
+                         icon_name="sun", key="D")
         if t.meeting and is_open(t):  # release 5.8
-            self._action("Meeting notes   M", lambda: self.open_capture(task=task_id, meeting=True), "Take this meeting's notes, with its agenda beside them")
-        if self.pages().has_agenda(t):
+            self._action("Meeting notes", lambda: self.open_capture(task=task_id, meeting=True),
+                         "Take this meeting's notes, with its agenda beside them", icon_name="people", key="M")
+        if self.pages().has_agenda(t) and LOOK.classic:
             self._action("Open agenda", lambda: self.show_agenda(task_id))
         agenda = QMenu(self)
         agenda.addAction("Today   ·   your list for today, straight away (D)", lambda: self.add_to_today(task_id))
@@ -1351,9 +1514,9 @@ class BrowseWindow(QWidget):
             act.triggered.connect(lambda _=False, x=meeting.id: self.open_capture(task=task_id, mode="update", agenda=[x]))
         other = agenda.addAction("Someone else or another task…")
         other.triggered.connect(lambda: self.open_capture(task=task_id, mode="update", agenda_focus=True))
-        self._action("Add to agenda   A", tip="Put this task on an agenda", menu=agenda)
+        self._action("Add to agenda" if LOOK.classic else "Agenda", tip="Put this task on an agenda", menu=agenda, icon_name="agenda", key="A")
         edit = QMenu(self)
-        edit.addAction("Edit task…   E", lambda: self.edit_task(task_id))
+        edit.addAction("Edit task…   E" if LOOK.classic else "Edit task…\tE", lambda: self.edit_task(task_id))
         edit.addSeparator()
         parents = m.parents_of(task_id)
         for p in parents:
@@ -1368,7 +1531,7 @@ class BrowseWindow(QWidget):
             edit.addAction("Make it a top-level task", lambda: self.move_task(task_id, parents[0], None))
         edit.addSeparator()
         edit.addAction("Discard…", lambda: self.discard_task(task_id))
-        self._action("Edit", tip="Edit any of its fields, move it in the tree, or discard it if it was made by mistake", menu=edit)
+        self._action("Edit", tip="Edit any of its fields, move it in the tree, or discard it if it was made by mistake", menu=edit, icon_name="edit")
         # Copy (release 5.9): its people's email addresses, for Outlook's To box (M0031), and each reference field (M0034).
         t = m.task(task_id)
         copy = QMenu(self)
@@ -1377,7 +1540,7 @@ class BrowseWindow(QWidget):
             copy.addAction("Emails of its lead and assignees", lambda: self.copy_emails(people_ids))
         for name, value in t.references.items():
             copy.addAction(f"{name} {value}", lambda n=name: self.copy_reference(task_id, n))
-        if copy.actions():
+        if copy.actions() and LOOK.classic:
             self._action("Copy", tip="Copy its people's email addresses or a reference field", menu=copy)
         self.summary_type = QComboBox()
         self.summary_type.setAccessibleName("Summary type")
@@ -1385,10 +1548,25 @@ class BrowseWindow(QWidget):
         self.summary_type.setMinimumContentsLength(22)
         self._summary_types = prompts.load_summary_types(self.ctx.data_root)
         self.summary_type.addItems([st.name for st in self._summary_types])
-        self.actions_layout.addWidget(self.summary_type)
-        self.summary_type.show()
-        self._action("Copy prompt", lambda: self.copy_prompt(task_id), "Copy a prompt for an LLM, with this task's records")
-        self._action("Open folder", lambda: self.reveal(self.ctx.data_root / "Tasks" / task_id), f"Open Tasks\\{task_id} in File Explorer")
+        if LOOK.classic:
+            self.actions_layout.addWidget(self.summary_type)
+            self.summary_type.show()
+            self._action("Copy prompt", lambda: self.copy_prompt(task_id), "Copy a prompt for an LLM, with this task's records")
+            self._action("Open folder", lambda: self.reveal(self.ctx.data_root / "Tasks" / task_id), f"Open Tasks\\{task_id} in File Explorer")
+            return
+        # The new look's More: the agenda, Copy, Copy prompt for each summary type, and the folder.
+        more = QMenu(self)
+        if self.pages().has_agenda(t):
+            more.addAction(icon("agenda"), "Open agenda", lambda: self.show_agenda(task_id))
+        if copy.actions():
+            copy.setTitle("Copy")
+            copy.setIcon(icon("copy"))
+            more.addMenu(copy)
+        prompt = more.addMenu(icon("copy"), "Copy prompt")
+        for i, st in enumerate(self._summary_types):
+            prompt.addAction(st.name, lambda n=i: (self.summary_type.setCurrentIndex(n), self.copy_prompt(task_id)))
+        more.addAction(icon("folder"), "Open folder", lambda: self.reveal(self.ctx.data_root / "Tasks" / task_id))
+        self._action("More", tip="Open agenda, Copy, Copy prompt and Open folder", menu=more, icon_name="more")
 
     def _capture_actions(self, capture_id: str) -> None:
         m = self.model()

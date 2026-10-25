@@ -135,6 +135,10 @@ class Settings:
     #: Reference fields every task has (mods log round 2, M0034, release 5.9), such as a change record's number. Named
     #: here, never in the code, so DocRepo names no company system.
     reference_fields: list[str] = field(default_factory=list)
+    #: The visual overhaul (releases 5.10 to 5.16): "new", or "classic" for release 5.9's look (decision 15); and Show
+    #: hints, which brings back the help text, ⓘ buttons and key badges (decision 7). Both take effect when DocRepo starts.
+    look: str = "new"
+    show_hints: bool = False
 
     @classmethod
     def load(cls, data_root: Path) -> Settings:

@@ -280,7 +280,7 @@ def test_task_edits(browse, monkeypatch):
 
     browse.go_task("T000012")
     edit_menu = next(b for b in browse.actions.findChildren(QPushButton) if b.text() == "Edit").menu()
-    assert edit_menu.actions()[0].text() == "Edit task…   E"
+    assert edit_menu.actions()[0].text() == "Edit task…	E"  # its key in the menu's key column (the visual overhaul's O2)
     dialog = TaskEditDialog(browse, browse.model(), "T000012", browse._label_options, browse._people_options)
     assert (dialog.title.text(), dialog.state.currentText(), dialog.assignees.values(), dialog.start.value()) == (
         "Rigging plan", "In progress", ["P004"], "2026-10-05")
@@ -692,7 +692,7 @@ def test_one_letter_per_topic(browse, monkeypatch):
 
     keys = {s.key().toString(): s for s in browse.findChildren(QShortcut)}
     assert {"N", "T", "U", "A", "D", "E", "Ctrl+F", "Ctrl+Shift+F", "F1"} <= set(keys) and "G" not in keys
-    assert browse.tb_new.text() == "New task   T"
+    assert browse.tb_new.text() == "New task" and browse.tb_new.isHidden()  # on the command bar, its key in the tooltip
     opened = []
     monkeypatch.setattr(browse, "open_capture", lambda **options: opened.append(options))
     browse.go_task("T000012")
@@ -708,7 +708,7 @@ def test_one_letter_per_topic(browse, monkeypatch):
     keys["E"].activated.emit()
     assert shown == ["Keys", "Edit task T000012"]
     labels = [b.text() for b in browse.actions.findChildren(QPushButton)]
-    assert {"Add note   N", "New task   T", "Add to agenda   A"} <= set(labels)
+    assert {"Note", "New task", "Agenda"} <= set(labels)
 
 
 def test_find_in_this_view(browse):

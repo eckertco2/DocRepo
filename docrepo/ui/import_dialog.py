@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
 
 from docrepo import excel_import as xi
 from docrepo.db import STATES
-from docrepo.detail import CSS
+from docrepo.ui.style import page_css
 from docrepo.model import Model
 from docrepo.ui.context import AppContext
 
@@ -69,7 +69,7 @@ class ImportDialog(QDialog):
         lay = QVBoxLayout(self)
         intro = QLabel("A one-time import of your project list: each row becomes a top-level task, imported from the Excel tracker. "
                        "The workbook is only read, never changed. Check what each column fills, then Import.", objectName="hint")
-        intro.setWordWrap(True)
+        intro.setWordWrap(True)  # kept in view: it says what the import does before you do it
         lay.addWidget(intro)
         self.last = QLabel(objectName="hint")
         self.last.setWordWrap(True)
@@ -122,7 +122,7 @@ class ImportDialog(QDialog):
         lay.addWidget(self.states)
         lay.addWidget(QLabel("<b>Preview</b>"))
         self.preview = QTextBrowser()
-        self.preview.document().setDefaultStyleSheet(CSS)
+        self.preview.document().setDefaultStyleSheet(page_css())
         lay.addWidget(self.preview, 3)
         self.error = QLabel(objectName="error")
         self.error.setWordWrap(True)

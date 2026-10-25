@@ -554,7 +554,9 @@ Settings.
     "outage",
     "walkthrough"
   ],
-  "reference_fields": []
+  "reference_fields": [],
+  "look": "new",
+  "show_hints": false
 }
 ```
 

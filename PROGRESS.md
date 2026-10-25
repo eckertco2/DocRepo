@@ -21,12 +21,19 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.7 | Formatted content text from the mods log, round 2: bold, italic, underline, strikethrough, highlights and lists in the content text, kept as Markdown in capture.md | Built 2026-10-23; on GitHub 2026-10-23, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
 | 5.8 | Items and meeting notes from the mods log, round 2: @, # and ** make tasks, notes, updates and decisions in any capture, and Meeting notes takes a meeting's notes with its agenda | Built 2026-10-23, after the owner approved the mockup; on GitHub 2026-10-23, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
 | 5.9 | People, labels and task fields from the mods log, round 2: email, group and role for people, reference fields named in Settings, nested labels, and plant events | Built 2026-10-23, with decisions 19 to 22 as the owner took them; on GitHub 2026-10-23, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
+| 5.10 | The visual overhaul, O1: design tokens, Fusion, the type ramp, the new inputs and buttons, the Fluent-style icons and the Classic look | Built 2026-10-24, with the others of the overhaul; on GitHub 2026-10-25, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
+| 5.11 | The visual overhaul, O2: Show hints, keys in tooltips, and the Alt and Ctrl key tips | Built 2026-10-24, with the others of the overhaul; on GitHub 2026-10-25, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
+| 5.12 | The visual overhaul, O3: the capture window's new layout | Built 2026-10-24, with the others of the overhaul; on GitHub 2026-10-25, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
+| 5.13 | The visual overhaul, O4: Edit task, Edit selected and the person and label forms, and the date field | Built 2026-10-24, with the others of the overhaul; on GitHub 2026-10-25, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
+| 5.14 | The visual overhaul, O5: the browse window's top bar, sidebar, command bar, empty detail pane, capacity colours and timeline legend | Built 2026-10-24, with the others of the overhaul; on GitHub 2026-10-25, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
+| 5.15 | The visual overhaul, O6: Settings as cards, with Look and Show hints | Built 2026-10-24, with the others of the overhaul; on GitHub 2026-10-25, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
+| 5.16 | The visual overhaul, O7: the command palette (Ctrl+K) | Built 2026-10-24, with the others of the overhaul; on GitHub 2026-10-25, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
 ## Decisions
 
 - Python 3.12.6, the same version as on the corporate computer.
-- Packages: the seven approved in the first version's Phase 0, at the same versions, pinned in `requirements.txt` with their dependencies. extract-msg isn't used; `.msg` files are read through Outlook.
+- Packages: the seven approved in the first version's Phase 0, at the same versions, pinned in `requirements.txt` with their dependencies. extract-msg isn't used; `.msg` files are read through Outlook. RapidFuzz (MIT, no dependencies) joined with release 5.16, the owner having approved reputable packages for the overhaul, to be checked by the corporate JFrog scan; without it, the command palette uses the standard library.
 - Default hotkey: Ctrl+Shift+Space.
 - No paths in the code. The data root's location is kept in `%LOCALAPPDATA%\DocRepo\location.json`; everything else is in `<data root>\Config\settings.json` and is edited in the browse tool's Settings view.
 - Publish to GitHub after phase 1, to test the route to the corporate computer early.
@@ -342,6 +349,33 @@ Stage 7 of the round 2 plan (items 28 to 31: M0031, M0033, M0038, M0034, M0051, 
 - A reference field's value is any text; Parse and populate reads only a number after its name. Search finds a value, or the name and value.
 - DocRepo never sends email: it keeps addresses and copies them, joined by "; " for Outlook's To box.
 - A plant event's band and the line under the dates use the same windows as the capacity calendar, so a routine plant event counts each time it comes round.
+
+## Releases 5.10 to 5.16: the visual overhaul (2026-10-24)
+
+The overhaul's stages O1 to O7, built together at the owner's request, from the plan, decisions 1 to 18 and the assessment of release 5.9's windows in the parent workspace (`docs/ui-design/`). O3 (the capture window) was mocked and approved; O4 and O5 were built from the assessment without mocks of their own.
+
+- **O1, 5.10:** `docrepo/ui/tokens.py`: every colour (light now, dark reserved), the type ramp, sizes and spacing, and from them the palette, the style sheet (`qss`) and the pages' HTML styles (`CSS`). `docrepo/ui/style.py`: `apply_look` (Fusion, the palette, the font, and the style sheet once on the application), `style_sheet` and `page_css`, and the Classic look (release 5.9's `CLASSIC_STYLE`). `docrepo/ui/icons/` and `docrepo/ui/icons.py`: the icons. `docrepo/config.py`: `look` and `show_hints`. `docrepo/ui/tree_view.py`: the top-level task's colour as an edge on its own row, the accent edge on the selected row, 28 px rows and a 16 px indent.
+- **O2, 5.11:** `docrepo/ui/look.py`: `LOOK`, `Help` and `KeyBadge` (shown only with Show hints, or in the Classic look), `set_hints`, `tip`, `with_key` and `KeyTips`, with one application-wide watcher for every window. The **i** buttons (`InfoButton`) are gated the same way, and field labels' own hints too. Help text in the capture window, the forms, the items and agenda panels, the browse tool's view notes, Capacity and the Timeline became `Help`.
+- **O3, 5.12:** `docrepo/ui/capture_window.py`: the new `_build` and `_build_footer` (row 1 of capture types as toggles, Today, Agenda and three icon buttons; the task picker with State beside it; the outlined editor; Parse, Attach and the Understood line; the items' column only when there's something in it; the footer with More and Save), Clear with Undo (`_draft_data`, `_apply_draft`, `_undo_clear`), the window fitting its content (`_fit`), sentence-case group headings, and item cards striped by their top-level task (`docrepo/ui/items_panel.py`: `task_colour`). `docrepo/ui/rich_edit.py`: the format bar's icons and tooltips.
+- **O4, 5.13:** `docrepo/ui/widgets.py`: `DateField` (words when you're not in it, the calendar button inside, 176 px; `parse_day`), `section`, `dialog_buttons` and `fit_dialog`. `docrepo/ui/task_forms.py`: Edit task in sections, Edit selected and the label's matching tasks on the same rules. `docrepo/ui/dialogs.py`: the person and label forms with labels above their fields.
+- **O5, 5.14:** `docrepo/ui/browse_window.py`: the top bar, the sidebar's folding groups (`_render_nav_new`, `_nav_clicked`, `browse_nav_folded`), the command bar (`_action` with icons and keys; More), the detail pane hidden while nothing is picked, Capacity's colours on one line, and Show hints from More. `docrepo/ui/timeline_view.py`: the legend under the controls.
+- **O6, 5.15:** `docrepo/ui/settings_view.py`: the settings cards (`_card`, `_row`), with Look and Show hints.
+- **O7, 5.16:** `docrepo/ui/palette.py`: `Command`, `rank` (RapidFuzz, else difflib) and `CommandPalette`; `palette_commands` and `open_palette` in both windows, on Ctrl+K and in More. `docrepo/ui/keymap.py`: Ctrl+K and the held Alt and Ctrl keys.
+- **The mockup and its exports:** `settings.json`'s example gains `look` and `show_hints`; the browse tool mockup's capture window shows the overhaul beside release 5.9's.
+- `tests/`: `test_look.py` (the tokens' contrast, the style sheet, Show hints, the date field, the palette, key tips, and the new look's capture window, browse tool and Settings); the capture, meeting, browse and config tests follow the new labels (762 pass in all, 1 skipped).
+
+## Decisions (releases 5.10 to 5.16)
+
+- The owner's decisions 1 to 18 (`docs/ui-design/decisions.md` in the parent workspace), with three changes on the way:
+  - **Icons:** drawn for DocRepo in the style of Fluent UI System Icons, as in the approved mock, rather than downloaded. The official set (MIT) can replace them by giving its files the same names.
+  - **The Classic look** restores release 5.9's colours, fonts, hints and key badges, on the new layouts: keeping both layouts would double every window's code, and every view is converted at once.
+  - **The command palette** uses RapidFuzz, with the owner's approval of reputable packages for the overhaul, and falls back to the standard library.
+- The style sheet is set once on the application: per-window sheets made each window and dialog parse it again.
+- The key tips need no key of their own: one watcher on the application hands Alt and Ctrl to the window that has the keyboard, and lets every other event through.
+- The capture window fits its content from 380 px to 88% of the screen, keeping its top where it is; Edit task fits up to 85% and scrolls only on a short screen.
+- Help that guards against a mistake stays in view: the mods log's note to leave out names and work details, and the import's note that the workbook is only read.
+- Without RapidFuzz, the palette matches a word whose letters come in order ("edt" finds Edit), so the tests pass either way.
+- Left for later: the formatting buttons only on hover, filter chips and Display options in each view's header, row actions on hover, a marker tooltip for auto-filled fields, Capacity's 80% and 100% as settings, and grey for a person who is away (DocRepo doesn't record time away yet).
 
 ## The first Frogbot findings (2026-10-20)
 

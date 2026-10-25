@@ -440,20 +440,22 @@ def test_editing_a_mods_log_entry_from_the_panel(window, ctx):
     assert window.mods.editing is None and window.mods.save_button.text() == "Save" and ctx.messages[-1][1] == r"M0001 is updated in Mods\mods-log.md."
 
 
-def test_the_found_list_sits_beside_the_content_text(window):
-    """Mods log round 2 (M0042): what Parse and populate found is beside the content text, under it when narrow."""
+def test_what_parse_and_populate_understood_sits_under_the_content_text(window):
+    """The visual overhaul's O3: what Parse and populate found is one line under the content text, shown once it has run;
+    the items' column beside the text goes under it when the window is narrow (mods log round 2, M0042)."""
     from PySide6.QtWidgets import QBoxLayout
 
     window.resize(940, 700)
     assert window.main_layout.direction() == QBoxLayout.Direction.LeftToRight
-    assert window.found_box.isVisibleTo(window) and "Alt+P reads the content text" in window.found_label.text()
+    assert not window.found_box.isVisibleTo(window) and window.found_label.text() == ""  # nothing until it runs (decision 7)
     window.set_task("T000008")
     window.set_type("update", True)
     window.content.setPlainText("Closed. The coupling is in.")
     window.parse()
-    assert "Current status" in window.found_label.text() and window.clear_found.isVisibleTo(window)
+    assert window.found_box.isVisibleTo(window) and window.clear_found.isVisibleTo(window)
+    assert "Understood" in window.found_label.text() and "Current status" in window.found_label.text()
     window.clear_found.click()
-    assert "Alt+P reads the content text" in window.found_label.text()
+    assert not window.found_box.isVisibleTo(window)
     window._arrange(600)
     assert window.main_layout.direction() == QBoxLayout.Direction.TopToBottom
     window._arrange(940)
@@ -481,8 +483,8 @@ def test_expand_folds_the_rest_away(window, ctx):
     window._show_summary(True)
     window.summary.setPlainText("A short summary.")
     window.toggle_expand()
-    assert window.expanded and not window.lower.isVisibleTo(window) and window.folded.isVisibleTo(window)
-    assert "Copy prompt and the summary" in window.folded.text() and window.expand_button.text().startswith("Back")
+    assert window.expanded and not window.lower.isVisibleTo(window) and not window.folded.isVisibleTo(window)  # help: Show hints only
+    assert "Copy prompt and the summary" in window.folded.text() and window.expand_button.toolTip().startswith("Back")
     assert window.draft().summary == "A short summary."  # folded away, not lost
     window.toggle_expand()
     assert not window.expanded and window.lower.isVisibleTo(window) and not window.folded.isVisibleTo(window)

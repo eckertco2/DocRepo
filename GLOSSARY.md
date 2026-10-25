@@ -100,6 +100,10 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Build phase**: a numbered step in building DocRepo, phases 1 to 6 in `PROGRESS.md`.
 - **Mods log**: DocRepo's own list of changes the owner wants made to it.
 - **IDs**: T task, C capture, D document, P person, M mod.
+- **Look**: how DocRepo's windows are drawn: the new look (from release 5.10), or the **Classic look**, release 5.9's colours, fonts and hints on the same layouts. Chosen in Settings.
+- **Show hints**: the setting that shows the help text, the **i** buttons and the key badges in every window. Off by default.
+- **Key tips**: the labels that show each control's key while Alt (letter keys) or Ctrl (Ctrl shortcuts) is held.
+- **Command palette**: the box Ctrl+K opens, listing every action and view, narrowed as you type.
 
 ## 7. Retired words
 

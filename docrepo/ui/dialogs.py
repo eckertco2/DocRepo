@@ -6,7 +6,6 @@ from collections.abc import Callable
 
 from PySide6.QtWidgets import (
     QComboBox,
-    QDialogButtonBox,
     QFormLayout,
     QLabel,
     QLineEdit,
@@ -14,8 +13,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo.ui.style import STYLE
-from docrepo.ui.widgets import FormDialog
+from docrepo.ui.look import LOOK, Help
+from docrepo.ui.style import style_sheet
+from docrepo.ui.widgets import FormDialog, dialog_buttons
 
 
 def split_list(text: str) -> list[str]:
@@ -28,26 +28,25 @@ class _Form(FormDialog):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setObjectName("capture")
-        self.setStyleSheet(STYLE)
-        self.setMinimumWidth(440)
+        self.setStyleSheet(style_sheet())
+        self.setMinimumWidth(480)
         self.layout_ = QVBoxLayout(self)
+        self.layout_.setContentsMargins(24, 20, 24, 20)
+        self.layout_.setSpacing(16)
         if note:
-            hint = QLabel(note, objectName="hint")
-            hint.setWordWrap(True)
-            self.layout_.addWidget(hint)
+            self.layout_.addWidget(Help(note))
+        # Labels above their fields, 8 px apart, 16 px between fields (the visual overhaul's O4); beside them in the Classic look.
         self.form = QFormLayout()
+        if not LOOK.classic:
+            self.form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
+            self.form.setVerticalSpacing(16)
         self.layout_.addLayout(self.form)
         self.error = QLabel(objectName="error")
         self.error.setWordWrap(True)
         self.error.hide()
         self.layout_.addWidget(self.error)
-        keys = QLabel(self.KEYS_HINT, objectName="hint")
-        keys.setWordWrap(True)
-        self.layout_.addWidget(keys)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
-        buttons.accepted.connect(self._accept)
-        buttons.rejected.connect(self.reject)
-        self.layout_.addWidget(buttons)
+        self.layout_.addWidget(Help(self.KEYS_HINT))
+        self.layout_.addLayout(dialog_buttons(self, "Save", self._accept, self.reject))
         self.check: Callable[[], str | None] = lambda: None
 
     def save(self) -> None:

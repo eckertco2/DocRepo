@@ -13,11 +13,11 @@ from collections.abc import Callable, Sequence
 from datetime import date
 from typing import Any
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
-    QDialogButtonBox,
+    QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -33,14 +33,28 @@ from PySide6.QtWidgets import (
 from docrepo import quick, timeline
 from docrepo.bulk import BulkEdit, LabelMatch, TaskOutcome, summary
 from docrepo.db import RECURRENCES, STATES
-from docrepo.detail import CSS, esc
+from docrepo.detail import esc
 from docrepo.model import Model
 from docrepo.parse import Who
 from docrepo.schedule import start_of
-from docrepo.ui.style import STYLE
+from docrepo.ui.look import Help
+from docrepo.ui.style import page_css, style_sheet
 from docrepo.ui.task_picker import full_path, path_text
 from docrepo.ui.tree_view import RowTree
-from docrepo.ui.widgets import Chip, ChipPicker, DateField, FlowLayout, FormDialog, HoursField, InfoButton, Option, field
+from docrepo.ui.widgets import (
+    Chip,
+    ChipPicker,
+    DateField,
+    FlowLayout,
+    FormDialog,
+    HoursField,
+    InfoButton,
+    Option,
+    dialog_buttons,
+    field,
+    fit_dialog,
+    section,
+)
 
 Options = Callable[[str, list[str]], list[Option]]
 #: Opens the task picker under a widget; the callback gets the picked task's ID, or None.
@@ -70,35 +84,119 @@ class TaskEditDialog(FormDialog):
         self.parents: list[str] = list(m.parents_of(task_id))
         self.setWindowTitle(f"Edit task {task_id}")
         self.setObjectName("capture")
-        self.setStyleSheet(STYLE)
-        self.resize(640, 760)
+        self.setStyleSheet(style_sheet())
+        # The visual overhaul's O4: one column of 560 px in sections, labels above fields, 8, 16 and 32 px apart, each field
+        # as wide as what goes in it, the rarer fields under More options, and no scrolling unless the screen is small.
         outer = QVBoxLayout(self)
-        hint = QLabel("Each change goes into the task's status log as Browse tool. For a change that comes with a note, use Update "
-                      "in the capture window instead.", objectName="hint")
-        hint.setWordWrap(True)
-        outer.addWidget(hint)
+        outer.setContentsMargins(24, 20, 24, 20)
+        outer.setSpacing(12)
+        outer.addWidget(Help("Each change goes into the task's status log as Browse tool. For a change that comes with a note, use Update "
+                             "in the capture window instead."))
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         body = QWidget(objectName="capture")
         g = QVBoxLayout(body)
+        g.setContentsMargins(0, 0, 8, 0)
+        g.setSpacing(16)
         scroll.setWidget(body)
         outer.addWidget(scroll, 1)
+        self._scroll = scroll
 
+        # ---- the task itself ----
         self.title = QLineEdit(t.title)
         g.addWidget(field("Title", self.title, "title"))
-        self.description = QPlainTextEdit(t.description)
-        self.description.setFixedHeight(96)
-        g.addWidget(field("Description", self.description))
         self.state = QComboBox()
         self.state.addItems(list(STATES))
         self.state.setCurrentText(t.state)
-        g.addWidget(field("State", self.state, "state"))
+        self.state.setFixedWidth(200)
+        self.urgent, self.meeting, self.plant_event = QCheckBox("Urgent"), QCheckBox("Meeting"), QCheckBox("Plant event")
+        self.urgent.setChecked(t.urgent)
+        self.meeting.setChecked(t.meeting)
+        self.plant_event.setChecked(t.plant_event)
+        row = QHBoxLayout()
+        row.setSpacing(16)
+        row.addWidget(field("State", self.state, "state"))
+        flags = QHBoxLayout()
+        flags.setSpacing(16)
+        notes = []
+        for box, key in ((self.urgent, "urgent"), (self.meeting, "meeting")):
+            flags.addWidget(box)
+            note = QLabel()
+            flags.addWidget(InfoButton(key, note))
+            notes.append(note)
+        row.addLayout(flags)
+        row.addStretch()
+        row.setAlignment(flags, Qt.AlignmentFlag.AlignBottom)
+        g.addLayout(row)
+        for note in notes:
+            g.addWidget(note)
         self.status = QPlainTextEdit(t.current_status)
-        self.status.setFixedHeight(56)
+        self.status.setFixedHeight(64)
         g.addWidget(field("Current status", self.status, "status"))
-        # Parents: a quick task is filed here, out of Quick tasks (mods log round 2, M0040).
+        self.description = QPlainTextEdit(t.description)
+        self.description.setFixedHeight(96)
+        g.addWidget(field("Description", self.description))
+
+        # ---- people ----
+        section(g, "People")
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(16)
+        grid.setVerticalSpacing(16)
+        self.leads = ChipPicker(people, "Search names and aliases", "Add “{}” to people")
+        self.leads.set_chips(people_chips(m, t.leads))
+        self.assignees = ChipPicker(people, "Search names and aliases", "Add “{}” to people")
+        self.assignees.set_chips(people_chips(m, t.assignees))
+        self.lead_hours, self.asg_hours = HoursField(), HoursField()
+        self.lead_hours.set_value(t.lead_hours)
+        self.asg_hours.set_value(t.assignee_hours)
+        for w in (self.lead_hours, self.asg_hours):
+            w.setFixedWidth(96)
+        grid.addWidget(field("Lead", self.leads, "leads"), 0, 0)
+        grid.addWidget(field("Assignees", self.assignees, "assignees"), 0, 1)
+        grid.addWidget(field("Lead hours", self.lead_hours, "hours"), 1, 0)
+        grid.addWidget(field("Assignee hours", self.asg_hours), 1, 1)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
+        g.addLayout(grid)
+
+        # ---- dates ----
+        section(g, "Dates")
+        self.start, self.due, self.deadline, self.reminder, self.repeat = DateField(), DateField(), DateField(), DateField(), DateField()
+        for w, value in ((self.start, start_of(t).isoformat()), (self.due, t.due), (self.deadline, t.deadline), (self.reminder, t.reminder),
+                         (self.repeat, t.repeat_until)):
+            w.set_value(value)
+        self.deadline_desc = QLineEdit(t.deadline_desc or "")
+        self.recurrence = QComboBox()
+        self.recurrence.addItems(["No recurrence", *RECURRENCES])
+        self.recurrence.setCurrentText(t.recurrence or "No recurrence")
+        self.recurrence.setFixedWidth(200)
+        self.recurrence.currentIndexChanged.connect(self._sync)
+        self.repeat_field = field("Repeat until", self.repeat, "repeatUntil")
+        dates = QGridLayout()
+        dates.setHorizontalSpacing(16)
+        dates.setVerticalSpacing(16)
+        for w, r, c in ((field("Start", self.start, "start"), 0, 0), (field("Due", self.due, "due"), 0, 1),
+                        (field("Deadline", self.deadline, "deadline"), 1, 0), (field("Deadline description", self.deadline_desc, "deadlineDesc"), 1, 1),
+                        (field("Reminder", self.reminder, "reminder"), 2, 0), (field("Recurrence", self.recurrence, "recurrence"), 2, 1),
+                        (self.repeat_field, 3, 1)):
+            dates.addWidget(w, r, c)
+        dates.setColumnStretch(0, 1)
+        dates.setColumnStretch(1, 1)
+        g.addLayout(dates)
+        # A date inside a plant event says so (release 5.9, mods log round 2, M0028).
+        self.during = QLabel(objectName="hint")
+        self.during.setWordWrap(True)
+        g.addWidget(self.during)
+        for w in (self.start, self.due, self.deadline):
+            w.edited.connect(self._show_during)
+        self._show_during()
+
+        # ---- where it sits: parents (mods log round 2, M0040) and labels ----
+        section(g, "Where it sits")
         self.parents_box = QWidget()
-        self.parents_layout = FlowLayout(self.parents_box, spacing=6)
+        self.parents_layout = FlowLayout(self.parents_box, spacing=8)
         self.parents_hint = QLabel(objectName="hint")
         self.parents_hint.setWordWrap(True)
         box = QWidget()
@@ -108,7 +206,6 @@ class TaskEditDialog(FormDialog):
         bl.addWidget(self.parents_hint)
         g.addWidget(field("Parents", box, sub="none makes it a top-level task"))
         self._draw_parents()
-
         self.labels = ChipPicker(labels, "Search or add", "Create label “{}”")
         self.labels.set_chips([Chip(name, name) for name in t.labels])
         g.addWidget(field("Labels", self.labels, "labels"))
@@ -122,77 +219,51 @@ class TaskEditDialog(FormDialog):
         row.addStretch()
         g.addLayout(row)
 
-        grid = QGridLayout()
-        self.leads = ChipPicker(people, "Search names and aliases", "Add “{}” to people")
-        self.leads.set_chips(people_chips(m, t.leads))
-        self.assignees = ChipPicker(people, "Search names and aliases", "Add “{}” to people")
-        self.assignees.set_chips(people_chips(m, t.assignees))
-        self.lead_hours, self.asg_hours = HoursField(), HoursField()
-        self.lead_hours.set_value(t.lead_hours)
-        self.asg_hours.set_value(t.assignee_hours)
-        self.start, self.due, self.deadline, self.reminder, self.repeat = DateField(), DateField(), DateField(), DateField(), DateField()
-        for w, value in ((self.start, start_of(t).isoformat()), (self.due, t.due), (self.deadline, t.deadline), (self.reminder, t.reminder),
-                         (self.repeat, t.repeat_until)):
-            w.set_value(value)
-        self.deadline_desc = QLineEdit(t.deadline_desc or "")
-        self.recurrence = QComboBox()
-        self.recurrence.addItems(["No recurrence", *RECURRENCES])
-        self.recurrence.setCurrentText(t.recurrence or "No recurrence")
-        self.recurrence.currentIndexChanged.connect(self._sync)
-        self.repeat_field = field("Repeat until", self.repeat, "repeatUntil")
-        cells = [(field("Lead", self.leads, "leads"), 0, 0), (field("Assignees", self.assignees, "assignees"), 0, 1),
-                 (field("Lead hours", self.lead_hours, "hours"), 1, 0), (field("Assignee hours", self.asg_hours), 1, 1),
-                 (field("Start", self.start, "start"), 2, 0), (field("Due", self.due, "due"), 2, 1),
-                 (field("Deadline", self.deadline, "deadline"), 3, 0), (field("Deadline description", self.deadline_desc, "deadlineDesc"), 3, 1),
-                 (field("Reminder", self.reminder, "reminder"), 4, 0), (field("Recurrence", self.recurrence, "recurrence"), 4, 1),
-                 (self.repeat_field, 5, 1)]
-        for w, r, c in cells:
-            grid.addWidget(w, r, c)
-        g.addLayout(grid)
-        # A date inside a plant event says so (release 5.9, mods log round 2, M0028).
-        self.during = QLabel(objectName="hint")
-        self.during.setWordWrap(True)
-        g.addWidget(self.during)
-        for w in (self.start, self.due, self.deadline):
-            w.edited.connect(self._show_during)
-        self._show_during()
-        flags = QHBoxLayout()
-        self.urgent, self.meeting, self.plant_event = QCheckBox("Urgent"), QCheckBox("Meeting"), QCheckBox("Plant event")
-        self.urgent.setChecked(t.urgent)
-        self.meeting.setChecked(t.meeting)
-        self.plant_event.setChecked(t.plant_event)
-        for box, key in ((self.urgent, "urgent"), (self.meeting, "meeting"), (self.plant_event, "plantEvent")):
-            flags.addWidget(box)
-            note = QLabel()
-            flags.addWidget(InfoButton(key, note))
-            g.addWidget(note)
-        flags.addStretch()
-        g.addLayout(flags)
-        # Reference fields (release 5.9, M0034): a box for each one named in Settings.
+        # ---- More options: the plant event and the reference fields (release 5.9) ----
+        self.more_button = QPushButton("More options ▸", objectName="moreLink")
+        g.addWidget(self.more_button)
+        self.more = QWidget()
+        ml = QVBoxLayout(self.more)
+        ml.setContentsMargins(0, 0, 0, 0)
+        ml.setSpacing(16)
+        plant = QHBoxLayout()
+        plant.addWidget(self.plant_event)
+        plant_note = QLabel()
+        plant.addWidget(InfoButton("plantEvent", plant_note))
+        plant.addStretch()
+        ml.addLayout(plant)
+        ml.addWidget(plant_note)
         self.references: dict[str, QLineEdit] = {}
         if reference_fields:
             refs = QGridLayout()
+            refs.setHorizontalSpacing(16)
+            refs.setVerticalSpacing(16)
             for i, name in enumerate(reference_fields):
                 box = QLineEdit(t.references.get(name, ""))
                 self.references[name] = box
                 refs.addWidget(field(name, box, "references" if i == 0 else None), i // 2, i % 2)
-            g.addLayout(refs)
+            ml.addLayout(refs)
+        g.addWidget(self.more)
+        open_more = t.plant_event or any(t.references.get(n) for n in reference_fields)
+        self.more.setVisible(open_more)
+        self.more_button.setText("More options ▾" if open_more else "More options ▸")
+        self.more_button.clicked.connect(self._toggle_more)
         g.addStretch()
 
         self.error = QLabel(objectName="error")
         self.error.setWordWrap(True)
         self.error.hide()
         outer.addWidget(self.error)
-        footer = QHBoxLayout()
-        footer.addWidget(QLabel(self.KEYS_HINT, objectName="hint"), 1)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
-        buttons.accepted.connect(self._accept)
-        buttons.rejected.connect(self.reject)
-        footer.addWidget(buttons)
-        outer.addLayout(footer)
+        outer.addLayout(dialog_buttons(self, "Save", self._accept, self.reject, Help(self.KEYS_HINT)))
         self._sync()
         self.mark_clean()
         self.title.setFocus()
+        fit_dialog(self, body, 608)
+
+    def _toggle_more(self) -> None:
+        on = self.more.isHidden()
+        self.more.setVisible(on)
+        self.more_button.setText("More options ▾" if on else "More options ▸")
 
     def _sync(self) -> None:
         self.repeat_field.setVisible(self.recurrence.currentIndex() > 0)
@@ -313,22 +384,27 @@ class BulkEditDialog(FormDialog):
         n = len(self.task_ids)
         self.setWindowTitle(f"Edit {n} selected task{'s' if n != 1 else ''}")
         self.setObjectName("capture")
-        self.setStyleSheet(STYLE)
-        self.resize(660, 780)
+        self.setStyleSheet(style_sheet())
+        self.resize(640, 720)
         outer = QVBoxLayout(self)
-        hint = QLabel("Only what you set here changes; everything else stays as it is on each task. Each task gets its own status "
-                      "log entries, as Browse tool. Check the preview, then Apply.", objectName="hint")
-        hint.setWordWrap(True)
-        outer.addWidget(hint)
+        outer.setContentsMargins(24, 20, 24, 20)
+        outer.setSpacing(12)
+        outer.addWidget(Help("Only what you set here changes; everything else stays as it is on each task. Each task gets its own "
+                             "status log entries, as Browse tool. Check the preview, then Apply."))
         form = QWidget(objectName="capture")
         g = QVBoxLayout(form)
         g.setContentsMargins(0, 0, 0, 0)
+        g.setSpacing(16)
 
         own = list(dict.fromkeys(name for x in self.task_ids if x in m.tasks for name in m.task(x).labels))
         self.add_labels = ChipPicker(labels, "Search or add", "Create label “{}”")
         self.remove_labels = ChipPicker(lambda text, picked: [Option(n, n) for n in own if n not in picked and text.strip().lower() in n.lower()],
                                         "Labels the tasks have" if own else "None of them has a label of its own")
         grid = QGridLayout()
+        grid.setHorizontalSpacing(16)
+        grid.setVerticalSpacing(16)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
         grid.addWidget(field("Add labels", self.add_labels, "labels"), 0, 0)
         grid.addWidget(field("Remove labels", self.remove_labels, sub="their own, not inherited ones"), 0, 1)
         self.state = QComboBox()
@@ -386,20 +462,14 @@ class BulkEditDialog(FormDialog):
         self.state.currentIndexChanged.connect(self._changed)
         outer.addWidget(form)
 
-        outer.addWidget(QLabel("Preview", objectName="fieldLabel"))
+        outer.addWidget(QLabel("Preview", objectName="heading"))
         self.preview = QTextBrowser()
         self.preview.setOpenLinks(False)
-        self.preview.document().setDefaultStyleSheet(CSS)
+        self.preview.document().setDefaultStyleSheet(page_css())
         outer.addWidget(self.preview, 1)
-        buttons = QHBoxLayout()
-        buttons.addWidget(QLabel("Ctrl+Enter applies. Esc closes, asking first if you've set something.", objectName="hint"), 1)
-        self.apply_button = QPushButton("Apply", objectName="primary")
-        self.apply_button.clicked.connect(self.accept)
-        cancel = QPushButton("Cancel")
-        cancel.clicked.connect(self.reject)
-        buttons.addWidget(self.apply_button)
-        buttons.addWidget(cancel)
-        outer.addLayout(buttons)
+        outer.addLayout(dialog_buttons(self, "Apply", self.accept, self.reject,
+                                       Help("Ctrl+Enter applies. Esc closes, asking first if you've set something.")))
+        self.apply_button = self.commit_button
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.setInterval(200)
@@ -477,9 +547,11 @@ class LabelMatchDialog(FormDialog):
         self.m, self.label, self._apply = m, label, apply
         self.setWindowTitle(f"Tasks for the label {label}")
         self.setObjectName("capture")
-        self.setStyleSheet(STYLE)
+        self.setStyleSheet(style_sheet())
         self.resize(640, 560)
         lay = QVBoxLayout(self)
+        lay.setContentsMargins(24, 20, 24, 20)
+        lay.setSpacing(12)
         keywords = next((lb.keywords for lb in m.labels if lb.name == label), [])
         note = QLabel(f"Open tasks whose title, description or current status mentions {', '.join(keywords) or label}, and that don't have "
                       f"the label {label} yet. A keyword can catch more than it should, so tick the ones to label. Nothing is labelled until "
@@ -501,7 +573,7 @@ class LabelMatchDialog(FormDialog):
         self.rows.end()
         lay.addWidget(self.rows, 1)
         buttons = QHBoxLayout()
-        buttons.addWidget(QLabel("Ctrl+Enter applies.", objectName="hint"))
+        buttons.addWidget(Help("Ctrl+Enter applies."))
         for text, on in (("Tick all", True), ("Clear", False)):
             b = QPushButton(text)
             b.clicked.connect(lambda _=False, on=on: self.tick_all(on))

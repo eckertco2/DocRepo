@@ -33,6 +33,9 @@ from PySide6.QtWidgets import (
 from docrepo import items
 from docrepo.dates import short
 from docrepo.model import AgendaItem, Model
+from docrepo.ui import tokens
+from docrepo.ui.icons import icon
+from docrepo.ui.look import LOOK, Help
 from docrepo.ui.widgets import DateField
 
 #: Each line's tint, by the part it plays: the item it makes, the new task's own line, or a heading.
@@ -109,29 +112,43 @@ def _facts(it: items.Item, where: str) -> str:
     return " · ".join(x for x in out if x)
 
 
+def task_colour(m: Model, task_id: str | None) -> str:
+    """A task's top-level task's colour: the task tree's group colours, in turn, as the timeline gives them (decision 9)."""
+    if not task_id or task_id not in m.tasks:
+        return tokens.colour("stroke_strong")
+    top = m.chains_of(task_id)[0][0]
+    order = [t.id for t in m.top_level()]
+    return tokens.group_colour(order.index(top)) if top in order else tokens.colour("stroke_strong")
+
+
 class ItemCard(QFrame):
-    """One item: tick, kind, its line, its title, what was read from it, and a task's due date."""
+    """One item: tick, kind, its line, its title, what was read from it, and a task's due date. In the new look its edge is
+    its top-level task's colour, and its kind is an icon and a word (decision 9)."""
 
     changed = Signal(str, str, object)  # key, "off", "title" or "due", value
     go = Signal(int)  # show its line in the content text
 
-    def __init__(self, it: items.Item, where: str) -> None:
+    def __init__(self, it: items.Item, where: str, stripe: str | None = None) -> None:
         super().__init__(objectName="itemCard")
         self.key = it.key
         self.setProperty("kind", it.kind if it.on else "off")  # its left edge's colour (style.py)
+        if stripe and not LOOK.classic:
+            self.setStyleSheet(f"QFrame#itemCard {{ border-left: 3px solid {stripe if it.on else tokens.colour('stroke_strong')}; }}")
         lay = QVBoxLayout(self)
         lay.setContentsMargins(8, 5, 6, 6)
         lay.setSpacing(3)
         top = QHBoxLayout()
         name = "Plant event" if it.plant_event else items.KIND_NAMES[it.kind]
         self.tick = QCheckBox(name + (f": {it.state}" if it.state else ""))
+        if not LOOK.classic:
+            self.tick.setIcon(icon("task" if it.kind == "task" else it.kind if it.kind in ("note", "update", "decision") else "note"))
         self.tick.setChecked(it.on)
         self.tick.setEnabled(not it.problem)
         self.tick.setToolTip("Untick to skip it")
         self.tick.toggled.connect(lambda on: self.changed.emit(self.key, "off", not on))
         top.addWidget(self.tick)
         if it.changed:
-            top.addWidget(QLabel("changed here", objectName="hint"))
+            top.addWidget(QLabel("changed here", objectName="hint"))  # state, not help
         top.addStretch()
         line = QPushButton(f"line {it.line + 1}", objectName="link")
         line.setToolTip("Show its line in the content text")
@@ -180,8 +197,7 @@ class ItemCards(QFrame):
         self.cards_box = QVBoxLayout()
         self.cards_box.setSpacing(6)
         lay.addLayout(self.cards_box)
-        self.hint = QLabel(objectName="hint")
-        self.hint.setWordWrap(True)
+        self.hint = Help()  # what the operators do, and how the cards work: with Show hints (decision 7)
         self.hint.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         lay.addWidget(self.hint)
         self.cards: list[ItemCard] = []
@@ -191,7 +207,8 @@ class ItemCards(QFrame):
         w = self.focusWidget()
         return w is not None and isinstance(w, QLineEdit) and self.isAncestorOf(w)
 
-    def show_items(self, r: items.Reading | None, own: items.SelfFields | None, where_text: Callable[[items.Item], str], names: items.Names) -> None:
+    def show_items(self, r: items.Reading | None, own: items.SelfFields | None, where_text: Callable[[items.Item], str], names: items.Names,
+                   stripe: Callable[[items.Item], str] | None = None) -> None:
         _drop(self.cards_box)
         self.cards = []
         its = r.items if r else []
@@ -209,7 +226,7 @@ class ItemCards(QFrame):
             bl.addWidget(facts)
             self.cards_box.addWidget(box)
         for it in its:
-            card = ItemCard(it, where_text(it))
+            card = ItemCard(it, where_text(it), stripe(it) if stripe else None)
             card.changed.connect(self.changed)
             card.go.connect(self.go)
             self.cards_box.addWidget(card)
@@ -261,8 +278,7 @@ class AgendaPanel(QFrame):
         row.addWidget(self.start_button)
         row.addStretch()
         lay.addLayout(row)
-        self.hint = QLabel(objectName="hint")
-        self.hint.setWordWrap(True)
+        self.hint = Help()
         self.hint.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         lay.addWidget(self.hint)
         self.boxes: dict[int, QCheckBox] = {}
