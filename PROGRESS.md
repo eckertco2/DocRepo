@@ -32,6 +32,7 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.18 | Plant events in Parse and populate, from the mods log, round 3 | Built 2026-10-25, with decisions 53 to 60; on GitHub 2026-10-25, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
 | 5.19 | The visual overhaul, O8: the task page's fields in a grid, from the mods log, round 3 | Built 2026-10-25, with decisions 53 to 60; on GitHub 2026-10-25, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
 | 5.20 | The pinned window's task picker, capture types, path or link box, descriptions and Outlook button, and Outlook's security guard in words, from the mods log, round 3 (M0062 to M0064) | Built 2026-10-25, with decisions 61 to 63; on GitHub 2026-10-25, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
+| 5.20.1 | pypdf 6.21.2, for the second Frogbot scan's findings | Built 2026-10-25; on GitHub 2026-10-25. Next: the corporate computer, with `release-5-20-1-frogbot-fix.md` |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
 ## Decisions
@@ -428,6 +429,13 @@ The corporate computer's Frogbot scan of phase 5 found four things.
 
 - `requirements.txt`: Pillow 12.3.0 had CVE-2026-96639 (critical) and CVE-2026-96640 (high), both fixed in Pillow 13.0.0, now pinned. DocRepo doesn't use Pillow itself; python-pptx needs it, and works with 13.0.0.
 - `pyproject.toml` is gone, and its pytest settings are in `pytest.ini`. Two GPL-3.0 findings named a component `docrepo` (in `pyproject.toml` and `docrepo/log_setup.py`). That was DocRepo itself: JFrog's pip scan runs `pip install .` first, and the `[project]` table named "docrepo" matched an unrelated GPL-3.0 package of that name on PyPI. DocRepo isn't installed as a package, so nothing used the table. Now `pip install .` fails, and the scan falls back to `requirements.txt`.
+
+## The second Frogbot findings (2026-10-25), release 5.20.1
+
+The corporate scan listed 23 open findings, every one located in `DocRepo-main/requirements.txt`:
+
+- **Pillow 12.3.0** (20: CVE-2026-112393, -112398, -112403 and -112900 critical; CVE-2026-96637, -96642, -96643, -96644, -96778, -112390, -112392, -112397, -112399, -112400, -112404, -112405, -112895, -112896, -112897 and -112902 high). Pillow 12.3.0 was phase 5's pin, before the first findings; Pillow left DocRepo altogether in release 5.3.1. So `DocRepo-main/` is a copy of phase 5 left inside the corporate repo, the first zip's folder, which the import guide says not to keep. Removing it there closes these; nothing in DocRepo changes.
+- **pypdf 6.19.0** (3: CVE-2026-115572, -115580 and -115585, high). The current `requirements.txt` pins it too, so the scan most likely reported each finding once, at the first copy it met. None of the three had a public record to name its fixed version, so pypdf goes to 6.21.2, the newest, whose releases since 6.19.0 carry six security fixes (6.20.0 to 6.21.2: limits on stream and xref work, cycles in trees, repeated file loads, and image data opened only with the matching Pillow plugin). It needs nothing new on Python 3.12, and every test passes on it (780, 1 skipped).
 
 ## Unfinished / notes
 

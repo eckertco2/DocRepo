@@ -4,6 +4,7 @@
 # DocRepo reads .pptx files with the standard library instead.
 # RapidFuzz (MIT, no dependencies of its own) came with the visual overhaul (releases 5.10 to 5.16), for the command
 # palette's fuzzy matching. Without it, DocRepo uses the standard library's difflib.
+# pypdf went from 6.19.0 to 6.21.2 in release 5.20.1, for the second Frogbot scan's findings.
 # Install with: .venv\Scripts\python.exe -m pip install -r requirements.txt
 colorama==0.4.6
 et_xmlfile==2.0.0
@@ -13,7 +14,7 @@ openpyxl==3.1.5
 packaging==26.3
 pluggy==1.6.0
 Pygments==2.21.0
-pypdf==6.19.0
+pypdf==6.21.2
 PySide6==6.8.2.1
 PySide6_Addons==6.8.2.1
 PySide6_Essentials==6.8.2.1
