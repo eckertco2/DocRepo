@@ -249,7 +249,9 @@ def security_settings(version: str) -> list[tuple[str, str]]:
 
     major = ".".join(version.split(".")[:2]) if version else "16.0"
     out = []
-    keys = [(rf"Software\Policies\Microsoft\Office\{major}\Outlook\Security", "policy"), (rf"Software\Microsoft\Office\{major}\Outlook\Security", "setting")]
+    keys = [(rf"Software\Policies\Microsoft\Office\{major}\Outlook\Security", "policy"), (rf"Software\Microsoft\Office\{major}\Outlook\Security", "setting"),
+            # Click-to-Run Office (Microsoft 365) keeps the Trust Center's own setting here (mods log round 3, M0063)
+            (rf"Software\Microsoft\Office\ClickToRun\REGISTRY\MACHINE\Software\Microsoft\Office\{major}\Outlook\Security", "Click-to-Run setting")]
     for hive_name, hive in (("HKCU", winreg.HKEY_CURRENT_USER), ("HKLM", winreg.HKEY_LOCAL_MACHINE)):
         for path, kind in keys:
             try:
@@ -324,6 +326,29 @@ def _cell(s: str) -> str:
     return s.replace("|", "\\|").replace("\n", " ")
 
 
+def antivirus_text(name: str, state: int) -> str:
+    """One antivirus product as Windows Security Center reports it: its name, on or off, and whether it's up to date.
+    ``state`` is Security Center's productState, read by its middle byte (on: 0x10 or 0x11) and low byte (up to date: 0)."""
+    on = ((state >> 8) & 0xFF) in (0x10, 0x11)
+    current = (state & 0xFF) == 0
+    return f"{name}: {'on' if on else 'off'}, {'up to date' if current else 'out of date'}"
+
+
+def antivirus_status() -> list[str]:
+    """The antivirus products Windows Security Center knows of, read-only through WMI on this computer. Outlook's default
+    guard asks, or refuses, when none is on and up to date (mods log round 3, M0063). Empty where it can't be read."""
+    if os.name != "nt":
+        return []
+    try:
+        import win32com.client  # approved: pywin32
+
+        center = win32com.client.GetObject(r"winmgmts:\\.\root\SecurityCenter2")
+        return [antivirus_text(str(p.displayName), int(p.productState)) for p in center.ExecQuery("SELECT displayName, productState FROM AntiVirusProduct")]
+    except Exception as e:  # noqa: BLE001 - a server has no Security Center, and WMI can refuse
+        log.info("Windows Security Center couldn't be read: %s", type(e).__name__)
+        return []
+
+
 def build_report(data_root: Path | None, now: datetime, drags: Sequence[DragNote] | None,
                  check_outlook: Callable[[], tuple[list[Step], str]] | None = None) -> str:
     """The report as Markdown. ``drags`` is None from the command line, where there's no capture window."""
@@ -347,6 +372,9 @@ def build_report(data_root: Path | None, now: datetime, drags: Sequence[DragNote
     lines += ["", "## Outlook's programmatic access settings", ""]
     lines += (["| Where | Value |", "|---|---|", *[f"| {a} | {_cell(b)} |" for a, b in settings]] if settings
               else ["None set in the registry, so Outlook's defaults apply (warn when antivirus is off or out of date)."])
+    av = antivirus_status()
+    lines += ["", "Antivirus, as Windows Security Center reports it (Outlook's default guard asks, or refuses, when none is on and up to date):",
+              "", *([f"- {_cell(a)}" for a in av] or ["- None reported, or Security Center couldn't be read."])]
     lines += ["", "## Drags and pastes in the capture window", ""]
     if drags is None:
         lines.append("Not available from the command line. Use Troubleshooting report in the browse tool's Settings, after dragging an "

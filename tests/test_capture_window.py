@@ -378,7 +378,7 @@ def test_an_email_with_refused_fields_is_added_and_says_so(window, monkeypatch):
     monkeypatch.setattr(outlook, "selected_emails", lambda: [email])
     window.add_outlook()
     assert [e.row.name for e in window.files] == ["Revised guard delivery"]
-    assert window.error.text().startswith("Outlook didn't give DocRepo the email's Body, SenderName, so those are left out.")
+    assert window.error.text().startswith("Outlook didn't let DocRepo read the email's text and sender, so they are left out;")
 
 
 def test_drags_are_noted_for_the_troubleshooting_report(window, monkeypatch):

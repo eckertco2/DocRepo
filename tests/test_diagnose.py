@@ -106,3 +106,15 @@ def test_the_real_check_runs_without_outlook():
     assert steps[0].name == "Load pywin32" and steps[0].ok
     if not outlook.outlook_window_open():
         assert version == "" and not any(s.name == "Join Outlook (Dispatch)" for s in steps)
+
+
+def test_the_report_says_what_antivirus_windows_sees(data_root, monkeypatch):
+    """Mods log round 3 (M0063): Outlook's default guard asks, or refuses, when Windows Security Center reports no
+    antivirus that's on and up to date, so the report says what it reports (made-up products here)."""
+    assert diagnose.antivirus_text("Example AV", 0x61100) == "Example AV: on, up to date"
+    assert diagnose.antivirus_text("Example AV", 0x60110) == "Example AV: off, out of date"
+    monkeypatch.setattr(diagnose, "antivirus_status", lambda: ["Example AV: on, out of date"])
+    text = diagnose.build_report(data_root, NOW, [], check_outlook=fake_check)
+    assert "Antivirus, as Windows Security Center reports it" in text and "- Example AV: on, out of date" in text
+    monkeypatch.setattr(diagnose, "antivirus_status", lambda: [])
+    assert "- None reported, or Security Center couldn't be read." in diagnose.build_report(data_root, NOW, [], check_outlook=fake_check)

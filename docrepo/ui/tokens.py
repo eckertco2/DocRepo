@@ -258,6 +258,12 @@ QFrame#editor QTextEdit, QFrame#editor QPlainTextEdit { border: none; border-rad
 QWidget#pinWindow { background: $content; border: 1px solid $stroke_strong; }
 QLabel#pinTitle { font-weight: 600; }
 QWidget#pinWindow QTextEdit { padding: 4px 6px; }
+QPushButton#pinTask { text-align: left; padding: 2px 6px; font-weight: 600; background: transparent; border: 1px solid transparent; }
+QPushButton#pinTask:hover { background: $hover; border-color: $stroke; }
+QCheckBox#typeToggle[compact="true"] { padding: 2px 8px; font-size: ${caption}pt; border: 1px solid $stroke; }
+QCheckBox#typeToggle[compact="true"]:checked { border-bottom: 2px solid $accent; }
+QFrame#dropZone QLineEdit { border: none; background: transparent; padding: 0 2px; min-height: 0; }
+QWidget#pinWindow QLineEdit { min-height: 0; padding: 1px 6px; }
 QFrame#dropZone { background: $base; border: 1px dashed $stroke_strong; border-radius: 6px; }
 QFrame#dropZone[over="true"] { background: $selected; border: 1px solid $accent; }
 QWidget#formatBar { border-bottom: 1px solid $stroke; }

@@ -273,10 +273,21 @@ def is_outlook_drop(formats: list[str]) -> bool:
     return any("RenPrivate" in f for f in formats)
 
 
+#: An email's fields in words, for the line the capture window shows when Outlook holds them back.
+FIELD_WORDS = {"Body": "text", "HTMLBody": "text", "SenderName": "sender", "To": "recipients", "Subject": "subject",
+               "Attachments": "attachments"}
+
+
 def refused_note(emails: list[EmailItem]) -> str:
-    """A line for the capture window when Outlook held back some fields, or ""."""
-    fields = sorted({f for e in emails for f in e.refused})
+    """A line for the capture window when Outlook held back some fields, or "": what's missing, why it usually is, and
+    the way round it today (mods log round 3, M0063)."""
+    fields = {f for e in emails for f in e.refused}
     if not fields:
         return ""
-    return (f"Outlook didn't give DocRepo the email's {', '.join(fields)}, so {'that is' if len(fields) == 1 else 'those are'} left out. "
-            "Settings → Troubleshooting report collects the details.")
+    words = list(dict.fromkeys(FIELD_WORDS.get(f, f) for f in sorted(fields, key=lambda f: list(FIELD_WORDS).index(f) if f in FIELD_WORDS else 99)))
+    what = words[0] if len(words) == 1 else ", ".join(words[:-1]) + " and " + words[-1]
+    text_too = "text" in words
+    return (f"Outlook didn't let DocRepo read the email's {what}, so {'it is' if len(words) == 1 else 'they are'} left out; the rest is kept. "
+            "Outlook's security guard does this when it doesn't trust programs that ask. If Outlook asks whether to allow access, choose Allow. "
+            + ("Otherwise, copy the email's text in Outlook (Ctrl+A, then Ctrl+C) and paste it into the content text. " if text_too else "")
+            + "Settings → Troubleshooting report shows Outlook's security settings.")

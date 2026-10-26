@@ -136,7 +136,9 @@ def test_fields_outlook_refuses_are_left_out_not_the_whole_email():
     assert [p.step for p in outlook.PROBLEMS] == ["reading the email's Body", "reading the email's HTMLBody", "reading the email's SenderName",
                                                   "reading the email's To"]
     assert "0x80004004" in outlook.PROBLEMS[0].detail
-    assert outlook.refused_note([email]).startswith("Outlook didn't give DocRepo the email's Body, HTMLBody, SenderName, To, so those are left out.")
+    note = outlook.refused_note([email])
+    assert note.startswith("Outlook didn't let DocRepo read the email's text, sender and recipients, so they are left out; the rest is kept.")
+    assert "choose Allow" in note and "Ctrl+A, then Ctrl+C" in note  # the way round it today (mods log round 3, M0063)
 
 
 def test_selected_emails(monkeypatch):

@@ -31,6 +31,7 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.17 | The capture window and double-click, from the mods log, round 3: the pinned window, OneNote's keys and 20 px indents in the content text, and double-click opening Edit | Built 2026-10-25, with decisions 53 to 60; on GitHub 2026-10-25, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
 | 5.18 | Plant events in Parse and populate, from the mods log, round 3 | Built 2026-10-25, with decisions 53 to 60; on GitHub 2026-10-25, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
 | 5.19 | The visual overhaul, O8: the task page's fields in a grid, from the mods log, round 3 | Built 2026-10-25, with decisions 53 to 60; on GitHub 2026-10-25, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
+| 5.20 | The pinned window's task picker, capture types, path or link box, descriptions and Outlook button, and Outlook's security guard in words, from the mods log, round 3 (M0062 to M0064) | Built 2026-10-25, with decisions 61 to 63; on GitHub 2026-10-25, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
 ## Decisions
@@ -402,6 +403,24 @@ From the third copy of the mods log (M0053 to M0060), planned in the parent work
 - The formatting buttons keep their room while hidden, so the text and the rows below never jump when the cursor leaves the box.
 - "Plant event" and "major event" count only in the singular, and not before planning, prep, preparation, meeting, review or readiness, so "major events planning meeting" isn't one; the event words alone still don't (decision 22).
 - The task page's people take a row of their own; the dates and the rest share rows, so a lone field doesn't leave a row nearly empty.
+
+## Release 5.20: the pinned window, again (2026-10-25)
+
+From M0062 to M0064 (the parent workspace's `docs/mods/round-3-plan.md`, items 45 to 48, decisions 61 to 63).
+
+- `docrepo/ui/pin_window.py`, rebuilt at the same 320 × 236 px: the task picker on the top line (`task_button`, opening `CaptureWindow._open_picker` under it), the capture types (`type_boxes`), the content text, the landing row (`DropZone`, now a frame round `path`, a box for a typed or pasted path or link, and `outlook_button`), one description at a time (`desc`, with ‹ and ›; `describable`, `_step`, `_described`), and one line for what's been added, or two for a problem, cut with "…" and all of it in the tooltip (`status`, `message`, `two_lines`). `typed_path` takes File Explorer's quotes off. The whole window takes drops and lights the landing row.
+- `docrepo/ui/capture_window.py`: `_open_picker(anchor)`, and a task picked from the pinned window puts the cursor back in its box. A capture type refused while pinned (Update with no task) says so there.
+- `docrepo/outlook.py`: `refused_note` says what Outlook held back in words (text, sender, recipients), why, and the ways round it today; `FIELD_WORDS`.
+- `docrepo/diagnose.py`: `antivirus_status` (Windows Security Center, through WMI, read-only) and `antivirus_text`, in the report's programmatic access section; the Click-to-Run registry place for the Trust Center's setting.
+- `docrepo/ui/icons/chevron-left.svg`; styles for the pinned window's task button, small toggles and boxes, in both looks.
+- `tests/`: the pinned window's types, typed paths and links, descriptions, picker and Outlook button (`test_pin_window.py`); the refusal's words (`test_outlook.py`, `test_capture_window.py`); the antivirus line (`test_diagnose.py`) (780 pass in all, 1 skipped). The real app was driven on `dev_data` too, by a script that clicks and types: every row of the corporate test's section 3 but Outlook's.
+
+## Decisions (release 5.20)
+
+- Decisions 61 to 63: no default change (the Pin hotkey opens it pinned already); Outlook's guard is diagnosed now and read past later, with the email reader's refinement; the rows as built, at the same size.
+- One description shows at a time, the newest first, so the window needn't grow with the files; the full window still has every row.
+- A typed path that isn't there, or is a folder, stays in the box with the problem underneath, so it can be fixed.
+- The report reads Security Center's antivirus product state by its documented bytes (on: 0x10 or 0x11 in the middle byte; up to date: 0 in the low byte), and names only the products.
 
 ## The first Frogbot findings (2026-10-20)
 

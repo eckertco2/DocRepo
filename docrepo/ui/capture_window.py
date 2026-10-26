@@ -1385,6 +1385,7 @@ class CaptureWindow(QWidget):
         self._load_summary_types()
         self.pin_window.show_message("")
         self.pin_window.sync()
+        self.pin_window.path.clear()
         self.pin_window.place()
         self.pinned = True
         self.hide()
@@ -1749,18 +1750,23 @@ class CaptureWindow(QWidget):
         return "Save " + parts[0] + "." + (" It also " + and_list(parts[1:]) + "." if len(parts) > 1 else "") + items_text
 
     # ================= the task picker and other pickers =================
-    def _open_picker(self) -> None:
+    def _open_picker(self, anchor: QWidget | None = None) -> None:
+        """The task picker, under the task button, or under ``anchor`` (the pinned window's, mods log round 3, M0062)."""
+        anchor = anchor or self.task_button
         none = ("None", "A new top-level task" if "new_task" in self.types else "Keep it unfiled")
         self.picker = TaskPicker(self, self.ctx.model, none)
         self.picker.picked.connect(self._picked)
-        self.picker.setMinimumWidth(max(300, self.task_button.width()))
-        self.picker.popup(self.task_button.mapToGlobal(self.task_button.rect().bottomLeft()))
+        self.picker.setMinimumWidth(max(300, anchor.width()))
+        self.picker.popup(anchor.mapToGlobal(anchor.rect().bottomLeft()))
 
     def _picked(self, task_id: str | None) -> None:
         self.set_task(task_id)
         after, self._after_pick = self._after_pick, None
         if after and task_id:  # the Update or Add to agenda hotkey opened the picker: only Update is checked, as with a task already picked
             self.show_capture(mode="update", agenda_focus=after == "agenda")
+            return
+        if self.pinned:  # picked on the pinned window: the cursor goes back to its box
+            self.pin_window.text.setFocus()
             return
         (self.title if "new_task" in self.types else self.content).setFocus()
 
@@ -2217,7 +2223,7 @@ class CaptureWindow(QWidget):
 
     # ================= Save =================
     def _fail(self, message: str, focus: QWidget | None = None) -> None:
-        if self.pinned and not self._saving:  # a problem with something dropped shows on the pinned window
+        if self.pinned and not self._saving:  # a problem with something added, or a type, shows on the pinned window
             self.pin_window.show_message(message)
             return
         if self.pinned:  # Save couldn't save: the full window shows where to fix it
