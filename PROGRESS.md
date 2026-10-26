@@ -33,6 +33,7 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.19 | The visual overhaul, O8: the task page's fields in a grid, from the mods log, round 3 | Built 2026-10-25, with decisions 53 to 60; on GitHub 2026-10-25, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
 | 5.20 | The pinned window's task picker, capture types, path or link box, descriptions and Outlook button, and Outlook's security guard in words, from the mods log, round 3 (M0062 to M0064) | Built 2026-10-25, with decisions 61 to 63; on GitHub 2026-10-25, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
 | 5.20.1 | pypdf 6.21.2, for the second Frogbot scan's findings | Built 2026-10-25; on GitHub 2026-10-25. Next: the corporate computer, with `release-5-20-1-frogbot-fix.md` |
+| 5.21 | The visual overhaul, O9: the task page as the task's story (decisions 64 to 69) | Built 2026-10-25 and hand-tested by the owner; on GitHub 2026-10-26. Next: testing on the corporate computer |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
 ## Decisions
@@ -422,6 +423,30 @@ From M0062 to M0064 (the parent workspace's `docs/mods/round-3-plan.md`, items 4
 - One description shows at a time, the newest first, so the window needn't grow with the files; the full window still has every row.
 - A typed path that isn't there, or is a folder, stays in the box with the problem underneath, so it can be fixed.
 - The report reads Security Center's antivirus product state by its documented bytes (on: 0x10 or 0x11 in the middle byte; up to date: 0 in the low byte), and names only the products.
+
+## Release 5.21: the task page as a story (2026-10-25)
+
+The visual overhaul's O9, designed, mocked and decided in the parent workspace (`docs/ui-design/task-page.md`, decisions 64 to 69, all as recommended). The owner found O8's grid still crowded and hard to follow; the page now reads top to bottom as the task's story (SPEC 8.4).
+
+- `docrepo/detail.py`: `task_page(task_id, state, width)` rebuilt from `page_head`, `status_block` (with `status_since`), `when_rows`, `who_rows` (with `avatar`), `agenda_section`, `subtask_section` (with `mark`), `details` and `history` (with `files_in`); one column, When and Who side by side from `SIDE_BY_SIDE` (540 px), and a rail from `WIDE_PAGE` (760 px), no wider than `PAGE_MAX`. `PageState` gains `details`, `desc` and `closed`. `story_tab` loses its order and chapters line, and its headings and months are in sentence case. `TABS` drops Subtasks; `SCOPE_NAMES` names the scopes. `link`, `task_link` and `capture_link` take `quiet` ("tl" or "tq"), for titles that read as text. O8's `facts_grid`, `text_block` and `tab_bar` are gone.
+- `docrepo/dates.py`: `days_words` ("in 22 days", "3 days overdue") and `ago` ("yesterday", "5 weeks ago").
+- `docrepo/ui/page_view.py`: `PageView`, the detail pane, draws `avatar:`, `mark:` and `progress:` pictures (`picture`) and says when its width crosses a layout's (`layout_changed`, `layout_of`).
+- `docrepo/ui/browse_window.py`: the page view; `render_detail` passes its width, and a crossing draws it again (`_page_width_changed`). `on_link` learns `fold:`, `menu:` (`_page_menu`: the scope, with Open all and Close all chapters, and the order), `new:`, `update:`, `copyref:` and `folder:`. `_task_actions`: Note, Update, Meeting notes, Add to (Today, or On Today ✓, then the agendas), Edit, and More at the row's end (New subtask, Open agenda, Copy, Copy prompt, Open folder), the same in both looks.
+- `docrepo/ui/widgets.py`: `FlowLayout` keeps a widget with the `flowEnd` property at its line's right end.
+- `docrepo/ui/icons.py`: `tinted`. `docrepo/ui/icons/`: `person.svg` and `state-ns`, `state-ip`, `state-pk` and `state-cl`.
+- `docrepo/ui/tokens.py` and `detail.CSS`: the page's classes (`sec`, `dt`, `rel`, `over`, `stat`, `sk`, `desc`, `lbli`, `rule`, `tl`, `tq`) in both looks; `QPushButton#iconOnly` for More.
+- `tests/`: the page's order, what it leaves out, the folds, the wide page and the dates in words (`test_detail.py`); the bar, its menus, the links and the redraw across 760 px, and the pictures (`test_browse_window.py`) (785 pass in all, 1 skipped). The new and Classic looks were drawn from the code over the sample data and checked by eye at the usual pane width and wide.
+
+## Decisions (release 5.21)
+
+- Decisions 64 to 69, as recommended: the story's order with Details folded; empty fields hidden but Due ("No due date"), with a deadline in Due's place when there's no Due (M0003); Subtasks as a section, closed ones behind Show closed; the description in about two lines with More; Note, Update, Add to, Edit and More; two columns from 760 px.
+- **Changed on the way:**
+  - The path has no colour dot: the tree's colours follow its filters, so the page couldn't match them.
+  - The progress bar is a small one beside the count, not a line across the section, so the page needn't be drawn again for every width.
+  - Details' folded line shows the reference fields too, beside the ID, so a change record's number is never a click away.
+  - Titles that are links (the path, subtasks, agenda items, raw text log entries) read as text; Qt's rich text can't underline them on hover, so the pointer and the click say they're links.
+  - The tab strip's tabs are a table of their own: the selected tab's underline made a full-width table a pixel too wide, with a scroll bar.
+- The page's scope names are plainer: With parent tasks and Whole family, for With ancestors and Family.
 
 ## The first Frogbot findings (2026-10-20)
 

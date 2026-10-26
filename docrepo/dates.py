@@ -71,6 +71,26 @@ def days_text(day: date, today: date) -> str:
     return {0: "today", 1: "tomorrow"}.get(n, f"in {n} d")
 
 
+def days_words(day: date, today: date) -> str:
+    """``days_text`` in full words, for the task page (release 5.21): ``in 22 days``, ``tomorrow`` or ``3 days overdue``."""
+    n = day_diff(today, day)
+    if n < 0:
+        return f"{-n} day{'s' if n < -1 else ''} overdue"
+    return {0: "today", 1: "tomorrow"}.get(n, f"in {n} days")
+
+
+def ago(day: date, today: date) -> str:
+    """How long ago a day was: ``today``, ``yesterday``, ``3 days ago``, ``3 weeks ago`` or ``2 months ago``."""
+    n = day_diff(day, today)
+    if n <= 0:
+        return "today"
+    if n == 1:
+        return "yesterday"
+    if n < 14:
+        return f"{n} days ago"
+    return f"{round(n / 7)} weeks ago" if n < 60 else f"{round(n / 30)} months ago"
+
+
 def workday_numbers(names: list[str]) -> frozenset[int]:
     """Weekday numbers (Monday is 0) for names such as ``["Mon", "Tue"]``."""
     unknown = [n for n in names if n not in WEEKDAYS]

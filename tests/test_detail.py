@@ -33,35 +33,88 @@ def links(html: str) -> list[str]:
 
 
 def test_a_task_page(pages):
+    """The visual overhaul's O9 (release 5.21, decisions 64 to 69): the task's story, top to bottom."""
     html = pages.task_page("T000008", PageState())
     words = text(html)
-    assert words.startswith("Reactor impeller upgrade › Installation In progress")
-    for part in ("Lead Me 8 h", "Assignees Tom Becker 60 h , Mike Ortiz 60 h", "Due Fri 30 Oct in 22 d", "Deadline Fri 30 Oct, Turnaround ends in 22 d",
-                 "Created Tue 22 Sep from C000005", "Raw text log Summaries Status log Files Subtasks",
-                 "Scope: This task · With ancestors · With subtasks · Family", "SUBTASKS (3)"):
-        assert part in words, part
-    assert {"task:T000001", "person:P003", "capture:C000005", "tab:log", "scope:family", "chap:T000012", "label:Line%201"} <= set(links(html))
+    assert words.startswith("Reactor impeller upgrade › Installation In progress Line 1 Strategic Plan Install and align")
+    order = ["Current status Mon 5 Oct · 3 days ago Procedure rev 2 approved. Waiting on the rigging plan.",
+             "When Due Fri 30 Oct in 22 days Deadline too · Turnaround ends Starts Mon 19 Oct in 11 days",
+             "Who Lead Me 8 h Assignees Tom Becker 60 h Mike Ortiz 60 h", "Subtasks 3 of 3 open New subtask Rigging plan 14 Oct · 6 d",
+             "▸ Details T000008 · Created Tue 22 Sep from C000005", "Raw text log 6 Status log 14 Summaries 1 Files 3 With subtasks ▾ ⇅ Oldest first",
+             "This task September 2026", "Subtasks · 3"]
+    at = [words.find(part) for part in order]
+    assert -1 not in at and at == sorted(at), dict(zip(order, at))
+    for gone in ("Reminder", "—", "Subtasks Summaries", "SUBTASKS", "Scope:", "Order:", "Top-level task"):  # empty fields, the old tab and lines
+        assert gone not in words, gone
+    assert {"task:T000001", "person:P003", "label:Line%201", "fold:details", "menu:scope", "menu:order", "new:T000008", "tab:log",
+            "chap:T000012"} <= set(links(html))
+    assert 'src="avatar:me"' in html and 'src="avatar:TB"' in html and 'src="mark:ip"' in html and 'src="progress:0:3"' in html
+    opened = pages.task_page("T000008", PageState(details=True))
+    assert "ID T000008 Created Tue 22 Sep from C000005 Folder Tasks\\T000008" in text(opened) and "folder:T000008" in opened  # Start's in When
 
 
-def test_with_no_due_the_deadline_shows_in_its_place(pages):
-    """Mods log round 1 (M0003): T000002 has a deadline and no Due."""
+def test_the_page_shows_only_what_says_something(pages):
+    """Decision 65: a deadline with no Due takes Due's place (M0003); a task with neither says No due date; a passed reminder
+    is "ago"; a routine meeting counts to its next one, with hours per occurrence and its agenda before Details."""
     words = text(pages.task_page("T000002", PageState()))
-    assert "Due Sat 31 Oct (deadline) in 23 d" in words and "Deadline Sat 31 Oct" in words
+    assert "When Deadline Sat 31 Oct in 23 days Verification walkthrough Who" in words and "No due date" not in words
+    assert "Current status Tue 1 Sep · 5 weeks ago" in words  # the Excel import's status: as old as the task
+    words = text(pages.task_page("T000016", PageState()))
+    assert "When Due No due date Reminder Wed 7 Oct yesterday Agenda Business team meeting Tue 13 Oct" in words
+    assert "No status yet. Add one" in words and "update:T000016" in pages.task_page("T000016", PageState())
+    words = text(pages.task_page("T000010", PageState()))
+    assert "When Next meeting Tue 13 Oct in 5 days Who Lead Priya Shah 1.5 h per occurrence" in words
+    assert words.index("Agenda 4 open Open agenda") < words.index("Details")
+    assert "↻ Weekly Meeting" in words
+
+
+def test_subtasks_closed_ones_and_the_description(pages, sample_root):
+    """Decisions 66 and 67: the closed subtasks behind Show closed; a long description folds to its first 180 characters."""
+    words = text(pages.task_page("T000001", PageState()))
+    assert "Subtasks 3 of 4 open" in words and "Show 1 closed" in words and "Order spare mechanical seal" not in words.split("Details")[0]
+    shown = text(pages.task_page("T000001", PageState(closed=True)))
+    assert "Order spare mechanical seal" in shown.split("Details")[0] and "Hide closed" in shown
+    conn, root, _ = sample_root
+    tasks.update_task(conn, Settings(me="P001"), "T000017", at=datetime(2026, 10, 8, 9, 0), via="Browse tool",
+                      description="Rails need to be painted red. " + "The rails by the stairs and the platform need it first. " * 4 + "Todd's on it.")
+    m = Model(conn)
+    p = Pages(m, TODAY, lambda cid: read_content(root, m.captures[cid]) or "", "P001", conn)
+    folded = p.task_page("T000017", PageState())
+    assert "fold:desc" in folded and "Todd's on it" not in text(folded) and "…" in text(folded)
+    assert "Todd's on it. Less" in text(p.task_page("T000017", PageState(desc=True)))
+
+
+def test_the_wide_page_has_its_facts_on_the_right(pages):
+    """Decision 69: from 760 px, When, Who and Details move into a rail, with Details open; narrow, When and Who stack."""
+    main, rail = pages.task_page("T000008", PageState(), 900).split('class="rule"', 1)
+    assert "Current status" in main and "Subtasks" in main and "Raw text log" in main and "When" not in text(main)
+    assert all(x in text(rail) for x in ("When Due Fri 30 Oct", "Who Lead", "Details ID T000008", "Folder"))
+    assert '<td width="50%"' in pages.task_page("T000008", PageState(), 600)
+    assert '<td width="50%"' not in pages.task_page("T000008", PageState(), 500)
 
 
 def test_tabs_scopes_and_chapters(pages):
     log = text(pages.task_page("T000008", PageState(tab="log")))
     assert "Work started" in log and "↳ New subtask: Rigging plan · Mike Ortiz, due 14 Oct" in log
     closed = text(pages.task_page("T000008", PageState(tab="log", scope="self")))
-    assert "SUBTASKS" not in closed and "Open all chapters" not in closed
+    assert "Subtasks ·" not in closed and "This task ▾" in closed  # the scope's name is its menu's
+    assert log.count("Status log") == closed.count("Status log") and log.split("Status log ")[1][:2] != closed.split("Status log ")[1][:2]
     opened = text(pages.task_page("T000008", PageState(tab="log", chapters={"T000012"})))
     assert "Rigging plan In progress Lift study done" in opened and "Mike to write the rigging plan" in opened
     files = pages.task_page("T000001", PageState(tab="files"))
-    assert "show:copy:" in files and "Impeller datasheet rev B.pdf" in text(files)
-    subs = text(pages.task_page("T000008", PageState(tab="subtasks")))
-    assert "In progress Rigging plan" in subs and "Not started Book the alignment contractor Urgent" in subs
+    assert "show:copy:" in files and "Impeller datasheet rev B.pdf" in text(files) and "⇅" not in text(files)
+    old = text(pages.task_page("T000008", PageState(tab="subtasks")))  # a page left on the old Subtasks tab shows the raw text log
+    assert "This task September 2026 Tue 22 Sep File · Started this task" in old
     sums = text(pages.task_page("T000001", PageState(tab="summaries")))
     assert sums.count("↗") >= 1  # entries from subtasks name the task they come from
+
+
+def test_dates_in_words():
+    from docrepo.dates import ago, days_words
+
+    assert [days_words(date(2026, 10, d), TODAY) for d in (5, 7, 8, 9, 30)] == ["3 days overdue", "1 day overdue", "today", "tomorrow", "in 22 days"]
+    assert [ago(date(2026, m, d), TODAY) for m, d in ((10, 8), (10, 7), (10, 5), (9, 1), (6, 1))] == [
+        "today", "yesterday", "3 days ago", "5 weeks ago", "4 months ago"]
 
 
 def test_newest_first_and_long_entries(pages, sample_root):
@@ -74,7 +127,7 @@ def test_newest_first_and_long_entries(pages, sample_root):
     assert "more:C000026" in folded and "Show all" in folded
     shown = p.task_page("T000012", PageState(scope="self", expanded={"C000026"}))
     assert "Show less" in shown
-    newest = text(p.task_page("T000012", PageState(scope="self", order="new"))).split("Order:", 1)[1]
+    newest = text(p.task_page("T000012", PageState(scope="self", order="new"))).split("Newest first", 1)[1]
     assert newest.index("First sentence of a long note") < newest.index("Mike to write the rigging plan")
 
 

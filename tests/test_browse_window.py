@@ -417,7 +417,8 @@ def test_the_today_list(browse, monkeypatch):
     browse.page.setFocus()
     browse._key("today")
     assert browse.status.text() == "Rigging plan is on Today. Its status log says so."
-    assert "On Today ✓" in [b.text() for b in browse.actions.findChildren(QPushButton)]
+    add_to = next(b for b in browse.actions.findChildren(QPushButton) if b.text() == "Add to").menu()
+    assert add_to.actions()[0].text().startswith("On Today ✓")  # in Add to's menu (release 5.21)
     browse.set_view("today")
     assert browse.view == "today" and browse.sel == ("task", "T000012") and ("task", "T000012") in rows(browse)
     browse.today_note.setText("Sign the overtime sheets")
@@ -716,7 +717,48 @@ def test_one_letter_per_topic(browse, monkeypatch):
     keys["E"].activated.emit()
     assert shown == ["Keys", "Edit task T000012"]
     labels = [b.text() for b in browse.actions.findChildren(QPushButton)]
-    assert {"Note", "New task", "Agenda"} <= set(labels)
+    assert labels == ["Note", "Update", "Add to", "Edit", ""]  # More is an icon at the row's end (release 5.21)
+
+
+def test_the_task_page_bar_and_its_links(browse, monkeypatch):
+    """The visual overhaul's O9 (release 5.21, decisions 64 to 69): the bar, the page's folds and menus, and two columns once
+    the page is 760 px wide."""
+    from PySide6.QtCore import QRect
+
+    browse.go_task("T000008")
+    browse.actions_layout.setGeometry(QRect(0, 0, 900, 40))  # the bar at a usual pane's width
+    buttons = browse.actions.findChildren(QPushButton)
+    more = buttons[-1]
+    assert more.accessibleName() == "More" and more.property("flowEnd") and more.menu().actions()[0].text() == "New subtask\tT"
+    assert len({b.y() for b in buttons}) == 1 and more.geometry().right() == 899  # one row, More at its end
+    add_to = next(b for b in buttons if b.text() == "Add to").menu().actions()
+    assert add_to[0].text().startswith("Today") and add_to[-1].text() == "Someone else or another task…"
+    opened = []
+    monkeypatch.setattr(browse, "open_capture", lambda **options: opened.append(options))
+    browse.on_link(QUrl("new:T000008"))
+    browse.on_link(QUrl("update:T000008"))
+    assert opened == [{"task": "T000008", "mode": "new_task"}, {"task": "T000008", "mode": "update"}]
+    assert "Folder" not in browse.page.toPlainText()
+    browse.on_link(QUrl("fold:details"))
+    assert browse.state.details and "Tasks\\T000008" in browse.page.toPlainText()
+    browse.on_link(QUrl("menu:scope"))
+    assert [a.text() for a in browse._menu.actions() if a.isChecked()] == ["With subtasks"]
+    browse._menu.actions()[0].trigger()
+    assert browse.state.scope == "self" and "This task ▾" in browse.page.toPlainText()
+    browse._menu.close()
+    browse.on_link(QUrl("menu:order"))
+    browse._menu.actions()[1].trigger()
+    assert browse.state.order == "new"
+    browse._menu.close()
+    browse.on_link(QUrl("fold:anything"))  # only the page's own folds
+    browse.go_task("T000012")  # another task: its folds start closed; the tab and order stay
+    assert not browse.state.details and browse.state.order == "new"
+    browse.page.setFixedWidth(1000)  # the pane made wide: the page is drawn again in two columns
+    QApplication.processEvents()
+    assert browse.page.page_width() >= 760 and "Folder" in browse.page.toPlainText()  # the rail, with Details open
+    browse.page.setFixedWidth(500)
+    QApplication.processEvents()
+    assert "Folder" not in browse.page.toPlainText()
 
 
 def test_find_in_this_view(browse):
@@ -903,3 +945,17 @@ def test_a_list_grouped_by_a_parent_label(browse):
     heads = [re.sub(r"<[^>]+>|&nbsp;", " ", item.data(0, HTML_ROLE)).split()[:-1] for item in browse.tree.items() if item.data(0, KEY_ROLE) is None]
     assert heads == [["Line", "1"]]  # both tasks in the list are under Reactor impeller upgrade, which has Line 1
     assert rows(browse) == [None, ("task", "T000019"), ("task", "T000012")]
+
+
+def test_the_page_view_draws_the_pages_pictures(qapp):
+    """Release 5.21: initials, the owner's figure, state marks and the progress bar, drawn for the task page; nothing else."""
+    from docrepo.ui.page_view import PageView, picture
+
+    assert picture(QUrl("avatar:TB"), 2.0).size().width() == 40 and picture(QUrl("avatar:me"), 1.0).width() == 20
+    assert picture(QUrl("mark:ip"), 1.0).width() == 14 and picture(QUrl("mark:zz"), 1.0) is None
+    assert picture(QUrl("progress:1:4"), 1.0).width() == 72 and picture(QUrl("progress:x"), 1.0) is None
+    assert picture(QUrl("https://example.com/a.png"), 1.0) is None
+    view = PageView()
+    view.setHtml('<img src="avatar:TB" width="20" height="20"> <img src="mark:cl" width="14" height="14">')
+    assert view.document().resource(2, QUrl("avatar:TB")) is not None
+    view.deleteLater()

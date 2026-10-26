@@ -33,6 +33,11 @@ def _pixmap(name: str, colour: str, size: int, scale: float) -> QPixmap:
     return pm
 
 
+def tinted(name: str, colour: str, size: int, scale: float = 1.0) -> QPixmap:
+    """The icon ``name`` in ``colour``, ``size`` px square at ``scale``, for drawing into a picture (the task page's marks)."""
+    return _pixmap(name, colour, size, scale)
+
+
 @lru_cache(maxsize=None)
 def icon(name: str, colour: str | None = None, on: str | None = None, size: int = 16) -> QIcon:
     """The icon ``name`` in ``colour`` (secondary text by default), the disabled colour when disabled, and ``on`` (the

@@ -22,7 +22,7 @@ from pathlib import Path
 from urllib.parse import unquote
 
 from PySide6.QtCore import Qt, QTimer, QUrl
-from PySide6.QtGui import QColor, QGuiApplication, QKeySequence, QShortcut
+from PySide6.QtGui import QColor, QCursor, QGuiApplication, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -53,7 +53,7 @@ from docrepo import bulk, capacity, db, edits, items, people, prompts, search
 from docrepo.agenda import AgendaError
 from docrepo.captures import capture_folder, capture_md_path
 from docrepo.dates import long_date, short
-from docrepo.detail import PageState, Pages, chip, esc, state_chip
+from docrepo.detail import SCOPE_NAMES, PageState, Pages, chip, esc, state_chip
 from docrepo.links import is_link
 from docrepo.model import TODAY, Model, is_person
 from docrepo.people import PeopleError
@@ -69,6 +69,7 @@ from docrepo.ui.settings_view import SettingsView
 from docrepo.ui import tokens
 from docrepo.ui.icons import icon
 from docrepo.ui.look import LOOK, Help, KeyTips, set_hints, tip, with_key
+from docrepo.ui.page_view import PageView
 from docrepo.ui.palette import Command, CommandPalette
 from docrepo.ui.style import FORMAT_BAR_STYLE, page_css, style_sheet
 from docrepo.ui.task_forms import BulkEditDialog, LabelMatchDialog, TaskEditDialog
@@ -342,12 +343,13 @@ class BrowseWindow(QWidget):
         self.actions_layout.setContentsMargins(14, 8, 14, 4) if LOOK.classic else self.actions_layout.setContentsMargins(16, 10, 16, 2)
         dl.addWidget(self.actions)
         self.detail_stack = QStackedWidget()
-        self.page = QTextBrowser()
+        self.page = PageView()
         self.page.setOpenLinks(False)
         self.page.setOpenExternalLinks(False)
         self.page.document().setDefaultStyleSheet(page_css())
         self.page.document().setDocumentMargin(14 if LOOK.classic else 16)
         self.page.anchorClicked.connect(self.on_link)
+        self.page.layout_changed.connect(self._page_width_changed)
         self.detail_stack.addWidget(self.page)
         self.detail_stack.addWidget(self._build_edit_form())
         dl.addWidget(self.detail_stack, 1)
@@ -1446,7 +1448,7 @@ class BrowseWindow(QWidget):
         kind, item = s
         if kind == "task":
             self._task_actions(item)
-            html = pages.task_page(item, self.state)
+            html = pages.task_page(item, self.state, self.page.page_width())
         elif kind == "capture":
             self._capture_actions(item)
             html = pages.capture_page(item, self._capture_text(item), self._old_versions(item))
@@ -1484,39 +1486,36 @@ class BrowseWindow(QWidget):
 
     # ---- the task page's actions ----
     def _task_actions(self, task_id: str) -> None:
+        """The task page's command bar (release 5.21, decision 68): Note, Update, Meeting notes for an open meeting, Add to
+        (Today and the agendas), Edit, and More at the row's end. The keys and the palette's commands are as they were."""
         m, t = self.model(), self.model().task(task_id)
         if t.discarded:
             self._action("Bring back", lambda: self.bring_back_task(task_id), "Restore it as it was: back in the task tree, the lists and search",
                          primary=True)
             self._action("Open folder", lambda: self.reveal(self.ctx.data_root / "Tasks" / task_id), f"Open Tasks\\{task_id} in File Explorer")
             return
-        self._action("Add note" if LOOK.classic else "Note", lambda: self.open_capture(task=task_id, mode="note"),
-                     "Add a note to this task's raw text log", icon_name="note", key="N")
+        menu_key = "   " if LOOK.classic else "\t"  # a menu's key column; the Classic look puts the key after the label
+        self._action("Note", lambda: self.open_capture(task=task_id, mode="note"), "Add a note to this task's raw text log", icon_name="note", key="N")
         self._action("Update", lambda: self.open_capture(task=task_id, mode="update"), "Update this task: its state, status, dates and more",
                      icon_name="update", key="U")
-        self._action("New task", lambda: self.open_capture(task=task_id, mode="new_task"), "A new task under this one", icon_name="add", key="T")
-        if any(a.subject == task_id for a in m.today_items()):
-            self._action("On Today ✓", lambda: self.show_agenda(TODAY), "It's on Today. Open the Today view.", icon_name="sun")
-        else:
-            self._action("Add to Today" if LOOK.classic else "Today", lambda: self.add_to_today(task_id), "Put it on your list for today",
-                         icon_name="sun", key="D")
         if t.meeting and is_open(t):  # release 5.8
             self._action("Meeting notes", lambda: self.open_capture(task=task_id, meeting=True),
                          "Take this meeting's notes, with its agenda beside them", icon_name="people", key="M")
-        if self.pages().has_agenda(t) and LOOK.classic:
-            self._action("Open agenda", lambda: self.show_agenda(task_id))
-        agenda = QMenu(self)
-        agenda.addAction("Today   ·   your list for today, straight away (D)", lambda: self.add_to_today(task_id))
-        agenda.addSeparator()
+        add_to = QMenu(self)
+        if any(a.subject == task_id for a in m.today_items()):
+            add_to.addAction(icon("sun"), "On Today ✓   ·   open the Today view", lambda: self.show_agenda(TODAY))
+        else:
+            add_to.addAction(icon("sun"), f"Today   ·   your list for today, straight away{menu_key}D", lambda: self.add_to_today(task_id))
+        add_to.addSeparator()
         for meeting in meetings_for_menu(m, task_id):
             when = m.meeting_when(meeting.id, self.today())
-            act = agenda.addAction(f"{meeting.title}   ·   {meeting.recurrence + ', next ' + when if meeting.recurrence else 'One-off, ' + when}")
+            act = add_to.addAction(f"{meeting.title}   ·   {meeting.recurrence + ', next ' + when if meeting.recurrence else 'One-off, ' + when}")
             act.triggered.connect(lambda _=False, x=meeting.id: self.open_capture(task=task_id, mode="update", agenda=[x]))
-        other = agenda.addAction("Someone else or another task…")
+        other = add_to.addAction("Someone else or another task…")
         other.triggered.connect(lambda: self.open_capture(task=task_id, mode="update", agenda_focus=True))
-        self._action("Add to agenda" if LOOK.classic else "Agenda", tip="Put this task on an agenda", menu=agenda, icon_name="agenda", key="A")
+        self._action("Add to", tip="Put it on Today (D) or an agenda", menu=add_to, icon_name="agenda", key="A")
         edit = QMenu(self)
-        edit.addAction("Edit task…   E" if LOOK.classic else "Edit task…\tE", lambda: self.edit_task(task_id))
+        edit.addAction(f"Edit task…{menu_key}E", lambda: self.edit_task(task_id))
         edit.addSeparator()
         parents = m.parents_of(task_id)
         for p in parents:
@@ -1532,41 +1531,38 @@ class BrowseWindow(QWidget):
         edit.addSeparator()
         edit.addAction("Discard…", lambda: self.discard_task(task_id))
         self._action("Edit", tip="Edit any of its fields, move it in the tree, or discard it if it was made by mistake", menu=edit, icon_name="edit")
-        # Copy (release 5.9): its people's email addresses, for Outlook's To box (M0031), and each reference field (M0034).
-        t = m.task(task_id)
-        copy = QMenu(self)
+        # More: New subtask, the agenda, Copy (release 5.9: its people's email addresses, M0031, and each reference field,
+        # M0034), Copy prompt for each summary type, and the folder.
+        more = QMenu(self)
+        more.addAction(icon("add"), f"New subtask{menu_key}T", lambda: self.open_capture(task=task_id, mode="new_task"))
+        if self.pages().has_agenda(t):
+            more.addAction(icon("agenda"), "Open agenda", lambda: self.show_agenda(task_id))
+        copy = QMenu("Copy", more)
+        copy.setIcon(icon("copy"))
         people_ids = [*t.leads, *t.assignees]
         if any(m.people[p].email for p in people_ids if p in m.people):
             copy.addAction("Emails of its lead and assignees", lambda: self.copy_emails(people_ids))
         for name, value in t.references.items():
             copy.addAction(f"{name} {value}", lambda n=name: self.copy_reference(task_id, n))
-        if copy.actions() and LOOK.classic:
-            self._action("Copy", tip="Copy its people's email addresses or a reference field", menu=copy)
+        if copy.actions():
+            more.addMenu(copy)
         self.summary_type = QComboBox()
         self.summary_type.setAccessibleName("Summary type")
-        self.summary_type.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
-        self.summary_type.setMinimumContentsLength(22)
         self._summary_types = prompts.load_summary_types(self.ctx.data_root)
         self.summary_type.addItems([st.name for st in self._summary_types])
-        if LOOK.classic:
-            self.actions_layout.addWidget(self.summary_type)
-            self.summary_type.show()
-            self._action("Copy prompt", lambda: self.copy_prompt(task_id), "Copy a prompt for an LLM, with this task's records")
-            self._action("Open folder", lambda: self.reveal(self.ctx.data_root / "Tasks" / task_id), f"Open Tasks\\{task_id} in File Explorer")
-            return
-        # The new look's More: the agenda, Copy, Copy prompt for each summary type, and the folder.
-        more = QMenu(self)
-        if self.pages().has_agenda(t):
-            more.addAction(icon("agenda"), "Open agenda", lambda: self.show_agenda(task_id))
-        if copy.actions():
-            copy.setTitle("Copy")
-            copy.setIcon(icon("copy"))
-            more.addMenu(copy)
         prompt = more.addMenu(icon("copy"), "Copy prompt")
         for i, st in enumerate(self._summary_types):
             prompt.addAction(st.name, lambda n=i: (self.summary_type.setCurrentIndex(n), self.copy_prompt(task_id)))
         more.addAction(icon("folder"), "Open folder", lambda: self.reveal(self.ctx.data_root / "Tasks" / task_id))
-        self._action("More", tip="Open agenda, Copy, Copy prompt and Open folder", menu=more, icon_name="more")
+        b = self._action("More" if LOOK.classic else "", tip="More: New subtask, Open agenda, Copy, Copy prompt and Open folder", menu=more,
+                         icon_name="more")
+        b.setAccessibleName("More")
+        b.setProperty("flowEnd", True)  # at the row's end
+        if not LOOK.classic:
+            b.setObjectName("iconOnly")
+            b.setProperty("menu", False)
+            b.style().unpolish(b)
+            b.style().polish(b)
 
     def _capture_actions(self, capture_id: str) -> None:
         m = self.model()
@@ -1650,6 +1646,52 @@ class BrowseWindow(QWidget):
             self.render_detail(keep_scroll=True)
         elif kind == "chapall":
             st.chapters = set(self.model().tasks) if rest == "open" else set()
+            self.render_detail(keep_scroll=True)
+        # The task page's own (release 5.21): Details, the whole description and the closed subtasks, the history's scope
+        # and order menus, New subtask, Add one (an update), a reference field's Copy, and the task's folder.
+        elif kind == "fold" and rest in ("details", "desc", "closed"):
+            setattr(st, rest, not getattr(st, rest))
+            self.render_detail(keep_scroll=True)
+        elif kind == "menu":
+            self._page_menu(rest)
+        elif kind == "new":
+            self.open_capture(task=rest, mode="new_task")
+        elif kind == "update":
+            self.open_capture(task=rest, mode="update")
+        elif kind == "copyref" and self.sel and self.sel[0] == "task":
+            self.copy_reference(self.sel[1], unquote(rest))
+        elif kind == "folder" and rest in self.model().tasks:
+            self.reveal(self.ctx.data_root / "Tasks" / rest)
+
+    def _page_menu(self, which: str) -> None:
+        """The task page's history menus: which tasks' entries it shows, with Open all and Close all chapters, and the
+        order (release 5.21)."""
+        st, menu = self.state, QMenu(self)
+
+        def pick(name: str, value: str) -> Callable[[], None]:
+            return lambda: (setattr(st, name, value), self.render_detail(keep_scroll=True))
+
+        if which == "scope":
+            for key, label in SCOPE_NAMES.items():
+                act = menu.addAction(label, pick("scope", key))
+                act.setCheckable(True)
+                act.setChecked(st.scope == key)
+            menu.addSeparator()
+            menu.addAction("Open all chapters", lambda: self.on_link(QUrl("chapall:open")))
+            menu.addAction("Close all chapters", lambda: self.on_link(QUrl("chapall:close")))
+        elif which == "order":
+            for key, label in (("old", "Oldest first"), ("new", "Newest first")):
+                act = menu.addAction(label, pick("order", key))
+                act.setCheckable(True)
+                act.setChecked(st.order == key)
+        else:
+            return
+        self._menu = menu  # kept, so it stays open and tests can read it
+        menu.popup(QCursor.pos())
+
+    def _page_width_changed(self) -> None:
+        """The pane crossed a width at which a task page lays itself out differently: draw it again."""
+        if self.sel and self.sel[0] == "task" and self.detail_stack.currentIndex() == 0:
             self.render_detail(keep_scroll=True)
 
     def double_click(self, item: QTreeWidgetItem) -> None:

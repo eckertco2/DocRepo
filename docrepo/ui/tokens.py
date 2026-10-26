@@ -161,6 +161,11 @@ QPushButton#link:hover, QPushButton#moreLink:hover, QPushButton#rowLink:hover { 
 QPushButton::menu-indicator { image: url("$arrow"); width: 12px; height: 12px; subcontrol-origin: padding; subcontrol-position: right center;
   right: 6px; }
 QPushButton[menu="true"] { padding-right: 24px; }
+/* an icon-only button at the end of a command bar, such as the task page's More (release 5.21) */
+QPushButton#iconOnly { background: transparent; border: 1px solid transparent; padding: 0; min-width: 28px; max-width: 28px;
+  min-height: 28px; max-height: 28px; }
+QPushButton#iconOnly:hover { background: $hover; }
+QPushButton#iconOnly::menu-indicator { image: none; width: 0; }
 QToolButton { background: transparent; border: 1px solid transparent; border-radius: 4px; padding: 4px; color: $text; }
 QToolButton:hover { background: $hover; }
 QToolButton:pressed { background: $pressed; }
@@ -330,7 +335,7 @@ h2 { font-size: ${subtitle}pt; font-weight: 600; margin-top: 2px; margin-bottom:
 .lead { color: $text2; font-size: ${caption}pt; }
 .facts { color: $text2; font-size: ${caption}pt; }
 .text { white-space: pre-wrap; }
-.chs { color: $text2; font-size: ${caption}pt; font-weight: 600; }
+.chs { color: $text; font-weight: 600; margin-top: 12px; }
 .ch { background-color: $base; }
 .num { font-family: 'Segoe UI'; }
 .st-ns { color: $text2; background-color: $hover; }
@@ -342,6 +347,17 @@ h2 { font-size: ${subtitle}pt; font-weight: 600; margin-top: 2px; margin-bottom:
 .multi { color: $accent; background-color: $selected; }
 .lbl { color: $text; background-color: $hover; }
 .inh { color: $text2; font-style: italic; }
+.sec { font-weight: 600; margin-top: 18px; margin-bottom: 4px; }
+.dt { color: $text2; font-size: ${caption}pt; padding-right: 14px; }
+.rel { color: $text2; font-size: ${caption}pt; }
+.over { color: $critical; font-weight: 600; }
+.stat { background-color: $base; }
+.sk { color: $text2; font-size: ${caption}pt; font-weight: 600; }
+.desc { color: $text2; margin-top: 4px; }
+.lbli { color: $text2; }
+.rule { background-color: $stroke; }
+.tl { color: $text; }
+.tq { color: $text2; }
 .new { color: $caution; background-color: $caution_bg; }
 .u1 { }
 .u2 { background-color: $selected; }

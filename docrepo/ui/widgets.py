@@ -98,7 +98,8 @@ def set_filled(widget: QWidget, filled: bool, name: str = "filled", value: bool 
 
 
 class FlowLayout(QLayout):
-    """Lays its items out left to right, wrapping onto new lines, like words in a paragraph."""
+    """Lays its items out left to right, wrapping onto new lines, like words in a paragraph. A widget whose ``flowEnd``
+    property is set sits at its line's right end."""
 
     def __init__(self, parent: QWidget | None = None, spacing: int = 4) -> None:
         super().__init__(parent)
@@ -151,6 +152,9 @@ class FlowLayout(QLayout):
             hint = item.sizeHint()
             if x + hint.width() > rect.right() and line > 0:
                 x, y, line = rect.x(), y + line + self.spacing(), 0
+            widget = item.widget()
+            if widget is not None and widget.property("flowEnd"):  # kept at the line's end, as the task page's More is
+                x = max(x, rect.right() + 1 - hint.width())
             if move:
                 item.setGeometry(QRect(QPoint(x, y), hint))
             x += hint.width() + self.spacing()
