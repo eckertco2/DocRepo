@@ -255,11 +255,16 @@ QToolButton#info:checked, QToolButton#info:hover { background: $accent; border-c
 QLabel#keyTip { background: $text; color: $content; border-radius: 3px; padding: 0 5px; font-size: ${caption}pt; font-weight: 600; }
 
 /* the task page with its notes page (release 5.25): one white page; the notes are part of it, not a box on it */
-QWidget#taskPaneInner, QWidget#notesHead { background: $content; }
+QWidget#taskPaneInner, QWidget#notesWrap { background: $content; }
+/* the notes' frame (release 5.27, decision 130): the capture window's editor frame, its header band on the base colour */
+QFrame#notesCard { background: $content; border: 1px solid $stroke; border-bottom: 1px solid $control; border-radius: 4px; }
+QFrame#notesCard[typing="true"] { border-bottom: 2px solid $accent; }
+QFrame#notesCard QWidget#notesHead { background: $base; border: none; border-bottom: 1px solid $stroke;
+  border-top-left-radius: 4px; border-top-right-radius: 4px; }
 QTextEdit#notesPage, QTextEdit#notesPage:focus { border: none; border-radius: 0; background: transparent; padding: 0; }
 QLabel#notesSaved { color: $text2; }
 /* the Checklist summary (release 5.26): rows bound to the page's checklist lines */
-QWidget#summaryBox { background: $content; }
+QWidget#summaryBox { background: transparent; }
 QWidget#checkRow { border-radius: 4px; }
 QWidget#checkRow:hover { background: $hover; }
 QTextEdit#checkText, QTextEdit#checkText:focus { border: none; border-radius: 0; background: transparent; padding: 0; }

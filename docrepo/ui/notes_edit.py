@@ -18,6 +18,12 @@ the facts above and the history below (``task_pane``).
 - **Moving lines** (Alt+Shift+Up and Down) moves a line with the list items under it, or a folded heading with its
   section, keeping what each line is.
 - **Saving** happens a moment after typing stops, and when the page loses the caret (``changed``).
+- **Pictures, files and tables** (release 5.27, decisions 124 to 128): a picture pasted (``image_pasted``) or a file
+  dropped (``files_dropped``) becomes a capture of the page's, which the browse window makes; ``insert_item`` then puts
+  its picture or file line at the caret, with an empty list item under it for its description. A picture shows at its
+  own size up to the page's width, from ``picture_path``. A table pasted from Excel, Word, Outlook or a web page stays a
+  table (one line of text a cell, merged cells split); Tab and Shift+Tab go between cells, Tab in the last adds a row,
+  Enter goes down a row, and right-click adds or removes rows and columns. ``insert_table`` makes one.
 - **Checklists** (release 5.26): ``RichEdit``'s, on lines of text. The Checklist summary (``checklist_summary``) shows the
   page's checklist lines again, each row the line itself: ``checklist_blocks``, ``set_line_from``, ``remove_line``,
   ``add_check_item`` and ``go_to_block`` are what it uses.
@@ -26,9 +32,12 @@ from __future__ import annotations
 
 from datetime import date
 
-from PySide6.QtCore import QByteArray, QPoint, QRect, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import (QBrush, QColor, QFont, QFontMetrics, QPainter, QPainterPath, QTextBlockFormat, QTextCharFormat, QTextCursor,
-                           QTextDocument, QTextFormat, QTextListFormat)
+from pathlib import Path
+
+from PySide6.QtCore import QByteArray, QPoint, QRect, QRectF, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import (QBrush, QColor, QFont, QFontMetrics, QImage, QPainter, QPainterPath, QTextBlockFormat, QTextCharFormat,
+                           QTextCursor, QTextDocument, QTextFormat, QTextImageFormat, QTextLength, QTextListFormat, QTextTable,
+                           QTextTableFormat)
 from PySide6.QtWidgets import QSizePolicy, QTextEdit, QWidget
 
 from docrepo import markup, notes_page
@@ -44,6 +53,8 @@ PROPORTIONAL = QTextBlockFormat.LineHeightTypes.ProportionalHeight.value
 SAVE_AFTER_MS = 800
 #: Each heading level's size above the body's, in points.
 HEADING_SIZES = {1: 3.5, 2: 1.5, 3: 0.5}
+#: The widest a picture shows on the page, in pixels (release 5.27).
+PICTURE_WIDTH = 560
 
 
 def _grey() -> QColor:
@@ -57,6 +68,11 @@ class NotesEdit(RichEdit):
     open_ref = Signal(str)
     message = Signal(str)
     folds_changed = Signal()
+    files_dropped = Signal(list)  # local files dropped on the page (release 5.27)
+    focus_changed = Signal(bool)  # the frame round the notes shows where you're typing (decision 130)
+    takes_pictures = True
+    #: A document's file, for its picture: set by the browse window.
+    picture_path = None
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -73,6 +89,7 @@ class NotesEdit(RichEdit):
         self._hover = -1
         self._clip = None
         self._clip_lines = False
+        self._clip_first = None  # the first copied line's format and list, which Qt's fragment loses
         self._clip_token = 0
         self._blocks = 0
         doc = self.document()
@@ -113,11 +130,20 @@ class NotesEdit(RichEdit):
         return (scheme, ref) if scheme in ("capture", "document") and ref else None
 
     def kind(self, block) -> str:
-        """"heading", "caption", "file" or "text"."""
+        """"heading", "caption", "file", "picture", "attachment", "cell" (in a table) or "text"."""
         if block.blockFormat().headingLevel():
             return "heading"
+        if QTextCursor(block).currentTable() is not None:
+            return "cell"
+        it = block.begin()
+        while not it.atEnd():
+            if it.fragment().charFormat().isImageFormat():
+                return "picture"
+            it += 1
         ref = self.ref_of(block)
-        return ("caption" if ref[0] == "capture" else "file") if ref else "text"
+        if ref:
+            return "caption" if ref[0] == "capture" else "attachment" if block.textList() is not None else "file"
+        return "text"
 
     def heading_of(self, block):
         """The nearest heading at or above ``block``."""
@@ -143,6 +169,10 @@ class NotesEdit(RichEdit):
         elif kind == "caption":
             f.setTopMargin(10)
             f.setLineHeight(115, PROPORTIONAL)
+        elif kind == "picture":  # a picture's line is as tall as the picture (release 5.27)
+            f.setTopMargin(4)
+            f.setBottomMargin(4)
+            f.setLineHeight(100, PROPORTIONAL)
         else:
             f.setBottomMargin(2)
             f.setLineHeight(130, PROPORTIONAL)
@@ -220,6 +250,20 @@ class NotesEdit(RichEdit):
                     f.setBackground(QBrush(QColor(markup.HIGHLIGHTS.get(colour or "yellow", markup.HIGHLIGHTS["yellow"]))))
                 c.insertText(text, f)
             return
+        if line.kind in ("picture", "attachment"):
+            bf, cf = self._block_format("text"), self._char_format("file", 0, f"document:{line.ref}")
+            if new_block:
+                c.insertBlock(bf, QTextCharFormat())
+            else:
+                c.setBlockFormat(bf)
+                c.setBlockCharFormat(QTextCharFormat())
+            self._join_list(c, line.level, False)
+            if line.kind == "picture":
+                c.insertImage(self._image_format(line.text, line.ref))
+            else:
+                c.insertText(line.text, cf)
+            c.setCharFormat(QTextCharFormat())
+            return
         href = f"{'capture' if line.kind == 'caption' else 'document'}:{line.ref}" if line.kind != "heading" else ""
         bf, cf = self._block_format(line.kind, line.level), self._char_format(line.kind, line.level, href)
         if new_block:
@@ -248,8 +292,254 @@ class NotesEdit(RichEdit):
             c.createList(lf)
 
     def _write_lines(self, c: QTextCursor, lines: list[Line], fresh: bool) -> None:
-        for i, line in enumerate(lines):
-            self._put(c, line, not (fresh and i == 0))
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            if line.kind == "row":  # a table: its rows, the separator line not among them
+                rows = []
+                while i < len(lines) and lines[i].kind == "row":
+                    if not notes_page.is_separator(lines[i].text):
+                        rows.append(notes_page.cells_of(lines[i].text))
+                    i += 1
+                if rows:
+                    self._put_table(c, rows, fresh)
+                    fresh = True  # the empty line Qt keeps after a table takes the next line
+                continue
+            self._put(c, line, not fresh)
+            fresh = False
+            i += 1
+
+    # ---- tables (release 5.27, decision 128) ----
+    def _table_format(self) -> QTextTableFormat:
+        f = QTextTableFormat()
+        # Qt's ordinary grid, which every cell gets, rows added later too. Qt 6 collapses borders unless told not to, and a
+        # collapsed border needs each cell's own.
+        f.setBorderCollapse(False)
+        f.setBorder(1)
+        f.setBorderBrush(QBrush(QColor(tokens.colour("stroke_strong"))))
+        f.setBorderStyle(QTextTableFormat.BorderStyle.BorderStyle_Solid)
+        # A cell's room is its lines' margins (_pad_cells), not the table's padding: a folded section's lines take no
+        # room, so its table folds to its borders, which paintEvent covers.
+        f.setCellPadding(0)
+        f.setCellSpacing(0)
+        f.setHeaderRowCount(1)
+        f.setWidth(QTextLength(QTextLength.Type.PercentageLength, 100))
+        f.setTopMargin(4)
+        f.setBottomMargin(6)
+        return f
+
+    def _put_table(self, c: QTextCursor, rows: list[list[str]], fresh: bool) -> QTextTable:
+        """A table from its rows' cells (markup), after c's line, or in its place when that's an empty line."""
+        columns = max(len(r) for r in rows)
+        # Qt puts a table after the caret's line and an empty line after the table, so an empty line in its place goes.
+        here = c.block()
+        if fresh and not here.text() and here.previous().isValid():
+            prev = here.previous()
+            r = QTextCursor(self.document())
+            r.setPosition(prev.position() + prev.length() - 1)
+            r.setPosition(here.position() + here.length() - 1, QTextCursor.MoveMode.KeepAnchor)
+            r.removeSelectedText()
+            c.setPosition(prev.position() + prev.length() - 1)
+        elif not fresh:
+            c.movePosition(QTextCursor.MoveOperation.EndOfBlock)
+        table = c.insertTable(len(rows), columns, self._table_format())
+        for r, cells in enumerate(rows):
+            for col in range(columns):
+                cell = table.cellAt(r, col)
+                if r == 0:
+                    cf = cell.format()
+                    cf.setBackground(QColor(tokens.colour("base")))
+                    cell.setFormat(cf)
+                cc = cell.firstCursorPosition()
+                for text, marks, colour in markup._segments(cells[col] if col < len(cells) else ""):
+                    cc.insertText(text, self._marked(marks, colour, bold=r == 0))
+        self._pad_cells(table)
+        after = table.lastCursorPosition()
+        after.movePosition(QTextCursor.MoveOperation.NextBlock)
+        if after.block().textList() is not None:  # the line after a table is plain, whatever the line before it was
+            after.block().textList().remove(after.block())
+        bf = self._block_format("text")
+        after.setBlockFormat(bf)
+        after.setBlockCharFormat(QTextCharFormat())
+        c.setPosition(after.position())
+        return table
+
+    @staticmethod
+    def _pad_cells(table: QTextTable) -> None:
+        """Give every line in the table's cells its room (rows and columns added later too), in the edit going on."""
+        pad = QTextBlockFormat()
+        pad.setLeftMargin(6)
+        pad.setRightMargin(6)
+        pad.setTopMargin(4)
+        pad.setBottomMargin(4)
+        for r in range(table.rows()):
+            for col in range(table.columns()):
+                cell = table.cellAt(r, col)
+                b, last = cell.firstCursorPosition().block(), cell.lastCursorPosition().block()
+                while b.isValid():
+                    if b.blockFormat().leftMargin() != 6:
+                        QTextCursor(b).mergeBlockFormat(pad)
+                    if b == last:
+                        break
+                    b = b.next()
+
+    def _change_table(self, table: QTextTable, change) -> None:
+        """Rows or columns added or taken away, their cells given their room, as one step for Ctrl+Z."""
+        c = self.textCursor()
+        c.beginEditBlock()
+        change()
+        self._pad_cells(table)
+        c.endEditBlock()
+
+    @staticmethod
+    def _marked(marks, colour, bold: bool = False) -> QTextCharFormat:
+        f = QTextCharFormat()
+        if "b" in marks or bold:
+            f.setFontWeight(QFont.Weight.Bold if "b" in marks else QFont.Weight.DemiBold)
+        if "i" in marks:
+            f.setFontItalic(True)
+        if "s" in marks:
+            f.setFontStrikeOut(True)
+        if "u" in marks:
+            f.setFontUnderline(True)
+        if "mark" in marks:
+            f.setBackground(QBrush(QColor(markup.HIGHLIGHTS.get(colour or "yellow", markup.HIGHLIGHTS["yellow"]))))
+        return f
+
+    @staticmethod
+    def table_lines(table: QTextTable) -> list[str]:
+        """A table as the page keeps it: Markdown's rows, its first row the header, a cell's lines joined."""
+        rows = []
+        for r in range(table.rows()):
+            cells = []
+            for col in range(table.columns()):
+                cell = table.cellAt(r, col)
+                if cell.row() != r or cell.column() != col:  # a merged cell's other places: split, and empty
+                    cells.append("")
+                    continue
+                b, last = cell.firstCursorPosition().block(), cell.lastCursorPosition().block()
+                parts = []
+                while b.isValid():
+                    words, _ = block_markup(b)
+                    if b == cell.firstCursorPosition().block() and table.format().headerRowCount() and r == 0:
+                        words = words.replace("**", "") if words.startswith("**") and words.endswith("**") else words
+                    if words.strip():
+                        parts.append(words.strip())
+                    if b == last:
+                        break
+                    b = b.next()
+                cells.append(" ".join(parts))
+            rows.append(cells)
+        out = [notes_page.row_line(rows[0]), notes_page.separator_line(table.columns())] if rows else []
+        return out + [notes_page.row_line(r) for r in rows[1:]]
+
+    def insert_table(self, rows: int, columns: int) -> None:
+        """A table of ``rows`` (the header row among them) by ``columns``, after the caret's line, the caret in its
+        first cell (the Table button)."""
+        c = self.textCursor()
+        b = c.block()
+        fresh = not b.text() and self.kind(b) == "text" and b.textList() is None
+        c.beginEditBlock()
+        table = self._put_table(c, [[""] * columns for _ in range(rows)], fresh)
+        c.endEditBlock()
+        self.setTextCursor(table.cellAt(0, 0).firstCursorPosition())
+        self._restructure.start()
+
+    def _table_key(self, event) -> bool:
+        """Tab, Shift+Tab and Enter in a table: the next or previous cell, a new row after the last, or the cell below."""
+        c = self.textCursor()
+        table = c.currentTable()
+        if table is None or event.modifiers() & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier):
+            return False
+        key = event.key()
+        cell = table.cellAt(c)
+        r, col = cell.row(), cell.column()
+        if key in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab):
+            back = key == Qt.Key.Key_Backtab or bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+            n = r * table.columns() + col + (-1 if back else 1)
+            if n < 0:
+                return True
+            if n >= table.rows() * table.columns():
+                self._change_table(table, lambda: table.appendRows(1))
+            self.setTextCursor(table.cellAt(n // table.columns(), n % table.columns()).firstCursorPosition())
+            return True
+        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            if r + 1 >= table.rows():
+                self._change_table(table, lambda: table.appendRows(1))
+            self.setTextCursor(table.cellAt(r + 1, col).firstCursorPosition())
+            return True
+        return False
+
+    def contextMenuEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        """Right-click in a table adds or removes its rows and columns; elsewhere, the usual menu."""
+        c = self.cursorForPosition(event.pos())
+        table = c.currentTable()
+        menu = self.createStandardContextMenu(event.pos())
+        if table is not None:
+            cell = table.cellAt(c)
+            r, col = cell.row(), cell.column()
+            menu.addSeparator()
+            for text, act in (("Insert row above", lambda: table.insertRows(r, 1)), ("Insert row below", lambda: table.insertRows(r + 1, 1)),
+                              ("Insert column left", lambda: table.insertColumns(col, 1)),
+                              ("Insert column right", lambda: table.insertColumns(col + 1, 1))):
+                menu.addAction(text, lambda act=act: self._change_table(table, act))
+            menu.addSeparator()
+            menu.addAction("Delete row", lambda: table.removeRows(r, 1) if table.rows() > 1 else None)
+            menu.addAction("Delete column", lambda: table.removeColumns(col, 1) if table.columns() > 1 else None)
+        self._menu = menu  # kept, so tests can reach it
+        menu.popup(event.globalPos())
+
+    # ---- pictures and files put on the page (release 5.27, decisions 124 to 126) ----
+    def _image_format(self, name: str, document_id: str) -> QTextImageFormat:
+        f = QTextImageFormat()
+        f.setName(f"docimg:{document_id}")
+        f.setToolTip(name)
+        f.setAnchor(True)
+        f.setAnchorHref(f"document:{document_id}")
+        image = self._picture(document_id)
+        if image is not None and not image.isNull():
+            w = min(image.width(), PICTURE_WIDTH)
+            f.setWidth(w)
+            f.setHeight(image.height() * w / max(1, image.width()))
+        else:
+            f.setWidth(160)
+            f.setHeight(24)
+        return f
+
+    def _picture(self, document_id: str) -> QImage | None:
+        path = self.picture_path(document_id) if self.picture_path else None
+        if path is None or not Path(path).is_file():
+            return None
+        image = QImage(str(path))
+        return None if image.isNull() else image
+
+    def loadResource(self, kind: int, url: QUrl):  # noqa: N802 - Qt's name
+        if url.scheme() == "docimg":
+            image = self._picture(url.path())
+            if image is None:  # the file's gone: a grey box with its name, as the page still holds it
+                image = QImage(160, 24, QImage.Format.Format_ARGB32)
+                image.fill(QColor(tokens.colour("hover")))
+            return image
+        return super().loadResource(kind, url)
+
+    def insert_item(self, kind: str, text: str, document_id: str) -> None:
+        """A picture or a file put on the page, at the caret's line, with an empty list item under it for its
+        description, the caret there (decisions 124 to 126)."""
+        c = self.textCursor()
+        c.clearSelection()
+        b = c.block()
+        fresh = not b.text() and self.kind(b) == "text" and b.textList() is None
+        c.beginEditBlock()
+        if not fresh:
+            c.movePosition(QTextCursor.MoveOperation.EndOfBlock)
+        self._put(c, Line(kind, text, 1, document_id), not fresh)
+        self.style_block(c.block())
+        self._put(c, Line("text", "  - "), True)
+        self.style_block(c.block())
+        c.endEditBlock()
+        self.setTextCursor(c)
+        self.setFocus()
+        self._restructure.start()
 
     def set_page(self, body: str, folds: list[str] = (), day_headings: bool = False) -> None:
         """Show a page, as docs.db holds it, with the headings in ``folds`` folded. Undo starts afresh."""
@@ -280,9 +570,27 @@ class NotesEdit(RichEdit):
 
     def page(self) -> str:
         """The page as docs.db keeps it."""
-        out = []
+        out = self._lines_out()
+        while out and not out[-1].strip():
+            out.pop()
+        return "\n".join(out)
+
+    def _lines_out(self) -> list[str]:
+        out, done_tables = [], set()
         for b in self.blocks():
             kind = self.kind(b)
+            if kind == "cell":
+                table = QTextCursor(b).currentTable()
+                if id(table) not in done_tables and table is not None:
+                    done_tables.add(id(table))
+                    out += self.table_lines(table)
+                continue
+            if kind in ("picture", "attachment"):
+                level = b.textList().format().indent() if b.textList() is not None else 1
+                ref = self.ref_of(b) or ("document", self._image_ref(b))
+                text = self._image_name(b) if kind == "picture" else " ".join(b.text().split())
+                out.append(notes_page.item_line(kind, text, ref[1], level))
+                continue
             if kind == "heading":
                 out.append(notes_page.heading_line(" ".join(b.text().split()), b.blockFormat().headingLevel()))
             elif kind in ("caption", "file"):
@@ -291,9 +599,27 @@ class NotesEdit(RichEdit):
                 out.append(notes_page.caption_line(text, ref[1]) if kind == "caption" else notes_page.file_line(text, ref[1]))
             else:
                 out.append(notes_page.text_line(block_markup(b)[0]))
-        while out and not out[-1].strip():
-            out.pop()
-        return "\n".join(out)
+        return out
+
+    @staticmethod
+    def _image_ref(block) -> str:
+        it = block.begin()
+        while not it.atEnd():
+            f = it.fragment().charFormat()
+            if f.isImageFormat():
+                return f.toImageFormat().name().removeprefix("docimg:")
+            it += 1
+        return ""
+
+    @staticmethod
+    def _image_name(block) -> str:
+        it = block.begin()
+        while not it.atEnd():
+            f = it.fragment().charFormat()
+            if f.isImageFormat():
+                return f.toolTip() or f.toImageFormat().name().removeprefix("docimg:")
+            it += 1
+        return ""
 
     @property
     def dirty(self) -> bool:
@@ -309,7 +635,12 @@ class NotesEdit(RichEdit):
 
     def focusOutEvent(self, event) -> None:  # noqa: N802 - Qt's name
         self.save_now()  # before the capture window, say, adds to the page
+        self.focus_changed.emit(False)
         super().focusOutEvent(event)
+
+    def focusInEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        self.focus_changed.emit(True)
+        super().focusInEvent(event)
 
     def _contents_change(self, _pos: int, removed: int, added: int) -> None:
         if self._quiet:
@@ -505,7 +836,12 @@ class NotesEdit(RichEdit):
         end, b, captures, lines = self.section_end(heading), heading.next(), 0, 0
         while b.isValid() and b.position() <= end.position():
             captures += self.kind(b) == "caption"
-            lines += 1
+            table = QTextCursor(b).currentTable()
+            if table is None:
+                lines += 1
+            else:  # a table is as many lines as it has rows
+                cell = table.cellAt(b.position())
+                lines += cell.column() == 0 and b == cell.firstCursorPosition().block()
             b = b.next()
         if captures:
             return f"{captures} capture{'s' if captures != 1 else ''}"
@@ -596,6 +932,7 @@ class NotesEdit(RichEdit):
             other = self._unit(last + 1, last + 1)
         lines = notes_page.lines_of(self.page_all())
         if len(lines) != count:
+            self.message.emit("Lines don't move on a page with a table yet. Cut and paste them instead.")
             return
         folded = {n for n in range(count) if doc.findBlockByNumber(n).userState() == FOLDED}
         unit, moved = list(range(first, last + 1)), list(range(other[0], other[1] + 1))
@@ -640,19 +977,9 @@ class NotesEdit(RichEdit):
         return h.blockNumber() if h.isValid() else n
 
     def page_all(self) -> str:
-        """The page, every line kept, empty ones at its end too: what moving lines works on."""
-        out = []
-        for b in self.blocks():
-            kind = self.kind(b)
-            if kind == "heading":
-                out.append(notes_page.heading_line(" ".join(b.text().split()), b.blockFormat().headingLevel()))
-            elif kind in ("caption", "file"):
-                ref = self.ref_of(b)
-                text = " ".join(b.text().split())
-                out.append(notes_page.caption_line(text, ref[1]) if kind == "caption" else notes_page.file_line(text, ref[1]))
-            else:
-                out.append(notes_page.text_line(block_markup(b)[0]))
-        return "\n".join(out)
+        """The page, every line kept, empty ones at its end too: what moving lines works on. (A table makes the
+        lines and the blocks differ in number, so lines don't move on a page with one.)"""
+        return "\n".join(self._lines_out())
 
     # ---- keys ----
     NAV = {Qt.Key.Key_Up: -1, Qt.Key.Key_Down: 1, Qt.Key.Key_Left: -1, Qt.Key.Key_Right: 1}
@@ -683,6 +1010,8 @@ class NotesEdit(RichEdit):
         c = self.textCursor()
         b = c.block()
         kind = self.kind(b)
+        if kind == "cell" and self._table_key(event):
+            return
         if key in (Qt.Key.Key_PageUp, Qt.Key.Key_PageDown) and self.on_page_key is not None:
             self.on_page_key(-1 if key == Qt.Key.Key_PageUp else 1, bool(mods & Qt.KeyboardModifier.ShiftModifier))
             return
@@ -699,7 +1028,10 @@ class NotesEdit(RichEdit):
         if combo is not None:
             super().keyPressEvent(event)
             return
-        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and kind != "text":
+        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and kind in ("picture", "attachment"):
+            self._to_description(b)
+            return
+        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and kind not in ("text", "cell"):
             # Enter on a heading, a caption or a file line never splits it: a new line of text under it.
             if b.userState() == FOLDED:
                 b.setUserState(-1)
@@ -711,11 +1043,11 @@ class NotesEdit(RichEdit):
             c.endEditBlock()
             self.setTextCursor(c)
             return
-        if kind in ("caption", "file") and not c.hasSelection() and key in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete):
+        if kind in ("caption", "file", "picture", "attachment") and not c.hasSelection() and key in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete):
             self._remove_line(b)
             return
         if key == Qt.Key.Key_Backspace and not c.hasSelection() and c.positionInBlock() == 0 and b.previous().isValid() \
-                and self.kind(b.previous()) != "text" and b.textList() is None:
+                and self.kind(b.previous()) not in ("text", "cell") and b.textList() is None and kind != "cell":
             if not b.text():
                 c.select(QTextCursor.SelectionType.BlockUnderCursor)
                 c.removeSelectedText()
@@ -724,10 +1056,13 @@ class NotesEdit(RichEdit):
             else:
                 super().keyPressEvent(event)
             return
-        if key == Qt.Key.Key_Delete and not c.hasSelection() and c.atBlockEnd() and b.next().isValid() and self.kind(b.next()) != "text":
+        if key == Qt.Key.Key_Delete and not c.hasSelection() and c.atBlockEnd() and b.next().isValid() \
+                and self.kind(b.next()) not in ("text", "cell") and kind != "cell":
             self.message.emit("Delete here would join the heading or caption below to this line, so it does nothing.")
             return
-        if kind in ("caption", "file") and event.text() and event.text().isprintable() and not mods & Qt.KeyboardModifier.ControlModifier:
+        if kind in ("picture", "attachment") and event.text() and event.text().isprintable() and not mods & Qt.KeyboardModifier.ControlModifier:
+            self._to_description(b)  # typing on a picture or a file goes to its description
+        elif kind in ("caption", "file") and event.text() and event.text().isprintable() and not mods & Qt.KeyboardModifier.ControlModifier:
             # Typing on a caption goes to the line below it: the caption stays the capture's (decision 109).
             nxt = b.next()
             if nxt.isValid() and self.kind(nxt) == "text" and nxt.isVisible():
@@ -740,8 +1075,45 @@ class NotesEdit(RichEdit):
             self.setCurrentCharFormat(QTextCharFormat())
         super().keyPressEvent(event)
 
+    def _description_of(self, block):
+        """The list item under a picture or attachment, a level in: its description, if it has one."""
+        nxt = block.next()
+        level = block.textList().format().indent() if block.textList() is not None else 1
+        if nxt.isValid() and nxt.textList() is not None and nxt.textList().format().indent() == level + 1 and self.kind(nxt) == "text":
+            return nxt
+        return None
+
+    def _to_description(self, block) -> None:
+        """The caret to a picture's or attachment's description, made if it has none."""
+        d = self._description_of(block)
+        c = QTextCursor(block)
+        if d is None:
+            level = block.textList().format().indent() if block.textList() is not None else 1
+            c.beginEditBlock()
+            c.movePosition(QTextCursor.MoveOperation.EndOfBlock)
+            self._put(c, Line("text", "  " * level + "- "), True)
+            self.style_block(c.block())
+            c.endEditBlock()
+        else:
+            c = QTextCursor(d)
+            c.movePosition(QTextCursor.MoveOperation.EndOfBlock)
+        self.setTextCursor(c)
+        self.setCurrentCharFormat(QTextCharFormat())
+
     def _remove_line(self, block) -> None:
-        """A caption or file line goes with the line break before it, so the line below keeps its own format."""
+        """A caption or file line goes with the line break before it, so the line below keeps its own format. A picture
+        or attachment goes with its description; its file and capture stay (decision 125)."""
+        if self.kind(block) in ("picture", "attachment"):
+            d = self._description_of(block)
+            c = QTextCursor(self.document())
+            c.beginEditBlock()
+            if d is not None:
+                self.remove_line(d)
+            self.remove_line(block)
+            c.endEditBlock()
+            self.message.emit("Taken off the page. Its file and its capture stay, and Captures says it's not on the page. "
+                              "Ctrl+Z puts it back.")
+            return
         ref, prev = self.ref_of(block), block.previous()
         c = QTextCursor(self.document())
         c.beginEditBlock()
@@ -778,17 +1150,66 @@ class NotesEdit(RichEdit):
         self._clip_token += 1
         self._clip = c.selection()
         self._clip_lines = doc.findBlock(start) != doc.findBlock(end) and at_edge(start) and at_edge(end)
+        first = doc.findBlock(start)
+        lst = first.textList()
+        self._clip_first = (QTextBlockFormat(first.blockFormat()),
+                            (lst.format().indent(), lst.format().style() in NUMBERED) if lst is not None else None)
         mime.setData(PAGE_MIME, QByteArray(str(self._clip_token).encode()))
         return mime
+
+    def _paste_html_tables(self, html: str) -> None:
+        """Pasted HTML with tables: each table as a table of the page's (one line of text a cell, merged cells split, no
+        colours or widths), and the rest as lines of DocRepo's markup, in after the caret's line."""
+        tmp = QTextDocument()
+        tmp.setHtml(html)
+        lines: list[Line] = []
+        it = tmp.rootFrame().begin()
+        while not it.atEnd():
+            frame, b = it.currentFrame(), it.currentBlock()
+            if frame is not None and isinstance(frame, QTextTable):
+                lines += [Line("row", x) for x in self.table_lines(frame)]
+            elif b.isValid():
+                words, _ = block_markup(b)
+                if words.strip():
+                    lines.append(Line("text", words))
+            it += 1
+        if not lines:
+            return
+        c = self.textCursor()
+        c.clearSelection()
+        here = c.block()
+        fresh = not here.text() and self.kind(here) == "text" and here.textList() is None
+        c.beginEditBlock()
+        self._write_lines(c, lines, fresh)
+        c.endEditBlock()
+        for b in list(self.blocks()):
+            if self.kind(b) != "cell":
+                self.style_block(b)
+        self.setTextCursor(c)
+        self._restructure.start()
+
+    def canInsertFromMimeData(self, source) -> bool:  # noqa: N802 - Qt's name
+        return source.hasUrls() or source.hasImage() or super().canInsertFromMimeData(source)
 
     def insertFromMimeData(self, source) -> None:  # noqa: N802 - Qt's name
         # Read as data, not hasFormat: Qt's own copy lists only its own formats, as the clipboard hands it back here.
         ours = self._clip is not None and bytes(source.data(PAGE_MIME)).decode(errors="ignore") == str(self._clip_token)
         if not ours:
+            files = [u.toLocalFile() for u in source.urls() if u.isLocalFile() and Path(u.toLocalFile()).is_file()] if source.hasUrls() else []
+            if files:  # files dropped on the page: captures of the page's (decision 126)
+                self.files_dropped.emit(files)
+                return
+            if source.hasHtml() and "<table" in source.html().lower():  # a table from Excel, Word or a web page (128)
+                self._paste_html_tables(source.html())
+                return
             super().insertFromMimeData(source)
             return
         tmp = QTextDocument()
         QTextCursor(tmp).insertFragment(self._clip)
+        if tmp.rootFrame().childFrames():  # a table among what's pasted: Qt's own paste keeps it
+            self.textCursor().insertFragment(self._clip)
+            self._restructure.start()
+            return
         rows = []
         b = tmp.begin()
         while b.isValid():
@@ -810,8 +1231,9 @@ class NotesEdit(RichEdit):
             c.endEditBlock()
             self.setTextCursor(c)
             return
+        first_kept = True
         if len(rows) > 1 and not rows[0].text():
-            rows = rows[1:]
+            rows, first_kept = rows[1:], False
         if len(rows) > 1 and not rows[-1].text():
             rows = rows[:-1]
         c.clearSelection()
@@ -821,14 +1243,18 @@ class NotesEdit(RichEdit):
         if not fresh:
             c.movePosition(QTextCursor.MoveOperation.EndOfBlock)
         for i, row in enumerate(rows):
-            bf = QTextBlockFormat(row.blockFormat())
+            # A fragment's first line comes back without its format (a heading as plain text), so it's the copied one's.
+            own = i == 0 and first_kept and self._clip_first is not None
+            bf = QTextBlockFormat(self._clip_first[0] if own else row.blockFormat())
             bf.clearProperty(QTextFormat.Property.ObjectIndex)
             if i or not fresh:
                 c.insertBlock(bf, QTextCharFormat())
             else:
                 c.setBlockFormat(bf)
-            if row.textList() is not None:
-                self._join_list(c, row.textList().format().indent(), row.textList().format().style() in NUMBERED)
+            listed = self._clip_first[1] if own else (
+                (row.textList().format().indent(), row.textList().format().style() in NUMBERED) if row.textList() is not None else None)
+            if listed is not None:
+                self._join_list(c, *listed)
             it = row.begin()
             while not it.atEnd():
                 c.insertText(it.fragment().text(), it.fragment().charFormat())
@@ -884,6 +1310,7 @@ class NotesEdit(RichEdit):
         super().paintEvent(event)
         area = event.rect()
         p = QPainter(self.viewport())
+        self._cover_folded_tables(p)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         small = tokens.ui_font(tokens.CAPTION)
         layout = self.document().documentLayout()
@@ -898,6 +1325,25 @@ class NotesEdit(RichEdit):
                     self._paint_heading(p, b, small)
             b = b.next()
         p.end()
+
+    def _cover_folded_tables(self, p: QPainter) -> None:
+        """A table in a folded section keeps its borders (Qt lays out a table whose lines are hidden), so they're covered."""
+        layout, dy = self.document().documentLayout(), self.verticalScrollBar().value()
+        for frame in self.document().rootFrame().childFrames():
+            first = frame.firstCursorPosition().block() if isinstance(frame, QTextTable) else None
+            if first is None or first.isVisible():
+                continue
+            # The gap between the lines that show above and below it: the table's leftovers are all in there.
+            above, below = first.previous(), frame.lastCursorPosition().block().next()
+            while above.isValid() and not above.isVisible():
+                above = above.previous()
+            while below.isValid() and not below.isVisible():
+                below = below.next()
+            top = layout.blockBoundingRect(above).bottom() if above.isValid() else 0
+            bottom = layout.blockBoundingRect(below).top() if below.isValid() else self.document().size().height()
+            if bottom > top:
+                p.fillRect(QRectF(0, top - dy, self.viewport().width(), bottom - top),
+                           QColor(tokens.colour("content")) if not LOOK.classic else QColor("#ffffff"))
 
     def _paint_heading(self, p: QPainter, b, small: QFont) -> None:
         r = self._row(b)

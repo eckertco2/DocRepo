@@ -534,7 +534,7 @@ class Pages:
         items = self.stories.raw_items(task_id)
         if not items:
             return '<p class="note">Nothing has come in yet.</p>'
-        on_page = set(notes_page.capture_ids(self.m.pages.get(task_id, "")))
+        on_page = notes_page.on_page(self.m, task_id, self.m.pages.get(task_id, ""))
         return self.story_list(items, lambda r: self.raw_item(r, state, task_id, on_page), state)
 
     def story_list(self, items: list, render: Callable, state: PageState) -> str:

@@ -42,7 +42,7 @@ def test_a_version_1_database_is_brought_up_to_date(data_root, fs):
     old.close()
     conn = db.connect(fs, data_root)
     try:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 10
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 11
         assert conn.execute("SELECT name, sha256, text_status FROM documents").fetchone()[:] == ("a.pdf", None, None)
         assert conn.execute("SELECT count(*) FROM search_text").fetchone()[0] == 0
         assert conn.execute("SELECT count(*) FROM tasks WHERE discarded IS NOT NULL").fetchone()[0] == 0

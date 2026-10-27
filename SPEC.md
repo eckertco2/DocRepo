@@ -61,6 +61,7 @@ A missing file gives the defaults. An unreadable file stops DocRepo with an erro
 - **Allowed places:** the data root, the backup folder (if set) and `%LOCALAPPDATA%\DocRepo\`.
 - **Checks on every path:** it must be a full path with a drive or a `\\server\share`. Device paths (`\\?\`, `\\.\`), alternate data streams, names ending in a dot or space, characters Windows forbids and reserved device names (CON, NUL, COM1 and so on) are refused. The path is then resolved through `..`, symlinks and junctions, and must land inside an allowed place.
 - **Writing:** `write_text` writes only `.md`, `.json`, `.txt` and `.log` files, as UTF-8, atomically (a temporary file in the same folder replaces the target).
+- **Pictures:** `write_picture` (release 5.27, decision 127) writes a picture the owner pasted, as a `.png` file only, atomically, and never over a file that's there.
 - **Copying:** `copy_file` copies a file the owner asked to keep. It only reads the source, and never overwrites.
 - **Moving:** `move` moves only from one allowed place to another, and never overwrites.
 - **Replacing:** `replace_file` (copy over) and `replace` (move over) work only inside a SafeFS's replace roots. `make_safe_fs` makes the backup folder the only one, and none when the backup folder is inside the data root or holds it, so a backup can bring its copies up to date (9.1) while nothing in the data root is ever overwritten by a copy.
@@ -98,7 +99,7 @@ The words used here are defined in `GLOSSARY.md`.
 
 ### 6.1 The database
 - `System\docs.db`, SQLite, is the source of truth. Folders never encode the task tree: task folders are named by ID only, and nothing moves when a task is renamed or gets another parent.
-- `docrepo/db.py` creates the schema and keeps its version in SQLite's `user_version` (now 10). An older DocRepo database is brought up to date when it's opened (version 2, phase 3: each document's text status, size, modified time and checksum, plus `app_state` and `reminders_shown`; version 3, phase 4: the search index, `search_text`; version 4, release 5.3: `discarded` and `discard_reason` on tasks and captures, and `agenda_items` made again, keeping its rows, so an item can close as Done; version 5, release 5.4: `email_layer_0` on captures; version 6, release 5.7: `formatted` on captures; version 7, release 5.8: `from_notes`, `item` and `meeting` on captures; version 8, release 5.9: `email`, `person_group` and `role` on people, `parent` on labels, `plant_event` on tasks, and `task_references`; version 9, release 5.23: `priority` and `priority_rank` on tasks). A database from a newer DocRepo, or one that isn't DocRepo's, is refused rather than changed. Version 10 (release 5.25): `task_pages` (each task's notes page), `task_page_versions` (the page as it stood at the end of each day it changed, when the owner last edited it that day, and whether they did), tasks' `day_headings`, and the search index made again with pages in it.
+- `docrepo/db.py` creates the schema and keeps its version in SQLite's `user_version` (now 11). An older DocRepo database is brought up to date when it's opened (version 2, phase 3: each document's text status, size, modified time and checksum, plus `app_state` and `reminders_shown`; version 3, phase 4: the search index, `search_text`; version 4, release 5.3: `discarded` and `discard_reason` on tasks and captures, and `agenda_items` made again, keeping its rows, so an item can close as Done; version 5, release 5.4: `email_layer_0` on captures; version 6, release 5.7: `formatted` on captures; version 7, release 5.8: `from_notes`, `item` and `meeting` on captures; version 8, release 5.9: `email`, `person_group` and `role` on people, `parent` on labels, `plant_event` on tasks, and `task_references`; version 9, release 5.23: `priority` and `priority_rank` on tasks). A database from a newer DocRepo, or one that isn't DocRepo's, is refused rather than changed. Version 10 (release 5.25): `task_pages` (each task's notes page), `task_page_versions` (the page as it stood at the end of each day it changed, when the owner last edited it that day, and whether they did), tasks' `day_headings`, and the search index made again with pages in it. Version 11 (release 5.27): `page_made` on captures, for a picture pasted or a file dropped on a notes page (6.11).
 - Foreign keys are on. Every change runs inside one transaction, so a save happens completely or not at all.
 - The tables:
 
@@ -187,7 +188,7 @@ The words used here are defined in `GLOSSARY.md`.
 
 ### 6.9 Generated pages
 - Every task gets `Tasks\<id>\Task.md`, and the data root `Contents.md`. They're one-way printouts for reading in VS Code's Markdown preview or from a backup; DocRepo never reads them back. Links are relative.
-- `Task.md`: the title, a note that the page is generated, and a field table (ID, state, then urgent, meeting, plant event and recurrence when set, parents, labels with inherited ones marked, lead and assignees with hours, start, due with days until due, deadline, then reminder when set, each reference field with a value (release 5.9), and the agendas it's on). Then Description, Current status, Subtasks, Agenda (for a target with open items, or an open meeting), Status log (newest first), Summary log, Raw text log and Files. Since release 5.25 (6.11): Notes, after Current status, is the task's notes page, its headings two levels down and each caption a link to its capture.md ("_No notes yet._" when empty); the raw text log is Captures, a capture not on the page saying "· not on the notes page".
+- `Task.md`: the title, a note that the page is generated, and a field table (ID, state, then urgent, meeting, plant event and recurrence when set, parents, labels with inherited ones marked, lead and assignees with hours, start, due with days until due, deadline, then reminder when set, each reference field with a value (release 5.9), and the agendas it's on). Then Description, Current status, Subtasks, Agenda (for a target with open items, or an open meeting), Status log (newest first), Summary log, Raw text log and Files. Since release 5.25 (6.11): Notes, after Current status, is the task's notes page, its headings two levels down and each caption a link to its capture.md ("_No notes yet._" when empty); the raw text log is Captures, a capture not on the page saying "· not on the notes page". Since release 5.27 a picture on the page is a picture in Task.md, an attachment a link to its file, each with its description under it, and a table a table.
 - `Contents.md`: open tasks as an indented tree, a task with two parents shown under each and marked "also under", then Parked, Closed in the last 30 days, Agendas, Unfiled, People and Labels.
 - A page is rewritten only when more than its "Generated from docs.db on" line would change.
 - The exact formats are those of the browse tool mockup's examples, kept in `tests/fixtures/examples.md`.
@@ -203,8 +204,12 @@ The words used here are defined in `GLOSSARY.md`.
   DocRepo's markup (5.7) and three more kinds. A **heading** is `# `, `## ` or `### ` and any text (decision 118); one
   that reads as a date ("Thu 8 Oct 2026") is a day heading. A **caption** is a line that's one link to a capture,
   `[Thu 8 Oct 2026 · 10:42 am · Note](capture:C000101)`: it starts the capture's block and dates it (109, 120). A **file
-  line** is one link to a document, `[File: Pump spec.docx, the vendor's datasheet](document:D000012)` (96). A line of
-  text that would read as one of them starts with a backslash; a link's text escapes `]` and `\`.
+  line** is one link to a document, `[File: Pump spec.docx, the vendor's datasheet](document:D000012)` (96). Since
+  release 5.27 (124 to 128): a **picture** is a list item that's one picture of a document,
+  `- ![Picture 2026-10-27 1042.png](document:D000031)`, and an **attachment** a list item that's one link to a document,
+  `- [File: Pump curve.pdf](document:D000032)`, each with its description as the list item under it; a **table** is
+  Markdown's rows (`| Part | Qty |`, then `|---|---|`), its first row the header, one line of text a cell. A line of
+  text that would read as one of them starts with a backslash (`\#`, `\[`, `\|`); a link's text escapes `]` and `\`.
 - **A capture's block** (`notes_page.block`): its caption, saying what it is ("Note", "New task", "Update: Due date moved
   to Fri 23 Oct.", "Email from Tom Becker: Re: impeller delivery", "Decision from the notes of …", "Meeting notes"), its
   typed text in full with names as written (`@Tom Becker`) and without file and link lines (96, 114), and a file line for
@@ -237,6 +242,21 @@ The words used here are defined in `GLOSSARY.md`.
   them in page order with the heading each sits under. Task.md prints the **Checklist summary** at the top of Notes
   ("**Checklist** · 1 of 4 done", the open lines, then the done ones). Ticks and changes to the lines are edits of the
   page: nothing goes into the status log (90).
+- **Pictures and files** (release 5.27, decisions 124 to 127): a picture pasted on the page is written as a PNG in the
+  task's `Files` folder ("Picture 2026-10-27 1042.png", made unique; `edits.add_page_picture`, `SafeFS.write_picture`),
+  and a file dropped on it is tracked where it is, its text read, as a dropped file is in the capture window
+  (`edits.add_page_file`). Each is a capture of its own, a Note on the task with the file as its document and no text,
+  **made on the page** (`page_made`): the page shows it at the caret, as a picture or an attachment with an empty line
+  under it for its description, so saving it adds no block, and it's on the page while its picture or attachment is
+  (`notes_page.on_page`). Add it again puts it back at the page's end, without a caption. A capture's picture (a
+  dropped picture or one pasted in the capture window, not an email's, whose pictures are mostly signatures and logos)
+  comes onto the page as a picture too, its description under it; its other files stay file lines.
+- **A picture's or attachment's description** is the list item under it (125): saving the page keeps it as the
+  document's file description (`edits.sync_descriptions`), so Files, search and Task.md read the same words. Left
+  empty, it's the made-up one ("*task* – Pasted picture – *name*", release 5.5's rule), which the page shows as an empty
+  line to be written.
+- **Tables** (128): kept as their rows, read back into a table. Task.md prints them as Markdown tables, and search reads
+  their cells' words.
 - **captures stay the record** (101): a capture's `capture.md` is written once when it's saved, and then only ever filed
   (112). Its words are fixed on the page; Edit fixes only its title and summary, in docs.db.
 
@@ -294,6 +314,7 @@ The words used here are defined in `GLOSSARY.md`.
 
 ### 7.5 Files, text and Outlook emails
 - `docrepo/extract.py` reads text, opening files read-only: `.txt`, `.md`, `.csv`, `.log`, `.json` (UTF-8, UTF-16 with a BOM, or Windows-1252), `.pdf` (pypdf), `.docx` (python-docx: paragraphs and tables), `.pptx` (read with the standard library since release 5.3.1, as a zip of XML parts: each slide's text in the deck's order, shapes inside groups too, tables row by row, and the speaker notes; a part with a DTD, or bigger than 64 MB unpacked, is refused), `.xlsx`/`.xlsm` (openpyxl, read-only: sheet names and cell values), `.eml`. Anything else is recorded with no text. Each document notes how it went (`text_status`: ok, partial when cut at `extracted_text_cap_chars`, none, or error) and how many characters it kept.
+- **A picture pasted in the content text** (release 5.27, decision 129) becomes a file of the capture's, as a dropped file does: a row named "Picture 2026-10-27 1042.png" (made unique), written as a PNG in the capture's `attachments` folder when it's saved (`SafeFS.write_picture`), its description left empty becoming "*task* – Pasted picture – *name*". It isn't shown in the text. On its task's notes page it's a picture, with its description under it (6.11).
 - **Outlook (phase 3b, tested on the corporate computer):** `docrepo/outlook.py`, through classic Outlook's COM interface (pywin32). DocRepo finds the running Outlook with `GetActiveObject`, and, since Office registers itself late, joins it with `Dispatch` when that fails but Outlook's main window is open; it never starts Outlook. Each field is read on its own, so one Outlook refuses (its security guard can refuse the sender, recipients or body) is left out and the window names it, and every failure shows in the window with its COM error code in words. Each problem is logged and kept for the troubleshooting report (9.4). An email dragged from Outlook isn't a file, so a drop that comes from Outlook, or **Add selected Outlook email**, reads the emails selected in Outlook: subject, sender, recipients, time, plain-text and HTML bodies and attachments, each with its size, content ID and hidden flag (embedded items, such as an attached email, are left out).
 - **Email layer 0** (release 5.4) sorts an email's parts. A picture is an attachment the HTML body shows (an image whose address is `cid:` and the attachment's content ID). Outlook hides most of those from the list of attachments, so hidden doesn't mean a signature: a hidden attachment the body doesn't show is left out, as before release 5.4, and a picture under 10 KB starts unticked as a probable logo or signature picture. Every other attachment is an attachment. The links are the body's `<a href>` addresses, in order: email addresses (`mailto:`) are left out, an address wrapped in Outlook's Safe Links (`…safelinks.protection.outlook.com/?url=…`) is turned back into the real one, anything that isn't http or https (a phone number, a place in the email) is left out, and a repeat is dropped. The body is read with Python's own HTML parser, as data: nothing in it is run, opened or fetched. A `.msg` file dropped from File Explorer is opened through Outlook. The email's text joins the content text, and saving writes each email as its own `.msg` file (Outlook's SaveAs) and its attachments into the capture's folder (7.4); the email's row in the capture window names the file it will be. DocRepo never sends, moves or changes an email.
 
@@ -385,8 +406,24 @@ The task page reads top to bottom as the task's story (release 5.21, the visual 
     glides (not in the Classic look); the scroll keeps the caret in view.
   - **The Notes menu:** Fold all headings, Unfold all, Day headings for new captures (119), and **Page history…** (103):
     the page as it stood at the end of each day it changed, read-only, and Restore, which is an edit like any other.
-  - **The format bar** (release 5.26) is beside Notes, shown while the notes have the caret or the mouse, as in the capture
-    window, with the **Checklist** button.
+  - **The format bar** (release 5.26) is beside Notes, with the **Checklist** button; since release 5.27 it's always
+    shown, with the **Table** button.
+  - **The frame** (release 5.27, decision 130, by the UI playbook's grouping ladder): Notes, its format bar, the
+    Checklist summary and the page sit in one frame, the capture window's editor frame, so the one part of the task page
+    that's typed in stands apart from the facts above it and the history below. Its header band is tinted, with a
+    hairline under it, and its bottom edge turns to the accent while the page has the caret.
+  - **Pictures** (release 5.27, decisions 124, 125 and 127): Ctrl+V of a picture (a screenshot, or one copied from a
+    document) keeps it as a capture of the page's (6.11) and shows it at the caret, at its own size up to the page's
+    width, with an empty list item under it, the caret there, for what it shows. Typing on a picture goes to the end of
+    its description; Backspace or Delete on it takes it and its description off the page, leaving its file and its
+    capture (Captures then says it's not on the page; Ctrl+Z puts it back).
+  - **Files** (126): files dropped on the page are each kept as a capture of the page's, shown at the caret as an
+    attachment ("File: Pump curve.pdf", a picture as a picture), with its description under it. A click opens it.
+  - **Tables** (128): the **Table** button's menu makes one (2 columns by 2 rows to 4 by 4), its first row the header.
+    One copied from Excel, Word, Outlook or a web page comes in as a table, one line of text a cell, merged cells split,
+    without colours or widths. Tab and Shift+Tab go between cells, Tab in the last cell adds a row, and Enter goes down a
+    row; right-click adds or removes rows and columns. A table folds away with its section, counted by its rows. Lines don't move (Alt+Shift+Up and Down) on a page with a table
+    yet; it says so.
   - **Checklists** (release 5.26): `RichEdit`'s (7.x): Ctrl+1 (OneNote's to-do key), the Checklist button, or `[] ` or
     `[ ] ` at a line's start make checklist lines; again takes them out. A click on a box ticks it, at once, and a ticked
     line's words go grey and stay in place (91); Enter after a ticked line starts an unticked one. Headings, captions and

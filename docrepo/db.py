@@ -15,7 +15,7 @@ from pathlib import Path
 from docrepo.safe_fs import SafeFS
 
 DB_FILE = Path("System") / "docs.db"
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 #: Each kind of ID: its letter and how many digits follow it.
 ID_FORMATS = {"T": 6, "C": 6, "D": 6, "P": 3}
@@ -312,6 +312,11 @@ CREATE TABLE search_text (
     body TEXT NOT NULL,
     PRIMARY KEY (kind, id)
 );
+""",
+    11: """
+-- Pictures and files put on a notes page (release 5.27, decisions 124 to 126): each is a capture of its own, made on the
+-- page, whose block there is its picture or file line and the description under it, not a caption.
+ALTER TABLE captures ADD COLUMN page_made INTEGER NOT NULL DEFAULT 0;
 """,
 }
 

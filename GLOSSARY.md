@@ -40,6 +40,8 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Caption**: the small grey line that starts a capture's block on a notes page, with its date, time and what it is ("Thu 8 Oct 2026 · 10:42 am · Note"). It links to the capture; removing it unties the text under it from the capture.
 - **Checklist line**: a line with a box on a notes page or in a capture's content text (release 5.26), ticked with a click. It's kept as `- [ ]` or `- [x]`.
 - **Checklist summary**: every checklist line on a task's notes page, shown again at the top of its notes and in Edit task; each row is the line itself, so a change in either place changes both.
+- **Picture** and **attachment** (on a notes page): a list item that shows one of the task's files, as the picture itself or as a link to the file (release 5.27), with its description as the list item under it. Saving the page keeps that description as the file's.
+- **Made on the page**: said of a capture made by pasting a picture or dropping a file on a notes page (release 5.27). It has no caption: its picture or attachment is its block.
 - **Day heading**: a heading on a notes page that reads as a date. With day headings on for a task, its new captures go under the heading for their day.
 - **Task description**: the short "what it is" of a task. A task made from a capture takes the first line of its content text; the whole text goes on its notes page (release 5.25).
 - **Label**: a category on a task, such as Safety. A task can have several, and subtasks can inherit them.

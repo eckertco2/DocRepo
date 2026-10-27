@@ -118,6 +118,8 @@ class Capture:
     from_notes: str | None = None
     item: str | None = None
     meeting: str | None = None
+    #: Made on a notes page (release 5.27): a picture pasted there, or a file dropped there.
+    page_made: bool = False
     documents: list[CaptureDocument] = field(default_factory=list)
     attachments: list[str] = field(default_factory=list)
 
@@ -293,6 +295,7 @@ class Model:
             values = {k: r[k] for k in r.keys()}
             values["types"] = values["types"].split(",") if values["types"] else []
             values["formatted"] = bool(values.get("formatted"))
+            values["page_made"] = bool(values.get("page_made"))
             self.captures[r["id"]] = Capture(**values)
         for r in q("SELECT * FROM capture_documents ORDER BY capture, pos"):
             self.captures[r["capture"]].documents.append(CaptureDocument(r["document"], bool(r["save_a_copy"]), bool(r["extract"])))

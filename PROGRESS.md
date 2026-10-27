@@ -40,6 +40,7 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.25 | The notes page: each task's notes as one page, edited in place on its task page, with captures adding their blocks (the notes page plan's decisions 95 to 120), schema version 10 | Built 2026-10-27, without a mock, after the Qt sample; hand-tested by the owner and on GitHub 2026-10-27. Next: testing on the corporate computer |
 | 5.26 | Checklists on the notes page and the Checklist summary (the notes page plan's decisions 85 to 91 as redone, and 121 to 123), and the format bar on the notes | Built 2026-10-27; hand-tested by the owner and on GitHub 2026-10-27. Next: testing on the corporate computer |
 | 5.26.1 | Fixes: each email in a capture its own .msg file and attachments with unique names (two emails had both gone to email.msg, losing the first), and a file path with Copy as path's quotes, or one DocRepo can't find, in the content text | Built 2026-10-27; on GitHub 2026-10-27, before the owner's hand test. Next: the hand test here, then testing on the corporate computer with `release-5-26-1-test.md` |
+| 5.27 | Pictures, files and tables on the notes page (the notes page plan's decisions 124 to 129, with the hard rules' change in 127), and Notes in its frame (decision 130), schema version 11 | Built 2026-10-27; hand-tested by the owner and on GitHub 2026-10-27. Next: testing on the corporate computer with `release-5-27-test.md` |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
 ## Decisions
@@ -474,6 +475,33 @@ The visual overhaul's O10, designed and mocked in the parent workspace (`docs/ui
   - **No button group:** the pane marks the open view itself, so that no row is marked while searching, and a click on the open view keeps it marked.
   - **The totals that left the sidebar** are beside their views' titles ("14 open", "7 active"), as `sidebar.md` said they'd be.
   - **The tooltip** shows only when a name is cut short. The headings' tooltips say Fold or Unfold.
+
+## Release 5.27: pictures, files and tables on the notes page, and Notes in its frame (2026-10-27)
+
+The notes page plan's last part (decisions 124 to 129, asked for by the owner on 2026-10-26: "paste pictures, tables, etc into the notes corpus", a picture filed as any other file, with the sub-bullet under it as its description), and decision 130 (2026-10-27): more distinction between Notes and the rest of the task page, from the UI playbook. Schema version 11. No new package. Decision 127 changes the hard rules: DocRepo may now write PNG files of pictures the owner pastes, in the data root.
+
+- `docrepo/safe_fs.py`: `write_picture`, `.png` only, atomic, never over a file. `.github/copilot-instructions.md`: the writes rule names it.
+- `docrepo/db.py`: schema version 11, `page_made` on captures. `docrepo/model.py`, `docrepo/captures.py`: `Capture.page_made`. `docrepo/layer0.py`: `Part.pasted`. `docrepo/save.py`: `CaptureDraft.page_made` (its block is the page's line, so saving adds none), and a pasted picture's made-up description says "Pasted picture".
+- `docrepo/notes_page.py`: the page's pictures and attachments (`item_line`, a list item that's one picture of, or link to, a document, its description the item under it) and tables (`cells_of`, `row_line`, `separator_line`, `is_separator`); a capture's picture comes onto the page as a picture with its description, not an email's; `descriptions`, `document_ids`, `made_up` and `on_page` (a capture made on the page is on it while its picture or attachment is); `task_md` prints pictures, links and tables; `words` reads cells.
+- `docrepo/edits.py`: `add_page_picture` (a PNG in the task's `Files` folder, kept as a capture made on the page), `add_page_file` (a dropped file, tracked where it is, its text read), and `sync_descriptions` when the page is saved (the item under a picture or attachment is its document's description; empty, the made-up one). `docrepo/pages.py`: Task.md's pictures and links to their files. `docrepo/detail.py`: the Captures tab's On the notes page knows captures made on the page.
+- `docrepo/ui/rich_edit.py`: `png_bytes`, and a picture pasted with no text goes to `image_pasted` where a box `takes_pictures` (else it's dropped, as before). `docrepo/ui/capture_window.py`: a picture pasted in the content text is a file row, saved as a PNG in the capture's `attachments` folder (decision 129).
+- `docrepo/ui/notes_edit.py`: pictures shown from their files (`picture_path`, `loadResource`), at their own size up to 560 px; `insert_item`; typing on a picture goes to its description, Backspace or Delete takes it and its description off; dropped files (`files_dropped`); tables (`insert_table`, the page's rows read into a table and back, Tab, Shift+Tab and Enter, the right-click menu for rows and columns, tables pasted from Excel, Word, Outlook or a web page; a cell's room is its lines' margins, so a table in a folded section folds away, its leftover borders covered, and the fold's pill counts its rows as lines). `docrepo/ui/browse_window.py`: the picture and the dropped files become captures and go in at the caret.
+- `docrepo/ui/task_pane.py`: the frame (decision 130): Notes, the format bar (now always shown), the **Table** button (`icons/table.svg`, new) and ⋯ in a tinted header band, then the Checklist summary and the page, in one frame whose bottom edge turns to the accent while the page has the caret. `docrepo/ui/tokens.py`: the frame's looks. `docrepo/ui/style.py`: `NOTES_STYLE`, the Classic look's frame, page and summary, now in the browse window's style sheet as well, so the Classic look shows 5.25's and 5.26's styles there too (they had been only in the capture window's).
+- Two fixes found on the way: whole lines copied on the page and pasted kept every line's form but the first's (a heading came back as bold text, a list item as text), and moving lines on a page with a table did nothing without a word; it now says so.
+- Tests: `tests/test_pictures_tables.py` (new); `tests/test_notes_edit.py`, the first copied line; `tests/test_db.py`, version 11. 880 pass in all, 1 skipped. The task page with a picture, an attachment and a table was drawn over the sample data root with Windows' own fonts, in both looks, and checked by eye.
+
+## Decisions (release 5.27)
+
+- Decisions 124 to 129 as recommended, 127 by the owner's explicit yes, and 130 as recommended.
+- **Changed on the way, for the owner's hand test:**
+  - **An email's pictures stay file lines.** Most are signatures and logos; a picture dropped or pasted in the capture window comes onto the page as a picture.
+  - **The capture window doesn't show a pasted picture in its text.** It's a file row, like a dropped file; the notes page shows it.
+  - **A file dropped on the page is tracked where it is**, as in the capture window, not copied: Save a copy still copies it.
+  - **Discarding a capture made on the page leaves its picture or attachment there.** It has no caption to find its block by; Backspace takes it off.
+  - **Lines don't move (Alt+Shift+Up and Down) on a page with a table** yet; it says so. Cut and paste still move lines.
+  - **A table under a folded heading folds with its section.**
+  - **The format bar is always shown** in the frame's header band, which gives it a place of its own.
+  - **The table's grid is Qt's own**, each cell with its border, so rows and columns added later have one too.
 
 ## Release 5.26.1: each email its own .msg file, and quoted paths (2026-10-27)
 

@@ -23,7 +23,7 @@ def add_capture(
     created_task: str | None = None, summary: str | None = None, summary_type: str | None = None,
     filed_to: str | None = None, filed: str | None = None, edited: str | None = None, capture_id: str | None = None,
     email_layer_0: str | None = None, formatted: bool = False, from_notes: str | None = None, item: str | None = None,
-    meeting: str | None = None,
+    meeting: str | None = None, page_made: bool = False,
 ) -> str:
     """Record a capture. ``saved`` is a stored time (``YYYY-MM-DD HH:MM:SS``). Returns its ID. ``formatted`` says its
     content text is markup (mods log round 2, M0045). ``from_notes``, ``item`` and ``meeting``: an item, the notes it
@@ -40,9 +40,9 @@ def add_capture(
             capture_id = next_id(conn, "C")
         conn.execute(
             "INSERT INTO captures (id, saved, source, task, types, created_task, filed_to, filed, title, summary, summary_type, edited,"
-            " email_layer_0, formatted, from_notes, item, meeting) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " email_layer_0, formatted, from_notes, item, meeting, page_made) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (capture_id, saved, source, task, ",".join(types), created_task, filed_to, filed, title, summary, summary_type, edited,
-             email_layer_0, int(formatted), from_notes, item, meeting),
+             email_layer_0, int(formatted), from_notes, item, meeting, int(page_made)),
         )
     return capture_id
 

@@ -85,11 +85,83 @@ def save_page(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, task_id: st
     if not notes_page.put(conn, task_id, body, at, by_owner=True):
         return out
     search.index_pages(conn, [task_id])
+    sync_descriptions(conn, data_root, task_id, body)
     try:
         write_task_page(Model(conn), data_root, fs, task_id, at.date(), at)
     except OSError as e:
         out.problems.append(f"Task.md wasn't updated ({type(e).__name__}).")
     return out
+
+
+def default_page_description(task_title: str, name: str) -> str:
+    """What a picture's or a file's description left empty on the page becomes (decision 125, release 5.5's rule)."""
+    kind = "Pasted picture" if name.lower().endswith(notes_page.PICTURES) else "Attached document"
+    return f"{task_title} – {kind} – {name}"
+
+
+def sync_descriptions(conn: sqlite3.Connection, data_root: Path, task_id: str, body: str) -> list[str]:
+    """A picture's or attachment's description is the list item under it on the page (decision 125): saving the page
+    keeps it as the document's file description; left empty, the made-up one. Returns the documents changed."""
+    model = Model(conn)
+    title = model.task(task_id).title
+    changed = []
+    with transaction(conn):
+        for doc_id, words in notes_page.descriptions(body).items():
+            d = model.documents.get(doc_id)
+            if d is None:
+                continue
+            want = words or (d.description if notes_page.made_up(d.description, d.name) and d.description else default_page_description(title, d.name))
+            if want != (d.description or ""):
+                conn.execute("UPDATE documents SET description = ? WHERE id = ?", (want, doc_id))
+                changed.append(doc_id)
+    if changed:
+        search.index_items(conn, data_root, documents=changed)
+    return changed
+
+
+def unique_name(folder: Path, name: str) -> str:
+    stem, dot, ext = name.rpartition(".")
+    candidate, n = name, 2
+    while (folder / candidate).exists():
+        candidate, n = f"{stem} ({n}).{ext}" if dot else f"{name} ({n})", n + 1
+    return candidate
+
+
+def add_page_picture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, task_id: str, png: bytes,
+                     at: datetime) -> tuple[str, str, str]:
+    """A picture pasted on a task's notes page (decisions 124, 125 and 127): written as a PNG in the task's Files
+    folder, and kept as a capture of its own, made on the page, with the picture as its document. The page shows it at
+    the caret, so nothing is added to the page here. Returns (capture, document, file name)."""
+    from docrepo.save import CaptureDraft, FileRow, save_capture
+
+    model = Model(conn)
+    if task_id not in model.tasks:
+        raise EditError(f"There's no task {task_id}.")
+    folder = data_root / "Tasks" / task_id / "Files"
+    name = unique_name(folder, f"Picture {at:%Y-%m-%d %H%M}.png")
+    path = fs.write_picture(folder / name, png)
+    row = FileRow(name, str(path), default_page_description(model.task(task_id).title, name))
+    r = save_capture(conn, data_root, fs, settings, CaptureDraft(task=task_id, types={"note"}, files=[row], page_made=True), at)
+    doc = Model(conn).captures[r.capture_id].document_ids[0]
+    log.info("picture %s pasted on %s's notes page as %s", name, task_id, r.capture_id)
+    return r.capture_id, doc, name
+
+
+def add_page_file(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, task_id: str, path: str,
+                  at: datetime) -> tuple[str, str, str]:
+    """A file dropped on a task's notes page (decision 126): kept as a capture of its own, made on the page, with the
+    file as its document, its original tracked where it is and its text read, as a dropped file is in the capture
+    window. Returns (capture, document, file name)."""
+    from docrepo.save import CaptureDraft, FileRow, save_capture
+
+    if task_id not in Model(conn).tasks:
+        raise EditError(f"There's no task {task_id}.")
+    name = Path(path).name
+    row = FileRow(name, path, "", extract=not name.lower().endswith(notes_page.PICTURES))
+    r = save_capture(conn, data_root, fs, settings, CaptureDraft(task=task_id, types={"note"}, files=[row], page_made=True), at)
+    doc = Model(conn).captures[r.capture_id].document_ids[0]
+    log.info("file dropped on %s's notes page as %s", task_id, r.capture_id)
+    return r.capture_id, doc, name
 
 
 def add_again(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, capture_id: str, task_id: str, at: datetime) -> Outcome:

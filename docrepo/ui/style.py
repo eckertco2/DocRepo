@@ -55,7 +55,22 @@ QWidget#formatBar QToolButton:hover { border-color: #b8c1cb; }
 QWidget#formatBar QToolButton:checked { background: #dbe8f5; border-color: #9dc0e3; }
 """
 
-STYLE = FORMAT_BAR_STYLE + """
+#: The task page's notes (releases 5.25 to 5.27): its frame, the page and the Checklist summary, in the browse window.
+NOTES_STYLE = """
+QWidget#taskPaneInner, QWidget#notesWrap { background: #ffffff; }
+QFrame#notesCard { background: #ffffff; border: 1px solid #b8c1cb; border-radius: 4px; }
+QFrame#notesCard[typing="true"] { border: 1px solid #1d5e98; }
+QFrame#notesCard QWidget#notesHead { background: #f4f6f8; border: none; border-bottom: 1px solid #d6dce3; }
+QTextEdit#notesPage { border: none; background: transparent; padding: 0; }
+QLabel#notesSaved { color: #5a6571; }
+QWidget#summaryBox { background: transparent; }
+QWidget#checkRow:hover { background: #eef1f4; }
+QTextEdit#checkText { border: none; background: transparent; padding: 0; }
+QLabel#checkCount, QLabel#checkHeading { color: #5a6571; }
+QToolButton#checkFold, QToolButton#rowAction { border: none; background: transparent; }
+"""
+
+STYLE = FORMAT_BAR_STYLE + NOTES_STYLE + """
 QWidget#capture { background: #ffffff; color: #1a1f25; font-family: "Segoe UI"; font-size: 10pt; }
 QWidget#header { background: #f4f6f8; border-bottom: 1px solid #d6dce3; }
 QLabel#appName { font-weight: 600; }
@@ -109,14 +124,6 @@ QFrame#dropZone QLineEdit { border: none; background: transparent; }
 QLabel#pinTitle { font-weight: 600; }
 QFrame#dropZone { background: #f4f6f8; border: 1px dashed #87919c; border-radius: 6px; }
 QFrame#dropZone[over="true"] { background: #e8f0f8; border: 1px solid #1d5e98; }
-QWidget#taskPaneInner, QWidget#notesHead { background: #ffffff; }
-QTextEdit#notesPage { border: none; background: transparent; padding: 0; }
-QLabel#notesSaved { color: #5a6571; }
-QWidget#summaryBox { background: #ffffff; }
-QWidget#checkRow:hover { background: #eef1f4; }
-QTextEdit#checkText { border: none; background: transparent; padding: 0; }
-QLabel#checkCount, QLabel#checkHeading { color: #5a6571; }
-QToolButton#checkFold, QToolButton#rowAction { border: none; background: transparent; }
 """
 #: Release 5.9's style sheet, the Classic look's.
 CLASSIC_STYLE = STYLE

@@ -10,9 +10,13 @@ list items) and three more kinds:
   the capture's block and dates it (decisions 109 and 120);
 - a file line: a line that's one link to a document, ``[File: Pump spec.docx, the vendor's datasheet](document:D000012)``
   (decision 96).
+- since release 5.27 (decisions 124 to 128): a **picture**, a list item that's one picture of a document,
+  ``- ![Picture 2026-10-27 1042.png](document:D000031)``, and an **attachment**, a list item that's one link to a
+  document, ``- [File: Pump curve.pdf](document:D000032)``, each with its description as the list item under it; and a
+  **table**, Markdown's rows (``| Part | Qty |``, ``|---|---|``), one line of text a cell, a cell's ``|`` escaped.
 
-A line of text that would read as one of them starts with a backslash (``\\#``, ``\\[``). A link's text escapes ``]``
-and ``\\`` with a backslash.
+A line of text that would read as one of them starts with a backslash (``\\#``, ``\\[``, ``\\|``). A link's text
+escapes ``]`` and ``\\`` with a backslash.
 
 Captures add their blocks when they're saved or filed (``add_capture``), each at the end of the page, or under the
 heading for its day when the task uses day headings, in date order (decisions 97, 113 and 119). Discarding a capture
@@ -38,17 +42,22 @@ MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", 
 DAY = re.compile(r"(Mon|Tue|Wed|Thu|Fri|Sat|Sun) (\d{1,2}) (" + "|".join(MONTHS) + r") (\d{4})")
 HEADING = re.compile(r"^(#{1,3}) (.*)$")
 LINK = re.compile(r"^\[((?:[^\]\\]|\\.)*)\]\((capture|document):([A-Z]\d+)\)$")
+#: A picture or an attachment on the page (release 5.27): a list item that's one picture of, or link to, a document.
+ITEM = re.compile(r"^((?:  )*)- (!?)\[((?:[^\]\\]|\\.)*)\]\(document:(D\d+)\)$")
+#: The kinds of file a page shows as a picture.
+PICTURES = (".png", ".jpg", ".jpeg", ".gif", ".bmp")
 _UNESCAPE = re.compile(r"\\([\]\\])")
 
 
 @dataclass(frozen=True)
 class Line:
-    """One line of a page, read: a "heading", a "caption", a "file" line or a line of "text"."""
+    """One line of a page, read: a "heading", a "caption", a "file" line, a "picture", an "attachment", a table's "row"
+    or a line of "text"."""
 
     kind: str
-    text: str        # a heading's or a link's text, in words; a text line's markup
-    level: int = 0   # a heading's level, 1 to 3
-    ref: str = ""    # a caption's capture, or a file line's document
+    text: str        # a heading's or a link's text, in words; a text line's markup; a row as it's kept
+    level: int = 0   # a heading's level, 1 to 3; a picture's or attachment's list level, from 1
+    ref: str = ""    # a caption's capture, or a file line's, picture's or attachment's document
 
 
 # ---- reading and writing lines ----
@@ -59,7 +68,12 @@ def read_line(line: str) -> Line:
     m = LINK.match(line)
     if m:
         return Line("caption" if m.group(2) == "capture" else "file", _UNESCAPE.sub(r"\1", m.group(1)), ref=m.group(3))
-    if line.startswith(("\\#", "\\[")):
+    m = ITEM.match(line)
+    if m:
+        return Line("picture" if m.group(2) else "attachment", _UNESCAPE.sub(r"\1", m.group(3)), len(m.group(1)) // 2 + 1, m.group(4))
+    if line.startswith("|"):
+        return Line("row", line)
+    if line.startswith(("\\#", "\\[", "\\|")):
         line = line[1:]
     return Line("text", line)
 
@@ -84,9 +98,42 @@ def file_line(text: str, document_id: str) -> str:
     return f"[{_link_text(text)}](document:{document_id})"
 
 
+def item_line(kind: str, text: str, document_id: str, level: int = 1) -> str:
+    """A picture's or an attachment's line (release 5.27)."""
+    return f"{'  ' * max(0, level - 1)}- {'!' if kind == 'picture' else ''}[{_link_text(text)}](document:{document_id})"
+
+
 def text_line(line: str) -> str:
-    """A line of markup as a page keeps it: one that would read as a heading or a link starts with a backslash."""
-    return "\\" + line if HEADING.match(line) or LINK.match(line) or line.startswith(("\\#", "\\[")) else line
+    """A line of markup as a page keeps it: one that would read as a heading, a link, a picture or a table's row starts
+    with a backslash."""
+    return ("\\" + line if HEADING.match(line) or LINK.match(line) or ITEM.match(line) or line.startswith(("\\#", "\\[", "|", "\\|"))
+            else line)
+
+
+# ---- tables (release 5.27, decision 128) ----
+_CELL_SPLIT = re.compile(r"(?<!\\)\|")
+_SEPARATOR = re.compile(r"^\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?$")
+
+
+def is_separator(row: str) -> bool:
+    return bool(_SEPARATOR.match(row.strip()))
+
+
+def cells_of(row: str) -> list[str]:
+    """A table row's cells, as markup, a ``\\|`` back to ``|``."""
+    inner = row.strip()
+    inner = inner[1:] if inner.startswith("|") else inner
+    inner = inner[:-1] if inner.endswith("|") and not inner.endswith("\\|") else inner
+    return [c.strip().replace("\\|", "|") for c in _CELL_SPLIT.split(inner)]
+
+
+def row_line(cells: list[str]) -> str:
+    """A table row from its cells' markup, each ``|`` escaped, so the row reads back as the same cells."""
+    return "| " + " | ".join(c.replace("|", "\\|") for c in cells) + " |"
+
+
+def separator_line(columns: int) -> str:
+    return "|" + "|".join(["---"] * columns) + "|"
 
 
 def write(lines: list[Line]) -> str:
@@ -98,6 +145,10 @@ def write(lines: list[Line]) -> str:
             out.append(caption_line(x.text, x.ref))
         elif x.kind == "file":
             out.append(file_line(x.text, x.ref))
+        elif x.kind in ("picture", "attachment"):
+            out.append(item_line(x.kind, x.text, x.ref, x.level))
+        elif x.kind == "row":
+            out.append(x.text)
         else:
             out.append(text_line(x.text))
     return "\n".join(out)
@@ -169,13 +220,54 @@ def capture_markup(c: Capture, content: str | None, title: str = "") -> list[str
 def block(model: Model, stories, c: Capture, task_id: str, content: str | None) -> list[str]:
     """A capture's block on a task's page (decisions 96, 114, 115, 120): its caption, its note text in full, and a file
     line for each of its files. ``content`` is its typed text: an email's own text stays with the email."""
-    out = [caption_line(caption_text(c, caption_label(stories, c, task_id)), c.id)]
+    out = [] if c.page_made else [caption_line(caption_text(c, caption_label(stories, c, task_id)), c.id)]
     out += capture_markup(c, content, c.title if c.created_task == task_id else "")
     for d in c.document_ids:
         doc = model.documents.get(d)
-        if doc is not None:
+        if doc is None:
+            continue
+        if c.page_made or is_picture(c, doc.name):
+            # A picture (or a file put on the page) as a list item, its description under it (decisions 124 to 126);
+            # a description DocRepo made up shows as an empty line, to be written.
+            kind = "picture" if doc.name.lower().endswith(PICTURES) else "attachment"
+            out.append(item_line(kind, doc.name if kind == "picture" else f"File: {doc.name}", d))
+            out.append("  - " + ("" if made_up(doc.description, doc.name) else markup.escape_inline(" ".join((doc.description or "").split()))))
+        else:
             out.append(file_line(f"File: {doc.name}" + (f", {doc.description}" if doc.description else ""), d))
     return out
+
+
+def is_picture(c: Capture, name: str) -> bool:
+    """A capture's file the page shows as a picture: one of PICTURES, but not an email's (its pictures are mostly
+    signatures and logos, so they stay file lines)."""
+    return c.source != "outlook_email" and name.lower().endswith(PICTURES)
+
+
+def made_up(description: str | None, name: str) -> bool:
+    """Whether a description is one DocRepo made up (release 5.5's default), not the owner's words."""
+    d = (description or "").strip()
+    return not d or d == name or any(f" – {how} {kind} – {name}" in d for how in ("Attached", "Pasted")
+                                     for kind in ("picture", "document", "link"))
+
+
+def descriptions(page: str) -> dict[str, str]:
+    """The descriptions a page gives its pictures and attachments: the list item under each, as words (release 5.27,
+    decision 125). An empty one gives "", for the description DocRepo makes up."""
+    lines, out = lines_of(page), {}
+    for i, x in enumerate(lines):
+        if x.kind in ("picture", "attachment") and x.ref not in out:
+            nxt = lines[i + 1] if i + 1 < len(lines) else None
+            m = markup.LIST_LINE.match(nxt.text) if nxt is not None and nxt.kind == "text" else None
+            if m and len(m.group(1)) // 2 + 1 == x.level + 1:
+                out[x.ref] = " ".join(markup.to_plain(nxt.text[m.end():]).split())
+            else:
+                out[x.ref] = ""
+    return out
+
+
+def document_ids(page: str) -> set[str]:
+    """The documents a page shows: its pictures, attachments and file lines."""
+    return {x.ref for x in lines_of(page) if x.kind in ("picture", "attachment", "file")}
 
 
 def typed_content(c: Capture, content: str | None) -> str | None:
@@ -274,6 +366,14 @@ def merge(base: str, ours: str, theirs: str, day_headings: bool) -> str:
     return out
 
 
+def on_page(model: Model, task_id: str, page: str) -> set[str]:
+    """The captures whose blocks are on a task's page: those with a caption there, and those made on the page (release
+    5.27) whose picture or attachment is there."""
+    docs = document_ids(page)
+    made = {c.id for c in model.notes_of(task_id) if c.page_made and set(c.document_ids) & docs}
+    return set(capture_ids(page)) | made
+
+
 def capture_ids(page: str) -> list[str]:
     return [x.ref for x in lines_of(page) if x.kind == "caption"]
 
@@ -282,13 +382,18 @@ def words(page: str) -> str:
     """The page in words, for search: headings, captions and file lines as their text, and markup without its marks."""
     out = []
     for x in lines_of(page):
-        out.append(markup.to_plain(x.text) if x.kind == "text" else x.text)
+        if x.kind == "row":
+            if not is_separator(x.text):
+                out.append(" ".join(markup.to_plain(c) for c in cells_of(x.text)))
+        else:
+            out.append(markup.to_plain(x.text) if x.kind == "text" else x.text)
     return "\n".join(out)
 
 
-def task_md(page: str, capture_link: Callable[[str], str | None]) -> list[str]:
+def task_md(page: str, capture_link: Callable[[str], str | None], document_link: Callable[[str], str | None] = lambda _: None) -> list[str]:
     """The page as Task.md prints it, under "## Notes": headings two levels down, captions as links to the capture's
-    capture.md, and the rest as it's kept (its markup reads as Markdown)."""
+    capture.md, pictures as pictures and attachments as links to their files (``document_link``), and the rest as
+    it's kept (its markup, and a table's rows, read as Markdown)."""
     out = []
     for x in lines_of(page):
         if x.kind == "heading":
@@ -299,6 +404,15 @@ def task_md(page: str, capture_link: Callable[[str], str | None]) -> list[str]:
             out.append(f"_[{text}]({target})_" if target else f"_{text}_")
         elif x.kind == "file":
             out.append(f"- {markup.escape_inline(x.text)}")
+        elif x.kind in ("picture", "attachment"):
+            target, text = document_link(x.ref), x.text.replace("[", "\\[").replace("]", "\\]")
+            indent = "  " * (x.level - 1)
+            if target:
+                out.append(f"{indent}- {'!' if x.kind == 'picture' else ''}[{text}]({target})")
+            else:
+                out.append(f"{indent}- {text}")
+        elif x.kind == "row":
+            out.append(x.text)
         else:
             out.append(text_line(x.text))
     while out and not out[-1].strip():
@@ -306,7 +420,9 @@ def task_md(page: str, capture_link: Callable[[str], str | None]) -> list[str]:
     # Markdown runs lines of text together; each line of the page is its own paragraph or list item.
     spaced: list[str] = []
     for line in out:
-        if spaced and line and spaced[-1] and not (markup.LIST_LINE.match(line) and markup.LIST_LINE.match(spaced[-1])):
+        together = (markup.LIST_LINE.match(line) and markup.LIST_LINE.match(spaced[-1] if spaced else "")) or (
+            line.startswith("|") and spaced and spaced[-1].startswith("|"))
+        if spaced and line and spaced[-1] and not together:
             spaced.append("")
         spaced.append(line)
     # The Checklist summary (release 5.26, decision 121): every checklist line on the page, open ones first.
@@ -389,7 +505,7 @@ def add_capture(conn: sqlite3.Connection, model: Model, stories, capture_id: str
         if t is None or t.discarded:
             continue
         page = get(conn, task_id)
-        if capture_id in capture_ids(page):
+        if capture_id in capture_ids(page) or (c.page_made and set(c.document_ids) & document_ids(page)):
             continue
         new = add_block(page, block(model, stories, c, task_id, content), datetime.fromisoformat(c.saved).date(),
                         model.uses_day_headings(task_id))

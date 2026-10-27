@@ -77,6 +77,20 @@ def _marks(fmt: QTextCharFormat) -> tuple[frozenset[str], str | None]:
     return frozenset(marks), colour
 
 
+def png_bytes(image) -> bytes:
+    """A pasted picture as PNG (release 5.27): what DocRepo keeps of it."""
+    from PySide6.QtCore import QBuffer, QByteArray, QIODevice
+
+    if hasattr(image, "toImage"):
+        image = image.toImage()
+    data = QByteArray()
+    buf = QBuffer(data)
+    buf.open(QIODevice.OpenModeFlag.WriteOnly)
+    image.save(buf, "PNG")
+    buf.close()
+    return bytes(data)
+
+
 def block_markup(block) -> tuple[str, bool]:
     """One block (a line) as markup, and whether it's formatted: a list item, or any mark."""
     segments = []
@@ -128,6 +142,10 @@ class RichEdit(QTextEdit):
     """The formatted content text box. ``formatting`` is sent when the cursor's formatting changes, for the toolbar."""
 
     formatting = Signal()
+    #: A picture pasted (a screenshot, a copied image), for the box's window to keep as a file (release 5.27).
+    image_pasted = Signal(object)
+    #: Whether a pasted picture goes to ``image_pasted`` (the capture window and the notes page); else it's left out.
+    takes_pictures = False
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -594,6 +612,10 @@ class RichEdit(QTextEdit):
         5.1 reads them (``paste.html_to_text``)."""
         from docrepo import diagnose, paste
 
+        if source.hasImage() and not source.text().strip():  # a picture alone: kept as a file, never inside the text
+            if self.takes_pictures:
+                self.image_pasted.emit(source.imageData())
+            return
         if source.hasHtml():
             raw = source.html()
             if paste.has_mso_list(raw):

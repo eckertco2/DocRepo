@@ -76,7 +76,7 @@ from docrepo.ui.page_view import PageView
 from docrepo.ui.task_pane import TaskPane
 from docrepo.ui.priorities_view import PrioritiesView
 from docrepo.ui.palette import Command, CommandPalette
-from docrepo.ui.style import FORMAT_BAR_STYLE, page_css, style_sheet
+from docrepo.ui.style import FORMAT_BAR_STYLE, NOTES_STYLE, page_css, style_sheet
 from docrepo.ui.task_forms import BulkEditDialog, LabelMatchDialog, TaskEditDialog
 from docrepo.ui.task_picker import TaskPicker
 from docrepo.ui.timeline_view import TimelineView
@@ -150,7 +150,7 @@ QFrame#prCard[sel="true"] { background: #dbe8f5; border-color: #1d5e98; }
 QFrame#prDrop { background: #1d5e98; border: none; }
 QLabel#prTitle { font-weight: 600; }
 QLabel#count { color: #5a6571; }
-""" + FORMAT_BAR_STYLE
+""" + FORMAT_BAR_STYLE + NOTES_STYLE
 #: The views with Select mode, where tasks can be ticked for Edit selected.
 SELECT_VIEWS = ("tasks", *LIST_IDS)
 #: The views but the task tree whose rows nest, so they have Collapse a level and Expand a level (release 5.24).
@@ -396,6 +396,10 @@ class BrowseWindow(QWidget):
         notes.open_ref.connect(self._open_ref)
         notes.message.connect(self.say)
         notes.folds_changed.connect(self._save_folds)
+        # Pictures pasted and files dropped on the page (release 5.27, decisions 124 to 126), and where a picture's file is.
+        notes.picture_path = lambda doc: edits.source_of(self.ctx.data_root, self.model(), doc) if doc in self.model().documents else None
+        notes.image_pasted.connect(self._picture_pasted)
+        notes.files_dropped.connect(self._files_dropped)
         self.task_pane.notes_menu.connect(self._notes_menu)
         self.task_pane.summary.folded.connect(self._save_summary_folded)
         self.detail_stack.addWidget(self.task_pane)
@@ -2123,6 +2127,57 @@ class BrowseWindow(QWidget):
             # The Captures tab says what's on the page: its history is drawn again, the editor left as it is.
             width = self.task_pane.viewport().width() - 2 * round(self.task_pane.top.document().documentMargin())
             self.task_pane.bottom.setHtml(self.pages().task_page(task_id, self.state, width, "bottom"))
+
+    def _history_again(self, task_id: str) -> None:
+        """The task page's history drawn again (its Captures tab says what's on the page), the editor left as it is."""
+        if self.sel == ("task", task_id):
+            width = self.task_pane.viewport().width() - 2 * round(self.task_pane.top.document().documentMargin())
+            self.task_pane.bottom.setHtml(self.pages().task_page(task_id, self.state, width, "bottom"))
+
+    def _picture_pasted(self, image) -> None:
+        """A picture pasted on the notes page (decisions 124, 125 and 127): a PNG in the task's Files folder, kept as a
+        capture of the page's, and shown at the caret with an empty line under it for what it shows."""
+        from docrepo.ui.rich_edit import png_bytes
+
+        task_id = self.task_pane.task_id
+        if not task_id:
+            return
+        try:
+            capture_id, doc, name = edits.add_page_picture(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, task_id,
+                                                           png_bytes(image), self._now())
+        except (edits.EditError, SaveError, WriteRefused, OSError, sqlite3.Error) as e:
+            self.say(f"The picture wasn't kept: {e}", error=True)
+            return
+        self._model = None
+        self.task_pane.notes.insert_item("picture", name, doc)
+        self.task_pane.notes.save_now()
+        self._history_again(task_id)
+        self.say(f"Kept {name} with the task's files, as {capture_id}. Type what it shows on the line under it.")
+
+    def _files_dropped(self, paths: list[str]) -> None:
+        """Files dropped on the notes page (decision 126): each kept as a capture of the page's, its original tracked where
+        it is, and shown at the caret, a picture as a picture."""
+        from docrepo import notes_page as np_
+
+        task_id = self.task_pane.task_id
+        if not task_id:
+            return
+        kept = []
+        for path in paths:
+            try:
+                capture_id, doc, name = edits.add_page_file(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, task_id, path,
+                                                            self._now())
+            except (edits.EditError, SaveError, WriteRefused, OSError, sqlite3.Error) as e:
+                self.say(f"{Path(path).name} wasn't kept: {e}", error=True)
+                continue
+            self._model = None
+            picture = name.lower().endswith(np_.PICTURES)
+            self.task_pane.notes.insert_item("picture" if picture else "attachment", name if picture else f"File: {name}", doc)
+            kept.append(name)
+        if kept:
+            self.task_pane.notes.save_now()
+            self._history_again(task_id)
+            self.say(f"Added {', '.join(kept)} to the page, each a capture of its own. Type what each is on the line under it.")
 
     def _folds_of(self, task_id: str) -> list[str]:
         try:

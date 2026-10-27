@@ -43,6 +43,7 @@ class Part:
     keep: bool = True  # whether its row starts ticked
     safe: bool = False  # a link turned back from Outlook's Safe Links
     small: bool = False  # a picture under SMALL_BYTES
+    pasted: bool = False  # a picture pasted into the capture window (release 5.27, decision 129), not an email's
 
 
 @dataclass(frozen=True)

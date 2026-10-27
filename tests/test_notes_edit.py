@@ -147,6 +147,20 @@ def test_whole_lines_paste_as_they_were(qapp):
     assert notes.page() == "\n".join([cap, "## Mine", cap, "## Mine"])
 
 
+def test_a_heading_or_list_item_copied_first_keeps_what_it_is(qapp):
+    # Qt's fragment brings its first line back as plain text (release 5.27's fix): a heading stays a heading.
+    for first in ("## Head", "- Item"):
+        notes = NotesEdit()
+        notes.set_page("\n".join(["Before", first, "Last"]))
+        c = QTextCursor(notes.document().findBlockByNumber(1))
+        c.movePosition(QTextCursor.MoveOperation.NextBlock, QTextCursor.MoveMode.KeepAnchor)
+        notes.setTextCursor(c)
+        notes.copy()
+        notes.setTextCursor(QTextCursor(notes.document().begin()))
+        notes.paste()
+        assert notes.page() == "\n".join(["Before", first, first, "Last"])
+
+
 # ---- on the task page ----
 def test_the_task_page_holds_its_notes_between_its_facts_and_history(browse):
     browse.go_task("T000008")

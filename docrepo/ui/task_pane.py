@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QEasingCurve, QEvent, QPoint, QPropertyAnimation, Qt, Signal
 from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QMenu, QScrollArea, QToolButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QFrame, QHBoxLayout, QLabel, QLayout, QMenu, QScrollArea, QToolButton, QVBoxLayout, QWidget
 
 from docrepo.ui import tokens
 from docrepo.ui.icons import icon
@@ -59,6 +59,7 @@ class TaskPane(QScrollArea):
         self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
         inner = QWidget(objectName="taskPaneInner")
         lay = QVBoxLayout(inner)
+        lay.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
         self.top, self.bottom = FitPageView(), FitPageView()
@@ -67,8 +68,9 @@ class TaskPane(QScrollArea):
             view.document().setDocumentMargin(margin)
             view.viewport().installEventFilter(self)
         head = QWidget(objectName="notesHead")
+        head.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         hl = QHBoxLayout(head)
-        hl.setContentsMargins(margin, 12, margin, 2)
+        hl.setContentsMargins(14, 8, 8, 8)
         self.title = QLabel("Notes", font=tokens.ui_font(tokens.BODY + 1.5, semibold=True))
         self.saved = QLabel("", objectName="notesSaved")
         self.saved.setFont(tokens.ui_font(tokens.CAPTION))
@@ -89,35 +91,64 @@ class TaskPane(QScrollArea):
         self.menu_button.setMenu(menu)
         self.notes = NotesEdit()
         self.format_bar = FormatBar(self.notes)  # the capture window's, with the Checklist button (release 5.26)
+        # A table (release 5.27, decision 128): rows and columns from the menu; Tab adds rows, right-click adds columns.
+        self.table_button = QToolButton(objectName="notesTable")
+        self.table_button.setIcon(icon("table"))
+        self.table_button.setToolTip("Insert a table: the first row is its header. Tab moves between cells; right-click adds or removes rows and columns.")
+        self.table_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.table_button.setAutoRaise(True)
+        self.table_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        sizes = QMenu(self.table_button)
+        for rows, columns in ((2, 2), (3, 2), (3, 3), (4, 4)):
+            sizes.addAction(f"{columns} columns, {rows} rows", lambda r=rows, c=columns: self.notes.insert_table(r, c))
+        self.table_button.setMenu(sizes)
         hl.addWidget(self.title)
         hl.addSpacing(8)
         hl.addWidget(self.saved)
         hl.addStretch()
         hl.addWidget(self.format_bar)
+        hl.addWidget(self.table_button)
         hl.addWidget(self.menu_button)
         self.notes.viewport().installEventFilter(self)
         self.notes.on_page_key = self.page_key
         self.notes.cursorPositionChanged.connect(self.follow_caret)
         row = QWidget()
         rl = QHBoxLayout(row)
-        rl.setContentsMargins(max(0, margin - 16), 0, margin, 4)
-        self.notes.setMaximumWidth(NOTES_MAX)
+        rl.setContentsMargins(0, 0, 14, 10)
         rl.addWidget(self.notes, 1)
+        # Each layer of the frame holds at least what's in it, so the notes, as tall as their text, are never cut short.
+        rl.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         self.summary = ChecklistSummary(self.notes)
         box = QWidget(objectName="summaryBox")
         bl = QHBoxLayout(box)
-        bl.setContentsMargins(margin, 2, margin, 8)
-        self.summary.setMaximumWidth(NOTES_MAX)
+        bl.setContentsMargins(14, 10, 14, 6)
         bl.addWidget(self.summary, 1)
+        # The frame round the notes (decision 130): the capture window's editor frame, by the UI playbook's grouping
+        # ladder, so the one editable part of the page stands apart. Its bottom edge turns to the accent while you type.
+        self.card = QFrame(objectName="notesCard")
+        cl = QVBoxLayout(self.card)
+        cl.setContentsMargins(0, 0, 0, 0)
+        cl.setSpacing(0)
+        cl.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
+        for w in (head, box, row):
+            cl.addWidget(w)
+        self.card.setMaximumWidth(NOTES_MAX)
+        self.notes.focus_changed.connect(self._card_focus)
+        wrap = QWidget(objectName="notesWrap")
+        wl = QHBoxLayout(wrap)
+        wl.setContentsMargins(margin, 20, margin, 20)
+        wl.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
+        wl.addWidget(self.card, 1)
         lay.addWidget(self.top)
-        lay.addWidget(head)
-        lay.addWidget(box)
-        lay.addWidget(row)
+        lay.addWidget(wrap)
         lay.addWidget(self.bottom)
         lay.addStretch(1)
         self.setWidget(inner)
-        if not LOOK.classic:
-            self.format_bar.show_on_use(row)  # as in the capture window: shown while the notes have the caret or the mouse
+
+    def _card_focus(self, on: bool) -> None:
+        self.card.setProperty("typing", on)  # not "focus": every widget has a read-only one
+        self.card.style().unpolish(self.card)
+        self.card.style().polish(self.card)
 
     # ---- the one scroll ----
     def wheel(self, event) -> None:

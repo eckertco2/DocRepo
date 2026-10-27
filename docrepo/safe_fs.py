@@ -143,6 +143,29 @@ class SafeFS:
             raise
         return target
 
+    def write_picture(self, path: PathLike, data: bytes) -> Path:
+        """Write a picture the owner pasted, as a PNG file (release 5.27, the notes page plan's decision 127): the one
+        kind of file DocRepo makes that isn't text, its database or a copy. Never overwrites, and atomically, as
+        ``write_text`` does."""
+        target = self.checked_path(path)
+        if target.suffix.lower() != ".png":
+            self._refuse(os.fspath(path), "DocRepo writes pictures only as PNG files")
+        if target.exists():
+            raise FileExistsError(f"{target} already exists.")
+        self.makedirs(target.parent)
+        fd, tmp = tempfile.mkstemp(prefix=f".{target.name}.", suffix=".tmp", dir=target.parent)
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(data)
+            if target.exists():
+                raise FileExistsError(f"{target} already exists.")
+            os.replace(tmp, target)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp)
+            raise
+        return target
+
     def copy_file(self, src: PathLike, dst: PathLike) -> Path:
         """Copy a file the owner asked to keep. The source is only read.
 

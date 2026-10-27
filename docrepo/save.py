@@ -108,7 +108,8 @@ def default_description(row: FileRow, task_title: str | None) -> str:
     """What a description left empty becomes (mods log round 2, M0041): "*task* – Attached document – *file name*", with
     "Attached link" or "Attached picture" for those, or just the file name when the capture has no task."""
     kind = "picture" if row.part and row.part.kind == "picture" else "link" if is_link(row.path) else "document"
-    return f"{task_title.strip()} – Attached {kind} – {row.name}" if task_title and task_title.strip() else row.name
+    how = "Pasted" if row.part and row.part.pasted else "Attached"  # release 5.27, decisions 125 and 129
+    return f"{task_title.strip()} – {how} {kind} – {row.name}" if task_title and task_title.strip() else row.name
 
 
 def email_rows(email: EmailItem) -> list[FileRow]:
@@ -171,6 +172,9 @@ class CaptureDraft:
     item_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
     #: Names picked from the @ and # lists, or kept with their IDs in the text: {"@tom becker": "P003", "#rigging plan": "T000012"}.
     refs: dict[str, str] = field(default_factory=dict)
+    #: Made on a notes page (release 5.27): a picture pasted or a file dropped there. Its block is the line the page
+    #: shows at the caret, so Save doesn't add one at the page's end.
+    page_made: bool = False
 
     def words(self) -> str:
         """The content text's words, without its marks: what titles, descriptions and Parse and populate read."""
@@ -426,7 +430,7 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
                 task=t, created_task=created, formatted=formatted,
                 summary=summary or None, summary_type=draft.summary_type if summary else None,
                 email_layer_0=" ".join(email_layer0_line(e, draft.files) for e in emails) or None,
-                item="notes" if draft.meeting else None, meeting=meeting_made,
+                item="notes" if draft.meeting else None, meeting=meeting_made, page_made=draft.page_made,
             )
             attachment_names: set[str] = set()
             for row in draft.files:
@@ -505,7 +509,8 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
         search.index_items(conn, data_root, captures=[capture_id, *result.items], documents=[d for d, _, _ in documents])
         # The notes page (release 5.25): the capture's block on its tasks' pages, and each item's on its own task's.
         typed = items.store(content, names, formatted) if content else ""
-        edits.add_to_pages(conn, data_root, at, [(capture_id, typed), *((cid, None) for cid in result.items)], result.problems)
+        if not draft.page_made:
+            edits.add_to_pages(conn, data_root, at, [(capture_id, typed), *((cid, None) for cid in result.items)], result.problems)
     if source_capture and created:
         edits.rewrite_capture_md(conn, data_root, fs, source_capture.id, source_content, result.problems)
         edits.copy_files(conn, data_root, fs, created, filed_copies, result.problems)

@@ -484,6 +484,8 @@ class CaptureWindow(QWidget):
         self.title_field = field("Title", self.title, "title")
         lc.addWidget(self.title_field)
         self.content = ContentEdit()
+        self.content.takes_pictures = True  # a picture pasted becomes the capture's file (release 5.27, decision 129)
+        self.content.image_pasted.connect(self._picture_pasted)
         self.content.setMinimumHeight(120)
         self.content.setPlaceholderText(CONTENT_PLACEHOLDER)
         self.content.textChanged.connect(self._content_changed)
@@ -1958,6 +1960,23 @@ class CaptureWindow(QWidget):
         if link:
             return ("Unwrapped from Outlook's Safe Links. " if part and part.safe else "") + "Only the address is kept. DocRepo never opens or fetches it."
         return "It stays where it is."
+
+    def _picture_pasted(self, image) -> None:
+        """A picture pasted in the content text (release 5.27, decision 129): a file of the capture's, as a dropped file is,
+        written as a PNG in the capture's attachments folder when it's saved, and shown on its task's notes page."""
+        from docrepo.layer0 import Part
+        from docrepo.save import Attachment
+        from docrepo.ui.rich_edit import png_bytes
+
+        data = png_bytes(image)
+        taken = {e.row.name for e in self.files}
+        base = f"Picture {self.ctx.now():%Y-%m-%d %H%M}"
+        name, n = f"{base}.png", 2
+        while name in taken:
+            name, n = f"{base} ({n}).png", n + 1
+        fs = self.ctx.fs
+        attachment = Attachment(name, save=lambda target, data=data: fs.write_picture(target, data), size=len(data))
+        self._add_file(FileRow(name, None, part=Part("picture", name, attachment=attachment, size=len(data), pasted=True)), "pasted")
 
     def _add_file(self, row: FileRow, src: str, line: str | None = None, focus: bool = True) -> None:
         m = self.ctx.model()

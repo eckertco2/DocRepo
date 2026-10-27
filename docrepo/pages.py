@@ -131,8 +131,21 @@ class Pages:
             c = self.m.captures.get(capture_id)
             return rel_link(here, [*capture_dir(c), "capture.md"]) if c else None
 
-        out += ["## Notes", "", *(notes_page.task_md(page, capture_link) or ["_No notes yet._"]), ""]
-        on_page = set(notes_page.capture_ids(page))
+        def document_link(document_id: str) -> str | None:
+            """A picture's or attachment's file, when it's DocRepo's: in the task's Files folder (pasted there) or in its
+            capture's attachments folder."""
+            d = self.m.documents.get(document_id)
+            if d is None:
+                return None
+            if d.capture and d.capture in self.m.captures:
+                return rel_link(here, [*capture_dir(self.m.captures[d.capture]), "attachments", d.name])
+            parts = Path(d.original or "").parts
+            if len(parts) >= 3 and parts[-2] == "Files" and parts[-3] == t.id:
+                return rel_link(here, [*here, "Files", d.name])
+            return None
+
+        out += ["## Notes", "", *(notes_page.task_md(page, capture_link, document_link) or ["_No notes yet._"]), ""]
+        on_page = notes_page.on_page(self.m, t.id, page)
         kids = self.m.children_of(t.id)
         if kids:
             out += ["## Subtasks", "", "| ID | Title | State | Assignees | Due |", "|---|---|---|---|---|"]
