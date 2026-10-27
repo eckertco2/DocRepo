@@ -2,8 +2,8 @@
 
 The task page was one HTML view. Its notes page is edited in place, so the task page is three parts in one scroll:
 the facts (``detail.task_page`` "top": where it sits, its status, When, Who, its agenda, subtasks and Details), the
-notes page's editor (``NotesEdit``), as tall as its text, and the history ("bottom": Captures, Status log, Summaries,
-Files). The two HTML parts are ``PageView``s as tall as their pages, so the pane has the one scroll bar. A wheel notch
+Notes heading with the format bar and its menu, the Checklist summary (release 5.26, ``checklist_summary``), the notes
+page's editor (``NotesEdit``), as tall as its text, and the history ("bottom": Captures, Status log, Summaries, Files). The two HTML parts are ``PageView``s as tall as their pages, so the pane has the one scroll bar. A wheel notch
 glides there, and the scroll keeps the caret in view as you type (the Qt sample's findings).
 """
 from __future__ import annotations
@@ -15,8 +15,10 @@ from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QMenu, QScrollA
 from docrepo.ui import tokens
 from docrepo.ui.icons import icon
 from docrepo.ui.look import LOOK
+from docrepo.ui.checklist_summary import ChecklistSummary
 from docrepo.ui.notes_edit import NotesEdit
 from docrepo.ui.page_view import PageView
+from docrepo.ui.rich_edit import FormatBar
 
 #: The widest the notes page's lines get, as the task page's HTML stops widening at 1040 px (release 5.21).
 NOTES_MAX = 1040
@@ -85,12 +87,14 @@ class TaskPane(QScrollArea):
         menu.addAction(self.day_action)
         menu.addAction("Page history…", lambda: self.notes_menu.emit("history"))
         self.menu_button.setMenu(menu)
+        self.notes = NotesEdit()
+        self.format_bar = FormatBar(self.notes)  # the capture window's, with the Checklist button (release 5.26)
         hl.addWidget(self.title)
         hl.addSpacing(8)
         hl.addWidget(self.saved)
         hl.addStretch()
+        hl.addWidget(self.format_bar)
         hl.addWidget(self.menu_button)
-        self.notes = NotesEdit()
         self.notes.viewport().installEventFilter(self)
         self.notes.on_page_key = self.page_key
         self.notes.cursorPositionChanged.connect(self.follow_caret)
@@ -99,12 +103,21 @@ class TaskPane(QScrollArea):
         rl.setContentsMargins(max(0, margin - 16), 0, margin, 4)
         self.notes.setMaximumWidth(NOTES_MAX)
         rl.addWidget(self.notes, 1)
+        self.summary = ChecklistSummary(self.notes)
+        box = QWidget(objectName="summaryBox")
+        bl = QHBoxLayout(box)
+        bl.setContentsMargins(margin, 2, margin, 8)
+        self.summary.setMaximumWidth(NOTES_MAX)
+        bl.addWidget(self.summary, 1)
         lay.addWidget(self.top)
         lay.addWidget(head)
+        lay.addWidget(box)
         lay.addWidget(row)
         lay.addWidget(self.bottom)
         lay.addStretch(1)
         self.setWidget(inner)
+        if not LOOK.classic:
+            self.format_bar.show_on_use(row)  # as in the capture window: shown while the notes have the caret or the mouse
 
     # ---- the one scroll ----
     def wheel(self, event) -> None:

@@ -11,29 +11,36 @@ above or below (with Shift, selecting); Alt+Shift+Up and Alt+Shift+Down move the
 Tab and Shift+Tab, or Alt+Shift+Right and Alt+Shift+Left, move a list item in and out; "- ", "* " or "1. " at the start
 of a line starts a list; Enter on an empty list item, or Backspace at its start, ends it. Release 5.7's own keys
 (Ctrl+Shift+X, H, L and O) still work. A list level is 20 px.
+
+Checklists (release 5.26, the notes page plan's decisions 86 and 91): Ctrl+1 (OneNote's to-do key), the Checklist button, or
+"[] " or "[ ] " at a line's start make checklist lines, a list item with a box; again takes the boxes off. A click on a box
+ticks it, and a ticked line's words go grey. Enter after a ticked line starts an unticked one. They're kept as ``- [ ]``
+and ``- [x]``. The new look draws its own tick box over Qt's.
 """
 from __future__ import annotations
 
 import re
 from collections.abc import Callable
 
-from PySide6.QtCore import QEvent, Qt, QTimer, Signal
-from PySide6.QtGui import (QBrush, QColor, QFont, QKeySequence, QTextBlockFormat, QTextCharFormat, QTextCursor, QTextDocument,
-                           QTextListFormat)
+from PySide6.QtCore import QEvent, QPoint, QRectF, Qt, QTimer, Signal
+from PySide6.QtGui import (QBrush, QColor, QFont, QKeySequence, QPainter, QPainterPath, QPen, QTextBlockFormat, QTextCharFormat,
+                           QTextCursor, QTextDocument, QTextListFormat)
 from PySide6.QtWidgets import QHBoxLayout, QMenu, QTextEdit, QToolButton, QWidget
 
 from docrepo import markup
 from docrepo.ui.icons import icon
+from docrepo.ui import tokens
 from docrepo.ui.look import LOOK
 
-#: The new look's icons on the format bar (decision 4): the highlight and the lists.
-ICONS = {"mark": "highlight", "ul": "bullets", "ol": "numbers"}
+#: The new look's icons on the format bar (decision 4): the highlight, the lists and the checklist.
+ICONS = {"mark": "highlight", "ul": "bullets", "ol": "numbers", "check": "checklist"}
+MARKER = QTextBlockFormat.MarkerType
 
 #: A list level's indent, in pixels: Qt's default is 40 (mods log round 3, M0055).
 INDENT = 20
 
 #: Each format bar button's key, as its tooltip and the Ctrl key tips show it.
-KEYS = {"b": "Ctrl+B", "i": "Ctrl+I", "u": "Ctrl+U", "s": "Ctrl+-", "mark": "Ctrl+Alt+H", "ul": "Ctrl+.", "ol": "Ctrl+/"}
+KEYS = {"b": "Ctrl+B", "i": "Ctrl+I", "u": "Ctrl+U", "s": "Ctrl+-", "mark": "Ctrl+Alt+H", "ul": "Ctrl+.", "ol": "Ctrl+/", "check": "Ctrl+1"}
 
 NUMBERED = (QTextListFormat.Style.ListDecimal, QTextListFormat.Style.ListLowerAlpha, QTextListFormat.Style.ListUpperAlpha,
             QTextListFormat.Style.ListLowerRoman, QTextListFormat.Style.ListUpperRoman)
@@ -95,7 +102,11 @@ def block_markup(block) -> tuple[str, bool]:
     lst = block.textList()
     if lst is not None:
         fmt = lst.format()
-        number = f"{lst.itemNumber(block) + 1}. " if fmt.style() in NUMBERED else "- "
+        marker = block.blockFormat().marker()
+        if marker != MARKER.NoMarker:  # a checklist line (release 5.26)
+            number = "- [x] " if marker == MARKER.Checked else "- [ ] "
+        else:
+            number = f"{lst.itemNumber(block) + 1}. " if fmt.style() in NUMBERED else "- "
         return "  " * max(0, fmt.indent() - 1) + number + line, True
     return markup.escape_line_start(line), formatted
 
@@ -134,6 +145,7 @@ class RichEdit(QTextEdit):
             "Ctrl+Shift+Up": lambda: self.to_paragraph(-1, True), "Ctrl+Shift+Down": lambda: self.to_paragraph(1, True),
             "Alt+Shift+Up": lambda: self.move_lines(-1), "Alt+Shift+Down": lambda: self.move_lines(1),
             "Alt+Shift+Right": lambda: self.indent_item(1), "Alt+Shift+Left": lambda: self.indent_item(-1),
+            "Ctrl+1": self.toggle_checklist,  # OneNote's to-do key (release 5.26, decision 86)
             # release 5.7's keys, kept (decision 56)
             "Ctrl+Shift+X": self.toggle_strike, "Ctrl+Shift+H": self.toggle_highlight, "Ctrl+Shift+L": bullets, "Ctrl+Shift+O": numbers}
 
@@ -262,6 +274,8 @@ class RichEdit(QTextEdit):
                 bf = c.blockFormat()
                 bf.setIndent(0)
                 c.setBlockFormat(bf)
+            if block.blockFormat().marker() != MARKER.NoMarker:
+                self._set_tick(block, None)
             block = block.next()
 
     def indent_item(self, delta: int) -> bool:
@@ -288,6 +302,170 @@ class RichEdit(QTextEdit):
             fmt.setIndent(level)
             QTextCursor(block).createList(fmt)
         return True
+
+    # ---- checklists (release 5.26, decisions 86 and 91) ----
+    def _checkable(self, block) -> bool:
+        """Whether a line can be a checklist line (the notes page leaves out headings, captions and file lines)."""
+        return True
+
+    @staticmethod
+    def is_check(block) -> bool:
+        return block.textList() is not None and block.blockFormat().marker() != MARKER.NoMarker
+
+    def _set_tick(self, block, done: bool | None) -> None:
+        """Tick (True), untick (False) or take the box off (None), greying a ticked line's words (decision 91)."""
+        c = QTextCursor(block)
+        bf = block.blockFormat()
+        bf.setMarker(MARKER.NoMarker if done is None else MARKER.Checked if done else MARKER.Unchecked)
+        c.setBlockFormat(bf)
+        ranges, it = [], block.begin()
+        while not it.atEnd():
+            frag = it.fragment()
+            ranges.append((frag.position(), frag.length(), QTextCharFormat(frag.charFormat())))
+            it += 1
+        for pos, length, fmt in ranges:
+            if done:
+                fmt.setForeground(QColor(markup.TICKED_GREY))
+            else:
+                fmt.clearForeground()
+            r = QTextCursor(self.document())
+            r.setPosition(pos)
+            r.setPosition(pos + length, QTextCursor.MoveMode.KeepAnchor)
+            r.setCharFormat(fmt)
+        if self.textCursor().block() == block:  # what's typed next on the line matches it
+            fmt = self.currentCharFormat()
+            if done:
+                fmt.setForeground(QColor(markup.TICKED_GREY))
+            else:
+                fmt.clearForeground()
+            self.setCurrentCharFormat(fmt)
+
+    def toggle_tick(self, block) -> None:
+        """Tick or untick a checklist line: one step of undo."""
+        if not self.is_check(block):
+            return
+        c = QTextCursor(block)
+        c.beginEditBlock()
+        self._set_tick(block, block.blockFormat().marker() != MARKER.Checked)
+        c.endEditBlock()
+        self.formatting.emit()
+
+    def _make_check(self, block) -> None:
+        if block.textList() is None:
+            prev = block.previous()
+            lst = prev.textList() if prev.isValid() and self.is_check(prev) else None
+            if lst is not None and lst.format().indent() == 1:
+                lst.add(block)
+            else:
+                fmt = QTextListFormat()
+                fmt.setStyle(QTextListFormat.Style.ListDisc)
+                fmt.setIndent(1)
+                QTextCursor(block).createList(fmt)
+        self._set_tick(block, False)
+
+    def toggle_checklist(self) -> None:
+        """Ctrl+1 or the Checklist button: the line, or the selected lines, become checklist lines; again takes them out
+        (decision 86), back to lines of text."""
+        c = self.textCursor()
+        start, end = sorted((c.selectionStart(), c.selectionEnd()))
+        targets, b = [], self.document().findBlock(start)
+        while b.isValid() and b.position() <= end:
+            if self._checkable(b):
+                targets.append(b)
+            b = b.next()
+        if not targets:
+            return
+        c.beginEditBlock()
+        if all(self.is_check(t) for t in targets):
+            for t in targets:
+                self._set_tick(t, None)
+                t.textList().remove(t)
+                bf = t.blockFormat()
+                bf.setIndent(0)
+                QTextCursor(t).setBlockFormat(bf)
+        else:
+            for t in targets:
+                if not self.is_check(t):
+                    self._make_check(t)
+        c.endEditBlock()
+        self.formatting.emit()
+
+    def checkbox_at(self, pos: QPoint):
+        """The checklist line whose box is at ``pos``, in the viewport, if any."""
+        b = self.cursorForPosition(pos).block()
+        if b.isValid() and b.isVisible() and self.is_check(b):
+            r = self.cursorRect(QTextCursor(b))
+            if r.left() - 22 <= pos.x() < r.left() and r.top() <= pos.y() <= r.bottom():
+                return b
+        return None
+
+    def checkbox_point(self, block) -> QPoint:
+        r = self.cursorRect(QTextCursor(block))
+        return QPoint(r.left() - 10, r.center().y())
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        if event.button() == Qt.MouseButton.LeftButton and not self.isReadOnly():
+            box = self.checkbox_at(event.position().toPoint())
+            if box is not None:
+                self.toggle_tick(box)
+                return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        if not self.isReadOnly():
+            on_box = self.checkbox_at(event.position().toPoint()) is not None
+            if on_box or self.viewport().cursor().shape() == Qt.CursorShape.PointingHandCursor:
+                self.viewport().setCursor(Qt.CursorShape.PointingHandCursor if on_box else Qt.CursorShape.IBeamCursor)
+        super().mouseMoveEvent(event)
+
+    def paintEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        """The new look's tick box over Qt's (a box with an X): an outline, or the accent with a white tick."""
+        super().paintEvent(event)
+        if LOOK.classic:
+            return
+        area = event.rect()
+        layout = self.document().documentLayout()
+        p = None
+        b = self.cursorForPosition(QPoint(4, area.top())).block()
+        if b.previous().isValid():
+            b = b.previous()
+        while b.isValid():
+            if b.isVisible():
+                if layout.blockBoundingRect(b).top() - self.verticalScrollBar().value() > area.bottom():
+                    break
+                if self.is_check(b):
+                    if p is None:
+                        p = QPainter(self.viewport())
+                        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+                    self._paint_box(p, b)
+            b = b.next()
+        if p is not None:
+            p.end()
+
+    def _paint_box(self, p: QPainter, b) -> None:
+        r = self.cursorRect(QTextCursor(b))
+        # Qt's own box is covered with the page's white: the notes page's box is transparent, so its palette's would show it.
+        p.fillRect(QRectF(r.left() - 22, r.top(), 21, r.height()), QColor(tokens.colour("content")))
+        side = 13.0
+        box = QRectF(r.left() - 7 - side, r.center().y() - side / 2 + 0.5, side, side)
+        if b.blockFormat().marker() == MARKER.Checked:
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QColor(tokens.colour("accent")))
+            p.drawRoundedRect(box, 3, 3)
+            tick = QPainterPath()
+            tick.moveTo(box.left() + 3.2, box.center().y() + 0.2)
+            tick.lineTo(box.left() + 5.6, box.bottom() - 3.4)
+            tick.lineTo(box.right() - 3.0, box.top() + 3.6)
+            pen = QPen(QColor(tokens.colour("on_accent")), 1.7)
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            p.setPen(pen)
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawPath(tick)
+        else:
+            p.setPen(QPen(QColor(tokens.colour("control")), 1))
+            p.setBrush(QColor(tokens.colour("content")))
+            p.drawRoundedRect(box.adjusted(0.5, 0.5, -0.5, -0.5), 3, 3)
 
     # ---- moving about (mods log round 3, M0055) ----
     def to_paragraph(self, step: int, select: bool = False) -> None:
@@ -381,11 +559,26 @@ class RichEdit(QTextEdit):
         if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and not event.modifiers() and block.textList() is not None and not block.text():
             self.indent_item(-1)  # Enter on an empty item: up a level, or out of the list
             return
+        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and self.is_check(block):
+            super().keyPressEvent(event)
+            nb = self.textCursor().block()
+            if self.is_check(nb):  # the next checklist line starts unticked
+                self._set_tick(nb, False)
+            return
         if key == Qt.Key.Key_Backspace and block.textList() is not None and cursor.positionInBlock() == 0 and not cursor.hasSelection():
             self._unlist(cursor)
             return
         if key == Qt.Key.Key_Space and block.textList() is None and not event.modifiers() & ~Qt.KeyboardModifier.ShiftModifier:
             before = block.text()[: cursor.positionInBlock()]
+            if before in ("[]", "[ ]") and self._checkable(block):  # "[] " or "[ ] " at a line's start starts a checklist
+                c = QTextCursor(block)
+                c.beginEditBlock()
+                c.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor, len(before))
+                c.removeSelectedText()
+                self._make_check(block)
+                c.endEditBlock()
+                self.formatting.emit()
+                return
             if before in ("-", "*") or re.fullmatch(r"\d+\.", before):  # "- " or "1. " starting a line starts a list
                 c = QTextCursor(block)
                 c.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor, len(before))
@@ -446,7 +639,9 @@ class FormatBar(QWidget):
                 ("mark", "Highlight", "Highlight (Ctrl+Alt+H): yellow, or the arrow for green and pink", edit.toggle_highlight, True),
                 ("ul", "• List", "Bulleted list (Ctrl+.), or type “- ”. Tab and Shift+Tab change the level; Alt+Shift+Up and "
                                  "Alt+Shift+Down move a line.", lambda: edit.toggle_list(False), True),
-                ("ol", "1. List", "Numbered list (Ctrl+/), or type “1. ”", lambda: edit.toggle_list(True), True)):
+                ("ol", "1. List", "Numbered list (Ctrl+/), or type “1. ”", lambda: edit.toggle_list(True), True),
+                ("check", "☐ Checklist", "Checklist (Ctrl+1), or type “[] ” at a line's start; a click on a box ticks it",
+                 edit.toggle_checklist, True)):
             b = QToolButton(text=text)
             if not LOOK.classic and key in ICONS:  # the new look: icons for the highlight and the lists, their names in the tooltip
                 b.setText("")
@@ -508,6 +703,7 @@ class FormatBar(QWidget):
         lst = e.textCursor().currentList()
         states = {"b": e.fontWeight() >= QFont.Weight.DemiBold.value, "i": e.fontItalic(), "u": e.fontUnderline(),
                   "s": e.currentCharFormat().fontStrikeOut(), "mark": e.current_highlight() is not None,
-                  "ul": lst is not None and lst.format().style() not in NUMBERED, "ol": lst is not None and lst.format().style() in NUMBERED}
+                  "ul": lst is not None and lst.format().style() not in NUMBERED and not e.is_check(e.textCursor().block()),
+                  "ol": lst is not None and lst.format().style() in NUMBERED, "check": e.is_check(e.textCursor().block())}
         for key, on in states.items():
             self.buttons[key].setChecked(bool(on))

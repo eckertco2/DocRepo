@@ -5,6 +5,7 @@ A formatted capture's content text is kept in its capture.md as a small, readabl
 - ``**bold**``, ``*italic*``, ``~~strikethrough~~``, ``<u>underline</u>`` and ``<mark class="yellow">highlight</mark>``
   (yellow, green or pink);
 - a list item: two spaces per level, then ``- `` or a number and ``. ``;
+- a checklist line (release 5.26, decision 86): a list item whose text starts with a box, ``- [ ] `` or ``- [x] ``;
 - any other line is a line of text, and an empty line stays empty.
 
 A backslash keeps a character as itself: ``\\*``, ``\\~``, ``\\<``, and ``\\-`` or ``1\\.`` at a line's start, so a line of
@@ -23,6 +24,10 @@ HIGHLIGHTS = {"yellow": "#fff1a8", "green": "#cdeccd", "pink": "#f8d0e3"}
 #: After a backslash, these stand for themselves.
 ESCAPABLE = frozenset("\\*~<-.")
 LIST_LINE = re.compile(r"^((?:  )*)(- |(\d+)\. )")
+#: A checklist line's box, at the start of a list item's text: "[ ] " or "[x] " (release 5.26).
+CHECK = re.compile(r"\[([ xX])\] ")
+#: Ticked lines' words are grey (decision 91).
+TICKED_GREY = "#5a6571"
 _LIKE_LIST = re.compile(r"^(\s*)(-|\d+\.)(?=\s|\Z)")
 _TAG = re.compile(r'<u>|</u>|<mark(?: class="(\w+)")?>|</mark>')
 #: The marks, in the order they're written and nested.
@@ -177,6 +182,15 @@ def to_plain(markup: str) -> str:
     return "\n".join(lines)
 
 
+def check_of(line: str) -> bool | None:
+    """A line's box: True ticked, False not, None for a line that isn't a checklist line."""
+    m = LIST_LINE.match(line)
+    if not m or m.group(3):
+        return None
+    c = CHECK.match(line, m.end())
+    return None if not c else c.group(1) in "xX"
+
+
 def is_formatted(markup: str) -> bool:
     """Whether the markup has any list or mark, so it needs keeping as markup rather than as plain text."""
     return any(LIST_LINE.match(line) or any(marks for _, marks, _ in _segments(line)) for line in markup.split("\n"))
@@ -222,7 +236,14 @@ def to_html(markup: str) -> str:
         while len(stack) < level + 1:
             out.append(f'<{kind} style="margin-top:0; margin-bottom:0">')
             stack.append([kind, False])
-        out.append(f'<li style="white-space:pre-wrap">{inline_html(line[m.end():])}')
+        rest, check = line[m.end():], None if m.group(3) else CHECK.match(line, m.end())
+        if check:  # a checklist line: Qt's list item with a box (release 5.26)
+            done = check.group(1) in "xX"
+            rest = line[check.end():]
+            out.append(f'<li class="{"checked" if done else "unchecked"}" style="white-space:pre-wrap'
+                       f'{"; color:" + TICKED_GREY if done else ""}">{inline_html(rest)}')
+        else:
+            out.append(f'<li style="white-space:pre-wrap">{inline_html(rest)}')
         stack[-1][1] = True
     close_to(0)
     return "".join(out)
@@ -235,8 +256,11 @@ def to_line_html(markup: str) -> str:
     for line in markup.split("\n"):
         m = LIST_LINE.match(line)
         if m:
-            marker = f"{m.group(3)}." if m.group(3) else "•"
-            out.append("&nbsp;" * (4 * (len(m.group(1)) // 2) + 1) + f"{marker}&nbsp;{inline_html(line[m.end():])}")
+            marker, rest = f"{m.group(3)}." if m.group(3) else "•", line[m.end():]
+            check = None if m.group(3) else CHECK.match(line, m.end())
+            if check:
+                marker, rest = ("☑" if check.group(1) in "xX" else "☐"), line[check.end():]
+            out.append("&nbsp;" * (4 * (len(m.group(1)) // 2) + 1) + f"{marker}&nbsp;{inline_html(rest)}")
         else:
             out.append(inline_html(line))
     return "<br>".join(out)

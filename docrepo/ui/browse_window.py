@@ -397,6 +397,7 @@ class BrowseWindow(QWidget):
         notes.message.connect(self.say)
         notes.folds_changed.connect(self._save_folds)
         self.task_pane.notes_menu.connect(self._notes_menu)
+        self.task_pane.summary.folded.connect(self._save_summary_folded)
         self.detail_stack.addWidget(self.task_pane)
         dl.addWidget(self.detail_stack, 1)
         self.detail = detail
@@ -2101,6 +2102,7 @@ class BrowseWindow(QWidget):
         self.task_pane.task_id = task_id
         self.task_pane.saved.setText("")
         notes.set_page(body, self._folds_of(task_id), day)
+        self.task_pane.summary.set_folded(db.get_state(self.conn, f"checklist_folded:{task_id}") == "1")
 
     def _save_notes(self, body: str) -> None:
         """The notes page saves as it's typed (decision 103): docs.db, the day's version, search and Task.md."""
@@ -2132,6 +2134,11 @@ class BrowseWindow(QWidget):
         """Which headings are folded, kept for each task in docs.db (the data root), as the app writes nowhere else."""
         if self.task_pane.task_id:
             db.set_state(self.conn, f"notes_folds:{self.task_pane.task_id}", json.dumps(self.task_pane.notes.folds()))
+
+    def _save_summary_folded(self, folded: bool) -> None:
+        """Whether the Checklist summary is folded, kept for each task in docs.db (decision 121)."""
+        if self.task_pane.task_id:
+            db.set_state(self.conn, f"checklist_folded:{self.task_pane.task_id}", "1" if folded else "0")
 
     def _open_ref(self, ref: str) -> None:
         if ref in self.model().captures:
@@ -2727,10 +2734,23 @@ class BrowseWindow(QWidget):
         """Edit task (E): every field on one page (mods log round 1, M0008, M0011)."""
         if task_id not in self.model().tasks:
             return
+        # Its checklist (release 5.26, decision 88 as redone): the Checklist summary, bound to the notes page's lines, so
+        # a tick or a rewording there changes the page at once, and Cancel leaves it.
+        from docrepo.ui.checklist_summary import ChecklistSummary
+
+        if self.task_pane.task_id != task_id and self.sel == ("task", task_id):
+            self.render_detail()
+        notes = self.task_pane.notes
+        checklist = ChecklistSummary(notes, foldable=False) if self.task_pane.task_id == task_id else None
         dialog = TaskEditDialog(self, self.model(), task_id, self._label_options, self._people_options,
                                 lambda anchor, picked: self._pick_task(anchor, picked, None),
-                                reference_fields=self.ctx.settings.reference_fields, today=self.today())
-        if self.run_dialog(dialog):
+                                reference_fields=self.ctx.settings.reference_fields, today=self.today(), checklist=checklist)
+        self._edit_dialog = dialog  # kept, so tests can reach it
+        try:
+            accepted = self.run_dialog(dialog)
+        finally:
+            notes.save_now()
+        if accepted:
             self.save_task_edit(task_id, dialog.values())
 
     def save_task_edit(self, task_id: str, values: dict) -> None:

@@ -495,10 +495,10 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
 
 def first_line(text: str) -> str:
     """A new task's description from its text (decision 115): the first line that has words, without a list marker. The
-    whole text goes on its notes page."""
+    whole text goes on its notes page. A checklist line is left out (decision 87)."""
     for line in text.split("\n"):
         words = re.sub(r"^\s*(?:[-*•]|\d+\.)\s+", "", line).strip()
-        if words:
+        if words and not markup.CHECK.match(words):
             return words
     return ""
 

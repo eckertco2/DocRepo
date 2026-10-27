@@ -258,6 +258,17 @@ QLabel#keyTip { background: $text; color: $content; border-radius: 3px; padding:
 QWidget#taskPaneInner, QWidget#notesHead { background: $content; }
 QTextEdit#notesPage, QTextEdit#notesPage:focus { border: none; border-radius: 0; background: transparent; padding: 0; }
 QLabel#notesSaved { color: $text2; }
+/* the Checklist summary (release 5.26): rows bound to the page's checklist lines */
+QWidget#summaryBox { background: $content; }
+QWidget#checkRow { border-radius: 4px; }
+QWidget#checkRow:hover { background: $hover; }
+QTextEdit#checkText, QTextEdit#checkText:focus { border: none; border-radius: 0; background: transparent; padding: 0; }
+QLabel#checkCount, QLabel#checkHeading { color: $text2; }
+QLabel#checkHeading { padding-top: 6px; padding-left: 4px; }
+QToolButton#checkFold, QToolButton#rowAction { border: none; background: transparent; padding: 0 2px; }
+QWidget#checkRow QCheckBox { spacing: 0; padding-top: 3px; }
+QWidget#checkRow QCheckBox::indicator { width: 13px; height: 13px; }
+QLineEdit#addItem { margin-top: 4px; }
 /* the capture window */
 QWidget#capture QScrollArea, QWidget#capture QScrollArea > QWidget > QWidget { background: $content; }
 QWidget#footer { background: $base; border-top: 1px solid $stroke; }

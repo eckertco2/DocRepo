@@ -325,7 +325,10 @@ def read(content: str, names: Names, today: date, *, labels: Sequence[ParseLabel
     for n, raw in enumerate(content.split("\n")):
         m = LIST_RE.match(raw)
         text = raw[m.end():] if m else raw
-        lines.append(Line(n, raw, bool(m), len(m.group(1).replace("\t", "  ")) // 2 if m else -1, m.end() if m else 0, text, scan(text, names)))
+        toks = scan(text, names)
+        if m and markup.CHECK.match(text):  # a checklist line (decision 87): its @ names stay names; it never makes a task
+            toks = [x for x in toks if x.kind == "task"]
+        lines.append(Line(n, raw, bool(m), len(m.group(1).replace("\t", "  ")) // 2 if m else -1, m.end() if m else 0, text, toks))
     blocks: list[Block] = []
     headings: list[Heading] = []
     heading: Heading | None = None

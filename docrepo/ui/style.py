@@ -112,6 +112,11 @@ QFrame#dropZone[over="true"] { background: #e8f0f8; border: 1px solid #1d5e98; }
 QWidget#taskPaneInner, QWidget#notesHead { background: #ffffff; }
 QTextEdit#notesPage { border: none; background: transparent; padding: 0; }
 QLabel#notesSaved { color: #5a6571; }
+QWidget#summaryBox { background: #ffffff; }
+QWidget#checkRow:hover { background: #eef1f4; }
+QTextEdit#checkText { border: none; background: transparent; padding: 0; }
+QLabel#checkCount, QLabel#checkHeading { color: #5a6571; }
+QToolButton#checkFold, QToolButton#rowAction { border: none; background: transparent; }
 """
 #: Release 5.9's style sheet, the Classic look's.
 CLASSIC_STYLE = STYLE

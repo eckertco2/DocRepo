@@ -76,7 +76,7 @@ class TaskEditDialog(FormDialog):
     hours, dates, recurrence and flags."""
 
     def __init__(self, parent: QWidget | None, m: Model, task_id: str, labels: Options, people: Options, pick_task: PickTask | None = None,
-                 reference_fields: Sequence[str] = (), today: date | None = None) -> None:
+                 reference_fields: Sequence[str] = (), today: date | None = None, checklist: QWidget | None = None) -> None:
         super().__init__(parent)
         t = m.task(task_id)
         self.m, self.task_id, self._pick_task = m, task_id, pick_task
@@ -146,6 +146,12 @@ class TaskEditDialog(FormDialog):
         self.description = QPlainTextEdit(t.description)
         self.description.setFixedHeight(96)
         g.addWidget(field("Description", self.description))
+        # Its checklist (release 5.26, decision 88 as redone): the notes page's checklist lines, bound to them. A tick or
+        # a rewording here changes the page at once, so Cancel leaves it; nothing goes into the status log.
+        self.checklist = checklist
+        if checklist is not None:
+            section(g, "Checklist")
+            g.addWidget(checklist)
 
         # ---- people ----
         section(g, "People")

@@ -38,6 +38,8 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Raw text log**: the corpus of all reference information entered for a task, including the text of its status updates and the content text of all captures associated with that task. Since release 5.25 the browse tool lists it on the task page's **Captures** tab, and the notes page is where its words are read.
 - **Notes page**: a task's notes as one page (release 5.25), read, written and edited in place on its task page. Each capture saved on the task adds its block to it; the owner adds, rewords and reorganises it freely. It lives in the database, and Task.md prints it under Notes.
 - **Caption**: the small grey line that starts a capture's block on a notes page, with its date, time and what it is ("Thu 8 Oct 2026 · 10:42 am · Note"). It links to the capture; removing it unties the text under it from the capture.
+- **Checklist line**: a line with a box on a notes page or in a capture's content text (release 5.26), ticked with a click. It's kept as `- [ ]` or `- [x]`.
+- **Checklist summary**: every checklist line on a task's notes page, shown again at the top of its notes and in Edit task; each row is the line itself, so a change in either place changes both.
 - **Day heading**: a heading on a notes page that reads as a date. With day headings on for a task, its new captures go under the heading for their day.
 - **Task description**: the short "what it is" of a task. A task made from a capture takes the first line of its content text; the whole text goes on its notes page (release 5.25).
 - **Label**: a category on a task, such as Safety. A task can have several, and subtasks can inherit them.

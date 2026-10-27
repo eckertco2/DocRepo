@@ -309,7 +309,39 @@ def task_md(page: str, capture_link: Callable[[str], str | None]) -> list[str]:
         if spaced and line and spaced[-1] and not (markup.LIST_LINE.match(line) and markup.LIST_LINE.match(spaced[-1])):
             spaced.append("")
         spaced.append(line)
+    # The Checklist summary (release 5.26, decision 121): every checklist line on the page, open ones first.
+    items = checklist(page)
+    if items:
+        done = sum(1 for x in items if x.done)
+        summary = [f"**Checklist** · {done} of {len(items)} done", ""]
+        summary += [f"- [{'x' if x.done else ' '}] {x.text}" for x in sorted(items, key=lambda x: x.done)]
+        spaced = summary + ([""] + spaced if spaced else [])
     return spaced
+
+
+@dataclass(frozen=True)
+class CheckLine:
+    """A checklist line on a page (release 5.26): where it is, whether it's ticked, its words as markup, its level, and
+    the heading it sits under ("" for none)."""
+
+    index: int
+    done: bool
+    text: str
+    level: int
+    heading: str
+
+
+def checklist(page: str) -> list[CheckLine]:
+    """Every checklist line on the page, in page order: what the Checklist summary lists (decision 121)."""
+    out, heading = [], ""
+    for i, x in enumerate(lines_of(page)):
+        if x.kind == "heading":
+            heading = x.text
+        elif x.kind == "text" and (done := markup.check_of(x.text)) is not None:
+            m = markup.LIST_LINE.match(x.text)
+            c = markup.CHECK.match(x.text, m.end())
+            out.append(CheckLine(i, done, x.text[c.end():], len(m.group(1)) // 2 + 1, heading))
+    return out
 
 
 # ---- docs.db ----

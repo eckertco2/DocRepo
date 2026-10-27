@@ -18,6 +18,9 @@ the facts above and the history below (``task_pane``).
 - **Moving lines** (Alt+Shift+Up and Down) moves a line with the list items under it, or a folded heading with its
   section, keeping what each line is.
 - **Saving** happens a moment after typing stops, and when the page loses the caret (``changed``).
+- **Checklists** (release 5.26): ``RichEdit``'s, on lines of text. The Checklist summary (``checklist_summary``) shows the
+  page's checklist lines again, each row the line itself: ``checklist_blocks``, ``set_line_from``, ``remove_line``,
+  ``add_check_item`` and ``go_to_block`` are what it uses.
 """
 from __future__ import annotations
 
@@ -26,13 +29,13 @@ from datetime import date
 from PySide6.QtCore import QByteArray, QPoint, QRect, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import (QBrush, QColor, QFont, QFontMetrics, QPainter, QPainterPath, QTextBlockFormat, QTextCharFormat, QTextCursor,
                            QTextDocument, QTextFormat, QTextListFormat)
-from PySide6.QtWidgets import QSizePolicy, QWidget
+from PySide6.QtWidgets import QSizePolicy, QTextEdit, QWidget
 
 from docrepo import markup, notes_page
 from docrepo.notes_page import Line
 from docrepo.ui import tokens
 from docrepo.ui.look import LOOK
-from docrepo.ui.rich_edit import NUMBERED, RichEdit, block_markup
+from docrepo.ui.rich_edit import MARKER, NUMBERED, RichEdit, block_markup
 
 FOLDED = 1  # a heading block's user state while its section is folded
 LEFT = 28   # the gutter beside the page, where the fold arrows go
@@ -190,12 +193,21 @@ class NotesEdit(RichEdit):
             else:
                 c.setBlockFormat(bf)
                 c.setBlockCharFormat(cf)
-            rest = line.text
+            rest, done = line.text, None
             if m:
                 self._join_list(c, len(m.group(1)) // 2 + 1, bool(m.group(3)))
                 rest = line.text[m.end():]
+                check = None if m.group(3) else markup.CHECK.match(rest)
+                if check:  # a checklist line (release 5.26)
+                    done = check.group(1) in "xX"
+                    rest = rest[check.end():]
+                    bf2 = c.blockFormat()
+                    bf2.setMarker(MARKER.Checked if done else MARKER.Unchecked)
+                    c.setBlockFormat(bf2)
             for text, marks, colour in markup._segments(rest):
                 f = QTextCharFormat()
+                if done:
+                    f.setForeground(QColor(markup.TICKED_GREY))
                 if "b" in marks:
                     f.setFontWeight(QFont.Weight.Bold)
                 if "i" in marks:
@@ -311,6 +323,91 @@ class NotesEdit(RichEdit):
         h = int(self.document().size().height()) + (self.height() - self.viewport().height())
         if h != self.height():
             self.setFixedHeight(max(h, 64))
+
+    # ---- checklists (release 5.26) ----
+    def _checkable(self, block) -> bool:
+        return self.kind(block) == "text"
+
+    def checklist_blocks(self) -> list[tuple[object, str]]:
+        """Every checklist line on the page, in page order, with the heading it sits under ("" for none)."""
+        out, heading = [], ""
+        for b in self.blocks():
+            if b.blockFormat().headingLevel():
+                heading = " ".join(b.text().split())
+            elif self.is_check(b):
+                out.append((b, heading))
+        return out
+
+    def set_line_from(self, block, source) -> None:
+        """A checklist line's words from the summary's row (``source``, a block of its own document): one change, in
+        the page's undo, keeping the line's box and greying its words if it's ticked."""
+        done = block.blockFormat().marker() == MARKER.Checked
+        c = QTextCursor(block)
+        c.beginEditBlock()
+        c.movePosition(QTextCursor.MoveOperation.StartOfBlock)
+        c.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
+        c.removeSelectedText()
+        it = source.begin()
+        while not it.atEnd():
+            fmt = QTextCharFormat(it.fragment().charFormat())
+            if done:
+                fmt.setForeground(QColor(markup.TICKED_GREY))
+            else:
+                fmt.clearForeground()
+            c.insertText(it.fragment().text(), fmt)
+            it += 1
+        c.endEditBlock()
+
+    def remove_line(self, block) -> None:
+        """Take a line off the page, with its line break: the summary's Remove. Ctrl+Z puts it back."""
+        doc, prev = self.document(), block.previous()
+        c = QTextCursor(doc)
+        c.beginEditBlock()
+        if prev.isValid():
+            c.setPosition(prev.position() + prev.length() - 1)
+            c.setPosition(block.position() + block.length() - 1, QTextCursor.MoveMode.KeepAnchor)
+        elif block.next().isValid():
+            c.setPosition(block.position())
+            c.setPosition(block.next().position(), QTextCursor.MoveMode.KeepAnchor)
+        else:
+            c.setPosition(block.position())
+            c.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
+        c.removeSelectedText()
+        if not prev.isValid() and not block.next().isValid():
+            self._set_tick(self.document().begin(), None)
+        c.endEditBlock()
+        self._restructure.start()
+
+    def add_check_item(self, text: str):
+        """The summary's Add item (decision 123): a new checklist line at the end of the page, under today's heading when
+        the task uses day headings. Returns its block."""
+        doc = self.document()
+        c = QTextCursor(doc)
+        c.beginEditBlock()
+        last = doc.lastBlock()
+        while last.previous().isValid() and not last.text() and self.kind(last) == "text" and not self.is_check(last) \
+                and last.textList() is None and not last.previous().text() and self.kind(last.previous()) == "text":
+            last = last.previous()
+        c.setPosition(last.position() + last.length() - 1)
+        fresh = doc.isEmpty() or (not last.text() and self.kind(last) == "text" and last.textList() is None)
+        title = notes_page.day_title(date.today())
+        if self.day_headings and not any(self.kind(b) == "heading" and b.text().strip() == title for b in self.blocks()):
+            self._put(c, Line("heading", title, 1), not fresh)
+            self.style_block(c.block())
+            fresh = False
+        self._put(c, Line("text", "- [ ] " + markup.escape_inline(" ".join(text.split()))), not fresh)
+        self.style_block(c.block())
+        c.endEditBlock()
+        self._restructure.start()
+        return c.block()
+
+    def go_to_block(self, block) -> None:
+        """The summary's Go to: the line on the page, unfolding what hides it, with the caret at its end."""
+        self.reveal(block)
+        c = QTextCursor(block)
+        c.movePosition(QTextCursor.MoveOperation.EndOfBlock)
+        self.setFocus()
+        self.setTextCursor(c)
 
     # ---- folding ----
     @staticmethod
@@ -774,9 +871,9 @@ class NotesEdit(RichEdit):
             self._hover = hover
             self.viewport().update()
         scheme = self.anchorAt(pos).partition(":")[0]
-        hand = (row is not None and pos.x() < LEFT) or scheme in ("capture", "document")
+        hand = (row is not None and pos.x() < LEFT) or scheme in ("capture", "document") or self.checkbox_at(pos) is not None
         self.viewport().setCursor(Qt.CursorShape.PointingHandCursor if hand else Qt.CursorShape.IBeamCursor)
-        super().mouseMoveEvent(event)
+        QTextEdit.mouseMoveEvent(self, event)  # the cursor's shape is set here, for the arrows and links too
 
     def leaveEvent(self, event) -> None:  # noqa: N802 - Qt's name
         self._hover = -1

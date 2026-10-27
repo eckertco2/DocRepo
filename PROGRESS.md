@@ -38,6 +38,7 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.23 | Review and planning, from the mods log, round 2 (stage 8): the Activity view and Priorities (decisions 23 and 70 to 78), schema version 9 | Built 2026-10-26, from the approved mock; hand-tested by the owner and on GitHub 2026-10-26. Next: testing on the corporate computer |
 | 5.24 | The owner's comments on 5.23: Find and Fold subtasks on the Priorities board, Group by on the task tree, and Collapse a level and Expand a level on every view whose rows nest | Built 2026-10-26; hand-tested by the owner and on GitHub 2026-10-26. Next: testing on the corporate computer |
 | 5.25 | The notes page: each task's notes as one page, edited in place on its task page, with captures adding their blocks (the notes page plan's decisions 95 to 120), schema version 10 | Built 2026-10-27, without a mock, after the Qt sample; hand-tested by the owner and on GitHub 2026-10-27. Next: testing on the corporate computer |
+| 5.26 | Checklists on the notes page and the Checklist summary (the notes page plan's decisions 85 to 91 as redone, and 121 to 123), and the format bar on the notes | Built 2026-10-27; hand-tested by the owner and on GitHub 2026-10-27. Next: testing on the corporate computer |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
 ## Decisions
@@ -472,6 +473,26 @@ The visual overhaul's O10, designed and mocked in the parent workspace (`docs/ui
   - **No button group:** the pane marks the open view itself, so that no row is marked while searching, and a click on the open view keeps it marked.
   - **The totals that left the sidebar** are beside their views' titles ("14 open", "7 active"), as `sidebar.md` said they'd be.
   - **The tooltip** shows only when a name is cut short. The headings' tooltips say Fold or Unfold.
+
+## Release 5.26: checklists and the Checklist summary (2026-10-27)
+
+The notes page plan's checklists (decisions 85 to 91 as the page redid them, and 121 to 123), asked for by the owner, with the format bar on the notes, which 5.25 left out. No schema change and no new package.
+
+- `docrepo/markup.py`: checklist lines, `- [ ] ` and `- [x] ` (`CHECK`, `check_of`, `TICKED_GREY`), in `to_html` (Qt's list item with a box, a ticked one grey) and `to_line_html` (☐ and ☑). `docrepo/items.py`: a checklist line's `@` names stay names, so it never makes a task item (87). `docrepo/save.py`: `first_line` skips checklist lines.
+- `docrepo/ui/rich_edit.py`: checklists in the content text box, so the capture window has them too: Ctrl+1, the format bar's **Checklist** button (`icons/checklist.svg`, new), `[] ` or `[ ] ` at a line's start, a click on a box ticks it, a ticked line's words grey, Enter after a ticked line starts an unticked one, and the new look's tick box painted over Qt's; `block_markup` writes the boxes.
+- `docrepo/notes_page.py`: `checklist` and `CheckLine`, and Task.md's Checklist summary at the top of Notes, open lines first. `docrepo/ui/notes_edit.py`: checklist lines on the page (not on headings, captions or file lines), and `checklist_blocks`, `set_line_from`, `remove_line`, `add_check_item` and `go_to_block` for the summary.
+- `docrepo/ui/checklist_summary.py` (new): `ChecklistSummary`, its rows bound to the page's lines (`Row`, `LineEdit`): ticking, rewording and removing in either place change the one line; done lines behind Show N done; Add item; Go to; folding, kept for each task. `docrepo/ui/task_pane.py`: the summary under Notes, and the format bar beside it. `docrepo/ui/task_forms.py` and `browse_window.py`: Edit task's Checklist section, the same summary bound to the same page, so a tick there saves and Cancel leaves it. `docrepo/ui/tokens.py` and `style.py`: the summary's looks.
+- `tests/test_checklists.py` (new). 860 pass in all, 1 skipped. The task page's summary and checklist lines, Edit task's Checklist and the capture window's checklist were drawn with Windows' own fonts and checked by eye.
+
+## Decisions (release 5.26)
+
+- Decisions 85 to 91 as the notes page redid them, and 121 to 123, as recommended.
+- **Changed on the way, for the owner's hand test:**
+  - **Add item takes words.** Format them on the page or in the row afterwards.
+  - **A row's Enter finishes the row**; it never adds a line. New lines come from Add item or the page.
+  - **Ctrl+1 again takes a line out of the list**, back to a line of text, as decision 86 says, not to a bullet.
+  - **A heading, caption or file line** never becomes a checklist line.
+
 
 ## Release 5.25: the notes page (2026-10-27)
 
