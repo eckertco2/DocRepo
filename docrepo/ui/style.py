@@ -109,6 +109,9 @@ QFrame#dropZone QLineEdit { border: none; background: transparent; }
 QLabel#pinTitle { font-weight: 600; }
 QFrame#dropZone { background: #f4f6f8; border: 1px dashed #87919c; border-radius: 6px; }
 QFrame#dropZone[over="true"] { background: #e8f0f8; border: 1px solid #1d5e98; }
+QWidget#taskPaneInner, QWidget#notesHead { background: #ffffff; }
+QTextEdit#notesPage { border: none; background: transparent; padding: 0; }
+QLabel#notesSaved { color: #5a6571; }
 """
 #: Release 5.9's style sheet, the Classic look's.
 CLASSIC_STYLE = STYLE

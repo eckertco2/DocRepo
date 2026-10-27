@@ -24,6 +24,11 @@ from docrepo.ui.tree_view import HTML_ROLE, KEY_ROLE  # noqa: E402
 NOW = datetime(2026, 10, 8, 14, 10)
 
 
+def shown(browse) -> str:
+    """What the detail pane shows, in words: a task's page is three parts since the notes page (release 5.25)."""
+    return browse.task_pane.text() if browse.detail_stack.currentIndex() == 2 else browse.page.toPlainText()
+
+
 @pytest.fixture(scope="module")
 def qapp():
     return QApplication.instance() or QApplication([])
@@ -59,7 +64,7 @@ def test_it_opens_on_the_task_tree(browse):
     assert browse.view == "tasks" and browse.sel == ("task", "T000001")
     assert ("task", "T000001") in rows(browse) and ("task", "T000010") in rows(browse)
     assert "unfiled" in browse.nav.rows and "settings" in browse.nav.rows
-    assert "Reactor impeller upgrade" in browse.page.toPlainText()
+    assert "Reactor impeller upgrade" in shown(browse)
 
 
 def test_the_views_pane_hides_and_stays_hidden(browse, ctx):
@@ -139,7 +144,7 @@ def test_links_change_the_tab_scope_and_chapters(browse):
     browse.on_link(QUrl("scope:family"))
     browse.on_link(QUrl("chap:T000012"))
     assert (browse.state.tab, browse.state.scope, browse.state.chapters) == ("log", "family", {"T000012"})
-    assert "Work started" in browse.page.toPlainText()
+    assert "Work started" in shown(browse)
     browse.go_task("T000009")  # another task: the scope goes back to With subtasks, the chapters close, the tab stays
     assert (browse.state.tab, browse.state.scope, browse.state.chapters) == ("log", "descendants", set())
     browse.on_link(QUrl("person:P003"))
@@ -151,7 +156,7 @@ def test_links_change_the_tab_scope_and_chapters(browse):
 def test_a_n_and_u_open_the_capture_window_on_the_selected_task(browse):
     browse.go_task("T000008")
     for mode in ("note", "new_task", "update"):
-        browse.page.setFocus()
+        browse.task_pane.top.setFocus()
         browse._key(mode)
         assert browse.capture.isVisible() and browse.capture.task == "T000008" and browse.capture.types == {mode}
         browse.capture.hide()
@@ -196,15 +201,17 @@ def test_make_it_a_task(browse):
 
 
 def test_fixing_a_capture(browse, ctx):
+    """Release 5.25 (decision 112): Edit fixes the title and summary; the text stays as it arrived, read-only."""
+    before = captures.capture_md_path(ctx.data_root, Model(browse.conn).captures["C000017"]).read_text(encoding="utf-8")
     browse.go_capture("C000017")
     browse.start_capture_edit("C000017")
-    assert browse.detail_stack.currentIndex() == 1
-    browse.edit_content.setPlainText("Vendor drawings came in late. Now due 23 Oct.")
+    assert browse.detail_stack.currentIndex() == 1 and browse.edit_content.isReadOnly()
+    assert browse.edit_content.value()[0] == "Vendor drawings came in late, so the package is now due Oct 23."
+    browse.edit_capture_title.setText("Drawings late")
     browse.save_capture_edit()
-    assert browse.detail_stack.currentIndex() == 0 and "previous version" in browse.status.text()
+    assert browse.detail_stack.currentIndex() == 0 and browse.status.text().startswith("Saved C000017.")
     c = Model(browse.conn).captures["C000017"]
-    assert captures.read_content(ctx.data_root, c) == "Vendor drawings came in late. Now due 23 Oct."
-    assert "1 earlier version kept" in browse.page.toPlainText()
+    assert c.title == "Drawings late" and captures.capture_md_path(ctx.data_root, c).read_text(encoding="utf-8") == before
 
 
 def test_clearing_a_reminder_from_the_list(browse):
@@ -299,7 +306,7 @@ def test_task_edits(browse, monkeypatch):
     browse.run_dialog = lambda d: opened.append(d.windowTitle()) or True
     typed = dialog.values()
     monkeypatch.setattr(TaskEditDialog, "values", lambda self: typed)
-    browse.page.setFocus()
+    browse.task_pane.top.setFocus()
     browse._key("edit")  # E opens the form on the selected task
     m = Model(browse.conn)
     t = m.task("T000012")
@@ -391,7 +398,7 @@ def test_discard_and_bring_back(browse):
     assert asked == ["Discard task"] and ("task", "T000017") not in rows(browse) and browse.sel == ("task", "T000002")
     assert "Discarded Rails need to be painted red." in browse.status.text()
     browse.go_task("T000017")  # opening it from elsewhere shows it in the Discarded view
-    assert browse.view == "discarded" and rows(browse) == [("task", "T000017")] and "Typed twice" in browse.page.toPlainText()
+    assert browse.view == "discarded" and rows(browse) == [("task", "T000017")] and "Typed twice" in shown(browse)
     labels = [b.text() for b in browse.actions.findChildren(QPushButton)]
     assert labels == ["Bring back", "Open folder"]
     browse.go_capture("C000022")
@@ -413,7 +420,7 @@ def test_the_today_list(browse, monkeypatch):
     from docrepo.model import TODAY
 
     browse.go_task("T000012")
-    browse.page.setFocus()
+    browse.task_pane.top.setFocus()
     browse._key("today")
     assert browse.status.text() == "Rigging plan is on Today. Its status log says so."
     add_to = next(b for b in browse.actions.findChildren(QPushButton) if b.text() == "Add to").menu()
@@ -687,11 +694,11 @@ def test_ctrl_enter_and_esc_in_a_capture_edit(browse):
     form = browse.detail_stack.widget(1)
     asked: list[str] = []
     browse.confirm = lambda title, text: asked.append(title) or False
-    browse.edit_content.setPlainText("Vendor drawings came in late.")
+    browse.edit_capture_title.setText("Drawings late")
     _shortcut(form, "Escape").activated.emit()
     assert asked == ["Edit capture C000017"] and browse.editing == "C000017"  # No keeps the edit open
     _shortcut(form, "Ctrl+Return").activated.emit()
-    assert browse.editing is None and "previous version" in browse.status.text()
+    assert browse.editing is None and browse.status.text().startswith("Saved C000017.")
     browse.start_capture_edit("C000017")
     _shortcut(form, "Escape").activated.emit()  # nothing changed: it closes without asking
     assert browse.editing is None and asked == ["Edit capture C000017"]
@@ -707,7 +714,7 @@ def test_one_letter_per_topic(browse, monkeypatch):
     opened = []
     monkeypatch.setattr(browse, "open_capture", lambda **options: opened.append(options))
     browse.go_task("T000012")
-    browse.page.setFocus()
+    browse.task_pane.top.setFocus()
     for k in ("N", "T", "U", "A"):
         keys[k].activated.emit()
     assert [(o["mode"], o.get("agenda_focus", False)) for o in opened] == [("note", False), ("new_task", False), ("update", False), ("update", True)]
@@ -740,13 +747,13 @@ def test_the_task_page_bar_and_its_links(browse, monkeypatch):
     browse.on_link(QUrl("new:T000008"))
     browse.on_link(QUrl("update:T000008"))
     assert opened == [{"task": "T000008", "mode": "new_task"}, {"task": "T000008", "mode": "update"}]
-    assert "Folder" not in browse.page.toPlainText()
+    assert "Folder" not in shown(browse)
     browse.on_link(QUrl("fold:details"))
-    assert browse.state.details and "Tasks\\T000008" in browse.page.toPlainText()
+    assert browse.state.details and "Tasks\\T000008" in shown(browse)
     browse.on_link(QUrl("menu:scope"))
     assert [a.text() for a in browse._menu.actions() if a.isChecked()] == ["With subtasks"]
     browse._menu.actions()[0].trigger()
-    assert browse.state.scope == "self" and "This task ▾" in browse.page.toPlainText()
+    assert browse.state.scope == "self" and "This task ▾" in shown(browse)
     browse._menu.close()
     browse.on_link(QUrl("menu:order"))
     browse._menu.actions()[1].trigger()
@@ -755,12 +762,12 @@ def test_the_task_page_bar_and_its_links(browse, monkeypatch):
     browse.on_link(QUrl("fold:anything"))  # only the page's own folds
     browse.go_task("T000012")  # another task: its folds start closed; the tab and order stay
     assert not browse.state.details and browse.state.order == "new"
-    browse.page.setFixedWidth(1000)  # the pane made wide: the page is drawn again in two columns
+    browse.task_pane.setFixedWidth(1040)  # the pane made wide: the page is drawn again in two columns
     QApplication.processEvents()
-    assert browse.page.page_width() >= 760 and "Folder" in browse.page.toPlainText()  # the rail, with Details open
-    browse.page.setFixedWidth(500)
+    assert browse.task_pane.page_width() >= 760 and "Folder" in shown(browse)  # the rail, with Details open
+    browse.task_pane.setFixedWidth(520)
     QApplication.processEvents()
-    assert "Folder" not in browse.page.toPlainText()
+    assert "Folder" not in shown(browse)
 
 
 def test_find_in_this_view(browse):
@@ -836,27 +843,20 @@ def test_the_suggested_hotkeys(browse):
     assert view.save() == ["browse_hotkey", "note_hotkey", "new_task_hotkey", "update_hotkey", "agenda_hotkey", "today_hotkey"]
 
 
-def test_fixing_a_capture_with_formatting(browse, ctx):
-    """Release 5.7 (mods log round 2, M0045): Edit keeps, adds and takes off formatting; Ctrl+B in the box is bold, not the views."""
-    from PySide6.QtCore import QEvent, Qt
-    from PySide6.QtGui import QKeyEvent
-    from PySide6.QtWidgets import QApplication
+def test_a_capture_s_edit_shows_its_text_and_goes_to_its_block(browse, ctx):
+    """Release 5.25 (decision 112): the text shows with its formatting, read-only; Go to it on the page opens its block."""
+    from docrepo.save import CaptureDraft, save_capture
 
-    browse.go_capture("C000017")
-    browse.start_capture_edit("C000017")
-    browse.edit_content.set_value("Vendor drawings came in **late**.\n- package due 23 Oct", True)
-    ctrl_b = QKeyEvent(QEvent.Type.ShortcutOverride, Qt.Key.Key_B, Qt.KeyboardModifier.ControlModifier, "")
-    assert QApplication.sendEvent(browse.edit_content, ctrl_b) and ctrl_b.isAccepted()
-    browse.save_capture_edit()
-    c = Model(browse.conn).captures["C000017"]
-    assert c.formatted and c.title == "Vendor drawings came in late"
-    assert "<b>late</b>" in browse.page.toHtml() or "font-weight" in browse.page.toHtml()
-    browse.start_capture_edit("C000017")
-    assert browse.edit_content.value() == ("Vendor drawings came in **late**.\n- package due 23 Oct", True)
-    browse.edit_content.set_value("Vendor drawings came in late.", False)
-    browse.save_capture_edit()
-    c = Model(browse.conn).captures["C000017"]
-    assert not c.formatted and captures.read_content(ctx.data_root, c) == "Vendor drawings came in late."
+    r = save_capture(browse.conn, ctx.data_root, ctx.fs, Settings(me="P001"),
+                     CaptureDraft(content="Guard **fitted**.\n- rails next", formatted=True, task="T000012"), NOW)
+    browse.refresh()
+    browse.go_capture(r.capture_id)
+    browse.start_capture_edit(r.capture_id)
+    assert browse.edit_content.value() == ("Guard **fitted**.\n- rails next", True) and not browse.edit_goto.isHidden()
+    browse.edit_goto.click()
+    notes = browse.task_pane.notes
+    assert browse.editing is None and browse.sel == ("task", "T000012") and browse.detail_stack.currentIndex() == 2
+    assert notes.textCursor().block().text().endswith("· Note") and notes.kind(notes.textCursor().block()) == "caption"
 
 
 def test_release_59_people_labels_reference_fields_and_capacity(browse, ctx):

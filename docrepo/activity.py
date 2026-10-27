@@ -175,6 +175,11 @@ class Activity:
                 else self.change_text(e.field, e.from_value, e.to_value)
             facts = [WHERE.get(e.via, f"By {e.via}")] if e.via and e.via != "Browse tool" and not re.match(r"C\d", e.via) else []
             out.append(Line(f"e:{i}", e.at[:16], e.task, e.task, ["change"], CHANGE_CHIPS.get(e.field, "Changed"), text, facts, ("task", e.task)))
+        # The notes page (release 5.25, decision 111): a line for each day the owner edited a task's page. Nothing goes
+        # into the status log for it (decision 90).
+        for task_id, day, at in m.page_edits:
+            if in_window(day) and task_id in m.tasks and not m.task(task_id).discarded:
+                out.append(Line(f"p:{task_id}:{day}", at[:16], task_id, task_id, ["note"], "Notes", "Notes edited", [], ("task", task_id)))
         for v in m.versions:
             if not in_window(v.at) or v.document not in m.documents:
                 continue

@@ -23,7 +23,7 @@ from PySide6.QtCore import QAbstractNativeEventFilter, QLockFile, QObject, QTime
 from PySide6.QtGui import QAction, QColor, QFont, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QInputDialog, QMenu, QSystemTrayIcon
 
-from docrepo import backup, capacity, db, diagnose, hotkey, people, prompts, search
+from docrepo import backup, capacity, db, diagnose, edits, hotkey, notes_page, people, prompts, search
 from docrepo.config import Settings
 from docrepo.dates import long_date
 from docrepo.model import Model
@@ -257,6 +257,26 @@ class CaptureApp(QObject):
         log.info("reminders: shown for %s", ", ".join(t.id for t in due))
         return len(due)
 
+    # ---- the notes pages' first build (release 5.25) ----
+    def build_pages(self) -> int:
+        """Each task's first notes page, from its raw text log (decision 107), the first time release 5.25 starts, after
+        a backup. The build only adds pages, so a backup that can't be made doesn't stop it; the notification says so."""
+        conn, now = self.ctx.conn, self.ctx.now()
+        try:
+            backup.record(conn, backup.run_backup(self.ctx.data_root, self.ctx.settings, now))
+            backed = True
+        except (backup.BackupError, OSError, ValueError) as e:
+            log.warning("no backup before building the notes pages: %s", e)
+            backed = False
+        model, stories = edits.stories_for(conn, self.ctx.data_root, now)
+        made = notes_page.build_all(conn, model, stories, now)
+        search.rebuild(conn, self.ctx.data_root)
+        write_pages(Model(conn), self.ctx.data_root, self.ctx.fs, now.date(), now)
+        log.info("notes pages built: %d, backup first: %s", made, backed)
+        self.notify("Notes pages", f"Each task's notes are one page now: {made} pages made from the raw text logs"
+                    + (", after a backup." if backed else ". No backup could be made first: check Settings, Backups."))
+        return made
+
     # ---- the daily work ----
     def daily(self) -> bool:
         """At the first start each day: rebuild the capacity calendar and the generated pages. True if it ran."""
@@ -360,6 +380,8 @@ def run(data_root: Path, settings: Settings, fs: SafeFS, browse: bool = False) -
     ask_who_i_am(ctx)
     app = CaptureApp(qt, ctx)
     diagnose.install_excepthook(app.notify)  # under pythonw an error nothing caught would otherwise vanish
+    if notes_page.needs_build(conn):
+        app.build_pages()
     app.daily()
     if search.needs_rebuild(conn):
         search.rebuild(conn, data_root)

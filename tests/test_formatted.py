@@ -49,10 +49,12 @@ def test_a_formatted_note_keeps_its_markup(env):
     # Search reads its words, not its marks.
     assert any(x.id == r.capture_id for x in search.search(conn, Model(conn), "guard fitted signed"))
     assert not any(x.id == r.capture_id for x in search.search(conn, Model(conn), "mark class"))
-    # The raw text log shows its formatting and lists, under its title; its first line is the title, so it isn't repeated.
-    log = pages(conn, root).task_page("T000008", PageState())
-    assert "<b>guard</b> fitted" in log and "background-color:#cdeccd" in log and "<i>62 Nm</i>" in log
-    assert "•&nbsp;" in log and "1.&nbsp;Book the alignment" in log and "- dash, not a list" in log
+    # Its notes page holds it with its formatting and lists, line for line (release 5.25); the Captures tab lists it.
+    from docrepo import notes_page
+
+    body = notes_page.get(conn, "T000008").split("\n")
+    assert all(line in body for line in NOTES.split("\n") if line.strip())
+    assert f"goto:T000008:{r.capture_id}" in pages(conn, root).task_page("T000008", PageState())
     page = pages(conn, root).capture_page(r.capture_id, NOTES)
     assert "<ul" in page and "<ol" in page and "<b>guard</b>" in page
 
@@ -69,8 +71,12 @@ def test_a_new_task_from_formatted_text_takes_its_words(env):
     conn, root, _ = env
     r = save(env, CaptureDraft(content="**Replace** the seal kit by Friday\n- two spares", formatted=True, task="T000008", types={"new_task"}))
     t = Model(conn).task(r.created_task)
-    # Parse and populate reads the words: "by Friday" is its due date, not part of its title.
-    assert t.title == "Replace the seal kit" and t.description == "Replace the seal kit by Friday\n- two spares"
+    # Parse and populate reads the words: "by Friday" is its due date, not part of its title. Its description is the first
+    # line, and the whole text, formatted, is on its notes page (release 5.25, decision 115).
+    assert t.title == "Replace the seal kit" and t.description == "Replace the seal kit by Friday"
+    from docrepo import notes_page
+
+    assert notes_page.get(conn, t.id).endswith("\n**Replace** the seal kit by Friday\n- two spares")
 
 
 def test_an_email_in_a_formatted_capture_reads_as_itself(env):
@@ -82,16 +88,3 @@ def test_an_email_in_a_formatted_capture_reads_as_itself(env):
     kept = captures.read_content(root, c)
     assert captures.plain(c, kept) == "Forwarding this\n\n" + email.text()  # the email's text comes back exactly
     assert c.title == "Seal kit *urgent*"
-
-
-def test_editing_can_add_or_take_off_formatting(env):
-    conn, root, fs = env
-    r = save(env, CaptureDraft(content="Guard fitted. Rails painted.", task="T000008", types={"note"}))
-    out = edits.edit_capture(conn, root, fs, r.capture_id, "**Guard** fitted. Rails painted.", "", None, AT, formatted=True)
-    c = Model(conn).captures[r.capture_id]
-    assert "Saved" in out.message and c.formatted and c.title == "Guard fitted"
-    assert 'content_format: "markdown"' in captures.capture_md_path(root, c).read_text(encoding="utf-8")
-    assert edits.edit_capture(conn, root, fs, r.capture_id, "**Guard** fitted. Rails painted.", "", None, AT).message == "Nothing changed."
-    edits.edit_capture(conn, root, fs, r.capture_id, "Guard fitted. Rails painted.", "", None, AT, formatted=False)
-    c = Model(conn).captures[r.capture_id]
-    assert not c.formatted and "content_format" not in captures.capture_md_path(root, c).read_text(encoding="utf-8")

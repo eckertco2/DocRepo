@@ -1,11 +1,12 @@
-"""Changes made in the browse tool: filing a capture, fixing one, clearing a reminder, closing an agenda item and editing a task.
+"""Changes made in the browse tool: filing a capture, fixing one, clearing a reminder, closing an agenda item, editing a
+task and its notes page.
 
 Each change happens in one database transaction, then its files are written:
 the capture's capture.md, any saved copies, the search index and the generated
 pages. A file that fails never undoes the change; it's reported and logged.
 
-Fixing a capture keeps the previous capture.md in the capture's ``_old versions``
-folder, so no captured text is ever lost (the hard rules).
+A capture's capture.md is written once and then only ever filed (the hard rules, since release 5.25): its title
+and summary can be fixed in docs.db, and its words on its tasks' notes pages.
 """
 from __future__ import annotations
 
@@ -15,17 +16,17 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from docrepo import activity, agenda, bulk, captures, items, markup, people, priorities, search, tasks
+from docrepo import activity, agenda, bulk, captures, notes_page, people, priorities, search, tasks
 from docrepo.config import Settings
 from docrepo.dates import stamp
 from docrepo.db import transaction
 from docrepo.links import is_link
 from docrepo.model import TODAY, Model, is_person
-from docrepo.pages import write_pages
+from docrepo.pages import write_pages, write_task_page
 from docrepo.parse import ParsePerson
 from docrepo.safe_fs import SafeFS
 from docrepo.schedule import start_of
-from docrepo.text import capture_title
+from docrepo.stories import Stories
 
 log = logging.getLogger(__name__)
 
@@ -50,6 +51,58 @@ def write_all_pages(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, at: d
         write_pages(Model(conn), data_root, fs, at.date(), at)
     except OSError as e:
         problems.append(f"The generated pages weren't all updated ({type(e).__name__}).")
+
+
+# ---- the notes page (release 5.25) ----
+def stories_for(conn: sqlite3.Connection, data_root: Path, at: datetime, model: Model | None = None) -> tuple[Model, Stories]:
+    model = model or Model(conn)
+    return model, Stories(model, at.date(), lambda cid: captures.read_content(data_root, model.captures[cid]) or "")
+
+
+def add_to_pages(conn: sqlite3.Connection, data_root: Path, at: datetime, added: list[tuple[str, str | None]], problems: list[str],
+                 tasks_: list[str] | None = None) -> list[str]:
+    """Put each capture's block on its tasks' notes pages (or ``tasks_``), given as (capture, its typed text, or None to
+    read it), and index the pages for search. A page that can't be changed is a problem, not a failed change: the
+    capture is kept, and its task page's Captures tab offers to add it again. Returns the tasks whose pages changed."""
+    changed: list[str] = []
+    try:
+        model, stories = stories_for(conn, data_root, at)
+        for capture_id, typed in added:
+            if capture_id in model.captures:
+                changed += notes_page.add_capture(conn, model, stories, capture_id, at, typed, tasks_)
+        search.index_pages(conn, changed)
+    except (sqlite3.Error, OSError, KeyError) as e:
+        problems.append(f"The notes pages weren't all updated ({type(e).__name__}).")
+    return changed
+
+
+def save_page(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, task_id: str, body: str, at: datetime) -> Outcome:
+    """The owner's edit of a task's notes page, saved as they type (decision 103): docs.db, the day's version, the
+    search index and the task's Task.md. Nothing goes into the status log (decision 90)."""
+    if task_id not in Model(conn).tasks:
+        raise EditError(f"There's no task {task_id}.")
+    out = Outcome("")
+    if not notes_page.put(conn, task_id, body, at, by_owner=True):
+        return out
+    search.index_pages(conn, [task_id])
+    try:
+        write_task_page(Model(conn), data_root, fs, task_id, at.date(), at)
+    except OSError as e:
+        out.problems.append(f"Task.md wasn't updated ({type(e).__name__}).")
+    return out
+
+
+def add_again(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, capture_id: str, task_id: str, at: datetime) -> Outcome:
+    """Add it again (decision 109): a capture whose block is no longer on the page goes back, as it was first added."""
+    out = Outcome("")
+    changed = add_to_pages(conn, data_root, at, [(capture_id, None)], out.problems, [task_id])
+    if changed:
+        try:
+            write_task_page(Model(conn), data_root, fs, task_id, at.date(), at)
+        except OSError as e:
+            out.problems.append(f"Task.md wasn't updated ({type(e).__name__}).")
+    out.message = f"{capture_id} is on the page again." if changed else f"{capture_id} is on the page already."
+    return out
 
 
 # ---- saved copies ----
@@ -133,6 +186,7 @@ def file_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, capture_
     rewrite_capture_md(conn, data_root, fs, capture_id, content, out.problems)
     copy_files(conn, data_root, fs, task_id, copies, out.problems)
     search.index_items(conn, data_root, captures=[capture_id])
+    add_to_pages(conn, data_root, at, [(capture_id, None)], out.problems)  # decision 106: on the page when it's filed
     write_all_pages(conn, data_root, fs, at, out.problems)
     title = Model(conn).task(task_id).title
     out.message = f"Filed {capture_id} to {title}." + (f" {len(copies)} saved cop{'ies' if len(copies) > 1 else 'y'} made." if copies else "")
@@ -140,56 +194,24 @@ def file_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, capture_
     return out
 
 
-# ---- fixing a capture ----
-def old_version_name(at: datetime, taken: set[str]) -> str:
-    """The previous capture.md's name in _old versions: "capture 2026-10-08 1410.md", made unique."""
-    base = f"capture {at:%Y-%m-%d %H%M}"
-    name, n = f"{base}.md", 2
-    while name.lower() in {t.lower() for t in taken}:
-        name, n = f"{base} ({n}).md", n + 1
-    return name
-
-
-def edit_capture(
-    conn: sqlite3.Connection, data_root: Path, fs: SafeFS, capture_id: str, content: str, summary: str, summary_type: str | None,
-    at: datetime, formatted: bool | None = None,
-) -> Outcome:
-    """Fix a capture's content text or summary. The previous capture.md is kept in its _old versions folder first.
-    ``formatted`` says whether ``content`` is markup (mods log round 2, M0045); None keeps what the capture was.
-    ``content`` is as it's shown, each @ and # by its name (release 5.8): they're kept with their IDs again, the IDs
-    the capture had coming first, so a person or task renamed since stays linked."""
-    model = Model(conn)
-    c = model.captures.get(capture_id)
+# ---- fixing a capture's title and summary (release 5.25, decision 112) ----
+def edit_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, capture_id: str, title: str, summary: str,
+                 summary_type: str | None, at: datetime) -> Outcome:
+    """Fix a capture's title or summary. Its words are read, fixed and added to on its tasks' notes pages now, so its
+    capture.md stays as it arrived: written once when it's saved, and then only ever filed (the hard rules)."""
+    c = Model(conn).captures.get(capture_id)
     if c is None:
         raise EditError(f"There's no capture {capture_id}.")
-    old = captures.read_content(data_root, c)
-    if old is None:
-        raise EditError(f"{capture_id}'s capture.md can't be read, so it can't be edited here.")
-    formatted = c.formatted if formatted is None else formatted
-    people = [ParsePerson(p.id, p.name, tuple(p.aliases), p.status) for p in model.people.values()]
-    names = items.names_of(model, people, items.refs_of(old))
-    content, summary = items.store(content.rstrip(), names, formatted), summary.strip()
-    if content == old.rstrip() and formatted == c.formatted and summary == (c.summary or ""):
+    title, summary = " ".join(title.split()) or c.title, summary.strip()
+    if title == c.title and summary == (c.summary or ""):
         return Outcome("Nothing changed.")
-    words = items.unstore(markup.to_plain(content) if formatted else content)
-    if not words.strip() and not c.documents:
-        raise EditError("The content text can't be empty for a capture with no files.")
-    folder = captures.capture_folder(data_root, c.id, c.saved)
-    old_dir = folder / "_old versions"
-    taken = {p.name for p in old_dir.iterdir()} if old_dir.is_dir() else set()
-    keep = old_dir / old_version_name(at, taken)
-    fs.copy_file(folder / "capture.md", keep)  # if this fails, nothing is changed
-    first_doc = next((model.documents[d].name for d in c.document_ids if d in model.documents), None)
     with transaction(conn):
-        conn.execute("UPDATE captures SET edited = ?, title = ?, summary = ?, summary_type = ?, formatted = ? WHERE id = ?",
-                     # Meeting notes and items keep their titles; any other is listed by its words, without operators.
-                     (stamp(at), c.title if c.item else capture_title(c.source, items.words(words, names), first_doc, c.id), summary or None,
-                      (summary_type or c.summary_type) if summary else None, int(formatted), capture_id))
-    out = Outcome(f"Saved {capture_id}. The previous version is in its _old versions folder.")
-    rewrite_capture_md(conn, data_root, fs, capture_id, content, out.problems)
+        conn.execute("UPDATE captures SET edited = ?, title = ?, summary = ?, summary_type = ? WHERE id = ?",
+                     (stamp(at), title, summary or None, (summary_type or c.summary_type) if summary else None, capture_id))
+    out = Outcome(f"Saved {capture_id}. Its text stays as it arrived; its words are edited on the notes page.")
     search.index_items(conn, data_root, captures=[capture_id])
     write_all_pages(conn, data_root, fs, at, out.problems)
-    log.info("capture %s edited; previous version kept as %s", capture_id, keep.name)
+    log.info("capture %s: title or summary edited", capture_id)
     return out
 
 
@@ -266,7 +288,10 @@ def edit_task(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: S
     added: list[str] = []
     parents = values.pop("parents", None)
     priority = values.pop("priority", None)
+    day_headings = values.pop("day_headings", "unset")  # decision 119: a setting of the page, not logged
     with transaction(conn):
+        if day_headings != "unset":
+            conn.execute("UPDATE tasks SET day_headings = ? WHERE id = ?", (None if day_headings is None else int(day_headings), task_id))
         t = tasks.get_task(conn, task_id)
         if values.get("start") == start_of(t).isoformat() and not t.start:
             values.pop("start")
@@ -404,19 +429,26 @@ def bring_back_task(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, setti
     return out
 
 
-def discard_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, capture_id: str, reason: str, at: datetime) -> Outcome:
+def discard_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, capture_id: str, reason: str, at: datetime,
+                    off_edited_pages: bool = False) -> Outcome:
     """Discard a capture saved by mistake. It leaves its tasks' raw text logs, summaries and files, the Unfiled view and
     search, and is kept in the Discarded view. Its folder and capture.md stay as they are, and changes it made to tasks
-    stay in their status logs."""
-    c = Model(conn).captures.get(capture_id)
+    stay in their status logs. Its block comes off its tasks' notes pages (decision 106); a block the owner edited there
+    stays, unless ``off_edited_pages`` (the browse tool asks first: ``notes_page.edited_blocks``)."""
+    model, stories = stories_for(conn, data_root, at)
+    c = model.captures.get(capture_id)
     if c is None:
         raise EditError(f"There's no capture {capture_id}.")
     if c.discarded:
         raise EditError(f"{capture_id} is already discarded.")
     with transaction(conn):
+        pages = notes_page.remove_capture(conn, model, stories, capture_id, at, force=off_edited_pages)
         conn.execute("UPDATE captures SET discarded = ?, discard_reason = ? WHERE id = ?",
                      (stamp(at), " ".join(reason.split()) or DISCARD_REASON, capture_id))
-    out = Outcome(f"Discarded {capture_id}. Its folder stays; it's in the Discarded view, where Bring back restores it.")
+    search.index_pages(conn, [t for t, what in pages.items() if what == "removed"])
+    kept = [t for t, what in pages.items() if what == "edited"]
+    out = Outcome(f"Discarded {capture_id}. Its folder stays; it's in the Discarded view, where Bring back restores it."
+                  + (" Its block stays on the notes page, as you'd edited it there." if kept else ""))
     write_all_pages(conn, data_root, fs, at, out.problems)
     log.info("capture %s discarded", capture_id)
     return out
@@ -429,6 +461,7 @@ def bring_back_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, ca
     with transaction(conn):
         conn.execute("UPDATE captures SET discarded = NULL, discard_reason = NULL WHERE id = ?", (capture_id,))
     out = Outcome(f"Brought back {capture_id}.")
+    add_to_pages(conn, data_root, at, [(capture_id, None)], out.problems)  # its block goes back on its tasks' pages
     write_all_pages(conn, data_root, fs, at, out.problems)
     log.info("capture %s brought back", capture_id)
     return out

@@ -3,7 +3,8 @@
 They're one-way printouts of docs.db for reading outside DocRepo, in VS Code's
 Markdown preview or from a restored backup. DocRepo never reads them back. Links
 are relative, so they work wherever the data root is. The formats are those in
-the mockup's ``examples.md``.
+the mockup's ``examples.md``, with each task's notes page (release 5.25) printed under Notes, and its raw text log
+listed as Captures.
 """
 from __future__ import annotations
 
@@ -121,6 +122,17 @@ class Pages:
             rows.append(("On agendas", ", ".join(self._target(here, a.target) for a in on)))
         out += ["| Field | Value |", "|---|---|", *[f"| {a} | {_cell(b)} |" for a, b in rows], ""]
         out += ["## Description", "", t.description or "_None._", "", "## Current status", "", t.current_status or "_No status yet._", ""]
+        # The notes page (release 5.25): its headings two levels down, each caption a link to its capture.
+        from docrepo import notes_page
+
+        page = self.m.pages.get(t.id, "")
+
+        def capture_link(capture_id: str) -> str | None:
+            c = self.m.captures.get(capture_id)
+            return rel_link(here, [*capture_dir(c), "capture.md"]) if c else None
+
+        out += ["## Notes", "", *(notes_page.task_md(page, capture_link) or ["_No notes yet._"]), ""]
+        on_page = set(notes_page.capture_ids(page))
         kids = self.m.children_of(t.id)
         if kids:
             out += ["## Subtasks", "", "| ID | Title | State | Assignees | Due |", "|---|---|---|---|---|"]
@@ -141,10 +153,11 @@ class Pages:
         for e in reversed(self.m.raw_log_of(t.id)):
             if e.capture:
                 types = ", ".join(TYPE_NAMES[k] for k in e.capture.types) or "None"
-                raw.append(f"- {minutes(e.at)} · {self._ref_link(here, e.capture.id)} · {types} · {e.capture.title}")
+                raw.append(f"- {minutes(e.at)} · {self._ref_link(here, e.capture.id)} · {types} · {e.capture.title}"
+                           + ("" if e.capture.id in on_page else " · not on the notes page"))
             else:
                 raw.append(f"- {minutes(e.at)} · {self._ref_link(here, e.version.document)} · Document version · {self.m.documents[e.version.document].name} changed")
-        out += ["## Raw text log", "", *(raw or ["_None._"]), ""]
+        out += ["## Captures", "", *(raw or ["_None._"]), ""]
         out += ["## Files", "", *([self._file_line(here, f) for f in self.m.files_of(t.id)] or ["_None._"]), ""]
         return "\n".join(out)
 
@@ -254,6 +267,11 @@ def _write(fs: SafeFS, path: Path, text: str) -> bool:
             pass
     fs.write_text(path, text)
     return True
+
+
+def write_task_page(model: Model, data_root: Path, fs: SafeFS, task_id: str, today: date, generated_at: datetime) -> bool:
+    """Write one task's Task.md, as an edit of its notes page does (release 5.25). Says whether it was written."""
+    return _write(fs, data_root.joinpath(*task_dir(task_id), TASK_FILE), Pages(model, today, generated_at).task_page(model.task(task_id)))
 
 
 def write_pages(

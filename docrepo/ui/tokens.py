@@ -254,6 +254,10 @@ QToolButton#info { min-width: 16px; max-width: 16px; min-height: 16px; max-heigh
 QToolButton#info:checked, QToolButton#info:hover { background: $accent; border-color: $accent; color: $on_accent; }
 QLabel#keyTip { background: $text; color: $content; border-radius: 3px; padding: 0 5px; font-size: ${caption}pt; font-weight: 600; }
 
+/* the task page with its notes page (release 5.25): one white page; the notes are part of it, not a box on it */
+QWidget#taskPaneInner, QWidget#notesHead { background: $content; }
+QTextEdit#notesPage, QTextEdit#notesPage:focus { border: none; border-radius: 0; background: transparent; padding: 0; }
+QLabel#notesSaved { color: $text2; }
 /* the capture window */
 QWidget#capture QScrollArea, QWidget#capture QScrollArea > QWidget > QWidget { background: $content; }
 QWidget#footer { background: $base; border-top: 1px solid $stroke; }

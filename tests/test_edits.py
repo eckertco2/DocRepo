@@ -67,30 +67,18 @@ def test_filing_makes_the_saved_copies_that_waited_for_it(sample_root, tmp_path)
     assert [f.name for f in Model(conn).copies if f.from_capture == r.capture_id] == ["2026-10-08 Pump curve.pdf"]
 
 
-def test_fixing_a_capture_keeps_the_previous_version(sample_root):
+def test_edit_fixes_a_capture_s_title_and_summary_and_leaves_its_text(sample_root):
+    """Release 5.25, decision 112: capture.md is written once and then only ever filed; the words are the page's."""
     conn, root, fs = sample_root
     old_text = capture_md(root, conn, "C000017")
-    out = edits.edit_capture(conn, root, fs, "C000017", "Vendor drawings came in late. The package is now due 23 Oct.", "", None, AT)
-    assert out.message == "Saved C000017. The previous version is in its _old versions folder."
-    kept = captures.capture_folder(root, "C000017", Model(conn).captures["C000017"].saved) / "_old versions" / "capture 2026-10-08 1520.md"
-    assert kept.read_text(encoding="utf-8") == old_text
+    out = edits.edit_capture(conn, root, fs, "C000017", "Drawings late", "A summary.", "General summary", AT)
+    assert out.message.startswith("Saved C000017.")
     c = Model(conn).captures["C000017"]
-    assert c.edited == "2026-10-08 15:20:00" and c.title == "Vendor drawings came in late"
-    text = capture_md(root, conn, "C000017")
-    assert front(text)["edited"] == "2026-10-08T15:20:00" and text.endswith("\n\nVendor drawings came in late. The package is now due 23 Oct.\n")
-    again = edits.edit_capture(conn, root, fs, "C000017", "Second fix.", "A summary.", "General summary", AT)
-    assert "Saved" in again.message and (kept.parent / "capture 2026-10-08 1520 (2).md").exists()
-    c = Model(conn).captures["C000017"]
-    assert (c.summary, c.summary_type) == ("A summary.", "General summary")
-    assert capture_md(root, conn, "C000017").endswith("Second fix.\n\n## Summary\n\nA summary.\n")
-
-
-def test_a_fix_needs_a_change_and_some_text(sample_root):
-    conn, root, fs = sample_root
-    content = captures.read_content(root, Model(conn).captures["C000017"])
-    assert edits.edit_capture(conn, root, fs, "C000017", content, "", None, AT).message == "Nothing changed."
-    with pytest.raises(edits.EditError, match="can't be empty"):
-        edits.edit_capture(conn, root, fs, "C000017", "  ", "", None, AT)
+    assert (c.title, c.summary, c.summary_type, c.edited) == ("Drawings late", "A summary.", "General summary", "2026-10-08 15:20:00")
+    assert capture_md(root, conn, "C000017") == old_text
+    assert not (captures.capture_folder(root, "C000017", c.saved) / "_old versions").exists()
+    assert edits.edit_capture(conn, root, fs, "C000017", "Drawings late", "A summary.", None, AT).message == "Nothing changed."
+    assert edits.edit_capture(conn, root, fs, "C000017", "  ", "A summary.", None, AT).message == "Nothing changed."  # an empty title keeps its own
 
 
 def test_make_it_a_task_files_the_capture_to_the_new_task(sample_root):

@@ -70,40 +70,45 @@ def _marks(fmt: QTextCharFormat) -> tuple[frozenset[str], str | None]:
     return frozenset(marks), colour
 
 
+def block_markup(block) -> tuple[str, bool]:
+    """One block (a line) as markup, and whether it's formatted: a list item, or any mark."""
+    segments = []
+    only_break = block.text() in _SOFT_BREAKS and block.text() != ""
+    it = block.begin()
+    while not it.atEnd():
+        frag = it.fragment()
+        if frag.isValid():
+            text = "" if only_break else frag.text().replace("￼", "")
+            for ch in _SOFT_BREAKS + "\xa0":  # and a no-break space is a space
+                text = text.replace(ch, " ")
+            marks, colour = _marks(frag.charFormat())
+            if text:
+                segments.append((text, marks, colour))
+        it += 1
+    # Spaces at a line's end are dropped: pasted HTML leaves them after list items and in "empty" paragraphs.
+    while segments and not segments[-1][0].rstrip():
+        segments.pop()
+    if segments:
+        segments[-1] = (segments[-1][0].rstrip(), *segments[-1][1:])
+    formatted = any(marks for _, marks, _ in segments)
+    line = markup.marks_text([(markup.escape_inline(text), marks, colour) for text, marks, colour in segments])
+    lst = block.textList()
+    if lst is not None:
+        fmt = lst.format()
+        number = f"{lst.itemNumber(block) + 1}. " if fmt.style() in NUMBERED else "- "
+        return "  " * max(0, fmt.indent() - 1) + number + line, True
+    return markup.escape_line_start(line), formatted
+
+
 def document_markup(doc: QTextDocument) -> tuple[str, bool]:
     """The document as markup, and whether anything in it is formatted."""
     lines: list[str] = []
     formatted = False
     block = doc.begin()
     while block.isValid():
-        segments = []
-        only_break = block.text() in _SOFT_BREAKS and block.text() != ""
-        it = block.begin()
-        while not it.atEnd():
-            frag = it.fragment()
-            if frag.isValid():
-                text = "" if only_break else frag.text().replace("￼", "")
-                for ch in _SOFT_BREAKS + "\xa0":  # and a no-break space is a space
-                    text = text.replace(ch, " ")
-                marks, colour = _marks(frag.charFormat())
-                if text:
-                    segments.append((text, marks, colour))
-            it += 1
-        # Spaces at a line's end are dropped: pasted HTML leaves them after list items and in "empty" paragraphs.
-        while segments and not segments[-1][0].rstrip():
-            segments.pop()
-        if segments:
-            segments[-1] = (segments[-1][0].rstrip(), *segments[-1][1:])
-        formatted = formatted or any(marks for _, marks, _ in segments)
-        line = markup.marks_text([(markup.escape_inline(text), marks, colour) for text, marks, colour in segments])
-        lst = block.textList()
-        if lst is not None:
-            formatted = True
-            fmt = lst.format()
-            number = f"{lst.itemNumber(block) + 1}. " if fmt.style() in NUMBERED else "- "
-            lines.append("  " * max(0, fmt.indent() - 1) + number + line)
-        else:
-            lines.append(markup.escape_line_start(line))
+        line, marked = block_markup(block)
+        lines.append(line)
+        formatted = formatted or marked
         block = block.next()
     return "\n".join(lines), formatted
 

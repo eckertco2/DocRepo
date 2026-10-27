@@ -106,6 +106,13 @@ def load_sample(conn: sqlite3.Connection, data: dict[str, Any] | None = None) ->
         log += [(e["task"], e["at"], e["field"], e["from"], e["to"], e["via"]) for e in data["edits"]]
         conn.executemany("INSERT INTO status_log (task, at, field, from_value, to_value, via) VALUES (?, ?, ?, ?, ?, ?)",
                          [(task, _time(at), field, _none(old), _none(new), via) for task, at, field, old, new, via in log])
+        # The notes pages (release 5.25), built from the captures' text as a first run builds them (decision 107).
+        from docrepo import notes_page
+        from docrepo.stories import Stories
+
+        content = {c["id"]: c["content"] for c in data["captures"]}
+        model = Model(conn)
+        notes_page.build_all(conn, model, Stories(model, SAMPLE_AS_OF.date(), lambda cid: content.get(cid, "")), SAMPLE_AS_OF)
 
 
 def write_sample_files(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, data: dict[str, Any] | None = None) -> int:

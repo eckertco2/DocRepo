@@ -98,7 +98,7 @@ The words used here are defined in `GLOSSARY.md`.
 
 ### 6.1 The database
 - `System\docs.db`, SQLite, is the source of truth. Folders never encode the task tree: task folders are named by ID only, and nothing moves when a task is renamed or gets another parent.
-- `docrepo/db.py` creates the schema and keeps its version in SQLite's `user_version` (now 9). An older DocRepo database is brought up to date when it's opened (version 2, phase 3: each document's text status, size, modified time and checksum, plus `app_state` and `reminders_shown`; version 3, phase 4: the search index, `search_text`; version 4, release 5.3: `discarded` and `discard_reason` on tasks and captures, and `agenda_items` made again, keeping its rows, so an item can close as Done; version 5, release 5.4: `email_layer_0` on captures; version 6, release 5.7: `formatted` on captures; version 7, release 5.8: `from_notes`, `item` and `meeting` on captures; version 8, release 5.9: `email`, `person_group` and `role` on people, `parent` on labels, `plant_event` on tasks, and `task_references`; version 9, release 5.23: `priority` and `priority_rank` on tasks). A database from a newer DocRepo, or one that isn't DocRepo's, is refused rather than changed.
+- `docrepo/db.py` creates the schema and keeps its version in SQLite's `user_version` (now 10). An older DocRepo database is brought up to date when it's opened (version 2, phase 3: each document's text status, size, modified time and checksum, plus `app_state` and `reminders_shown`; version 3, phase 4: the search index, `search_text`; version 4, release 5.3: `discarded` and `discard_reason` on tasks and captures, and `agenda_items` made again, keeping its rows, so an item can close as Done; version 5, release 5.4: `email_layer_0` on captures; version 6, release 5.7: `formatted` on captures; version 7, release 5.8: `from_notes`, `item` and `meeting` on captures; version 8, release 5.9: `email`, `person_group` and `role` on people, `parent` on labels, `plant_event` on tasks, and `task_references`; version 9, release 5.23: `priority` and `priority_rank` on tasks). A database from a newer DocRepo, or one that isn't DocRepo's, is refused rather than changed. Version 10 (release 5.25): `task_pages` (each task's notes page), `task_page_versions` (the page as it stood at the end of each day it changed, when the owner last edited it that day, and whether they did), tasks' `day_headings`, and the search index made again with pages in it.
 - Foreign keys are on. Every change runs inside one transaction, so a save happens completely or not at all.
 - The tables:
 
@@ -167,7 +167,7 @@ The words used here are defined in `GLOSSARY.md`.
 
 ### 6.6 The logs
 - **Status log:** each field change, with when, the field, its old and new values as shown, and where it came from (a capture's ID, or "Browse tool", "Capture window", "Agenda view", "Reminders list", "Today"). In `Task.md` each entry stays on one line, so a value with line breaks, such as an edited description, is shown with spaces. Agenda items add their own entries: "Agenda: None → *target*" when one is added and "Agenda: *target* → Discussed" (or Removed) when it's closed.
-- **Raw text log:** the task's captures and its documents' versions, oldest first.
+- **Raw text log:** the task's captures and its documents' versions, oldest first. Since release 5.25 the browse tool lists it as Captures, and Task.md under Captures.
 - **Summary log:** pasted summaries from the task's captures and from its documents' versions.
 - **Files:** the task's saved copies (and replaced ones), then the documents of its captures: tracked originals, links and email attachments. `Task.md` shows a link's address as code (`` - Link: name · `address` · D000042 ``), not as a link to follow.
 
@@ -187,7 +187,7 @@ The words used here are defined in `GLOSSARY.md`.
 
 ### 6.9 Generated pages
 - Every task gets `Tasks\<id>\Task.md`, and the data root `Contents.md`. They're one-way printouts for reading in VS Code's Markdown preview or from a backup; DocRepo never reads them back. Links are relative.
-- `Task.md`: the title, a note that the page is generated, and a field table (ID, state, then urgent, meeting, plant event and recurrence when set, parents, labels with inherited ones marked, lead and assignees with hours, start, due with days until due, deadline, then reminder when set, each reference field with a value (release 5.9), and the agendas it's on). Then Description, Current status, Subtasks, Agenda (for a target with open items, or an open meeting), Status log (newest first), Summary log, Raw text log and Files.
+- `Task.md`: the title, a note that the page is generated, and a field table (ID, state, then urgent, meeting, plant event and recurrence when set, parents, labels with inherited ones marked, lead and assignees with hours, start, due with days until due, deadline, then reminder when set, each reference field with a value (release 5.9), and the agendas it's on). Then Description, Current status, Subtasks, Agenda (for a target with open items, or an open meeting), Status log (newest first), Summary log, Raw text log and Files. Since release 5.25 (6.11): Notes, after Current status, is the task's notes page, its headings two levels down and each caption a link to its capture.md ("_No notes yet._" when empty); the raw text log is Captures, a capture not on the page saying "· not on the notes page".
 - `Contents.md`: open tasks as an indented tree, a task with two parents shown under each and marked "also under", then Parked, Closed in the last 30 days, Agendas, Unfiled, People and Labels.
 - A page is rewritten only when more than its "Generated from docs.db on" line would change.
 - The exact formats are those of the browse tool mockup's examples, kept in `tests/fixtures/examples.md`.
@@ -195,6 +195,45 @@ The words used here are defined in `GLOSSARY.md`.
 ### 6.10 Sample data and tests
 - `docrepo/sample/sample-data.json` is the browse tool mockup's made-up sample data, as of Thursday 2026-10-08 07:58. `load-sample` loads it with its IDs, writes its `capture.md` and `extracted.txt` files (not its emails, attachments or saved copies, which are binary), and builds the calendar and pages as of that moment.
 - `tests/fixtures/examples.md` and `tests/fixtures/test-vectors.md` are the mockup's expected results for that data. The tests check every generated page, every `capture.md` example, and the report's capacity, days until due, lists, labels and chains, raw text logs and agendas against them, line for line.
+
+### 6.11 The notes page (release 5.25)
+
+- **One page per task** (`docrepo/notes_page.py`; the notes page plan's decisions 95 to 120 in the parent workspace),
+  where its notes are read, written and edited. It's kept in docs.db (`task_pages`) as markup, one line a block:
+  DocRepo's markup (5.7) and three more kinds. A **heading** is `# `, `## ` or `### ` and any text (decision 118); one
+  that reads as a date ("Thu 8 Oct 2026") is a day heading. A **caption** is a line that's one link to a capture,
+  `[Thu 8 Oct 2026 · 10:42 am · Note](capture:C000101)`: it starts the capture's block and dates it (109, 120). A **file
+  line** is one link to a document, `[File: Pump spec.docx, the vendor's datasheet](document:D000012)` (96). A line of
+  text that would read as one of them starts with a backslash; a link's text escapes `]` and `\`.
+- **A capture's block** (`notes_page.block`): its caption, saying what it is ("Note", "New task", "Update: Due date moved
+  to Fri 23 Oct.", "Email from Tom Becker: Re: impeller delivery", "Decision from the notes of …", "Meeting notes"), its
+  typed text in full with names as written (`@Tom Becker`) and without file and link lines (96, 114), and a file line for
+  each of its files. An email's own text stays with the email. A new task's text that's only its title isn't repeated.
+- **Where it goes** (`notes_page.add_block`): at the end of the page; or, when the task uses day headings, at the end of
+  its day's section, or under a new heading for its day, made in date order among the day headings (97, 113). Day
+  headings are off by default and on for a meeting (119; `Model.uses_day_headings`), and set in the task page's Notes menu.
+- **When blocks are added** (`notes_page.add_capture`, `edits.add_to_pages`): when a capture is saved, on each task it
+  belongs to (`Model.capture_tasks`), and each item's (5.8) on its own task; when an unfiled capture is filed or made
+  into a task; when a discarded capture is brought back; and Add it again (109). A page that can't be changed is a
+  problem, not a failed save: the capture is kept, and its Captures tab offers Add it again.
+- **A new task's description** is its text's first line (115); the whole text is on its page. Make it a task keeps the
+  window's whole text as the description, as the page gets the capture's own text.
+- **Discarding a capture** takes its block off its tasks' pages if it's as it was added; a block the owner edited there
+  stays unless they say (106; `notes_page.edited_blocks`, `edits.discard_capture`'s `off_edited_pages`). A day heading
+  left with nothing under it goes too.
+- **The owner's edits** (`edits.save_page`): docs.db, the day's version (103: `task_page_versions`, one row a day, the page
+  as it stood at the day's end), the search index and that task's `Task.md` (`pages.write_task_page`). Nothing goes into
+  the status log (90). Each day the owner edited a page is a Notes edited line in Activity (111).
+- **Two writers** (`notes_page.merge`): a page that changed in docs.db while unsaved typing is open gains the new blocks,
+  and loses the blocks taken off there that the owner hasn't changed; the typing stays.
+- **The first pages** (107; `notes_page.build_all`): the first time release 5.25 starts, each task's page is built from
+  its raw text log, oldest first, after a backup (`CaptureApp.build_pages`). The build only adds pages, so a backup that
+  can't be made doesn't stop it; the notification says so. `app_state`'s `notes_pages_built` says it's done. The sample
+  data builds its pages as it's loaded.
+- **Search** (8.8) indexes each page's words (`search.index_pages`, kind `page`), and lists a hit under Notes unless one of
+  the page's captures, the record behind it, is found too.
+- **captures stay the record** (101): a capture's `capture.md` is written once when it's saved, and then only ever filed
+  (112). Its words are fixed on the page; Edit fixes only its title and summary, in docs.db.
 
 ## 7. Capture app (phase 3, built)
 
@@ -314,16 +353,38 @@ The task page reads top to bottom as the task's story (release 5.21, the visual 
 - **Buttons** (subtle buttons with icons, each key in its tooltip; in the Classic look, the key follows the label): Note (N), Update (U), Meeting notes (M, an open meeting's: release 5.8), **Add to** (A: Today, which adds it at once, or On Today ✓, which opens the Today view; then the open meetings, those with open items first, with their next dates; then "Someone else or another task…", each opening an Update capture with that target under Add to agenda; D adds to Today), **Edit**, and at the row's end **More** (an icon): New subtask (T), Open agenda (an open meeting, or a task with open items), Copy, Copy prompt for each summary type, and Open folder. **Copy** (release 5.9) copies its lead's and assignees' email addresses, joined by "; " for Outlook's To box, and each reference field's value.
 - **Edit:** Edit task… (E, release 5.3, M0008 and M0011: section 8.7), Move from under *parent*…, Put under a task… (a top-level task), Also put under…, Take out from under *parent* (with several parents), Make it a top-level task (with one) and Discard… (8.7). Each change goes into the status log as "Browse tool". A move that would put a task under itself is refused.
 - **A discarded task's page** says when it was discarded and why, and has only Bring back and Open folder.
-- **History:** the tabs Raw text log, Status log, Summaries and Files, each with its count for the scope, and beside them two menus: the scope (This task, With parent tasks, With subtasks, Whole family; With subtasks each time a task is opened), which ends with Open all chapters and Close all chapters, and the order (oldest or newest first). A page left on the old Subtasks tab shows the raw text log.
-- **Status log and Raw text log** read as stories (`docrepo/stories.py`), oldest first (the order menu gives newest first), grouped by day with a heading for each month. The status log opens with how the task began (created under its parents, made from an unfiled capture, or imported, with its description and what it started with), tells each update in words (a state change as a chip such as "Work started" or "Closed", then sentences such as "Due date moved to Fri 23 Oct."), and shows its direct subtasks and, for an agenda target, its agenda items as one-line milestones. The raw text log shows each capture as a journal entry (what it is, such as "Update · Due date moved to Fri 23 Oct." or "Email from …", its title and its text; a summary with the original behind Show the email) and each document version. A formatted capture's text shows its formatting, its lists as indented bullets and numbers, and leaves out its first line when that's its title (release 5.7). Long entries fold after 360 characters (a formatted one at the line before), with Show all. With subtasks or ancestors in the scope, each one's story is a chapter, closed until opened, under Parent tasks or Subtasks, with its state, latest status or number of entries, its latest date and Open. Entry titles read as text, and open their capture.
+- **History:** the tabs Captures (the raw text log, release 5.25), Status log, Summaries and Files, each with its count for the scope, and beside them two menus: the scope (This task, With parent tasks, With subtasks, Whole family; With subtasks each time a task is opened), which ends with Open all chapters and Close all chapters, and the order (oldest or newest first). A page left on the old Subtasks tab shows the raw text log.
+- **Status log and Raw text log** read as stories (`docrepo/stories.py`), oldest first (the order menu gives newest first), grouped by day with a heading for each month. The status log opens with how the task began (created under its parents, made from an unfiled capture, or imported, with its description and what it started with), tells each update in words (a state change as a chip such as "Work started" or "Closed", then sentences such as "Due date moved to Fri 23 Oct."), and shows its direct subtasks and, for an agenda target, its agenda items as one-line milestones. The raw text log shows each capture as a journal entry (what it is, such as "Update · Due date moved to Fri 23 Oct." or "Email from …", its title and its text; a summary with the original behind Show the email) and each document version. A formatted capture's text shows its formatting, its lists as indented bullets and numbers, and leaves out its first line when that's its title (release 5.7). Long entries fold after 360 characters (a formatted one at the line before), with Show all. With subtasks or ancestors in the scope, each one's story is a chapter, closed until opened, under Parent tasks or Subtasks, with its state, latest status or number of entries, its latest date and Open. Entry titles read as text, and open their capture. Since release 5.25 a capture's entry on Captures doesn't show its text, which is the notes page's to show: it says **On the notes page** (a link to its block, unfolding what hides it) or **Not on the notes page** with **Add it again**; a document version still shows what changed.
 - **Items and meeting notes** (release 5.8) in the raw text log: an item's entry says "· from the notes of *meeting or task*" (a link to the notes), a decision's says Decision, and an item shows its block, formatted, only when it's more than its one line. Meeting notes show all their text.
 - **Summaries and Files** are one row per entry. An entry from another task in the scope names that task, which opens it. A file's name shows it in File Explorer; a link's name opens its page, and **Copy link** next to it copies the address.
 - **Copy prompt** works as in the capture window (7.6), on the task's records within the summary type's scope: the latest raw text log entry's content text (or every entry's, for `raw_text_all`), each document's extracted text for `file_text`, and the rest as before.
 
+- **The notes page** (release 5.25, `docrepo/ui/task_pane.py` and `docrepo/ui/notes_edit.py`): the task page is three
+  parts in one scroll (`TaskPane`): the page's HTML without its history (`Pages.task_page(…, "top")`), the **Notes**
+  heading with its menu and the notes page's editor, as tall as its text, then the history ("bottom"). The editor is the
+  capture window's `RichEdit` (decision 117: Qt's own text box) holding the page (6.11), with its formatting, lists and
+  keys, and:
+  - **Headings:** Ctrl+Alt+1, 2 and 3 (OneNote's) make the line a heading, Ctrl+Alt+0 text again; Alt+Shift+D adds today's
+    date as a heading at the caret (110). Each heading folds, from the arrow beside it or Alt+Shift+- and Alt+Shift++ for
+    the caret's section; a folded heading says how many captures (or lines) it holds, and the arrow keys pass over its
+    section. The folded headings are kept for each task in docs.db (`app_state`, `notes_folds:<task>`).
+  - **Captions and file lines:** a click opens the capture or document. Typing on a caption goes to the line below;
+    Backspace or Delete on one removes it with its line break (Ctrl+Z puts it back), and its capture is then no longer on
+    the page. Enter on a heading, caption or file line starts a line of text under it; Backspace and Delete never join a
+    line to one.
+  - **Copy and paste** inside the page keep whole lines as they are (headings, captions, lists); a line's words go in at
+    the caret. Text from elsewhere comes in as `RichEdit` takes it. **Alt+Shift+Up and Down** move a line with the list
+    items under it, or a folded heading with its section, keeping what each line is; one Ctrl+Z puts it back.
+  - **Saving** a moment after typing stops, and when the editor loses the caret ("Saved 14:10" beside Notes); the Captures
+    tab is drawn again when the page's captions change. Page Up and Page Down move the scroll a screen; a wheel notch
+    glides (not in the Classic look); the scroll keeps the caret in view.
+  - **The Notes menu:** Fold all headings, Unfold all, Day headings for new captures (119), and **Page history…** (103):
+    the page as it stood at the end of each day it changed, read-only, and Restore, which is an edit like any other.
+
 ### 8.5 The capture page
 - Saved, source, capture types, what Save did (the task it created, updated or added to, where it was filed, and each agenda item, with how and when it was closed), when it was filed, its field changes, an email's layer 0 line, its files with their descriptions and choices, its summary, when it was edited and how many earlier versions are kept, then the content text, read from its capture.md, with its formatting and lists (release 5.7).
 - **What Save did** (release 5.8) also names the meeting the notes made, each item they made (its capture, and the task it made or the task it's on), and the agenda items they closed as Discussed; an item's page links its notes. The content text shows each `@` and `#` by its name.
-- **Edit** fixes the content text, with the same formatting buttons and keys as the capture window (release 5.7), and the summary. Each `@` and `#` shows by its name, and saving keeps them with their IDs again, the capture's own IDs first, so a person renamed since stays linked; meeting notes and items keep their titles (release 5.8). Saving first copies the previous capture.md to the capture's `_old versions\capture YYYY-MM-DD HHMM.md` (made unique), then updates docs.db (`edited`, the title, the summary, `formatted`: adding formatting makes it formatted, and taking all of it off makes it plain text again), rewrites capture.md with `edited` in its front matter, the search index and the pages. A capture with no files can't be left without content text. A capture.md that can't be read can't be edited.
+- **Edit** (release 5.25, decision 112) fixes the capture's title and summary, in docs.db. Its text shows as it arrived, formatted and read-only, with **Go to it on the page**, which opens its block on a task's notes page. Its capture.md is never rewritten: it's written once and then only ever filed. (Before 5.25, Edit fixed the content text and kept the previous capture.md in `_old versions`; those old versions stay where they are.)
 - **Show in File Explorer** shows its capture.md.
 - **Discard…** (release 5.3, M0021) asks why and discards it (6.5). A discarded capture's page says so, and has only Bring back and Show in File Explorer.
 - **An unfiled capture** also has a task picker, **File to task** and **Make it a task**. Filing sets the capture's task in docs.db and its capture.md (with `filed`); the folder doesn't move; the saved copies its files asked for are made in the task's `Files` folder now. Make it a task opens the capture window with New task checked, the capture's content text and a title from it; saving creates the task (its creator is the capture, so its story says "Made into a task from an unfiled capture") and files the capture to it. No new capture is made, and the capture's own content text stays as it was, even if it was changed in the window for the new task's description.

@@ -360,8 +360,11 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
             parents += [p for p in (own.tasks if own else []) if p not in parents]
             leads = list(dict.fromkeys([person(w) for w in nt.leads] + [person(x.who()) for x in (own.leads if own else [])]))
             assignees = list(dict.fromkeys([person(w) for w in nt.assignees] + [person(x.who()) for x in (own.assignees if own else [])]))
+            # Its description is its text's first line, as the text goes on its notes page (decision 115). Make it a task
+            # keeps the window's whole text: the page gets the capture's own, so the window's would be kept nowhere else.
             created = tasks.create_task(
-                conn, settings, title=title, at=at, created_by=via, parents=parents, description=plain_text(source),
+                conn, settings, title=title, at=at, created_by=via, parents=parents,
+                description=first_line(plain_text(words)) if words and not draft.from_capture else plain_text(source),
                 state=nt.state, start=nt.start if nt.start and nt.start != day else None, due=nt.due, deadline=nt.deadline,
                 deadline_desc=nt.deadline_desc, reminder=nt.reminder, recurrence=nt.recurrence, repeat_until=nt.repeat_until,
                 urgent=nt.urgent, meeting=nt.meeting, leads=leads, assignees=assignees,
@@ -473,10 +476,14 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
             except OSError as e:
                 result.problems.append(f"{cid}'s capture.md couldn't be written ({type(e).__name__}).")
         search.index_items(conn, data_root, captures=[capture_id, *result.items], documents=[d for d, _, _ in documents])
+        # The notes page (release 5.25): the capture's block on its tasks' pages, and each item's on its own task's.
+        typed = items.store(content, names, formatted) if content else ""
+        edits.add_to_pages(conn, data_root, at, [(capture_id, typed), *((cid, None) for cid in result.items)], result.problems)
     if source_capture and created:
         edits.rewrite_capture_md(conn, data_root, fs, source_capture.id, source_content, result.problems)
         edits.copy_files(conn, data_root, fs, created, filed_copies, result.problems)
         search.index_items(conn, data_root, captures=[source_capture.id])
+        edits.add_to_pages(conn, data_root, at, [(source_capture.id, None)], result.problems)
     try:
         write_pages(Model(conn), data_root, fs, at.date(), at)
     except OSError as e:
@@ -484,6 +491,16 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
     result.message = _message(conn, draft, result, targets, bool(draft.new_task.title.strip()))
     log.info("capture %s saved: %s", capture_id or "(none kept)", _log_line(draft, result, targets, [d for d, _, _ in documents]))
     return result
+
+
+def first_line(text: str) -> str:
+    """A new task's description from its text (decision 115): the first line that has words, without a list marker. The
+    whole text goes on its notes page."""
+    for line in text.split("\n"):
+        words = re.sub(r"^\s*(?:[-*•]|\d+\.)\s+", "", line).strip()
+        if words:
+            return words
+    return ""
 
 
 def _save_items(conn: sqlite3.Connection, settings: Settings, reading: items.Reading, names: items.Names, content: str, formatted: bool,

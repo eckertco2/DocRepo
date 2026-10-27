@@ -35,8 +35,11 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **State**: Not started, In progress, Parked or Closed. Closed means done or cancelled.
 - **Current status**: a short paragraph saying where the task stands now.
 - **Status log**: the dated list of changes to a task's state, current status and other fields.
-- **Raw text log**: the corpus of all reference information entered for a task, including the text of its status updates and the content text of all captures associated with that task.
-- **Task description**: the content text of the capture that created the task. There's no separate Description box.
+- **Raw text log**: the corpus of all reference information entered for a task, including the text of its status updates and the content text of all captures associated with that task. Since release 5.25 the browse tool lists it on the task page's **Captures** tab, and the notes page is where its words are read.
+- **Notes page**: a task's notes as one page (release 5.25), read, written and edited in place on its task page. Each capture saved on the task adds its block to it; the owner adds, rewords and reorganises it freely. It lives in the database, and Task.md prints it under Notes.
+- **Caption**: the small grey line that starts a capture's block on a notes page, with its date, time and what it is ("Thu 8 Oct 2026 · 10:42 am · Note"). It links to the capture; removing it unties the text under it from the capture.
+- **Day heading**: a heading on a notes page that reads as a date. With day headings on for a task, its new captures go under the heading for their day.
+- **Task description**: the short "what it is" of a task. A task made from a capture takes the first line of its content text; the whole text goes on its notes page (release 5.25).
 - **Label**: a category on a task, such as Safety. A task can have several, and subtasks can inherit them.
 - **Parent label**: a label with labels under it (its **sublabels**), such as Production line over Line 1 and Line 2. It's a heading: tasks get its sublabels, not it. Labels nest one level only.
 - **Plant event**: a task with Plant event ticked, such as an outage or a turnaround, which the timeline shades from its Start to its Due so other work can be seen against it.

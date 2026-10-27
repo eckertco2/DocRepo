@@ -2,8 +2,8 @@
 .venv/
 .pip-install.log
 
-# Development data (never real data)
-dev_data/
+# Development data (never real data), and any hand-test data root beside it (dev_data_525 and so on)
+dev_data*/
 
 # Python and pytest
 __pycache__/

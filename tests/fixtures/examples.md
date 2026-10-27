@@ -235,6 +235,18 @@ Install and align the new impeller during the turnaround. Maintenance planning's
 
 Procedure rev 2 approved. Waiting on the rigging plan.
 
+## Notes
+
+_[Tue 22 Sep 2026 · 10:31 am · New task](../../Captures/2026/09/C000005/capture.md)_
+
+Install and align the new impeller during the turnaround. Maintenance planning's procedure is attached.
+
+- File: Installation procedure.docx, Maintenance planning's step-by-step procedure for installing and aligning the impeller.
+
+_[Mon 5 Oct 2026 · 9:25 am · Update: Added to the agenda of Business team meeting.](../../Captures/2026/10/C000013/capture.md)_
+
+Bring up the 20 Oct crane booking at the next business team meeting.
+
 ## Subtasks
 
 | ID | Title | State | Assignees | Due |
@@ -256,7 +268,7 @@ Procedure rev 2 approved. Waiting on the rigging plan.
 
 Procedure rev 2 replaces the dial-indicator alignment with a laser alignment to 0.05 mm TIR, and adds a 4-hour hold before the coupling bolts are re-torqued.
 
-## Raw text log
+## Captures
 
 - 2026-10-05 09:25 · [C000013](../../Captures/2026/10/C000013/capture.md) · Update · Bring up the 20 Oct crane booking at the next business team meeting
 - 2026-10-05 06:30 · [D000002](../../Documents/D000002/extracted.txt) · Document version · Installation procedure.docx changed
@@ -300,6 +312,14 @@ Business team meeting, weekly on Tuesdays at 9:00, starting 6 Oct. Priya leads; 
 
 _No status yet._
 
+## Notes
+
+### Fri 2 Oct 2026
+
+_[Fri 2 Oct 2026 · 1:20 pm · New task](../../Captures/2026/10/C000009/capture.md)_
+
+Business team meeting, weekly on Tuesdays at 9:00, starting 6 Oct. Priya leads; Tom, Mike and I attend.
+
 ## Agenda
 
 - [Reactor impeller upgrade](../T000001/Task.md) · Bring up the reactor impeller status at the next business team meeting. · added 2026-10-06
@@ -315,7 +335,7 @@ _No changes yet._
 
 _No summaries yet._
 
-## Raw text log
+## Captures
 
 - 2026-10-02 13:20 · [C000009](../../Captures/2026/10/C000009/capture.md) · New task · Business team meeting, weekly on Tuesdays at 9:00, starting 6 Oct
 
@@ -354,6 +374,10 @@ Raise the Q4 overtime forecast for the turnaround.
 
 _No status yet._
 
+## Notes
+
+_[Tue 6 Oct 2026 · 10:18 am · New task](../../Captures/2026/10/C000015/capture.md)_
+
 ## Status log
 
 - 2026-10-06 10:19 · Parents: Q4 cost reduction → Q4 cost reduction; Installation · Browse tool
@@ -363,7 +387,7 @@ _No status yet._
 
 _No summaries yet._
 
-## Raw text log
+## Captures
 
 - 2026-10-06 10:18 · [C000015](../../Captures/2026/10/C000015/capture.md) · New task · Raise the Q4 overtime forecast for the turnaround
 

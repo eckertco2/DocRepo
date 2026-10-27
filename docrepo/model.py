@@ -51,6 +51,9 @@ class Task:
     #: Its priority (mods log round 2, M0029, M0030, release 5.23): a bucket (``priorities.BUCKETS``) and its place in it.
     priority: str | None = None
     priority_rank: int | None = None
+    #: Whether new captures go under a heading for their day on its notes page (release 5.25, decision 119): None is the
+    #: default, which is on for a meeting and off for any other task (``uses_day_headings``).
+    day_headings: bool | None = None
     leads: list[str] = field(default_factory=list)
     assignees: list[str] = field(default_factory=list)
     labels: list[str] = field(default_factory=list)
@@ -234,7 +237,7 @@ def _unique(items: Iterable[str]) -> list[str]:
 _TASK_COLUMNS = (
     "id, title, state, closed, urgent, meeting, recurrence, repeat_until, start, due, deadline, deadline_desc, reminder, "
     "lead_hours, assignee_hours, inherit_labels, description, current_status, created, created_by, discarded, discard_reason, plant_event, "
-    "priority, priority_rank"
+    "priority, priority_rank, day_headings"
 )
 
 
@@ -249,6 +252,7 @@ def load_tasks(conn: sqlite3.Connection, task_ids: Iterable[str] | None = None) 
         tasks[r["id"]] = Task(**{k: r[k] for k in r.keys()})
         t = tasks[r["id"]]
         t.urgent, t.meeting, t.inherit_labels, t.plant_event = bool(t.urgent), bool(t.meeting), bool(t.inherit_labels), bool(t.plant_event)
+        t.day_headings = None if t.day_headings is None else bool(t.day_headings)
     for r in conn.execute("SELECT task, person, role FROM task_people ORDER BY id"):
         if r["task"] in tasks:
             (tasks[r["task"]].leads if r["role"] == "lead" else tasks[r["task"]].assignees).append(r["person"])
@@ -306,8 +310,19 @@ class Model:
             StatusEntry(r["task"], r["at"], r["field"], r["from_value"], r["to_value"], r["via"])
             for r in q("SELECT * FROM status_log ORDER BY id")
         ]
+        #: Each task's notes page (release 5.25; ``docrepo.notes_page``), and the days the owner edited it, with the time
+        #: of the day's last edit.
+        self.pages: dict[str, str] = {r["task"]: r["body"] for r in q("SELECT task, body FROM task_pages")}
+        self.page_edits: list[tuple[str, str, str]] = [(r["task"], r["day"], r["at"]) for r in q(
+            "SELECT task, day, at FROM task_page_versions WHERE by_owner = 1 ORDER BY day, task")]
 
     # ---- names ----
+    def uses_day_headings(self, task_id: str) -> bool:
+        """Whether the task's new captures go under a heading for their day (decision 119): off by default, on for a
+        meeting, unless set on the task in Edit task."""
+        t = self.tasks[task_id]
+        return t.meeting if t.day_headings is None else t.day_headings
+
     def task(self, task_id: str) -> Task:
         return self.tasks[task_id]
 

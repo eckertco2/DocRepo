@@ -15,7 +15,7 @@ from pathlib import Path
 from docrepo.safe_fs import SafeFS
 
 DB_FILE = Path("System") / "docs.db"
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 #: Each kind of ID: its letter and how many digits follow it.
 ID_FORMATS = {"T": 6, "C": 6, "D": 6, "P": 3}
@@ -284,6 +284,34 @@ CREATE TABLE task_references (
 -- Priorities (mods log round 2, M0029, M0030, decision 23, release 5.23): a task's bucket, and its place in the bucket.
 ALTER TABLE tasks ADD COLUMN priority TEXT CHECK (priority IN ('critical', 'high', 'medium', 'parking'));
 ALTER TABLE tasks ADD COLUMN priority_rank INTEGER;
+""",
+    10: """
+-- The notes page (release 5.25, the notes page plan's decisions 95 to 120): each task's notes as one page of markup
+-- (docrepo/notes_page.py), and the page as it stood at the end of each day it changed (at, its last change), by_owner when
+-- the owner edited it.
+-- day_headings is whether new captures go under a heading for their day: NULL is the default, on for a meeting.
+CREATE TABLE task_pages (
+    task    TEXT PRIMARY KEY REFERENCES tasks(id),
+    body    TEXT NOT NULL,
+    updated TEXT NOT NULL
+);
+CREATE TABLE task_page_versions (
+    task     TEXT NOT NULL REFERENCES tasks(id),
+    day      TEXT NOT NULL,
+    body     TEXT NOT NULL,
+    by_owner INTEGER NOT NULL DEFAULT 0,
+    at       TEXT NOT NULL,
+    PRIMARY KEY (task, day)
+);
+ALTER TABLE tasks ADD COLUMN day_headings INTEGER;
+-- The search index learns pages. It's a cache, so it's made again and rebuilt (search.needs_rebuild).
+DROP TABLE search_text;
+CREATE TABLE search_text (
+    kind TEXT NOT NULL CHECK (kind IN ('capture', 'document', 'page')),
+    id   TEXT NOT NULL,
+    body TEXT NOT NULL,
+    PRIMARY KEY (kind, id)
+);
 """,
 }
 

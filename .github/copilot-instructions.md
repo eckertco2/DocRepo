@@ -24,7 +24,7 @@ DocRepo is developed on its owner's personal computer and published to a public 
 - Never edit Word, PowerPoint, PDF or Excel files anywhere, including DocRepo's own copies. Open them read-only, and only to extract text.
 - The app writes only Markdown, JSON, plain text, its SQLite database (and copies of it in the backup folder), its own logs and settings, file copies the owner asked for and their backups, and the Startup shortcut.
 - Copying and moving never overwrite a file, except inside the backup folder, where a backup brings its copies up to date. The backup folder is never inside the data root.
-- Never delete captures, copied files or saved emails. Generated files (`Task.md`, `Contents.md`, the search index) may be rebuilt. A capture's `capture.md` may be edited only to file it or to fix a mistake, and a fix keeps the previous version in the capture's `_old versions` folder.
+- Never delete captures, copied files or saved emails. Generated files (`Task.md`, `Contents.md`, the search index) may be rebuilt. A capture's `capture.md` is written once, when the capture is saved, and then edited only to file it. Its words are read, fixed and added to on its task's notes page, which lives in the database. (Before release 5.25 a fix kept the previous version in the capture's `_old versions` folder; those files stay.)
 - No paths in the code: no user names, data root, backup folder, LAN host names or package repository addresses. Paths come from settings that the owner enters in the app.
 
 ### Code safety

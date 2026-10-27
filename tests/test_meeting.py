@@ -154,18 +154,3 @@ def test_the_pages_show_the_items(env):
     assert "#Reactor impeller upgrade" in notes_page and "](T000001)" not in notes_page  # names, not IDs
     item_page = pages.capture_page(r.items[0], captures.read_content(root, m.captures[r.items[0]]))
     assert "An item from the notes in" in item_page
-
-
-def test_editing_keeps_the_ids(env):
-    conn, root, fs = env
-    r = save(env, CaptureDraft(content="Walkdown done.\n@Tom check the guards #Installation", task="T000008", types={"note"}))
-    conn.execute("UPDATE people SET name = 'Thomas Becker' WHERE id = 'P003'")  # renamed since
-    shown = "Walkdown done, guards fitted.\n@Tom Becker check the guards #Installation"  # as the Edit box shows it
-    out = edits.edit_capture(conn, root, fs, r.capture_id, shown, "", None, AT)
-    assert "Saved" in out.message
-    text = capture_md(env, r.capture_id)
-    assert text.endswith("Walkdown done, guards fitted.\n@[Thomas Becker](P003) check the guards #[Installation](T000008)\n")
-    assert Model(conn).captures[r.capture_id].title == "Walkdown done, guards fitted"
-    item = Model(conn).captures[r.items[0]]
-    edits.edit_capture(conn, root, fs, item.id, "@Thomas check the guards and rails", "", None, AT)
-    assert Model(conn).captures[item.id].title == item.title  # an item keeps its title

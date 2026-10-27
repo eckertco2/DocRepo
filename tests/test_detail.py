@@ -40,7 +40,7 @@ def test_a_task_page(pages):
     order = ["Current status Mon 5 Oct · 3 days ago Procedure rev 2 approved. Waiting on the rigging plan.",
              "When Due Fri 30 Oct in 22 days Deadline too · Turnaround ends Starts Mon 19 Oct in 11 days",
              "Who Lead Me 8 h Assignees Tom Becker 60 h Mike Ortiz 60 h", "Subtasks 3 of 3 open New subtask Rigging plan 14 Oct · 6 d",
-             "▸ Details T000008 · Created Tue 22 Sep from C000005", "Raw text log 6 Status log 14 Summaries 1 Files 3 With subtasks ▾ ⇅ Oldest first",
+             "▸ Details T000008 · Created Tue 22 Sep from C000005", "Captures 6 Status log 14 Summaries 1 Files 3 With subtasks ▾ ⇅ Oldest first",
              "This task September 2026", "Subtasks · 3"]
     at = [words.find(part) for part in order]
     assert -1 not in at and at == sorted(at), dict(zip(order, at))
@@ -87,7 +87,10 @@ def test_subtasks_closed_ones_and_the_description(pages, sample_root):
 def test_the_wide_page_has_its_facts_on_the_right(pages):
     """Decision 69: from 760 px, When, Who and Details move into a rail, with Details open; narrow, When and Who stack."""
     main, rail = pages.task_page("T000008", PageState(), 900).split('class="rule"', 1)
-    assert "Current status" in main and "Subtasks" in main and "Raw text log" in main and "When" not in text(main)
+    assert "Current status" in main and "Subtasks" in main and "Captures" in main and "When" not in text(main)
+    # The browse tool draws it in two parts, the notes page's editor between them (release 5.25).
+    top, bottom = pages.task_page("T000008", PageState(), 900, "top"), pages.task_page("T000008", PageState(), 900, "bottom")
+    assert "Captures" not in text(top) and "Folder" in text(top) and text(bottom).startswith("Captures 6 Status log")
     assert all(x in text(rail) for x in ("When Due Fri 30 Oct", "Who Lead", "Details ID T000008", "Folder"))
     assert '<td width="50%"' in pages.task_page("T000008", PageState(), 600)
     assert '<td width="50%"' not in pages.task_page("T000008", PageState(), 500)
@@ -123,10 +126,12 @@ def test_newest_first_and_long_entries(pages, sample_root):
     save_capture(conn, root, fs, Settings(me="P001"), CaptureDraft(content=long_text, task="T000012"), datetime(2026, 10, 8, 15, 0))
     m = Model(conn)
     p = Pages(m, TODAY, lambda cid: read_content(root, m.captures[cid]) or "", "P001", conn)
-    folded = p.task_page("T000012", PageState(scope="self"))
-    assert "more:C000026" in folded and "Show all" in folded
-    shown = p.task_page("T000012", PageState(scope="self", expanded={"C000026"}))
-    assert "Show less" in shown
+    # Captures (release 5.25, decision 104): the text is the notes page's to show; each entry links to its block there.
+    page = p.task_page("T000012", PageState(scope="self"))
+    assert "goto:T000012:C000026" in page and "More words go here" not in page
+    conn.execute("UPDATE task_pages SET body = '' WHERE task = 'T000012'")
+    off = Pages(Model(conn), TODAY, lambda cid: read_content(root, m.captures[cid]) or "", "P001", conn).task_page("T000012", PageState(scope="self"))
+    assert "Not on the notes page" in text(off) and "readd:T000012:C000026" in off
     newest = text(p.task_page("T000012", PageState(scope="self", order="new"))).split("Newest first", 1)[1]
     assert newest.index("First sentence of a long note") < newest.index("Mike to write the rigging plan")
 

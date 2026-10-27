@@ -13,6 +13,7 @@ Ported from the mockup's ``views.js`` and ``detail.js``; SPEC section 8 describe
 from __future__ import annotations
 
 import html
+import json
 import logging
 import re
 import sqlite3
@@ -50,7 +51,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo import activity, bulk, capacity, db, edits, items, people, priorities, prompts, search
+from docrepo import activity, bulk, capacity, db, edits, items, notes_page, people, priorities, prompts, search
 from docrepo.agenda import AgendaError
 from docrepo.captures import capture_folder, capture_md_path
 from docrepo.dates import long_date, short, to_date
@@ -72,6 +73,7 @@ from docrepo.ui.icons import icon
 from docrepo.ui.look import LOOK, Help, KeyTips, set_hints, tip, with_key
 from docrepo.ui.nav_pane import WIDTH as NAV_WIDTH, NavPane
 from docrepo.ui.page_view import PageView
+from docrepo.ui.task_pane import TaskPane
 from docrepo.ui.priorities_view import PrioritiesView
 from docrepo.ui.palette import Command, CommandPalette
 from docrepo.ui.style import FORMAT_BAR_STYLE, page_css, style_sheet
@@ -384,6 +386,18 @@ class BrowseWindow(QWidget):
         self.page.layout_changed.connect(self._page_width_changed)
         self.detail_stack.addWidget(self.page)
         self.detail_stack.addWidget(self._build_edit_form())
+        # A task's page with its notes page (release 5.25): its facts, the notes and its history in one scroll.
+        self.task_pane = TaskPane(page_css(), 14 if LOOK.classic else 16)
+        for view in (self.task_pane.top, self.task_pane.bottom):
+            view.anchorClicked.connect(self.on_link)
+        self.task_pane.top.layout_changed.connect(self._page_width_changed)
+        notes = self.task_pane.notes
+        notes.changed.connect(self._save_notes)
+        notes.open_ref.connect(self._open_ref)
+        notes.message.connect(self.say)
+        notes.folds_changed.connect(self._save_folds)
+        self.task_pane.notes_menu.connect(self._notes_menu)
+        self.detail_stack.addWidget(self.task_pane)
         dl.addWidget(self.detail_stack, 1)
         self.detail = detail
         self.split.addWidget(detail)
@@ -448,16 +462,27 @@ class BrowseWindow(QWidget):
         lay.setContentsMargins(14, 10, 14, 14)
         self.edit_title = QLabel(objectName="paneTitle")
         lay.addWidget(self.edit_title)
-        lay.addWidget(QLabel("Content text", objectName="fieldLabel"))
-        self.edit_content = RichEdit()  # with formatting and lists (mods log round 2, M0045)
-        lay.addWidget(FormatBar(self.edit_content))
+        # Release 5.25 (decision 112): Edit fixes the title and summary. The text stays as it arrived, and its words are
+        # fixed on the task's notes page, which Go to it on the page opens.
+        lay.addWidget(QLabel("Title", objectName="fieldLabel"))
+        self.edit_capture_title = QLineEdit()
+        lay.addWidget(self.edit_capture_title)
+        head = QHBoxLayout()
+        head.addWidget(QLabel("Its text, as it arrived", objectName="fieldLabel"))
+        head.addStretch()
+        self.edit_goto = QPushButton("Go to it on the page")
+        self.edit_goto.setToolTip("Its block on the task's notes page, where its words are edited")
+        self.edit_goto.clicked.connect(self._edit_goto)
+        head.addWidget(self.edit_goto)
+        lay.addLayout(head)
+        self.edit_content = RichEdit()  # shown with its formatting and lists, read-only
+        self.edit_content.setReadOnly(True)
         lay.addWidget(self.edit_content, 3)
         lay.addWidget(QLabel("Summary", objectName="fieldLabel"))
         self.edit_summary = QPlainTextEdit()
         self.edit_summary.setPlaceholderText("No summary")
         lay.addWidget(self.edit_summary, 1)
-        note = Help("Saving rewrites capture.md and keeps the previous version in the capture's _old versions folder. Nothing is lost. "
-                    "Ctrl+Enter saves; Esc cancels.")
+        note = Help("Its capture.md stays as it arrived: the title and summary are kept in docs.db. Ctrl+Enter saves; Esc cancels.")
         lay.addWidget(note)
         row = QHBoxLayout()
         save = QPushButton("Save", objectName="primary")
@@ -1781,8 +1806,9 @@ class BrowseWindow(QWidget):
         kind, item = s
         if kind == "task":
             self._task_actions(item)
-            html = pages.task_page(item, self.state, self.page.page_width())
-        elif kind == "capture":
+            self._show_task(item, keep_scroll)
+            return
+        if kind == "capture":
             self._capture_actions(item)
             html = pages.capture_page(item, self._capture_text(item), self._old_versions(item))
         elif kind == "doc":
@@ -1905,7 +1931,7 @@ class BrowseWindow(QWidget):
             self._action("Show in File Explorer", lambda: self.reveal(capture_md_path(self.ctx.data_root, c)))
             return
         readable = self._capture_text(capture_id) is not None
-        self._action("Edit", lambda: self.start_capture_edit(capture_id), "Fix the content text or summary", readable)
+        self._action("Edit", lambda: self.start_capture_edit(capture_id), "Fix its title or summary", readable)
         self._action("Show in File Explorer", lambda: self.reveal(capture_md_path(self.ctx.data_root, c)))
         self._action("Discard…", lambda: self.discard_capture(capture_id), "Hide a capture saved by mistake. Its folder stays.")
         if m.is_unfiled(c):
@@ -1995,6 +2021,10 @@ class BrowseWindow(QWidget):
             self.copy_reference(self.sel[1], unquote(rest))
         elif kind == "folder" and rest in self.model().tasks:
             self.reveal(self.ctx.data_root / "Tasks" / rest)
+        # The Captures tab (release 5.25): a capture's block on the notes page, or Add it again (decision 109).
+        elif kind in ("goto", "readd") and ":" in rest:
+            task_id, capture_id = rest.split(":", 1)
+            (self.go_to_block if kind == "goto" else self.add_again)(task_id, capture_id)
 
     def _page_menu(self, which: str) -> None:
         """The task page's history menus: which tasks' entries it shows, with Open all and Close all chapters, and the
@@ -2024,8 +2054,174 @@ class BrowseWindow(QWidget):
 
     def _page_width_changed(self) -> None:
         """The pane crossed a width at which a task page lays itself out differently: draw it again."""
-        if self.sel and self.sel[0] == "task" and self.detail_stack.currentIndex() == 0:
+        if self.sel and self.sel[0] == "task" and self.detail_stack.currentIndex() == 2:
             self.render_detail(keep_scroll=True)
+
+    # ---- the task page with its notes page (release 5.25) ----
+    def _show_task(self, task_id: str, keep_scroll: bool) -> None:
+        """Draw a task's page: its facts and history as HTML, and its notes page in the editor between them."""
+        pane = self.task_pane
+        scroll = pane.verticalScrollBar().value() if keep_scroll and pane.task_id == task_id else 0
+        pages = self.pages()
+        width = pane.viewport().width() - 2 * round(pane.top.document().documentMargin())
+        pane.top.setHtml(pages.task_page(task_id, self.state, width, "top"))
+        pane.bottom.setHtml(pages.task_page(task_id, self.state, width, "bottom"))
+        self._load_notes(task_id)
+        self.detail_stack.setCurrentIndex(2)
+        pane.verticalScrollBar().setValue(scroll)
+        if keep_scroll:
+            QTimer.singleShot(0, lambda: pane.verticalScrollBar().setValue(scroll))
+
+    def _load_notes(self, task_id: str) -> None:
+        """Put the task's notes page in the editor. The same task's page stays as it is unless docs.db holds another
+        version (a capture added to it, say): then it's shown again, or, with unsaved typing, merged into it."""
+        notes, m = self.task_pane.notes, self.model()
+        body, day = m.pages.get(task_id, ""), m.uses_day_headings(task_id)
+        self.task_pane.day_action.setChecked(day)
+        if self.task_pane.task_id == task_id:
+            notes.day_headings = day
+            if body == notes.saved_body:
+                return
+            if notes.dirty:  # two writers: the typing keeps, the new blocks come in
+                merged = notes_page.merge(notes.saved_body, notes.page(), body, day)
+                notes.set_page(merged, notes.folds(), day)
+                notes.saved_body = body
+                notes.save_now()
+                return
+            caret = notes.textCursor().position()
+            notes.set_page(body, notes.folds(), day)
+            from PySide6.QtGui import QTextCursor
+
+            c = notes.textCursor()
+            c.setPosition(min(caret, max(0, notes.document().characterCount() - 1)))
+            notes.setTextCursor(c)
+            return
+        if self.task_pane.task_id and notes.dirty:
+            notes.save_now()  # the page being left keeps its last words
+        self.task_pane.task_id = task_id
+        self.task_pane.saved.setText("")
+        notes.set_page(body, self._folds_of(task_id), day)
+
+    def _save_notes(self, body: str) -> None:
+        """The notes page saves as it's typed (decision 103): docs.db, the day's version, search and Task.md."""
+        task_id = self.task_pane.task_id
+        before = self.model().pages.get(task_id, "") if task_id else ""
+        if not task_id or task_id not in self.model().tasks:
+            return
+        try:
+            out = edits.save_page(self.conn, self.ctx.data_root, self.ctx.fs, task_id, body, self._now())
+        except (edits.EditError, sqlite3.Error, OSError) as e:
+            self.say(f"The notes weren't saved: {e}", error=True)
+            return
+        self._model = None
+        self.task_pane.saved.setText(f"Saved {self._now():%H:%M}")
+        if out.problems:
+            self.say(" ".join(out.problems), error=True)
+        if notes_page.capture_ids(before) != notes_page.capture_ids(body) and self.sel == ("task", task_id):
+            # The Captures tab says what's on the page: its history is drawn again, the editor left as it is.
+            width = self.task_pane.viewport().width() - 2 * round(self.task_pane.top.document().documentMargin())
+            self.task_pane.bottom.setHtml(self.pages().task_page(task_id, self.state, width, "bottom"))
+
+    def _folds_of(self, task_id: str) -> list[str]:
+        try:
+            return list(json.loads(db.get_state(self.conn, f"notes_folds:{task_id}") or "[]"))
+        except ValueError:
+            return []
+
+    def _save_folds(self) -> None:
+        """Which headings are folded, kept for each task in docs.db (the data root), as the app writes nowhere else."""
+        if self.task_pane.task_id:
+            db.set_state(self.conn, f"notes_folds:{self.task_pane.task_id}", json.dumps(self.task_pane.notes.folds()))
+
+    def _open_ref(self, ref: str) -> None:
+        if ref in self.model().captures:
+            self.go_capture(ref)
+        elif ref in self.model().documents:
+            self.on_link(QUrl(f"doc:{ref}"))
+
+    def go_to_block(self, task_id: str, capture_id: str) -> None:
+        """The Captures tab's On the notes page: the capture's block, unfolded, with the caret on its caption."""
+        if self.sel != ("task", task_id):
+            self.go_task(task_id)
+        if self.task_pane.notes.go_to(capture_id):
+            QTimer.singleShot(0, self.task_pane.scroll_to_caret)
+        else:
+            self.say(f"{capture_id} isn't on the notes page.")
+
+    def add_again(self, task_id: str, capture_id: str) -> None:
+        self.task_pane.notes.save_now()
+        self._do(lambda: edits.add_again(self.conn, self.ctx.data_root, self.ctx.fs, capture_id, task_id, self._now()))
+        if self.task_pane.task_id == task_id:
+            self.task_pane.notes.go_to(capture_id)
+            QTimer.singleShot(0, self.task_pane.scroll_to_caret)
+
+    def _notes_menu(self, which: str) -> None:
+        task_id, notes = self.task_pane.task_id, self.task_pane.notes
+        if not task_id:
+            return
+        if which in ("fold", "unfold"):
+            notes.fold_all(which == "fold")
+        elif which == "day_headings":
+            on = self.task_pane.day_action.isChecked()
+            notes.save_now()
+            self._do(lambda: edits.edit_task(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, task_id, self._now(),
+                                             day_headings=on))
+            self.say("New captures go under a heading for their day." if on else "New captures go at the end of the page.")
+        elif which == "history":
+            self.page_history(task_id)
+
+    def page_history(self, task_id: str) -> None:
+        """Page history (decision 103): the page as it stood at the end of each day it changed, and Restore, which is an
+        edit like any other, so the page as it stands now is kept too."""
+        from PySide6.QtWidgets import QDialog, QDialogButtonBox, QListWidget, QListWidgetItem
+
+        from docrepo.ui.notes_edit import NotesEdit
+
+        self.task_pane.notes.save_now()
+        days = notes_page.versions(self.conn, task_id)
+        if not days:
+            self.say("This page has no earlier versions yet.")
+            return
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"Page history: {self.model().task(task_id).title}")
+        dlg.resize(820, 560)
+        lay = QHBoxLayout(dlg)
+        listing = QListWidget()
+        listing.setMaximumWidth(220)
+        for day, by_owner in days:
+            item = QListWidgetItem(f"{long_date(to_date(day), self.today())}" + ("" if by_owner else " · captures only"))
+            item.setData(Qt.ItemDataRole.UserRole, day)
+            listing.addItem(item)
+        right = QVBoxLayout()
+        shown = NotesEdit()
+        shown.setReadOnly(True)
+        shown.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        shown.setSizePolicy(shown.sizePolicy().horizontalPolicy(), shown.sizePolicy().Policy.Expanding)
+        shown.setMinimumHeight(360)
+        shown._fit = lambda: None  # the dialog's view scrolls
+        buttons = QDialogButtonBox()
+        restore = buttons.addButton("Restore this version", QDialogButtonBox.ButtonRole.AcceptRole)
+        buttons.addButton(QDialogButtonBox.StandardButton.Close).clicked.connect(dlg.reject)
+        right.addWidget(QLabel("The page as it stood at the end of the day. Restoring it is an edit: today's page is kept too."))
+        right.addWidget(shown, 1)
+        right.addWidget(buttons)
+        lay.addWidget(listing)
+        lay.addLayout(right, 1)
+
+        def show(row: int) -> None:
+            day = listing.item(row).data(Qt.ItemDataRole.UserRole)
+            shown.set_page(notes_page.version(self.conn, task_id, day) or "")
+
+        listing.currentRowChanged.connect(show)
+        listing.setCurrentRow(0)
+        restore.clicked.connect(dlg.accept)
+        self._history_dialog = dlg  # kept, so tests can reach it
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        day = listing.currentItem().data(Qt.ItemDataRole.UserRole)
+        body = notes_page.version(self.conn, task_id, day) or ""
+        if self._do(lambda: edits.save_page(self.conn, self.ctx.data_root, self.ctx.fs, task_id, body, self._now())):
+            self.say(f"Restored the page as it stood on {long_date(to_date(day), self.today())}.")
 
     def double_click(self, item: QTreeWidgetItem) -> None:
         """Double-clicking a row opens its edit form (mods log round 3, M0056; decision 57): Edit task for a task, wherever
@@ -2339,18 +2535,28 @@ class BrowseWindow(QWidget):
         c = self.model().captures[capture_id]
         self.editing = capture_id
         self.edit_title.setText(f"Edit capture {capture_id}")
+        self.edit_capture_title.setText(c.title)
         self.edit_content.clear()
-        # Each @ and # shows by its name; saving keeps them with their IDs again (release 5.8, edits.edit_capture).
-        self.edit_content.set_value(items.unstore(self._capture_text(capture_id) or ""), c.formatted)
+        self.edit_content.set_value(items.unstore(self._capture_text(capture_id) or ""), c.formatted)  # each @ and # by its name
         self.edit_summary.setPlainText(c.summary or "")
-        self._edit_start = (self.edit_content.value(), self.edit_summary.toPlainText())
+        m = self.model()
+        self._edit_page = next((t for t in m.capture_tasks(c) if capture_id in notes_page.capture_ids(m.pages.get(t, ""))), None)
+        self.edit_goto.setVisible(self._edit_page is not None)
+        self._edit_start = (self.edit_capture_title.text(), self.edit_summary.toPlainText())
         self.render_detail()
-        self.edit_content.setFocus()
+        self.edit_capture_title.setFocus()
+
+    def _edit_goto(self) -> None:
+        """Go to it on the page: its block on a task's notes page, leaving the form (asking first if it changed)."""
+        task_id, capture_id = self._edit_page, self.editing
+        self.cancel_capture_edit()
+        if self.editing is None and task_id and capture_id:
+            self.go_to_block(task_id, capture_id)
 
     def cancel_capture_edit(self) -> None:
         if not self.editing:
             return
-        changed = (self.edit_content.value(), self.edit_summary.toPlainText()) != self._edit_start
+        changed = (self.edit_capture_title.text(), self.edit_summary.toPlainText()) != self._edit_start
         if changed and not self.confirm(f"Edit capture {self.editing}", "Close without saving your changes?"):
             return
         self.editing = None
@@ -2362,10 +2568,9 @@ class BrowseWindow(QWidget):
             return
         types = prompts.load_summary_types(self.ctx.data_root)
         default_type = types[0].name if types else None
-        content, formatted = self.edit_content.value()
         try:
-            out = edits.edit_capture(self.conn, self.ctx.data_root, self.ctx.fs, capture_id, content,
-                                     self.edit_summary.toPlainText(), default_type, self._now(), formatted)
+            out = edits.edit_capture(self.conn, self.ctx.data_root, self.ctx.fs, capture_id, self.edit_capture_title.text(),
+                                     self.edit_summary.toPlainText(), default_type, self._now())
         except (edits.EditError, WriteRefused, OSError) as e:
             self.say(str(e), error=True)
             return
@@ -2567,7 +2772,16 @@ class BrowseWindow(QWidget):
                                                     "stays, and any changes it made to tasks stay in their status logs.\n\nWhy?")
         if reason is None:
             return
-        self._do(lambda: edits.discard_capture(self.conn, self.ctx.data_root, self.ctx.fs, capture_id, reason, self._now()), ("capture", capture_id))
+        # Its block comes off its tasks' notes pages; one edited there stays unless you say (decision 106).
+        self.task_pane.notes.save_now()
+        model, stories = edits.stories_for(self.conn, self.ctx.data_root, self._now())
+        edited = notes_page.edited_blocks(model, stories, capture_id)
+        off = False
+        if edited:
+            names = ", ".join(model.task(t).title for t in edited)
+            off = self.confirm("Discard capture", f"{capture_id}'s block on the notes page of {names} was edited there. "
+                                                  "Take it off the page too?\n\nNo leaves it on the page as you edited it.")
+        self._do(lambda: edits.discard_capture(self.conn, self.ctx.data_root, self.ctx.fs, capture_id, reason, self._now(), off), ("capture", capture_id))
 
     def bring_back_capture(self, capture_id: str) -> None:
         if self._do(lambda: edits.bring_back_capture(self.conn, self.ctx.data_root, self.ctx.fs, capture_id, self._now())):

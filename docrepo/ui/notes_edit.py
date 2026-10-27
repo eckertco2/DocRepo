@@ -1,0 +1,832 @@
+"""A task's notes page, edited in place on its task page (release 5.25; the notes page plan, decisions 95 to 120).
+
+``NotesEdit`` is the capture window's ``RichEdit`` (decision 117: Qt's own text box, no new package) holding one page
+(``docrepo.notes_page``): DocRepo's formatting and lists, headings of any text at three levels that fold, captions
+that start each capture's block, and file lines. It's as tall as its text: the task page's one scroll holds it, with
+the facts above and the history below (``task_pane``).
+
+- **Headings** (decision 118): Ctrl+Alt+1, 2 and 3, OneNote's keys, make the line a heading; Ctrl+Alt+0 makes it text
+  again. Alt+Shift+D adds today's date as a heading at the caret (decision 110). Each heading folds, from the arrow
+  beside it, or Alt+Shift+- and Alt+Shift++ for the section the caret is in. A folded heading says how many captures
+  (or lines) it holds, and the arrow keys pass over its section. Which headings are folded is kept for each task.
+- **Captions** (decisions 109 and 120): a click opens the capture. Typing on one goes to the line below; Backspace or
+  Delete on one removes it, and its capture is then no longer on the page. Enter on a heading or a caption starts a
+  line of text under it, and Backspace and Delete never join a line to one.
+- **File lines** open the document.
+- **Copy and paste** inside the page keep whole lines as they are (headings, captions, lists); a line's words go in at
+  the caret. Text from elsewhere comes in as ``RichEdit`` takes it.
+- **Moving lines** (Alt+Shift+Up and Down) moves a line with the list items under it, or a folded heading with its
+  section, keeping what each line is.
+- **Saving** happens a moment after typing stops, and when the page loses the caret (``changed``).
+"""
+from __future__ import annotations
+
+from datetime import date
+
+from PySide6.QtCore import QByteArray, QPoint, QRect, QRectF, Qt, QTimer, Signal
+from PySide6.QtGui import (QBrush, QColor, QFont, QFontMetrics, QPainter, QPainterPath, QTextBlockFormat, QTextCharFormat, QTextCursor,
+                           QTextDocument, QTextFormat, QTextListFormat)
+from PySide6.QtWidgets import QSizePolicy, QWidget
+
+from docrepo import markup, notes_page
+from docrepo.notes_page import Line
+from docrepo.ui import tokens
+from docrepo.ui.look import LOOK
+from docrepo.ui.rich_edit import NUMBERED, RichEdit, block_markup
+
+FOLDED = 1  # a heading block's user state while its section is folded
+LEFT = 28   # the gutter beside the page, where the fold arrows go
+PAGE_MIME = "application/x-docrepo-notes-page"
+PROPORTIONAL = QTextBlockFormat.LineHeightTypes.ProportionalHeight.value
+SAVE_AFTER_MS = 800
+#: Each heading level's size above the body's, in points.
+HEADING_SIZES = {1: 3.5, 2: 1.5, 3: 0.5}
+
+
+def _grey() -> QColor:
+    return QColor(tokens.colour("text2"))
+
+
+class NotesEdit(RichEdit):
+    """The notes page's editor. ``changed`` carries the page to save; ``open_ref`` a capture's or document's ID."""
+
+    changed = Signal(str)
+    open_ref = Signal(str)
+    message = Signal(str)
+    folds_changed = Signal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("notesPage")
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.viewport().setMouseTracking(True)
+        self.setPlaceholderText("Notes for this task. Captures saved on it are added here; type anywhere.")
+        self.saved_body = ""     # the page as docs.db holds it, as far as this editor knows
+        self.day_headings = False
+        self.on_page_key = None  # the pane's Page Up and Page Down: this box is as tall as its text
+        self._quiet = self._moving = False
+        self._hover = -1
+        self._clip = None
+        self._clip_lines = False
+        self._clip_token = 0
+        self._blocks = 0
+        doc = self.document()
+        doc.documentLayout().documentSizeChanged.connect(lambda _: self._fit())
+        doc.contentsChange.connect(self._contents_change)
+        self.cursorPositionChanged.connect(self._cursor_moved)
+        self._save_timer = QTimer(self)
+        self._save_timer.setSingleShot(True)
+        self._save_timer.setInterval(SAVE_AFTER_MS)
+        self._save_timer.timeout.connect(self.save_now)
+        self._restructure = QTimer(self)
+        self._restructure.setSingleShot(True)
+        self._restructure.setInterval(0)
+        self._restructure.timeout.connect(self.refold)
+        self._keys.update({
+            "Alt+Shift+D": self.add_today_heading,
+            "Ctrl+Alt+1": lambda: self.set_heading(1), "Ctrl+Alt+2": lambda: self.set_heading(2),
+            "Ctrl+Alt+3": lambda: self.set_heading(3), "Ctrl+Alt+0": lambda: self.set_heading(0),
+            "Alt+Shift+-": lambda: self.fold_here(True), "Alt+Shift+_": lambda: self.fold_here(True),
+            "Alt+Shift++": lambda: self.fold_here(False), "Alt+Shift+=": lambda: self.fold_here(False),
+        })
+
+    # ---- what a block is ----
+    def blocks(self):
+        b = self.document().begin()
+        while b.isValid():
+            yield b
+            b = b.next()
+
+    @staticmethod
+    def ref_of(block) -> tuple[str, str] | None:
+        """A caption's or file line's ("capture" or "document", ID): a line that starts with its link."""
+        it = block.begin()
+        if it.atEnd():
+            return None
+        href = it.fragment().charFormat().anchorHref()
+        scheme, _, ref = href.partition(":")
+        return (scheme, ref) if scheme in ("capture", "document") and ref else None
+
+    def kind(self, block) -> str:
+        """"heading", "caption", "file" or "text"."""
+        if block.blockFormat().headingLevel():
+            return "heading"
+        ref = self.ref_of(block)
+        return ("caption" if ref[0] == "capture" else "file") if ref else "text"
+
+    def heading_of(self, block):
+        """The nearest heading at or above ``block``."""
+        b = block
+        while b.isValid() and not b.blockFormat().headingLevel():
+            b = b.previous()
+        return b if b.isValid() else None
+
+    def section_end(self, heading):
+        level, last, b = heading.blockFormat().headingLevel(), heading, heading.next()
+        while b.isValid() and not (b.blockFormat().headingLevel() and b.blockFormat().headingLevel() <= level):
+            last, b = b, b.next()
+        return last
+
+    # ---- formats ----
+    def _block_format(self, kind: str, level: int = 0) -> QTextBlockFormat:
+        f = QTextBlockFormat()
+        if kind == "heading":
+            f.setHeadingLevel(level)
+            f.setTopMargin({1: 16, 2: 10}.get(level, 8))
+            f.setBottomMargin(4)
+            f.setLineHeight(115, PROPORTIONAL)
+        elif kind == "caption":
+            f.setTopMargin(10)
+            f.setLineHeight(115, PROPORTIONAL)
+        else:
+            f.setBottomMargin(2)
+            f.setLineHeight(130, PROPORTIONAL)
+        return f
+
+    def _char_format(self, kind: str, level: int = 0, href: str = "") -> QTextCharFormat:
+        f = QTextCharFormat()
+        if kind == "heading":
+            f.setFontPointSize(tokens.BODY + HEADING_SIZES.get(level, 0.5))
+            f.setFontWeight(QFont.Weight.DemiBold)
+        elif kind in ("caption", "file"):
+            f.setAnchor(True)
+            f.setAnchorHref(href)
+            if kind == "caption":
+                f.setFontPointSize(tokens.CAPTION)
+                f.setForeground(_grey())
+            else:
+                f.setForeground(QColor(tokens.colour("accent")))
+        return f
+
+    def style_block(self, block) -> None:
+        """Give ``block`` its kind's spacing and look, keeping its words and their bold, italic and the like."""
+        kind, bf = self.kind(block), block.blockFormat()
+        new = self._block_format(kind, bf.headingLevel())
+        for prop in (QTextFormat.Property.BlockTopMargin, QTextFormat.Property.BlockBottomMargin,
+                     QTextFormat.Property.LineHeight, QTextFormat.Property.LineHeightType):
+            if new.hasProperty(prop):
+                bf.setProperty(prop, new.property(prop))
+            else:
+                bf.clearProperty(prop)
+        if block == self.document().begin():
+            bf.setTopMargin(2)
+        c = QTextCursor(block)
+        c.setBlockFormat(bf)
+        if kind != "text":
+            ref = self.ref_of(block)
+            c.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
+            c.mergeCharFormat(self._char_format(kind, bf.headingLevel(), f"{ref[0]}:{ref[1]}" if ref else ""))
+
+    # ---- the page in and out ----
+    def _put(self, c: QTextCursor, line: Line, new_block: bool) -> None:
+        """Write one page line at ``c``: into a new block after c's, or into c's own (empty) block."""
+        if line.kind == "text":
+            m = markup.LIST_LINE.match(line.text)
+            bf, cf = self._block_format("text"), QTextCharFormat()
+            if new_block:
+                c.insertBlock(bf, cf)
+            else:
+                c.setBlockFormat(bf)
+                c.setBlockCharFormat(cf)
+            rest = line.text
+            if m:
+                self._join_list(c, len(m.group(1)) // 2 + 1, bool(m.group(3)))
+                rest = line.text[m.end():]
+            for text, marks, colour in markup._segments(rest):
+                f = QTextCharFormat()
+                if "b" in marks:
+                    f.setFontWeight(QFont.Weight.Bold)
+                if "i" in marks:
+                    f.setFontItalic(True)
+                if "s" in marks:
+                    f.setFontStrikeOut(True)
+                if "u" in marks:
+                    f.setFontUnderline(True)
+                if "mark" in marks:
+                    f.setBackground(QBrush(QColor(markup.HIGHLIGHTS.get(colour or "yellow", markup.HIGHLIGHTS["yellow"]))))
+                c.insertText(text, f)
+            return
+        href = f"{'capture' if line.kind == 'caption' else 'document'}:{line.ref}" if line.kind != "heading" else ""
+        bf, cf = self._block_format(line.kind, line.level), self._char_format(line.kind, line.level, href)
+        if new_block:
+            c.insertBlock(bf, cf)
+        else:
+            c.setBlockFormat(bf)
+            c.setBlockCharFormat(cf)
+        c.insertText(line.text, cf)
+        if line.kind != "heading":
+            c.setCharFormat(QTextCharFormat())  # what's typed after a link isn't part of it
+
+    @staticmethod
+    def _join_list(c: QTextCursor, level: int, numbered: bool) -> None:
+        """Make c's block a list item at ``level``, in the list just above at that level and kind if there is one."""
+        style = QTextListFormat.Style.ListDecimal if numbered else QTextListFormat.Style.ListDisc
+        prev = c.block().previous()
+        while prev.isValid() and prev.textList() is not None and prev.textList().format().indent() > level:
+            prev = prev.previous()
+        lst = prev.textList() if prev.isValid() else None
+        if lst is not None and lst.format().indent() == level and (lst.format().style() in NUMBERED) == numbered:
+            lst.add(c.block())
+        else:
+            lf = QTextListFormat()
+            lf.setStyle(style)
+            lf.setIndent(level)
+            c.createList(lf)
+
+    def _write_lines(self, c: QTextCursor, lines: list[Line], fresh: bool) -> None:
+        for i, line in enumerate(lines):
+            self._put(c, line, not (fresh and i == 0))
+
+    def set_page(self, body: str, folds: list[str] = (), day_headings: bool = False) -> None:
+        """Show a page, as docs.db holds it, with the headings in ``folds`` folded. Undo starts afresh."""
+        self._save_timer.stop()
+        doc = self.document()
+        self._quiet = True
+        doc.setUndoRedoEnabled(False)
+        doc.clear()
+        frame = doc.rootFrame().frameFormat()
+        frame.setLeftMargin(LEFT)
+        doc.rootFrame().setFrameFormat(frame)
+        lines = notes_page.lines_of(body)
+        if lines:
+            c = QTextCursor(doc)
+            self._write_lines(c, lines, True)
+        for b in list(self.blocks()):
+            self.style_block(b)
+        wanted = set(folds)
+        for b in self.blocks():
+            if b.blockFormat().headingLevel() and self.fold_key(b) in wanted:
+                b.setUserState(FOLDED)
+        doc.setUndoRedoEnabled(True)
+        doc.setModified(False)
+        self._quiet = False
+        self.saved_body, self.day_headings = body, day_headings
+        self._blocks = doc.blockCount()
+        self.refold()
+
+    def page(self) -> str:
+        """The page as docs.db keeps it."""
+        out = []
+        for b in self.blocks():
+            kind = self.kind(b)
+            if kind == "heading":
+                out.append(notes_page.heading_line(" ".join(b.text().split()), b.blockFormat().headingLevel()))
+            elif kind in ("caption", "file"):
+                ref = self.ref_of(b)
+                text = " ".join(b.text().split())
+                out.append(notes_page.caption_line(text, ref[1]) if kind == "caption" else notes_page.file_line(text, ref[1]))
+            else:
+                out.append(notes_page.text_line(block_markup(b)[0]))
+        while out and not out[-1].strip():
+            out.pop()
+        return "\n".join(out)
+
+    @property
+    def dirty(self) -> bool:
+        return self._save_timer.isActive()
+
+    def save_now(self) -> None:
+        """Save what's typed, if anything changed: ``changed`` carries it to docs.db."""
+        self._save_timer.stop()
+        body = self.page()
+        if body != self.saved_body:
+            self.saved_body = body
+            self.changed.emit(body)
+
+    def focusOutEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        self.save_now()  # before the capture window, say, adds to the page
+        super().focusOutEvent(event)
+
+    def _contents_change(self, _pos: int, removed: int, added: int) -> None:
+        if self._quiet:
+            return
+        self._save_timer.start()
+        if removed or self.document().blockCount() != self._blocks:
+            self._blocks = self.document().blockCount()
+            self._restructure.start()
+
+    def _fit(self) -> None:
+        h = int(self.document().size().height()) + (self.height() - self.viewport().height())
+        if h != self.height():
+            self.setFixedHeight(max(h, 64))
+
+    # ---- folding ----
+    @staticmethod
+    def fold_key(block) -> str:
+        return f"{block.blockFormat().headingLevel()}:{' '.join(block.text().split())}"
+
+    def folds(self) -> list[str]:
+        return [self.fold_key(b) for b in self.blocks() if b.blockFormat().headingLevel() and b.userState() == FOLDED]
+
+    def refold(self) -> None:
+        """Show and hide blocks from the headings' folds: a block is hidden under any folded heading above it at a
+        higher level. Only the blocks that change are laid out again."""
+        doc = self.document()
+        lo, hi, hide_level = None, None, None
+        for b in self.blocks():
+            level = b.blockFormat().headingLevel()
+            if hide_level is not None and level and level <= hide_level:
+                hide_level = None
+            visible = hide_level is None
+            if b.isVisible() != visible:
+                b.setVisible(visible)
+                lo = b.position() if lo is None else lo
+                hi = b.position() + b.length()
+            if visible and level and b.userState() == FOLDED:
+                hide_level = level
+        if lo is not None:
+            self._quiet = True
+            doc.markContentsDirty(lo, hi - lo)
+            self._quiet = False
+        c = self.textCursor()
+        if not c.block().isVisible():  # the caret was folded away: to the end of the line above that shows
+            b = c.block()
+            while b.isValid() and not b.isVisible():
+                b = b.previous()
+            if b.isValid():
+                c.setPosition(b.position() + b.length() - 1)
+                self._moving = True
+                self.setTextCursor(c)
+                self._moving = False
+        self._fit()
+        self.viewport().update()
+
+    def toggle_fold(self, heading) -> None:
+        heading.setUserState(-1 if heading.userState() == FOLDED else FOLDED)
+        self.refold()
+        self.folds_changed.emit()
+
+    def fold_here(self, fold: bool) -> None:
+        """Alt+Shift+- and Alt+Shift++, as in OneNote: fold or unfold the section the caret is in."""
+        h = self.heading_of(self.textCursor().block())
+        if h is not None:
+            h.setUserState(FOLDED if fold else -1)
+            self.refold()
+            self.folds_changed.emit()
+
+    def fold_all(self, fold: bool) -> None:
+        for b in self.blocks():
+            if b.blockFormat().headingLevel():
+                b.setUserState(FOLDED if fold else -1)
+        self.refold()
+        self.folds_changed.emit()
+
+    def reveal(self, block) -> bool:
+        """Unfold every heading that hides ``block``. Says whether any did."""
+        if block.isVisible():
+            return False
+        bound, b = 99, block.previous()
+        while b.isValid() and bound > 1:
+            level = b.blockFormat().headingLevel()
+            if level and level < bound:
+                if b.userState() == FOLDED:
+                    b.setUserState(-1)
+                bound = level
+            b = b.previous()
+        self.refold()
+        self.folds_changed.emit()
+        return True
+
+    def caption_block(self, capture_id: str):
+        return next((b for b in self.blocks() if self.ref_of(b) == ("capture", capture_id)), None)
+
+    def go_to(self, capture_id: str) -> bool:
+        """Put the caret on a capture's caption, unfolding what hides it (the Captures tab's On the notes page)."""
+        b = self.caption_block(capture_id)
+        if b is None:
+            return False
+        self.reveal(b)
+        c = QTextCursor(b)
+        c.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
+        self.setFocus()
+        self.setTextCursor(c)
+        return True
+
+    def section_summary(self, heading) -> str:
+        end, b, captures, lines = self.section_end(heading), heading.next(), 0, 0
+        while b.isValid() and b.position() <= end.position():
+            captures += self.kind(b) == "caption"
+            lines += 1
+            b = b.next()
+        if captures:
+            return f"{captures} capture{'s' if captures != 1 else ''}"
+        return f"{lines} line{'s' if lines != 1 else ''}"
+
+    def _cursor_moved(self) -> None:
+        if not (self._moving or self._quiet) and not self.textCursor().block().isVisible():
+            self.reveal(self.textCursor().block())
+
+    # ---- headings ----
+    def add_today_heading(self) -> None:
+        """Alt+Shift+D (decision 110): today's heading at the caret. With day headings on, the day's captures go under it."""
+        title = notes_page.day_title(date.today())
+        existing = next((b for b in self.blocks() if self.kind(b) == "heading" and b.text().strip() == title), None)
+        if existing is not None:
+            self.reveal(existing)
+            c = QTextCursor(existing)
+            c.movePosition(QTextCursor.MoveOperation.EndOfBlock)
+            self.setTextCursor(c)
+            self.message.emit(f"{title} is already on the page, so the caret went to it.")
+            return
+        c = self.textCursor()
+        b = c.block()
+        c.beginEditBlock()
+        if not b.text() and self.kind(b) == "text" and b.textList() is None:
+            self._put(c, Line("heading", title, 1), False)
+        else:
+            c.movePosition(QTextCursor.MoveOperation.EndOfBlock)
+            self._put(c, Line("heading", title, 1), True)
+        self.style_block(c.block())
+        self._put(c, Line("text", ""), True)
+        self.style_block(c.block())
+        c.endEditBlock()
+        self.setTextCursor(c)
+        self._restructure.start()
+
+    def set_heading(self, level: int) -> None:
+        """Ctrl+Alt+1, 2 and 3 (OneNote's keys, decision 118): the line becomes a heading of that level, which folds;
+        Ctrl+Alt+0 makes it text again. A caption, a file line and a list item are left as they are."""
+        c = self.textCursor()
+        b = c.block()
+        if self.kind(b) in ("caption", "file") or b.textList() is not None:
+            return
+        c.beginEditBlock()
+        bf = b.blockFormat()
+        bf.setHeadingLevel(level)
+        QTextCursor(b).setBlockFormat(bf)
+        if not level:
+            ranges, it = [], b.begin()
+            while not it.atEnd():
+                ranges.append((it.fragment().position(), it.fragment().length(), QTextCharFormat(it.fragment().charFormat())))
+                it += 1
+            r = QTextCursor(b)
+            for pos, length, fmt in ranges:
+                fmt.clearProperty(QTextFormat.Property.FontPointSize)
+                fmt.setFontWeight(QFont.Weight.Normal)
+                r.setPosition(pos)
+                r.setPosition(pos + length, QTextCursor.MoveMode.KeepAnchor)
+                r.setCharFormat(fmt)
+            b.setUserState(-1)
+        self.style_block(b)
+        c.endEditBlock()
+        self._restructure.start()
+
+    # ---- moving lines, keeping what each line is ----
+    def move_lines(self, step: int) -> None:
+        """Alt+Shift+Up and Alt+Shift+Down, as in OneNote: move the line (or the selected lines) with the list items
+        under it, or a folded heading with its section, past the line or unit next to it. One Ctrl+Z puts it back."""
+        doc, cursor = self.document(), self.textCursor()
+        start, end = sorted((cursor.selectionStart(), cursor.selectionEnd()))
+        first, last_block = doc.findBlock(start).blockNumber(), doc.findBlock(end)
+        last = last_block.blockNumber()
+        if cursor.hasSelection() and end == last_block.position() and last > first:
+            last -= 1
+        first, last = self._unit(first, last)
+        count = doc.blockCount()
+        if step < 0:
+            if first == 0:
+                return
+            j = first - 1
+            while j > 0 and not doc.findBlockByNumber(j).isVisible():
+                j -= 1
+            j = self._unit_start(j)
+            other = (j, first - 1)
+        else:
+            if last >= count - 1:
+                return
+            other = self._unit(last + 1, last + 1)
+        lines = notes_page.lines_of(self.page_all())
+        if len(lines) != count:
+            return
+        folded = {n for n in range(count) if doc.findBlockByNumber(n).userState() == FOLDED}
+        unit, moved = list(range(first, last + 1)), list(range(other[0], other[1] + 1))
+        order = (list(range(other[0])) + unit + moved + list(range(last + 1, count)) if step < 0
+                 else list(range(first)) + moved + unit + list(range(other[1] + 1, count)))
+        offset, column = cursor.blockNumber() - first, cursor.positionInBlock()
+        new_first = order.index(first)
+        edit = QTextCursor(doc)
+        edit.beginEditBlock()
+        edit.select(QTextCursor.SelectionType.Document)
+        edit.removeSelectedText()
+        edit.setBlockFormat(QTextBlockFormat())
+        edit.setCharFormat(QTextCharFormat())
+        self._write_lines(edit, [lines[n] for n in order], True)
+        for b in list(self.blocks()):
+            self.style_block(b)
+        edit.endEditBlock()
+        for i, n in enumerate(order):
+            doc.findBlockByNumber(i).setUserState(FOLDED if n in folded else -1)
+        self.refold()
+        block = doc.findBlockByNumber(min(doc.blockCount() - 1, new_first + offset))
+        here = QTextCursor(block)
+        here.setPosition(block.position() + min(column, block.length() - 1))
+        self.setTextCursor(here)
+
+    def _unit(self, first: int, last: int) -> tuple[int, int]:
+        """Lines ``first`` to ``last``, with the list items under the last of them, or a folded heading's section."""
+        doc = self.document()
+        b = doc.findBlockByNumber(last)
+        if b.blockFormat().headingLevel() and b.userState() == FOLDED:
+            return first, self.section_end(b).blockNumber()
+        return super()._unit(first, last)
+
+    def _unit_start(self, n: int) -> int:
+        """The first line of the unit that ends at line ``n``: a folded heading whose section it's in, or itself."""
+        b = self.document().findBlockByNumber(n)
+        if b.isVisible():
+            return n
+        h = b
+        while h.isValid() and not (h.isVisible() and h.blockFormat().headingLevel()):
+            h = h.previous()
+        return h.blockNumber() if h.isValid() else n
+
+    def page_all(self) -> str:
+        """The page, every line kept, empty ones at its end too: what moving lines works on."""
+        out = []
+        for b in self.blocks():
+            kind = self.kind(b)
+            if kind == "heading":
+                out.append(notes_page.heading_line(" ".join(b.text().split()), b.blockFormat().headingLevel()))
+            elif kind in ("caption", "file"):
+                ref = self.ref_of(b)
+                text = " ".join(b.text().split())
+                out.append(notes_page.caption_line(text, ref[1]) if kind == "caption" else notes_page.file_line(text, ref[1]))
+            else:
+                out.append(notes_page.text_line(block_markup(b)[0]))
+        return "\n".join(out)
+
+    # ---- keys ----
+    NAV = {Qt.Key.Key_Up: -1, Qt.Key.Key_Down: 1, Qt.Key.Key_Left: -1, Qt.Key.Key_Right: 1}
+
+    def _skip_hidden(self, step: int, keep: bool) -> None:
+        """After a move, a caret in a folded section goes on past it, as if the section weren't there."""
+        c = self.textCursor()
+        b = c.block()
+        if b.isVisible():
+            return
+        while b.isValid() and not b.isVisible():
+            b = b.next() if step > 0 else b.previous()
+        if not b.isValid():
+            b = self.document().lastBlock() if step > 0 else self.document().begin()
+            while b.isValid() and not b.isVisible():
+                b = b.previous() if step > 0 else b.next()
+        if not b.isValid():
+            return
+        pos = b.position() if step > 0 and b.position() > c.position() else b.position() + b.length() - 1
+        c.setPosition(pos, QTextCursor.MoveMode.KeepAnchor if keep else QTextCursor.MoveMode.MoveAnchor)
+        self._moving = True
+        self.setTextCursor(c)
+        self._moving = False
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        key, mods = event.key(), event.modifiers()
+        combo = self._key_action(event)
+        c = self.textCursor()
+        b = c.block()
+        kind = self.kind(b)
+        if key in (Qt.Key.Key_PageUp, Qt.Key.Key_PageDown) and self.on_page_key is not None:
+            self.on_page_key(-1 if key == Qt.Key.Key_PageUp else 1, bool(mods & Qt.KeyboardModifier.ShiftModifier))
+            return
+        moving = key in self.NAV and not mods & Qt.KeyboardModifier.AltModifier
+        if moving or (combo is not None and key in (Qt.Key.Key_Up, Qt.Key.Key_Down) and mods & Qt.KeyboardModifier.ControlModifier
+                      and not mods & Qt.KeyboardModifier.AltModifier):
+            self._moving = True
+            try:
+                super().keyPressEvent(event)
+            finally:
+                self._moving = False
+            self._skip_hidden(self.NAV.get(key, 1), bool(mods & Qt.KeyboardModifier.ShiftModifier))
+            return
+        if combo is not None:
+            super().keyPressEvent(event)
+            return
+        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and kind != "text":
+            # Enter on a heading, a caption or a file line never splits it: a new line of text under it.
+            if b.userState() == FOLDED:
+                b.setUserState(-1)
+                self.refold()
+            c.beginEditBlock()
+            c.movePosition(QTextCursor.MoveOperation.EndOfBlock)
+            self._put(c, Line("text", ""), True)
+            self.style_block(c.block())
+            c.endEditBlock()
+            self.setTextCursor(c)
+            return
+        if kind in ("caption", "file") and not c.hasSelection() and key in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete):
+            self._remove_line(b)
+            return
+        if key == Qt.Key.Key_Backspace and not c.hasSelection() and c.positionInBlock() == 0 and b.previous().isValid() \
+                and self.kind(b.previous()) != "text" and b.textList() is None:
+            if not b.text():
+                c.select(QTextCursor.SelectionType.BlockUnderCursor)
+                c.removeSelectedText()
+            elif kind == "text":
+                self.message.emit("Backspace here would join this line to the heading or caption above, so it does nothing.")
+            else:
+                super().keyPressEvent(event)
+            return
+        if key == Qt.Key.Key_Delete and not c.hasSelection() and c.atBlockEnd() and b.next().isValid() and self.kind(b.next()) != "text":
+            self.message.emit("Delete here would join the heading or caption below to this line, so it does nothing.")
+            return
+        if kind in ("caption", "file") and event.text() and event.text().isprintable() and not mods & Qt.KeyboardModifier.ControlModifier:
+            # Typing on a caption goes to the line below it: the caption stays the capture's (decision 109).
+            nxt = b.next()
+            if nxt.isValid() and self.kind(nxt) == "text" and nxt.isVisible():
+                c = QTextCursor(nxt)
+            else:
+                c.movePosition(QTextCursor.MoveOperation.EndOfBlock)
+                self._put(c, Line("text", ""), True)
+                self.style_block(c.block())
+            self.setTextCursor(c)
+            self.setCurrentCharFormat(QTextCharFormat())
+        super().keyPressEvent(event)
+
+    def _remove_line(self, block) -> None:
+        """A caption or file line goes with the line break before it, so the line below keeps its own format."""
+        ref, prev = self.ref_of(block), block.previous()
+        c = QTextCursor(self.document())
+        c.beginEditBlock()
+        if prev.isValid():
+            c.setPosition(prev.position() + prev.length() - 1)
+            c.setPosition(block.position() + block.length() - 1, QTextCursor.MoveMode.KeepAnchor)
+            c.removeSelectedText()
+        elif block.next().isValid():  # the first line: it goes with the line break after it; the next line keeps its format
+            c.setPosition(block.position())
+            c.setPosition(block.next().position(), QTextCursor.MoveMode.KeepAnchor)
+            c.removeSelectedText()
+        else:
+            c.setPosition(block.position())
+            c.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
+            c.removeSelectedText()
+            c.setBlockCharFormat(QTextCharFormat())
+            self.style_block(c.block())
+        c.endEditBlock()
+        self.setTextCursor(c)
+        if ref and ref[0] == "capture":
+            self.message.emit(f"Caption removed: the text under it is no longer tied to {ref[1]}, and Captures says so. Ctrl+Z puts it back.")
+        self._restructure.start()
+
+    # ---- copy and paste: inside the page, lines stay what they are ----
+    def createMimeDataFromSelection(self):  # noqa: N802 - Qt's name
+        mime = super().createMimeDataFromSelection()
+        c = self.textCursor()
+        doc, start, end = self.document(), c.selectionStart(), c.selectionEnd()
+
+        def at_edge(pos: int) -> bool:
+            b = doc.findBlock(pos)
+            return pos in (b.position(), b.position() + b.length() - 1)
+
+        self._clip_token += 1
+        self._clip = c.selection()
+        self._clip_lines = doc.findBlock(start) != doc.findBlock(end) and at_edge(start) and at_edge(end)
+        mime.setData(PAGE_MIME, QByteArray(str(self._clip_token).encode()))
+        return mime
+
+    def insertFromMimeData(self, source) -> None:  # noqa: N802 - Qt's name
+        # Read as data, not hasFormat: Qt's own copy lists only its own formats, as the clipboard hands it back here.
+        ours = self._clip is not None and bytes(source.data(PAGE_MIME)).decode(errors="ignore") == str(self._clip_token)
+        if not ours:
+            super().insertFromMimeData(source)
+            return
+        tmp = QTextDocument()
+        QTextCursor(tmp).insertFragment(self._clip)
+        rows = []
+        b = tmp.begin()
+        while b.isValid():
+            rows.append(b)
+            b = b.next()
+        c = self.textCursor()
+        if not self._clip_lines:
+            # A line's words (Qt starts a whole line's words with a line break, to carry its format): in at the caret.
+            c.beginEditBlock()
+            c.removeSelectedText()
+            for row in rows:
+                it = row.begin()
+                while not it.atEnd():
+                    fmt = QTextCharFormat(it.fragment().charFormat())
+                    fmt.setAnchor(False)
+                    fmt.clearProperty(QTextFormat.Property.AnchorHref)
+                    c.insertText(it.fragment().text(), fmt)
+                    it += 1
+            c.endEditBlock()
+            self.setTextCursor(c)
+            return
+        if len(rows) > 1 and not rows[0].text():
+            rows = rows[1:]
+        if len(rows) > 1 and not rows[-1].text():
+            rows = rows[:-1]
+        c.clearSelection()
+        here = c.block()
+        fresh = not here.text() and self.kind(here) == "text" and here.textList() is None
+        c.beginEditBlock()
+        if not fresh:
+            c.movePosition(QTextCursor.MoveOperation.EndOfBlock)
+        for i, row in enumerate(rows):
+            bf = QTextBlockFormat(row.blockFormat())
+            bf.clearProperty(QTextFormat.Property.ObjectIndex)
+            if i or not fresh:
+                c.insertBlock(bf, QTextCharFormat())
+            else:
+                c.setBlockFormat(bf)
+            if row.textList() is not None:
+                self._join_list(c, row.textList().format().indent(), row.textList().format().style() in NUMBERED)
+            it = row.begin()
+            while not it.atEnd():
+                c.insertText(it.fragment().text(), it.fragment().charFormat())
+                it += 1
+            self.style_block(c.block())
+        c.endEditBlock()
+        self.setTextCursor(c)
+        self._restructure.start()
+
+    # ---- the mouse: fold arrows, captions and file lines ----
+    def _row(self, block) -> QRect:
+        return self.cursorRect(QTextCursor(block))
+
+    def heading_row_at(self, pos: QPoint):
+        b = self.cursorForPosition(QPoint(LEFT + 4, pos.y())).block()
+        if b.isValid() and b.isVisible() and b.blockFormat().headingLevel():
+            r = self._row(b)
+            if r.top() - 4 <= pos.y() <= r.bottom() + 4:
+                return b
+        return None
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        pos = event.position().toPoint()
+        if event.button() == Qt.MouseButton.LeftButton:
+            h = self.heading_row_at(pos) if pos.x() < LEFT else None
+            if h is not None:
+                self.toggle_fold(h)
+                return
+            scheme, _, ref = self.anchorAt(pos).partition(":")
+            if scheme in ("capture", "document") and ref and not event.modifiers():
+                self.open_ref.emit(ref)
+                return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        pos = event.position().toPoint()
+        row = self.heading_row_at(pos)
+        hover = row.blockNumber() if row is not None else -1
+        if hover != self._hover:
+            self._hover = hover
+            self.viewport().update()
+        scheme = self.anchorAt(pos).partition(":")[0]
+        hand = (row is not None and pos.x() < LEFT) or scheme in ("capture", "document")
+        self.viewport().setCursor(Qt.CursorShape.PointingHandCursor if hand else Qt.CursorShape.IBeamCursor)
+        super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        self._hover = -1
+        self.viewport().update()
+        super().leaveEvent(event)
+
+    def paintEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        super().paintEvent(event)
+        area = event.rect()
+        p = QPainter(self.viewport())
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        small = tokens.ui_font(tokens.CAPTION)
+        layout = self.document().documentLayout()
+        b = self.cursorForPosition(QPoint(LEFT + 4, area.top())).block()
+        if b.previous().isValid():
+            b = b.previous()
+        while b.isValid():
+            if b.isVisible():
+                if layout.blockBoundingRect(b).top() > area.bottom():
+                    break
+                if b.blockFormat().headingLevel():
+                    self._paint_heading(p, b, small)
+            b = b.next()
+        p.end()
+
+    def _paint_heading(self, p: QPainter, b, small: QFont) -> None:
+        r = self._row(b)
+        folded, hover = b.userState() == FOLDED, b.blockNumber() == self._hover
+        cx, cy, s = LEFT / 2, r.center().y() + 0.5, 4.5
+        path = QPainterPath()
+        if folded:
+            path.moveTo(cx - s / 2, cy - s)
+            path.lineTo(cx + s * 0.75, cy)
+            path.lineTo(cx - s / 2, cy + s)
+        else:
+            path.moveTo(cx - s, cy - s / 2)
+            path.lineTo(cx + s, cy - s / 2)
+            path.lineTo(cx, cy + s * 0.75)
+        path.closeSubpath()
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(tokens.colour("text2" if folded or hover else "scroll")) if not LOOK.classic else QColor("#666666"))
+        p.drawPath(path)
+        if folded:
+            line = b.layout().lineAt(0)
+            text = self.section_summary(b)
+            fm = QFontMetrics(small)
+            x = r.left() + line.naturalTextWidth() + 12
+            pill = QRectF(x, r.center().y() - fm.height() / 2 - 1, fm.horizontalAdvance(text) + 14, fm.height() + 2)
+            p.setBrush(QColor(tokens.colour("hover")))
+            p.drawRoundedRect(pill, pill.height() / 2, pill.height() / 2)
+            p.setFont(small)
+            p.setPen(_grey())
+            p.drawText(pill, Qt.AlignmentFlag.AlignCenter, text)

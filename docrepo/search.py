@@ -6,6 +6,9 @@ extracted.txt, so their text is copied into a search index in docs.db
 the files (the ``rebuild`` command). It's a cache, like the capacity calendar.
 Tasks, people and labels are searched straight from their tables.
 
+Each task's notes page (release 5.25) is indexed too, as its words (``notes_page.words``), and a hit on it is listed
+under Notes, unless one of the page's captures, the record behind it, is found as well.
+
 A search matches items that hold every word typed, in any case, anywhere in
 their text: "seal ord" finds "Order a spare mechanical seal". Discarded tasks and
 captures aren't found.
@@ -26,7 +29,7 @@ log = logging.getLogger(__name__)
 
 #: The most results shown for each kind of item.
 LIMIT = 40
-GROUPS = ("Task", "Capture", "Document", "Saved copy", "Person", "Label")
+GROUPS = ("Task", "Notes", "Capture", "Document", "Saved copy", "Person", "Label")
 
 
 @dataclass(frozen=True)
@@ -74,6 +77,23 @@ def index_items(conn: sqlite3.Connection, data_root: Path, captures: list[str] =
                 _put(conn, "document", d, document_body(model, data_root, d))
 
 
+def page_body(model: Model, task_id: str) -> str:
+    from docrepo import notes_page
+
+    return "\n".join((task_id, model.task(task_id).title, notes_page.words(model.pages.get(task_id, ""))))
+
+
+def index_pages(conn: sqlite3.Connection, task_ids: list[str]) -> None:
+    """Bring the index up to date for these tasks' notes pages (release 5.25)."""
+    if not task_ids:
+        return
+    model = Model(conn)
+    with transaction(conn):
+        for t in dict.fromkeys(task_ids):
+            if t in model.tasks:
+                _put(conn, "page", t, page_body(model, t))
+
+
 def rebuild(conn: sqlite3.Connection, data_root: Path) -> int:
     """Rebuild the whole index from the capture.md and extracted.txt files. Returns the number of items."""
     model = Model(conn)
@@ -83,7 +103,10 @@ def rebuild(conn: sqlite3.Connection, data_root: Path) -> int:
             _put(conn, "capture", c, capture_body(model, data_root, c))
         for d in model.documents:
             _put(conn, "document", d, document_body(model, data_root, d))
-    count = len(model.captures) + len(model.documents)
+        for t in model.pages:
+            if t in model.tasks:
+                _put(conn, "page", t, page_body(model, t))
+    count = len(model.captures) + len(model.documents) + len(model.pages)
     log.info("search index rebuilt: %d items", count)
     return count
 
@@ -91,7 +114,7 @@ def rebuild(conn: sqlite3.Connection, data_root: Path) -> int:
 def needs_rebuild(conn: sqlite3.Connection) -> bool:
     """True when the index is missing items, as after DocRepo is first updated to phase 4."""
     have = conn.execute("SELECT count(*) FROM search_text").fetchone()[0]
-    want = conn.execute("SELECT (SELECT count(*) FROM captures) + (SELECT count(*) FROM documents)").fetchone()[0]
+    want = conn.execute("SELECT (SELECT count(*) FROM captures) + (SELECT count(*) FROM documents) + (SELECT count(*) FROM task_pages)").fetchone()[0]
     return have < want
 
 
@@ -143,6 +166,15 @@ def search(conn: sqlite3.Connection, model: Model, query: str) -> list[Result]:
     for t in tasks[:LIMIT]:
         out.append(Result("Task", "task", t.id, t.title, f"{t.id} · {t.state}", snippet(f"{t.description}\n{t.current_status}", words)))
     found = [(i, b) for i, b in _indexed(conn, "capture", words) if i in m.captures and not m.captures[i].discarded]
+    # Notes pages (release 5.25): a page's hit, unless its task is listed already or a capture on it is found.
+    from docrepo import notes_page
+
+    listed, hit = {t.id for t in tasks}, {i for i, _ in found}
+    pages = [(i, b) for i, b in _indexed(conn, "page", words) if i in m.tasks and not m.tasks[i].discarded and i not in listed
+             and not hit & set(notes_page.capture_ids(m.pages.get(i, "")))]
+    for tid, body in pages[:LIMIT]:
+        t = m.tasks[tid]
+        out.append(Result("Notes", "task", t.id, f"Notes of {t.title}", f"{t.id} · its notes page", snippet(_after_title(body), words)))
     for cid, body in sorted(found, key=lambda x: m.captures[x[0]].saved, reverse=True)[:LIMIT]:
         c = m.captures[cid]
         out.append(Result("Capture", "capture", c.id, c.title, f"{c.id} · {c.saved[:16]}", snippet(_after_title(body), words)))

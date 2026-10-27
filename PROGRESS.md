@@ -37,6 +37,7 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.22 | The visual overhaul, O10: the sidebar redrawn, with an icon per view, small folding headings and counts only where they ask for something (decisions 79 to 84) | Built 2026-10-26, from the approved mock; on GitHub 2026-10-26, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
 | 5.23 | Review and planning, from the mods log, round 2 (stage 8): the Activity view and Priorities (decisions 23 and 70 to 78), schema version 9 | Built 2026-10-26, from the approved mock; hand-tested by the owner and on GitHub 2026-10-26. Next: testing on the corporate computer |
 | 5.24 | The owner's comments on 5.23: Find and Fold subtasks on the Priorities board, Group by on the task tree, and Collapse a level and Expand a level on every view whose rows nest | Built 2026-10-26; hand-tested by the owner and on GitHub 2026-10-26. Next: testing on the corporate computer |
+| 5.25 | The notes page: each task's notes as one page, edited in place on its task page, with captures adding their blocks (the notes page plan's decisions 95 to 120), schema version 10 | Built 2026-10-27, without a mock, after the Qt sample; hand-tested by the owner and on GitHub 2026-10-27. Next: testing on the corporate computer |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
 ## Decisions
@@ -471,6 +472,30 @@ The visual overhaul's O10, designed and mocked in the parent workspace (`docs/ui
   - **No button group:** the pane marks the open view itself, so that no row is marked while searching, and a click on the open view keeps it marked.
   - **The totals that left the sidebar** are beside their views' titles ("14 open", "7 active"), as `sidebar.md` said they'd be.
   - **The tooltip** shows only when a name is cut short. The headings' tooltips say Fold or Unfold.
+
+## Release 5.25: the notes page (2026-10-27)
+
+The notes page plan (`docs/mods/notes-page-plan.md` in the parent workspace, decisions 95 to 120, and 117: Qt's own text box), asked for by the owner on 2026-10-26 and built without a mock, as the owner chose, using what the Qt sample found. The checklist summary (5.26) and pictures, files and tables (5.27) follow.
+
+- `docrepo/db.py`: schema version 10, `task_pages`, `task_page_versions` (the page at each day's end, when the owner last edited it, and whether they did), tasks' `day_headings`, and `search_text` made again with pages. `docrepo/model.py`: `Model.pages`, `Model.page_edits`, `Task.day_headings` and `uses_day_headings`.
+- `docrepo/notes_page.py` (new): the page's lines (headings, captions, file lines, markup), a capture's block and caption, where a block goes (`add_block`, with day headings in date order), taking one off (`remove_block`, `edited_blocks`), `merge` for two writers, `task_md`, `words`, and docs.db (`get`, `put` with the day's version, `versions`, `add_capture`, `remove_capture`, `build`, `build_all`, `needs_build`).
+- `docrepo/save.py`: a saved capture's block, and each item's, go on their tasks' pages; a new task's description is its text's first line (`first_line`), Make it a task's the window's whole text. `docrepo/edits.py`: `add_to_pages`, `save_page`, `add_again`, filing, discarding (with `off_edited_pages`) and bringing back; `edit_task`'s `day_headings`; `edit_capture` now fixes the title and summary only, leaving capture.md as it arrived. `docrepo/app.py`: `build_pages`, the first pages after a backup, once. `docrepo/sample.py`: the sample builds its pages.
+- `docrepo/pages.py`: Task.md's Notes and Captures, and `write_task_page`. `docrepo/detail.py`: the task page in two parts ("top", "bottom"), and the Captures tab (On the notes page, Not on the notes page, Add it again). `docrepo/search.py`: pages indexed and found under Notes. `docrepo/activity.py`: Notes edited.
+- `docrepo/ui/notes_edit.py` (new): `NotesEdit`, the page's editor (folding, captions, headings, Alt+Shift+D, moving lines, copy and paste, saving). `docrepo/ui/task_pane.py` (new): `TaskPane`, the task page in one scroll, with the Notes menu. `docrepo/ui/browse_window.py`: the pane in the detail stack, saving, folds kept, merging arrivals, the Captures tab's links, Page history, discarding asking about an edited block, and the capture edit form (title, summary, its text read-only, Go to it on the page). `docrepo/ui/rich_edit.py`: `block_markup`. `docrepo/ui/tokens.py` and `style.py`: the pane is one white page.
+- `.github/copilot-instructions.md`: capture.md is written once and then only ever filed. `GLOSSARY.md`: notes page, caption, day heading.
+- Tests: `tests/test_notes_page.py` and `tests/test_notes_edit.py` (new); the Task.md examples in `tests/fixtures/examples.md` now have Notes and Captures, written from DocRepo (the mockup's own exports don't have notes pages yet); the capture edit, task page and description tests follow the decisions. 851 pass in all, 1 skipped. The task page was drawn over a sample data root with Windows' own fonts and checked by eye.
+
+## Decisions (release 5.25)
+
+- Decisions 95 to 120 as the plan records them, with 119's default off (a meeting's on).
+- **Changed on the way, for the owner's hand test:**
+  - **Day headings for new captures** are set in the task page's **Notes** menu (⋯ beside Notes), not in Edit task.
+  - **Folded headings are kept in docs.db** (`app_state`), not in `%LOCALAPPDATA%\DocRepo\` as the plan said: the hard rules keep only `location.json` and the Startup shortcut there.
+  - **Make it a task** keeps the window's whole text as the new task's description: the page gets the capture's own text, so the window's would otherwise be kept nowhere.
+  - **Typing on the page** isn't on the Captures tab or in the status log; it's a Notes edited line in Activity.
+  - **Find (Ctrl+F) and Find in this view** don't search the page yet; search (the top bar) does. A heading's own bold or italic isn't kept.
+  - **Ctrl+Z just after a capture arrives** can't undo it: the page is shown again, and undo starts afresh. Unsaved typing is merged with it instead.
+
 
 ## Release 5.24: the owner's comments on 5.23 (2026-10-26)
 

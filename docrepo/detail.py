@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from urllib.parse import quote
 
-from docrepo import capacity, items, markup
+from docrepo import capacity, items, markup, notes_page
 from docrepo.dates import ago, days_words, long_date, monday_of, short, to_date
 from docrepo.links import NO_TEXT, is_link
 from docrepo.model import PRIORITY_NAMES, TODAY, TYPE_NAMES, Capture, Model, Task, is_person
@@ -84,7 +84,8 @@ h2 { font-size: 15pt; font-weight: 600; margin-top: 2px; margin-bottom: 4px; }
 
 STATE_CLASS = {"Not started": "st-ns", "In progress": "st-ip", "Parked": "st-pk", "Closed": "st-cl"}
 #: The task page's history (release 5.21): its tabs, and the names of its scopes. Subtasks is a section of its own now.
-TABS = (("notes", "Raw text log"), ("log", "Status log"), ("summaries", "Summaries"), ("files", "Files"))
+#: The history's tabs. The raw text log is Captures since the notes page (release 5.25, decision 104).
+TABS = (("notes", "Captures"), ("log", "Status log"), ("summaries", "Summaries"), ("files", "Files"))
 SCOPE_NAMES = {"self": "This task", "ancestors": "With parent tasks", "descendants": "With subtasks", "family": "Whole family"}
 SOURCE_NAMES = {"typed": "Typed", "outlook_email": "Email", "file_path": "File path"}
 MONTH_NAMES = ("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")
@@ -258,23 +259,36 @@ class Pages:
     def has_agenda(self, t: Task) -> bool:
         return bool(self.m.open_items_for(t.id)) or (t.meeting and is_open(t))
 
-    def task_page(self, task_id: str, state: PageState, width: int = 600) -> str:
+    def task_page(self, task_id: str, state: PageState, width: int = 600, part: str = "all") -> str:
         """The task's story, top to bottom: where it sits and what it is, its current status, When and Who, a meeting's
         agenda, its subtasks, Details folded to one line, then its history. ``width`` is the page's: from WIDE_PAGE, When,
-        Who and Details move into a rail on the right, and narrower than SIDE_BY_SIDE, When and Who stack."""
+        Who and Details move into a rail on the right, and narrower than SIDE_BY_SIDE, When and Who stack.
+
+        Since the notes page (release 5.25), the browse tool draws it in two ``part``s with the page's editor between
+        them: "top", all but the history, and "bottom", the history. "all" is both, for anything that reads the page."""
+        if part == "bottom":
+            t = self.m.task(task_id)
+            history = self.history(t, state)
+            return (f'<table width="{min(width, PAGE_MAX)}" cellspacing="0" cellpadding="0"><tr><td>{history}</td></tr></table>'
+                    if width >= WIDE_PAGE else history)
+        if part == "top":
+            return self._task_top(task_id, state, width, history=False)
+        return self._task_top(task_id, state, width, history=True)
+
+    def _task_top(self, task_id: str, state: PageState, width: int, history: bool) -> str:
         t = self.m.task(task_id)
         head = (self.discarded_box(t.discarded, t.discard_reason, "the task tree, the lists, the pickers, search and the capacity calendar")
                 if t.discarded else "") + self.page_head(t, state)  # mods log round 1, M0021
         when, who = group("When", self.when_rows(t)), group("Who", self.who_rows(t))
         if width >= WIDE_PAGE:
-            main = head + self.status_block(t) + self.agenda_section(t) + self.subtask_section(t, state) + self.history(t, state)
+            main = head + self.status_block(t) + self.agenda_section(t) + self.subtask_section(t, state) + (self.history(t, state) if history else "")
             return (f'<table width="{min(width, PAGE_MAX)}" cellspacing="0" cellpadding="0"><tr><td valign="top">{main}</td>'
                     f'<td width="24"></td><td width="1" class="rule"></td><td width="20"></td>'
                     f'<td width="{RAIL}" valign="top">{when}{who}{self.details(t, state, rail=True)}</td></tr></table>')
         facts = (f'<table width="100%" cellspacing="0" cellpadding="0" style="margin-top: 8px"><tr><td width="50%" valign="top">{when}</td>'
                  f'<td width="50%" valign="top">{who}</td></tr></table>' if width >= SIDE_BY_SIDE else when + who)
         return (head + self.status_block(t) + facts + self.agenda_section(t) + self.subtask_section(t, state) + self.details(t, state)
-                + self.history(t, state))
+                + (self.history(t, state) if history else ""))
 
     def page_head(self, t: Task, state: PageState) -> str:
         """The path (none for a top-level task), the title, the state, flags and labels, and the description in two lines."""
@@ -519,8 +533,9 @@ class Pages:
             return self.story_list(self.stories.story(task_id), lambda e: self.log_item(e), state)
         items = self.stories.raw_items(task_id)
         if not items:
-            return '<p class="note">Nothing in the raw text log yet.</p>'
-        return self.story_list(items, lambda r: self.raw_item(r, state), state)
+            return '<p class="note">Nothing has come in yet.</p>'
+        on_page = set(notes_page.capture_ids(self.m.pages.get(task_id, "")))
+        return self.story_list(items, lambda r: self.raw_item(r, state, task_id, on_page), state)
 
     def story_list(self, items: list, render: Callable, state: PageState) -> str:
         """Entries grouped by day, with a heading for each month when they span more than one."""
@@ -566,12 +581,24 @@ class Pages:
             out += f'<br><span class="facts">{esc(rest)}</span>{src}'
         return out + "</p>"
 
-    def raw_item(self, r: RawItem, state: PageState) -> str:
+    def raw_item(self, r: RawItem, state: PageState, task_id: str = "", on_page: set[str] | None = None) -> str:
+        """An entry on the Captures tab. A capture (release 5.25, decision 104) says whether its block is on the task's
+        notes page, linking to it there, or offers to add it again (decision 109): its text is the page's to show. A
+        document version still shows what changed."""
         key = r.capture or f"V{r.document}{r.at}"
         title = self.capture_link(r.capture, r.title, "tl") if r.capture else link(f"doc:{r.document}", r.title, quiet="tl")
         # An item (release 5.8) says whose notes it came from.
         notes = f' <span class="lead">· from the notes of</span> {self.capture_link(r.from_notes, r.from_title)}' if r.from_notes else ""
         out = f'<p><span class="lead">{esc(r.lead)}</span>{notes}<br><b>{title}</b>'
+        if r.capture and on_page is not None:
+            if r.capture in on_page:
+                out += f'<br>{link(f"goto:{task_id}:{r.capture}", "On the notes page", "Show its block on the notes page")}'
+            else:
+                out += (f'<br><span class="sub">Not on the notes page</span> · '
+                        f'{link(f"readd:{task_id}:{r.capture}", "Add it again", "Put its block back on the notes page, as it was added")}')
+            if r.documents:
+                out += '<br><span class="facts">Files: ' + ", ".join(link(f"doc:{d}", name, desc) for d, name, desc in r.documents) + "</span>"
+            return out + "</p>"
 
         def shown(text: str) -> str:
             return markup.to_line_html(text) if r.formatted else multiline(text)

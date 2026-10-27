@@ -48,7 +48,8 @@ def test_rebuild_and_needs_rebuild(sample_root):
     conn.execute("DELETE FROM search_text")
     assert search.needs_rebuild(conn)
     m = Model(conn)
-    assert search.rebuild(conn, root) == len(m.captures) + len(m.documents) == 28
+    # Each task's notes page is indexed too (release 5.25).
+    assert search.rebuild(conn, root) == len(m.captures) + len(m.documents) + len(m.pages) == 28 + len(m.tasks)
     assert not search.needs_rebuild(conn)
 
 
