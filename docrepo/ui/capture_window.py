@@ -66,6 +66,7 @@ from docrepo.db import RECURRENCES, STATES
 from docrepo.extract import extract_text, to_unc
 from docrepo.layer0 import size_text
 from docrepo.links import is_link, link_name
+from docrepo.text import typed_path
 from docrepo.model import TODAY, Model, is_person
 from docrepo.parse import Found, Known, Who, as_plant_event, parse_capture, quick_update
 from docrepo.prompts import capture_blocks, load_summary_types, prompt_text
@@ -81,6 +82,7 @@ from docrepo.save import (
     item_names,
     meeting_case,
     meeting_name,
+    msg_name,
     save_capture,
 )
 from docrepo.schedule import is_open, start_of
@@ -114,6 +116,20 @@ log = logging.getLogger(__name__)
 #: A line of the content text that is a file path adds that file; deleting the line removes it. A link on a line of its
 #: own does the same (``links.LINK_LINE``).
 PATH_LINE = re.compile(r"^(?:\\\\[^\\\s][^\\]*\\.+|[A-Za-z]:\\.+)\.[A-Za-z0-9]{1,5}$")
+
+
+def existing_file(path: str) -> str | None:
+    """``path`` if it's a file, else the same path with its no-break spaces as spaces when that is one (a path copied
+    from an email or a chat can have them), else None (release 5.26.1)."""
+    for candidate in dict.fromkeys((path, path.replace(" ", " "))):
+        try:
+            if Path(candidate).is_file():
+                return candidate
+        except OSError:
+            continue
+    return None
+
+
 WIDTH = 940
 #: Below this width, what Parse and populate found goes under the content text instead of beside it.
 NARROW = 700
@@ -167,6 +183,7 @@ class FileEntry:
     extract: QCheckBox | None = None
     keep: QCheckBox | None = None  # an email's part: whether it's kept
     layer0: QLabel | None = None  # an email's row: what email layer 0 kept and left out
+    note: QLabel | None = None  # the line beside its name (_file_note); an email's names its .msg file
     what: str = ""  # the description's question, the start of its placeholder
 
 
@@ -275,6 +292,7 @@ class CaptureWindow(QWidget):
         self.pin_window = None  # made the first time it's pinned (docrepo/ui/pin_window.py)
         self._saving = False
         self.today_on = False  # Today, beside the capture types (M0037)
+        self._missing_paths: dict[str, bool] = {}  # path lines that aren't files DocRepo can find, and whether it's said so
         self._path_timer = QTimer(self)
         self._path_timer.setSingleShot(True)
         self._path_timer.setInterval(350)
@@ -471,6 +489,7 @@ class CaptureWindow(QWidget):
         self.content.textChanged.connect(self._content_changed)
         self.content.dropped.connect(self.dropped)
         self.content.cursorPositionChanged.connect(self._ref_list)
+        self.content.cursorPositionChanged.connect(self._tell_missing_paths)
         self.content.list_keys = lambda key: self.ref_popup.handle_key(key)
         self.content.left = lambda: self.ref_popup.hide()
         self.highlighter = OperatorHighlighter(self.content.document())
@@ -1810,23 +1829,43 @@ class CaptureWindow(QWidget):
 
     def _sync_paths(self) -> None:
         """A line of the content text that's an existing file's path, or a link, adds a row for it; deleting the line
-        removes it."""
-        lines = [line.strip() for line in self.content.toPlainText().split("\n") if PATH_LINE.match(line.strip()) or is_link(line)]
+        removes it. A path may have the quotes File Explorer's Copy as path puts round it (release 5.26.1). A path line
+        that isn't a file DocRepo can find says so once the cursor leaves it, rather than staying text without a word."""
+        lines = [line.strip() for line in self.content.toPlainText().split("\n") if PATH_LINE.match(typed_path(line)) or is_link(line)]
         keep = {line.lower() for line in lines}
         for entry in [e for e in self.files if e.src == "pasted" and (e.line or "").lower() not in keep]:
             self._remove_file(entry, from_content=False)
+        self._missing_paths = {line: told for line, told in self._missing_paths.items() if line in lines}
         for line in lines:
-            if not any(line.lower() in ((e.line or "").lower(), (e.row.path or "").lower()) for e in self.files):
+            if not any(line.lower() == (e.line or "").lower() or typed_path(line).lower() == (e.row.path or "").lower() for e in self.files):
                 if is_link(line):
                     # No focus move: a link typed by hand matches before it's finished, and typing must go on.
                     self._add_file(FileRow(link_name(line), line), "pasted", line, focus=False)
                     continue
-                try:
-                    exists = Path(line).is_file()
-                except OSError:
-                    exists = False
-                if exists:
-                    self._add_file(FileRow(Path(line).name, to_unc(line)), "pasted", line)
+                if line in self._missing_paths:
+                    continue  # looked for already; editing the line looks again
+                path = existing_file(typed_path(line))
+                if path:
+                    self._add_file(FileRow(Path(path).name, to_unc(path)), "pasted", line)
+                else:
+                    self._missing_paths[line] = False
+        self._tell_missing_paths()
+
+    def _tell_missing_paths(self) -> None:
+        """Say which path lines aren't files DocRepo can find, each once, and not while the cursor is still on it: a path
+        being typed matches the pattern before it's finished."""
+        if not self._missing_paths:
+            return
+        here = self.content.textCursor().block().text().strip()
+        untold = [line for line, told in self._missing_paths.items() if not told and line != here]
+        if not untold:
+            return
+        for line in untold:
+            self._missing_paths[line] = True
+        names = ", ".join(Path(typed_path(line)).name for line in untold)
+        verb = "isn't a file" if len(untold) == 1 else "aren't files"
+        self._fail(f"{names} {verb} DocRepo can find, so it's kept as text and not attached. Check the path (the drive "
+                   "and each folder's name), or drop the file on the window.")
 
     def add_paths(self, paths: list[str]) -> None:
         """Files dropped or picked. A .msg file is read through Outlook as an email. A folder, or something that
@@ -1905,7 +1944,9 @@ class CaptureWindow(QWidget):
         """The line beside a row's name: where its file stays or goes, or what layer 0 made of it."""
         part = row.part
         if row.email:
-            return "Saved as email.msg in the capture's folder."
+            emails = [e.row for e in self.files if e.row.email]
+            position = next((n for n, r in enumerate(emails) if r is row), len(emails))
+            return f"Saved as {msg_name(position)} in the capture's folder."
         if part and part.kind != "link":
             size = f"{size_text(part.size)}. " if part.size else ""
             if part.kind == "picture":
@@ -1947,7 +1988,8 @@ class CaptureWindow(QWidget):
         name = QLabel(f"<span style='color:#5a6571'>{label}</span>  <b>{esc(row.name)}</b>")
         name.setToolTip(row.path or "")
         top.addWidget(name)
-        top.addWidget(QLabel(self._file_note(row, doc.id if doc else None, link), objectName="hint"), 1)
+        entry.note = QLabel(self._file_note(row, doc.id if doc else None, link), objectName="hint")
+        top.addWidget(entry.note, 1)
         if row.of is None:
             remove = QToolButton(text="×")
             remove.setToolTip(f"Remove {row.name}")
@@ -2006,6 +2048,9 @@ class CaptureWindow(QWidget):
                 self.files.remove(e)
             if e.widget:
                 e.widget.deleteLater()
+        for e in self.files:  # the emails after a removed one move up: email 2.msg becomes email.msg
+            if e.row.email and e.note:
+                e.note.setText(self._file_note(e.row, e.doc, False))
         if from_content and entry.src == "pasted" and entry.line:
             self._setting = True
             self.content.remove_line(entry.line)  # the rest keeps its formatting

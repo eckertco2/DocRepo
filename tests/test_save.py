@@ -12,7 +12,20 @@ from docrepo.log_setup import setup_logging
 from docrepo.model import Model
 from docrepo.parse import Who
 from docrepo.sample import load_sample
-from docrepo.save import Attachment, CaptureDraft, EmailItem, FileRow, NewTaskFields, SaveError, copy_name, email_rows, save_capture
+from docrepo.edits import source_of
+from docrepo.save import (
+    Attachment,
+    CaptureDraft,
+    EmailItem,
+    FileRow,
+    NewTaskFields,
+    SaveError,
+    attachment_name,
+    copy_name,
+    email_rows,
+    msg_name,
+    save_capture,
+)
 
 AT = datetime(2026, 10, 16, 9, 30)
 SETTINGS = Settings(me="P001")
@@ -197,6 +210,47 @@ def test_an_email_with_no_attachments_is_still_saved_as_email_msg(env):
     r = save(env, CaptureDraft(task="T000008", types={"note"}, files=email_rows(email)))
     assert (env[1] / "Captures" / "2026" / "10" / r.capture_id / "email.msg").read_bytes() == b"MSG"
     assert Model(env[0]).captures[r.capture_id].email_layer_0 == "Nothing kept."
+
+
+def test_two_emails_in_one_capture_keep_their_own_msg_files_and_attachments(env):
+    """Release 5.26.1: both emails went to email.msg, and same-named attachments to one file, and Outlook's SaveAs and
+    SaveAsFile overwrite, so only the last of each was kept."""
+    def write(data: bytes):
+        return lambda path: Path(path).write_bytes(data)  # as Outlook does: a file already there is replaced
+
+    first = EmailItem("Seal kit quote", "Norvane Pumps (vendor)", "2026-10-14 09:10", "Me", "Quote attached.",
+                      attachments=[Attachment("Notes.txt", write(b"Seal kit: part 4471"))], save_msg=write(b"MSG 1"))
+    second = EmailItem("RE: Seal kit quote", "Tom Becker", "2026-10-15 11:42", "Me", "Lead time below.",
+                       attachments=[Attachment("notes.TXT", write(b"Lead time: three weeks"))], save_msg=write(b"MSG 2"))
+    rows = email_rows(first) + email_rows(second)
+    rows[1].description, rows[3].description, rows[3].save_a_copy = "The quote's notes.", "The lead time.", True
+    r = save(env, CaptureDraft(task="T000008", types={"note"}, files=rows))
+    conn, root, _ = env
+    folder = root / "Captures" / "2026" / "10" / r.capture_id
+    assert ((folder / "email.msg").read_bytes(), (folder / "email 2.msg").read_bytes()) == (b"MSG 1", b"MSG 2")
+    assert (folder / "attachments" / "Notes.txt").read_bytes() == b"Seal kit: part 4471"
+    assert (folder / "attachments" / "notes (2).TXT").read_bytes() == b"Lead time: three weeks"
+    model = Model(conn)
+    capture = model.captures[r.capture_id]
+    assert capture.attachments == ["Notes.txt", "notes (2).TXT"]
+    docs = [model.documents[d.document] for d in capture.documents]
+    assert [d.name for d in docs] == ["Notes.txt", "notes (2).TXT"]
+    assert [(root / "Documents" / d.id / "extracted.txt").read_text(encoding="utf-8") for d in docs] == [
+        "Seal kit: part 4471", "Lead time: three weeks"]
+    assert source_of(root, model, docs[1].id) == folder / "attachments" / "notes (2).TXT"
+    copy = next(c for c in model.copies if c.document == docs[1].id)
+    assert (root / "Tasks" / "T000008" / "Files" / copy.name).read_bytes() == b"Lead time: three weeks"
+    assert not r.problems
+
+
+def test_msg_and_attachment_names():
+    assert [msg_name(n) for n in range(3)] == ["email.msg", "email 2.msg", "email 3.msg"]
+    assert attachment_name("image001.png", set()) == "image001.png"
+    assert attachment_name("image001.png", {"image001.png"}) == "image001 (2).png"
+    assert attachment_name("image001.png", {"IMAGE001.PNG", "image001 (2).png"}) == "image001 (3).png"  # Windows ignores case
+    assert attachment_name('Spec: "rev B"?.pdf', set()) == "Spec rev B.pdf"
+    assert attachment_name("README", {"readme"}) == "README (2)"
+    assert attachment_name("...", set()) == "attachment"
 
 
 def test_the_log_holds_ids_not_content(env):

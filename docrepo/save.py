@@ -3,8 +3,8 @@
 Everything that goes into docs.db happens in one transaction: new people and labels,
 the new task or the update, the capture's record, its documents and saved copies,
 and its agenda items. Then the files are written: capture.md, each document's
-extracted text, the saved copies, an Outlook email's email.msg and attachments,
-and the generated pages. A file that fails never undoes the capture; it's reported
+extracted text, the saved copies, each Outlook email's .msg file (email.msg, then
+email 2.msg and so on) and its attachments, and the generated pages. A file that fails never undoes the capture; it's reported
 in the result and the log.
 
 Ported from the mockup's ``capture.js`` (``save``). SPEC section 7 describes it.
@@ -84,7 +84,7 @@ class FileRow:
     """A file, link or email added to the capture, with its description and choices. ``path`` is its original: a file's
     path, or a link (``links.is_link``), which has nothing to copy or read, so its choices are always off.
 
-    An email's row (``email``) holds its text and becomes email.msg; it has no description of its own. Each part email
+    An email's row (``email``) holds its text and becomes its .msg file (``msg_name``); it has no description of its own. Each part email
     layer 0 finds in it (``part``: an attachment, a link or a picture) is a row of its own, ``of`` that email, kept only
     while ``keep`` is ticked (mods log round 1, M0024)."""
 
@@ -234,6 +234,29 @@ def copy_name(day: str, name: str, taken: set[str]) -> str:
     candidate, n = base + ext, 2
     while candidate.lower() in {t.lower() for t in taken}:
         candidate = f"{base[: 100 - len(ext) - 4]} ({n}){ext}"
+        n += 1
+    return candidate
+
+
+def msg_name(position: int) -> str:
+    """The file a capture's email is saved as, by its place among the capture's emails: email.msg, then email 2.msg and
+    so on (release 5.26.1: before it, every email went to email.msg, which Outlook overwrites, so only the last was kept)."""
+    return "email.msg" if position == 0 else f"email {position + 1}.msg"
+
+
+def attachment_name(name: str, taken: set[str]) -> str:
+    """An email attachment's file name in its capture's attachments folder: cleaned of characters Windows forbids, and
+    unique within the capture in any case, so a second email's image001.png is image001 (2).png (release 5.26.1).
+    The attachment's document takes this name, so its file is always found by it."""
+    clean = _FORBIDDEN.sub("", name).rstrip(". ") or "attachment"
+    stem, dot, ext = clean.rpartition(".")
+    if not dot:
+        stem, ext = ext, ""
+    ext = f".{ext}" if ext else ""
+    lowered = {t.lower() for t in taken}
+    candidate, n = stem + ext, 2
+    while candidate.lower() in lowered:
+        candidate = f"{stem} ({n}){ext}"
         n += 1
     return candidate
 
@@ -405,16 +428,20 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
                 email_layer_0=" ".join(email_layer0_line(e, draft.files) for e in emails) or None,
                 item="notes" if draft.meeting else None, meeting=meeting_made,
             )
+            attachment_names: set[str] = set()
             for row in draft.files:
                 if not row.described:
-                    continue  # an email's own row is its text and email.msg; an unticked part is left out
+                    continue  # an email's own row is its text and its .msg file; an unticked part is left out
                 desc = row.description.strip() or default_description(row, holder_title)
                 row.description = desc
                 if row.part and row.part.attachment:
-                    # An email's attachment or picture (email layer 0): saved in the capture's attachments folder.
+                    # An email's attachment or picture (email layer 0): saved in the capture's attachments folder, under a
+                    # name no other attachment of the capture has (release 5.26.1).
                     a = row.part.attachment
-                    doc = captures.add_document(conn, name=a.name, description=desc, capture=capture_id)
-                    captures.add_attachment(conn, capture_id, a.name)
+                    name = attachment_name(a.name, attachment_names)
+                    attachment_names.add(name)
+                    doc = captures.add_document(conn, name=name, description=desc, capture=capture_id)
+                    captures.add_attachment(conn, capture_id, name)
                     captures.link_document(conn, capture_id, doc, save_a_copy=row.save_a_copy, extract=row.extract)
                     documents.append((doc, row, a))
                     continue
@@ -609,23 +636,27 @@ def _write_files(
         captures.write_capture_md(fs, data_root, model, capture_id, content)
     except OSError as e:
         result.problems.append(f"capture.md couldn't be written ({type(e).__name__}).")
-    for email in emails:
+    # Outlook's SaveAs and SaveAsFile replace a file of the same name without asking, so each email and attachment has a
+    # name of its own (release 5.26.1).
+    for position, email in enumerate(emails):
         if email.save_msg:
+            name = msg_name(position)
             try:
-                email.save_msg(fs.checked_path(folder / "email.msg"))
+                email.save_msg(fs.checked_path(folder / name))
             except Exception as e:  # noqa: BLE001 - Outlook can fail in many ways; the capture stays saved
-                result.problems.append(f"The email couldn't be saved as email.msg ({type(e).__name__}).")
-                log.warning("capture %s: email.msg not saved: %s", capture_id, type(e).__name__)
+                result.problems.append(f"The email couldn't be saved as {name} ({type(e).__name__}).")
+                log.warning("capture %s: %s not saved: %s", capture_id, name, type(e).__name__)
     sources: dict[str, Path] = {}
     for doc, row, attachment in documents:
         if attachment:
-            target = fs.checked_path(folder / "attachments" / attachment.name)
+            name = model.documents[doc].name  # attachment_name made it unique within the capture
+            target = fs.checked_path(folder / "attachments" / name)
             try:
                 fs.makedirs(target.parent)
                 attachment.save(target)
                 sources[doc] = target
             except Exception as e:  # noqa: BLE001
-                result.problems.append(f"The attachment {attachment.name} couldn't be saved ({type(e).__name__}).")
+                result.problems.append(f"The attachment {name} couldn't be saved ({type(e).__name__}).")
                 continue
         elif row.path and not is_link(row.path):
             sources[doc] = Path(row.path)

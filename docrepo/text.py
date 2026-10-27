@@ -31,9 +31,16 @@ class Sentence:
     end: int
 
 
+def typed_path(text: str) -> str:
+    """A path or link as typed or pasted: File Explorer's Copy as path puts quotes round it, so they're taken off."""
+    text = text.strip()
+    return text[1:-1].strip() if len(text) > 1 and text[0] == text[-1] == '"' else text
+
+
 def is_path_line(line: str) -> bool:
-    """True for a line that is a file path, such as ``C:\\Docs\\a.pdf`` or ``\\\\server\\share\\a.pdf``."""
-    return bool(_PATH_LINE.match(line.strip()))
+    """True for a line that is a file path, such as ``C:\\Docs\\a.pdf`` or ``\\\\server\\share\\a.pdf``, with or without
+    the quotes Copy as path adds (release 5.26.1)."""
+    return bool(_PATH_LINE.match(typed_path(line)))
 
 
 def is_file_line(line: str) -> bool:

@@ -25,6 +25,7 @@ from PySide6.QtGui import QCursor, QGuiApplication, QKeySequence, QShortcut
 from PySide6.QtWidgets import QCheckBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QToolButton, QVBoxLayout, QWidget
 
 from docrepo.links import is_link
+from docrepo.text import typed_path
 from docrepo.ui import tokens
 from docrepo.ui.capture_window import ContentEdit, FileEntry, _accept_copy, note_drag, read_drop
 from docrepo.ui.icons import icon, icon_size
@@ -61,12 +62,6 @@ def what_was_added(capture: CaptureWindow) -> str:
 def describable(capture: CaptureWindow) -> list[FileEntry]:
     """The rows that take a description: files, links, and an email's kept attachments, links and pictures."""
     return [e for e in capture.files if e.desc is not None and (e.row.of is None or e.row.keep)]
-
-
-def typed_path(text: str) -> str:
-    """A path or link as typed or pasted: File Explorer's Copy as path puts quotes round it."""
-    text = text.strip()
-    return text[1:-1].strip() if len(text) > 1 and text[0] == text[-1] == '"' else text
 
 
 def two_lines(text: str, metrics, width: int) -> str:

@@ -165,6 +165,47 @@ def test_a_pasted_path_line_adds_the_file(window, tmp_path):
     assert window.files == []
 
 
+def test_a_path_from_copy_as_path_adds_the_file(window, tmp_path):
+    """Release 5.26.1: File Explorer's Copy as path puts quotes round the path, and the line was left as text."""
+    folder = tmp_path / "Parent 1" / "Parent 2"
+    folder.mkdir(parents=True)
+    (folder / "Downloads.xls").write_bytes(b"xls")
+    quoted = f'"{folder / "Downloads.xls"}"'
+    window.content.setPlainText(f"The download log.\n{quoted}")
+    window._sync_paths()
+    assert [(e.row.name, e.row.path, e.line) for e in window.files] == [("Downloads.xls", str(folder / "Downloads.xls"), quoted)]
+    window.content.setPlainText("The download log.")
+    window._sync_paths()
+    assert window.files == []
+
+
+def test_a_path_with_no_break_spaces_finds_the_file(window, tmp_path):
+    """A path copied from an email or a chat can have no-break spaces where the folder names have spaces."""
+    folder = tmp_path / "Parent 1"
+    folder.mkdir()
+    (folder / "Pump spec.txt").write_text("Rev B", encoding="utf-8")
+    window.content.setPlainText(str(folder / "Pump spec.txt").replace(" ", " "))
+    window._sync_paths()
+    assert [e.row.path for e in window.files] == [str(folder / "Pump spec.txt")]
+
+
+def test_a_path_that_isnt_a_file_says_so_once_the_cursor_leaves_it(window, tmp_path):
+    """Release 5.26.1: a path line DocRepo couldn't find was left as text without a word."""
+    missing = tmp_path / "Parent 1" / "Downloads.xls"
+    window.content.setPlainText(f"The download log.\n{missing}")
+    cursor = window.content.textCursor()
+    cursor.movePosition(cursor.MoveOperation.End)
+    window.content.setTextCursor(cursor)  # still on the path line, as while typing it
+    window._sync_paths()
+    assert window.files == [] and "Downloads.xls" not in window.error.text()
+    cursor.movePosition(cursor.MoveOperation.Start)
+    window.content.setTextCursor(cursor)  # the cursor leaves the line
+    assert window.error.text().startswith("Downloads.xls isn't a file DocRepo can find, so it's kept as text and not attached.")
+    window.error.setText("")
+    window._sync_paths()
+    assert window.error.text() == ""  # said once
+
+
 def test_a_pasted_path_on_a_mapped_drive_stays_put(window, tmp_path, monkeypatch):
     from docrepo.ui import capture_window
 
@@ -379,6 +420,21 @@ def test_an_email_with_refused_fields_is_added_and_says_so(window, monkeypatch):
     window.add_outlook()
     assert [e.row.name for e in window.files] == ["Revised guard delivery"]
     assert window.error.text().startswith("Outlook didn't let DocRepo read the email's text and sender, so they are left out;")
+
+
+def test_each_email_row_names_its_own_msg_file(window, monkeypatch):
+    """Release 5.26.1: the second email is saved as email 2.msg, and moves up to email.msg when the first is removed."""
+    from docrepo import outlook
+    from docrepo.save import EmailItem
+
+    emails = [EmailItem("Seal kit quote", "Tom Becker", "2026-10-14 09:10", "Me", "Quote."),
+              EmailItem("RE: Seal kit quote", "Priya Shah", "2026-10-15 11:42", "Me", "Agreed.")]
+    monkeypatch.setattr(outlook, "selected_emails", lambda: emails)
+    window.add_outlook()
+    assert [e.note.text() for e in window.files] == ["Saved as email.msg in the capture's folder.",
+                                                      "Saved as email 2.msg in the capture's folder."]
+    window._remove_file(window.files[0])
+    assert [e.note.text() for e in window.files] == ["Saved as email.msg in the capture's folder."]
 
 
 def test_drags_are_noted_for_the_troubleshooting_report(window, monkeypatch):

@@ -39,6 +39,7 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.24 | The owner's comments on 5.23: Find and Fold subtasks on the Priorities board, Group by on the task tree, and Collapse a level and Expand a level on every view whose rows nest | Built 2026-10-26; hand-tested by the owner and on GitHub 2026-10-26. Next: testing on the corporate computer |
 | 5.25 | The notes page: each task's notes as one page, edited in place on its task page, with captures adding their blocks (the notes page plan's decisions 95 to 120), schema version 10 | Built 2026-10-27, without a mock, after the Qt sample; hand-tested by the owner and on GitHub 2026-10-27. Next: testing on the corporate computer |
 | 5.26 | Checklists on the notes page and the Checklist summary (the notes page plan's decisions 85 to 91 as redone, and 121 to 123), and the format bar on the notes | Built 2026-10-27; hand-tested by the owner and on GitHub 2026-10-27. Next: testing on the corporate computer |
+| 5.26.1 | Fixes: each email in a capture its own .msg file and attachments with unique names (two emails had both gone to email.msg, losing the first), and a file path with Copy as path's quotes, or one DocRepo can't find, in the content text | Built 2026-10-27; on GitHub 2026-10-27, before the owner's hand test. Next: the hand test here, then testing on the corporate computer with `release-5-26-1-test.md` |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
 ## Decisions
@@ -473,6 +474,23 @@ The visual overhaul's O10, designed and mocked in the parent workspace (`docs/ui
   - **No button group:** the pane marks the open view itself, so that no row is marked while searching, and a click on the open view keeps it marked.
   - **The totals that left the sidebar** are beside their views' titles ("14 open", "7 active"), as `sidebar.md` said they'd be.
   - **The tooltip** shows only when a name is cut short. The headings' tooltips say Fold or Unfold.
+
+## Release 5.26.1: each email its own .msg file, and quoted paths (2026-10-27)
+
+Two fixes. The first is for a bug found while planning the knowledge base (`docs/knowledge-base/plan.md` in the parent workspace, its decision 12). Two emails added to one capture were both saved as `email.msg`, and same-named attachments across them (such as each email's `image001.png`) to one file in `attachments\`. Outlook's SaveAs and SaveAsFile replace a file without asking, so only the last of each was kept, against the rule that saved emails are never lost. Both emails' text was always in capture.md; what was lost was the first `.msg` file and any overwritten attachment, and an overwritten attachment's document pointed at the other email's file. Captures saved before this release can't get them back from DocRepo; the emails themselves are still in Outlook. No schema change and no new package.
+
+- `docrepo/save.py`: `msg_name` names each email's file by its place among the capture's emails, `email.msg`, then `email 2.msg` and so on. `attachment_name` cleans an attachment's name of characters Windows forbids and makes it unique within the capture, in any case (`image001 (2).png`); the attachment's document takes that name, so `edits.source_of`, Task.md's link and Save a copy find its file by it, as before.
+- `docrepo/ui/capture_window.py`: an email's row says which file it will be ("Saved as email 2.msg in the capture's folder."), and the rows after a removed email move up.
+- `tests/test_save.py`: two emails with same-named attachments keep two `.msg` files and two attachments, each document with its own file and extracted text, and a saved copy of the second; the names' rules. `tests/test_capture_window.py`: each email row names its file, and moves up when the first is removed.
+
+The second is for a file path the owner couldn't add on the corporate computer, a mapped drive's path with spaces in its folder names (2026-10-27). A path line in the content text was matched only without quotes, but File Explorer's Copy as path puts quotes round every path it copies; and a path line that didn't lead to a file (a typo, or no-break spaces from a path copied out of an email or a chat) stayed as text without a word, so it looked as if DocRepo refused it.
+
+- `docrepo/text.py`: `typed_path`, moved from `docrepo/ui/pin_window.py` (whose path box already took quotes off), and `is_path_line` reads through it, so a quoted path line is left out of titles, descriptions and Parse and populate like any other.
+- `docrepo/ui/capture_window.py`: `_sync_paths` takes the quotes off; `existing_file` also tries the path with its no-break spaces as spaces; a path line that isn't a file is noted once and said in the window's message line (`_tell_missing_paths`) once the cursor leaves it, so a path being typed isn't reported half-way.
+- `tests/test_capture_window.py`: a quoted path with spaces adds its file and its row goes with its line; no-break spaces find the file; a missing path is said once, after the cursor leaves. `tests/test_text.py`: quoted path lines.
+- 867 pass in all, 1 skipped. The email fix can only be tried by hand where Outlook runs, so here it rests on the tests' fake Outlook; `release-5-26-1-test.md` in the parent workspace tries it with two drafts.
+
+Asked for at the same time and left for its own release: headings in the capture window. A capture's text has no heading form, and its lines are escaped on the notes page so they never become the page's headings, which mark the sections later captures go under; how a capture's heading should behave there needs deciding first.
 
 ## Release 5.26: checklists and the Checklist summary (2026-10-27)
 

@@ -3,8 +3,8 @@
 DocRepo reads the emails selected in Outlook (the ones being dragged, or Add
 selected Outlook email) and .msg files dropped from File Explorer. It reads
 their subject, sender, recipients, time, plain-text and HTML bodies and attachments, and,
-when the capture is saved, writes the email as email.msg and its attachments
-into the capture's folder. It never sends, moves or changes an email.
+when the capture is saved, writes each email as its own .msg file (email.msg,
+then email 2.msg and so on) and its attachments into the capture's folder. It never sends, moves or changes an email.
 
 Each field is read on its own, so a field Outlook refuses (its security guard
 can refuse the sender, the recipients or the body) leaves only that field out.
