@@ -34,6 +34,7 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.20 | The pinned window's task picker, capture types, path or link box, descriptions and Outlook button, and Outlook's security guard in words, from the mods log, round 3 (M0062 to M0064) | Built 2026-10-25, with decisions 61 to 63; on GitHub 2026-10-25, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
 | 5.20.1 | pypdf 6.21.2, for the second Frogbot scan's findings | Built 2026-10-25; on GitHub 2026-10-25. Next: the corporate computer, with `release-5-20-1-frogbot-fix.md` |
 | 5.21 | The visual overhaul, O9: the task page as the task's story (decisions 64 to 69) | Built 2026-10-25 and hand-tested by the owner; on GitHub 2026-10-26. Next: testing on the corporate computer |
+| 5.22 | The visual overhaul, O10: the sidebar redrawn, with an icon per view, small folding headings and counts only where they ask for something (decisions 79 to 84) | Built 2026-10-26, from the approved mock; on GitHub 2026-10-26, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
 ## Decisions
@@ -447,6 +448,27 @@ The visual overhaul's O9, designed, mocked and decided in the parent workspace (
   - Titles that are links (the path, subtasks, agenda items, raw text log entries) read as text; Qt's rich text can't underline them on hover, so the pointer and the click say they're links.
   - The tab strip's tabs are a table of their own: the selected tab's underline made a full-width table a pixel too wide, with a scroll bar.
 - The page's scope names are plainer: With parent tasks and Whole family, for With ancestors and Family.
+
+## Release 5.22: the sidebar (2026-10-26)
+
+The visual overhaul's O10, designed and mocked in the parent workspace (`docs/ui-design/sidebar.md`, decisions 79 to 84, all as mocked; for 83, Discarded and Settings both at the foot). The owner found release 5.16's sidebar, drawn with the task tree's control, didn't follow the playbook. It's built ahead of round 2's stage 8, whose Activity and Priorities views go under Plan in it.
+
+- `docrepo/ui/nav_pane.py` (new): `NavPane`, the new look's sidebar, in place of the `RowTree`. `ViewRow` and `Heading` are buttons painted from the tokens (the icon, the name elided with a tooltip, the count, the backplate and pill, and the focus ring); `show_state(counts, current, folded)` sets the open view, the counts and the folded groups, keeping the open view in sight under a folded heading. It says `picked(view)` and `folded(section, closed)`. Tab has one stop in it (the open view's row, or the row last moved to), and its event filter moves between rows with the arrows, Home and End, opens or folds with Enter, and folds with Left and Right. `ICONS`, `FOOT` (discarded, settings) and `WIDTH` (248).
+- `docrepo/views.py`: `ASKS`, the views whose counts the new look's sidebar shows (today, unfiled and each list).
+- `docrepo/ui/browse_window.py`: the `NavPane` in the new look, the `RowTree` kept for the Classic look; `_render_nav_new` calls `show_state`, and `_nav_folded` keeps the folded groups in docs.db (`browse_nav_folded`, as before); `_nav_clicked` is gone. The sidebar starts at `WIDTH` once the window has its size, rather than a share of it. `_set_head` takes a `total`, shown after the title in the new look (Task tree, People, Labels and Documents), and sets the title's text format, so a search for text such as `<b>` shows as typed.
+- `docrepo/ui/tokens.py`: `QWidget#navPane`, `#navBody` and `QFrame#navFoot` (its hairline), for `QTreeWidget#nav`.
+- `docrepo/ui/icons/`: `unfiled`, `tasks`, `due`, `reminders`, `waiting`, `urgent`, `unplanned`, `timeline`, `capacity`, `labels` and `discarded`, from the mock's drawings; the README lists each view's icon.
+- `tests/test_nav_pane.py` (new): the rows, their order and the foot; counts only for `ASKS`, and the totals in the headers; a click opening and marking a view, and none marked while searching; folding kept in docs.db and the open view kept in sight; the keys; the ellipsis; the Classic look's tree. `test_browse_window.py` and `test_look.py` follow the new pane. (792 pass in all, 1 skipped.) The new look was drawn on `dev_data/` with Windows' own fonts and checked by eye: no name cut short at 248 px, a folded group with the open list in sight, and the focus ring.
+
+## Decisions (release 5.22)
+
+- Decisions 79 to 84, as mocked: an icon per view and small semibold headings with a chevron, drawn by a widget of their own; a folded group keeps the open view in sight; counts only for Today, Unfiled and the lists; the inset backplate with a short accent pill and a semibold name; Discarded and Settings pinned at the foot; the order as it was (Activity and Priorities join Plan in 5.23).
+- **Changed on the way:**
+  - **Width:** 248 px to start with, not 228. The mock's text was 13 px; DocRepo's is 14 px, and "Overdue and next 7 days" in semibold with its count needs 227 px of row, plus room for the scroll bar on a short window.
+  - **The rows are painted, not styled:** a style sheet can't put the count at the right or draw the short pill, so `nav_pane.py` paints each row from the tokens, and the style sheet only colours the pane and the foot's hairline.
+  - **No button group:** the pane marks the open view itself, so that no row is marked while searching, and a click on the open view keeps it marked.
+  - **The totals that left the sidebar** are beside their views' titles ("14 open", "7 active"), as `sidebar.md` said they'd be.
+  - **The tooltip** shows only when a name is cut short. The headings' tooltips say Fold or Unfold.
 
 ## The first Frogbot findings (2026-10-20)
 

@@ -4,3 +4,6 @@ with the colour for its state. The three files without currentColor (tick-white,
 used by the style sheet as they are. The official Fluent set (MIT) can replace them later: give its files these names.
 The task page (release 5.21) draws state-ns, state-ip, state-pk and state-cl beside its subtasks (Not started, In progress,
 Parked and Closed; state-cl's tick stays white), and person for the owner in place of initials.
+The sidebar (release 5.22) gives each view an icon: sun (Today), unfiled, tasks (the task tree), due, reminders, waiting,
+person (Assigned to me), urgent, unplanned, agenda, timeline, capacity, people, labels, file (Documents), discarded and
+settings, with chevron-down and chevron-right on the groups' headings (docrepo/ui/nav_pane.py, ICONS).

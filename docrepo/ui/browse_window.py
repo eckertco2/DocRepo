@@ -69,6 +69,7 @@ from docrepo.ui.settings_view import SettingsView
 from docrepo.ui import tokens
 from docrepo.ui.icons import icon
 from docrepo.ui.look import LOOK, Help, KeyTips, set_hints, tip, with_key
+from docrepo.ui.nav_pane import WIDTH as NAV_WIDTH, NavPane
 from docrepo.ui.page_view import PageView
 from docrepo.ui.palette import Command, CommandPalette
 from docrepo.ui.style import FORMAT_BAR_STYLE, page_css, style_sheet
@@ -271,18 +272,18 @@ class BrowseWindow(QWidget):
         outer.addWidget(bar)
 
         self.split = QSplitter(Qt.Orientation.Horizontal)
-        self.nav = RowTree()
-        self.nav.setObjectName("nav")
-        self.nav.set_columns(["View", ""], [0, 34])
-        self.nav.setHeaderHidden(True)
-        self.nav.setRootIsDecorated(False)
-        self.nav.setIndentation(0)
-        self.nav.picked.connect(lambda key: self.set_view(key[1]) if key[0] == "view" else None)
-        self.nav.itemClicked.connect(lambda item, _col: self._nav_clicked(item))
-        if not LOOK.classic:
-            self.nav.cell_pad = 10
+        if LOOK.classic:
+            self.nav = RowTree()
+            self.nav.setObjectName("nav")
+            self.nav.set_columns(["View", ""], [0, 34])
+            self.nav.setHeaderHidden(True)
             self.nav.setRootIsDecorated(False)
-            self.nav.set_columns(["View", ""], [0, 40])
+            self.nav.setIndentation(0)
+            self.nav.picked.connect(lambda key: self.set_view(key[1]) if key[0] == "view" else None)
+        else:  # the visual overhaul's O10 (release 5.22): a sidebar of its own, not the tree
+            self.nav = NavPane(VIEWS)
+            self.nav.picked.connect(self.set_view)
+            self.nav.folded.connect(self._nav_folded)
         self.split.addWidget(self.nav)
 
         self.middle = QStackedWidget()
@@ -355,7 +356,7 @@ class BrowseWindow(QWidget):
         dl.addWidget(self.detail_stack, 1)
         self.detail = detail
         self.split.addWidget(detail)
-        self.split.setSizes([190, 430, 560])
+        self.split.setSizes([190 if LOOK.classic else NAV_WIDTH, 430, 560])
         self.split.setStretchFactor(1, 1)
         self.split.setStretchFactor(2, 1)
         outer.addWidget(self.split, 1)
@@ -448,6 +449,9 @@ class BrowseWindow(QWidget):
             screen = QGuiApplication.primaryScreen().availableGeometry()
             self.resize(int(screen.width() * 0.82), int(screen.height() * 0.85))
             self.move(screen.x() + (screen.width() - self.width()) // 2, screen.y() + (screen.height() - self.height()) // 3)
+            if not LOOK.classic:  # the sidebar starts at its own width, not a share of the window's (O10)
+                rest = self.width() - NAV_WIDTH - 2 * self.split.handleWidth()
+                self.split.setSizes([NAV_WIDTH, rest * 43 // 99, rest - rest * 43 // 99])
             self._placed = True
         if self.dirty:
             self.refresh(render=False)
@@ -561,39 +565,17 @@ class BrowseWindow(QWidget):
         self.nav.end(("view", self.view) if self.view != "search" else None)
 
     def _render_nav_new(self) -> None:
-        """The new look's sidebar (decision 10): today's order and groups, each group folding and staying as you left it (in
-        docs.db), and Settings at the bottom."""
+        """The new look's sidebar (O10): an icon per view, counts only where they ask for something, and the groups
+        folded as the owner left them (in docs.db)."""
         counts = view_counts(self.model(), self.today(), self.ctx.settings.me)
         folded = set(filter(None, (db.get_state(self.ctx.conn, NAV_FOLDED_KEY) or "").split(",")))
-        self.nav.begin()
-        group = None
-        for v in VIEWS:
-            if v.id == "settings":
-                continue
-            if v.section and (group is None or group.data(0, KEY_ROLE) != ("section", v.section)):
-                closed = v.section in folded
-                arrow = "›" if closed else "⌄"
-                group = self.nav.add_row(None, ("section", v.section),
-                                         [f'<span class="sub">{esc(v.section)}</span>', f'<p align="right" class="sub">{arrow}</p>'], selectable=False)
-                group.setToolTip(0, f"Fold or unfold {v.section}")
-            count = counts.get(v.id)
-            parent = group if v.section else None
-            self.nav.add_row(parent, ("view", v.id), [esc(v.label), f'<p align="right" class="sub">{count}</p>' if count else ""])
-            if parent is not None:
-                parent.setExpanded(v.section not in folded)
-        self.nav.add_row(None, ("view", "settings"), [esc("Settings"), ""])
-        self.nav.end(("view", self.view) if self.view != "search" else None)
+        self.nav.show_state(counts, self.view if self.view != "search" else None, folded)
 
-    def _nav_clicked(self, item) -> None:
-        """A group's heading in the sidebar folds or unfolds it; the choice is kept in docs.db's app_state."""
-        key = item.data(0, KEY_ROLE)
-        if not key or key[0] != "section":
-            return
-        item.setExpanded(not item.isExpanded())
+    def _nav_folded(self, section: str, closed: bool) -> None:
+        """A group in the sidebar was folded or unfolded; the choice is kept in docs.db's app_state."""
         folded = set(filter(None, (db.get_state(self.ctx.conn, NAV_FOLDED_KEY) or "").split(",")))
-        (folded.discard if item.isExpanded() else folded.add)(key[1])
+        (folded.add if closed else folded.discard)(section)
         db.set_state(self.ctx.conn, NAV_FOLDED_KEY, ",".join(sorted(folded)))
-        item.setData(1, HTML_ROLE, f'<p align="right" class="sub">{"⌄" if item.isExpanded() else "›"}</p>')
 
     # ---- the command palette (the visual overhaul's O7) ----
     def palette_commands(self) -> list[Command]:
@@ -658,8 +640,16 @@ class BrowseWindow(QWidget):
             db.set_state(self.ctx.conn, VIEWS_HIDDEN_KEY, "0" if on else "1")
 
     # ================= the list pane =================
-    def _set_head(self, title: str, note: str = "") -> None:
-        self.pane_title.setText(title)
+    def _set_head(self, title: str, note: str = "", total: str = "") -> None:
+        """The view's title and what it is. ``total`` (such as "18 open") follows the title in the new look, whose sidebar
+        counts only what asks for something (O10)."""
+        if total and not LOOK.classic:
+            self.pane_title.setTextFormat(Qt.TextFormat.RichText)
+            self.pane_title.setText(f'{esc(title)}&nbsp;&nbsp;<span style="color:{tokens.colour("text2")}; font-size:{tokens.CAPTION}pt; '
+                                    f'font-weight:400">{esc(total)}</span>')
+        else:
+            self.pane_title.setTextFormat(Qt.TextFormat.PlainText)
+            self.pane_title.setText(title)
         self.pane_note.setText(note)
         self.pane_note.setVisible(bool(note))
 
@@ -831,8 +821,9 @@ class BrowseWindow(QWidget):
     def _tasks_view(self) -> None:
         f = self.tree_filter
         filtered = bool(f["labels"] or f["people"])
-        self._set_head("Task tree", "Dimmed rows don't match the filter. They're parents of tasks that do, shown for context." if filtered else "")
         m = self.model()
+        self._set_head("Task tree", "Dimmed rows don't match the filter. They're parents of tasks that do, shown for context." if filtered else "",
+                       f"{sum(1 for t in m.tasks.values() if is_open(t))} open")
         self._check("Show parked", f["parked"], lambda on: self._set_filter("parked", on))
         self._check("Show closed", f["closed"], lambda on: self._set_filter("closed", on))
         self._check("Show routine", f["routine"], lambda on: self._set_filter("routine", on), "Recurring tasks, such as meetings, and their subtasks")
@@ -1234,7 +1225,8 @@ class BrowseWindow(QWidget):
 
     def _people_view(self) -> None:
         m = self.model()
-        self._set_head("People", "Stored in docs.db. Tasks store a person's ID, so renaming someone changes nothing else.")
+        self._set_head("People", "Stored in docs.db. Tasks store a person's ID, so renaming someone changes nothing else.",
+                       f"{len(m.active_people())} active")
         self._check("Show retired", self.retired["people"], lambda on: self._set_retired("people", on))
         self._button("Add person", self.add_person)
         # Group and role (mods log round 2, M0033, M0038): the aliases go under the name.
@@ -1251,7 +1243,7 @@ class BrowseWindow(QWidget):
 
     def _labels_view(self) -> None:
         m = self.model()
-        self._set_head("Labels", "Stored in docs.db. Keywords let Parse and populate suggest the label.")
+        self._set_head("Labels", "Stored in docs.db. Keywords let Parse and populate suggest the label.", f"{len(m.active_labels())} active")
         self._check("Show retired", self.retired["labels"], lambda on: self._set_retired("labels", on))
         self._button("Add label", self.add_label)
         self.tree.set_columns(["Label", "Keywords", "Open tasks"], [0, 200, 76])
@@ -1278,7 +1270,8 @@ class BrowseWindow(QWidget):
 
     def _docs_view(self) -> None:
         m = self.model()
-        self._set_head("Documents", "Files DocRepo tracks, under the tasks they belong to. Originals stay where they are; their text is kept in Documents.")
+        self._set_head("Documents", "Files DocRepo tracks, under the tasks they belong to. Originals stay where they are; their text is kept in Documents.",
+                       str(sum(1 for d in m.documents if not m.only_in_discarded(d))))
         self._filter_widget(QLabel("Task"))
         picker = QPushButton((full_path(m, self.doc_task) if self.doc_task in m.tasks else "Any task") + "  ▾")
         picker.clicked.connect(lambda: self._pick_task(picker, self._set_doc_task, ("Any task", "Show every document")))

@@ -300,7 +300,9 @@ QWidget#paneHead { background: $content; border-bottom: 1px solid $stroke; }
 QWidget#actions { background: $content; }
 QLabel#status { background: $base; border-top: 1px solid $stroke; color: $text; padding: 4px 12px; font-size: ${caption}pt; }
 QLabel#status[error="true"] { background: $critical_bg; color: $critical; }
-QTreeWidget#nav { background: $base; border: none; }
+/* the sidebar (stage O10): docrepo/ui/nav_pane.py paints its rows from these same tokens */
+QWidget#navPane, QWidget#navBody { background: $base; }
+QFrame#navFoot { background: $base; border: none; border-top: 1px solid $stroke; }
 QTextBrowser { border: none; background: $content; }
 QWidget#settingsCard { background: $content; border: 1px solid $stroke; border-radius: 6px; }
 """)

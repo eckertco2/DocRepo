@@ -66,6 +66,9 @@ VIEWS: tuple[ViewDef, ...] = (
 )
 VIEW_IDS = {v.id: v for v in VIEWS}
 LIST_IDS = {x.id: x for x in LISTS}
+#: The views whose counts ask for something: what's on Today, the captures waiting to be filed, and each list. The new
+#: look's sidebar counts only these (the visual overhaul's stage O10, decision 81).
+ASKS = frozenset({"today", "unfiled", *LIST_IDS})
 #: Views that show tasks, so opening a task from them stays in them.
 TASK_VIEWS = ("today", "tasks", *LIST_IDS, "agenda", "search")
 

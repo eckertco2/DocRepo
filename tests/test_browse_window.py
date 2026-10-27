@@ -58,8 +58,7 @@ def rows(w) -> list:
 def test_it_opens_on_the_task_tree(browse):
     assert browse.view == "tasks" and browse.sel == ("task", "T000001")
     assert ("task", "T000001") in rows(browse) and ("task", "T000010") in rows(browse)
-    nav = {k[1]: browse.nav.items() for k in browse.nav.keys() if k}
-    assert "unfiled" in nav and "settings" in nav
+    assert "unfiled" in browse.nav.rows and "settings" in browse.nav.rows
     assert "Reactor impeller upgrade" in browse.page.toPlainText()
 
 

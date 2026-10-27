@@ -182,12 +182,10 @@ def test_the_browse_tool_in_the_new_look(ctx):
     assert w.detail.isVisibleTo(w)
     names = [c.label for c in w.palette_commands()]
     assert {"Task: Edit task", "View: Timeline", "View: Capacity", "Keys"} <= set(names)
-    lists = next(i for i in w.nav.items() if i.data(0, 0x100) == ("section", "Lists"))
-    w._nav_clicked(lists)
-    assert not lists.isExpanded() and db.get_state(ctx.conn, NAV_FOLDED_KEY) == "Lists"
+    w.nav.headings["Lists"].click()
+    assert w.nav.rows["due"].isHidden() and db.get_state(ctx.conn, NAV_FOLDED_KEY) == "Lists"
     w.render_nav()
-    again = next(i for i in w.nav.items() if i.data(0, 0x100) == ("section", "Lists"))
-    assert not again.isExpanded()
+    assert w.nav.headings["Lists"].folded and w.nav.rows["due"].isHidden()
     w.hide()
     cap.deleteLater()
     w.deleteLater()
