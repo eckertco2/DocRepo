@@ -61,10 +61,28 @@ class BoardFilter:
     labels: tuple[str, ...] = ()
     due: str = "any"
     routine: bool = False
+    #: Fold subtasks (release 5.24): only parent and top-level tasks show.
+    fold: bool = False
+
+
+def open_subtasks(m: Model, task_id: str) -> list[str]:
+    return [c for c in m.children_of(task_id) if is_open(m.task(c))]
+
+
+def folded(m: Model, t: Task) -> bool:
+    """Whether Fold subtasks takes a task off the board: a subtask with no open subtasks of its own. A task whose only
+    parent is Quick tasks counts as top-level, as it waits there for its real parent."""
+    parents = [p for p in m.parents_of(t.id) if not quick.is_parent(m.task(p))]
+    return bool(parents) and not open_subtasks(m, t.id)
+
+
+def folded_under(m: Model, task_id: str) -> int:
+    """How many of a task's open subtasks Fold subtasks folds into it."""
+    return sum(1 for c in open_subtasks(m, task_id) if folded(m, m.task(c)))
 
 
 def shown(m: Model, t: Task, f: BoardFilter, today: date) -> bool:
-    if not on_board(t, f.routine):
+    if not on_board(t, f.routine) or (f.fold and folded(m, t)):
         return False
     if f.people and not any(p in f.people for p in (*t.leads, *t.assignees)):
         return False

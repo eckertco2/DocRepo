@@ -258,3 +258,33 @@ def test_the_classic_look_has_both(qapp, sample_root):
         w.deleteLater()
     finally:
         configure("new", False)
+
+
+def test_fold_subtasks(conn):
+    """Release 5.24: only parent and top-level tasks; a subtask with no open subtasks of its own folds into its parent."""
+    m = Model(conn)
+    folded = board(conn, priorities.BoardFilter(fold=True))["Not ranked"]
+    assert "T000008" in folded and "T000001" in folded  # Installation has open subtasks; Reactor impeller upgrade is top-level
+    assert "T000012" not in folded and "T000019" not in folded  # Rigging plan and Book the alignment contractor fold away
+    assert "T000016" in folded  # top-level, with no subtasks: it stays
+    assert priorities.folded_under(m, "T000008") == len(priorities.open_subtasks(m, "T000008"))
+
+
+def test_find_and_fold_on_the_board(browse):
+    v = browse.priorities
+    browse.open_find()
+    assert not v.find_bar.isHidden() and v.find_box.hasFocus() or not v.find_bar.isHidden()
+    v.find_box.setText("rigging")  # Rigging plan, and Installation, whose status is waiting on it
+    assert sorted(x for c in v.columns for x in c.ids) == ["T000008", "T000012"] and v.find_count.text() == "2 matches"
+    v.find_box.setText("sling")
+    assert [x for c in v.columns for x in c.ids] == ["T000012"] and v.find_count.text() == "1 match"
+    v.find_box.setText("mike installation")  # every word: Mike Ortiz, and Installation in the path
+    assert set(x for c in v.columns for x in c.ids) <= {"T000008", "T000012", "T000019", "T000015"}
+    v.find_box.setText("nothing like this")
+    assert v.find_count.text() == "Nothing on the board matches"
+    v.close_find()
+    assert v.find_bar.isHidden() and len([x for c in v.columns for x in c.ids]) > 3
+    browse.priorities._set("fold", True)
+    assert "T000012" not in v.cards and "folded" in v.cards["T000008"].findChildren(type(v.title))[-1].text()
+    browse.set_view("tasks")
+    assert v.find_bar.isHidden()

@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -35,7 +36,7 @@ from docrepo.stories import clip
 from docrepo.ui import tokens
 from docrepo.ui.look import Help
 from docrepo.ui.widgets import CheckMenuButton, FlowLayout, label_filter, people_filter
-from docrepo.views import due_cell, path_text
+from docrepo.views import due_cell, find_text, path_text
 
 #: A dragged card carries its task's ID.
 MIME = "application/x-docrepo-task"
@@ -242,6 +243,7 @@ class PrioritiesView(QWidget):
         self.labels: list[str] = []
         self.due = "any"
         self.routine = False
+        self.fold = False
         self.dragging: str | None = None
         self.columns: list[priorities.Column] = []
         self.cards: dict[str, Card] = {}
@@ -257,6 +259,22 @@ class PrioritiesView(QWidget):
         self.controls = QWidget()
         self.controls_layout = FlowLayout(self.controls, spacing=8)
         lay.addWidget(self.controls)
+        # Find on the board (release 5.24): Ctrl+F, as Find in this view elsewhere; it narrows the cards as you type, and
+        # Esc clears it.
+        self.find_bar = QWidget()
+        fb = QHBoxLayout(self.find_bar)
+        fb.setContentsMargins(0, 0, 0, 0)
+        self.find_box = QLineEdit()
+        self.find_box.setPlaceholderText("Find on the board")
+        self.find_box.setAccessibleName("Find in this view")
+        self.find_box.setToolTip("Find in this view: a card stays when its task holds every word. Esc clears it. (Ctrl+F)")
+        self.find_box.textChanged.connect(lambda _: self.model is not None and self.render(self.model, self.today, self.sel, self.me))
+        self.find_box.installEventFilter(self)
+        fb.addWidget(self.find_box, 1)
+        self.find_count = QLabel(objectName="paneNote")
+        fb.addWidget(self.find_count)
+        self.find_bar.hide()
+        lay.addWidget(self.find_bar)
         self.strip = QFrame(objectName="fileRow")
         sl = QVBoxLayout(self.strip)
         sl.setContentsMargins(12, 8, 12, 8)
@@ -303,15 +321,23 @@ class PrioritiesView(QWidget):
     # ---- drawing ----
     def render(self, model: Model, today: date, sel: str | None, me: str | None = None) -> None:
         """Draw the board again from the model, keeping its filters, and the focus on the selected card if it had it."""
-        had_focus = self.isAncestorOf(QApplication.focusWidget()) if QApplication.focusWidget() else False
+        had_focus = isinstance(QApplication.focusWidget(), Card)  # not while typing in Find
         self.model, self.today, self.me = model, today, me
         tops = [t.id for t in model.top_level() if not t.discarded]
         self._colours = {}
         for t in model.tasks.values():
             top = model.chains_of(t.id)[0][0]
             self._colours[t.id] = tokens.group_colour(tops.index(top)) if top in tops else tokens.group_colour(-1)
-        f = priorities.BoardFilter(tuple(self.people), tuple(self.labels), self.due, self.routine)
+        f = priorities.BoardFilter(tuple(self.people), tuple(self.labels), self.due, self.routine, self.fold)
         self.columns = priorities.columns(model, today, f)
+        words = self.find_box.text().lower().split() if not self.find_bar.isHidden() else []
+        if words:  # every word in the task's ID, title, description, status, labels, people or path
+            for col in self.columns:
+                col.ids = [x for x in col.ids if all(w in find_text(model, x) + " " + path_text(model, x).lower() for w in words)]
+            hits = sum(len(c.ids) for c in self.columns)
+            self.find_count.setText(f"{hits} match{'es' if hits != 1 else ''}" if hits else "Nothing on the board matches")
+        else:
+            self.find_count.clear()
         shown = {x for c in self.columns for x in c.ids}
         self.sel = sel if sel in shown else None
         self._controls()
@@ -344,9 +370,17 @@ class PrioritiesView(QWidget):
         who = ", ".join("Me" if p == self.me else m.person_name(p).split()[0] for p in dict.fromkeys((*t.leads, *t.assignees)))
         if who:
             bits.append(f'<span style="color:{tokens.colour("text2")}">{esc(who)}</span>')
-        kids = sum(1 for k in m.children_of(t.id) if m.task(k).state in ("Not started", "In progress") and not m.task(k).discarded)
+        kids = len(priorities.open_subtasks(m, t.id))
+        shut = priorities.folded_under(m, t.id) if self.fold else 0
         if kids:
-            bits.append(f'<span style="color:{tokens.colour("text2")}">{kids} open subtask{"" if kids == 1 else "s"}</span>')
+            text = f"{shut} subtask{'' if shut == 1 else 's'} folded" if shut == kids else \
+                f"{kids} open subtask{'' if kids == 1 else 's'}" + (f", {shut} folded" if shut else "")
+            if shut:  # what the folded ones are ranked, so a Critical subtask isn't lost from sight
+                ranked = [priorities.name(m.task(c).priority) for c in priorities.open_subtasks(m, t.id)
+                          if m.task(c).priority and priorities.folded(m, m.task(c))]
+                counts = [f"{ranked.count(n)} {n}" for _, n, _ in priorities.BUCKETS if n in ranked]
+                text += f" ({', '.join(counts)})" if counts else ""
+            bits.append(f'<span style="color:{tokens.colour("text2")}">{text}</span>')
         card = Card(self, t, self._colours.get(t.id, tokens.group_colour(-1)), " &nbsp;".join(bits), path_text(m, t.id), t.id == self.sel)
         self.cards[task_id] = card
         return card
@@ -380,6 +414,11 @@ class PrioritiesView(QWidget):
         routine.setChecked(self.routine)
         routine.toggled.connect(lambda on: self._set("routine", on))
         lay.addWidget(routine)
+        fold = QCheckBox("Fold subtasks")
+        fold.setToolTip("Only parent and top-level tasks: a subtask with no open subtasks of its own folds into its parent's card")
+        fold.setChecked(self.fold)
+        fold.toggled.connect(lambda on: self._set("fold", on))
+        lay.addWidget(fold)
 
     def _set(self, key: str, value) -> None:
         setattr(self, key, value)
@@ -434,7 +473,30 @@ class PrioritiesView(QWidget):
     def _column_of(self, task_id: str) -> int:
         return next((i for i, c in enumerate(self.columns) if task_id in c.ids), -1)
 
+    # ---- Find on the board ----
+    def open_find(self) -> None:
+        """Ctrl+F: the box above the board, which narrows it as you type."""
+        self.find_bar.show()
+        self.find_box.setFocus()
+        self.find_box.selectAll()
+
+    def close_find(self, render: bool = True) -> None:
+        """Esc in the box, or another view: clear it, and the board shows every card again."""
+        had = bool(self.find_box.text())
+        self.find_box.blockSignals(True)
+        self.find_box.clear()
+        self.find_box.blockSignals(False)
+        self.find_bar.hide()
+        self.find_count.clear()
+        if render and had and self.model is not None:
+            self.render(self.model, self.today, self.sel, self.me)
+
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802 - the keys, on a card
+        if watched is self.find_box and event.type() == QEvent.Type.KeyPress and event.key() == Qt.Key.Key_Escape:  # type: ignore[attr-defined]
+            self.close_find()
+            card = self.cards.get(self.sel or "")
+            (card or self).setFocus()
+            return True
         if event.type() == QEvent.Type.FocusIn and isinstance(watched, Card):
             self.pick(watched.task_id)
         if event.type() == QEvent.Type.KeyPress and isinstance(watched, Card):

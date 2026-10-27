@@ -429,7 +429,10 @@ def test_the_today_list(browse, monkeypatch):
     monkeypatch.setattr(browse, "open_capture", lambda **options: opened.append(options))
     browse.close_today_item(item.id, "Done")
     assert browse.today_ask == "T000012" and "is done for today" in " ".join(w.text() for w in browse.filters.findChildren(QLabel))
-    assert "Done today" in browse.tree.topLevelItem(browse.tree.topLevelItemCount() - 2).data(0, Qt.ItemDataRole.UserRole + 1)
+    # Done today holds the item marked done (release 5.24: each heading holds its items, so it folds).
+    done = next(browse.tree.topLevelItem(i) for i in range(browse.tree.topLevelItemCount())
+                if "Done today" in browse.tree.topLevelItem(i).data(0, Qt.ItemDataRole.UserRole + 1))
+    assert done.childCount() == 1 and done.child(0).data(0, Qt.ItemDataRole.UserRole) == ("task", "T000012")
     browse.answer_today("update")
     assert opened == [{"task": "T000012", "mode": "update", "content": "Done today: "}] and browse.today_ask is None
     browse.set_view("agenda")

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 
 from docrepo import capacity, priorities
@@ -201,10 +201,12 @@ class TreeFilter:
     pin: str | None = None
     #: Tasks in any of these priorities, "" being Not ranked (release 5.23).
     priorities: tuple[str, ...] = ()
+    #: Only these tasks match (release 5.24): a section of the grouped task tree.
+    only: frozenset[str] | None = None
 
     @property
     def filtered(self) -> bool:
-        return bool(self.labels or self.people or self.priorities)
+        return bool(self.labels or self.people or self.priorities) or self.only is not None
 
 
 def task_tree(m: Model, f: TreeFilter) -> list[Node]:
@@ -221,7 +223,8 @@ def task_tree(m: Model, f: TreeFilter) -> list[Node]:
     def pass_filter(t: Task) -> bool:
         return ((not f.labels or any(name in f.labels for name, _ in m.labels_of(t.id)))
                 and (not f.people or any(p in f.people for p in (*t.leads, *t.assignees)))
-                and (not f.priorities or (t.priority or "") in f.priorities))
+                and (not f.priorities or (t.priority or "") in f.priorities)
+                and (f.only is None or t.id in f.only))
 
     pinned = {f.pin, *m.ancestors_of(f.pin)} if f.pin and f.pin in m.tasks else set()
     seen: dict[str, bool] = {}
@@ -250,6 +253,64 @@ def task_tree(m: Model, f: TreeFilter) -> list[Node]:
         return out
 
     return build([t.id for t in m.top_level()], 0, 0)
+
+
+# ---- the task tree, grouped (release 5.24) ----
+#: The task tree's Group by, besides each parent label (``"pl:"`` and its name), which groups by its sublabels.
+TREE_GROUPS = (("", "No grouping"), ("group", "Group"), ("person", "Person"), ("label", "Label"))
+
+
+@dataclass
+class TreeSection:
+    """One section of the grouped task tree: a group, person or label, how many of its tasks match, and their tree."""
+
+    name: str
+    count: int
+    nodes: list[Node]
+    sub: str = ""
+
+
+def tree_sections(m: Model, f: TreeFilter, how: str) -> list[TreeSection]:
+    """The task tree grouped by people's groups, people, labels or a parent label's sublabels (``"pl:"`` and its name):
+    a section for each, holding its tasks as the filters allow, in tree shape, with their parents dimmed for context.
+    With the People or Labels filter on, only the ticked people, their groups or the ticked labels get a section. A task
+    in two groups is in both; one in none is in the last section ("No group", "No one", "No label")."""
+    matched = [n.id for n in walk(task_tree(m, f)) if n.match]
+
+    def section(name: str, ids: list[str], sub: str = "") -> TreeSection | None:
+        ids = list(dict.fromkeys(ids))
+        if not ids:
+            return None
+        return TreeSection(name, len(ids), task_tree(m, replace(f, only=frozenset(ids))), sub)
+
+    def people_of(task_id: str) -> list[str]:
+        t = m.task(task_id)
+        return [p for p in dict.fromkeys((*t.leads, *t.assignees)) if not f.people or p in f.people]
+
+    out: list[TreeSection | None] = []
+    if how in ("group", "person"):
+        active = [p for p in m.active_people() if not f.people or p.id in f.people]
+        if how == "group":
+            for g in m.groups():
+                members = {p.id for p in active if p.group == g}
+                out.append(section(g, [x for x in matched if members & set(people_of(x))]))
+            grouped = {p.id for p in active if p.group}
+            out.append(section("No group", [x for x in matched if people_of(x) and not grouped & set(people_of(x))]))
+        else:
+            for p in active:
+                out.append(section(p.name, [x for x in matched if p.id in people_of(x)], ", ".join(v for v in (p.group, p.role) if v)))
+        if not f.people:
+            out.append(section("No one", [x for x in matched if not people_of(x)]))
+    elif how == "label" or how.startswith("pl:"):
+        parent = how[3:] if how.startswith("pl:") else None
+        names = m.sublabels(parent) if parent else [lb.name for lb in m.active_labels() if not m.is_parent_label(lb.name)]
+        names = [n for n in names if not f.labels or n in f.labels]
+        for n in names:
+            out.append(section(m.label_path(n) if not parent else n, [x for x in matched if any(name == n for name, _ in m.labels_of(x))]))
+        if not f.labels:
+            none = f"No {parent.lower()}" if parent else "No label"
+            out.append(section(none, [x for x in matched if not any(name in names for name, _ in m.labels_of(x))]))
+    return [s for s in out if s is not None]
 
 
 # ---- sorting ----

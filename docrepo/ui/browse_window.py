@@ -17,6 +17,7 @@ import logging
 import re
 import sqlite3
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import date, timedelta
 from pathlib import Path
 from urllib.parse import unquote
@@ -85,6 +86,7 @@ from docrepo.views import (
     LIST_IDS,
     SORTS,
     TASK_VIEWS,
+    TREE_GROUPS,
     VIEW_IDS,
     VIEWS,
     CapacityRow,
@@ -113,6 +115,8 @@ from docrepo.views import (
     sort_tree,
     task_tree,
     today_groups,
+    tree_sections,
+    walk,
     unfiled_rows,
     view_counts,
 )
@@ -147,6 +151,8 @@ QLabel#count { color: #5a6571; }
 """ + FORMAT_BAR_STYLE
 #: The views with Select mode, where tasks can be ticked for Edit selected.
 SELECT_VIEWS = ("tasks", *LIST_IDS)
+#: The views but the task tree whose rows nest, so they have Collapse a level and Expand a level (release 5.24).
+NESTING_VIEWS = ("today", *LIST_IDS, "agenda", "activity", "docs", "labels")
 #: Activity's line chips, by what happened (release 5.23): the pages' chip classes.
 ACT_CHIPS = {"task": "multi", "update": "st-ip", "note": "lbl", "email": "lbl", "change": "routine", "doc": "st-pk", "agenda": "new"}
 UNFILED_NOTE = ("Unfiled captures: saved without a task. Their folders are already in Captures. Filing one links it in docs.db and sets "
@@ -179,6 +185,9 @@ class BrowseWindow(QWidget):
         #: Each task view's sort order (views.SORTS); "default" is its own order.
         self.sorts: dict[str, str] = {}
         self.list_groups: dict[str, str] = {}  # each list's Group by: a parent label (release 5.9)
+        self.tree_group = ""  # the task tree's Group by (release 5.24): views.TREE_GROUPS, or "pl:" and a parent label
+        #: The rows folded by hand in each view but the task tree (release 5.24), so they stay folded when it's drawn again.
+        self.shut: dict[str, set] = {}
         #: The Activity view's choices (release 5.23): its window, grouping and filters, Select and its ticks ("t:" a task,
         #: "l:" a line), the agenda Add to agenda puts them on, and the line clicked last.
         self.act: dict = {"win": "week", "from": None, "to": None, "group": "top", "people": [], "labels": [], "kinds": [],
@@ -729,8 +738,13 @@ class BrowseWindow(QWidget):
                 builder()
             else:
                 self._list_view(self.view)
+            if self.view in NESTING_VIEWS:
+                self._apply_shut()
+                self._level_buttons()
         finally:
             self.tree.end(self._row_to_select())
+        if self.view in NESTING_VIEWS:
+            self._sync_level_buttons()
         self.filters.setVisible(self.filters_layout.count() > 0)
         self._apply_find()
 
@@ -742,9 +756,12 @@ class BrowseWindow(QWidget):
     # ---- Find in this view (mods log round 2, M0026) ----
     def open_find(self) -> None:
         """Ctrl+F: a box above the list that narrows the view you're in as you type."""
-        if self.view in ("timeline", "capacity", "settings", "activity", "priorities"):
-            self.say("Activity, Priorities, the timeline and capacity have their own filters. Find in this view works on Today, the task tree, the lists, "
-                     "Unfiled, Agendas, People, Labels, Documents and Discarded. Ctrl+Shift+F searches everything.")
+        if self.view == "priorities":  # release 5.24: the board has a box of its own
+            self.priorities.open_find()
+            return
+        if self.view in ("timeline", "capacity", "settings"):
+            self.say("The timeline and capacity have their own filters. Find in this view works on Today, the task tree, the lists, "
+                     "Unfiled, Agendas, Activity, Priorities, People, Labels, Documents and Discarded. Ctrl+Shift+F searches everything.")
             return
         self.find_bar.show()
         self.find_box.setFocus()
@@ -873,18 +890,59 @@ class BrowseWindow(QWidget):
         ranked.chosen.connect(lambda values: self._set_filter("priorities", values))
         self._filter_widget(ranked)
         self._sort_box("tasks")
+        self._tree_group_box(m)
         self._select_controls()
-        nodes = task_tree(m, TreeFilter(parked=f["parked"], closed=f["closed"], routine=f["routine"], labels=tuple(f["labels"]),
-                                        people=tuple(f["people"]), pin=self.pin, priorities=tuple(f["priorities"])))
-        nodes = sort_tree(m, nodes, self.sorts.get("tasks", "default"), self.today())
+        tf = TreeFilter(parked=f["parked"], closed=f["closed"], routine=f["routine"], labels=tuple(f["labels"]), people=tuple(f["people"]),
+                        pin=self.pin, priorities=tuple(f["priorities"]))
+        how = self.tree_group if self.tree_group in dict(TREE_GROUPS) or self.tree_group[3:] in {lb.name for lb in m.labels} else ""
+        sections = [replace(s, nodes=sort_tree(m, s.nodes, self.sorts.get("tasks", "default"), self.today()))
+                    for s in tree_sections(m, tf, how)] if how else []
+        nodes = [n for s in sections for n in s.nodes] if how else sort_tree(m, task_tree(m, tf), self.sorts.get("tasks", "default"), self.today())
         self._button("− Collapse a level", lambda: self._level(nodes, "collapse"), collapse_level(nodes, self.open) != self.open,
                      "Fold every branch up one level")
         self._button("+ Expand a level", lambda: self._level(nodes, "expand"), expand_level(nodes, self.open) != self.open,
                      "Open every branch one more level")
         self.tree.set_columns(["Title", "State", "Due"])
-        self._add_nodes(nodes, filtered=filtered, expand_all=False)
+        if how:  # a section per group, each with its tasks in tree shape (release 5.24)
+            grey = QColor(GREY).lighter(135)
+            for s in sections:
+                sub = f' <span class="sub">{esc(s.sub)}</span>' if s.sub else ""
+                head = self.tree.add_row(None, None, [f'<b>{esc(s.name)}</b>{sub} &nbsp;<span class="sub">{s.count}</span>'], grey,
+                                         selectable=False, span=True)
+                self._add_nodes(s.nodes, head, filtered=True, expand_all=False)
+                head.setExpanded(True)
+        else:
+            self._add_nodes(nodes, filtered=filtered, expand_all=False)
         if not nodes:
             self.tree.add_row(None, None, ['<span class="sub">No tasks match these filters.</span>'], selectable=False, span=True)
+
+    def _tree_group_box(self, m) -> None:
+        """The task tree's Group by (release 5.24): Group, Person or Label, or a parent label's sublabels."""
+        box = QComboBox()
+        box.setAccessibleName("Group by")
+        for key, label in TREE_GROUPS:
+            box.addItem("No grouping" if not key else f"Group by {label.lower()}", key)
+        for lb in m.active_labels():
+            if m.is_parent_label(lb.name):
+                box.addItem(f"Group by {lb.name}", "pl:" + lb.name)
+        box.setCurrentIndex(max(0, box.findData(self.tree_group)))
+        box.setToolTip("A section for each group, person or label, each with its tasks in tree shape. With People or Labels ticked, "
+                       "only those get a section.")
+        box.currentIndexChanged.connect(lambda _: self._set_tree_group(box.currentData()))
+        self._filter_widget(box)
+
+    def _set_tree_group(self, how: str) -> None:
+        """Group by, chosen: the branches open down to each section's tasks, so the groups show what's in them."""
+        self.tree_group = how
+        if how:
+            m, f = self.model(), self.tree_filter
+            tf = TreeFilter(parked=f["parked"], closed=f["closed"], routine=f["routine"], labels=tuple(f["labels"]),
+                            people=tuple(f["people"]), priorities=tuple(f["priorities"]))
+            for section in tree_sections(m, tf, how):
+                for n in walk(section.nodes):
+                    if n.match:
+                        self.open.update(m.ancestors_of(n.id))
+        self.render_list()
 
     def _set_filter(self, key: str, value) -> None:
         self.tree_filter[key] = value
@@ -973,11 +1031,62 @@ class BrowseWindow(QWidget):
         self.render_list()
 
     def _expanded(self, item, on: bool) -> None:
-        if self.tree._building or self.view != "tasks":
+        if self.tree._building:
             return
         key = item.data(0, KEY_ROLE)
-        if key and key[0] == "task":
+        if self.view != "tasks":  # release 5.24: a row folded by hand stays folded when the view is drawn again
+            (self.shut.setdefault(self.view, set()).discard if on else self.shut.setdefault(self.view, set()).add)(self._row_id(item))
+            self._sync_level_buttons()
+        elif key and key[0] == "task":
             (self.open.add if on else self.open.discard)(key[1])
+
+    # ---- Collapse a level and Expand a level, on every view whose rows nest (release 5.24) ----
+    @staticmethod
+    def _row_id(item):
+        return item.data(0, KEY_ROLE) or ("row", item.data(0, HTML_ROLE))
+
+    def _level_buttons(self) -> None:
+        self._lvl_collapse = self._button("− Collapse a level", lambda: self._tree_level(False), tip="Fold every branch up one level")
+        self._lvl_expand = self._button("+ Expand a level", lambda: self._tree_level(True), tip="Open every branch one more level")
+
+    def _branches(self) -> list:
+        """The rows you can see that have rows under them."""
+        return [item for item in self.tree.items() if item.childCount() and not item.isHidden() and self.tree.is_shown(item)]
+
+    def _tree_level(self, expand: bool) -> None:
+        """As the task tree's: Collapse a level closes every open row none of whose rows is open, so each branch folds up one
+        step; Expand a level opens every folded row you can see."""
+        rows = self._branches()
+        if expand:
+            targets = [x for x in rows if not x.isExpanded()]
+        else:
+            targets = [x for x in rows if x.isExpanded() and not any(
+                x.child(i).childCount() and x.child(i).isExpanded() for i in range(x.childCount()))]
+        for item in targets:
+            item.setExpanded(expand)  # each one's signal keeps it in self.shut
+        self._sync_level_buttons()
+
+    def _sync_level_buttons(self) -> None:
+        for name in ("_lvl_collapse", "_lvl_expand"):
+            b = getattr(self, name, None)
+            if b is None or b.parent() is None:
+                return
+        rows = self._branches()
+        self._lvl_collapse.setEnabled(any(x.isExpanded() for x in rows))
+        self._lvl_expand.setEnabled(any(not x.isExpanded() for x in rows))
+
+    def _apply_shut(self) -> None:
+        """Fold again the rows folded by hand in this view."""
+        shut = self.shut.get(self.view)
+        if not shut:
+            return
+        building, self.tree._building = self.tree._building, True
+        try:
+            for item in self.tree.items():
+                if item.childCount() and self._row_id(item) in shut:
+                    item.setExpanded(False)
+        finally:
+            self.tree._building = building
 
     def _list_view(self, view_id: str) -> None:
         v, task_list, m = VIEW_IDS[view_id], LIST_IDS[view_id], self.model()
@@ -1102,8 +1211,8 @@ class BrowseWindow(QWidget):
             self._button("No", lambda: self.answer_today(None))
         self.tree.set_columns(["Item", "State", "Due", ""], [0, 96, 96, 220])
         grey = QColor(GREY).lighter(135)
-        for name, items in today_groups(m, today):
-            self.tree.add_row(None, None, [f"<b>{esc(name)}</b>"], grey, selectable=False, span=True)
+        for name, items in today_groups(m, today):  # each group's items under its heading, which folds (release 5.24)
+            head = self.tree.add_row(None, None, [f"<b>{esc(name)}</b>"], grey, selectable=False, span=True)
             for a in items:
                 t = m.tasks.get(a.subject) if a.subject else None
                 key = ("task", t.id) if t else ("capture", a.added_by) if a.added_by in m.captures else None
@@ -1112,24 +1221,26 @@ class BrowseWindow(QWidget):
                 note = f" · {esc(a.note)}" if t and a.note else ""
                 cell = due_cell(t, today) if t else None
                 colour = {"over": "color:#b0261e; font-weight:600", "soon": "color:#875700; font-weight:600"}.get(cell.cls if cell else "", "")
-                item = self.tree.add_row(None, key, [f'{esc(t.title if t else a.note)}<br><span class="sub">{since}{where}{note}</span>',
+                item = self.tree.add_row(head, key, [f'{esc(t.title if t else a.note)}<br><span class="sub">{since}{where}{note}</span>',
                                                      state_chip(t.state) if t else chip("Note", "st-ns"),
                                                      f'<p align="right" style="{colour}">{esc(cell.text)}</p>' if cell else ""],
                                          tip=f"Added {long_date(date.fromisoformat(a.added[:10]), today)}")
                 self.tree.setItemWidget(item, 3, self._today_buttons(a.id, t.id if t else None))
+            head.setExpanded(True)
         if not m.today_items():
             self.tree.add_row(None, None, ['<span class="sub">Nothing on Today. Select a task and press D, or type a quick task above.</span>'],
                               selectable=False, span=True)
         self._today_due_rows(m, today, grey)
         done = m.done_on(today)
         if done:
-            self.tree.add_row(None, None, ["<b>Done today</b>"], grey, selectable=False, span=True)
+            head = self.tree.add_row(None, None, ["<b>Done today</b>"], grey, selectable=False, span=True)
             for a in done:
                 t = m.tasks.get(a.subject) if a.subject else None
-                self.tree.add_row(None, ("task", t.id) if t else None,
+                self.tree.add_row(head, ("task", t.id) if t else None,
                                   [f'<s><span style="color:#87919c">{esc(t.title if t else a.note)}</span></s><br>'
                                    f'<span class="sub">Done at {esc((a.closed or "")[11:16])}</span>',
                                    state_chip(t.state) if t else chip("Note", "st-ns"), ""])
+            head.setExpanded(True)
 
     def _today_due_rows(self, m: Model, today: date, grey: QColor) -> None:
         """Due in the next 7 days (mods log round 2, M0050): tasks overdue or due soon that aren't on Today, each with Add
@@ -1141,12 +1252,12 @@ class BrowseWindow(QWidget):
         box.toggled.connect(self.set_today_mine)
         self._filter_widget(box)
         tasks = due_this_week(m, today, self.ctx.settings.me, mine)
-        self.tree.add_row(None, None, ["<b>Due in the next 7 days</b>" + (" <span class=\"sub\">· yours</span>" if mine else "")],
-                          grey, selectable=False, span=True)
+        head = self.tree.add_row(None, None, ["<b>Due in the next 7 days</b>" + (" <span class=\"sub\">· yours</span>" if mine else "")],
+                                 grey, selectable=False, span=True)
         for t in tasks:
             cell = due_cell(t, today)
             colour = {"over": "color:#b0261e; font-weight:600", "soon": "color:#875700; font-weight:600"}.get(cell.cls if cell else "", "")
-            item = self.tree.add_row(None, ("task", t.id), [f'{esc(t.title)}<br><span class="sub">{esc(path_text(m, t.id) or "Top-level task")}</span>',
+            item = self.tree.add_row(head, ("task", t.id), [f'{esc(t.title)}<br><span class="sub">{esc(path_text(m, t.id) or "Top-level task")}</span>',
                                                           state_chip(t.state), f'<p align="right" style="{colour}">{esc(cell.text)}</p>' if cell else ""])
             add = QPushButton("Add to Today", objectName="rowLink")
             add.setToolTip("Put it on Today (D)")
@@ -1158,8 +1269,9 @@ class BrowseWindow(QWidget):
             lay.addStretch()
             self.tree.setItemWidget(item, 3, holder)
         if not tasks:
-            self.tree.add_row(None, None, ['<span class="sub">Nothing else is due in the next 7 days' + (" for you." if mine else ".") + "</span>"],
+            self.tree.add_row(head, None, ['<span class="sub">Nothing else is due in the next 7 days' + (" for you." if mine else ".") + "</span>"],
                               selectable=False, span=True)
+        head.setExpanded(True)
 
     def set_today_mine(self, on: bool) -> None:
         """Mine only, on Today's Due in the next 7 days. The choice is kept in docs.db's app_state."""
@@ -1226,28 +1338,30 @@ class BrowseWindow(QWidget):
             self._button("Meeting notes", lambda: self.open_capture(task=target, meeting=True))
         self.tree.set_columns(["Item", "State", "Added", ""], [0, 96, 70, 130])
         grey = QColor(GREY).lighter(135)
-        for name, items in agenda_groups(m, target):
-            self.tree.add_row(None, None, [f"<b>{esc(name)}</b>"], grey, selectable=False, span=True)
+        for name, items in agenda_groups(m, target):  # each topic's items under its heading, which folds (release 5.24)
+            head = self.tree.add_row(None, None, [f"<b>{esc(name)}</b>"], grey, selectable=False, span=True)
             for a in items:
                 t = m.tasks.get(a.subject) if a.subject else None
                 key = ("task", t.id) if t else ("capture", a.added_by) if a.added_by in m.captures else None
                 main = esc(t.title if t else a.note)
                 note = f'<br><span class="sub">{esc(a.note)}</span>' if t and a.note else ""
                 where = f'<br><span class="sub">{esc(path_text(m, t.id) or "Top-level task") if t else "A note, with no task"}</span>'
-                item = self.tree.add_row(None, key, [main + note + where, state_chip(t.state) if t else chip("Note", "st-ns"),
+                item = self.tree.add_row(head, key, [main + note + where, state_chip(t.state) if t else chip("Note", "st-ns"),
                                                      f'<p align="right">{esc(short(date.fromisoformat(a.added[:10]), self.today()))}</p>'],
                                          tip=f"Added {long_date(date.fromisoformat(a.added[:10]), self.today())}")
                 self.tree.setItemWidget(item, 3, self._agenda_buttons(a.id))
+            head.setExpanded(True)
         closed = closed_items(m, target)
         if closed:
-            self.tree.add_row(None, None, ["<b>Closed recently</b>"], grey, selectable=False, span=True)
+            head = self.tree.add_row(None, None, ["<b>Closed recently</b>"], grey, selectable=False, span=True)
             for a in closed:
                 t = m.tasks.get(a.subject) if a.subject else None
-                self.tree.add_row(None, ("task", t.id) if t else None,
+                self.tree.add_row(head, ("task", t.id) if t else None,
                                   [f'<s><span style="color:#87919c">{esc(t.title if t else a.note)}</span></s><br>'
                                    f'<span class="sub">{esc(a.how)} {esc(long_date(date.fromisoformat(a.closed[:10]), self.today()))}</span>',
                                    state_chip(t.state) if t else chip("Note", "st-ns"),
                                    f'<p align="right">{esc(short(date.fromisoformat(a.closed[:10]), self.today()))}</p>'])
+            head.setExpanded(True)
         if not agenda_groups(m, target):
             self.tree.add_row(None, None, ['<span class="sub">No open agenda items.</span>'], selectable=False, span=True)
 
@@ -2052,6 +2166,7 @@ class BrowseWindow(QWidget):
         self.view, self.cap_cell = view, None
         self.ticked.clear()
         self.close_find()
+        self.priorities.close_find(render=False)
         self._select_first()
         self.render_all()
 

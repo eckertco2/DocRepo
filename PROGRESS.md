@@ -36,6 +36,7 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.21 | The visual overhaul, O9: the task page as the task's story (decisions 64 to 69) | Built 2026-10-25 and hand-tested by the owner; on GitHub 2026-10-26. Next: testing on the corporate computer |
 | 5.22 | The visual overhaul, O10: the sidebar redrawn, with an icon per view, small folding headings and counts only where they ask for something (decisions 79 to 84) | Built 2026-10-26, from the approved mock; on GitHub 2026-10-26, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
 | 5.23 | Review and planning, from the mods log, round 2 (stage 8): the Activity view and Priorities (decisions 23 and 70 to 78), schema version 9 | Built 2026-10-26, from the approved mock; hand-tested by the owner and on GitHub 2026-10-26. Next: testing on the corporate computer |
+| 5.24 | The owner's comments on 5.23: Find and Fold subtasks on the Priorities board, Group by on the task tree, and Collapse a level and Expand a level on every view whose rows nest | Built 2026-10-26; hand-tested by the owner and on GitHub 2026-10-26. Next: testing on the corporate computer |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
 ## Decisions
@@ -470,6 +471,26 @@ The visual overhaul's O10, designed and mocked in the parent workspace (`docs/ui
   - **No button group:** the pane marks the open view itself, so that no row is marked while searching, and a click on the open view keeps it marked.
   - **The totals that left the sidebar** are beside their views' titles ("14 open", "7 active"), as `sidebar.md` said they'd be.
   - **The tooltip** shows only when a name is cut short. The headings' tooltips say Fold or Unfold.
+
+## Release 5.24: the owner's comments on 5.23 (2026-10-26)
+
+After the 5.23 hand test the owner asked for four things: Find (Ctrl+F) on the Priorities board, as elsewhere; a way to fold the board down to the parent tasks; the task tree clustered by the groups picked; and Collapse a level and Expand a level on every browse view. The owner chose a Fold subtasks switch and a Group by list over the alternatives.
+
+- `docrepo/priorities.py`: `BoardFilter.fold`, `open_subtasks`, `folded` (a subtask with no open subtasks of its own; a task under Quick tasks counts as top-level) and `folded_under`.
+- `docrepo/ui/priorities_view.py`: the Fold subtasks switch, with each parent's card saying how many subtasks are folded and how they're ranked ("3 subtasks folded (2 Critical)"); the board's Find box (`open_find`, `close_find`, Esc), matching the task's ID, title, description, status, labels, people and path; the focus stays in the box while the board redraws.
+- `docrepo/views.py`: `TreeFilter.only`, `TREE_GROUPS`, `TreeSection` and `tree_sections`: a section per group, person, label or parent label's sublabel, each a task tree of its tasks with their parents dimmed; with People or Labels ticked, only what's ticked gets one, and a last section holds the tasks in none.
+- `docrepo/ui/browse_window.py`: Ctrl+F opens the board's box, and Find works on Activity too; the task tree's Group by (`_tree_group_box`, `_set_tree_group`, which opens the branches down to each section's tasks), drawn as a heading per section with its tree under it; Collapse a level and Expand a level on Today, the lists, Agendas, Activity, Documents and Labels (`NESTING_VIEWS`, `_level_buttons`, `_tree_level`, `_sync_level_buttons`), as the task tree's work, with each view's hand-folded rows kept while DocRepo runs (`shut`, `_apply_shut`, `_row_id`); Today's and Agendas' headings hold their items, so they fold.
+- `tests/test_grouping.py` (new): the sections, only what's ticked getting one, the tree's Group by, and the level buttons on the other views, with folds kept. `tests/test_priorities.py`: Fold subtasks, and Find and Fold on the board. `tests/test_browse_window.py`: Today's Done today holding its item. (819 pass in all, 1 skipped.) Checked by eye over a sample data root: the board folded and found, the tree grouped by group, and Agendas' headings folding.
+
+## Decisions (release 5.24)
+
+- The owner's: Fold subtasks as one switch on the board, and a Group by list on the task tree (each section in tree shape; only what's ticked gets a section).
+- **Judgement calls, for the owner's hand test:**
+  - **The level buttons** are on every view whose rows nest. Unfiled, People, Discarded and Search are always flat, so they have none; the board has Fold subtasks instead; the timeline, capacity and Settings have no rows to fold.
+  - **Today's and Agendas' headings** now hold their items, indented under them, so they fold.
+  - **Find works on Activity too**, as the other list views have it.
+  - **A folded parent's card** says how its folded subtasks are ranked, so a Critical subtask isn't lost from sight.
+  - **Choosing a Group by** opens the branches down to each section's tasks; Collapse a level folds them as usual.
 
 ## Release 5.23: Activity and Priorities (2026-10-26)
 
