@@ -15,12 +15,12 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from docrepo import agenda, bulk, captures, items, markup, people, search, tasks
+from docrepo import activity, agenda, bulk, captures, items, markup, people, priorities, search, tasks
 from docrepo.config import Settings
 from docrepo.dates import stamp
 from docrepo.db import transaction
 from docrepo.links import is_link
-from docrepo.model import TODAY, Model
+from docrepo.model import TODAY, Model, is_person
 from docrepo.pages import write_pages
 from docrepo.parse import ParsePerson
 from docrepo.safe_fs import SafeFS
@@ -261,9 +261,11 @@ def edit_task(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: S
     Only the fields that differ change, each logged as "Browse tool". ``leads`` and ``assignees`` are Who's: someone not on
     the people list is added to it, and a label not there yet is created. A Start left at the day the task was created
     stays unset. ``parents`` puts the task under exactly those tasks (mods log round 2, M0040), as one Parents change.
+    ``priority`` (release 5.23) puts it in a bucket ("" for Not ranked), at the bucket's end, when that's a change.
     """
     added: list[str] = []
     parents = values.pop("parents", None)
+    priority = values.pop("priority", None)
     with transaction(conn):
         t = tasks.get_task(conn, task_id)
         if values.get("start") == start_of(t).isoformat() and not t.start:
@@ -288,6 +290,10 @@ def edit_task(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: S
         moved = tasks.set_parents(conn, task_id, parents, at=at, via=BROWSE) if parents is not None else None
         if moved:
             logged.append(moved)
+        if priority is not None and priority != (t.priority or ""):
+            ranked = priorities.place(conn, task_id, priority, at=at, via=BROWSE)
+            if ranked:
+                logged.append(ranked)
     message = f"{len(logged)} change{'s' if len(logged) != 1 else ''} in the status log." if logged else "Nothing changed."
     if added:
         message += f" Added {', '.join(added)} to the people list."
@@ -305,6 +311,51 @@ def bulk_edit(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: S
     write_all_pages(conn, data_root, fs, at, out.problems)
     log.info("edit selected: %d tasks, %d changes", len(outcomes), sum(len(o.changes) for o in outcomes))
     return out
+
+
+# ---- the Priorities board and the Activity view (release 5.23) ----
+def set_priority(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, task_id: str, bucket: str, before: str | None,
+                 at: datetime) -> Outcome:
+    """A move on the Priorities board: into ``bucket`` ("" for Not ranked), before the task ``before`` there or at its
+    end. A move to another bucket goes into the status log and the pages are written again; a move within one doesn't."""
+    change = priorities.place(conn, task_id, bucket, before, at=at, via=priorities.VIA)
+    title = tasks.get_task(conn, task_id).title
+    if change is None:
+        return Outcome(f"{title} moved within {priorities.name(bucket)}.")
+    out = Outcome(f"{title}: {priorities.name(bucket)}. Its status log says so.")
+    write_all_pages(conn, data_root, fs, at, out.problems)
+    log.info("task %s priority: %s", task_id, bucket or "not ranked")
+    return out
+
+
+def add_activity_to_agenda(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, target: str, entries: list[tuple[str | None, str]],
+                           at: datetime) -> Outcome:
+    """The Activity view's Add to agenda (decision 72): each (task, note) as an agenda item on ``target``, or a note alone
+    for a task of None. A task already open on that agenda isn't added twice. One transaction."""
+    m = Model(conn)
+    added: list[str] = []
+    skipped: list[str] = []
+    with transaction(conn):
+        for subject, note in entries:
+            if subject and any(a.subject == subject for a in m.open_items_for(target)):
+                skipped.append(m.task(subject).title)
+                continue
+            agenda.add_item(conn, subject=subject, target=target, note=" ".join(note.split()), added=stamp(at), added_by=activity.VIA)
+            added.append(m.task(subject).title if subject else clip_note(note))
+    where = "Today" if target == TODAY else f"{m.person_name(target)}'s agenda" if is_person(target) else f"the agenda of {m.target_name(target)}"
+    message = f"Added {len(added)} to {where}: {', '.join(added)}." if added else "Nothing added."
+    if skipped:
+        message += f" Already on it: {', '.join(skipped)}."
+    out = Outcome(message)
+    if added:
+        write_all_pages(conn, data_root, fs, at, out.problems)
+    log.info("activity view: %d agenda items for %s", len(added), target)
+    return out
+
+
+def clip_note(note: str, limit: int = 40) -> str:
+    text = " ".join(note.split())
+    return text if len(text) <= limit else text[:limit].rsplit(" ", 1)[0] + "…"
 
 
 # ---- discarding (mods log round 1, M0021) ----

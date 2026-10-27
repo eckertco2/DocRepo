@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo import quick, timeline
+from docrepo import priorities, quick, timeline
 from docrepo.bulk import BulkEdit, LabelMatch, TaskOutcome, summary
 from docrepo.db import RECURRENCES, STATES
 from docrepo.detail import esc
@@ -115,9 +115,17 @@ class TaskEditDialog(FormDialog):
         self.urgent.setChecked(t.urgent)
         self.meeting.setChecked(t.meeting)
         self.plant_event.setChecked(t.plant_event)
+        # Priority (release 5.23, mods log round 2, M0029, M0030): a new bucket puts it at that bucket's end, ordered on the board.
+        self.priority = QComboBox()
+        for key, label, _ in priorities.COLUMNS:
+            self.priority.addItem(label, key)
+        self.priority.setCurrentIndex(max(0, self.priority.findData(t.priority or "")))
+        self.priority.setToolTip("Its bucket on the Priorities board. A new bucket puts it at that bucket's end; order it on the board.")
+        self.priority.setFixedWidth(160)
         row = QHBoxLayout()
         row.setSpacing(16)
         row.addWidget(field("State", self.state, "state"))
+        row.addWidget(field("Priority", self.priority))
         flags = QHBoxLayout()
         flags.setSpacing(16)
         notes = []
@@ -345,7 +353,7 @@ class TaskEditDialog(FormDialog):
             "assignee_hours": self.asg_hours.value(), "start": self.start.value(), "due": self.due.value(), "deadline": self.deadline.value(),
             "deadline_desc": self.deadline_desc.text(), "reminder": self.reminder.value(), "recurrence": recurrence,
             "repeat_until": self.repeat.value() if recurrence else None, "urgent": self.urgent.isChecked(), "meeting": self.meeting.isChecked(),
-            "plant_event": self.plant_event.isChecked(), "parents": list(self.parents),
+            "plant_event": self.plant_event.isChecked(), "parents": list(self.parents), "priority": self.priority.currentData(),
             **({"references": {name: box.text() for name, box in self.references.items()}} if self.references else {}),
         }
 
@@ -445,6 +453,13 @@ class BulkEditDialog(FormDialog):
             lay.addWidget(date)
             grid.addWidget(box, 3 + i // 2, i % 2)
             self.dates[key] = (on, date)
+        # Priority (release 5.23): each task goes to the end of the bucket, in the order they're ticked.
+        self.priority = QComboBox()
+        self.priority.addItem(LEAVE, None)
+        for key, label, _ in priorities.COLUMNS:
+            self.priority.addItem(label, key)
+        self.priority.currentIndexChanged.connect(self._changed)
+        grid.addWidget(field("Priority", self.priority), 4, 1)
         g.addLayout(grid)
         self.parent_button = QPushButton("Leave them where they are  ▾")
         self.parent_button.clicked.connect(lambda: self._pick_task(self.parent_button, self.set_parent))
@@ -511,6 +526,8 @@ class BulkEditDialog(FormDialog):
             e.fields["state"] = self.state.currentText()
         if self.plant_event.currentIndex():
             e.fields["plant_event"] = self.plant_event.currentIndex() == 1
+        if self.priority.currentIndex():
+            e.priority = self.priority.currentData()
         for key, (on, date) in self.dates.items():
             if on.isChecked():
                 e.fields[key] = date.value()

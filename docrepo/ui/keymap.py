@@ -33,6 +33,9 @@ OTHER_KEYS = (
     ("Ctrl+K", "The command palette: every action and view, narrowed as you type"),
     ("Alt, held", "Shows each control's letter key in the window"),
     ("Ctrl, held", "Shows the Ctrl shortcuts in the window, after half a second"),
+    ("1 to 4, 0", "On the Priorities board: puts the selected card in Critical, High, Medium or Parking lot, or takes it out (0)"),
+    ("Alt+Up, Alt+Down", "On the Priorities board: moves the selected card up or down in its bucket. The arrow keys move between cards; "
+                         "Enter opens the task"),
     ("F1", "This list"),
 )
 #: The content text's keys, as OneNote's (mods log round 3, M0055).

@@ -15,7 +15,7 @@ from pathlib import Path
 from docrepo.safe_fs import SafeFS
 
 DB_FILE = Path("System") / "docs.db"
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 #: Each kind of ID: its letter and how many digits follow it.
 ID_FORMATS = {"T": 6, "C": 6, "D": 6, "P": 3}
@@ -279,6 +279,11 @@ CREATE TABLE task_references (
     value TEXT NOT NULL,
     PRIMARY KEY (task, name)
 );
+""",
+    9: """
+-- Priorities (mods log round 2, M0029, M0030, decision 23, release 5.23): a task's bucket, and its place in the bucket.
+ALTER TABLE tasks ADD COLUMN priority TEXT CHECK (priority IN ('critical', 'high', 'medium', 'parking'));
+ALTER TABLE tasks ADD COLUMN priority_rank INTEGER;
 """,
 }
 

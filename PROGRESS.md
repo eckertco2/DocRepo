@@ -35,6 +35,7 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.20.1 | pypdf 6.21.2, for the second Frogbot scan's findings | Built 2026-10-25; on GitHub 2026-10-25. Next: the corporate computer, with `release-5-20-1-frogbot-fix.md` |
 | 5.21 | The visual overhaul, O9: the task page as the task's story (decisions 64 to 69) | Built 2026-10-25 and hand-tested by the owner; on GitHub 2026-10-26. Next: testing on the corporate computer |
 | 5.22 | The visual overhaul, O10: the sidebar redrawn, with an icon per view, small folding headings and counts only where they ask for something (decisions 79 to 84) | Built 2026-10-26, from the approved mock; on GitHub 2026-10-26, before the owner's hand test. Next: the hand test here, and testing on the corporate computer |
+| 5.23 | Review and planning, from the mods log, round 2 (stage 8): the Activity view and Priorities (decisions 23 and 70 to 78), schema version 9 | Built 2026-10-26, from the approved mock; hand-tested by the owner and on GitHub 2026-10-26. Next: testing on the corporate computer |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
 ## Decisions
@@ -469,6 +470,30 @@ The visual overhaul's O10, designed and mocked in the parent workspace (`docs/ui
   - **No button group:** the pane marks the open view itself, so that no row is marked while searching, and a click on the open view keeps it marked.
   - **The totals that left the sidebar** are beside their views' titles ("14 open", "7 active"), as `sidebar.md` said they'd be.
   - **The tooltip** shows only when a name is cut short. The headings' tooltips say Fold or Unfold.
+
+## Release 5.23: Activity and Priorities (2026-10-26)
+
+Round 2's stage 8 (`docs/mods/round-2-plan.md` in the parent workspace, items 32 and 33), mocked and approved with decisions 23 (four buckets, ordered within each) and 70 to 78 as mocked. Both views are under Plan in the sidebar, after Agendas.
+
+- `docrepo/db.py`: schema version 9, `priority` (critical, high, medium or parking, checked) and `priority_rank` on tasks. `docrepo/model.py`: `Task.priority`, `Task.priority_rank`, and `PRIORITY_NAMES`.
+- `docrepo/priorities.py` (new): the buckets (`BUCKETS`, `COLUMNS`, `BY_DIGIT`), what's on the board (`on_board`, `BoardFilter`, `shown`), each bucket's order and Not ranked's sort (`bucket_ids`, `not_ranked`), the board's `columns`, `place` (into a bucket before a task or at its end, numbering it again, and a Priority status log entry when the bucket changes) and `nudge` (one place among the cards shown, not logged), and `sort_key` for Sort by priority.
+- `docrepo/activity.py` (new): `window`, `Activity.lines` (captures, status log changes made outside a capture, document versions and agenda items, each a `Line` under its task), `passes` (People, Labels, What), `groups` (by top-level task, person, group or label, with `Heading`s in tree order and Not filed yet last), `plant_events`, `markdown`, and `agenda_items` (one item per ticked task, its ticked lines joined as the note).
+- `docrepo/edits.py`: `set_priority` (a move on the board), `add_activity_to_agenda` (skipping a task already open on that agenda), and `edit_task`'s `priority`. `docrepo/bulk.py`: `BulkEdit.priority`. `docrepo/tasks.py`: `record`, for status log entries made outside `update_task`.
+- `docrepo/views.py`: the Activity and Priorities views, Sort by priority, `TreeFilter.priorities`, and `markers` with Critical (rows only show that bucket). `docrepo/stories.py`: the Priority sentences. `docrepo/pages.py`: `Task.md`'s Priority row. `docrepo/detail.py`: the task page's priority chip, for every bucket, and the chips' classes.
+- `docrepo/ui/priorities_view.py` (new): `PrioritiesView`, with `Column` (a drop target, with a line where a card lands) and `Card` (dragged with `QDrag`); the filters, the selected card's strip with the buckets as buttons, and the keys (an event filter on each card, so the columns' scroll areas don't take the arrows).
+- `docrepo/ui/browse_window.py`: the board in the middle pane (the detail pane hidden, as for the timeline) and its `move_priority` and `nudge_priority`; the Activity view (`_activity_view`, `_activity_controls`, `_activity_group`): its rows in the list pane, a line opening its page and staying the selected row (`select(keep_row=True)`, `_row_to_select`), Select's ticks and bar, `add_activity_to_agenda` and `copy_activity`; the task tree's Priority filter. `docrepo/ui/task_forms.py`: Priority in Edit task and Edit selected. `docrepo/ui/nav_pane.py` and `docrepo/ui/icons/`: `activity.svg` and `priorities.svg`. `docrepo/ui/tokens.py`: the board's styles and the priority chips; the Classic look has its own. `docrepo/ui/keymap.py`: the board's keys.
+- `tests/test_priorities.py` and `tests/test_activity.py` (new); `test_db.py` and `test_nav_pane.py` follow (813 pass in all, 1 skipped). Both views were drawn over a sample data root with Windows' own fonts and checked by eye: Activity this week, with Select and its bar; the board with eight tasks ranked and the selected card above it; the tree with the Critical chip beside Urgent and the Priority filter; the task page's chip.
+
+## Decisions (release 5.23)
+
+- Decisions 23 and 70 to 78, as mocked: four buckets, Critical, High, Medium and Parking lot, ordered within each; Activity's lines, where each goes, Add to agenda, and its place in the list pane; the board's tasks and filters, Not ranked sorted for you, the status log on a move to another bucket only, Critical on rows and every bucket on the page, the board and Edit task, Urgent a flag of its own (77), and Parking lot not Parked.
+- **Also built, from the plan (item 33) but not mocked:** Sort by priority on the task tree and the lists, the task tree's Priority filter (the lists have no filters), and Edit selected's Priority.
+- **Changed on the way:**
+  - **The Critical chip is solid red,** white on the critical colour: Qt's rich text can't draw the mock's outlined chip, and a tint would look like Urgent's.
+  - **`Task.md` has a Priority row** when a task is ranked, after State; the mock's `Task.md` has none, and its examples (with no ranked task) don't change.
+  - **A card dropped on Not ranked** leaves its bucket: Not ranked has no order, so no line shows there.
+  - **Activity's agenda list** is the open meetings (with their next dates), Today, then the people, without the owner.
+  - **Activity's header** says how much happened and when ("20 things happened, Mon 5 Oct to today"), with the kinds counted in the first row.
 
 ## The first Frogbot findings (2026-10-20)
 

@@ -258,6 +258,11 @@ def set_discarded(conn: sqlite3.Connection, settings: Settings, task_id: str, re
     return change
 
 
+def record(conn: sqlite3.Connection, task_id: str, at: datetime, via: str, changes: list[Change]) -> None:
+    """Put changes made outside ``update_task`` into the status log, such as a move on the Priorities board."""
+    _log(conn, task_id, at, via, changes)
+
+
 def _log(conn: sqlite3.Connection, task_id: str, at: datetime, via: str, changes: list[Change]) -> None:
     conn.executemany(
         "INSERT INTO status_log (task, at, field, from_value, to_value, via) VALUES (?, ?, ?, ?, ?, ?)",

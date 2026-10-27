@@ -13,7 +13,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from docrepo.dates import day_diff, days_text, minutes, to_date
-from docrepo.model import TODAY, TYPE_NAMES, Capture, FileEntry, Model, StatusEntry, Task, is_person
+from docrepo.model import PRIORITY_NAMES, TODAY, TYPE_NAMES, Capture, FileEntry, Model, StatusEntry, Task, is_person
 from docrepo.safe_fs import SafeFS
 from docrepo.schedule import due_of, is_open, start_of
 
@@ -92,6 +92,8 @@ class Pages:
 
         out = [f"# {t.title}", "", f"{_GENERATED}{self.generated}. Don't edit: DocRepo rewrites this page. Change the task in the browse tool.", ""]
         rows = [("ID", t.id), ("State", t.state + (f" ({t.closed})" if t.closed else ""))]
+        if t.priority:  # release 5.23
+            rows.append(("Priority", PRIORITY_NAMES.get(t.priority, t.priority)))
         if t.discarded:
             rows.append(("Discarded", f"{t.discarded[:10]}: {t.discard_reason}" if t.discard_reason else t.discarded[:10]))
         if t.urgent:

@@ -303,6 +303,15 @@ QLabel#status[error="true"] { background: $critical_bg; color: $critical; }
 /* the sidebar (stage O10): docrepo/ui/nav_pane.py paints its rows from these same tokens */
 QWidget#navPane, QWidget#navBody { background: $base; }
 QFrame#navFoot { background: $base; border: none; border-top: 1px solid $stroke; }
+/* the Priorities board (release 5.23): a column per bucket, a card per task; the card's left edge is painted in its colour */
+QFrame#prCol { background: $base; border: 1px solid $stroke; border-radius: 6px; }
+QFrame#prCol[over="true"] { background: $selected; border-color: $accent; }
+QWidget#prCards { background: transparent; }
+QFrame#prCard { background: $content; border: 1px solid $stroke; border-radius: 4px; }
+QFrame#prCard:hover { border-color: $stroke_strong; }
+QFrame#prCard[sel="true"] { background: $selected; border-color: $accent; }
+QFrame#prDrop { background: $accent; border: none; border-radius: 1px; }
+QLabel#prTitle { font-weight: 600; color: $text; }
 QTextBrowser { border: none; background: $content; }
 QWidget#settingsCard { background: $content; border: 1px solid $stroke; border-radius: 6px; }
 """)
@@ -345,6 +354,10 @@ h2 { font-size: ${subtitle}pt; font-weight: 600; margin-top: 2px; margin-bottom:
 .st-pk { color: #585a70; background-color: #eae8f2; }
 .st-cl { color: $text2; background-color: $hover; }
 .urgent { color: $critical; background-color: $critical_bg; font-weight: 600; }
+.pri-critical { color: $on_accent; background-color: $critical; font-weight: 600; }
+.pri-high { color: $caution; background-color: $caution_bg; font-weight: 600; }
+.pri-medium { color: $accent; background-color: $selected; }
+.pri-parking { color: $text2; background-color: $hover; }
 .routine { color: $text; background-color: $hover; }
 .multi { color: $accent; background-color: $selected; }
 .lbl { color: $text; background-color: $hover; }

@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from docrepo import people, tasks
+from docrepo import people, priorities, tasks
 from docrepo.config import Settings
 from docrepo.db import transaction
 from docrepo.model import Model
@@ -39,10 +39,14 @@ class BulkEdit:
     parent: str | None = None
     #: "move": under ``parent`` instead of under its parents; "also": under it as well.
     parent_how: str = "move"
+    #: A priority to put them in (release 5.23): a bucket's key, "" for Not ranked, None to leave each as it is. Each goes
+    #: to the end of the bucket, in the order the tasks are given.
+    priority: str | None = None
 
     @property
     def empty(self) -> bool:
-        return not (self.add_labels or self.remove_labels or self.fields or self.leads or self.assignees or self.parent)
+        return not (self.add_labels or self.remove_labels or self.fields or self.leads or self.assignees or self.parent
+                    or self.priority is not None)
 
 
 @dataclass
@@ -78,6 +82,10 @@ def _edit_one(conn: sqlite3.Connection, settings: Settings, task_id: str, edit: 
         moved = tasks.set_parents(conn, task_id, wanted, at=at, via=via)
         if moved:
             logged.append(moved)
+    if edit.priority is not None and (t.priority or "") != edit.priority:
+        ranked = priorities.place(conn, task_id, edit.priority, at=at, via=via)
+        if ranked:
+            logged.append(ranked)
     return logged
 
 

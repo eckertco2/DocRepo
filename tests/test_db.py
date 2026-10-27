@@ -42,7 +42,7 @@ def test_a_version_1_database_is_brought_up_to_date(data_root, fs):
     old.close()
     conn = db.connect(fs, data_root)
     try:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 8
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 9
         assert conn.execute("SELECT name, sha256, text_status FROM documents").fetchone()[:] == ("a.pdf", None, None)
         assert conn.execute("SELECT count(*) FROM search_text").fetchone()[0] == 0
         assert conn.execute("SELECT count(*) FROM tasks WHERE discarded IS NOT NULL").fetchone()[0] == 0
@@ -53,6 +53,7 @@ def test_a_version_1_database_is_brought_up_to_date(data_root, fs):
         assert conn.execute("SELECT count(*) FROM tasks WHERE plant_event = 1").fetchone()[0] == 0
         assert conn.execute("SELECT count(*) FROM people WHERE email IS NOT NULL OR person_group IS NOT NULL OR role IS NOT NULL").fetchone()[0] == 0
         assert conn.execute("SELECT count(*) FROM labels WHERE parent IS NOT NULL").fetchone()[0] == 0
+        assert conn.execute("SELECT count(*) FROM tasks WHERE priority IS NOT NULL OR priority_rank IS NOT NULL").fetchone()[0] == 0  # version 9
         # Version 4 made agenda_items again, keeping its rows and IDs, so an item can close as Done.
         assert [tuple(r) for r in conn.execute("SELECT id, target, note FROM agenda_items")] == [(7, "P001", "Ask about it")]
         conn.execute("UPDATE agenda_items SET closed = '2026-10-02 09:00', how = 'Done', closed_by = 'Today' WHERE id = 7")

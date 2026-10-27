@@ -38,7 +38,7 @@ FG, MUTED, LINE, LINE_STRONG = "#1a1f25", "#5a6571", "#d6dce3", "#b8c1cb"
 ACCENT, BAD, SEL, SURFACE_2 = "#1d5e98", "#b0261e", "#dbe8f5", "#f4f6f8"
 #: The pages' chip colours, inline: a QLabel doesn't have the pages' stylesheet.
 CHIP_STYLE = {"st-ns": ("#5a6571", "#eef1f4"), "st-ip": ("#1d5e98", "#dbe8f5"), "urgent": ("#b0261e", "#fbe3e1"),
-              "routine": ("#1a1f25", "#e9edf1"), "multi": ("#1d5e98", "#e4eefa")}
+              "routine": ("#1a1f25", "#e9edf1"), "multi": ("#1d5e98", "#e4eefa"), "pri-critical": ("#ffffff", "#c42b1c")}
 
 
 def _chip(text: str, cls: str) -> str:

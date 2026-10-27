@@ -187,6 +187,8 @@ class Stories:
             return f"{f} set to {value}."
         if f == "Urgent":
             return "Marked urgent." if after == "Yes" else "No longer urgent."
+        if f == "Priority":  # release 5.23 (decision 76): a move to another bucket
+            return "No longer ranked." if is_none(after) else f"Ranked {after}." if is_none(before) else f"Priority moved to {after}."
         if f == "Meeting":
             return "Made a meeting." if after == "Yes" else "No longer a meeting."
         if f == "Recurrence":

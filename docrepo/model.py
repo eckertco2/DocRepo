@@ -48,6 +48,9 @@ class Task:
     discard_reason: str | None = None
     #: A plant event (mods log round 2, M0028): an outage or turnaround, drawn as a band across the timeline.
     plant_event: bool = False
+    #: Its priority (mods log round 2, M0029, M0030, release 5.23): a bucket (``priorities.BUCKETS``) and its place in it.
+    priority: str | None = None
+    priority_rank: int | None = None
     leads: list[str] = field(default_factory=list)
     assignees: list[str] = field(default_factory=list)
     labels: list[str] = field(default_factory=list)
@@ -215,6 +218,9 @@ class FileEntry:
 
 #: Today (mods log round 1, M0016): the built-in agenda target that is the owner's list for the day.
 TODAY = "today"
+#: The priorities (mods log round 2, M0029, M0030, decision 23), in order: each bucket's key and name. A task with none
+#: is Not ranked. ``docrepo/priorities.py`` ranks tasks.
+PRIORITY_NAMES = {"critical": "Critical", "high": "High", "medium": "Medium", "parking": "Parking lot"}
 
 
 def is_person(item_id: str | None) -> bool:
@@ -227,7 +233,8 @@ def _unique(items: Iterable[str]) -> list[str]:
 
 _TASK_COLUMNS = (
     "id, title, state, closed, urgent, meeting, recurrence, repeat_until, start, due, deadline, deadline_desc, reminder, "
-    "lead_hours, assignee_hours, inherit_labels, description, current_status, created, created_by, discarded, discard_reason, plant_event"
+    "lead_hours, assignee_hours, inherit_labels, description, current_status, created, created_by, discarded, discard_reason, plant_event, "
+    "priority, priority_rank"
 )
 
 

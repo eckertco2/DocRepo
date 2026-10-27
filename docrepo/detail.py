@@ -24,7 +24,7 @@ from urllib.parse import quote
 from docrepo import capacity, items, markup
 from docrepo.dates import ago, days_words, long_date, monday_of, short, to_date
 from docrepo.links import NO_TEXT, is_link
-from docrepo.model import TODAY, TYPE_NAMES, Capture, Model, Task, is_person
+from docrepo.model import PRIORITY_NAMES, TODAY, TYPE_NAMES, Capture, Model, Task, is_person
 from docrepo.pages import num
 from docrepo.schedule import due_of, is_open, start_of
 from docrepo.stories import Event, RawItem, Stories, clip
@@ -57,6 +57,10 @@ h2 { font-size: 15pt; font-weight: 600; margin-top: 2px; margin-bottom: 4px; }
 .st-pk { color: #585a70; background-color: #eae8f2; }
 .st-cl { color: #87919c; background-color: #e9edf1; }
 .urgent { color: #b0261e; background-color: #fbe3e1; font-weight: 600; }
+.pri-critical { color: #ffffff; background-color: #b0261e; font-weight: 600; }
+.pri-high { color: #875700; background-color: #fcefcf; font-weight: 600; }
+.pri-medium { color: #1d5e98; background-color: #dbe8f5; }
+.pri-parking { color: #5a6571; background-color: #e9edf1; }
 .routine { color: #1a1f25; background-color: #e9edf1; }
 .multi { color: #1d5e98; background-color: #e4eefa; }
 .lbl { color: #1a1f25; background-color: #e9edf1; }
@@ -227,8 +231,12 @@ class Pages:
         return ", ".join(link(f"person:{p}", self.m.person_name(p)) + (f' <span class="sub">{num(hours)} h</span>' if hours else "")
                          for p in person_ids) + per
 
-    def markers_html(self, t: Task) -> str:
-        return "".join(" " + chip(text, cls) for text, cls in markers(self.m, t))
+    def markers_html(self, t: Task, critical: bool = True) -> str:
+        return "".join(" " + chip(text, cls) for text, cls in markers(self.m, t, critical))
+
+    def priority_chip(self, t: Task) -> str:
+        """The task page shows every bucket (release 5.23, decision 77); rows show only Critical."""
+        return f" {chip(PRIORITY_NAMES[t.priority], 'pri-' + t.priority)}" if t.priority in PRIORITY_NAMES else ""
 
     def agenda_block(self, target: str) -> str:
         items = self.m.open_items_for(target)
@@ -281,7 +289,7 @@ class Pages:
             crumbs = f'<p class="crumbs">{" › ".join(self.task_link(x, "tq") for x in chains[0][:-1])} ›{more}</p>'
         labels = "".join(f' <a href="{esc(label_href(name))}" title="{"Inherited from a parent task" if inherited else "Set on this task"}">'
                          f'{chip(name, "lbli" if inherited else "lbl")}</a>' for name, inherited in m.labels_of(t.id))
-        tags = (state_chip(t.state) + self.markers_html(t) + (" " + chip("Meeting", "routine") if t.meeting else "")
+        tags = (state_chip(t.state) + self.priority_chip(t) + self.markers_html(t, critical=False) + (" " + chip("Meeting", "routine") if t.meeting else "")
                 + (" " + chip("Plant event", "new") if t.plant_event else "") + labels)
         desc = ""
         if t.description:

@@ -16,7 +16,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
-from docrepo import capacity
+from docrepo import capacity, priorities
 from docrepo.dates import day_diff, days_text, long_date, monday_of, short, to_date
 from docrepo.lists import LISTS, TaskList, list_tasks
 from docrepo.model import AgendaItem, Model, Task
@@ -48,12 +48,22 @@ TODAY_NOTE = ("Your list for today. Each item stays until you mark it Done, carr
               "while browsing, or Add to Today on its page. The box makes a quick task (under Quick tasks until you file it), or a "
               "note; Ctrl+Shift+D does the same from anywhere. Below it, the tasks due in the next 7 days that aren't on it yet.")
 
+ACTIVITY_NOTE = ("What happened, under the tasks it happened to: captures, changes, document versions and agenda items. For meeting "
+                 "prep, Select, tick tasks or lines, then Add to agenda: a ticked line goes on as its task, with the line as the "
+                 "item's note.")
+PRIORITIES_NOTE = ("Open tasks by priority. Drag a card to another column or within its own, or use the keys: 1 to 4 put the selected "
+                   "card in a bucket and 0 takes it out, Alt+Up and Alt+Down move it within its bucket, the arrow keys move between "
+                   "cards, and Enter opens the task. A move to another column goes into the task's status log. Urgent stays a flag "
+                   "of its own; parked, closed and routine tasks aren't here.")
+
 VIEWS: tuple[ViewDef, ...] = (
     ViewDef("today", "Today", note=TODAY_NOTE),  # mods log round 1, M0016
     ViewDef("unfiled", "Unfiled"),
     ViewDef("tasks", "Task tree"),
     *(ViewDef(x.id, x.label, "Lists", LIST_NOTES[x.id]) for x in LISTS),
     ViewDef("agenda", "Agendas", "Plan"),
+    ViewDef("activity", "Activity", "Plan", ACTIVITY_NOTE),  # mods log round 2, M0032 (release 5.23): docrepo/activity.py
+    ViewDef("priorities", "Priorities", "Plan", PRIORITIES_NOTE),  # M0029, M0030 (release 5.23): docrepo/priorities.py
     ViewDef("timeline", "Timeline", "Plan"),  # mods log round 1, M0019: docrepo/timeline.py
     ViewDef("capacity", "Capacity", "Plan"),
     ViewDef("people", "People", "Manage"),
@@ -70,7 +80,7 @@ LIST_IDS = {x.id: x for x in LISTS}
 #: look's sidebar counts only these (the visual overhaul's stage O10, decision 81).
 ASKS = frozenset({"today", "unfiled", *LIST_IDS})
 #: Views that show tasks, so opening a task from them stays in them.
-TASK_VIEWS = ("today", "tasks", *LIST_IDS, "agenda", "search")
+TASK_VIEWS = ("today", "tasks", *LIST_IDS, "agenda", "activity", "search")
 
 
 def view_counts(m: Model, today: date, me: str | None) -> dict[str, int]:
@@ -132,9 +142,12 @@ def list_date(task_list: TaskList, t: Task, today: date) -> DueDate | None:
     return due_of(t, today)
 
 
-def markers(m: Model, t: Task) -> list[tuple[str, str]]:
-    """The chips after a task's title: (text, kind), kind being urgent, routine or multi."""
+def markers(m: Model, t: Task, critical: bool = True) -> list[tuple[str, str]]:
+    """The chips after a task's title: (text, kind), kind being pri-critical, urgent, routine or multi. Of the priorities,
+    rows show only Critical, as they show Urgent (decision 77); the task page shows every bucket, so it leaves this one out."""
     out = []
+    if critical and t.priority == "critical":
+        out.append((priorities.name("critical"), "pri-critical"))
     if t.urgent:
         out.append(("Urgent", "urgent"))
     if t.recurrence:
@@ -186,10 +199,12 @@ class TreeFilter:
     people: tuple[str, ...] = ()
     #: A task just saved in the capture window: it shows whatever the filters, with its parents, until something else is selected.
     pin: str | None = None
+    #: Tasks in any of these priorities, "" being Not ranked (release 5.23).
+    priorities: tuple[str, ...] = ()
 
     @property
     def filtered(self) -> bool:
-        return bool(self.labels or self.people)
+        return bool(self.labels or self.people or self.priorities)
 
 
 def task_tree(m: Model, f: TreeFilter) -> list[Node]:
@@ -205,7 +220,8 @@ def task_tree(m: Model, f: TreeFilter) -> list[Node]:
 
     def pass_filter(t: Task) -> bool:
         return ((not f.labels or any(name in f.labels for name, _ in m.labels_of(t.id)))
-                and (not f.people or any(p in f.people for p in (*t.leads, *t.assignees))))
+                and (not f.people or any(p in f.people for p in (*t.leads, *t.assignees)))
+                and (not f.priorities or (t.priority or "") in f.priorities))
 
     pinned = {f.pin, *m.ancestors_of(f.pin)} if f.pin and f.pin in m.tasks else set()
     seen: dict[str, bool] = {}
@@ -239,8 +255,8 @@ def task_tree(m: Model, f: TreeFilter) -> list[Node]:
 # ---- sorting ----
 #: How the task tree and the lists can be sorted (mods log round 1, M0015). Each sorts the tasks under each parent, so
 #: the tree keeps its shape. "default" is the view's own order: tree order, or soonest first for a list.
-SORTS: tuple[tuple[str, str], ...] = (("default", "Default order"), ("due", "Due date"), ("title", "Title"), ("state", "State"),
-                                      ("updated", "Last updated"))
+SORTS: tuple[tuple[str, str], ...] = (("default", "Default order"), ("due", "Due date"), ("priority", "Priority"), ("title", "Title"),
+                                      ("state", "State"), ("updated", "Last updated"))
 STATE_ORDER = {"In progress": 0, "Not started": 1, "Parked": 2, "Closed": 3}
 
 
@@ -274,6 +290,8 @@ def sort_tree(m: Model, nodes: list[Node], how: str, today: date) -> list[Node]:
         t = m.task(n.id)
         if how == "due":
             return soonest(n)
+        if how == "priority":  # release 5.23: Critical first, each bucket in its order, Not ranked last
+            return priorities.sort_key(t)
         if how == "title":
             return t.title.casefold()
         if how == "state":
