@@ -2353,11 +2353,16 @@ class CaptureWindow(QWidget):
     def draft(self) -> CaptureDraft:
         """Everything in the window, ready for save_capture."""
         recurrence = self.n_recurrence.currentText() if self.n_recurrence.currentIndex() else None
+        # A plant event's Start counts only when it was typed or Parse and populate read it: the field starts at today,
+        # and an event with no Start is one day (release 5.30).
+        start = self.n_start.value()
+        if self.n_plant.isChecked() and "new.start" not in self.touched and not self.n_start.line.property("filled"):
+            start = None
         new = NewTaskFields(
             title=self.title.text(), labels=self.n_labels.values(), inherit_labels=self.n_inherit.isChecked(),
             leads=self._chips_people(self.n_leads), assignees=self._chips_people(self.n_assignees), due=self.n_due.value(),
             deadline=self.n_deadline.value(), deadline_desc=self.n_deadline_desc.text().strip() or None, urgent=self.n_urgent.isChecked(),
-            meeting=self.n_meeting.isChecked(), state=self.n_state.currentText(), start=self.n_start.value(), reminder=self.n_reminder.value(),
+            meeting=self.n_meeting.isChecked(), state=self.n_state.currentText(), start=start, reminder=self.n_reminder.value(),
             recurrence=recurrence, repeat_until=self.n_repeat.value() if recurrence else None,
             lead_hours=self.n_lead_hours.value(), assignee_hours=self.n_asg_hours.value(), plant_event=self.n_plant.isChecked(),
             references={name: box.text().strip() for name, box in self.n_refs.items() if box.text().strip()},

@@ -664,7 +664,10 @@ def title_text(sentence: str, today: date, tokens: Sequence[str], events: Sequen
     who = rf"(?:{_tokens_re(tokens)}|I|me)(?:\s*(?:,|,?\s*and|&)\s*(?:{_tokens_re(tokens)}|I|me))*" if tokens else ""
     subject = re.compile(rf"^{who}(?:\s+(?:to|will|should|needs\s+to|is\s+going\s+to|must|can)\s+(?!lead\b)|\s*:\s*)", I) if who else None
     clause = re.compile(rf"(?:\s*[,;]|\s+and|\s+[-–—])?\s+{who}\s+(?:will|to|should|needs?\s+to|has\s+to|is\s+going\s+to|must|is\s+[a-z]+ing"
-                        rf"|owns|leads|handles|does)\b", I) if who else None
+                        rf"|owns|leads|handles|does|assists?|assisting)\b", I) if who else None
+    # "…, assign Mike", "…, assigned to Mike and Priya", "… and assignees: Mike, Priya" (mods log round 4, decision 142).
+    assigning = re.compile(rf"(?:\s*[,;]|\s+and|\s+[-–—])\s*(?:assign(?:ed)?\s+(?:(?:this(?:\s+one)?|it)\s+)?(?:to\s*:?\s+)?"
+                           rf"|assignees?(?:\s*[:\-–]\s*|\s+(?:(?:are|is|will\s+be)\s+)?)){who}(?!\w)", I) if who else None
     for _ in range(8):
         was = s
         for lead_in in LEAD_INS:
@@ -691,6 +694,9 @@ def title_text(sentence: str, today: date, tokens: Sequence[str], events: Sequen
     c = clause.search(s) if clause else None
     if c:
         cut(c.start())
+    a = assigning.search(s) if assigning else None
+    if a:
+        cut(a.start())
     dl = re.search(r"[\s,;]+(?:(?:the|a)\s+)?(?:hard\s+)?deadline(?:\s+is|\s*:)|,?\s+(?:led|owned|driven)\s+by\s|,\s+(?:ahead of|in time for|before)\s", s, I)
     if dl:
         cut(dl.start())
@@ -741,19 +747,22 @@ COMMON_WORDS = set((
 NOT_PEOPLE = set((
     "maintenance purchasing procurement engineering operations ops facilities safety quality production finance accounting "
     "management security legal logistics shipping receiving stores warehouse planning scheduling reliability environmental admin payroll "
-    "contractor contractors vendor vendors supplier suppliers supervisor supervisors manager managers crew shift everybody somebody nobody"
+    "contractor contractors vendor vendors supplier suppliers supervisor supervisors manager managers crew shift everybody somebody nobody "
+    "assignee assignees"
 ).split())
 PERSON_BEFORE = [
     (re.compile(r"\b(?:remind|chase|ask|ping|follow\s+up\s+with)\s+\Z", I), "remind"),
     (re.compile(r"\b(?:leads?|owners?)\s*[:\-–]\s*\Z|\b(?:led|owned|driven)\s+by\s+\Z", I), "lead"),
-    (re.compile(r"(?:\bassign(?:ed)?\s+(?:this(?:\s+one)?\s+|it\s+)?to\s*:?\s+|\b(?:give|hand)\s+(?:it\s+|this\s+)?(?:over\s+)?to\s+"
-                r"|\bassignees?\s*[:\-–]\s*|\bhave\s+|@)\Z", I), "asg"),
+    # "Assign to Mike", and since mods log round 4 (decision 142) "assign Mike", "assigned Mike", "assignees Mike and Priya".
+    (re.compile(r"(?:\bassign(?:ed)?\s+(?:this(?:\s+one)?\s+|it\s+)?to\s*:?\s+|\bassign(?:ed)?\s+|\b(?:give|hand)\s+(?:it\s+|this\s+)?(?:over\s+)?to\s+"
+                r"|\bassignees?(?:\s*[:\-–]\s*|\s+(?:(?:are|is|will\s+be)\s+)?)|\bhave\s+|@)\Z", I), "asg"),
 ]
 PERSON_AFTER = [
     # "Tom is lead", "Tom is the lead", "Tom as lead" (mods log round 1), but not "Tom is lead-certified".
     (re.compile(r"^\s+(?:owns|leads|is\s+leading|is\s+driving|will\s+coordinate|will\s+lead|(?:is|will\s+be|as)\s+(?:the\s+)?lead)\b(?!-)", I), "lead"),
+    # "Mike assists", "Mike and Priya assist", "Mike assisting" (mods log round 4, decision 142).
     (re.compile(r"^\s+(?:will|to|should|needs?\s+to|has\s+to|is\s+going\s+to|is\s+(?!going\b)[a-z]+ing|does|handles|covers|takes|completes"
-                r"|prepares|drafts|writes|checks|reviews|updates|books|orders|installs|fixes|runs)\b", I), "asg"),
+                r"|prepares|drafts|writes|checks|reviews|updates|books|orders|installs|fixes|runs|assists?|assisting)\b", I), "asg"),
     (re.compile(r"^\s*[:\-–]?\s*(?:about\s+|~\s*)?\d+(?:\.\d+)?\s*(?:hours?|hrs?|h)\b", I), "asg"),  # "Tom 20 hours", "Mike - 6 h"
 ]
 # New names come only from unmistakable phrases. Group 1 is the name, group 2 a possible surname.

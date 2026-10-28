@@ -19,7 +19,7 @@ KEY_MAP = (
     ("E", "Edit", "", "Edit task", ""),
     ("F", "Find", "", "Ctrl+F finds in this view; Ctrl+Shift+F searches everything", ""),
     ("B", "Browse tool", "Ctrl+Shift+B shows it", "", ""),
-    ("P", "Parse", "", "", "Alt+P runs Parse and populate"),
+    ("P", "Parse, Plan", "", "On the timeline: Plan mode, to drag dates (Ctrl+Z undoes a drop)", "Alt+P runs Parse and populate"),
     ("M", "Meeting notes", "", "Meeting notes for the selected task: its meeting, or a new one under it", "Alt+M turns meeting notes on or off"),
 )
 OTHER_KEYS = (

@@ -47,7 +47,10 @@ def is_open(task: Dated) -> bool:
 
 
 def start_of(task: Dated) -> date:
-    """The task's Start, or the day it was created if Start isn't set."""
+    """The task's Start, or the day it was created if Start isn't set. A plant event without a Start of its own is one
+    day, its Due (or Deadline): an outage typed with only its date isn't a range from the day it was noted (release 5.30)."""
+    if not task.start and getattr(task, "plant_event", False) and (task.due or task.deadline):
+        return to_date(task.due or task.deadline)
     return to_date(task.start or task.created)
 
 

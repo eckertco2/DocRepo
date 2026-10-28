@@ -392,7 +392,8 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
             created = tasks.create_task(
                 conn, settings, title=title, at=at, created_by=via, parents=parents,
                 description=first_line(plain_text(words)) if words and not draft.from_capture else plain_text(source),
-                state=nt.state, start=nt.start if nt.start and nt.start != day else None, due=nt.due, deadline=nt.deadline,
+                # Start left at today is no Start, except for a plant event, whose given Start makes it a range (release 5.30).
+                state=nt.state, start=nt.start if nt.start and (nt.start != day or nt.plant_event) else None, due=nt.due, deadline=nt.deadline,
                 deadline_desc=nt.deadline_desc, reminder=nt.reminder, recurrence=nt.recurrence, repeat_until=nt.repeat_until,
                 urgent=nt.urgent, meeting=nt.meeting, leads=leads, assignees=assignees,
                 lead_hours=nt.lead_hours, assignee_hours=nt.assignee_hours, labels=nt.labels, inherit_labels=nt.inherit_labels,
@@ -562,7 +563,7 @@ def _save_items(conn: sqlite3.Connection, settings: Settings, reading: items.Rea
             task_id = tasks.create_task(
                 conn, settings, title=title, at=at, created_by=cid, parents=where, description=it.text, due=it.due, deadline=it.deadline,
                 deadline_desc=it.deadline_desc or None, reminder=it.reminder, recurrence=it.recurrence or None,
-                start=it.start if it.start and it.start != day else None, urgent=it.urgent, leads=[person(x.who()) for x in it.leads],
+                start=it.start if it.start and (it.start != day or it.plant_event) else None, urgent=it.urgent, leads=[person(x.who()) for x in it.leads],
                 assignees=[person(x.who()) for x in it.assignees], lead_hours=float(it.lead_hours) if it.lead_hours else None,
                 assignee_hours=float(it.assignee_hours) if it.assignee_hours else None, labels=it.labels, plant_event=it.plant_event)
             item_task[it.key] = task_id

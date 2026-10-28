@@ -371,6 +371,23 @@ Made-up versions of what Parse and populate missed in DocRepo's first use (2026-
 | New task | Major event planning meeting with Tom on Friday. | Title "Major event planning meeting with Tom". Due 2026-10-09. Assignees [Tom Becker]. |
 | Update | Now a plant event: the dates moved to 16 to 20 Nov. | Current status "Now a plant event: the dates moved to 16 to 20 Nov.". Due 2026-11-20. Plant event. |
 
+### Naming assignees (mods log round 4)
+
+"Mike assists", "Mike and Priya assist", "assign Mike", "assigned to Mike" and "assignees Mike and Tyler" name the assignees, with known people only, and leave the title, as "Tom leads" does.
+
+| Capture type | Content text | Fills |
+|---|---|---|
+| New task | Survey the existing guards, Mike assists. | Title "Survey the existing guards". Labels [Safety]. Assignees [Mike Ortiz]. |
+| New task | Survey the existing guards, Tom leads, Mike and Priya assist. | Title "Survey the existing guards". Labels [Safety]. Lead [Tom Becker]. Assignees [Mike Ortiz, Priya Shah]. |
+| New task | Survey the existing guards, Tyler assisting. | Title "Survey the existing guards". Labels [Safety]. Assignees [Tyler Nguyen]. |
+| New task | Fabricate the guards, assign Mike. | Title "Fabricate the guards". Labels [Safety]. Assignees [Mike Ortiz]. |
+| New task | Fabricate the guards and assign it to Tyler by Friday. | Title "Fabricate the guards". Due 2026-10-09. Labels [Safety]. Assignees [Tyler Nguyen]. |
+| New task | Install the guards, assigned to Mike and Priya. | Title "Install the guards". Labels [Safety]. Assignees [Mike Ortiz, Priya Shah]. |
+| New task | Install the guards. Assignees Mike and Tyler. | Title "Install the guards". Labels [Safety]. Assignees [Mike Ortiz, Tyler Nguyen]. |
+| New task | Install the guards, assignees: Mike, Priya. | Title "Install the guards". Labels [Safety]. Assignees [Mike Ortiz, Priya Shah]. |
+| New task | Guarding sign-off walkthrough, Tom leads, Mike assists, 3 hours a week, due Nov 20. | Title "Guarding sign-off walkthrough". Due 2026-11-20. Labels [Safety]. Lead [Tom Becker]. Assignees [Mike Ortiz]. Assignee hours 19. |
+| New task | Reassign the old guard drawings to the archive. | Title "Reassign the old guard drawings to the archive". Labels [Safety]. |
+
 ### Reference fields (release 5.9)
 
 Read with two made-up reference fields in Settings, "Work order #" and "Permit no.": a field's name (without its # or no.), then a number. The first for each field counts. The other sections are read with none.

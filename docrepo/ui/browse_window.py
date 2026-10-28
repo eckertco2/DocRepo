@@ -129,6 +129,8 @@ WINDOW_TITLE = "DocRepo"
 VIEWS_HIDDEN_KEY = "browse_views_hidden"
 TODAY_MINE_KEY = "today_due_mine"  # Mine only, on Today's Due in the next 7 days (mods log round 2, M0050)
 NAV_FOLDED_KEY = "browse_nav_folded"  # the sidebar's folded groups (the visual overhaul's decision 10)
+TIMELINE_OPEN_KEY = "timeline_open"  # the timeline's rows whose subtasks are shown (mods log round 4, decision 133)
+TIMELINE_VIEW_KEY = "timeline_view"  # the timeline's range, Order by, bar colours, Hours and Show routine (release 5.29)
 STYLE = """
 QWidget#browse { background: #ffffff; color: #1a1f25; font-family: "Segoe UI"; font-size: 10pt; }
 QWidget#toolbar { background: #f4f6f8; border-bottom: 1px solid #d6dce3; }
@@ -355,9 +357,19 @@ class BrowseWindow(QWidget):
         self.settings_view = SettingsView(self.ctx, self.say, lambda title, text: self.confirm(title, text),
                                           lambda path: self.reveal(path), lambda: self.open_import())
         self.middle.addWidget(self.settings_view)
-        self.timeline = TimelineView()  # mods log round 1, M0019
+        self.timeline = TimelineView()  # mods log round 1, M0019; round 4, M0067 (releases 5.29 and 5.30)
+        self.timeline.open_ids = set(filter(None, (db.get_state(self.ctx.conn, TIMELINE_OPEN_KEY) or "").split(",")))
         self.timeline.open_task.connect(lambda task_id: self.go_task(task_id))
         self.timeline.update_task.connect(lambda task_id: self.open_capture(task=task_id, mode="update"))
+        self.timeline.folds_changed.connect(lambda ids: db.set_state(self.ctx.conn, TIMELINE_OPEN_KEY, ",".join(ids)))
+        try:  # its range, Order by, the bars' colour, Hours and Show routine, as left last time
+            self.timeline.restore(json.loads(db.get_state(self.ctx.conn, TIMELINE_VIEW_KEY) or "{}"))
+        except ValueError:
+            pass
+        self.timeline.settings_changed.connect(lambda kept: db.set_state(self.ctx.conn, TIMELINE_VIEW_KEY, json.dumps(kept)))
+        self.timeline.set_dates.connect(self.set_timeline_dates)
+        self.timeline.quick_edit.connect(self.quick_edit)
+        self.quick_window = None
         self.middle.addWidget(self.timeline)
         self.priorities = PrioritiesView()  # mods log round 2, M0029, M0030 (release 5.23)
         self.priorities.picked.connect(lambda task_id: setattr(self, "sel", ("task", task_id)))
@@ -1650,6 +1662,26 @@ class BrowseWindow(QWidget):
     def move_priority(self, task_id: str, bucket: str, before) -> None:
         """A card dragged, or moved by its key or the buckets above the board."""
         self._do(lambda: edits.set_priority(self.conn, self.ctx.data_root, self.ctx.fs, task_id, bucket, before, self._now()), ("task", task_id))
+
+    def set_timeline_dates(self, task_id: str, start: str | None, due: str | None, said: str) -> None:
+        """A Plan mode drop on the timeline, or Ctrl+Z (release 5.30, decision 136): the dates saved and logged, as Edit
+        task's are."""
+        out = self._do(lambda: edits.change_task(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, task_id, self._now(),
+                                                 start=start, due=due), ("task", task_id))
+        if isinstance(out, edits.Outcome) and not out.problems:
+            self.say(said if out.message != "Nothing changed." else out.message)
+
+    def quick_edit(self, task_id: str, near) -> None:
+        """Quick edit (release 5.30, item 55): the small window for one task's dates, people and hours, beside its bar."""
+        from docrepo.ui.quick_edit import QuickEdit
+
+        if self.quick_window is not None:  # one at a time: closing only hides it
+            self.quick_window.close()
+            self.quick_window.deleteLater()
+        self.quick_window = QuickEdit(self.ctx, task_id, self)
+        self.quick_window.saved.connect(lambda x: (self.refresh(render=False), setattr(self, "sel", ("task", x)), self.render_all()))
+        self.quick_window.open_task.connect(self.go_task)
+        self.quick_window.show_near(near)
 
     def nudge_priority(self, task_id: str, step: int, shown: list) -> None:
         """Alt+Up and Alt+Down on the board: one place up or down in its bucket, not in the status log."""

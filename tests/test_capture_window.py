@@ -621,7 +621,8 @@ def test_reference_fields_and_plant_events_in_the_capture_window(window, ctx):
     window.refresh()
     assert window.update_changes(Model(ctx.conn).task("T000008")) == {"due": "2026-10-27", "references": {"Work order #": "50001"}}
     assert "Work order # → 50001" in window.changes_label.text()
-    assert window.u_during.text() == "Start, Due and Deadline fall during Spring outage prep under work order 48213, Thu 8 Oct to Fri 30 Oct."
+    # The event has no Start of its own, so it is its one day (release 5.30): only the Deadline falls in it.
+    assert window.u_during.text() == "Deadline falls during Spring outage prep under work order 48213, Fri 30 Oct."
     window.save()
     assert Model(ctx.conn).task("T000008").references == {"Work order #": "50001"}
     ctx.settings.reference_fields = []
@@ -661,3 +662,18 @@ def test_an_event_line_makes_a_plant_event(window, ctx):
     event = next(t for t in m.tasks.values() if t.title == "Spring outage")
     assert event.plant_event and (event.start, event.due, event.deadline) == ("2026-11-03", "2026-11-14", None)
     assert m.parents_of(event.id) == ["T000010"]
+
+
+def test_a_plant_event_s_start_counts_only_when_given(window):
+    """Release 5.30: the Start field starts at today, which a plant event doesn't take as its Start unless it was typed or
+    read; with none, the event is one day."""
+    window.set_type("new_task", True)
+    window.title.setText("Boiler inspection")
+    window.n_plant.setChecked(True)
+    window.n_due.set_value("2026-10-30")
+    assert window.n_start.value() == NOW.date().isoformat() and window.draft().new_task.start is None
+    window._touch("new.start", window.n_start)  # typed in it: kept, today or not
+    assert window.draft().new_task.start == NOW.date().isoformat()
+    window.n_plant.setChecked(False)
+    window.touched.discard("new.start")
+    assert window.draft().new_task.start == NOW.date().isoformat()  # any other task keeps the field, as before
