@@ -373,7 +373,7 @@ def test_a_file_dragged_from_file_explorer_becomes_a_file_row(window, tmp_path, 
     from docrepo import outlook
     from docrepo.ui.capture_window import read_drop
 
-    monkeypatch.setattr(outlook, "selected_emails", lambda: pytest.fail("a file drop must not ask Outlook"))
+    monkeypatch.setattr(outlook, "selected_emails", lambda scratch=None: pytest.fail("a file drop must not ask Outlook"))
     report = tmp_path / "Pump curve.pdf"
     report.write_bytes(b"%PDF-1.4")
     mime = _mime([report], EXPLORER_FORMATS)  # Explorer carries Outlook's virtual-file format too
@@ -391,7 +391,7 @@ def test_an_email_dragged_from_outlook_is_read_from_outlook(window, monkeypatch)
     from docrepo.ui.capture_window import read_drop
 
     asked = []
-    monkeypatch.setattr(outlook, "selected_emails", lambda: asked.append(True) or [])
+    monkeypatch.setattr(outlook, "selected_emails", lambda scratch=None: asked.append(True) or [])
     mime = _mime([], ("RenPrivateSourceFolder", "RenPrivateMessages", "FileGroupDescriptorW", "FileContents"))
     assert read_drop(mime) == ("outlook", [])
     _drop(window.content.viewport(), mime)
@@ -405,11 +405,11 @@ def test_an_outlook_failure_always_shows_in_the_window(window, monkeypatch):
     from docrepo import outlook
 
     outlook.PROBLEMS.clear()
-    monkeypatch.setattr(outlook, "selected_emails", lambda: (_ for _ in ()).throw(AttributeError("Selection")))
+    monkeypatch.setattr(outlook, "selected_emails", lambda scratch=None: (_ for _ in ()).throw(AttributeError("Selection")))
     window.add_outlook()
     assert window.error.text().startswith("Outlook didn't give DocRepo the email (AttributeError: Selection).")
     assert outlook.PROBLEMS[-1].step == "adding the selected Outlook email"
-    monkeypatch.setattr(outlook, "selected_emails", lambda: (_ for _ in ()).throw(outlook.OutlookError("No email is selected in Outlook.")))
+    monkeypatch.setattr(outlook, "selected_emails", lambda scratch=None: (_ for _ in ()).throw(outlook.OutlookError("No email is selected in Outlook.")))
     window.add_outlook()
     assert window.error.text() == "No email is selected in Outlook."
 
@@ -419,7 +419,7 @@ def test_an_email_with_refused_fields_is_added_and_says_so(window, monkeypatch):
     from docrepo.save import EmailItem
 
     email = EmailItem("Revised guard delivery", "", "2026-10-08 09:30", "", "", refused=("Body", "SenderName"))
-    monkeypatch.setattr(outlook, "selected_emails", lambda: [email])
+    monkeypatch.setattr(outlook, "selected_emails", lambda scratch=None: [email])
     window.add_outlook()
     assert [e.row.name for e in window.files] == ["Revised guard delivery"]
     assert window.error.text().startswith("Outlook didn't let DocRepo read the email's text and sender, so they are left out;")
@@ -432,7 +432,7 @@ def test_each_email_row_names_its_own_msg_file(window, monkeypatch):
 
     emails = [EmailItem("Seal kit quote", "Tom Becker", "2026-10-14 09:10", "Me", "Quote."),
               EmailItem("RE: Seal kit quote", "Priya Shah", "2026-10-15 11:42", "Me", "Agreed.")]
-    monkeypatch.setattr(outlook, "selected_emails", lambda: emails)
+    monkeypatch.setattr(outlook, "selected_emails", lambda scratch=None: emails)
     window.add_outlook()
     assert [e.note.text() for e in window.files] == ["Saved as email.msg in the capture's folder.",
                                                       "Saved as email 2.msg in the capture's folder."]
@@ -444,7 +444,7 @@ def test_drags_are_noted_for_the_troubleshooting_report(window, monkeypatch):
     from docrepo import diagnose, outlook
 
     diagnose.DRAGS.clear()
-    monkeypatch.setattr(outlook, "selected_emails", lambda: [])
+    monkeypatch.setattr(outlook, "selected_emails", lambda scratch=None: [])
     _drop(window.content.viewport(), _mime([], ("RenPrivateMessages", "FileGroupDescriptorW")))
     assert [(d.stage, d.taken_as, d.urls) for d in diagnose.DRAGS] == [("enter", "outlook", 0), ("drop", "outlook", 0)]
     assert 'application/x-qt-windows-mime;value="RenPrivateMessages"' in diagnose.DRAGS[-1].formats

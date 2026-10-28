@@ -1,16 +1,23 @@
 """Outlook emails, from classic Outlook through COM (pywin32). Phase 3b: it can only be tested where Outlook runs.
 
-DocRepo reads the email selected in Outlook (Add selected Outlook email, and a
-drag that DocRepo's own drop target couldn't take). It reads its subject,
-sender, recipients, time, plain-text and HTML bodies and attachments, and, when
-the capture is saved, writes it as its own .msg file (email.msg, then email
-2.msg and so on) and its attachments into the capture's folder. A dragged email
-and a dropped .msg file are read without Outlook (``docrepo/msg.py``, release 5.33).
+DocRepo reads the email selected in Outlook (Add selected Outlook email, its
+hotkey, and a drag that DocRepo's own drop target couldn't take). Since release
+5.33.1 it copies the email whole first (``copy_whole``): attached to a new email
+that's never saved or sent, and that attachment saved as a .msg file, which
+Outlook's security guard allows, as it allows any attachment's. The .msg is read
+without Outlook (``docrepo/msg.py``), as a dragged email or a dropped .msg file
+is (release 5.33). Only when that fails is the email read field by field, as
+before, which the guard can refuse; then, when the capture is saved, Outlook's
+SaveAs writes its .msg file (email.msg, then email 2.msg and so on) and its
+attachments into the capture's folder.
 
 It never sends, moves or deletes an email. With Settings' "Mark filed emails in
 Outlook" on (release 5.33, the knowledge base's decisions 24 to 26), it adds the
 task's name to each email it files as a category (``mark_filed``), and changes
-nothing else; Outlook's own list of categories is left alone.
+nothing else on it. Since release 5.33.1 (decision 26 as the owner changed it),
+it also adds that category to Outlook's list of categories, in the colour chosen
+in Settings, when it isn't there yet, so it shows; a category already on the
+list keeps its colour, and the colour None leaves the list alone.
 
 Each field is read on its own, so a field Outlook refuses (its security guard
 can refuse the sender, the recipients or the body) leaves only that field out.
@@ -34,10 +41,12 @@ from docrepo.save import Attachment, EmailItem
 
 if TYPE_CHECKING:
     from docrepo.model import Model
+    from docrepo.safe_fs import SafeFS
 
 log = logging.getLogger(__name__)
 
 OL_MAIL = 43  # olMail: a mail item, not a meeting request or a report
+OL_MAIL_ITEM, OL_EMBEDDED_ITEM, OL_DISCARD = 0, 5, 1  # CreateItem's olMailItem, an attached Outlook item, Close without saving
 OL_MSG = 3  # olMSG: SaveAs as an Outlook .msg file
 OL_BY_VALUE = 1  # an attached file, not a link or an embedded item
 PR_ATTACHMENT_HIDDEN = "http://schemas.microsoft.com/mapi/proptag/0x7FFE000B"
@@ -244,8 +253,43 @@ def where_kept(item: object) -> tuple[str, str]:
     return out[0], out[1]
 
 
-def selected_emails() -> list[EmailItem]:
-    """The emails selected in Outlook's main window. Other kinds of item (meetings, tasks) are left out."""
+#: DocRepo's one file for the email Outlook copies whole for Add selected Outlook email (release 5.33.1), in the data
+#: root's System folder. Outlook replaces it each time.
+COPY_FILE = Path("System") / "outlook-email.msg"
+
+
+def copy_path(fs: SafeFS, data_root: Path) -> Path | None:
+    """Where Outlook writes the email it copies whole, checked as inside the data root; None if it can't be."""
+    try:
+        target = fs.checked_path(data_root / COPY_FILE)
+        fs.makedirs(target.parent)
+        return target
+    except OSError:
+        return None
+
+
+def copy_whole(app: object, item: object, scratch: Path) -> EmailItem:
+    """The email, whole, as Outlook's own .msg copy (release 5.33.1): attached to a new email that's never saved or sent,
+    and that attachment saved at ``scratch`` (Attachment.SaveAsFile, which the guard allows), then read without Outlook.
+    The new email is closed without saving. ``scratch`` is DocRepo's one file for this, which Outlook replaces each time."""
+    from docrepo import msg
+
+    draft = app.CreateItem(OL_MAIL_ITEM)  # type: ignore[attr-defined]
+    try:
+        draft.Attachments.Add(item, OL_EMBEDDED_ITEM).SaveAsFile(str(scratch))
+    finally:
+        try:
+            draft.Close(OL_DISCARD)
+        except Exception:  # noqa: BLE001 - never saved, so nothing is left behind either way
+            pass
+    email = msg.read(scratch.read_bytes())
+    email.entry_id, email.store_id = where_kept(item)
+    return email
+
+
+def selected_emails(scratch: Path | None = None) -> list[EmailItem]:
+    """The emails selected in Outlook's main window. Other kinds of item (meetings, tasks) are left out. With ``scratch``
+    (a path in the data root), each is copied whole first (``copy_whole``); one that can't be is read field by field."""
     outlook, _how = connect()
     step = "opening Outlook's main window (ActiveExplorer)"
     try:
@@ -269,6 +313,12 @@ def selected_emails() -> list[EmailItem]:
                            "reading Outlook's selection", f"{len(items)} selected, none an email")
     emails = []
     for item in mails:
+        if scratch is not None:
+            try:
+                emails.append(copy_whole(outlook, item, scratch))
+                continue
+            except Exception as e:  # noqa: BLE001 - the guard, or a damaged copy: read it field by field instead
+                record_problem("copying the email whole (attached to a new email, never saved)", e)
         try:
             emails.append(email_from_item(item))
         except Exception as e:  # noqa: BLE001 - anything not caught field by field
@@ -374,10 +424,37 @@ def category_name(model: Model, task_id: str) -> str:
     return name[:255]
 
 
-def mark_filed(filed: Sequence[tuple[EmailItem, str]], model: Model) -> tuple[int, list[str]]:
+#: Outlook's category colours (OlCategoryColor), in its own order: a colour's number is its place here. "None" leaves
+#: Outlook's list of categories alone, as release 5.33 did.
+COLOURS = ("None", "Red", "Orange", "Peach", "Yellow", "Green", "Teal", "Olive", "Blue", "Purple", "Maroon", "Steel", "Dark steel",
+           "Gray", "Dark gray", "Black", "Dark red", "Dark orange", "Dark peach", "Dark yellow", "Dark green", "Dark teal",
+           "Dark olive", "Dark blue", "Dark purple", "Dark maroon")
+
+
+def colour_number(name: str) -> int:
+    """A colour's number in Outlook (olCategoryColorTeal is 6), or 0 for None or a name it doesn't know."""
+    return COLOURS.index(name) if name in COLOURS else 0
+
+
+def listed(session: object, name: str, colour: str) -> str:
+    """Put the category on Outlook's list, in ``colour``, when it isn't there yet, so it shows in that colour; one already
+    there keeps its own (release 5.33.1). Returns a problem in words, or ""."""
+    number = colour_number(colour)
+    if not number:
+        return ""
+    try:
+        categories = session.Categories  # type: ignore[attr-defined]
+        if name.casefold() not in {categories.Item(n).Name.casefold() for n in range(1, categories.Count + 1)}:
+            categories.Add(name, number)
+        return ""
+    except Exception as e:  # noqa: BLE001
+        return f"The category {name} wasn't added to Outlook's list of categories ({record_problem('adding a category to Outlook’s list', e)})."
+
+
+def mark_filed(filed: Sequence[tuple[EmailItem, str]], model: Model, colour: str = "None") -> tuple[int, list[str]]:
     """Add each filed email's task name to it in Outlook as a category, and save it (decisions 24 to 26). Nothing else
-    on the email changes, and Outlook's list of categories is left alone. Returns how many were marked, and a problem
-    for each that wasn't, in words safe for the notification."""
+    on the email changes. The category goes on Outlook's list in ``colour`` when it isn't there yet (release 5.33.1).
+    Returns how many were marked, and a problem for each that wasn't, in words safe for the notification."""
     if not filed:
         return 0, []
     unplaced = sum(not e.entry_id for e, _ in filed)
@@ -393,6 +470,9 @@ def mark_filed(filed: Sequence[tuple[EmailItem, str]], model: Model) -> tuple[in
         return 0, problems + [f"Emails weren't marked in Outlook ({e if isinstance(e, OutlookError) else record_problem('marking emails', e)})."]
     marked = 0
     separator = list_separator()
+    for name in dict.fromkeys(category_name(model, task) for _, task in todo):
+        if trouble := listed(session, name, colour):
+            problems.append(trouble)
     for email, task in todo:
         try:
             item = session.GetItemFromID(email.entry_id, email.store_id) if email.store_id else session.GetItemFromID(email.entry_id)

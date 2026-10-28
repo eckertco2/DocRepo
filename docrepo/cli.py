@@ -10,7 +10,7 @@ from contextlib import closing
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from docrepo import __version__, backup, capacity, db, diagnose, hotkey, prompts, search
+from docrepo import __version__, backup, capacity, db, diagnose, hotkey, outlook, prompts, search
 from docrepo.config import (
     SETTINGS_FILE,
     Settings,
@@ -255,7 +255,9 @@ def cmd_outlook_check(args: argparse.Namespace) -> int:
     conn.close()
     now = datetime.now()
     trying = bool(getattr(args, "try_category", False))
-    text = diagnose.build_report(root, now, drags=None, check_outlook=lambda: diagnose.outlook_check(try_category=trying))
+    scratch = outlook.copy_path(fs, root)  # where Outlook copies the email whole (release 5.33.1)
+    text = diagnose.build_report(root, now, drags=None, check_outlook=lambda: diagnose.outlook_check(
+        try_category=trying, scratch=scratch, colour=_settings.outlook_category_colour))
     path = diagnose.save_report(fs, root, text, now)
     _utf8_stdout()
     print(text)

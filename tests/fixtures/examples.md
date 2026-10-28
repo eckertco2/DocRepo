@@ -556,6 +556,7 @@ Settings.
   "agenda_hotkey": "",
   "today_hotkey": "",
   "pin_hotkey": "",
+  "outlook_hotkey": "",
   "backup_dir": "C:\\Users\\<user>\\Documents\\DocRepoBackups",
   "backup_every_days": 7,
   "backup_keep": 8,
@@ -582,7 +583,8 @@ Settings.
   "reference_fields": [],
   "look": "new",
   "show_hints": false,
-  "outlook_categories": false
+  "outlook_categories": false,
+  "outlook_category_colour": "Teal"
 }
 ```
 

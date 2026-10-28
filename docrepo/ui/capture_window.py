@@ -2264,7 +2264,20 @@ class CaptureWindow(QWidget):
             self._add_file(FileRow(link_name(url), url), "added")
 
     def add_outlook(self) -> None:
-        self._read_emails(outlook.selected_emails, "adding the selected Outlook email")
+        """The email selected in Outlook, copied whole through an attachment where Outlook allows it (release 5.33.1)."""
+        scratch = outlook.copy_path(self.ctx.fs, self.ctx.data_root)
+        self._read_emails(lambda: outlook.selected_emails(scratch), "adding the selected Outlook email")
+
+    def add_selected_email(self) -> None:
+        """The Outlook email hotkey (release 5.33.1): the email selected in Outlook joins the capture. The pinned window shows
+        it; it opens first when nothing is showing, and otherwise the keyboard stays in Outlook, for the next email."""
+        if not (self.pinned and self.pin_window is not None and self.pin_window.isVisible()) and not self.isVisible():
+            self.pin()
+        if self.pinned and self.pin_window is not None:
+            self.pin_window.show_message("")
+        self.add_outlook()
+        if self.pinned and self.pin_window is not None:
+            self.pin_window.sync()
 
     def _read_emails(self, read: Callable[[], list[EmailItem]], step: str) -> None:
         """Add the emails ``read`` gets from Outlook. Every failure shows here, never silently: under pythonw an error
@@ -2770,7 +2783,7 @@ class CaptureWindow(QWidget):
         found = list(result.problems)
         message = result.message
         if self.ctx.settings.outlook_categories and result.filed_emails:  # release 5.33
-            marked, trouble = outlook.mark_filed(result.filed_emails, self.ctx.model())
+            marked, trouble = outlook.mark_filed(result.filed_emails, self.ctx.model(), self.ctx.settings.outlook_category_colour)
             message += f" Marked {marked} email{'s' if marked != 1 else ''} in Outlook with {'its' if len(result.filed_emails) == 1 else 'their'} task's name." if marked else ""
             found += trouble
         problems = (" Problems: " + " ".join(found)) if found else ""

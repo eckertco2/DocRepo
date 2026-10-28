@@ -29,12 +29,15 @@ HOTKEYS: tuple[tuple[str, str], ...] = (
     ("agenda_hotkey", "Add to agenda"),
     ("today_hotkey", "A quick task on Today"),
     ("pin_hotkey", "Pin the capture window, or bring it back"),
+    ("outlook_hotkey", "Add the email selected in Outlook"),
 )
 HOTKEY_IDS = {setting: n for n, (setting, _label) in enumerate(HOTKEYS, 1)}
 #: The keys Settings offers for the others (mods log round 2, M0036): Ctrl+Shift and the topic's letter, as the owner chose.
 #: While DocRepo runs, a global hotkey is taken from every other program, such as Outlook's Ctrl+Shift+N for a new note.
 SUGGESTED = {"browse_hotkey": "Ctrl+Shift+B", "note_hotkey": "Ctrl+Shift+N", "new_task_hotkey": "Ctrl+Shift+T", "update_hotkey": "Ctrl+Shift+U",
-             "agenda_hotkey": "Ctrl+Shift+A", "today_hotkey": "Ctrl+Shift+D"}
+             "agenda_hotkey": "Ctrl+Shift+A", "today_hotkey": "Ctrl+Shift+D",
+             # Release 5.33.1: E for email. While DocRepo runs it takes Outlook's own Ctrl+Shift+E (a new folder).
+             "outlook_hotkey": "Ctrl+Shift+E"}
 
 
 def parse_hotkey(text: str) -> tuple[int, int]:

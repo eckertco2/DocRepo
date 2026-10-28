@@ -838,9 +838,10 @@ def test_the_suggested_hotkeys(browse):
     view.suggest_hotkeys()
     assert {k: box.text() for k, box in view.more_hotkeys.items()} == {
         "browse_hotkey": "Ctrl+Alt+B", "note_hotkey": "Ctrl+Shift+N", "new_task_hotkey": "Ctrl+Shift+T", "update_hotkey": "Ctrl+Shift+U",
-        "agenda_hotkey": "Ctrl+Shift+A", "today_hotkey": "Ctrl+Shift+D", "pin_hotkey": ""}  # Pin has no suggested key (round 3)
-    assert browse.status.text() == "Filled 5 hotkeys. Save settings to use them."
-    assert view.save() == ["browse_hotkey", "note_hotkey", "new_task_hotkey", "update_hotkey", "agenda_hotkey", "today_hotkey"]
+        "agenda_hotkey": "Ctrl+Shift+A", "today_hotkey": "Ctrl+Shift+D", "pin_hotkey": "",  # Pin has no suggested key (round 3)
+        "outlook_hotkey": "Ctrl+Shift+E"}  # E for email (release 5.33.1)
+    assert browse.status.text() == "Filled 6 hotkeys. Save settings to use them."
+    assert view.save() == ["browse_hotkey", "note_hotkey", "new_task_hotkey", "update_hotkey", "agenda_hotkey", "today_hotkey", "outlook_hotkey"]
 
 
 def test_a_capture_s_edit_shows_its_text_and_goes_to_its_block(browse, ctx):

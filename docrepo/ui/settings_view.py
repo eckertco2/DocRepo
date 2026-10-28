@@ -34,7 +34,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo import backup, capacity, db, diagnose, hotkey, prompts, search, startup
+from docrepo import backup, capacity, db, diagnose, hotkey, outlook, prompts, search, startup
 from docrepo.config import Settings, data_root_problem, init_data_root, make_safe_fs, resolve_data_root, save_location
 from docrepo.dates import WEEKDAYS, long_date
 from docrepo.model import Model
@@ -373,10 +373,16 @@ class SettingsView(QWidget):
         # ---- Outlook (release 5.33) ----
         self.categories = QCheckBox("Mark filed emails in Outlook with their task's name")
         self.categories.setToolTip("Each email a capture files on a task gets the task's name as a category in Outlook")
+        self.colour = QComboBox()
+        for name in outlook.COLOURS:
+            self.colour.addItem("None: leave Outlook's list alone" if name == "None" else name, name)
+        self.colour.setFixedWidth(240)
         self._card(lay, "Outlook", [
             ("Categories", "When a capture with an Outlook email is saved on a task, DocRepo adds the task's name to the email in "
                            "Outlook as a category, so Outlook's search finds it (category:\"Pump trial\"). Nothing else on the email "
-                           "changes, nobody on the email sees it, and Outlook's list of categories is left alone.", self.categories),
+                           "changes, and nobody on the email sees it.", self.categories),
+            ("Category colour", "A new category goes on Outlook's list of categories in this colour, so it shows on the email. One "
+                                "already on the list keeps its own colour.", self.colour),
         ])
 
         # ---- the troubleshooting report, to bring to the personal computer ----
@@ -484,6 +490,7 @@ class SettingsView(QWidget):
         self.hints.setChecked(s.show_hints)
         self.hints.blockSignals(False)
         self.categories.setChecked(s.outlook_categories)
+        self.colour.setCurrentIndex(max(0, self.colour.findData(s.outlook_category_colour)))
         self.startup_status.setText(f"<b>Start when you sign in:</b> {startup.status()}")
         self.show_backup_status()
         self.error.hide()
@@ -498,6 +505,7 @@ class SettingsView(QWidget):
             "extracted_text_cap_chars": self.cap.value(), "prompt_warn_chars": self.warn.value(), "doc_check_minutes": self.check.value(),
             "backup_every_days": self.backup_days.value(), "backup_keep": self.backup_keep.value(),
             "look": self.look.currentData(), "show_hints": self.hints.isChecked(), "outlook_categories": self.categories.isChecked(),
+            "outlook_category_colour": self.colour.currentData(),
         }
 
     def save(self) -> list[str]:
@@ -571,9 +579,10 @@ class SettingsView(QWidget):
         now = self.ctx.now()
         QGuiApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
-            trying = self.try_category.isChecked()
+            trying, colour = self.try_category.isChecked(), self.ctx.settings.outlook_category_colour
+            scratch = outlook.copy_path(self.ctx.fs, self.ctx.data_root)
             text = diagnose.build_report(self.ctx.data_root, now, list(diagnose.DRAGS), drops=list(diagnose.DROPS),
-                                         check_outlook=lambda: diagnose.outlook_check(try_category=trying))
+                                         check_outlook=lambda: diagnose.outlook_check(try_category=trying, scratch=scratch, colour=colour))
             try:
                 path: Path | None = diagnose.save_report(self.ctx.fs, self.ctx.data_root, text, now)
             except (OSError, WriteRefused) as e:

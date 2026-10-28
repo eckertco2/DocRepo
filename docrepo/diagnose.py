@@ -165,10 +165,12 @@ def _length(value: object) -> str:
     return f"{len(value)} characters" if isinstance(value, str) else "empty" if value is None else type(value).__name__
 
 
-def outlook_check(try_category: bool = False) -> tuple[list[Step], str]:
+def outlook_check(try_category: bool = False, scratch: Path | None = None, colour: str = "None") -> tuple[list[Step], str]:
     """Each step DocRepo takes to read the selected email, and how it went. Also returns Outlook's version ("" if it
     wasn't reached). Values are described by their length or count only. ``try_category`` also adds a test category
-    to the email and puts its categories back as they were (release 5.33), to see whether Outlook allows it."""
+    to the email and puts its categories back as they were (release 5.33), and with a ``colour``, puts it on Outlook's
+    list and takes it off again (release 5.33.1). With ``scratch``, the email is copied whole there, as Add selected
+    Outlook email copies it (release 5.33.1)."""
     steps: list[Step] = []
     try:
         import win32com.client
@@ -269,18 +271,37 @@ def outlook_check(try_category: bool = False) -> tuple[list[Step], str]:
             steps.append(Step(name, True, f"ok, {_length(read())}"))
         except Exception as e:  # noqa: BLE001
             steps.append(Step(name, False, outlook.describe(e)))
+    if scratch is not None:
+        try:
+            whole = outlook.copy_whole(app, mail, scratch)
+            steps.append(Step("Copy the email whole (attached to a new email, never saved)", True,
+                              f"ok, {len(whole.msg_bytes or b'')} bytes; read without Outlook: text {_length(whole.body)}, "
+                              f"sender {_length(whole.sender)}, {len(whole.attachments)} attachments"))
+        except Exception as e:  # noqa: BLE001
+            steps.append(Step("Copy the email whole (attached to a new email, never saved)", False, outlook.describe(e)))
     if try_category:
-        steps += category_steps(mail)
+        steps += category_steps(mail, app.Session if colour != "None" else None, colour)
     return steps, version
 
 
 TEST_CATEGORY = "DocRepo test"
 
 
-def category_steps(mail: object) -> list[Step]:
+def category_steps(mail: object, session: object | None = None, colour: str = "None") -> list[Step]:
     """Add a test category to the email, save it, then put its categories back as they were and save again (release
-    5.33). Run only when asked for."""
+    5.33). With a ``session`` and a colour, the test category also goes on Outlook's list in that colour, and comes off
+    again if it wasn't there before (release 5.33.1). Run only when asked for."""
     steps = []
+    if session is not None:
+        try:
+            categories = session.Categories  # type: ignore[attr-defined]
+            had = TEST_CATEGORY.casefold() in {categories.Item(n).Name.casefold() for n in range(1, categories.Count + 1)}
+            if not had:
+                categories.Add(TEST_CATEGORY, outlook.colour_number(colour))
+            steps.append(Step(f"Put {TEST_CATEGORY} on Outlook's list of categories, in {colour}", True, "ok" if not had else "ok, it was there"))
+        except Exception as e:  # noqa: BLE001
+            had = True  # nothing to take off
+            steps.append(Step(f"Put {TEST_CATEGORY} on Outlook's list of categories, in {colour}", False, outlook.describe(e)))
     try:
         was = mail.Categories or ""  # type: ignore[attr-defined]
         steps.append(Step("Read the email's categories", True, f"ok, {len([c for c in was.split(outlook.list_separator()) if c.strip()])} set"))
@@ -298,6 +319,12 @@ def category_steps(mail: object) -> list[Step]:
         steps.append(Step("Put the categories back and save", True, "ok"))
     except Exception as e:  # noqa: BLE001
         steps.append(Step("Put the categories back and save", False, outlook.describe(e)))
+    if session is not None and not had:
+        try:
+            session.Categories.Remove(TEST_CATEGORY)  # type: ignore[attr-defined]
+            steps.append(Step(f"Take {TEST_CATEGORY} off Outlook's list again", True, "ok"))
+        except Exception as e:  # noqa: BLE001
+            steps.append(Step(f"Take {TEST_CATEGORY} off Outlook's list again", False, outlook.describe(e)))
     return steps
 
 

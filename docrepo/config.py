@@ -123,6 +123,8 @@ class Settings:
     agenda_hotkey: str = ""
     today_hotkey: str = ""
     pin_hotkey: str = ""
+    #: Adds the email selected in Outlook to the capture, on the pinned window, from Outlook itself (release 5.33.1).
+    outlook_hotkey: str = ""
     backup_dir: str | None = None
     backup_every_days: int = 7
     backup_keep: int = 8
@@ -143,6 +145,9 @@ class Settings:
     #: Mark filed emails in Outlook (release 5.33, the knowledge base's decisions 24 to 26): each email a capture files on
     #: a task gets the task's name as a category in Outlook. Off until the owner turns it on, since it changes the email.
     outlook_categories: bool = False
+    #: The colour a category gets on Outlook's list of categories when DocRepo puts it there (release 5.33.1, decision 26 as
+    #: the owner changed it): one of ``outlook.COLOURS``; "None" leaves the list alone, so the category shows uncoloured.
+    outlook_category_colour: str = "Teal"
 
     @classmethod
     def load(cls, data_root: Path) -> Settings:

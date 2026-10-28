@@ -47,6 +47,7 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.31 | Key dates (the key dates plan, decisions 146 to 155): any number of dated line items on a task, with Plant activity, Deadline and Done ticks, in Edit task, Quick edit, the capture window, the task page, Today, the lists and the timeline, and the `**date` line; schema version 12 | Built 2026-10-28, without a mock; hand-tested by the owner and on GitHub 2026-10-28. Next: testing on the corporate computer |
 | 5.32 | `#` chooses the task (the knowledge base's phase 0, decisions 28 to 30): one `#` task fills the task picker, and several split a note into a capture per task, with each file going with the section the cursor was in; a note on the capture's own task makes no item; the `@` and `#` list on the pinned window | Built 2026-10-28; hand-tested by the owner and on GitHub 2026-10-28. Next: testing on the corporate computer, with 5.33 |
 | 5.33 | Emails from the drag's own copy, read without Outlook, and the task's name as a category in Outlook (the knowledge base's phase 0, decisions 22 to 27) | Built 2026-10-28; on GitHub 2026-10-28, before the owner's hand test. Next: testing on the corporate computer, with 5.32 |
+| 5.33.1 | Add selected Outlook email copies the email whole, past Outlook's guard; a hotkey for it; and the category's colour on Outlook's list (decision 26 as the owner changed it) | Built 2026-10-28; on GitHub 2026-10-28. Next: testing on the corporate computer |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
 ## Decisions
@@ -481,6 +482,24 @@ The visual overhaul's O10, designed and mocked in the parent workspace (`docs/ui
   - **No button group:** the pane marks the open view itself, so that no row is marked while searching, and a click on the open view keeps it marked.
   - **The totals that left the sidebar** are beside their views' titles ("14 open", "7 active"), as `sidebar.md` said they'd be.
   - **The tooltip** shows only when a name is cut short. The headings' tooltips say Fold or Unfold.
+
+## Release 5.33.1: the mail button past the guard, its hotkey, and the category's colour (2026-10-28)
+
+From the owner's corporate test of 5.33 the same day: dragging an email from Outlook works, whole, and its category is added; but Add selected Outlook email still read the email field by field, which the guard refused (the text, sender and recipients, and SaveAs, so no `email.msg`), and the category showed white, not in Outlook's list of categories. The owner asked for the button to work, a hotkey for it, and a colour on the category. No schema change, no new package.
+
+- `docrepo/outlook.py`: `copy_whole` (the selected email attached to a new email that's never saved, that attachment saved as the `.msg`, which the guard allows as it allows attachments, then read without Outlook); `copy_path` and `COPY_FILE` (`System\outlook-email.msg`); `selected_emails(scratch)` copies each email whole and reads it field by field only when that fails. `COLOURS`, `colour_number` and `listed`: `mark_filed` puts each category on Outlook's list in the chosen colour when it isn't there.
+- `docrepo/hotkey.py`, `docrepo/app.py`: `outlook_hotkey`, "Add the email selected in Outlook", suggested Ctrl+Shift+E. `docrepo/ui/capture_window.py`: `add_selected_email` (the pinned window opens with it when nothing is showing; otherwise the keyboard stays in Outlook) and `add_outlook` with the copy's path.
+- `docrepo/config.py`, `docrepo/ui/settings_view.py`: `outlook_hotkey` and `outlook_category_colour` (Teal), the Outlook card's Category colour. `docrepo/diagnose.py`: the Outlook check copies the email whole (its size, and what was read from it, by length), and the test category goes on Outlook's list and off again; `docrepo/cli.py` passes the copy's path.
+- The hard rules: the category on Outlook's list, and `System\outlook-email.msg`.
+- The mockup's `files.js` and `examples.md` (copied into `tests/fixtures/`): the two settings; `examples.md`'s checksum matches the mockup's export.
+- Tests: `tests/test_email_drop.py` (the copy past a guard that refuses the fields, and the fallback; the category's colour; the test category on the list and off; the hotkey); `tests/test_capture_window.py`'s stand-ins take the copy's path; `tests/test_config.py` and `tests/test_browse_window.py`, the new settings and suggested key.
+
+983 pass in all, 1 skipped. Release 5.33's drop target stands as built: the change tried while the drag looked broken (standing DocRepo's drop target in front of Qt's) wasn't needed and isn't in this release.
+
+## Decisions (release 5.33.1)
+
+- **Decision 26, changed by the owner:** a category DocRepo adds goes on Outlook's list of categories, in a colour, so a filed email shows it. The colour is chosen in Settings (Teal by default), a category already on the list keeps its own, and None keeps release 5.33's way.
+- **Settled while building, for the owner's corporate test:** the copy is made through a new email that's never saved or sent, and closed without saving; Outlook's copy goes to one file in `System`, which it replaces each time, since DocRepo deletes nothing.
 
 ## Release 5.33: emails from the drag's own copy, and categories in Outlook (2026-10-28)
 

@@ -205,10 +205,36 @@ class FakeItem:
         self.saved += 1
 
 
+class FakeCategory:
+    def __init__(self, name: str, colour: int) -> None:
+        self.Name, self.Color = name, colour
+
+
+class FakeCategories:
+    """Outlook's list of categories."""
+
+    def __init__(self, *items: FakeCategory) -> None:
+        self.items = list(items)
+
+    @property
+    def Count(self):  # noqa: N802 - Outlook's names
+        return len(self.items)
+
+    def Item(self, n):  # noqa: N802
+        return self.items[n - 1]
+
+    def Add(self, name, colour=0):  # noqa: N802
+        self.items.append(FakeCategory(name, colour))
+
+    def Remove(self, name):  # noqa: N802
+        self.items = [c for c in self.items if c.Name != name]
+
+
 class FakeSession:
-    def __init__(self, items: dict[str, FakeItem]) -> None:
+    def __init__(self, items: dict[str, FakeItem], categories: FakeCategories | None = None) -> None:
         self.items = items
         self.asked: list[tuple] = []
+        self.Categories = categories or FakeCategories()
 
     def GetItemFromID(self, entry_id, store_id=None):  # noqa: N802
         self.asked.append((entry_id, store_id))
@@ -327,3 +353,124 @@ def test_a_drop_that_cant_be_read_says_so(window):
                               problems=["file 2 couldn't be read (com_error)"]))
     assert window.error.text().startswith("Not all of the drop could be read: file 2 couldn't be read (com_error); Broken.msg: ")
     assert window.files == []
+
+
+# ---- release 5.33.1: the selected email copied whole, its hotkey, and the category's colour ----
+class FakeDraft:
+    """A new email Outlook makes for the copy: the selected email is attached to it, never saved or sent."""
+
+    def __init__(self, data: bytes | None) -> None:
+        self.data = data
+        self.closed: list[int] = []
+        self.Attachments = self
+
+    def Add(self, item, kind):  # noqa: N802 - Outlook's names
+        assert kind == outlook.OL_EMBEDDED_ITEM
+        if self.data is None:
+            raise outlook_error()
+        return self
+
+    def SaveAsFile(self, path):  # noqa: N802
+        open(path, "wb").write(self.data)  # what Outlook does: the attached email as a .msg
+
+    def Close(self, how):  # noqa: N802
+        self.closed.append(how)
+
+
+def outlook_error():
+    import pywintypes
+    return pywintypes.com_error(-2147467260, "Operation aborted", None, None)
+
+
+class FakeMailItem:
+    Class = outlook.OL_MAIL
+    Subject = "Crane booking"
+    EntryID = "E1"
+
+    class Parent:
+        StoreID = "S1"
+
+    def __getattr__(self, name):  # the guard refuses the rest
+        raise outlook_error()
+
+
+class FakeOutlookApp:
+    def __init__(self, data: bytes | None) -> None:
+        self.draft = FakeDraft(data)
+        self.selection = [FakeMailItem()]
+        self.Session = FakeSession({})
+
+    def CreateItem(self, kind):  # noqa: N802
+        assert kind == outlook.OL_MAIL_ITEM
+        return self.draft
+
+    def ActiveExplorer(self):  # noqa: N802
+        return self
+
+    @property
+    def Selection(self):  # noqa: N802
+        items = self.selection
+
+        class S:
+            Count = len(items)
+
+            def Item(self, n):  # noqa: N802
+                return items[n - 1]
+
+        return S()
+
+
+def test_the_selected_email_is_copied_whole_past_the_guard(monkeypatch, tmp_path):
+    data = crane_email()
+    app = FakeOutlookApp(data)
+    monkeypatch.setattr(outlook, "connect", lambda: (app, "fake"))
+    scratch = tmp_path / "System" / "outlook-email.msg"
+    scratch.parent.mkdir()
+    [email] = outlook.selected_emails(scratch)
+    assert (email.subject, email.sender, email.refused) == ("Crane booking", "Ann Example", ())
+    assert email.body.startswith("The crane is booked") and email.msg_bytes == data
+    assert (email.entry_id, email.store_id) == ("E1", "S1") and app.draft.closed == [outlook.OL_DISCARD]  # never saved
+    # Where Outlook refuses the copy too, the email is read field by field, as before.
+    refusing = FakeOutlookApp(None)
+    monkeypatch.setattr(outlook, "connect", lambda: (refusing, "fake"))
+    [partial] = outlook.selected_emails(scratch)
+    assert partial.subject == "Crane booking" and partial.msg_bytes is None and "Body" in partial.refused
+    assert refusing.draft.closed == [outlook.OL_DISCARD]
+
+
+def test_the_category_goes_on_outlooks_list_in_its_colour(env, monkeypatch):
+    m = Model(env[0])
+    item = FakeItem()
+    session = FakeSession({"E1": item}, FakeCategories(FakeCategory("Rigging plan", 1)))
+    monkeypatch.setattr(outlook, "connect", lambda: (FakeApp(session), "fake"))
+    monkeypatch.setattr(outlook, "list_separator", lambda: ",")
+    e1 = EmailItem("Crane booking", "", "", "", "", entry_id="E1")
+    assert outlook.mark_filed([(e1, INSTALLATION)], m, "Teal") == (1, [])
+    assert [(c.Name, c.Color) for c in session.Categories.items] == [("Rigging plan", 1), ("Installation", 6)]
+    e2 = EmailItem("Sling drawing", "", "", "", "", entry_id="E1")
+    outlook.mark_filed([(e2, "T000012")], m, "Teal")
+    assert [(c.Name, c.Color) for c in session.Categories.items] == [("Rigging plan", 1), ("Installation", 6)]  # its own colour stays
+    session.Categories = FakeCategories()
+    outlook.mark_filed([(e1, INSTALLATION)], m, "None")
+    assert session.Categories.items == []  # None leaves the list alone
+    assert outlook.COLOURS[outlook.colour_number("Dark maroon")] == "Dark maroon" and outlook.colour_number("Pink") == 0
+
+
+def test_the_test_category_goes_on_the_list_and_off_again():
+    mail, categories = FakeItem("Red"), FakeCategories()
+    steps = diagnose.category_steps(mail, FakeSession({}, categories), "Teal")
+    assert [s.ok for s in steps] == [True, True, True, True, True] and categories.items == [] and mail.Categories == "Red"
+
+
+def test_the_outlook_hotkey_adds_the_selected_email(window, monkeypatch):
+    from docrepo import hotkey
+    assert ("outlook_hotkey", "Add the email selected in Outlook") in hotkey.HOTKEYS and hotkey.SUGGESTED["outlook_hotkey"] == "Ctrl+Shift+E"
+    asked = []
+    monkeypatch.setattr(outlook, "selected_emails", lambda scratch=None: asked.append(scratch) or [msg.read(crane_email())])
+    window.hide()
+    window.add_selected_email()  # nothing showing: the pinned window opens, with the email
+    assert window.pinned and window.pin_window.isVisible() and window.pin_window.status.text().startswith("1 email")
+    assert asked[0] is not None and asked[0].name == "outlook-email.msg" and asked[0].parent.name == "System"
+    window.add_selected_email()  # again, from Outlook: added to the same capture
+    assert sum(e.row.email is not None for e in window.files) == 2
+    window.pin_window.hide()

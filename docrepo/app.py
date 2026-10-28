@@ -150,6 +150,7 @@ class CaptureApp(QObject):
             hotkey.HOTKEY_IDS["agenda_hotkey"]: lambda: self.window.open_with_hotkey("agenda"),
             hotkey.HOTKEY_IDS["today_hotkey"]: lambda: self.window.open_with_hotkey("today"),
             hotkey.HOTKEY_IDS["pin_hotkey"]: self.window.toggle_pin,
+            hotkey.HOTKEY_IDS["outlook_hotkey"]: self.window.add_selected_email,
         }
         self.register_hotkey()
         self.timer = QTimer(self)
