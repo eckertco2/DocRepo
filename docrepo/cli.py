@@ -77,8 +77,10 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser("make-shortcut", help="make DocRepo.lnk, to move into your Startup folder so DocRepo starts when you sign in")
     set_hotkey = commands.add_parser("set-hotkey", help="choose the capture window's hotkey, such as \"Ctrl+Alt+Space\"")
     set_hotkey.add_argument("keys")
-    commands.add_parser("outlook-check", aliases=["troubleshoot"],
-                        help="check each step of reading the email selected in Outlook, and save a troubleshooting report to bring to the personal computer")
+    check = commands.add_parser("outlook-check", aliases=["troubleshoot"],
+                                help="check each step of reading the email selected in Outlook, and save a troubleshooting report to bring to the personal computer")
+    check.add_argument("--try-category", action="store_true",
+                       help="also add the category DocRepo test to the selected email, then put its categories back (release 5.33)")
     return parser
 
 
@@ -252,7 +254,8 @@ def cmd_outlook_check(args: argparse.Namespace) -> int:
     root, _settings, fs, conn = opened
     conn.close()
     now = datetime.now()
-    text = diagnose.build_report(root, now, drags=None)
+    trying = bool(getattr(args, "try_category", False))
+    text = diagnose.build_report(root, now, drags=None, check_outlook=lambda: diagnose.outlook_check(try_category=trying))
     path = diagnose.save_report(fs, root, text, now)
     _utf8_stdout()
     print(text)

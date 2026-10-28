@@ -46,6 +46,7 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.30 | Planning on the timeline (decisions 136 to 138 and 142 to 145): Plan mode's drags with Ctrl+Z, Focus, Quick edit, and Parse and populate reading "Mike assists", "assign Mike" and "assignees Mike and Priya" | Built 2026-10-27, with 5.29; hand-tested by the owner and on GitHub 2026-10-27. Next: testing on the corporate computer |
 | 5.31 | Key dates (the key dates plan, decisions 146 to 155): any number of dated line items on a task, with Plant activity, Deadline and Done ticks, in Edit task, Quick edit, the capture window, the task page, Today, the lists and the timeline, and the `**date` line; schema version 12 | Built 2026-10-28, without a mock; hand-tested by the owner and on GitHub 2026-10-28. Next: testing on the corporate computer |
 | 5.32 | `#` chooses the task (the knowledge base's phase 0, decisions 28 to 30): one `#` task fills the task picker, and several split a note into a capture per task, with each file going with the section the cursor was in; a note on the capture's own task makes no item; the `@` and `#` list on the pinned window | Built 2026-10-28; hand-tested by the owner and on GitHub 2026-10-28. Next: testing on the corporate computer, with 5.33 |
+| 5.33 | Emails from the drag's own copy, read without Outlook, and the task's name as a category in Outlook (the knowledge base's phase 0, decisions 22 to 27) | Built 2026-10-28; on GitHub 2026-10-28, before the owner's hand test. Next: testing on the corporate computer, with 5.32 |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
 ## Decisions
@@ -480,6 +481,33 @@ The visual overhaul's O10, designed and mocked in the parent workspace (`docs/ui
   - **No button group:** the pane marks the open view itself, so that no row is marked while searching, and a click on the open view keeps it marked.
   - **The totals that left the sidebar** are beside their views' titles ("14 open", "7 active"), as `sidebar.md` said they'd be.
   - **The tooltip** shows only when a name is cut short. The headings' tooltips say Fold or Unfold.
+
+## Release 5.33: emails from the drag's own copy, and categories in Outlook (2026-10-28)
+
+The second part of the knowledge base's phase 0, assigning emails (the parent workspace's `docs/knowledge-base/phase-0-assigning.md`, parts 1 and 2, decisions 22 to 27, taken as recommended on 2026-10-28). The owner's report that a dragged email kept only its subject and sent time, with its attachments, confirmed the cause: Outlook's security guard refuses the email's text, sender, recipients and SaveAs, and not its attachments. No schema change, no new package.
+
+- `docrepo/msg.py` (new): a `.msg` read without Outlook, in memory, with pywin32's structured storage calls (`read`, `is_msg`, `when`, `MsgError`).
+- `docrepo/ui/drop_target.py` (new): `DropOverlay`, the dashed cover with DocRepo's own OLE drop target (`DropTarget`, pywin32's `IDropTarget`), shown on the capture window or the pinned window while a drag of an Outlook email, or of a file with no path on disk, is over it; `read` copies the drag's files into memory during the drop (`descriptors`, `storage_bytes`), and the window handles them after it.
+- `docrepo/ui/capture_window.py`: `take_drop` (each email read from its `.msg` and added with its parts; each other file added as an attachment; where each email is in Outlook, while categories are on); `_drag_entered`, putting the cover up from Qt's drag events; `ContentEdit.drag_entered`; Outlook asked only after a drop has finished (`QTimer.singleShot`); `read_msg_file`, a `.msg` from File Explorer read without Outlook (through Outlook only when that fails); Save marks filed emails in Outlook, and says so. `docrepo/ui/pin_window.py`: its own cover.
+- `docrepo/save.py`: `Attachment.data` (and `save` optional), `EmailItem.msg_bytes`, `entry_id` and `store_id`, `SaveResult.filed_emails`; the `.msg` and attachments written from their bytes with `SafeFS.write_copy`; a picture's having no text to read is no longer listed as a problem.
+- `docrepo/safe_fs.py`: `write_copy` (never overwrites, atomic), and `write_picture` sharing its writing.
+- `docrepo/layer0.py`: with no HTML body, links from the plain text (`read_text`) and pictures from the hidden attachments with a content ID.
+- `docrepo/outlook.py`: `where_kept` (EntryID and StoreID, on emails read through Outlook too), `selected_places`, `match_places`, `list_separator`, `with_category`, `category_name` and `mark_filed`.
+- `docrepo/config.py`, `docrepo/ui/settings_view.py`: `outlook_categories`, off by default, in a new Outlook card; **Also try a test category on the selected email** beside Troubleshooting report. `docrepo/diagnose.py`: `DropNote`, `DROPS`, `note_drop` and the report's section on drops; EntryID and StoreID in the Outlook check; `category_steps`. `docrepo/cli.py`: `outlook-check --try-category`.
+- The hard rules (`.github/copilot-instructions.md`): the app also writes files dragged in from a program that holds them, as handed over; and the Outlook rule, which allows the category and nothing else.
+- The mockup's `files.js` and `examples.md` (copied into `tests/fixtures/`): `outlook_categories` in `settings.json`; `examples.md`'s checksum matches the mockup's export.
+- Tests: `tests/test_email_drop.py` (new) and `tests/msg_builder.py` (made-up `.msg` files laid out as MS-OXMSG says): reading a `.msg`, layer 0 without HTML, a made-up OLE drag copied into memory, the drop target through its COM interface, the files written as handed over, `write_copy`, category names, finding dragged emails in Outlook's selection, marking with a fake Outlook, the test category put back, and the window: a dragged email filed and marked, a `.msg` from File Explorer with no Outlook, and a drop that can't be read. `tests/test_capture_window.py`: Outlook asked only after the drop. `tests/test_config.py`: the new setting.
+
+979 pass in all, 1 skipped. Both covers' drop targets were registered on real windows here (not offscreen). An Outlook drag can't be tried on the personal computer; a file dragged out of a zip folder in File Explorer takes the same route.
+
+## Decisions (release 5.33)
+
+- Decisions 22 to 27 of the knowledge base's phase 0, as recommended.
+- **Settled while building, for the owner's hand test:**
+  - **The cover appears only for drags Qt can't take** (an Outlook email, or a file with no path on disk), so files, links and text dragged in go to Qt as before, and text still drops into the content text.
+  - **Where a dragged email is in Outlook is read only while categories are on**, so with the setting off, a drag never touches Outlook at all.
+  - **A file dropped with no path on disk is an attachment of the capture**, saved in its `attachments` folder, since there's no original to point to.
+  - **Add selected Outlook email is unchanged**: it still reads through Outlook, and its SaveAs can still be refused; dragging is the way past the guard.
 
 ## Release 5.32: `#` chooses the task (2026-10-28)
 

@@ -82,6 +82,8 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Saved copy**: a copy of a file in a task's `Files` folder, made only when Save a copy is checked.
 - **Attachment**: a file inside an Outlook email, saved with that email's capture.
 - **Email layer 0**: the first pass over an Outlook email added to a capture. It gives each of the email's attachments, the links in its body and the pictures in its body a row of its own, each kept or left out with Keep, and records what it kept and left out in the capture. Later layers, such as summaries and tasks from emails, build on it.
+- **The drag's own copy**: the full copy of an email (its `.msg`) that Outlook puts on a drag, which DocRepo's own drop target takes and saves as it is, read without Outlook (release 5.33). An attachment dragged from an email, or a file in a zip folder, comes the same way, as a file with no path on disk.
+- **Outlook category**: the task's name DocRepo adds to an Outlook email it files on that task, with Mark filed emails in Outlook on in Settings (release 5.33), so Outlook's own search finds it. It isn't a label.
 - **Link**: a web or SharePoint address kept as a document, with a file description, in place of a file. Its original is the address. DocRepo never opens or fetches it, so it has no extracted text; Copy link puts it on the clipboard.
 - **Document version**: DocRepo's record that a tracked original has changed, with the difference. It isn't a capture; it becomes part of the raw text log of the tasks linked to that document.
 

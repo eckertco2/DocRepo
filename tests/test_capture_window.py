@@ -395,6 +395,8 @@ def test_an_email_dragged_from_outlook_is_read_from_outlook(window, monkeypatch)
     mime = _mime([], ("RenPrivateSourceFolder", "RenPrivateMessages", "FileGroupDescriptorW", "FileContents"))
     assert read_drop(mime) == ("outlook", [])
     _drop(window.content.viewport(), mime)
+    assert asked == []  # Outlook is asked only once its drag is over (release 5.33)
+    QApplication.processEvents()
     assert asked == [True]
 
 

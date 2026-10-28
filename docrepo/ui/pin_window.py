@@ -30,6 +30,7 @@ from docrepo.text import typed_path
 from docrepo.ui import tokens
 from docrepo.ui.capture_window import ContentEdit, FileEntry, _accept_copy, note_drag, read_drop
 from docrepo.ui.icons import icon, icon_size
+from docrepo.ui.drop_target import DropOverlay
 from docrepo.ui.items_panel import RefPopup
 from docrepo.ui.look import tip
 from docrepo.ui.style import style_sheet
@@ -150,6 +151,7 @@ class PinWindow(QWidget):
         self.text.setDocument(capture.content.document())  # the capture window's own text
         self.text.setPlaceholderText("Type a note, or drop files, emails or links")
         self.text.dropped.connect(self._take)
+        self.text.drag_entered = capture._drag_entered
         lay.addWidget(self.text, 1)
         # The @ and # list (release 5.32): a window of its own, as the pinned window is too small to hold it, which
         # never takes the keyboard from the text, so typing goes on while it's open.
@@ -203,6 +205,8 @@ class PinWindow(QWidget):
         for keys, handler in (("Ctrl+Return", capture.save), ("Ctrl+Enter", capture.save), ("Esc", self._escape),
                               ("F12", capture.unpin)):
             QShortcut(QKeySequence(keys), self, handler)
+        # DocRepo's own drop target, for emails from Outlook (release 5.33): a cover over the whole window while one is dragged.
+        self.drop_overlay = DropOverlay(self, capture.take_drop)
         self._index = 0  # which description shows
         self._count = 0  # how many there were at the last sync, to show a new one as it comes
         self._moved: QPoint | None = None  # where it was dragged to, kept until DocRepo restarts
@@ -333,9 +337,10 @@ class PinWindow(QWidget):
 
     # ---- drops anywhere on it; the landing row lights up ----
     def dragEnterEvent(self, event) -> None:  # noqa: N802
-        if note_drag("enter", event.mimeData(), links=True):
+        if kind := note_drag("enter", event.mimeData(), links=True):
             _accept_copy(event)
             self.drop.over(True)
+            self.capture._drag_entered(kind)
 
     def dragMoveEvent(self, event) -> None:  # noqa: N802
         if read_drop(event.mimeData(), links=True)[0]:

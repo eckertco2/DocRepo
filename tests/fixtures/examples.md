@@ -581,7 +581,8 @@ Settings.
   ],
   "reference_fields": [],
   "look": "new",
-  "show_hints": false
+  "show_hints": false,
+  "outlook_categories": false
 }
 ```
 

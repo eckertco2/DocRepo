@@ -28,6 +28,7 @@ if TYPE_CHECKING:
 #: Pictures smaller than this start unticked: logos and signature pictures are usually a few KB.
 SMALL_BYTES = 10 * 1024
 _SAFE_LINKS = re.compile(r"(?:^|\.)safelinks\.protection\.outlook\.com$", re.IGNORECASE)
+_TEXT_LINK = re.compile(r"(?:https?://|mailto:)[^\s<>\"]+", re.IGNORECASE)
 KINDS = ("attachment", "link", "picture")
 
 
@@ -99,9 +100,20 @@ def unwrap(href: str) -> tuple[str, bool]:
     return href.strip(), False
 
 
+def read_text(body: str) -> list[str]:
+    """The addresses in a plain-text body, in order: Outlook writes a link out there as "text <https://…>". Punctuation
+    ending a sentence after an address isn't part of it."""
+    return [m.rstrip(".,;:!?)]'") for m in _TEXT_LINK.findall(body or "")]
+
+
 def find(email: EmailItem) -> Found:
-    """The email's parts, attachments first, then the links in its body, then the pictures in its body."""
-    hrefs, cids = read_body(email.html)
+    """The email's parts, attachments first, then the links in its body, then the pictures in its body. With no HTML
+    body, as a .msg can have (release 5.33, the knowledge base's decision 23), the links come from the plain text, and
+    the pictures are the hidden attachments with a content ID."""
+    if email.html:
+        hrefs, cids = read_body(email.html)
+    else:
+        hrefs, cids = read_text(email.body), [content_id(a.content_id) for a in email.attachments if a.hidden and a.content_id]
     shown = set(cids)
     attachments: list[Part] = []
     pictures: list[Part] = []

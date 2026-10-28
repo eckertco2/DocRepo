@@ -61,10 +61,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo import diagnose, items, key_dates, outlook, timeline
+from docrepo import diagnose, items, key_dates, msg, outlook, timeline
 from docrepo.db import RECURRENCES, STATES
 from docrepo.extract import extract_text, to_unc
-from docrepo.layer0 import size_text
+from docrepo.layer0 import Part, size_text
 from docrepo.links import is_link, link_name
 from docrepo.text import typed_path
 from docrepo.model import TODAY, Model, is_person
@@ -72,6 +72,7 @@ from docrepo.parse import Found, Known, Who, as_plant_event, parse_capture, quic
 from docrepo.prompts import capture_blocks, load_summary_types, prompt_text
 from docrepo.save import (
     CaptureDraft,
+    Attachment,
     EmailItem,
     FileRow,
     NewTaskFields,
@@ -92,6 +93,7 @@ from docrepo.schedule import is_open, start_of
 from docrepo.tasks import KeyDateRow
 from docrepo.ui import tokens
 from docrepo.ui.context import AppContext
+from docrepo.ui.drop_target import DropOverlay, DropRead
 from docrepo.ui.icons import icon, icon_size
 from docrepo.ui.items_panel import AgendaPanel, ItemCards, OperatorHighlighter, RefPopup, _drop, task_colour, where_text
 from docrepo.ui.keymap import KeyMapDialog
@@ -241,9 +243,15 @@ class ContentEdit(RichEdit):
     takes_headings = True
     folds_here = True
 
+    #: Called with read_drop's answer when a drag comes in (release 5.33): an email or a file with no path on disk puts
+    #: up the window's DropOverlay, for DocRepo's own drop target.
+    drag_entered: Callable[[str], None] | None = None
+
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # noqa: N802 - Qt's name
-        if note_drag("enter", event.mimeData(), self.take_links):
+        if kind := note_drag("enter", event.mimeData(), self.take_links):
             _accept_copy(event)
+            if self.drag_entered:
+                self.drag_entered(kind)
         else:
             super().dragEnterEvent(event)
 
@@ -447,6 +455,8 @@ class CaptureWindow(QWidget):
         self.expanded = False  # Expand (F11): the content text fills the window (mods log round 2, M0046, M0048 phase 1)
         self.pinned = False  # Pin (F12): the small window at the bottom right (mods log round 3, M0053, M0054)
         self.pin_window = None  # made the first time it's pinned (docrepo/ui/pin_window.py)
+        # DocRepo's own drop target, for emails from Outlook (release 5.33): a cover that's up while one is dragged over.
+        self.drop_overlay = DropOverlay(self, self.take_drop)
         self._saving = False
         self.today_on = False  # Today, beside the capture types (M0037)
         self._missing_paths: dict[str, bool] = {}  # path lines that aren't files DocRepo can find, and whether it's said so
@@ -647,6 +657,7 @@ class CaptureWindow(QWidget):
         self.content.setPlaceholderText(CONTENT_PLACEHOLDER)
         self.content.textChanged.connect(self._content_changed)
         self.content.dropped.connect(self.dropped)
+        self.content.drag_entered = self._drag_entered
         self.content.cursorPositionChanged.connect(self._ref_list)
         self.content.cursorPositionChanged.connect(self._tell_missing_paths)
         self.content.list_keys = lambda key: self.ref_popup.handle_key(key)
@@ -1720,8 +1731,9 @@ class CaptureWindow(QWidget):
         super().keyPressEvent(event)
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # noqa: N802 - files can be dropped anywhere on the window
-        if note_drag("enter", event.mimeData(), links=True):
+        if kind := note_drag("enter", event.mimeData(), links=True):
             _accept_copy(event)
+            self._drag_entered(kind)
 
     def dragMoveEvent(self, event) -> None:  # noqa: N802
         if read_drop(event.mimeData(), links=True)[0]:
@@ -1745,10 +1757,46 @@ class CaptureWindow(QWidget):
             for url in paths:
                 self.add_link_url(url)
         elif kind == "outlook":
-            self.add_outlook()
+            # Outlook is asked only after its drag is over: asking during the drop can hang it (release 5.33).
+            QTimer.singleShot(0, self.add_outlook)
         elif kind == "virtual":
             self._fail("These files come from a program that doesn't hand DocRepo a file it can read, such as a zip folder. "
                        "Save or extract them to a folder first, then drop them from there.", self.content)
+        if self.pinned:
+            self.pin_window.sync()
+
+    def _drag_entered(self, kind: str) -> None:
+        """A drag of an email from Outlook, or of a file only a program holds, puts up the cover with DocRepo's own drop
+        target, on the pinned window while pinned (release 5.33)."""
+        if kind in ("outlook", "virtual"):
+            (self.pin_window.drop_overlay if self.pinned and self.pin_window is not None else self.drop_overlay).cover(email=kind == "outlook")
+
+    def take_drop(self, found: DropRead) -> None:
+        """What DocRepo's own drop target took, after the drop (release 5.33): each email as its .msg, read without
+        Outlook, and each other file (an attachment dragged from an email, a file in a zip folder) as its bytes, saved
+        in the capture's attachments folder."""
+        if self.pin_window is not None:
+            self.pin_window.show_message("")
+        emails, problems = [], list(found.problems)
+        for item in found.items:
+            if item.email:
+                try:
+                    emails.append(msg.read(item.data))
+                except msg.MsgError as e:
+                    problems.append(f"{item.name}: {e}")
+            else:
+                a = Attachment(item.name, size=len(item.data), data=item.data)
+                self._add_file(FileRow(item.name, part=Part("attachment", item.name, a, size=len(item.data))), "dropped")
+        if emails and found.outlook and self.ctx.settings.outlook_categories:
+            try:  # where each is in Outlook, to mark it with its task when it's saved
+                outlook.match_places(emails, outlook.selected_places())
+            except outlook.OutlookError:
+                pass  # Save says which couldn't be marked
+        for email in emails:
+            self._add_email(email)
+        if problems:
+            self._fail("Not all of the drop could be read: " + "; ".join(problems) + ". Settings → Troubleshooting report has the details.",
+                       self.content)
         if self.pinned:
             self.pin_window.sync()
 
@@ -2180,7 +2228,7 @@ class CaptureWindow(QWidget):
         for p in paths:
             path = Path(p)
             if path.suffix.lower() == ".msg":
-                self._read_emails(lambda path=path: [outlook.open_msg_file(path)], "reading a dropped .msg file")
+                self._read_emails(lambda path=path: [read_msg_file(path)], "reading a dropped .msg file")
                 continue
             try:
                 is_file, is_dir = path.is_file(), path.is_dir()
@@ -2719,13 +2767,28 @@ class CaptureWindow(QWidget):
             QGuiApplication.restoreOverrideCursor()
         finally:
             self._saving = False
-        problems = (" Problems: " + " ".join(result.problems)) if result.problems else ""
-        self.ctx.notify("Saved", result.message + problems)
+        found = list(result.problems)
+        message = result.message
+        if self.ctx.settings.outlook_categories and result.filed_emails:  # release 5.33
+            marked, trouble = outlook.mark_filed(result.filed_emails, self.ctx.model())
+            message += f" Marked {marked} email{'s' if marked != 1 else ''} in Outlook with {'its' if len(result.filed_emails) == 1 else 'their'} task's name." if marked else ""
+            found += trouble
+        problems = (" Problems: " + " ".join(found)) if found else ""
+        self.ctx.notify("Saved", message + problems)
         self.reset_draft()
         self.forget_draft()
         self._close_pin()
         self.hide()
         self.saved.emit(result)
+
+
+def read_msg_file(path: Path) -> EmailItem:
+    """A .msg file dropped from File Explorer (release 5.33): read without Outlook, and kept as it is; through Outlook
+    only when DocRepo's own reader can't read it."""
+    try:
+        return msg.read(path.read_bytes())
+    except (OSError, msg.MsgError):
+        return outlook.open_msg_file(path)
 
 
 def _as_date(value: str | None) -> date | None:

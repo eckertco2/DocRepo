@@ -370,13 +370,25 @@ class SettingsView(QWidget):
             ("Document checks", "How often tracked documents are checked for changes (a later version).", self.check),
         ])
 
+        # ---- Outlook (release 5.33) ----
+        self.categories = QCheckBox("Mark filed emails in Outlook with their task's name")
+        self.categories.setToolTip("Each email a capture files on a task gets the task's name as a category in Outlook")
+        self._card(lay, "Outlook", [
+            ("Categories", "When a capture with an Outlook email is saved on a task, DocRepo adds the task's name to the email in "
+                           "Outlook as a category, so Outlook's search finds it (category:\"Pump trial\"). Nothing else on the email "
+                           "changes, nobody on the email sees it, and Outlook's list of categories is left alone.", self.categories),
+        ])
+
         # ---- the troubleshooting report, to bring to the personal computer ----
+        self.try_category = QCheckBox("Also try a test category on the selected email")
+        self.try_category.setToolTip("Adds the category DocRepo test to the email selected in Outlook, then puts its categories back")
         report = QPushButton("Troubleshooting report…")
         report.setToolTip("Saved in System\\diagnostics in the data root, and shown here to copy")
         report.clicked.connect(self.troubleshooting_report)
         self._card(lay, "Troubleshooting", [
             ("Troubleshooting report", "DocRepo's versions, a check of reading the email selected in Outlook, recent drags and recent "
-                                       "problems. It leaves out email text, names and addresses. Select an email in Outlook first.", report),
+                                       "problems. It leaves out email text, names and addresses. Select an email in Outlook first.",
+             _row(report, self.try_category)),
         ])
 
         self.error = QLabel(objectName="error")
@@ -471,6 +483,7 @@ class SettingsView(QWidget):
         self.hints.blockSignals(True)
         self.hints.setChecked(s.show_hints)
         self.hints.blockSignals(False)
+        self.categories.setChecked(s.outlook_categories)
         self.startup_status.setText(f"<b>Start when you sign in:</b> {startup.status()}")
         self.show_backup_status()
         self.error.hide()
@@ -484,7 +497,7 @@ class SettingsView(QWidget):
             "reference_fields": [w for w in self.references.text().split(",")],
             "extracted_text_cap_chars": self.cap.value(), "prompt_warn_chars": self.warn.value(), "doc_check_minutes": self.check.value(),
             "backup_every_days": self.backup_days.value(), "backup_keep": self.backup_keep.value(),
-            "look": self.look.currentData(), "show_hints": self.hints.isChecked(),
+            "look": self.look.currentData(), "show_hints": self.hints.isChecked(), "outlook_categories": self.categories.isChecked(),
         }
 
     def save(self) -> list[str]:
@@ -558,7 +571,9 @@ class SettingsView(QWidget):
         now = self.ctx.now()
         QGuiApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
-            text = diagnose.build_report(self.ctx.data_root, now, list(diagnose.DRAGS))
+            trying = self.try_category.isChecked()
+            text = diagnose.build_report(self.ctx.data_root, now, list(diagnose.DRAGS), drops=list(diagnose.DROPS),
+                                         check_outlook=lambda: diagnose.outlook_check(try_category=trying))
             try:
                 path: Path | None = diagnose.save_report(self.ctx.fs, self.ctx.data_root, text, now)
             except (OSError, WriteRefused) as e:

@@ -140,6 +140,9 @@ class Settings:
     #: hints, which brings back the help text, ⓘ buttons and key badges (decision 7). Both take effect when DocRepo starts.
     look: str = "new"
     show_hints: bool = False
+    #: Mark filed emails in Outlook (release 5.33, the knowledge base's decisions 24 to 26): each email a capture files on
+    #: a task gets the task's name as a category in Outlook. Off until the owner turns it on, since it changes the email.
+    outlook_categories: bool = False
 
     @classmethod
     def load(cls, data_root: Path) -> Settings:

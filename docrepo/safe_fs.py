@@ -150,6 +150,17 @@ class SafeFS:
         target = self.checked_path(path)
         if target.suffix.lower() != ".png":
             self._refuse(os.fspath(path), "DocRepo writes pictures only as PNG files")
+        return self._write_new(target, data)
+
+    def write_copy(self, path: PathLike, data: bytes) -> Path:
+        """Write a file the owner dragged in from a program that holds it, exactly as that program handed it over
+        (release 5.33, the knowledge base's decision 22): an Outlook email as its .msg file, the email's attachments, or a
+        file inside a zip folder. It's a copy, like Save a copy's. Never overwrites, and atomically, as ``write_text``
+        does."""
+        return self._write_new(self.checked_path(path), data)
+
+    def _write_new(self, target: Path, data: bytes) -> Path:
+        """Write bytes to a new file at an already checked path, through a temporary file; refuses one that exists."""
         if target.exists():
             raise FileExistsError(f"{target} already exists.")
         self.makedirs(target.parent)

@@ -1,10 +1,16 @@
 """Outlook emails, from classic Outlook through COM (pywin32). Phase 3b: it can only be tested where Outlook runs.
 
-DocRepo reads the emails selected in Outlook (the ones being dragged, or Add
-selected Outlook email) and .msg files dropped from File Explorer. It reads
-their subject, sender, recipients, time, plain-text and HTML bodies and attachments, and,
-when the capture is saved, writes each email as its own .msg file (email.msg,
-then email 2.msg and so on) and its attachments into the capture's folder. It never sends, moves or changes an email.
+DocRepo reads the email selected in Outlook (Add selected Outlook email, and a
+drag that DocRepo's own drop target couldn't take). It reads its subject,
+sender, recipients, time, plain-text and HTML bodies and attachments, and, when
+the capture is saved, writes it as its own .msg file (email.msg, then email
+2.msg and so on) and its attachments into the capture's folder. A dragged email
+and a dropped .msg file are read without Outlook (``docrepo/msg.py``, release 5.33).
+
+It never sends, moves or deletes an email. With Settings' "Mark filed emails in
+Outlook" on (release 5.33, the knowledge base's decisions 24 to 26), it adds the
+task's name to each email it files as a category (``mark_filed``), and changes
+nothing else; Outlook's own list of categories is left alone.
 
 Each field is read on its own, so a field Outlook refuses (its security guard
 can refuse the sender, the recipients or the body) leaves only that field out.
@@ -18,11 +24,16 @@ import logging
 import os
 import re
 from collections import deque
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from docrepo.save import Attachment, EmailItem
+
+if TYPE_CHECKING:
+    from docrepo.model import Model
 
 log = logging.getLogger(__name__)
 
@@ -204,6 +215,7 @@ def email_from_item(item: object) -> EmailItem:
     sent = read_field(i, "SentOn", [])  # a received email's SentOn; a draft has only ReceivedTime or neither
     body = read_field(i, "Body", refused)
     html = read_field(i, "HTMLBody", refused)
+    entry_id, store_id = where_kept(i)
     return EmailItem(
         subject=_text(read_field(i, "Subject", refused)) or "(no subject)",
         sender=_text(read_field(i, "SenderName", refused)),
@@ -214,7 +226,22 @@ def email_from_item(item: object) -> EmailItem:
         save_msg=lambda path: i.SaveAs(str(path), OL_MSG),  # type: ignore[attr-defined]
         refused=tuple(refused),
         html=html if isinstance(html, str) else "",
+        entry_id=entry_id,
+        store_id=store_id,
     )
+
+
+def where_kept(item: object) -> tuple[str, str]:
+    """Where Outlook keeps an item: its EntryID and its folder's StoreID ("" for one Outlook won't give). The security
+    guard doesn't cover them (release 5.33)."""
+    out = []
+    for read in (lambda: item.EntryID, lambda: item.Parent.StoreID):  # type: ignore[attr-defined]
+        try:
+            value = read()
+        except Exception:  # noqa: BLE001
+            value = ""
+        out.append(value if isinstance(value, str) else "")
+    return out[0], out[1]
 
 
 def selected_emails() -> list[EmailItem]:
@@ -253,7 +280,8 @@ def selected_emails() -> list[EmailItem]:
 
 
 def open_msg_file(path: Path) -> EmailItem:
-    """A .msg file dropped from File Explorer, read through Outlook."""
+    """A .msg file dropped from File Explorer, read through Outlook: only when DocRepo's own reader (``docrepo/msg.py``)
+    can't read it."""
     outlook, _how = connect()
     try:
         item = outlook.Session.OpenSharedItem(str(path))  # type: ignore[attr-defined]
@@ -271,6 +299,113 @@ def is_outlook_drop(formats: list[str]) -> bool:
     """True for what Outlook puts on a drag (its own RenPrivate formats): the email isn't a file yet, so it's read from
     Outlook's selection. FileGroupDescriptorW alone doesn't count: File Explorer puts it on every file it drags."""
     return any("RenPrivate" in f for f in formats)
+
+
+# ---- where a dragged email is in Outlook, and its category (release 5.33) ----
+def selected_places() -> list[tuple[str, str, str]]:
+    """The EntryID, StoreID and subject of each email selected in Outlook, which are the emails being dragged. None of
+    these is covered by the security guard. Raises OutlookError."""
+    app, _how = connect()
+    try:
+        selection = app.ActiveExplorer().Selection  # type: ignore[attr-defined]
+        items = [selection.Item(n) for n in range(1, selection.Count + 1)]
+    except Exception as e:  # noqa: BLE001
+        detail = record_problem("reading Outlook's selection, for where the dragged emails are", e)
+        raise OutlookError(f"Outlook didn't say which emails are selected ({detail}).", "reading Outlook's selection", detail) from e
+    out = []
+    for item in items:
+        if getattr(item, "Class", None) != OL_MAIL:
+            continue
+        entry_id, store_id = where_kept(item)
+        out.append((entry_id, store_id, _text(read_field(item, "Subject", []))))
+    return out
+
+
+def match_places(emails: Sequence[EmailItem], places: Sequence[tuple[str, str, str]]) -> int:
+    """Give each dragged email the place in Outlook of the selected email with the same subject, in order; failing that,
+    when as many are selected as were dragged, the one in the same position. Returns how many were placed."""
+    left = [p for p in places if p[0]]
+    placed = 0
+    for n, email in enumerate(emails):
+        match = next((p for p in left if p[2].strip().casefold() == email.subject.strip().casefold()), None)
+        if match is None and len(places) == len(emails) and places[n][0] and places[n] in left:
+            match = places[n]
+        if match is not None:
+            left.remove(match)
+            email.entry_id, email.store_id = match[0], match[1]
+            placed += 1
+    return placed
+
+
+def list_separator() -> str:
+    """The list separator Windows is set to, which Outlook puts between an email's categories: "," in most places."""
+    if os.name == "nt":
+        buffer = ctypes.create_unicode_buffer(8)
+        if ctypes.windll.kernel32.GetLocaleInfoW(0x0400, 0x0C, buffer, 8):  # LOCALE_USER_DEFAULT, LOCALE_SLIST
+            return buffer.value.strip() or ","
+    return ","
+
+
+def with_category(categories: str, name: str, separator: str | None = None) -> str:
+    """An email's categories with ``name`` added at the end, unless it's there already (in any case)."""
+    sep = separator or list_separator()
+    have = [c.strip() for c in (categories or "").split(sep) if c.strip()]
+    if name.casefold() not in {c.casefold() for c in have}:
+        have.append(name)
+    return f"{sep} ".join(have)
+
+
+def category_name(model: Model, task_id: str) -> str:
+    """The category an email filed on a task gets (decision 25): the task's name, with its top-level task's name in
+    brackets when another open task has the same name ("Procurement (Pump trial)"). Commas and semicolons separate
+    categories in Outlook, so they become spaces."""
+    t = model.task(task_id)
+
+    def clean(text: str) -> str:
+        return " ".join(re.sub(r"[,;]", " ", text).split())
+
+    name = clean(t.title)
+    same = [x for x in model.tasks.values() if x.id != t.id and not x.discarded and x.state != "Closed" and clean(x.title).casefold() == name.casefold()]
+    if same:
+        top = t
+        while model.parents_of(top.id):
+            top = model.task(model.parents_of(top.id)[0])
+        name = f"{name} ({clean(top.title) if top.id != t.id else t.id})"
+    return name[:255]
+
+
+def mark_filed(filed: Sequence[tuple[EmailItem, str]], model: Model) -> tuple[int, list[str]]:
+    """Add each filed email's task name to it in Outlook as a category, and save it (decisions 24 to 26). Nothing else
+    on the email changes, and Outlook's list of categories is left alone. Returns how many were marked, and a problem
+    for each that wasn't, in words safe for the notification."""
+    if not filed:
+        return 0, []
+    unplaced = sum(not e.entry_id for e, _ in filed)
+    problems = [f"{unplaced} email{'s' if unplaced != 1 else ''} couldn't be marked in Outlook: DocRepo didn't find "
+                f"{'them' if unplaced != 1 else 'it'} there."] if unplaced else []
+    todo = [(e, task) for e, task in filed if e.entry_id]
+    if not todo:
+        return 0, problems
+    try:
+        app, _how = connect()
+        session = app.Session  # type: ignore[attr-defined]
+    except Exception as e:  # noqa: BLE001
+        return 0, problems + [f"Emails weren't marked in Outlook ({e if isinstance(e, OutlookError) else record_problem('marking emails', e)})."]
+    marked = 0
+    separator = list_separator()
+    for email, task in todo:
+        try:
+            item = session.GetItemFromID(email.entry_id, email.store_id) if email.store_id else session.GetItemFromID(email.entry_id)
+            now = item.Categories or ""
+            new = with_category(now, category_name(model, task), separator)
+            if new != now:
+                item.Categories = new
+                item.Save()
+            marked += 1
+        except Exception as e:  # noqa: BLE001 - moved to another mailbox, deleted, or refused
+            problems.append(f"An email wasn't marked in Outlook ({record_problem('marking an email with its task', e)}).")
+    log.info("Outlook: marked %d of %d filed emails with their task's name", marked, len(filed))
+    return marked, problems
 
 
 #: An email's fields in words, for the line the capture window shows when Outlook holds them back.

@@ -48,14 +48,16 @@ class SaveError(ValueError):
 
 @dataclass
 class Attachment:
-    """An Outlook email's attachment. ``save`` writes it to a path (Outlook's SaveAsFile). Email layer 0 reads its size,
-    its content ID (a picture in the body has one) and whether Outlook hides it."""
+    """An Outlook email's attachment. ``save`` writes it to a path (Outlook's SaveAsFile); or, read from a .msg without
+    Outlook, ``data`` holds its bytes, which DocRepo writes (release 5.33). Email layer 0 reads its size, its content ID
+    (a picture in the body has one) and whether Outlook hides it."""
 
     name: str
-    save: Callable[[Path], None]
+    save: Callable[[Path], None] | None = None
     size: int = 0
     content_id: str = ""
     hidden: bool = False
+    data: bytes | None = None
 
 
 @dataclass
@@ -71,6 +73,12 @@ class EmailItem:
     save_msg: Callable[[Path], None] | None = None
     refused: tuple[str, ...] = ()  # fields Outlook didn't give DocRepo, such as "Body"
     html: str = ""  # the HTML body, where email layer 0 finds the links and pictures
+    #: The email's .msg file as Outlook handed it over in a drag, or as dropped from File Explorer (release 5.33): saved
+    #: as it is, in place of ``save_msg``, and read without Outlook (``docrepo/msg.py``).
+    msg_bytes: bytes | None = None
+    #: Where Outlook keeps it (EntryID and the store's StoreID), to put its task's name on it as a category (release 5.33).
+    entry_id: str = ""
+    store_id: str = ""
 
     def text(self) -> str:
         """The email as it goes into the content text: its header lines, then its body."""
@@ -225,6 +233,8 @@ class SaveResult:
     discussed: int = 0
     #: A note split by # task (release 5.32): each capture it made, in order. The fields above are the first one's.
     parts: list[SaveResult] = field(default_factory=list)
+    #: Each email saved with a task, and the task, for its category in Outlook (release 5.33).
+    filed_emails: list[tuple[EmailItem, str]] = field(default_factory=list)
 
 
 def meeting_case(model: Model, task_id: str | None) -> str:
@@ -394,7 +404,8 @@ def _save_split(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings:
     first = results[0]
     out = SaveResult(first.capture_id, None, None, [], list(dict.fromkeys(name for r in results for name in r.added_people)), "",
                      problems=[x for r in results for x in r.problems], agenda_targets=first.agenda_targets, picked_task=parts[0].task,
-                     items=[c for r in results for c in r.items], made=made, parts=results)
+                     items=[c for r in results for c in r.items], made=made, parts=results,
+                     filed_emails=[x for r in results for x in r.filed_emails])
     model = Model(conn)
     kept = [(p, r) for p, r in zip(parts, results) if r.capture_id]
     said = [f"{r.capture_id}, {'a note on ' + model.task(p.task).title if p.task else 'an unfiled note'}"
@@ -619,6 +630,8 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
             full_content = "\n\n".join([items.store(content, names, formatted)] * bool(content)
                                        + [markup.escape(e.text()) if formatted else e.text() for e in emails])
         _write_files(conn, data_root, fs, settings, capture_id, full_content, emails, documents, copies, created or t, result)
+        filed = model.capture_tasks(model.captures[capture_id])  # the task the capture's page is on, a new task first
+        result.filed_emails = [(e, filed[0]) for e in emails] if filed else []
         for cid, block, block_formatted in item_files:
             try:
                 fs.makedirs(captures.capture_folder(data_root, cid, model.captures[cid].saved))
@@ -773,10 +786,13 @@ def _write_files(
     # Outlook's SaveAs and SaveAsFile replace a file of the same name without asking, so each email and attachment has a
     # name of its own (release 5.26.1).
     for position, email in enumerate(emails):
-        if email.save_msg:
+        if email.msg_bytes is not None or email.save_msg:
             name = msg_name(position)
             try:
-                email.save_msg(fs.checked_path(folder / name))
+                if email.msg_bytes is not None:  # the email as Outlook handed it over, or as dropped (release 5.33)
+                    fs.write_copy(folder / name, email.msg_bytes)
+                else:
+                    email.save_msg(fs.checked_path(folder / name))
             except Exception as e:  # noqa: BLE001 - Outlook can fail in many ways; the capture stays saved
                 result.problems.append(f"The email couldn't be saved as {name} ({type(e).__name__}).")
                 log.warning("capture %s: %s not saved: %s", capture_id, name, type(e).__name__)
@@ -787,15 +803,19 @@ def _write_files(
             target = fs.checked_path(folder / "attachments" / name)
             try:
                 fs.makedirs(target.parent)
-                attachment.save(target)
+                if attachment.data is not None:  # read from the email's .msg, or a file a program handed over (release 5.33)
+                    fs.write_copy(target, attachment.data)
+                elif attachment.save:
+                    attachment.save(target)
                 sources[doc] = target
             except Exception as e:  # noqa: BLE001
                 result.problems.append(f"The attachment {name} couldn't be saved ({type(e).__name__}).")
                 continue
         elif row.path and not is_link(row.path):
             sources[doc] = Path(row.path)
+    pictures = {doc for doc, row, _ in documents if row.part and row.part.kind == "picture"}
     for doc, source in sources.items():
-        _record_text(conn, data_root, fs, settings, doc, source, result)
+        _record_text(conn, data_root, fs, settings, doc, source, result, picture=doc in pictures)
     for doc, name in copies:
         source = sources.get(doc)
         if not source or not holder:
@@ -807,8 +827,10 @@ def _write_files(
             log.warning("capture %s: saved copy %s failed: %s", capture_id, name, type(e).__name__)
 
 
-def _record_text(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, doc: str, source: Path, result: SaveResult) -> None:
-    """Pull a document's plain text into Documents/<id>/extracted.txt, and note its size, time and checksum."""
+def _record_text(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, doc: str, source: Path, result: SaveResult,
+                 picture: bool = False) -> None:
+    """Pull a document's plain text into Documents/<id>/extracted.txt, and note its size, time and checksum. A picture has
+    no text to read, so that isn't a problem (release 5.33)."""
     try:
         info = file_info(source)
     except OSError as e:
@@ -821,7 +843,7 @@ def _record_text(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
             fs.write_text(data_root / "Documents" / doc / "extracted.txt", found.text)
         except OSError as e:
             result.problems.append(f"The text of {source.name} couldn't be saved ({type(e).__name__}).")
-    if found.status in ("none", "error"):
+    if found.status == "error" or found.status == "none" and not picture:
         result.problems.append(f"{source.name}: {found.note}.")
     with transaction(conn):
         conn.execute(

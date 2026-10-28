@@ -66,6 +66,29 @@ DRAGS: deque[DragNote] = deque(maxlen=12)
 UNCAUGHT: deque[tuple[str, str]] = deque(maxlen=10)
 
 
+@dataclass(frozen=True)
+class DropNote:
+    """A drop on DocRepo's own drop target (release 5.33): its formats' names, whether Outlook made it, how each file came
+    (storage, stream or memory) and its size, and what couldn't be read. Never a name or content."""
+
+    at: str
+    formats: tuple[str, ...]
+    outlook: bool
+    forms: tuple[str, ...]
+    sizes: tuple[int, ...]
+    problems: tuple[str, ...]
+
+
+#: This session's drops on DocRepo's own drop target, newest last.
+DROPS: deque[DropNote] = deque(maxlen=12)
+
+
+def note_drop(formats: Sequence[str], from_outlook: bool, forms: Sequence[str], sizes: Sequence[int], problems: Sequence[str]) -> None:
+    DROPS.append(DropNote(datetime.now().strftime("%Y-%m-%d %H:%M:%S"), tuple(formats), from_outlook, tuple(forms), tuple(sizes), tuple(problems)))
+    log.info("drop on DocRepo's drop target: %d formats, %d files (%s)%s", len(formats), len(sizes), ", ".join(forms) or "none",
+             f"; {len(problems)} not read" if problems else "")
+
+
 def note_drag(stage: str, formats: Sequence[str], urls: int, local_files: int, taken_as: str) -> None:
     DRAGS.append(DragNote(datetime.now().strftime("%Y-%m-%d %H:%M:%S"), stage, tuple(formats), urls, local_files, taken_as))
     log.info("drag %s: %d formats, %d urls (%d local), taken as %s", stage, len(formats), urls, local_files, taken_as or "text")
@@ -142,9 +165,10 @@ def _length(value: object) -> str:
     return f"{len(value)} characters" if isinstance(value, str) else "empty" if value is None else type(value).__name__
 
 
-def outlook_check() -> tuple[list[Step], str]:
+def outlook_check(try_category: bool = False) -> tuple[list[Step], str]:
     """Each step DocRepo takes to read the selected email, and how it went. Also returns Outlook's version ("" if it
-    wasn't reached). Values are described by their length or count only."""
+    wasn't reached). Values are described by their length or count only. ``try_category`` also adds a test category
+    to the email and puts its categories back as they were (release 5.33), to see whether Outlook allows it."""
     steps: list[Step] = []
     try:
         import win32com.client
@@ -235,10 +259,46 @@ def outlook_check() -> tuple[list[Step], str]:
                       f"{len(hrefs)} links ({mailto} email addresses, {safe} in Safe Links), {len(cids)} pictures" if html else "no HTML body"))
     try:
         has_save = callable(getattr(mail, "SaveAs", None))
-        steps.append(Step("SaveAs is there (used on Save)", has_save, "yes, not tried here, so no file is left behind" if has_save else "no"))
+        steps.append(Step("SaveAs is there (used by Add selected Outlook email)", has_save,
+                          "yes, not tried here, so no file is left behind" if has_save else "no"))
     except Exception as e:  # noqa: BLE001
-        steps.append(Step("SaveAs is there (used on Save)", False, outlook.describe(e)))
+        steps.append(Step("SaveAs is there (used by Add selected Outlook email)", False, outlook.describe(e)))
+    # Where Outlook keeps it, for its category (release 5.33): the guard doesn't cover these.
+    for name, read in (("Read the email's EntryID", lambda: mail.EntryID), ("Read its folder's StoreID", lambda: mail.Parent.StoreID)):
+        try:
+            steps.append(Step(name, True, f"ok, {_length(read())}"))
+        except Exception as e:  # noqa: BLE001
+            steps.append(Step(name, False, outlook.describe(e)))
+    if try_category:
+        steps += category_steps(mail)
     return steps, version
+
+
+TEST_CATEGORY = "DocRepo test"
+
+
+def category_steps(mail: object) -> list[Step]:
+    """Add a test category to the email, save it, then put its categories back as they were and save again (release
+    5.33). Run only when asked for."""
+    steps = []
+    try:
+        was = mail.Categories or ""  # type: ignore[attr-defined]
+        steps.append(Step("Read the email's categories", True, f"ok, {len([c for c in was.split(outlook.list_separator()) if c.strip()])} set"))
+    except Exception as e:  # noqa: BLE001
+        return [Step("Read the email's categories", False, outlook.describe(e))]
+    try:
+        mail.Categories = outlook.with_category(was, TEST_CATEGORY)  # type: ignore[attr-defined]
+        mail.Save()  # type: ignore[attr-defined]
+        steps.append(Step(f"Add the category {TEST_CATEGORY} and save", True, "ok"))
+    except Exception as e:  # noqa: BLE001
+        steps.append(Step(f"Add the category {TEST_CATEGORY} and save", False, outlook.describe(e)))
+    try:
+        mail.Categories = was  # type: ignore[attr-defined]
+        mail.Save()  # type: ignore[attr-defined]
+        steps.append(Step("Put the categories back and save", True, "ok"))
+    except Exception as e:  # noqa: BLE001
+        steps.append(Step("Put the categories back and save", False, outlook.describe(e)))
+    return steps
 
 
 def security_settings(version: str) -> list[tuple[str, str]]:
@@ -350,8 +410,8 @@ def antivirus_status() -> list[str]:
 
 
 def build_report(data_root: Path | None, now: datetime, drags: Sequence[DragNote] | None,
-                 check_outlook: Callable[[], tuple[list[Step], str]] | None = None) -> str:
-    """The report as Markdown. ``drags`` is None from the command line, where there's no capture window."""
+                 check_outlook: Callable[[], tuple[list[Step], str]] | None = None, drops: Sequence[DropNote] | None = None) -> str:
+    """The report as Markdown. ``drags`` and ``drops`` are None from the command line, where there's no capture window."""
     check_outlook = check_outlook or outlook_check
     lines = ["# DocRepo troubleshooting report", "",
              f"Made {now:%Y-%m-%d %H:%M}. To bring it to the personal computer, copy it (Copy report) or take the file from "
@@ -386,6 +446,18 @@ def build_report(data_root: Path | None, now: datetime, drags: Sequence[DragNote
         lines += ["| When | Stage | Taken as | URLs (local files) | Formats |", "|---|---|---|---|---|"]
         lines += [f"| {d.at} | {d.stage} | {d.taken_as or 'text, or nothing'} | {d.urls} ({d.local_files}) | {_cell(', '.join(short_format(f) for f in d.formats)) or 'none'} |"
                   for d in drags]
+    lines += ["", "## Drops on DocRepo's own drop target", "",
+              "Emails dragged from Outlook (and attachments, and files in zip folders) are taken from the copy the drag carries, "
+              "without asking Outlook (release 5.33). Each drop's formats, how each file came, and its size."]
+    if drops is None:
+        lines += ["", "Not available from the command line."]
+    elif not drops:
+        lines += ["", "None yet since DocRepo started. Drag an email from Outlook onto the capture window or the pinned window: "
+                      "a dashed box appears, and the drop lands there."]
+    else:
+        lines += ["", "| When | From Outlook | Files (how, bytes) | Not read | Formats |", "|---|---|---|---|---|"]
+        lines += [f"| {d.at} | {'yes' if d.outlook else 'no'} | {_cell(', '.join(f'{f} {n}' for f, n in zip(d.forms, d.sizes))) or 'none'} | "
+                  f"{_cell('; '.join(d.problems)) or 'none'} | {_cell(', '.join(d.formats)) or 'none'} |" for d in drops]
     lines += ["", "## Outlook problems since DocRepo started", ""]
     lines += ([f"- {p.at} · {p.step}: {p.detail}" for p in outlook.PROBLEMS] if outlook.PROBLEMS
               else ["None." if drags is not None else "Not available from the command line (they're kept by the running app)."])
