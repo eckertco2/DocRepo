@@ -25,10 +25,12 @@ from PySide6.QtGui import QCursor, QGuiApplication, QKeySequence, QShortcut
 from PySide6.QtWidgets import QCheckBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QToolButton, QVBoxLayout, QWidget
 
 from docrepo.links import is_link
+from docrepo.save import held_text
 from docrepo.text import typed_path
 from docrepo.ui import tokens
 from docrepo.ui.capture_window import ContentEdit, FileEntry, _accept_copy, note_drag, read_drop
 from docrepo.ui.icons import icon, icon_size
+from docrepo.ui.items_panel import RefPopup
 from docrepo.ui.look import tip
 from docrepo.ui.style import style_sheet
 
@@ -45,7 +47,13 @@ ROW = 26
 
 
 def what_was_added(capture: CaptureWindow) -> str:
-    """The pinned window's line for what's in the capture: "3 files, 1 email, 1 link added", or that there's nothing yet."""
+    """The pinned window's line for what's in the capture: "3 files, 1 email, 1 link added", or that there's nothing yet.
+    In a note split by # task, what goes with each task's capture: "Installation: 2 emails · Rigging plan: 1 file"."""
+    parts = capture.split()
+    if parts:
+        m = capture.ctx.model()
+        said = [f"{m.tasks[p.task].title if p.task in m.tasks else 'Unfiled'}: {held}" for p in parts if (held := held_text(p.files))]
+        return " · ".join(said) if said else "Nothing added yet"
     files = emails = links = 0
     for e in capture.files:
         if e.src == "outlook":
@@ -143,6 +151,17 @@ class PinWindow(QWidget):
         self.text.setPlaceholderText("Type a note, or drop files, emails or links")
         self.text.dropped.connect(self._take)
         lay.addWidget(self.text, 1)
+        # The @ and # list (release 5.32): a window of its own, as the pinned window is too small to hold it, which
+        # never takes the keyboard from the text, so typing goes on while it's open.
+        self.ref_popup = RefPopup(self)
+        self.ref_popup.setWindowFlags(Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint
+                                      | Qt.WindowType.WindowDoesNotAcceptFocus)
+        self.ref_popup.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+        self.ref_popup.setStyleSheet(style_sheet())
+        self.ref_popup.picked.connect(capture._pick_ref)
+        self.text.cursorPositionChanged.connect(capture._ref_list)
+        self.text.list_keys = lambda key: self.ref_popup.handle_key(key)
+        self.text.left = lambda: self.ref_popup.hide()
         # ---- the landing row: a path or link, typed or pasted; the email selected in Outlook ----
         self.drop = DropZone()
         dl = QHBoxLayout(self.drop)
@@ -181,7 +200,7 @@ class PinWindow(QWidget):
         self.message.setFixedHeight(2 * self.message.fontMetrics().lineSpacing() + 2)
         lay.addWidget(self.message)
         self.message.hide()
-        for keys, handler in (("Ctrl+Return", capture.save), ("Ctrl+Enter", capture.save), ("Esc", capture.hide_pinned),
+        for keys, handler in (("Ctrl+Return", capture.save), ("Ctrl+Enter", capture.save), ("Esc", self._escape),
                               ("F12", capture.unpin)):
             QShortcut(QKeySequence(keys), self, handler)
         self._index = 0  # which description shows
@@ -204,8 +223,11 @@ class PinWindow(QWidget):
         """The capture's task and types, the current file's description, and what's been added."""
         capture = self.capture
         t = capture.ctx.model().tasks.get(capture.task) if capture.task else None
-        name = t.title if t else "No task picked"
-        self.task_button.setToolTip(f"{name}. The task this capture belongs to")
+        # A task from the text's one # task shows as "#Installation"; several # tasks split the note (release 5.32).
+        name = (f"#{t.title}" if capture.task_auto else t.title) if t else "Split by #task" if capture.split() else "No task picked"
+        self.task_button.setToolTip(f"{t.title}, from the # in the text. The task this capture belongs to" if t and capture.task_auto else
+                                    "Several #tasks in the text: Save makes a capture per task" if not t and name != "No task picked" else
+                                    f"{name}. The task this capture belongs to")
         self.task_button.setText(self.task_button.fontMetrics().elidedText(name, Qt.TextElideMode.ElideRight, WIDTH - 120))
         for key, box in self.type_boxes.items():
             box.setChecked(key in capture.types)
@@ -329,6 +351,17 @@ class PinWindow(QWidget):
         if kind:
             _accept_copy(event)
             self._take(kind, paths)
+
+    def _escape(self) -> None:
+        """Esc closes the @ or # list when it's open, and otherwise hides the pinned window."""
+        if self.ref_popup.isVisible():
+            self.ref_popup.hide()
+        else:
+            self.capture.hide_pinned()
+
+    def hideEvent(self, event) -> None:  # noqa: N802 - the list goes with the window
+        self.ref_popup.hide()
+        super().hideEvent(event)
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Alt+F4 hides it; the draft is kept
         event.ignore()

@@ -45,6 +45,7 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.29 | The timeline as one chart (the mods log round 4, M0067, decisions 133 to 135): a foldable row per project with summary bars, Order by and Colour bars by, hours in the bars, 3 and 12 months, and the plant events lane pinned with the scale | Built 2026-10-27, from the mock's design, with the owner's hand-test changes; hand-tested by the owner and on GitHub 2026-10-27. Next: testing on the corporate computer |
 | 5.30 | Planning on the timeline (decisions 136 to 138 and 142 to 145): Plan mode's drags with Ctrl+Z, Focus, Quick edit, and Parse and populate reading "Mike assists", "assign Mike" and "assignees Mike and Priya" | Built 2026-10-27, with 5.29; hand-tested by the owner and on GitHub 2026-10-27. Next: testing on the corporate computer |
 | 5.31 | Key dates (the key dates plan, decisions 146 to 155): any number of dated line items on a task, with Plant activity, Deadline and Done ticks, in Edit task, Quick edit, the capture window, the task page, Today, the lists and the timeline, and the `**date` line; schema version 12 | Built 2026-10-28, without a mock; hand-tested by the owner and on GitHub 2026-10-28. Next: testing on the corporate computer |
+| 5.32 | `#` chooses the task (the knowledge base's phase 0, decisions 28 to 30): one `#` task fills the task picker, and several split a note into a capture per task, with each file going with the section the cursor was in; a note on the capture's own task makes no item; the `@` and `#` list on the pinned window | Built 2026-10-28; hand-tested by the owner and on GitHub 2026-10-28. Next: testing on the corporate computer, with 5.33 |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
 ## Decisions
@@ -479,6 +480,29 @@ The visual overhaul's O10, designed and mocked in the parent workspace (`docs/ui
   - **No button group:** the pane marks the open view itself, so that no row is marked while searching, and a click on the open view keeps it marked.
   - **The totals that left the sidebar** are beside their views' titles ("14 open", "7 active"), as `sidebar.md` said they'd be.
   - **The tooltip** shows only when a name is cut short. The headings' tooltips say Fold or Unfold.
+
+## Release 5.32: `#` chooses the task (2026-10-28)
+
+The first part of the knowledge base's phase 0, assigning emails (the parent workspace's `docs/knowledge-base/phase-0-assigning.md`, part 3, decisions 28 to 31, taken as recommended on 2026-10-28). With the pinned window's hotkey, a typed `#` task and an email dragged on, an email is filed with no click. Release 5.33 (the email saved from the drag's own copy, and its task's name as a category in Outlook) follows. No schema change, no new package.
+
+- `docrepo/items.py`: `read`'s `own`, the capture's own task: a note naming only it makes no item; a note naming it and others goes on the others. `Section`, `named_tasks`, `sections` and `section_at`.
+- `docrepo/save.py`: `FileRow.section`, `CaptureDraft.split_part` and `own_task`, `SaveResult.parts`; `split_parts`, `part_of`, `held_text` and `_save_split`; `save_capture` reads items with the capture's own task and splits a note naming several `#` tasks; a split part's Add to agenda puts its task on the agenda.
+- `docrepo/notes_page.py`: `own_heading`; `capture_markup` leaves a heading naming only the page's task out of the block.
+- `docrepo/ui/capture_window.py`: `task_auto` and `by_hand` (kept with the draft); `set_task`'s `auto`; `_read`, `_follow_hash` (the one `#` task fills the picker and is followed), `split` (cached per change of the text and files), `_cursor_section`, and each file row's `goes` button and menu (`_show_goes`, `_goes_menu`, `_set_goes`); the task picker's "(from #)" and "None: a capture per #task"; Save's line for a split; a file dropped on the content text moves the cursor there.
+- `docrepo/ui/pin_window.py`: the top line's "#Installation" or "Split by #task", and the added line by task. The `@` and `#` list now opens on the pinned window too, found in the owner's hand test (it followed only the full window's text box, and showed inside the full window, hidden while pinned): a list of its own, a window that never takes the keyboard, under the cursor or above it at the screen's foot (`CaptureWindow._ref_box`); Esc closes it before it hides the pinned window.
+- Tests: `tests/test_hash_task.py` (new): the sections, the own-task rule and its notes page, a split's captures, files, items, agenda and message, what isn't split, empty sections and unticked items, joined parts, and the window: the picker following the text, a hand pick staying, Update, files by the cursor, and the pinned window, with its `@` and `#` list.
+
+966 pass in all, 1 skipped. The capture window and the pinned window were drawn offscreen with a split note and two files, and checked by eye.
+
+## Decisions (release 5.32)
+
+- Decisions 28 to 30 of the knowledge base's phase 0, as recommended.
+- **Settled while building, for the owner's hand test:**
+  - **None picked by hand stops the text picking the task,** so a `#` can still make a note item on an unfiled capture, as before.
+  - **The `#` going leaves Update checked**, with Save saying to pick a task, since the `#` is often being retyped.
+  - **Only Note splits.** New task and Update keep their behaviour, and a task picked by hand means no split.
+  - **The Items cards in a split** still show the headings' notes, each on its task: what the split makes from them is the capture on that task. Unticking one doesn't stop its capture.
+  - **A list item under a plain line isn't part of that line's block** (as items read it since release 5.8), so before the first heading, a note's part is its own line and the list items indented under it, when it's a list item itself.
 
 ## Release 5.31: key dates (2026-10-28)
 

@@ -18,6 +18,7 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Operator**: `@`, `@L.`, `@__`, `#` or `**` in the content text, saying what a line makes (release 5.8): a person, a lead, no one yet, a task it belongs to, or its kind.
 - **Item**: a line of the content text (with the list items under it) that an operator makes into a task, a note, an update or a decision. Saving keeps each as a small capture of its own, linked to the capture it came from (its notes).
 - **Heading**: a line that's only `#` tasks. It covers the lines under it, until the next heading.
+- **Split**: what Save does with a note that names several `#` tasks and has no task picked (release 5.32): a capture per task, each with its part of the text and the files added while the cursor was in it, and an unfiled one for the rest. One `#` task fills the task picker instead.
 - **Meeting notes**: the capture window taking a meeting's notes (Alt+M): expanded, with the meeting's name and its agenda beside the text. The notes are kept on the meeting, and their items made when they're saved.
 - **Unfiled capture**: a capture with no task linked yet.
 - **Filing**: linking an unfiled capture to a task later. The capture's folder doesn't move.

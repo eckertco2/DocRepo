@@ -15,7 +15,7 @@ import logging
 import re
 import sqlite3
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -97,6 +97,9 @@ class FileRow:
     part: layer0.Part | None = None
     of: EmailItem | None = None
     keep: bool = True
+    #: The # task whose section the text cursor was in when it was added: where it goes if several # tasks split the note
+    #: (the knowledge base's decision 30, release 5.32). An email's parts go with the email.
+    section: str | None = None
 
     @property
     def described(self) -> bool:
@@ -178,6 +181,9 @@ class CaptureDraft:
     #: Made on a notes page (release 5.27): a picture pasted or a file dropped there. Its block is the line the page
     #: shows at the caret, so Save doesn't add one at the page's end.
     page_made: bool = False
+    #: One of the captures a note split by # task makes (the knowledge base's decision 29, release 5.32): it isn't split
+    #: again, and Add to agenda puts its task, with its text, on the agenda.
+    split_part: bool = False
 
     def words(self) -> str:
         """The content text's words, without its marks: what titles, descriptions and Parse and populate read."""
@@ -190,8 +196,14 @@ class CaptureDraft:
         return markup.to_plain(content) if self.formatted else content
 
     def agenda_shown(self) -> bool:
-        """Add to agenda applies with New task, with Update on a picked task, or with no task picked."""
-        return "new_task" in self.types or ("update" in self.types and bool(self.task)) or not self.task
+        """Add to agenda applies with New task, with Update on a picked task, or with no task picked, and to each capture
+        a split note makes."""
+        return "new_task" in self.types or ("update" in self.types and bool(self.task)) or not self.task or self.split_part
+
+    def own_task(self) -> str | None:
+        """The capture's own task, whose page its note goes on: a note's or an update's picked task, not a new task's
+        parent, nor a meeting's (items.read's ``own``)."""
+        return self.task if self.task and not self.meeting and ("new_task" not in self.types or "update" in self.types) else None
 
 
 @dataclass
@@ -211,6 +223,8 @@ class SaveResult:
     items: list[str] = field(default_factory=list)
     made: dict[str, int] = field(default_factory=dict)
     discussed: int = 0
+    #: A note split by # task (release 5.32): each capture it made, in order. The fields above are the first one's.
+    parts: list[SaveResult] = field(default_factory=list)
 
 
 def meeting_case(model: Model, task_id: str | None) -> str:
@@ -309,6 +323,96 @@ def _check(draft: CaptureDraft, task_exists: bool) -> None:
         raise SaveError("A note on an agenda needs some content text: it's what goes on the agenda.", "content")
 
 
+# ---- a note split by # task (the knowledge base's phase 0, decisions 29 and 30; release 5.32) ----
+def part_of(row: FileRow, files: list[FileRow], task_ids: list[str]) -> str | None:
+    """Which capture of a split note a file goes with (decision 30): the task whose section the cursor was in when it was
+    added, while that task has a section; else the one for the lines under no # task (None). An email's parts go with
+    the email."""
+    top = row if row.of is None else next((r for r in files if r.email is not None and r.email is row.of), row)
+    return top.section if top.section in task_ids else None
+
+
+def held_text(files: list[FileRow]) -> str:
+    """What a capture's files are, in words: "2 emails, 1 file and 1 link", or "" for none. An email's parts count with it."""
+    emails = sum(r.email is not None for r in files)
+    links = sum(r.of is None and r.email is None and is_link(r.path) for r in files)
+    others = sum(r.of is None and r.email is None and not is_link(r.path) for r in files)
+    return _and_list([f"{n} {word}{'s' if n != 1 else ''}" for n, word in ((emails, "email"), (others, "file"), (links, "link")) if n])
+
+
+def split_parts(draft: CaptureDraft, reading: items.Reading, read_part: Callable[[CaptureDraft], items.Reading]) -> list[CaptureDraft] | None:
+    """A note that names several # tasks, with no task picked and outside meeting notes, as one draft per task, then one
+    for the lines and files under no # task, when there are any (decisions 29 and 30). None when it isn't split.
+    ``read_part`` reads a part's items, so the item cards' changes carry over to them."""
+    if draft.task or draft.meeting or draft.from_capture or draft.split_part or draft.types != {"note"}:
+        return None
+    if len(items.named_tasks(reading)) < 2:
+        return None
+    secs, rest = items.sections(reading)
+    source = (draft.content.strip() if draft.formatted else draft.words()).split("\n")
+    task_ids = [sec.task for sec in secs]
+
+    def part(task: str | None, numbers: list[int]) -> CaptureDraft:
+        lines: list[str] = []
+        moved: dict[int, int] = {}  # a line's number in the whole text, to its number in the part's
+        for n in numbers:
+            if lines and n - 1 not in moved and lines[-1].strip():
+                lines.append("")  # two pieces of one task's part are kept apart by an empty line
+            moved[n] = len(lines)
+            lines.append(source[n] if n < len(source) else "")
+        lead = next((i for i, line in enumerate(lines) if line.strip()), 0)  # the empty lines the part's text loses at its start
+        out = replace(draft, content="\n".join(lines[lead:]).rstrip(), task=task, agenda=list(draft.agenda), item_overrides={},
+                      split_part=True, files=[r for r in draft.files if part_of(r, draft.files, task_ids) == task])
+        if draft.item_overrides:
+            mine = {it.line: it.key for it in read_part(out).items}
+            for key, change in draft.item_overrides.items():
+                it = next((x for x in reading.items if x.key == key), None)
+                if it is not None and it.line in moved and moved[it.line] - lead in mine:
+                    out.item_overrides[mine[moved[it.line] - lead]] = dict(change)
+        return out
+
+    def empty(p: CaptureDraft) -> bool:  # only # headings, and no files: nothing to keep
+        return not p.files and all(not L.raw.strip() or L.heading for L in read_part(p).lines)
+
+    parts = [p for p in (part(sec.task, sec.lines) for sec in secs) if not empty(p)]
+    leftover = part(None, rest)
+    if leftover.words().strip() or leftover.files:
+        parts.append(leftover)
+    return parts if any(p.task for p in parts) else None
+
+
+def _save_split(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, parts: list[CaptureDraft], at: datetime) -> SaveResult:
+    """Save each capture a split note makes (release 5.32), all checked first, so none is saved when one can't be."""
+    model = Model(conn)
+    for p in parts:
+        _check(p, p.task is None or p.task in model.tasks)
+    results = [save_capture(conn, data_root, fs, settings, p, at) for p in parts]
+    made: dict[str, int] = {}
+    for r in results:
+        for kind, n in r.made.items():
+            made[kind] = made.get(kind, 0) + n
+    first = results[0]
+    out = SaveResult(first.capture_id, None, None, [], list(dict.fromkeys(name for r in results for name in r.added_people)), "",
+                     problems=[x for r in results for x in r.problems], agenda_targets=first.agenda_targets, picked_task=parts[0].task,
+                     items=[c for r in results for c in r.items], made=made, parts=results)
+    model = Model(conn)
+    kept = [(p, r) for p, r in zip(parts, results) if r.capture_id]
+    said = [f"{r.capture_id}, {'a note on ' + model.task(p.task).title if p.task else 'an unfiled note'}"
+            + (f" with {held}" if (held := held_text(p.files)) else "") for p, r in kept]
+    text = f"Saved {len(kept)} capture{'s' if len(kept) != 1 else ''}, one per #task: {'; '.join(said)}."
+    if out.agenda_targets:
+        others = [model.target_name(x) for x in out.agenda_targets if x != TODAY]
+        text += " Each is on " + " and ".join(["Today"] * (TODAY in out.agenda_targets) + [f"the agenda of {_and_list(others)}"] * bool(others)) + "."
+    counts = [f"{n} {items.KIND_NAMES[k].lower()}{'s' if n > 1 else ''}" for k, n in made.items() if n]
+    if counts:
+        text += f" Made {_and_list(counts)} from their items."
+    if out.added_people:
+        text += f" Added {' and '.join(out.added_people)} to people."
+    out.message = text
+    log.info("note split by #task into %s", ", ".join(r.capture_id or "(none kept)" for r in results))
+    return out
+
+
 def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, draft: CaptureDraft, at: datetime) -> SaveResult:
     """Save what's in the capture window. Raises SaveError, changing nothing, if something is missing."""
     if draft.from_capture:
@@ -336,9 +440,15 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
     # Items (release 5.8): read from the content text's words, never from an email. capture.md keeps each @ and # with
     # its ID; titles read the words without the operators.
     names = item_names(model0, settings, draft.refs)
+    labels = _parse_labels(model0)
     reading = None if draft.from_capture else items.read(
-        draft.lines(), names, at.date(), labels=_parse_labels(model0), events=settings.event_words,
-        home=bool(t) or is_new or draft.meeting, new_task=is_new, overrides=draft.item_overrides)
+        draft.lines(), names, at.date(), labels=labels, events=settings.event_words,
+        home=bool(t) or is_new or draft.meeting, new_task=is_new, overrides=draft.item_overrides, own=draft.own_task())
+    # Several # tasks, with no task picked, split a note into a capture per task (release 5.32).
+    parts = split_parts(draft, reading, lambda p: items.read(p.lines(), names, at.date(), labels=labels, events=settings.event_words,
+                                                            home=bool(p.task), overrides=p.item_overrides, own=p.own_task())) if reading else None
+    if parts:
+        return _save_split(conn, data_root, fs, settings, parts, at)
     own = items.self_fields(reading, names) if reading and is_new else None
     # capture.md keeps the markup, with each email's text escaped so it reads as itself; the rest reads the words.
     full_content = "\n\n".join([items.store(content, names, formatted)] * bool(content)
@@ -482,10 +592,11 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
                         taken.add(name)
                         captures.add_saved_copy(conn, task=holder, name=name, document=doc, from_capture=capture_id)
                         copies.append((doc, name))
-        subject = created if is_new else t if is_upd else None
+        subject = created if is_new else t if is_upd or draft.split_part else None
         note_text = "" if is_new else plain_text(words)
         for target in targets:
-            agenda.add_item(conn, subject=subject, target=target, note=note_text, added=when, added_by=via)
+            # A split note's task on its own agenda is the note alone: a task can't be on its own agenda.
+            agenda.add_item(conn, subject=None if subject == target else subject, target=target, note=note_text, added=when, added_by=via)
         item_files: list[tuple[str, str, bool]] = []  # (item capture, its block, whether it's markup)
         made: dict[str, int] = {}
         if capture_id and reading:

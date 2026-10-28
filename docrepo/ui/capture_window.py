@@ -82,8 +82,11 @@ from docrepo.save import (
     item_names,
     meeting_case,
     meeting_name,
+    held_text,
     msg_name,
+    part_of,
     save_capture,
+    split_parts,
 )
 from docrepo.schedule import is_open, start_of
 from docrepo.tasks import KeyDateRow
@@ -185,6 +188,7 @@ class FileEntry:
     keep: QCheckBox | None = None  # an email's part: whether it's kept
     layer0: QLabel | None = None  # an email's row: what email layer 0 kept and left out
     note: QLabel | None = None  # the line beside its name (_file_note); an email's names its .msg file
+    goes: QToolButton | None = None  # in a note split by # task, which capture it goes with (release 5.32)
     what: str = ""  # the description's question, the start of its placeholder
 
 
@@ -254,6 +258,8 @@ class ContentEdit(RichEdit):
         kind, paths = read_drop(event.mimeData(), self.take_links)
         if kind:
             _accept_copy(event)
+            # The cursor goes where it was dropped: in a note split by # task, the file goes with that section (release 5.32).
+            self.setTextCursor(self.cursorForPosition(event.position().toPoint()))
             self.dropped.emit(kind, paths)
         else:
             super().dropEvent(event)
@@ -1322,10 +1328,9 @@ class CaptureWindow(QWidget):
         if self.from_capture:
             self.reading = None
         else:
-            m = self.ctx.model()
-            self.reading = items.read(self.content.plain(), self.names(), self.ctx.now().date(), labels=self.ctx.parse_labels(m),
-                                      events=self.ctx.settings.event_words, home=bool(self.task) or new or self.meeting_on, new_task=new,
-                                      overrides=self.item_ov)
+            self.reading = self._read()
+            if self._follow_hash():
+                self.reading = self._read()
         self._highlighting = True
         try:
             self.highlighter.set_reading(self.reading)
@@ -1339,6 +1344,86 @@ class CaptureWindow(QWidget):
         self.item_cards.setVisible(not self.from_capture and (bool(self.item_cards.cards) or LOOK.show_help))
         self._show_agenda()
         self.side.setVisible(not self.item_cards.isHidden() or not self.agenda_panel.isHidden())
+        self.refresh()
+
+    def _read(self) -> items.Reading:
+        """The content text's items, as Save will read them."""
+        m = self.ctx.model()
+        new = "new_task" in self.types and not self.meeting_on and not self.from_capture
+        own = self.task if self.task and not self.meeting_on and (not new or "update" in self.types) else None
+        return items.read(self.content.plain(), self.names(), self.ctx.now().date(), labels=self.ctx.parse_labels(m),
+                          events=self.ctx.settings.event_words, home=bool(self.task) or new or self.meeting_on, new_task=new,
+                          overrides=self.item_ov, own=own)
+
+    def _follow_hash(self) -> bool:
+        """One # task in the content text fills the task picker, until a task is picked by hand; the # going, or a second
+        # task, empties it again (the knowledge base's decision 28, release 5.32). True when the task changed."""
+        if self.by_hand or self.meeting_on or self.from_capture or not self.reading or (self.task and not self.task_auto):
+            return False
+        m = self.ctx.model()
+        named = [t for t in items.named_tasks(self.reading) if t in m.tasks and not m.tasks[t].discarded]
+        want = named[0] if len(named) == 1 else None
+        if want == self.task:
+            return False
+        self.task, self.task_auto = want, bool(want)
+        if want and "update" in self.types:
+            self.prefill()
+        return True
+
+    def split(self) -> list[CaptureDraft] | None:
+        """The captures Save makes when several # tasks split this note (the knowledge base's decision 29, release 5.32),
+        as save_capture's split_parts makes them, or None when it isn't split."""
+        if self.task or self.meeting_on or self.from_capture or self.types != {"note"} or not self.reading:
+            return None
+        if len(items.named_tasks(self.reading)) < 2:
+            return None
+        content, formatted = self.content.value()
+        key = (content, formatted, tuple((id(e.row), e.row.section) for e in self.files))
+        if key == getattr(self, "_split_key", None):  # refresh runs on each key pressed: the parts are read once per change
+            return self._split_parts
+        draft = CaptureDraft(content=content, formatted=formatted, files=[e.row for e in self.files])
+        names, today = self.names(), self.ctx.now().date()
+
+        def read(p: CaptureDraft) -> items.Reading:
+            return items.read(p.lines(), names, today, home=bool(p.task), own=p.own_task())
+
+        self._split_key, self._split_parts = key, split_parts(draft, read(draft), read)
+        return self._split_parts
+
+    def _cursor_section(self) -> str | None:
+        """The # task whose section holds the text cursor: where a file added now goes, if several # tasks split the note
+        (decision 30). Read afresh, as if no task were picked, so a # that's also the picked task counts."""
+        box = self.pin_window.text if self.pinned and self.pin_window is not None else self.content
+        reading = items.read(self.content.plain(), self.names(), self.ctx.now().date())
+        return items.section_at(reading, box.textCursor().blockNumber())
+
+    def _show_goes(self, parts: list[CaptureDraft] | None) -> None:
+        """Each file's row says which capture of a split note it goes with, and its menu changes it (decision 30)."""
+        m = self.ctx.model()
+        ids = [p.task for p in parts or [] if p.task]
+        rows = [e.row for e in self.files]
+        for e in self.files:
+            if e.goes is None:
+                continue
+            e.goes.setVisible(bool(parts))
+            if parts:
+                task = part_of(e.row, rows, ids)
+                e.goes.setText(f"→ {m.tasks[task].title if task in m.tasks else 'Unfiled'}")
+                e.goes.setToolTip("Several #tasks split this note into a capture per task. This goes with the one shown; click to change it.")
+
+    def _goes_menu(self, entry: FileEntry) -> None:
+        """The captures of a split note a file can go with: each #task's, or the unfiled one."""
+        menu = entry.goes.menu()
+        menu.clear()
+        m = self.ctx.model()
+        for task in [p.task for p in self.split() or [] if p.task] + [None]:
+            action = menu.addAction(m.tasks[task].title if task in m.tasks else "Unfiled: the lines under no #task")
+            action.setCheckable(True)
+            action.setChecked(part_of(entry.row, [e.row for e in self.files], [task] if task else []) == task)
+            action.triggered.connect(lambda _=False, task=task: self._set_goes(entry, task))
+
+    def _set_goes(self, entry: FileEntry, task: str | None) -> None:
+        entry.row.section = task
         self.refresh()
 
     def _stripe(self, it: items.Item) -> str:
@@ -1376,37 +1461,55 @@ class CaptureWindow(QWidget):
             self.content.setTextCursor(cursor)
         self.content.setFocus()
 
+    def _ref_box(self) -> tuple[ContentEdit, RefPopup]:
+        """The text box the @ and # list follows, and its list: the pinned window's own while pinned, where the full
+        window's list can't show (release 5.32)."""
+        if self.pinned and self.pin_window is not None:
+            return self.pin_window.text, self.pin_window.ref_popup
+        return self.content, self.ref_popup
+
     def _ref_list(self) -> None:
         """The @ or # list, while a name is being typed after one."""
         if not hasattr(self, "ref_popup"):
             return
-        cursor = self.content.textCursor()
+        box, popup = self._ref_box()
+        cursor = box.textCursor()
         t = None
-        if not cursor.hasSelection() and not self.from_capture and self.content.hasFocus():
+        if not cursor.hasSelection() and not self.from_capture and box.hasFocus():
             t = items.typing(cursor.block().text()[:cursor.positionInBlock()])
         options = items.options(t, self.names()) if t else []
         if not options:
-            self.ref_popup.hide()
+            popup.hide()
             self._typing = None
             return
         if t.sigil == "#":
             m = self.ctx.model()
             options = [replace(o, sub=path_text(m, o.ref) or "Top-level task") if o.ref in m.tasks else o for o in options]
         self._typing = t
-        at = self.content.viewport().mapTo(self, self.content.cursorRect(cursor).bottomLeft()) + QPoint(0, 3)
-        at.setX(max(4, min(at.x(), self.width() - self.ref_popup.width() - 4)))
-        self.ref_popup.show_options(options, at)
+        if popup is self.ref_popup:
+            at = self.content.viewport().mapTo(self, self.content.cursorRect(cursor).bottomLeft()) + QPoint(0, 3)
+            at.setX(max(4, min(at.x(), self.width() - self.ref_popup.width() - 4)))
+            self.ref_popup.show_options(options, at)
+            return
+        # The pinned window's list is a window of its own, placed under the cursor, or above it at the screen's foot.
+        rect = box.cursorRect(cursor)
+        area = box.screen().availableGeometry()
+        at = box.viewport().mapToGlobal(rect.bottomLeft()) + QPoint(0, 3)
+        popup.show_options(options, QPoint(max(area.left(), min(at.x(), area.right() - popup.width())), at.y()))
+        if popup.geometry().bottom() > area.bottom():
+            popup.move(popup.x(), box.viewport().mapToGlobal(rect.topLeft()).y() - popup.height() - 3)
 
     def _pick_ref(self, option: items.Option) -> None:
         """Put the picked name in, with a space after it; a picked one's ID is kept, ahead of names alike."""
         t = self._typing
-        self.ref_popup.hide()
+        box, popup = self._ref_box()
+        popup.hide()
         if not t:
             return
-        cursor = self.content.textCursor()
+        cursor = box.textCursor()
         cursor.setPosition(cursor.position() - (cursor.positionInBlock() - t.start), QTextCursor.MoveMode.KeepAnchor)
         cursor.insertText(t.sigil + option.value + " ")
-        self.content.setTextCursor(cursor)
+        box.setTextCursor(cursor)
         if option.ref:
             self.ref_ids[("#" if t.sigil == "#" else "@") + option.value.lower()] = option.ref
             self._names = None
@@ -1420,7 +1523,8 @@ class CaptureWindow(QWidget):
     def _draft_data(self) -> dict:
         """The draft as capture-draft.json keeps it."""
         content, formatted = self.content.value()
-        return {"saved": self.ctx.now().isoformat(timespec="seconds"), "task": self.task, "types": sorted(self.types), "title": self.title.text(),
+        return {"saved": self.ctx.now().isoformat(timespec="seconds"), "task": self.task, "task_auto": self.task_auto, "by_hand": self.by_hand,
+                "types": sorted(self.types), "title": self.title.text(),
                 "content": content, "formatted": formatted, "meeting": self.meeting_on,
                 "meeting_name": self.meet_name.text() if self._meet_name_typed else "", "refs": self.ref_ids}
 
@@ -1457,6 +1561,8 @@ class CaptureWindow(QWidget):
         self._setting = True
         task = data.get("task")
         self.task = task if task in m.tasks else None
+        self.task_auto = bool(data.get("task_auto")) and self.task is not None
+        self.by_hand = bool(data.get("by_hand"))
         self.types = {k for k in data.get("types") or [] if k in self.type_boxes} or {"note"}
         self.note_auto = self.types == {"note"}
         self.title.setText(str(data.get("title") or ""))
@@ -1651,6 +1757,10 @@ class CaptureWindow(QWidget):
         """Clear the window for a new capture."""
         self._setting = True
         self.task: str | None = None
+        # The task came from the content text's one # task, and follows it; by_hand: a task (or none) was picked by hand,
+        # so the text no longer picks it (the knowledge base's decision 28, release 5.32).
+        self.task_auto = False
+        self.by_hand = False
         self.from_capture: str | None = None
         self.today_on = False
         self.types: set[str] = {"note"}
@@ -1720,11 +1830,18 @@ class CaptureWindow(QWidget):
         self.title.setText(title or c.title)
         self.refresh()
 
-    def set_task(self, task_id: str | None) -> None:
+    def set_task(self, task_id: str | None, auto: bool = False) -> None:
+        """Pick the capture's task: by hand, or (``auto``) from the content text's one # task, which it then follows until
+        a task, or none, is picked by hand (the knowledge base's decision 28, release 5.32)."""
+        was = self.task_auto
+        self.task_auto = auto and bool(task_id)
+        self.by_hand = self.by_hand or not auto
         if task_id == self.task:
+            if was != self.task_auto:
+                self.refresh()
             return
         self.task = task_id
-        if not task_id and "update" in self.types:
+        if not task_id and "update" in self.types and not auto:  # the # going doesn't uncheck Update: it may come back
             self._drop_type("update")
         if "update" in self.types:
             self.prefill()
@@ -1812,8 +1929,11 @@ class CaptureWindow(QWidget):
             box.setEnabled(not self.from_capture)
         self._setting = False
         self._show_during(m)
-        self.task_button.setText(full_path(m, t.id) if t else ("None: a quick task, under Quick tasks" if self._quick() else
-                                                                "None: a new top-level task" if new else "None: keep it unfiled"))
+        parts = self.split()
+        self.task_button.setText(full_path(m, t.id) + ("  (from #)" if self.task_auto else "") if t else
+                                 ("None: a quick task, under Quick tasks" if self._quick() else "None: a new top-level task" if new
+                                  else "None: a capture per #task" if parts else "None: keep it unfiled"))
+        self._show_goes(parts)
         self.title_field.setVisible(new)
         self.content_field.property("label").setText("Content text" + ("  <span style='color:#87919c'>becomes the new task's description</span>" if new else ""))
         self.parse_button.setEnabled(new or upd or bool(t))
@@ -1911,6 +2031,24 @@ class CaptureWindow(QWidget):
             return (f"Save keeps these notes on {name}." if case == "oneoff" else
                     f"Save makes {meeting}, a meeting {'under ' + name if t else 'at the top level'}, In progress until you close it, and keeps "
                     "these notes on it.") + items_text + (f" {done} agenda item{'s close' if done > 1 else ' closes'} as Discussed." if done else "")
+        split = self.split()
+        if split:
+            said = []
+            for p in split:
+                held = held_text(p.files)
+                if p.task:
+                    said.append(f"a note on <b>{esc(m.task(p.task).title)}</b>" + (f" with {held}" if held else ""))
+                elif p.words().strip():
+                    said.append("an unfiled note with the lines under no #task" + (f" and {held}" if held else ""))
+                else:
+                    said.append(f"an unfiled note with {held}")
+            agenda_text = " Each goes on the agenda you picked." if self._targets() else ""
+            # A note on a part's own task is its text, not an item: the parts' items are counted, not the whole text's.
+            names, today = self.names(), self.ctx.now().date()
+            its = [it for p in split for it in items.read(p.lines(), names, today, home=bool(p.task), own=p.own_task()).items if it.on]
+            counts = [f"{n} {label.lower()}{'s' if n > 1 else ''}" for k, label in items.KIND_NAMES.items() if (n := sum(it.kind == k for it in its))]
+            return (f"Save makes {len(split)} capture{'s' if len(split) != 1 else ''}, one per #task: {and_list(said)}.{agenda_text}"
+                    + (f" From their items it makes {and_list(counts)}." if counts else ""))
         text = bool(self.content.toPlainText().strip())
         new, upd, note = ("new_task" in self.types, "update" in self.types, "note" in self.types)
         parts = []
@@ -1947,7 +2085,7 @@ class CaptureWindow(QWidget):
         self.picker.popup(anchor.mapToGlobal(anchor.rect().bottomLeft()))
 
     def _picked(self, task_id: str | None) -> None:
-        self.set_task(task_id)
+        self.set_task(task_id)  # by hand: the text's # no longer picks it
         after, self._after_pick = self._after_pick, None
         if after and task_id:  # the Update or Add to agenda hotkey opened the picker: only Update is checked, as with a task already picked
             self.show_capture(mode="update", agenda_focus=after == "agenda")
@@ -2154,6 +2292,8 @@ class CaptureWindow(QWidget):
 
         doc = next((d for d in m.documents.values() if row.path and d.original and same(d.original)), None)
         entry = FileEntry(row, src, line=line, doc=doc.id if doc else None)
+        if row.of is None and row.section is None:
+            row.section = self._cursor_section()  # where it goes if several # tasks split the note (release 5.32)
         holder = QWidget()
         hl = QHBoxLayout(holder)
         hl.setContentsMargins(18 if row.of else 0, 0, 0, 0)  # an email's parts sit under it
@@ -2176,6 +2316,12 @@ class CaptureWindow(QWidget):
         entry.note = QLabel(self._file_note(row, doc.id if doc else None, link), objectName="hint")
         top.addWidget(entry.note, 1)
         if row.of is None:
+            entry.goes = QToolButton(objectName="goes")
+            entry.goes.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+            entry.goes.setMenu(QMenu(entry.goes))
+            entry.goes.menu().aboutToShow.connect(lambda: self._goes_menu(entry))
+            entry.goes.hide()
+            top.addWidget(entry.goes)
             remove = QToolButton(text="×")
             remove.setToolTip(f"Remove {row.name}")
             remove.clicked.connect(lambda: self._remove_file(entry))

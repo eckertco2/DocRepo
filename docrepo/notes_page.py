@@ -47,6 +47,9 @@ ITEM = re.compile(r"^((?:  )*)- (!?)\[((?:[^\]\\]|\\.)*)\]\(document:(D\d+)\)$")
 #: The kinds of file a page shows as a picture.
 PICTURES = (".png", ".jpg", ".jpeg", ".gif", ".bmp")
 _UNESCAPE = re.compile(r"\\([\]\\])")
+#: A line that's only stored # tasks (release 5.32): ``#[Installation](T000008)``, with a colon or a full stop at most.
+_OWN_HEADING = re.compile(r"(?:#\[[^\]\n]+\]\(T\d+\)[\s:.]*)+")
+_TASK_REF = re.compile(r"\]\((T\d+)\)")
 
 
 @dataclass(frozen=True)
@@ -199,13 +202,22 @@ def caption_text(c: Capture, label: str) -> str:
     return f"{day_title(saved.date())} · {clock(saved)} · {label}"
 
 
-def capture_markup(c: Capture, content: str | None, title: str = "") -> list[str]:
+def own_heading(line: str, task_id: str) -> bool:
+    """Whether a line of a capture's stored text is a # heading naming only ``task_id``. On that task's own page it says
+    nothing, so it's left out (the knowledge base's decision 28, release 5.32); capture.md keeps it."""
+    words = markup.to_plain(line).strip()
+    return bool(_OWN_HEADING.fullmatch(words)) and set(_TASK_REF.findall(words)) == {task_id}
+
+
+def capture_markup(c: Capture, content: str | None, title: str = "", own: str | None = None) -> list[str]:
     """A capture's note text as page lines: its names as written (``@Tom Becker``), its file and link lines left out
     (they're file lines on the page), and empty lines at its ends dropped. A new task's text that's only its title isn't
     repeated (decision 115). Its headings are the page's headings, at the level they were typed (release 5.28, the
-    mods log round 4's decision 132)."""
+    mods log round 4's decision 132). On ``own``'s page, a # heading naming only that task is left out (release 5.32)."""
     if not content:
         return []
+    if own:
+        content = "\n".join(line for line in content.split("\n") if not own_heading(line, own))
     content = items.unstore(content)
     text = content if c.formatted else markup.escape(content)
     lines = [line for line in text.split("\n") if not is_file_line(markup.to_plain(line).strip())]
@@ -222,7 +234,7 @@ def block(model: Model, stories, c: Capture, task_id: str, content: str | None) 
     """A capture's block on a task's page (decisions 96, 114, 115, 120): its caption, its note text in full, and a file
     line for each of its files. ``content`` is its typed text: an email's own text stays with the email."""
     out = [] if c.page_made else [caption_line(caption_text(c, caption_label(stories, c, task_id)), c.id)]
-    out += capture_markup(c, content, c.title if c.created_task == task_id else "")
+    out += capture_markup(c, content, c.title if c.created_task == task_id else "", task_id)
     for d in c.document_ids:
         doc = model.documents.get(d)
         if doc is None:

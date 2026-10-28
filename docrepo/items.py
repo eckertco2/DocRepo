@@ -8,7 +8,9 @@ added email), and only after a space, a "(" or the start of a line, so an addres
 - ``@Tom``, ``@Tom Becker``: a task, with Tom an assignee (several allowed). ``@L.Tom``: a task, with Tom its lead.
   ``@__``: a task with no one yet.
 - ``#Rigging plan``, ``#T000012``: a link to that task, as a parent. With no ``@`` or ``**``, the block is a note on
-  it. On a line of its own (a heading), it covers the lines under it, until the next heading.
+  it. On a line of its own (a heading), it covers the lines under it, until the next heading. With no task picked, one
+  ``#`` task fills the task picker, and several split a note into a capture per task (release 5.32: ``named_tasks``,
+  ``sections``); a note naming only the capture's own task makes no item (``own``).
 - ``**t``, ``**n``: a task, or a note, said outright. ``**Closed.``, ``**Done.``, ``**Parked.``, ``**In progress.``,
   ``**Started.``: an update to the ``#`` task with that state; the rest is its current status. ``**u``: an update with
   no state change. ``**Decision.``: a decision, on the ``#`` task, else on the capture's task or meeting.
@@ -393,10 +395,13 @@ def _iso(d: date | None) -> str | None:
 
 
 def read(content: str, names: Names, today: date, *, labels: Sequence[ParseLabel] = (), events: Sequence[str] = EVENT_WORDS,
-         home: bool = False, new_task: bool = False, overrides: Mapping[str, Mapping[str, object]] | None = None) -> Reading:
+         home: bool = False, new_task: bool = False, overrides: Mapping[str, Mapping[str, object]] | None = None,
+         own: str | None = None) -> Reading:
     """The content text's lines, blocks and items. ``home``: there's a task the items go under (the picked task, the
     meeting or the new task). ``new_task``: the first line is the new task itself. ``overrides``: the cards' changes,
-    by item key ({"off": True, "title": …, "due": …})."""
+    by item key ({"off": True, "title": …, "due": …}). ``own``: the capture's own task, a note's or an update's picked
+    task: a note naming only it makes no item, since its lines are already the capture's note on it (the knowledge
+    base's decision 28, release 5.32)."""
     lines = []
     for n, raw in enumerate(content.split("\n")):
         m = LIST_RE.match(raw)
@@ -500,6 +505,10 @@ def read(content: str, names: Names, today: date, *, labels: Sequence[ParseLabel
             it.where = [*up, *(Where("task", t) for t in it.tasks)] or [Where("quick")]
         else:
             it.where = [Where("task", t) for t in it.tasks] if it.tasks else up
+            if kind == "note" and own and it.tasks:
+                it.where = [w for w in it.where if w.ref != own]
+                if not it.where:
+                    continue  # its lines stay the capture's own note, with no item of their own
         # A card's changes stay, even when the block is edited later.
         ov = (overrides or {}).get(it.key, {})
         it.on = not ov.get("off")
@@ -562,6 +571,53 @@ def parse_text(r: Reading, names: Names) -> str:
         else:
             out.append(L.raw)
     return "\n".join(out)
+
+
+# ---- # choosing the task (the knowledge base's phase 0, decisions 28 to 30; release 5.32) ----
+@dataclass
+class Section:
+    """A task's part of the content text, when several # tasks split a note (decision 29): a # heading with the lines
+    under it, or a note whose own line names a # task, outside any heading. ``task`` is the first task it names; the
+    parts of one task are joined, in the order written."""
+
+    task: str
+    lines: list[int]
+
+
+def named_tasks(r: Reading) -> list[str]:
+    """The tasks the content text names with #, on a heading or on a line, each once, in the order they first appear.
+    One fills the task picker (decision 28); two or more split a note (decision 29)."""
+    return list(dict.fromkeys(x.id for L in r.lines for x in L.toks if x.kind == "task" and x.id))
+
+
+def sections(r: Reading) -> tuple[list[Section], list[int]]:
+    """The content text by # task (decision 29): each task's section, and the lines under no # task. A line under a
+    heading is its heading's first task's; before the first heading, a note block naming a # task (with the list items
+    under it) is that task's, and anything else is under no task."""
+    by_block = {it.block: it for it in r.items}
+    parts: dict[str, Section] = {}
+    rest: list[int] = []
+    heading: Heading | None = None
+    for L in r.lines:
+        heading = L.heading or heading
+        task = heading.tasks[0] if heading and heading.tasks else None
+        if task is None and L.block is not None:
+            b = r.blocks[L.block]
+            while b.parent is not None:
+                b = r.blocks[b.parent]
+            it = by_block.get(b.i)
+            if it and it.on and it.kind == "note" and it.tasks:
+                task = it.tasks[0]
+        if task:
+            parts.setdefault(task, Section(task, [])).lines.append(L.n)
+        else:
+            rest.append(L.n)
+    return list(parts.values()), rest
+
+
+def section_at(r: Reading, line: int) -> str | None:
+    """The task whose section holds ``line`` (the text cursor's): where a file added there goes in a split (decision 30)."""
+    return next((s.task for s in sections(r)[0] if line in s.lines), None)
 
 
 def discussed(r: Reading, subject: str | None) -> bool:
