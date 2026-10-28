@@ -356,9 +356,11 @@ def edit_task(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: S
     the people list is added to it, and a label not there yet is created. A Start left at the day the task was created
     stays unset. ``parents`` puts the task under exactly those tasks (mods log round 2, M0040), as one Parents change.
     ``priority`` (release 5.23) puts it in a bucket ("" for Not ranked), at the bucket's end, when that's a change.
+    ``key_dates`` (release 5.31), a list of ``tasks.KeyDateRow``, makes its key dates those, each change logged.
     """
     added: list[str] = []
     parents = values.pop("parents", None)
+    key_dates = values.pop("key_dates", None)
     priority = values.pop("priority", None)
     day_headings = values.pop("day_headings", "unset")  # decision 119: a setting of the page, not logged
     with transaction(conn):
@@ -391,12 +393,53 @@ def edit_task(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: S
             ranked = priorities.place(conn, task_id, priority, at=at, via=BROWSE)
             if ranked:
                 logged.append(ranked)
+        if key_dates is not None:
+            logged += tasks.set_key_dates(conn, task_id, key_dates, at=at, via=BROWSE)
     message = f"{len(logged)} change{'s' if len(logged) != 1 else ''} in the status log." if logged else "Nothing changed."
     if added:
         message += f" Added {', '.join(added)} to the people list."
     out = Outcome(message)
     write_all_pages(conn, data_root, fs, at, out.problems)
     log.info("task %s edited in the browse tool: %d changes", task_id, len(logged))
+    return out
+
+
+# ---- key dates (release 5.31, the key dates plan) ----
+def set_key_dates(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, task_id: str, rows: list[tasks.KeyDateRow],
+                  at: datetime) -> Outcome:
+    """Make a task's key dates these, in this order, from the browse tool: each change logged as "Browse tool"."""
+    logged = tasks.set_key_dates(conn, task_id, rows, at=at, via=BROWSE)
+    out = Outcome(f"{len(logged)} change{'s' if len(logged) != 1 else ''} in the status log." if logged else "Nothing changed.")
+    write_all_pages(conn, data_root, fs, at, out.problems)
+    return out
+
+
+def set_key_date_done(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, key_id: int, done: bool, at: datetime) -> Outcome:
+    """A key date's Done tick (decision 148), from Today, the list, the task page or the timeline's card."""
+    task_id, logged = tasks.set_key_date_done(conn, key_id, done, at=at, via=BROWSE)
+    title = conn.execute("SELECT title FROM tasks WHERE id = ?", (task_id,)).fetchone()["title"]
+    out = Outcome(f"{'Done' if done else 'Not done'}: a key date of {title}." if logged else "Nothing changed.")
+    write_all_pages(conn, data_root, fs, at, out.problems)
+    return out
+
+
+def key_date_subtask(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, key_id: int, at: datetime) -> Outcome:
+    """Make it a subtask (item 61): a subtask of its task, titled with its description, its Start and Due its dates (a
+    Deadline when it's ticked as one, Plant event when it's a plant activity); the key date is taken off. Both logged."""
+    r = conn.execute("SELECT * FROM task_dates WHERE id = ?", (key_id,)).fetchone()
+    if r is None:
+        raise EditError(f"There's no key date {key_id}.")
+    parent = tasks.get_task(conn, r["task"])
+    with transaction(conn):
+        end = r["end_day"] or r["start_day"]
+        child = tasks.create_task(conn, settings, title=r["description"] or f"{parent.title}: key date", at=at, created_by=BROWSE,
+                                  parents=[parent.id], start=r["start_day"], due=end, deadline=end if r["deadline"] else None,
+                                  plant_event=bool(r["plant"]))
+        if r["done"]:  # a done key date makes a closed subtask, with its day closed
+            tasks.update_task(conn, settings, child, at=at, via=BROWSE, state="Closed")
+        tasks.set_key_dates(conn, parent.id, [x for x in tasks.key_date_rows(conn, parent.id) if x.id != key_id], at=at, via=BROWSE)
+    out = Outcome(f"{child} is a subtask of {parent.title} now, in place of its key date.")
+    write_all_pages(conn, data_root, fs, at, out.problems)
     return out
 
 

@@ -279,7 +279,7 @@ class Pages:
         t = self.m.task(task_id)
         head = (self.discarded_box(t.discarded, t.discard_reason, "the task tree, the lists, the pickers, search and the capacity calendar")
                 if t.discarded else "") + self.page_head(t, state)  # mods log round 1, M0021
-        when, who = group("When", self.when_rows(t)), group("Who", self.who_rows(t))
+        when, who = group("When", self.when_rows(t)) + self.key_dates_block(t), group("Who", self.who_rows(t))
         if width >= WIDE_PAGE:
             main = head + self.status_block(t) + self.agenda_section(t) + self.subtask_section(t, state) + (self.history(t, state) if history else "")
             return (f'<table width="{min(width, PAGE_MAX)}" cellspacing="0" cellpadding="0"><tr><td valign="top">{main}</td>'
@@ -335,6 +335,38 @@ class Pages:
         """How far off a date is, in words, in critical red once it's passed."""
         text = esc(days_words(day, self.today))
         return f'<span class="over">{text}</span>' if day < self.today else text
+
+    def key_dates_block(self, t: Task) -> str:
+        """Its key dates (release 5.31, the key dates plan), under When: a line each, in its order, with its Done tick
+        (decision 148), its dates (how far off while it's open), its description, ⚑ for a plant activity and a red ◆ for a
+        deadline, done ones grey (decision 153), and Make it a subtask (item 61)."""
+        from docrepo import key_dates
+
+        kds = self.m.key_dates_of(t.id)
+        if not kds:
+            return ""
+        today, lines = self.today, []
+        for kd in kds:
+            done = bool(kd.done)
+            tick = link(f"kd:{'undone' if done else 'done'}:{kd.id}", "☑" if done else "☐",
+                        "Not done after all" if done else "Mark it done: off Today and the Overdue list, logged")
+            when = esc(key_dates.when_text(kd, today))
+            _, last = key_dates.first_last(kd)
+            if not done and is_open(t) and (kd.end or last >= today):
+                when += f' <span class="rel">{self.days(last)}</span>'
+            what = esc(kd.description) if kd.description else '<span class="sub">Key date</span>'
+            marks = (' <span style="color:#875700">⚑ plant activity</span>' if kd.plant else "") + \
+                    (' <span style="color:#b0261e">◆</span> <span class="rel">deadline</span>' if kd.deadline else "")
+            # Kept on one line (no-break spaces), so a narrow column doesn't split it.
+            sub = link(f"kd:subtask:{kd.id}", "Make it a subtask".replace(" ", "\u00a0"), "A subtask of this task with these dates, in its place", quiet="tq")
+            text = f"{when}<br>{what}{marks}"
+            if done:
+                text = f'<span style="color:#87919c"><s>{key_dates.when_text(kd, today)}</s><br>{esc(kd.description or "Key date")}</span>' \
+                       f' <span class="rel">done {esc(self.long(kd.done))}</span>'
+            lines.append(f'<tr><td valign="top" width="18">{tick}</td><td valign="top">{text} <span class="rel">· {sub}</span></td></tr>')
+        open_n = sum(1 for kd in kds if not kd.done)
+        count = f' <span class="rel">{open_n} open</span>' if open_n != len(kds) else ""
+        return section("Key dates", count) + f'<table cellspacing="0" cellpadding="3">{"".join(lines)}</table>'
 
     def when_rows(self, t: Task) -> list[tuple[str, str]]:
         """Only the dates that say something. Due is always there, so a missing one is still seen, unless a deadline takes

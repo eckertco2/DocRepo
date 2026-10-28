@@ -51,7 +51,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo import activity, bulk, capacity, db, edits, items, notes_page, people, priorities, prompts, search
+from docrepo import activity, bulk, capacity, db, edits, items, key_dates, notes_page, people, priorities, prompts, search
+from docrepo.lists import key_dates_due
 from docrepo.agenda import AgendaError
 from docrepo.captures import capture_folder, capture_md_path
 from docrepo.dates import long_date, short, to_date
@@ -61,7 +62,7 @@ from docrepo.model import TODAY, Model, is_person
 from docrepo.people import PeopleError
 from docrepo.safe_fs import WriteRefused
 from docrepo.save import SaveError, SaveResult, add_quick_task, note_to_task
-from docrepo.schedule import DueDate, is_open
+from docrepo.schedule import DueDate, due_of, is_open
 from docrepo.tasks import TaskError
 from docrepo.ui.context import AppContext
 from docrepo.ui.dialogs import LabelDialog, PersonDialog
@@ -104,6 +105,7 @@ from docrepo.views import (
     documents_tree,
     due_cell,
     due_this_week,
+    key_date_cell,
     find_text,
     expand_level,
     full_path,
@@ -368,6 +370,7 @@ class BrowseWindow(QWidget):
             pass
         self.timeline.settings_changed.connect(lambda kept: db.set_state(self.ctx.conn, TIMELINE_VIEW_KEY, json.dumps(kept)))
         self.timeline.set_dates.connect(self.set_timeline_dates)
+        self.timeline.set_key_date.connect(self.set_timeline_key_date)
         self.timeline.quick_edit.connect(self.quick_edit)
         self.quick_window = None
         self.middle.addWidget(self.timeline)
@@ -1134,14 +1137,17 @@ class BrowseWindow(QWidget):
         v, task_list, m = VIEW_IDS[view_id], LIST_IDS[view_id], self.model()
         self._set_head(v.label, v.note + " Dimmed rows are their parents, shown for context.")
         reminders = view_id == "reminders"
-        self.tree.set_columns(["Title", "State", "Reminder" if reminders else "Due", ""] if reminders else ["Title", "State", "Due"],
-                              [0, 96, 96, 56] if reminders else None)
+        with_keys = view_id == "due"  # key dates have a row each, with Done (release 5.31, decision 150)
+        self.tree.set_columns(["Title", "State", "Reminder" if reminders else "Due", ""] if reminders or with_keys else ["Title", "State", "Due"],
+                              [0, 96, 96, 56] if reminders or with_keys else None)
         self._sort_box(view_id)
         grouped = self._group_box(view_id)
         self._select_controls()
         nodes = sort_tree(m, list_tree(m, task_list, self.today(), self.ctx.settings.me), self.sorts.get(view_id, "default"), self.today())
         if grouped:  # under each sublabel's heading (release 5.9, M0051)
             self._grouped_list(view_id, grouped, nodes)
+            if with_keys:
+                self._key_date_rows(None)
             return
 
         def row(n: Node) -> tuple[list[str], str]:
@@ -1161,8 +1167,53 @@ class BrowseWindow(QWidget):
                     b.setToolTip("Clear this reminder. Its status log records it.")
                     b.clicked.connect(lambda _=False, tid=key[1]: self.clear_reminder(tid))
                     self.tree.setItemWidget(item, 3, b)
-        if not nodes:
+        keyed = self._key_date_rows(None) if with_keys else 0
+        if not nodes and not keyed:
             self.tree.add_row(None, None, ['<span class="sub">Nothing here right now.</span>'], selectable=False, span=True)
+
+    def _key_date_cells(self, d: key_dates.Due) -> list[str]:
+        """A key date's row (release 5.31): its task's title, with the key date's words under it and its marks, a Key date
+        chip, and its days until due, red when it's overdue."""
+        today = self.today()
+        cell = key_date_cell(d, today)
+        colour = {"over": "color:#b0261e; font-weight:600", "soon": "color:#875700; font-weight:600"}.get(cell.cls, "")
+        marks = (' <span style="color:#875700">⚑</span>' if d.key_date.plant else "") + (' <span style="color:#b0261e">◆</span>' if d.key_date.deadline else "")
+        return [f'{esc(d.task.title)}<br><span class="sub">{esc(d.text(today))}</span>{marks}', chip("Key date", "st-ns"),
+                f'<p align="right" style="{colour}">{esc(cell.text)}</p>']
+
+    def _key_date_done_button(self, key_id: int) -> QWidget:
+        done = QPushButton("Done", objectName="rowLink")
+        done.setToolTip("Mark this key date done: off Today and this list, and in its task's status log (decision 148)")
+        done.clicked.connect(lambda _=False, k=key_id: self.key_date_done(k, True))
+        holder = QWidget()
+        lay = QHBoxLayout(holder)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(done)
+        lay.addStretch()
+        return holder
+
+    def _key_date_rows(self, parent) -> int:
+        """The Overdue and next 7 days list's key dates (release 5.31, decision 150): under a Key dates heading, a row each,
+        soonest first, opening its task, with Done. Returns how many."""
+        dues = key_dates_due(self.model(), self.today())
+        if not dues:
+            return 0
+        head = self.tree.add_row(parent, None, [f'<b>Key dates</b> &nbsp;<span class="sub">{len(dues)}</span>'], QColor(GREY).lighter(135),
+                                 selectable=False, span=True)
+        for d in dues:
+            item = self.tree.add_row(head, ("task", d.task.id), self._key_date_cells(d),
+                                     tip=f"A key date of {d.task.title}: {key_dates.label(d.key_date, self.today())}")
+            self.tree.setItemWidget(item, 3, self._key_date_done_button(d.key_date.id))
+        head.setExpanded(True)
+        return len(dues)
+
+    def key_date_done(self, key_id: int, done: bool) -> None:
+        """A key date's Done tick, from the lists, Today or the task page (release 5.31, decision 148)."""
+        self._do(lambda: edits.set_key_date_done(self.conn, self.ctx.data_root, self.ctx.fs, key_id, done, self._now()))
+
+    def key_date_subtask(self, key_id: int) -> None:
+        """Make it a subtask (item 61), from the task page."""
+        self._do(lambda: edits.key_date_subtask(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, key_id, self._now()))
 
     def _group_box(self, view_id: str) -> str | None:
         """The lists' Group by (release 5.9, M0051): a parent label, putting each task under its sublabel's heading. Shown
@@ -1294,9 +1345,18 @@ class BrowseWindow(QWidget):
         box.toggled.connect(self.set_today_mine)
         self._filter_widget(box)
         tasks = due_this_week(m, today, self.ctx.settings.me, mine)
+        dues = key_dates_due(m, today, self.ctx.settings.me, mine)  # each key date a row of its own (release 5.31, decision 150)
         head = self.tree.add_row(None, None, ["<b>Due in the next 7 days</b>" + (" <span class=\"sub\">· yours</span>" if mine else "")],
                                  grey, selectable=False, span=True)
-        for t in tasks:
+        # Tasks and key dates together, soonest first; on the same day, a key date before a task.
+        entries = sorted([*((d.date if (d := due_of(t, today)) else date.max, 1, i, t) for i, t in enumerate(tasks)),
+                          *((d.day, 0, i, d) for i, d in enumerate(dues))], key=lambda e: e[:3])
+        for _, _, _, t in entries:
+            if isinstance(t, key_dates.Due):
+                item = self.tree.add_row(head, ("task", t.task.id), self._key_date_cells(t),
+                                         tip=f"A key date of {t.task.title}: {key_dates.label(t.key_date, today)}")
+                self.tree.setItemWidget(item, 3, self._key_date_done_button(t.key_date.id))
+                continue
             cell = due_cell(t, today)
             colour = {"over": "color:#b0261e; font-weight:600", "soon": "color:#875700; font-weight:600"}.get(cell.cls if cell else "", "")
             item = self.tree.add_row(head, ("task", t.id), [f'{esc(t.title)}<br><span class="sub">{esc(path_text(m, t.id) or "Top-level task")}</span>',
@@ -1310,7 +1370,7 @@ class BrowseWindow(QWidget):
             lay.addWidget(add)
             lay.addStretch()
             self.tree.setItemWidget(item, 3, holder)
-        if not tasks:
+        if not entries:
             self.tree.add_row(head, None, ['<span class="sub">Nothing else is due in the next 7 days' + (" for you." if mine else ".") + "</span>"],
                               selectable=False, span=True)
         head.setExpanded(True)
@@ -1662,6 +1722,18 @@ class BrowseWindow(QWidget):
     def move_priority(self, task_id: str, bucket: str, before) -> None:
         """A card dragged, or moved by its key or the buckets above the board."""
         self._do(lambda: edits.set_priority(self.conn, self.ctx.data_root, self.ctx.fs, task_id, bucket, before, self._now()), ("task", task_id))
+
+    def set_timeline_key_date(self, task_id: str, key_id: int, start: str | None, end: str | None, said: str) -> None:
+        """A key date dragged in Plan mode, or put back by Ctrl+Z (release 5.31, decision 152): saved and logged."""
+        from docrepo import tasks
+
+        rows = tasks.key_date_rows(self.conn, task_id)
+        for row in rows:
+            if row.id == key_id:
+                row.start, row.end = start, end
+        out = self._do(lambda: edits.set_key_dates(self.conn, self.ctx.data_root, self.ctx.fs, task_id, rows, self._now()), ("task", task_id))
+        if isinstance(out, edits.Outcome) and not out.problems and out.message != "Nothing changed.":
+            self.say(said)
 
     def set_timeline_dates(self, task_id: str, start: str | None, due: str | None, said: str) -> None:
         """A Plan mode drop on the timeline, or Ctrl+Z (release 5.30, decision 136): the dates saved and logged, as Edit
@@ -2059,6 +2131,12 @@ class BrowseWindow(QWidget):
         elif kind == "folder" and rest in self.model().tasks:
             self.reveal(self.ctx.data_root / "Tasks" / rest)
         # The Captures tab (release 5.25): a capture's block on the notes page, or Add it again (decision 109).
+        elif kind == "kd" and ":" in rest:  # a key date on the task page (release 5.31)
+            action, _, key = rest.partition(":")
+            if action == "subtask":
+                self.key_date_subtask(int(key))
+            else:
+                self.key_date_done(int(key), action == "done")
         elif kind in ("goto", "readd") and ":" in rest:
             task_id, capture_id = rest.split(":", 1)
             (self.go_to_block if kind == "goto" else self.add_again)(task_id, capture_id)

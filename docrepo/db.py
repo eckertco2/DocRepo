@@ -15,7 +15,7 @@ from pathlib import Path
 from docrepo.safe_fs import SafeFS
 
 DB_FILE = Path("System") / "docs.db"
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 #: Each kind of ID: its letter and how many digits follow it.
 ID_FORMATS = {"T": 6, "C": 6, "D": 6, "P": 3}
@@ -317,6 +317,24 @@ CREATE TABLE search_text (
 -- Pictures and files put on a notes page (release 5.27, decisions 124 to 126): each is a capture of its own, made on the
 -- page, whose block there is its picture or file line and the description under it, not a caption.
 ALTER TABLE captures ADD COLUMN page_made INTEGER NOT NULL DEFAULT 0;
+""",
+    12: """
+-- Key dates (release 5.31, the key dates plan, decisions 146 to 155): dated line items on a task, any number, beside its
+-- own Start, Due and Deadline: a start, an end or both, a description, ticks for a plant activity (a plant event of its
+-- own), a hard deadline and done (the day it was ticked), and its place in the task's own order.
+CREATE TABLE task_dates (
+    id          INTEGER PRIMARY KEY,
+    task        TEXT NOT NULL REFERENCES tasks(id),
+    start_day   TEXT,
+    end_day     TEXT,
+    description TEXT NOT NULL DEFAULT '',
+    plant       INTEGER NOT NULL DEFAULT 0,
+    deadline    INTEGER NOT NULL DEFAULT 0,
+    done        TEXT,
+    pos         INTEGER NOT NULL,
+    CHECK (start_day IS NOT NULL OR end_day IS NOT NULL)
+);
+CREATE INDEX task_dates_task ON task_dates (task, pos);
 """,
 }
 

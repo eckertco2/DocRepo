@@ -61,7 +61,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo import diagnose, items, outlook, timeline
+from docrepo import diagnose, items, key_dates, outlook, timeline
 from docrepo.db import RECURRENCES, STATES
 from docrepo.extract import extract_text, to_unc
 from docrepo.layer0 import size_text
@@ -86,6 +86,7 @@ from docrepo.save import (
     save_capture,
 )
 from docrepo.schedule import is_open, start_of
+from docrepo.tasks import KeyDateRow
 from docrepo.ui import tokens
 from docrepo.ui.context import AppContext
 from docrepo.ui.icons import icon, icon_size
@@ -272,6 +273,153 @@ class ContentEdit(RichEdit):
         super().focusOutEvent(event)
         if self.left:
             self.left()
+
+
+class _KeyDateLine(QFrame):
+    """One key date in the Key dates rows: its description and ✕, then its dates and its three ticks."""
+
+    changed = Signal()
+    removed = Signal(object)
+
+    def __init__(self, row: KeyDateRow | None = None) -> None:
+        super().__init__(objectName="keyDateRow")
+        self.key_id = row.id if row else None
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 2, 0, 4)
+        lay.setSpacing(4)
+        top = QHBoxLayout()
+        self.description = QLineEdit(row.description if row else "")
+        self.description.setPlaceholderText("Description, such as Trial execution window")
+        self.description.setAccessibleName("Key date description")
+        self.description.textEdited.connect(lambda _: self.changed.emit())
+        top.addWidget(self.description, 1)
+        x = QToolButton(text="✕")
+        x.setAutoRaise(True)
+        x.setToolTip("Take this key date off")
+        x.clicked.connect(lambda: self.removed.emit(self))
+        top.addWidget(x)
+        lay.addLayout(top)
+        bottom = QHBoxLayout()
+        bottom.setSpacing(6)
+        self.start, self.end = DateField(), DateField()
+        for w, name, value in ((self.start, "Start", row.start if row else None), (self.end, "End", row.end if row else None)):
+            w.set_value(value)
+            w.line.setPlaceholderText(name)
+            w.line.setAccessibleName(f"Key date {name.lower()}")
+            w.setMaximumWidth(150)
+            w.edited.connect(self.changed.emit)
+        bottom.addWidget(self.start)
+        bottom.addWidget(QLabel("to", objectName="hint"))
+        bottom.addWidget(self.end)
+        self.plant, self.deadline, self.done = QCheckBox("Plant activity"), QCheckBox("Deadline"), QCheckBox("Done")
+        for box, on, tip in ((self.plant, row.plant if row else False, "A major plant activity: a plant event of its own"),
+                             (self.deadline, row.deadline if row else False, "A hard deadline: a red diamond at its end"),
+                             (self.done, row.done if row else False, "Done: off Today and the lists")):
+            box.setChecked(on)
+            box.setToolTip(tip)
+            box.toggled.connect(lambda _: self.changed.emit())
+            bottom.addWidget(box)
+        bottom.addStretch()
+        lay.addLayout(bottom)
+
+    def value(self) -> KeyDateRow:
+        return KeyDateRow(self.start.value(), self.end.value(), self.description.text().strip(), self.plant.isChecked(),
+                          self.deadline.isChecked(), self.done.isChecked(), self.key_id)
+
+    def blank(self) -> bool:
+        return not (self.start.line.text().strip() or self.end.line.text().strip() or self.description.text().strip())
+
+
+class KeyDatesEditor(QWidget):
+    """Key dates (release 5.31, the key dates plan, item 57) in New task and Update: any number of rows, each a start, an
+    end, a description and the Plant activity, Deadline and Done ticks, with ✕, and Add key date. Folded under its link
+    until there's one. A ``**date`` line's card adds its key date only when the capture is saved, not here."""
+
+    changed = Signal()
+
+    def __init__(self) -> None:
+        super().__init__()
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(4)
+        self.toggle = QPushButton("Key dates ▸", objectName="moreLink")
+        self.toggle.setToolTip("Dates on the task beside its own: a start, an end or both, with a description")
+        self.toggle.clicked.connect(lambda: self._fold(not self.body.isHidden()))
+        lay.addWidget(self.toggle, 0, Qt.AlignmentFlag.AlignLeft)
+        self.body = QWidget()
+        bl = QVBoxLayout(self.body)
+        bl.setContentsMargins(0, 0, 0, 0)
+        bl.setSpacing(2)
+        self.rows_box = QVBoxLayout()
+        self.rows_box.setSpacing(2)
+        bl.addLayout(self.rows_box)
+        add = QPushButton("+ Add key date", objectName="link")
+        add.clicked.connect(lambda: self.add_row(focus=True))
+        bl.addWidget(add, 0, Qt.AlignmentFlag.AlignLeft)
+        self.body.hide()
+        lay.addWidget(self.body)
+        self.lines: list[_KeyDateLine] = []
+
+    def _fold(self, folded: bool) -> None:
+        self.body.setVisible(not folded)
+        if not folded and not self.lines:
+            self.add_row(focus=True)
+        self._sync()
+
+    def _sync(self) -> None:
+        n = sum(not x.blank() for x in self.lines)
+        self.toggle.setText(f"Key dates{f' ({n})' if n else ''} {'▸' if self.body.isHidden() else '▾'}")
+
+    def add_row(self, row: KeyDateRow | None = None, focus: bool = False) -> None:
+        line = _KeyDateLine(row)
+        line.changed.connect(self._changed)
+        line.removed.connect(self._remove)
+        self.rows_box.addWidget(line)
+        self.lines.append(line)
+        self.body.show()
+        self._sync()
+        if focus:
+            line.description.setFocus()
+
+    def _remove(self, line: _KeyDateLine) -> None:
+        self.lines.remove(line)
+        line.hide()
+        line.setParent(None)
+        line.deleteLater()
+        self._changed()
+
+    def _changed(self) -> None:
+        self._sync()
+        self.changed.emit()
+
+    def set_rows(self, rows: list[KeyDateRow]) -> None:
+        """Show these key dates (none: folded), without counting it as a change."""
+        for line in self.lines:
+            line.hide()
+            line.setParent(None)
+            line.deleteLater()
+        self.lines = []
+        for row in rows:
+            self.add_row(row)
+        self.body.setVisible(bool(rows))
+        self._sync()
+
+    def rows(self) -> list[KeyDateRow]:
+        """The key dates in the rows, in order; a row with nothing in it is left out."""
+        return [x.value() for x in self.lines if not x.blank()]
+
+    def problem(self) -> tuple[str, QWidget] | None:
+        """The first row that can't be saved, as (what's wrong, where to put the cursor)."""
+        for x in self.lines:
+            if x.blank():
+                continue
+            for w, name in ((x.start, "start"), (x.end, "end")):
+                if not w.is_valid():
+                    return f"A key date's {name} isn't a date. Use YYYY-MM-DD.", w.line
+            p = key_dates.problem(x.start.value(), x.end.value())
+            if p:
+                return p, x.start.line
+        return None
 
 
 class CaptureWindow(QWidget):
@@ -785,6 +933,9 @@ class CaptureWindow(QWidget):
             g.addWidget(note)
         flags.addStretch()
         g.addLayout(flags)
+        self.n_keydates = KeyDatesEditor()  # release 5.31: the new task's key dates
+        self.n_keydates.changed.connect(self.refresh)
+        g.addWidget(self.n_keydates)
         self.n_more_button = QPushButton("More fields ▸", objectName="moreLink")
         self.n_more_button.clicked.connect(lambda: self._toggle_more(self.n_more, self.n_more_button))
         g.addWidget(self.n_more_button)
@@ -837,6 +988,10 @@ class CaptureWindow(QWidget):
         self.u_deadline_desc = QLineEdit()
         g.addWidget(field("Deadline description", self.u_deadline_desc, "deadlineDesc"))
         self.u_during = self._during_label(g)
+        self.u_keydates = KeyDatesEditor()  # release 5.31: the task's key dates, to change, add to or take off
+        self.u_keydates.changed.connect(self.refresh)
+        self._u_keydates_were: list[KeyDateRow] = []
+        g.addWidget(self.u_keydates)
         self.u_more_button = QPushButton("More fields ▸", objectName="moreLink")
         self.u_more_button.clicked.connect(lambda: self._toggle_more(self.u_more, self.u_more_button))
         g.addWidget(self.u_more_button)
@@ -1520,6 +1675,9 @@ class CaptureWindow(QWidget):
         self._sync_refs()
         for box in (*self.n_refs.values(), *self.u_refs.values()):
             box.clear()
+        self.n_keydates.set_rows([])
+        self.u_keydates.set_rows([])
+        self._u_keydates_were = []
         self.n_inherit.setChecked(True)
         self.n_state.setCurrentText("Not started")
         self.n_recurrence.setCurrentIndex(0)
@@ -1631,6 +1789,9 @@ class CaptureWindow(QWidget):
         self.u_plant.setChecked(t.plant_event)
         for name, box in self.u_refs.items():
             box.setText(t.references.get(name, ""))
+        self._u_keydates_were = [KeyDateRow(kd.start, kd.end, kd.description, kd.plant, kd.deadline, bool(kd.done), kd.id)
+                                 for kd in m.key_dates_of(t.id)]
+        self.u_keydates.set_rows(self._u_keydates_were)
         for key, w in self.__dict__.get("_fields", {}).items():
             if key.startswith("upd."):
                 self.touched.discard(key)
@@ -1696,6 +1857,8 @@ class CaptureWindow(QWidget):
         self.copy_hint.setVisible(has_files)
         changes = self.update_changes(t) if upd and t else {}
         parts = [(k.replace('_', ' '), v) for k, v in changes.items() if k != "references"] + list(changes.get("references", {}).items())
+        if upd and t and self.update_key_dates() is not None:  # release 5.31
+            parts.append(("key dates", f"{len(self.u_keydates.rows())} in all"))
         self.changes_label.setText(
             "Status log: " + "; ".join(f"{k} → {self._short(v)}" for k, v in parts)
             if parts else "Prefilled with the task's current values. Each change goes into its status log.")
@@ -2348,7 +2511,17 @@ class CaptureWindow(QWidget):
                 hours = isinstance(w, HoursField)
                 self._fail(f"{name} isn't {'a number of hours' if hours else 'a date. Use YYYY-MM-DD'}.", w if hours else w.line)
                 return False
+        for on, editor in (("new_task" in self.types, self.n_keydates), ("update" in self.types and bool(self.task), self.u_keydates)):
+            p = editor.problem() if on else None
+            if p:
+                self._fail(p[0], p[1])
+                return False
         return True
+
+    def update_key_dates(self) -> list[KeyDateRow] | None:
+        """Update's key dates when they differ from the task's own (release 5.31), else None."""
+        rows = self.u_keydates.rows()
+        return rows if rows != self._u_keydates_were else None
 
     def draft(self) -> CaptureDraft:
         """Everything in the window, ready for save_capture."""
@@ -2366,6 +2539,7 @@ class CaptureWindow(QWidget):
             recurrence=recurrence, repeat_until=self.n_repeat.value() if recurrence else None,
             lead_hours=self.n_lead_hours.value(), assignee_hours=self.n_asg_hours.value(), plant_event=self.n_plant.isChecked(),
             references={name: box.text().strip() for name, box in self.n_refs.items() if box.text().strip()},
+            key_dates=self.n_keydates.rows(),
         )
         t = self.ctx.model().tasks.get(self.task) if self.task else None
         summary_type = self._summary_types[self.prompt_type.currentIndex()].name if not self.summary_field.isHidden() and self._summary_types else None
@@ -2374,6 +2548,7 @@ class CaptureWindow(QWidget):
             content=content, formatted=formatted, task=self.task, types=set(self.types), files=self._file_rows(),
             agenda=self._targets(), summary=self.summary.toPlainText() if not self.summary_field.isHidden() else "",
             summary_type=summary_type, new_task=new, update=self.update_changes(t) if "update" in self.types else {},
+            update_key_dates=self.update_key_dates() if "update" in self.types and t else None,
             from_capture=self.from_capture, quick=self._quick(),
             meeting=self.meeting_on, meeting_name=self.meet_name.text() if self.meeting_on else "", agenda_ticks=dict(self.agenda_ticks),
             item_overrides={k: dict(v) for k, v in self.item_ov.items()}, refs=dict(self.ref_ids),

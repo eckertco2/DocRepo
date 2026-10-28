@@ -319,3 +319,121 @@ def test_ordered_by_a_field_the_lane_column_names_it(browse):
     fresh = TimelineView()
     fresh.restore(kept | {"weeks": 7, "bars": "nonsense"})  # a value it no longer offers is left at its default
     assert (fresh.weeks, fresh.order, fresh.bars) == (9, "person", "project")
+
+
+# ---- key dates on the timeline (release 5.31, the key dates plan, item 58 and decision 152) ----
+def _key_dates(conn, task_id: str, *rows) -> None:
+    from docrepo.tasks import set_key_dates
+
+    set_key_dates(conn, task_id, list(rows), at=datetime(2026, 10, 8, 9, 0), via="Browse tool")
+
+
+def test_key_dates_are_marks_on_their_task_s_row(sample_conn):
+    """A task whose only dates are key dates has a row of its own, with its marks; a parent's summary bar takes in its
+    subtasks' key dates, their deadlines among its diamonds; the tooltip lists them."""
+    from docrepo.tasks import KeyDateRow
+
+    _key_dates(sample_conn, "T000016",
+               KeyDateRow("2026-10-01", None, "Planning period"),
+               KeyDateRow("2026-10-12", "2026-10-16", "Rota drafted"),
+               KeyDateRow(None, "2026-10-20", "Rota signed off", deadline=True),
+               KeyDateRow(None, "2026-10-07", "Old draft", done=True),
+               KeyDateRow(None, "2027-03-01", "Too far off"))
+    _key_dates(sample_conn, "T000012", KeyDateRow(None, "2026-11-20", "Lift plan approved", deadline=True))
+    m = Model(sample_conn)
+    tl = timeline.build(m, TODAY, START, 9, open_ids={"T000001", "T000008"})
+    rows_ = {r.task: r for r in tl.rows}
+    assert "T000016" in rows_ and not rows_["T000016"].ctx and "T000016" not in tl.undated
+    marks_ = [(k.kind, k.description, k.deadline, k.done) for k in rows_["T000016"].key_dates]
+    assert marks_ == [("from", "Planning period", False, False), ("window", "Rota drafted", False, False),
+                      ("by", "Rota signed off", True, False), ("by", "Old draft", False, True)]  # the one off the chart left out
+    assert rows_["T000016"].windows == () and rows_["T000016"].deadline is None
+    # The parent's summary bar reaches its subtask's key date, with its deadline as a diamond.
+    assert rows_["T000008"].span[1] == date(2026, 11, 20) and date(2026, 11, 20) in rows_["T000008"].sub_deadlines
+    assert rows_["T000001"].span[1] == date(2026, 11, 20)
+    assert rows_["T000012"].key_dates[0].kind == "by" and rows_["T000012"].windows
+    tip = timeline.tooltip(m, "T000016", TODAY)
+    assert "Key dates:\n  Planning period, from Thu 1 Oct" in tip and "◆ Rota signed off, by Tue 20 Oct" in tip
+    assert "Old draft, by Wed 7 Oct (done)" in tip
+    # In Plan mode a task with key dates but no dates of its own isn't an undated row with a grip.
+    assert not next(r for r in timeline.build(m, TODAY, START, 9, plan=True).rows if r.task == "T000016").undated
+
+
+def test_plant_activities_are_plant_events(sample_conn):
+    """Decision 149: a key date ticked as a plant activity is a band, in the lane, and in the lines naming what falls in
+    one; its own task doesn't count it."""
+    from docrepo.schedule import windows
+    from docrepo.tasks import KeyDateRow
+
+    _key_dates(sample_conn, "T000008", KeyDateRow("2026-10-20", "2026-10-22", "Crane lift", plant=True),
+               KeyDateRow(None, "2026-10-26", plant=True))
+    m = Model(sample_conn)
+    kds = m.key_dates_of("T000008")
+    tl = timeline.build(m, TODAY, START, 9)
+    assert tl.events == (timeline.Band("T000008", "Crane lift", date(2026, 10, 20), date(2026, 10, 22), kds[0].id),
+                         timeline.Band("T000008", "Installation", date(2026, 10, 26), date(2026, 10, 26), kds[1].id))
+    assert timeline.during(m, date(2026, 10, 21)).title == "Crane lift"
+    assert timeline.during(m, date(2026, 10, 21), "T000008") is None  # its own task's dates don't count
+    assert timeline.during_text(m, [("Due", "2026-10-21")], TODAY, "T000002") == "Due falls during Crane lift, Tue 20 Oct to Thu 22 Oct."
+    far = date(2036, 1, 1)
+    expected = sum(1 for t in m.tasks.values() if t.id != "T000008" and t.state in ("Not started", "In progress") and not t.plant_event
+                   and not t.discarded and any(a <= date(2026, 10, 22) and b >= date(2026, 10, 20) for a, b in windows(t, far)))
+    assert timeline.tasks_during(m, tl.events[0], TODAY) == expected > 0
+    assert [b.title for b in timeline.bands(m, date(2026, 10, 23), date(2026, 10, 30))] == ["Installation"]
+
+
+def test_plan_mode_drags_a_key_date_and_undoes_it(browse):
+    """Decision 152: in Plan mode a key date's window moves, or its ends stretch, and a start alone moves; each drop is
+    sent as set_key_date and saved, and Ctrl+Z puts it back. A done key date doesn't drag."""
+    from docrepo import edits, tasks
+    from docrepo.tasks import KeyDateRow
+
+    w = browse
+    _key_dates(w.ctx.conn, "T000008", KeyDateRow("2026-10-12", "2026-10-14", "Crane booked"), KeyDateRow("2026-10-05", None, "Planning"),
+               KeyDateRow(None, "2026-10-09", "Old", done=True))
+    w.refresh()
+    view, chart = w.timeline, w.timeline.chart
+    sent = []
+
+    def save(task_id, key_id, start, end, said):  # the browse window saves it (set_timeline_key_date); this records what was sent
+        sent.append((key_id, start, end, said))
+
+    view.set_key_date.connect(save)
+    view.set_open("T000001", True)
+    view.set_plan(True)
+    QApplication.processEvents()
+    ids = [k.id for k in Model(w.ctx.conn).key_dates_of("T000008")]
+    top = chart.top_of("T000008")
+    row = next(r for r in chart.rows if r.task == "T000008")
+    cy = int(chart._key_strip(row, top)[0])
+    day = chart.scale.px_per_day(chart)
+    # The window's middle, two days later.
+    x = int((chart.scale.x(chart, date(2026, 10, 12)) + chart.scale.x(chart, date(2026, 10, 15))) / 2)
+    assert chart._hit(x, cy)[1] == "kd-move" and chart.hit_key.id == ids[0]
+    QTest.mousePress(chart, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(x, cy))
+    QTest.mouseMove(chart, QPoint(x + 6, cy))
+    QTest.mouseMove(chart, QPoint(int(x + 2 * day), cy))
+    QTest.mouseRelease(chart, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(int(x + 2 * day), cy))
+    kd = Model(w.ctx.conn).key_dates_of("T000008")[0]
+    assert (kd.start, kd.end) == ("2026-10-14", "2026-10-16")
+    assert sent[-1][3].startswith("Installation: Crane booked now Wed 14 Oct to Fri 16 Oct")
+    # The start alone moves a day earlier, and stays a start alone.
+    bx = int(chart.scale.x(chart, date(2026, 10, 5)) + 3)
+    assert chart._hit(bx, cy)[1] == "kd-move" and chart.hit_key.id == ids[1]
+    QTest.mousePress(chart, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(bx, cy))
+    QTest.mouseMove(chart, QPoint(bx - 6, cy))
+    QTest.mouseMove(chart, QPoint(int(bx - day), cy))
+    QTest.mouseRelease(chart, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(int(bx - day), cy))
+    assert [(k.start, k.end) for k in Model(w.ctx.conn).key_dates_of("T000008")][1] == ("2026-10-04", None)
+    # The done one doesn't drag.
+    ex = int(chart.scale.x(chart, date(2026, 10, 10)) - 3)
+    assert chart._hit(ex, cy)[1] not in ("kd-move", "kd-start", "kd-end")
+    # Ctrl+Z, twice: both back as they were, through the same signal.
+    QTest.keyClick(chart, Qt.Key.Key_Z, Qt.KeyboardModifier.ControlModifier)
+    QTest.keyClick(chart, Qt.Key.Key_Z, Qt.KeyboardModifier.ControlModifier)
+    kds = Model(w.ctx.conn).key_dates_of("T000008")
+    assert [(k.start, k.end) for k in kds[:2]] == [("2026-10-12", "2026-10-14"), ("2026-10-05", None)]
+    view._pick("T000008")
+    assert "Key dates:" in view.card_text.text() and "Crane booked" in view.card_text.text()
+    chart.grab()
+    view.head.grab()

@@ -18,7 +18,7 @@ from datetime import date, timedelta
 
 from docrepo import capacity, priorities
 from docrepo.dates import day_diff, days_text, long_date, monday_of, short, to_date
-from docrepo.lists import LISTS, TaskList, list_tasks
+from docrepo.lists import LISTS, TaskList, key_dates_due, list_tasks
 from docrepo.model import AgendaItem, Model, Task
 from docrepo.schedule import DueDate, due_of, is_open
 
@@ -95,6 +95,7 @@ def view_counts(m: Model, today: date, me: str | None) -> dict[str, int]:
         "discarded": len(m.discarded_tasks()) + len(m.discarded_captures()),
     }
     counts.update({x.id: len(list_tasks(m, x, today, me)) for x in LISTS})
+    counts["due"] += len(key_dates_due(m, today))  # each key date due is a row of its own (release 5.31, decision 150)
     return counts
 
 
@@ -112,6 +113,13 @@ def rem_text(day: date, today: date) -> str:
     """A reminder that has passed is "ago", not overdue: it's a nudge, not a date the work missed."""
     n = day_diff(today, day)
     return f"{-n} d ago" if n < 0 else days_text(day, today)
+
+
+def key_date_cell(due: object, today: date) -> DueCell:
+    """A key date's Due column on the lists and Today (release 5.31): like a task's, from its end, or its start ("Starts")."""
+    cell = due_cell(due.task, today, DueDate(due.day, "Starts" if due.starts else "Due"))  # type: ignore[attr-defined]
+    assert cell is not None
+    return cell
 
 
 def due_cell(t: Task, today: date, d: DueDate | None = None, use_due: bool = True) -> DueCell | None:

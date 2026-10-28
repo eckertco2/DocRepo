@@ -42,6 +42,7 @@ from docrepo.ui.icons import icon, icon_size
 from docrepo.ui.look import LOOK, tip
 from docrepo.ui.style import style_sheet
 from docrepo.ui.task_picker import path_text
+from docrepo.ui.task_forms import KeyDatesEditor, key_date_rows
 from docrepo.ui.widgets import DateField, FlowLayout, HoursField, set_filled
 
 #: Its width (decision 145: about the pinned capture window's size, a little larger for the chips and the during line).
@@ -140,7 +141,7 @@ class QuickEdit(QWidget):
         self.model = ctx.model()
         self.task = self.model.task(task_id)
         self.people = ctx.parse_people(self.model)
-        self.base = planning.values_of(self.task)  # the fields without the box
+        self.base = planning.values_of(self.task, key_date_rows(self.model, task_id))  # the fields without the box
         self.orig = self.base.copy()
         self.off: set[str] = set()  # the fields the box doesn't fill: unticked, or changed by hand
         self.reading = planning.Reading()
@@ -230,6 +231,12 @@ class QuickEdit(QWidget):
         self.during = QLabel(objectName="hint")
         self.during.setWordWrap(True)
         lay.addWidget(self.during)
+        # ---- its key dates (release 5.31, the key dates plan): the same rows as Edit task's, compact ----
+        self.key_dates = KeyDatesEditor(self.base.key_dates, compact=True)
+        self.key_dates.add_button.setText("+ Key date")
+        self.key_dates.empty.hide()
+        self.key_dates.changed.connect(self._key_dates_edited)
+        lay.addWidget(self.key_dates)
         # ---- the people and their hours ----
         who = QGridLayout()
         who.setHorizontalSpacing(4)
@@ -379,6 +386,14 @@ class QuickEdit(QWidget):
         self.off.add(key)
         self._changed_by_user(key if key not in self.rows else None)
 
+    def _key_dates_edited(self) -> None:
+        """A key date added, changed, moved or taken off: kept as it stands; Save says what's wrong with one."""
+        if self._setting:
+            return
+        self.key_dates.empty.hide()  # the window keeps its room: Edit task's sentence about key dates isn't shown here
+        self.base.key_dates = self.key_dates.rows()
+        self._changed_by_user(None)
+
     def toggle(self, key: str) -> None:
         """A chip's click: its field no longer filled by the box, or filled again."""
         if key in self.off:
@@ -394,7 +409,7 @@ class QuickEdit(QWidget):
             if not h.is_valid():
                 return self._say(f"{planning.NAMES[key]} isn't a number of hours.")
         v = self.values()
-        problem = planning.problem(v)
+        problem = planning.problem(v) or self.key_dates.problem()
         if problem:
             return self._say(problem)
         if v == self.orig:

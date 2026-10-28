@@ -10,6 +10,12 @@ week or priority (``BARS``), and show their hours. The Labels and People filters
 closed and discarded tasks are left out, and open tasks with no dates are named under the chart; in Plan mode (release
 5.30) they're rows of their own, to be dragged onto it. Focus shows one task and everything under it.
 
+Key dates (release 5.31, the key dates plan) are marks on their task's row (``KeyMark``): a window a thin segment, a start
+alone an opening bracket, an end alone a closing tick, a Deadline end a red diamond, a done one grey. A task whose only dates
+in view are key dates has a row of its own, and a parent's summary bar takes in its subtasks' key dates. A key date ticked
+as a plant activity is a plant event of its own (decision 149): a ``Band`` with its ``key_date``, in the events lane, down
+the chart and in the lines naming what falls during one.
+
 Nothing here draws anything: ``docrepo/ui/timeline_view.py`` paints it. Ported from the mockup's ``timeline.js``.
 """
 from __future__ import annotations
@@ -19,9 +25,9 @@ from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import date, timedelta
 
-from docrepo import quick
+from docrepo import key_dates, quick
 from docrepo.dates import add_months, long_date, monday_of, to_date
-from docrepo.model import Model, Task
+from docrepo.model import KeyDate, Model, Task
 from docrepo.schedule import due_of, is_open, start_of, windows
 from docrepo.stories import and_list
 
@@ -55,6 +61,21 @@ class Band:
     title: str
     start: date
     end: date  # its last day
+    key_date: int | None = None  # a key date ticked as a plant activity (release 5.31): its ID; its task's own tick: None
+
+
+@dataclass(frozen=True)
+class KeyMark:
+    """A key date on its task's row (release 5.31): its days, its kind (``key_dates.kind``) and its ticks."""
+
+    id: int
+    first: date
+    last: date
+    kind: str  # "window", "on", "from" or "by"
+    description: str = ""
+    plant: bool = False
+    deadline: bool = False
+    done: bool = False
 
 
 @dataclass(frozen=True)
@@ -77,6 +98,7 @@ class Row:
     undated: bool = False  # it has no dates at all: in Plan mode, a row with a grip, to be dragged onto the chart
     key: int | None = None  # its Order by key's place in ``Timeline.keys``, which colours its title
     plant_event: bool = False
+    key_dates: tuple[KeyMark, ...] = ()  # its key dates that reach into view (release 5.31)
 
     @property
     def ctx(self) -> bool:
@@ -141,17 +163,28 @@ def marks(t: Task, start: date, end: date) -> tuple[tuple[tuple[date, date], ...
     return wins, dl if dl and start <= dl < end else None
 
 
-def is_undated(t: Task, today: date) -> bool:
-    """No deadline and no window at all: nothing to put on the chart."""
-    return not t.deadline and not windows(t, today + _FAR)
+def is_undated(t: Task, today: date, m: Model | None = None) -> bool:
+    """No deadline, no window and (given the model) no key date at all: nothing to put on the chart."""
+    return not t.deadline and not windows(t, today + _FAR) and not (m is not None and m.key_dates_of(t.id))
 
 
-def own_span(t: Task, today: date) -> tuple[date, date] | None:
-    """A one-time task's first and last day, its deadline included; a routine one repeats, so it has none."""
-    if t.recurrence:
-        return None
-    days = [d for w in windows(t, today + _FAR)[:1] for d in w] + ([to_date(t.deadline)] if t.deadline else [])
+def own_span(t: Task, today: date, m: Model | None = None) -> tuple[date, date] | None:
+    """A one-time task's first and last day, its deadline included, and (given the model) its key dates (release 5.31); a
+    routine one repeats, so its own dates don't count."""
+    days = [] if t.recurrence else [d for w in windows(t, today + _FAR)[:1] for d in w] + ([to_date(t.deadline)] if t.deadline else [])
+    if m is not None:
+        days += [d for kd in m.key_dates_of(t.id) for d in key_dates.first_last(kd)]
     return (min(days), max(days)) if days else None
+
+
+def key_marks(m: Model, task_id: str, start: date, end: date) -> tuple[KeyMark, ...]:
+    """A task's key dates that reach into [start, end), as marks for its row."""
+    out = []
+    for kd in m.key_dates_of(task_id):
+        a, b = key_dates.first_last(kd)
+        if b >= start and a < end:
+            out.append(KeyMark(kd.id, a, b, key_dates.kind(kd), kd.description, kd.plant, kd.deadline, bool(kd.done)))
+    return tuple(out)
 
 
 # ---- hours (item 53) ----
@@ -265,9 +298,9 @@ def build(m: Model, today: date, start: date, weeks: int, order: str = "top", la
 
     def dated(t: Task) -> bool:
         wins, dl = marks(t, start, end)
-        return bool(wins or dl)
+        return bool(wins or dl or key_marks(m, t.id, start, end))
 
-    shown = {t.id for t in m.tasks.values() if base(t) and (dated(t) or (plan and is_undated(t, today)))}
+    shown = {t.id for t in m.tasks.values() if base(t) and (dated(t) or (plan and is_undated(t, today, m)))}
     below: dict[str, list[str]] = {}
 
     def under(task_id: str) -> list[str]:
@@ -279,12 +312,18 @@ def build(m: Model, today: date, start: date, weeks: int, order: str = "top", la
         return task_id in shown or bool(under(task_id))
 
     def first(task_id: str) -> date:
-        span = own_span(m.task(task_id), today) if task_id in shown else None
+        span = own_span(m.task(task_id), today, m) if task_id in shown else None
         return (span or sub_span(task_id) or (date.max, date.max))[0]
 
     def sub_span(task_id: str) -> tuple[date, date] | None:
-        spans = [s for x in under(task_id) if (s := own_span(m.task(x), today))]
+        spans = [s for x in under(task_id) if (s := own_span(m.task(x), today, m))]
         return (min(s[0] for s in spans), max(s[1] for s in spans)) if spans else None
+
+    def sub_deadlines(task_id: str) -> tuple[date, ...]:
+        """Its subtasks' deadlines in view: their own, and their key dates' ticked as one (decision 147)."""
+        days = {d for x in under(task_id) if (d := marks(m.task(x), start, end)[1])}
+        days |= {k.last for x in under(task_id) for k in key_marks(m, x, start, end) if k.deadline and start <= k.last < end}
+        return tuple(sorted(days))
 
     def ordered(ids: list[str]) -> list[str]:
         if order == "top":
@@ -302,31 +341,43 @@ def build(m: Model, today: date, start: date, weeks: int, order: str = "top", la
             wins, dl = marks(t, start, end) if own else ((), None)
             due = due_of(t, today)
             span = sub_span(task_id) if kids else None
-            subs = tuple(sorted({d for x in under(task_id) if (d := marks(m.task(x), start, end)[1])})) if kids else ()
+            subs = sub_deadlines(task_id) if kids else ()
             rows.append(Row(task_id, depth, own, wins, dl, bool(t.recurrence),
                             own and not t.recurrence and due is not None and due.date < today, t.state == "Not started",
                             colours.get(m.chains_of(task_id)[0][0], 0), len(kids), bool(kids) and task_id in open_ids,
                             span if span and span[0] < end and span[1] >= start else None, subs,
-                            task_id in shown and not own, key_of(m, task_id, order, keys), t.plant_event))
+                            task_id in shown and not own, key_of(m, task_id, order, keys), t.plant_event,
+                            key_marks(m, task_id, start, end) if own else ()))
             if kids and task_id in open_ids:
                 walk(kids, depth + 1)
 
     walk([focus] if focus and focus in m.tasks else [t.id for t in m.top_level()], 0)
     # The built-in Quick tasks (mods log round 2) has no dates of its own, so it's left out of them.
-    undated = () if plan else tuple(t.id for t in m.tasks.values() if base(t) and is_undated(t, today))
+    undated = () if plan else tuple(t.id for t in m.tasks.values() if base(t) and is_undated(t, today, m))
     return Timeline(start, weeks, tuple(rows), undated, bands(m, start, end), tuple(name for _, name in keys) if order != "top" else ())
 
 
+def all_bands(m: Model, until: date) -> list[Band]:
+    """Every plant event up to ``until``: each task ticked as one, from its Start to its Due (or Deadline), a routine one
+    each time it comes round (release 5.9, M0028); and each key date ticked as a plant activity, its own days, titled by
+    its description, or its task's title when it has none (release 5.31, decision 149)."""
+    out = [Band(t.id, t.title, a, b) for t in m.plant_events() for a, b in windows(t, until)]
+    for t, kd in m.plant_activities():
+        a, b = key_dates.first_last(kd)
+        if a <= until:
+            out.append(Band(t.id, kd.description or t.title, a, b, kd.id))
+    return out
+
+
 def bands(m: Model, start: date, end: date) -> tuple[Band, ...]:
-    """The plant events (release 5.9, M0028) that reach into [start, end): from their Start to their Due (or Deadline),
-    and a routine one each time it comes round."""
-    return tuple(sorted((Band(t.id, t.title, a, b) for t in m.plant_events() for a, b in windows(t, end) if b >= start and a < end),
-                        key=lambda b: (b.start, b.title.lower())))
+    """The plant events that reach into [start, end), in date order."""
+    return tuple(sorted((b for b in all_bands(m, end) if b.end >= start and b.start < end), key=lambda b: (b.start, b.title.lower())))
 
 
 def tasks_during(m: Model, band: Band, today: date) -> int:
-    """How many open tasks, other than plant events, have a window in a plant event's days."""
+    """How many open tasks, other than plant events and the key date's own task, have a window in a plant event's days."""
     return sum(1 for t in m.tasks.values() if is_open(t) and not t.plant_event and not quick.is_parent(t)
+               and not (band.key_date is not None and t.id == band.task)
                and any(a <= band.end and b >= band.start for a, b in windows(t, today + _FAR)))
 
 
@@ -355,16 +406,11 @@ def days_text(band: Band, today: date) -> str:
 
 
 def during(m: Model, day: date | None, task_id: str | None = None) -> Band | None:
-    """The plant event a day falls in, if any, for the line under a date field (release 5.9, M0028)."""
+    """The plant event a day falls in, if any, for the line under a date field (release 5.9, M0028): a plant event task's,
+    or a key date ticked as a plant activity (release 5.31). The task's own events don't count."""
     if day is None:
         return None
-    for t in m.plant_events():
-        if t.id == task_id:
-            continue
-        for a, b in windows(t, day + timedelta(days=1)):
-            if a <= day <= b:
-                return Band(t.id, t.title, a, b)
-    return None
+    return next((b for b in all_bands(m, day + timedelta(days=1)) if b.task != task_id and b.start <= day <= b.end), None)
 
 
 def tooltip(m: Model, task_id: str, today: date, order: str = "top", plan: bool = False) -> str:
@@ -393,4 +439,18 @@ def tooltip(m: Model, task_id: str, today: date, order: str = "top", plan: bool 
             lines.append(f"{and_list(names)} (coloured by {names[0]})")
     if t.plant_event:
         lines.append("Plant event")
+    lines += key_date_lines(m, task_id, today)
     return "\n".join(lines)
+
+
+def key_date_text(kd: KeyDate, today: date) -> str:
+    """One key date for the tooltip and the card: its marks (a flag for a plant activity, a diamond for a deadline), its
+    description and dates, and "done"."""
+    flags = "".join(x for x, on in (("\u2691 ", kd.plant), ("\u25c6 ", kd.deadline)) if on)
+    return f"{flags}{key_dates.label(kd, today)}" + (" (done)" if kd.done else "")
+
+
+def key_date_lines(m: Model, task_id: str, today: date) -> list[str]:
+    """A task's key dates, a line each under "Key dates:", for the tooltip (release 5.31)."""
+    kds = m.key_dates_of(task_id)
+    return ["Key dates:", *(f"  {key_date_text(kd, today)}" for kd in kds)] if kds else []

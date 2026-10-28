@@ -359,3 +359,95 @@ def remove_parent(conn: sqlite3.Connection, task_id: str, parent_id: str, *, at:
         change = Change("Parents", before, parent_titles(conn, task_id))
         _log(conn, task_id, at, via, [change])
     return change
+
+
+# ---- key dates (release 5.31, the key dates plan) ----
+@dataclass
+class KeyDateRow:
+    """A key date as a form or a capture has it: its ID when it's one already (None for a new one), its dates as
+    YYYY-MM-DD or None, its description, and its ticks."""
+
+    start: str | None
+    end: str | None
+    description: str = ""
+    plant: bool = False
+    deadline: bool = False
+    done: bool = False
+    id: int | None = None
+
+
+def _key_date(row: KeyDateRow, task_id: str, done: str | None, pos: int, key_id: int = 0):
+    from docrepo.model import KeyDate
+
+    return KeyDate(key_id, task_id, row.start or None, row.end or None, " ".join(row.description.split()), row.plant, row.deadline, done, pos)
+
+
+def set_key_dates(conn: sqlite3.Connection, task_id: str, rows: Sequence[KeyDateRow], *, at: datetime, via: str) -> list[Change]:
+    """Make a task's key dates these, in this order: new ones added, changed ones changed, those left out taken off, a
+    Done tick set or cleared. Each is logged ("Key date", or "Key date done"); a new order alone isn't. Returns what was."""
+    from docrepo import key_dates
+
+    for row in rows:
+        p = key_dates.problem(row.start, row.end)
+        if p:
+            raise TaskError(p)
+    with transaction(conn):
+        if conn.execute("SELECT 1 FROM tasks WHERE id = ?", (task_id,)).fetchone() is None:
+            raise TaskError(f"There's no task {task_id}.")
+        old = {r["id"]: r for r in conn.execute("SELECT * FROM task_dates WHERE task = ?", (task_id,))}
+        logged: list[Change] = []
+        kept: set[int] = set()
+        day = at.date().isoformat()
+        for pos, row in enumerate(rows):
+            before = old.get(row.id) if row.id is not None else None
+            if before is None:
+                kd = _key_date(row, task_id, day if row.done else None, pos)
+                conn.execute("INSERT INTO task_dates (task, start_day, end_day, description, plant, deadline, done, pos) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                             (task_id, kd.start, kd.end, kd.description, int(kd.plant), int(kd.deadline), kd.done, pos))
+                logged.append(Change("Key date", None, key_dates.log_text(kd)))
+                if kd.done:
+                    logged.append(Change("Key date done", None, key_dates.log_text(kd)))
+                continue
+            kept.add(before["id"])
+            was = _key_date(KeyDateRow(before["start_day"], before["end_day"], before["description"], bool(before["plant"]),
+                                       bool(before["deadline"])), task_id, before["done"], before["pos"], before["id"])
+            done = (before["done"] or day) if row.done else None
+            kd = _key_date(row, task_id, done, pos, before["id"])
+            conn.execute("UPDATE task_dates SET start_day = ?, end_day = ?, description = ?, plant = ?, deadline = ?, done = ?, pos = ? WHERE id = ?",
+                         (kd.start, kd.end, kd.description, int(kd.plant), int(kd.deadline), kd.done, pos, kd.id))
+            if key_dates.log_text(was) != key_dates.log_text(kd):
+                logged.append(Change("Key date", key_dates.log_text(was), key_dates.log_text(kd)))
+            if bool(was.done) != bool(kd.done):
+                logged.append(Change("Key date done", None if kd.done else key_dates.log_text(kd), key_dates.log_text(kd) if kd.done else None))
+        for key_id, r in old.items():
+            if key_id not in kept:
+                conn.execute("DELETE FROM task_dates WHERE id = ?", (key_id,))
+                was = _key_date(KeyDateRow(r["start_day"], r["end_day"], r["description"], bool(r["plant"]), bool(r["deadline"])),
+                                task_id, r["done"], r["pos"], key_id)
+                logged.append(Change("Key date", key_dates.log_text(was), None))
+        _log(conn, task_id, at, via, logged)
+    return logged
+
+
+def key_date_rows(conn: sqlite3.Connection, task_id: str) -> list[KeyDateRow]:
+    """A task's key dates as rows, in its order, to change some and give them all back to ``set_key_dates``."""
+    return [KeyDateRow(r["start_day"], r["end_day"], r["description"], bool(r["plant"]), bool(r["deadline"]), bool(r["done"]), r["id"])
+            for r in conn.execute("SELECT * FROM task_dates WHERE task = ? ORDER BY pos, id", (task_id,))]
+
+
+def add_key_dates(conn: sqlite3.Connection, task_id: str, rows: Sequence[KeyDateRow], *, at: datetime, via: str) -> list[Change]:
+    """Add key dates at the end of a task's own, as a capture's ``**date`` lines do. Returns what was logged."""
+    return set_key_dates(conn, task_id, [*key_date_rows(conn, task_id), *rows], at=at, via=via)
+
+
+def set_key_date_done(conn: sqlite3.Connection, key_id: int, done: bool, *, at: datetime, via: str) -> tuple[str, list[Change]]:
+    """Tick or untick a key date's Done (decision 148): from Today, the list, the task page or a form. Returns its task and
+    what was logged."""
+    r = conn.execute("SELECT task FROM task_dates WHERE id = ?", (key_id,)).fetchone()
+    if r is None:
+        raise TaskError(f"There's no key date {key_id}.")
+    rows = key_date_rows(conn, r["task"])
+    for row in rows:
+        if row.id == key_id:
+            row.done = done
+    return r["task"], set_key_dates(conn, r["task"], rows, at=at, via=via)

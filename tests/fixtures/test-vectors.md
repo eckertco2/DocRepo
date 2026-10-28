@@ -133,6 +133,24 @@ Agenda items are links from a task, or a note with no task, to a meeting, anothe
 - Longest path in the sample data root: 122 characters.
 - `C:\Users\<user>\DocRepoData\Tasks\T000008\Files\_old versions\2026-09-22 Installation procedure (replaced 2026-10-05).docx`
 
+## Key dates from text (release 5.31)
+
+A `**date` line in a capture, read by `keyDate` in `docs/browse-tool/mockup/items.js` with today = 2026-10-08: its date phrase as Parse and populate reads dates ("from" a start, "by" or "due" an end, a range a window, "on" or a bare date one day), "plant activity" (or "plant event") and "deadline" as its ticks, and the rest its description.
+
+| Line | Reads |
+|---|---|
+| **date Dec 1 to 5 Trial execution window, plant activity | Start 2026-12-01. End 2026-12-05. Description "Trial execution window". Plant activity. |
+| **date by Nov 25 Target for trial preparations, deadline | End 2026-11-25. Description "Target for trial preparations". Deadline. |
+| **date from Oct 12 Trial planning period | Start 2026-10-12. Description "Trial planning period". |
+| **date on Nov 2 Pump test | Start 2026-11-02. End 2026-11-02. Description "Pump test". |
+| **date Pump test Nov 2 | Start 2026-11-02. End 2026-11-02. Description "Pump test". |
+| **date Trial run Dec 1 - Dec 5 | Start 2026-12-01. End 2026-12-05. Description "Trial run". |
+| **date due Nov 25 Preparations done, hard deadline | End 2026-11-25. Description "Preparations done". Deadline. |
+| **date. Kickoff 2026-11-02, major plant activity | Start 2026-11-02. End 2026-11-02. Description "Kickoff". Plant activity. |
+| **date: Commissioning window 9 to 20 Nov | Start 2026-11-09. End 2026-11-20. Description "Commissioning window". |
+| **date by Friday Send the drawings | End 2026-10-09. Description "Send the drawings". |
+| **date Trial planning period | Description "Trial planning period". No date: add one, such as by 25 Nov. |
+
 ## Parse and populate
 
 Results of `parseCapture` in `docs/browse-tool/mockup/parse.js`, with today = 2026-10-08. The people list is Me, Priya Shah, Tom Becker, Mike Ortiz, Tyler Nguyen, with Rob Lee on it as retired. Todd and Marcus aren't on it, so they're added as new people. Labels and their keywords are the sample data's, listed in Contents.md. The first three cases and the last five are the brainstorm's. A rate of hours becomes a total from Start (today, unless the text gives one) to Due. Fields not listed are left empty. There's no Description to fill: a new task's description is its whole content text (round 23).

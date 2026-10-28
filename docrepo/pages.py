@@ -121,6 +121,15 @@ class Pages:
         if on:
             rows.append(("On agendas", ", ".join(self._target(here, a.target) for a in on)))
         out += ["| Field | Value |", "|---|---|", *[f"| {a} | {_cell(b)} |" for a, b in rows], ""]
+        kds = self.m.key_dates_of(t.id)
+        if kds:  # release 5.31: its key dates, in its order, with their ticks
+            from docrepo.key_dates import when_text
+
+            out += ["## Key dates", "", "| Dates | Description | Marks |", "|---|---|---|"]
+            for kd in kds:
+                marks = ", ".join(x for x, on in (("Plant activity", kd.plant), ("Deadline", kd.deadline), (f"Done {kd.done}", kd.done)) if on)
+                out.append(f"| {_cell(when_text(kd, self.today))} | {_cell(kd.description) or '–'} | {_cell(marks) or '–'} |")
+            out.append("")
         out += ["## Description", "", t.description or "_None._", "", "## Current status", "", t.current_status or "_No status yet._", ""]
         # The notes page (release 5.25): its headings two levels down, each caption a link to its capture.
         from docrepo import notes_page

@@ -139,6 +139,7 @@ class NewTaskFields:
     assignee_hours: float | None = None
     plant_event: bool = False  # release 5.9
     references: dict[str, str] = field(default_factory=dict)  # reference field values by name (release 5.9)
+    key_dates: list[tasks.KeyDateRow] = field(default_factory=list)  # the new task's key dates (release 5.31)
 
 
 @dataclass
@@ -155,6 +156,8 @@ class CaptureDraft:
     new_task: NewTaskFields = field(default_factory=NewTaskFields)
     #: The Update fields, prefilled with the task's values; only those that differ are changed.
     update: dict[str, Any] = field(default_factory=dict)
+    #: Update's key dates (release 5.31): the task's own, as changed in the window, or None when they weren't changed.
+    update_key_dates: list[tasks.KeyDateRow] | None = None
     #: Make it a task: the unfiled capture the new task is made from. It's filed to the new task; no new capture is kept.
     from_capture: str | None = None
     #: A quick task (mods log round 2, M0039): with no task picked, the new task goes under the built-in Quick tasks. A new
@@ -399,6 +402,8 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
                 lead_hours=nt.lead_hours, assignee_hours=nt.assignee_hours, labels=nt.labels, inherit_labels=nt.inherit_labels,
                 plant_event=nt.plant_event or bool(own and own.plant_event), references=nt.references,
             )
+            if nt.key_dates:  # its key dates (release 5.31), logged as the capture's
+                tasks.add_key_dates(conn, created, nt.key_dates, at=at, via=via)
         # Meeting notes (release 5.8): this time's meeting of a regular meeting, or a new meeting, is made first, and
         # the notes go on it. It stays In progress until it's closed by hand.
         agenda_task = t if draft.meeting and case != "new" else None  # the meeting whose agenda the notes worked through
@@ -419,6 +424,8 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
                 if key in update:
                     update[key] = [person(w) if isinstance(w, Who) else w for w in update[key]]
             changes = tasks.update_task(conn, settings, t, at=at, via=via, **update)
+            if draft.update_key_dates is not None:  # its key dates as changed in the window (release 5.31)
+                changes += tasks.set_key_dates(conn, t, draft.update_key_dates, at=at, via=via)
             if not is_new and not keep and not changes and not targets:
                 raise SaveError("There's nothing to save yet. Change a field, add an agenda, or type the update in the content text.", "content")
         if capture_id:
@@ -540,8 +547,9 @@ def _save_items(conn: sqlite3.Connection, settings: Settings, reading: items.Rea
                 notes_id: str, home: str | None, when: str, at: datetime, person: Callable[[Who], str]) -> tuple[list[tuple[str, str]], dict[str, int]]:
     """Each ticked item as a small capture of its own, linked to the notes (release 5.8). A task item makes its task,
     under the capture's task (or meeting, or new task) and its # tasks; a note, an update or a decision is filed to each
-    of its tasks. Returns each item's capture with its block as written (and whether that's markup), and how many of
-    each kind were made."""
+    of its tasks. A key date (release 5.31) is added to each of its tasks, logged as the notes', with no capture of its
+    own: its line stays in the notes. Returns each item's capture with its block as written (and whether that's markup),
+    and how many of each kind were made."""
     lines = content.split("\n")
     files: list[tuple[str, str, bool]] = []
     made: dict[str, int] = {}
@@ -558,6 +566,15 @@ def _save_items(conn: sqlite3.Connection, settings: Settings, reading: items.Rea
             if ref and ref not in where:
                 where.append(ref)
         title = it.title or items.KIND_NAMES[it.kind]
+        if it.kind == "date":
+            kd = it.key_date
+            if kd is None or kd.problem or not where:
+                continue
+            description = it.title if it.changed else kd.description  # its card's title, when changed there
+            for task_id in where:
+                tasks.add_key_dates(conn, task_id, [tasks.KeyDateRow(kd.start, kd.end, description, kd.plant, kd.deadline)], at=at, via=notes_id)
+            made["date"] = made.get("date", 0) + 1
+            continue
         if it.kind == "task":
             cid = next_id(conn, "C")
             task_id = tasks.create_task(

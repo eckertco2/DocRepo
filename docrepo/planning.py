@@ -23,6 +23,7 @@ from typing import Any
 from docrepo import timeline
 from docrepo.model import Model, Task
 from docrepo.parse import EVENT_WORDS, ROLE_HOURS_RE, Known, ParsePerson, Who, parse_capture, work_weeks
+from docrepo.tasks import KeyDateRow
 
 #: The fields Quick edit has, in the order its chips are listed.
 KEYS = ("start", "due", "deadline", "deadline_desc", "recurrence", "leads", "assignees", "lead_hours", "assignee_hours", "plant_event")
@@ -50,15 +51,17 @@ class Values:
     lead_hours: float | None = None
     assignee_hours: float | None = None
     plant_event: bool = False
+    #: Its key dates (release 5.31), as the form's rows; the box never fills them.
+    key_dates: list[KeyDateRow] = field(default_factory=list)
 
     def copy(self) -> Values:
-        return replace(self, leads=list(self.leads), assignees=list(self.assignees))
+        return replace(self, leads=list(self.leads), assignees=list(self.assignees), key_dates=[replace(r) for r in self.key_dates])
 
 
-def values_of(t: Task) -> Values:
+def values_of(t: Task, key_dates: Sequence[KeyDateRow] = ()) -> Values:
     """A task's fields as Quick edit shows them. A Start that isn't set stays empty (the task starts the day it was made)."""
     return Values(t.start or "", t.due or "", t.deadline or "", t.deadline_desc or "", t.recurrence or "", list(t.leads),
-                  list(t.assignees), t.lead_hours, t.assignee_hours, bool(t.plant_event))
+                  list(t.assignees), t.lead_hours, t.assignee_hours, bool(t.plant_event), [replace(r) for r in key_dates])
 
 
 @dataclass(frozen=True)
@@ -245,4 +248,5 @@ def edit_values(v: Values) -> dict[str, Any]:
     """The fields as ``edits.edit_task`` takes them."""
     return {"start": v.start or None, "due": v.due or None, "deadline": v.deadline or None, "deadline_desc": v.deadline_desc,
             "recurrence": v.recurrence or None, "leads": [Who(p) for p in v.leads], "assignees": [Who(p) for p in v.assignees],
-            "lead_hours": v.lead_hours, "assignee_hours": v.assignee_hours, "plant_event": v.plant_event}
+            "lead_hours": v.lead_hours, "assignee_hours": v.assignee_hours, "plant_event": v.plant_event,
+            "key_dates": [replace(r) for r in v.key_dates]}

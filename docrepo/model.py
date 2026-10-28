@@ -62,6 +62,22 @@ class Task:
 
 
 @dataclass
+class KeyDate:
+    """A key date on a task (release 5.31, the key dates plan): a start, an end or both (YYYY-MM-DD), a description, and
+    whether it's a plant activity (a plant event of its own), a hard deadline, or done (the day it was ticked)."""
+
+    id: int
+    task: str
+    start: str | None
+    end: str | None
+    description: str = ""
+    plant: bool = False
+    deadline: bool = False
+    done: str | None = None
+    pos: int = 0
+
+
+@dataclass
 class Person:
     id: str
     name: str
@@ -285,6 +301,11 @@ class Model:
             labels[r["label"]].keywords.append(r["keyword"])
         self.labels: list[Label] = list(labels.values())
         self.links: list[tuple[str, str]] = [(r["child"], r["parent"]) for r in q("SELECT child, parent FROM task_parents ORDER BY id")]
+        #: Each task's key dates (release 5.31), in its own order.
+        self.key_dates: dict[str, list[KeyDate]] = {}
+        for r in q("SELECT * FROM task_dates ORDER BY task, pos, id"):
+            self.key_dates.setdefault(r["task"], []).append(KeyDate(r["id"], r["task"], r["start_day"], r["end_day"], r["description"],
+                                                                    bool(r["plant"]), bool(r["deadline"]), r["done"], r["pos"]))
         self._parents: dict[str, list[str]] = {}
         self._children: dict[str, list[str]] = {}
         for child, parent in self.links:
@@ -378,6 +399,15 @@ class Model:
         """A label as pickers show it: "Production line › Line 1"."""
         parent = self.parent_label(name)
         return f"{parent} › {name}" if parent else name
+
+    def key_dates_of(self, task_id: str) -> list[KeyDate]:
+        """A task's key dates (release 5.31), in its own order."""
+        return self.key_dates.get(task_id, [])
+
+    def plant_activities(self) -> list[tuple[Task, KeyDate]]:
+        """The key dates ticked as a plant activity (release 5.31, decision 149), on tasks that aren't discarded: each a
+        plant event of its own."""
+        return [(t, kd) for t in self.tasks.values() if not t.discarded for kd in self.key_dates.get(t.id, []) if kd.plant]
 
     def plant_events(self) -> list[Task]:
         """The plant events (M0028): tasks with Plant event ticked, but discarded ones, soonest first."""

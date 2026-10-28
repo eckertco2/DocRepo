@@ -39,7 +39,7 @@ from docrepo.ui.look import LOOK, Help
 from docrepo.ui.widgets import DateField
 
 #: Each line's tint, by the part it plays: the item it makes, the new task's own line, or a heading.
-TINTS = {"task": "#e3ecf7", "note": "#e0f1ee", "update": "#f6ecd8", "decision": "#ece6f6", "heading": "#e9edf1"}
+TINTS = {"task": "#e3ecf7", "note": "#e0f1ee", "update": "#f6ecd8", "decision": "#ece6f6", "date": "#e8f0dc", "heading": "#e9edf1"}
 #: The operators' colours: (text, background).
 REF_COLOURS = {"person": ("#1d5e98", "#dbe8f5"), "new": ("#875700", "#fcefcf"), "none": ("#5a6571", "#e9edf1"),
                "task": ("#22706a", "#d6eeea"), "type": ("#875700", "#fcefcf")}
@@ -107,6 +107,14 @@ def _facts(it: items.Item, where: str) -> str:
         if it.assignee_hours or it.lead_hours:
             out.append(f"{it.assignee_hours or it.lead_hours} h")
         out.append(f"under {where}")
+    elif it.kind == "date" and it.key_date:  # a key date (release 5.31): its dates, its ticks, and whose it is
+        kd = it.key_date
+        a, b = (date.fromisoformat(kd.start) if kd.start else None), (date.fromisoformat(kd.end) if kd.end else None)
+        out.append(f"on {short(a, a)}" if a and a == b else f"{short(a, a)} to {short(b, b)}" if a and b
+                   else f"from {short(a, a)}" if a else f"by {short(b, b)}" if b else "")
+        out += ["plant activity" * kd.plant, "deadline" * kd.deadline]
+        if it.where:
+            out.append(f"on {where}")
     elif it.where:
         out.append(f"{'updates' if it.kind == 'update' else 'on'} {where}" + (f": {it.state}" if it.state else ""))
     return " · ".join(x for x in out if x)
@@ -141,7 +149,8 @@ class ItemCard(QFrame):
         name = "Plant event" if it.plant_event else items.KIND_NAMES[it.kind]
         self.tick = QCheckBox(name + (f": {it.state}" if it.state else ""))
         if not LOOK.classic:
-            self.tick.setIcon(icon("task" if it.kind == "task" else it.kind if it.kind in ("note", "update", "decision") else "note"))
+            self.tick.setIcon(icon("task" if it.kind == "task" else "calendar" if it.kind == "date"
+                                   else it.kind if it.kind in ("note", "update", "decision") else "note"))
         self.tick.setChecked(it.on)
         self.tick.setEnabled(not it.problem)
         self.tick.setToolTip("Untick to skip it")
@@ -239,7 +248,7 @@ class ItemCards(QFrame):
             "even when you edit the line." if its or (own and own.any) else
             "In any capture, <b>@Tom</b> makes a task for Tom, <b>@L.Tom</b> makes him its lead, <b>@__</b> a task for no one yet, "
             "<b>#Rigging plan</b> files a note to that task, and <b>**Closed.</b>, <b>**u</b>, <b>**n</b>, <b>**t</b>, <b>**Decision.</b> "
-            "or <b>**event.</b> say what a line is. Type @ or # for a list.")
+            "or <b>**event.</b> say what a line is; <b>**date Dec 1 to 5 Trial run, plant activity</b> adds a key date. Type @ or # for a list.")
         self.setProperty("empty", not its and not (own and own.any))
         self.style().unpolish(self)
         self.style().polish(self)

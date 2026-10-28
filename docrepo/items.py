@@ -13,6 +13,11 @@ added email), and only after a space, a "(" or the start of a line, so an addres
   ``**Started.``: an update to the ``#`` task with that state; the rest is its current status. ``**u``: an update with
   no state change. ``**Decision.``: a decision, on the ``#`` task, else on the capture's task or meeting.
   ``**event.``: a task with Plant event ticked (release 5.9, decision 22): ``**event. Spring outage, 3 to 14 Nov``.
+- ``**date``: a key date (release 5.31, the key dates plan, item 60) on the ``#`` task, else the task item it's listed
+  under, else the capture's task or new task: ``**date Dec 1 to 5 Trial execution window, plant activity``. Its date
+  phrase is read as Parse and populate reads dates ("from" a start, "by" or "due" an end, a range a window, "on" or a
+  bare date one day), "plant activity" (or "plant event") and "deadline" are its ticks, and the rest is its description
+  (``read_key_date``). Free text is never a key date (decision 154).
 
 A ``**`` type wins; else an ``@`` makes a task; else a ``#`` alone makes a note; a block with none stays in the notes.
 ``**`` and a space is never an operator, and ``#`` is a link only when it names a task, so "Pump #3" stays text.
@@ -30,11 +35,18 @@ from dataclasses import dataclass, field, replace
 from datetime import date
 
 from docrepo import markup
-from docrepo.parse import EVENT_WORDS, STATE_WORDS, ParseLabel, ParsePerson, Who, parse_capture, quick_update
+from docrepo.parse import EVENT_WORDS, STATE_WORDS, ParseLabel, ParsePerson, Who, find_dates, parse_capture, quick_update
 from docrepo.text import first_sentence
 
-KIND_NAMES = {"task": "Task", "note": "Note", "update": "Update", "decision": "Decision"}
-TYPE_RE = re.compile(rf"^\*\*(?:([tnu])(?![A-Za-z0-9_])|(decision)\b[.:]?|({STATE_WORDS})\b[.:]?|(event)\b[.:]?)", re.I)
+KIND_NAMES = {"task": "Task", "note": "Note", "update": "Update", "decision": "Decision", "date": "Key date"}
+TYPE_RE = re.compile(rf"^\*\*(?:([tnu])(?![A-Za-z0-9_])|(decision)\b[.:]?|({STATE_WORDS})\b[.:]?|(event)\b[.:]?|(date)\b[.:]?)", re.I)
+# A **date line's ticks and the words before its date (release 5.31).
+_KD_PLANT = re.compile(r"\b(?:major\s+)?plant\s+(?:activity|event)\b", re.I)
+_KD_DEADLINE = re.compile(r"\b(?:hard\s+)?deadline\b", re.I)
+_KD_WORD = re.compile(r"\b(from|starting|starts?|by|due|until|till|before|ends?|on)\s*\Z", re.I)
+_KD_FROM = re.compile(r"(?:from|starting|starts?)\Z", re.I)
+_KD_BY = re.compile(r"(?:by|due|until|till|before|ends?)\Z", re.I)
+_KD_JOIN = re.compile(r"\s*(?:-|–|—|to|until|till|through|thru)\s*", re.I)
 LIST_RE = re.compile(r"^([ \t]*)([-*•]|\d+[.)])\s+")
 #: An @ or # kept with its ID in capture.md.
 STORED = re.compile(r"(@L\.|@|#)\[([^\]\n]+)\]\(([PT]\d+)\)", re.I)
@@ -126,6 +138,8 @@ def _type(rest: str) -> Token | None:
     m = TYPE_RE.match(rest)
     if not m:
         return None
+    if m.group(5):
+        return Token("type", item_type="date", size=m.end())
     if m.group(4):
         return Token("type", item_type="task", event=True, size=m.end())
     kind = {"t": "task", "n": "note", "u": "update"}[m.group(1).lower()] if m.group(1) else "decision" if m.group(2) else "update"
@@ -214,6 +228,67 @@ def clean(text: str, toks: list[Token], names: Names) -> str:
     return s[:1].upper() + s[1:] if s else ""
 
 
+# ---- a **date line's key date (release 5.31, the key dates plan, item 60) ----
+@dataclass(frozen=True)
+class KeyDateText:
+    """What a ``**date`` line says: its dates (YYYY-MM-DD, or None), description, ticks, and what stops it, if anything."""
+
+    start: str | None
+    end: str | None
+    description: str
+    plant: bool = False
+    deadline: bool = False
+    problem: str = ""
+
+
+def read_key_date(text: str, today: date) -> KeyDateText:
+    """A ``**date`` line's text, after its operator, as a key date: its first date phrase, read with Parse and populate's
+    date rules ("from" makes it a start, "by" or "due" an end, a range or two dates joined by "to" or a dash a window, "on"
+    or a bare date one day); "plant activity" (or "plant event") and "deadline" as its ticks; the rest its description.
+    Ported from the mockup's ``keyDate``."""
+    plant, deadline = bool(_KD_PLANT.search(text)), bool(_KD_DEADLINE.search(text))
+    hits = find_dates(text, today)
+    start = end = None
+    problem = ""
+    rest = text
+    if hits:
+        h = hits[0]
+        w = _KD_WORD.search(text[:h.start])
+        nxt = hits[1] if len(hits) > 1 else None
+        joined = bool(nxt and _KD_JOIN.fullmatch(text[h.end:nxt.start]))
+        cut_from, cut_to = (h.start - len(w.group(0))) if w else h.start, nxt.end if joined and nxt else h.end
+        if h.from_:
+            start, end = h.from_.isoformat(), h.date.isoformat()
+        elif joined and nxt:
+            start, end = h.date.isoformat(), nxt.date.isoformat()
+        elif w and _KD_FROM.match(w.group(1)):
+            start = h.date.isoformat()
+        elif w and _KD_BY.match(w.group(1)):
+            end = h.date.isoformat()
+        else:
+            start = end = h.date.isoformat()
+        if start and end and end < start:
+            problem = "Its end is before its start"
+        rest = text[:cut_from] + " " + text[cut_to:]
+    else:
+        problem = "No date: add one, such as by 25 Nov"
+    rest = _KD_DEADLINE.sub(" ", _KD_PLANT.sub(" ", rest))
+    rest = re.sub(r"\s+", " ", rest)
+    rest = re.sub(r"\s+([,.;:!?])", r"\1", rest)
+    rest = re.sub(r"([,;:])(?:\s*[,;:])+", r"\1", rest)
+    rest = re.sub(r"^[\s,;:.–—-]+", "", rest)
+    rest = re.sub(r"[\s,;:–—-]+\Z", "", rest).strip()
+    return KeyDateText(start, end, rest[:1].upper() + rest[1:], plant, deadline, problem)
+
+
+def key_date_text(kd: KeyDateText) -> str:
+    """A key date in words, as the test vectors list it: ``Start 2026-12-01. End 2026-12-05. Description "…". Plant
+    activity.``"""
+    parts = [kd.start and f"Start {kd.start}", kd.end and f"End {kd.end}", kd.description and f'Description "{kd.description}"',
+             kd.plant and "Plant activity", kd.deadline and "Deadline", kd.problem]
+    return ". ".join(p for p in parts if p) + "."
+
+
 # ---- blocks and items ----
 @dataclass
 class Heading:
@@ -283,6 +358,7 @@ class Item:
     reminder: str | None = None
     start: str | None = None
     plant_event: bool = False  # made by **event. (release 5.9)
+    key_date: KeyDateText | None = None  # made by **date (release 5.31)
     where: list[Where] = field(default_factory=list)
     on: bool = True
     changed: bool = False
@@ -400,7 +476,10 @@ def read(content: str, names: Names, today: date, *, labels: Sequence[ParseLabel
                   leads=[x for x in people if x.lead and not x.none], none=any(x.none for x in people), tasks=ctx_tasks(b),
                   parent_item=parent_item.key if parent_item and parent_item.kind == "task" else None,
                   parent_self=b.parent is not None and blocks[b.parent].is_self, plant_event=bool(typ and typ.event))
-        if kind == "task":
+        if kind == "date":  # a key date (item 60): from its own line, without the operator
+            it.key_date = read_key_date(clean(lines[b.owner].text, toks, names) if b.owner is not None else it.text, today)
+            it.title = it.key_date.description or KIND_NAMES["date"]
+        elif kind == "task":
             r = parse_capture(it.text, "new_task", today, names.people, labels, events)
             it.title = r.title or first_sentence(it.text) or "Untitled task"
             it.due, it.deadline, it.deadline_desc, it.urgent = _iso(r.due), _iso(r.deadline), r.deadline_desc, r.urgent
@@ -429,7 +508,9 @@ def read(content: str, names: Names, today: date, *, labels: Sequence[ParseLabel
         if ov.get("due") is not None:
             it.due = str(ov["due"]) or None
         it.changed = ov.get("title") is not None or ov.get("due") is not None
-        if kind != "task" and not it.where:
+        if kind == "date" and it.key_date and it.key_date.problem:
+            it.problem = it.key_date.problem
+        elif kind != "task" and not it.where:
             it.problem = "Needs a #task to update" if kind == "update" else "No task to put it on: it stays in the notes"
         elif kind == "update" and not it.state and not it.text:
             it.problem = "Nothing to update: add a state or some text"

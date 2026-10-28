@@ -259,6 +259,6 @@ def test_the_notes_frame_shows_where_you_type(browse):
 
 def test_the_schema_has_page_made_captures(data_root, fs):
     conn = db.connect(fs, data_root)
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 11
+    assert conn.execute("PRAGMA user_version").fetchone()[0] >= 11  # 11 brought page_made; later versions keep it
     assert [r[1] for r in conn.execute("PRAGMA table_info(captures)") if r[1] == "page_made"] == ["page_made"]
     conn.close()

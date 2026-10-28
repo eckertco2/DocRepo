@@ -13,7 +13,7 @@ from collections.abc import Callable, Sequence
 from datetime import date
 from typing import Any
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QTextBrowser,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -37,6 +38,7 @@ from docrepo.detail import esc
 from docrepo.model import Model
 from docrepo.parse import Who
 from docrepo.schedule import start_of
+from docrepo.tasks import KeyDateRow
 from docrepo.ui.look import Help
 from docrepo.ui.style import page_css, style_sheet
 from docrepo.ui.task_picker import full_path, path_text
@@ -69,6 +71,187 @@ def people_chips(m: Model, ids: list[str]) -> list[Chip]:
 def chips_people(chips: ChipPicker) -> list[Who]:
     """A people picker's chips as Who's: an ID, or the name of someone to add to the people list."""
     return [Who(name=c.value) if c.new else Who(c.value) for c in chips.chips()]
+
+
+class KeyDateLine(QFrame):
+    """One key date in a form (release 5.31, the key dates plan): Start and End, a description, and its Plant activity,
+    Deadline and Done ticks, with up, down and remove. ``compact`` (Quick edit) puts the description on a line of its own,
+    shortens the ticks' names and leaves out up and down, so it fits the small window; Edit task orders them."""
+
+    changed = Signal()
+    moved = Signal(object, int)
+    removed = Signal(object)
+
+    def __init__(self, row: KeyDateRow, compact: bool = False) -> None:
+        super().__init__(objectName="fileRow")
+        self.key_id = row.id
+        self.start, self.end = DateField(), DateField()
+        for f, value, name in ((self.start, row.start, "Start"), (self.end, row.end, "End")):
+            f.set_value(value)
+            f.line.setPlaceholderText(name)
+            f.line.setAccessibleName(f"Key date {name.lower()}")
+            f.setToolTip(f"{name}, YYYY-MM-DD; leave it empty for a key date with only {'an end' if name == 'Start' else 'a start'}")
+            f.edited.connect(self.changed)
+            if compact:
+                f.setMaximumWidth(16777215)
+        self.desc = QLineEdit(row.description)
+        self.desc.setPlaceholderText("Description, such as Trial execution window")
+        self.desc.setAccessibleName("Key date description")
+        self.desc.textEdited.connect(lambda _: self.changed.emit())
+        self.plant = QCheckBox("⚑ Plant" if compact else "⚑ Plant activity")
+        self.plant.setToolTip("A plant event of its own: in the timeline's events lane, as a band down the chart, and named "
+                              "under other tasks' dates that fall in it")
+        self.deadline = QCheckBox("◆ Deadline")
+        self.deadline.setToolTip("A hard date: a red diamond at its end")
+        self.done = QCheckBox("Done")
+        self.done.setToolTip("Off Today and the Overdue list; it stays on the task page and the timeline, grey")
+        for box, on in ((self.plant, row.plant), (self.deadline, row.deadline), (self.done, row.done)):
+            box.setChecked(on)
+            box.toggled.connect(lambda _: self.changed.emit())
+        self.done.toggled.connect(self._grey)
+        buttons = []
+        moves = () if compact else (("↑", "Move it up", lambda: self.moved.emit(self, -1)), ("↓", "Move it down", lambda: self.moved.emit(self, 1)))
+        for text, tip_text, action in (*moves, ("✕", "Take it off", lambda: self.removed.emit(self))):
+            b = QToolButton(text=text)
+            b.setToolTip(tip_text)
+            b.setAccessibleName(tip_text)
+            b.setAutoRaise(True)
+            b.clicked.connect(action)
+            buttons.append(b)
+        grid = QGridLayout(self)
+        grid.setContentsMargins(8, 6, 4, 6)
+        grid.setHorizontalSpacing(6)
+        grid.setVerticalSpacing(4)
+        ticks = QHBoxLayout()
+        ticks.setSpacing(6 if compact else 12)
+        for box in (self.plant, self.deadline, self.done):
+            ticks.addWidget(box)
+        ticks.addStretch()
+        for b in buttons:
+            ticks.addWidget(b)
+        if compact:
+            grid.addWidget(self.start, 0, 0)
+            grid.addWidget(self.end, 0, 1)
+            grid.addWidget(self.desc, 1, 0, 1, 2)
+            grid.addLayout(ticks, 2, 0, 1, 2)
+            grid.setColumnStretch(0, 1)
+            grid.setColumnStretch(1, 1)
+        else:
+            grid.addWidget(self.start, 0, 0)
+            grid.addWidget(self.end, 0, 1)
+            grid.addWidget(self.desc, 0, 2)
+            grid.addLayout(ticks, 1, 0, 1, 3)
+            grid.setColumnStretch(2, 1)
+        self._grey(row.done)
+
+    def _grey(self, done: bool) -> None:
+        self.desc.setStyleSheet("color: #87919c;" if done else "")
+
+    def is_blank(self) -> bool:
+        """A new line with nothing typed in it yet, which isn't saved."""
+        return (self.key_id is None and not self.start.line.text().strip() and not self.end.line.text().strip()
+                and not self.desc.text().strip())
+
+    def row(self) -> KeyDateRow:
+        return KeyDateRow(self.start.value(), self.end.value(), " ".join(self.desc.text().split()), self.plant.isChecked(),
+                          self.deadline.isChecked(), self.done.isChecked(), self.key_id)
+
+    def problem(self, n: int) -> str | None:
+        """What stops it being saved, as key date ``n``."""
+        for f, which in ((self.start, "start"), (self.end, "end")):
+            if not f.is_valid():
+                return f"Key date {n}'s {which} isn't a date. Use YYYY-MM-DD."
+        start, end = self.start.value(), self.end.value()
+        if not start and not end:
+            return f"Key date {n} needs a start, an end or both."
+        if start and end and end < start:
+            return f"Key date {n} ends before it starts."
+        return None
+
+
+class KeyDatesEditor(QWidget):
+    """A task's key dates in a form (release 5.31, the key dates plan, decision 146): a line each, in its order, and Add key
+    date. ``rows`` gives them as ``edits.edit_task`` takes them; ``problem`` says what stops a save."""
+
+    changed = Signal()
+
+    def __init__(self, rows: Sequence[KeyDateRow] = (), compact: bool = False) -> None:
+        super().__init__()
+        self.compact = compact
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(6)
+        self.list = QVBoxLayout()
+        self.list.setSpacing(6)
+        lay.addLayout(self.list)
+        self.empty = QLabel("None. A key date is a date in the task's story: a start, a target or a window, without a subtask.",
+                            objectName="hint")
+        self.empty.setWordWrap(True)
+        lay.addWidget(self.empty)
+        self.add_button = QPushButton("+ Add key date")
+        self.add_button.setToolTip("A start, an end or both, with a description: such as a trial's execution window")
+        self.add_button.clicked.connect(lambda: self.add_row())
+        lay.addWidget(self.add_button, 0, Qt.AlignmentFlag.AlignLeft)
+        self.lines: list[KeyDateLine] = []
+        for row in rows:
+            self.add_row(row, focus=False)
+        self._sync()
+
+    def add_row(self, row: KeyDateRow | None = None, focus: bool = True) -> KeyDateLine:
+        line = KeyDateLine(row or KeyDateRow(None, None), self.compact)
+        line.changed.connect(self.changed)
+        line.moved.connect(self._move)
+        line.removed.connect(self._remove)
+        self.lines.append(line)
+        self.list.addWidget(line)
+        self._sync()
+        if focus:
+            line.start.line.setFocus()
+            self.changed.emit()
+        return line
+
+    def _move(self, line: KeyDateLine, step: int) -> None:
+        i = self.lines.index(line)
+        j = i + step
+        if not 0 <= j < len(self.lines):
+            return
+        self.lines[i], self.lines[j] = self.lines[j], self.lines[i]
+        for x in self.lines:
+            self.list.removeWidget(x)
+        for x in self.lines:
+            self.list.addWidget(x)
+        self.changed.emit()
+
+    def _remove(self, line: KeyDateLine) -> None:
+        self.lines.remove(line)
+        self.list.removeWidget(line)
+        line.hide()
+        line.deleteLater()
+        self._sync()
+        self.changed.emit()
+
+    def _sync(self) -> None:
+        self.empty.setVisible(not self.lines)
+
+    def rows(self) -> list[KeyDateRow]:
+        """The lines as rows, in order; a new line left empty isn't one."""
+        return [line.row() for line in self.lines if not line.is_blank()]
+
+    def problem(self) -> str | None:
+        n = 0
+        for line in self.lines:
+            if line.is_blank():
+                continue
+            n += 1
+            p = line.problem(n)
+            if p:
+                return p
+        return None
+
+
+def key_date_rows(m: Model, task_id: str) -> list[KeyDateRow]:
+    """A task's key dates as a form's rows."""
+    return [KeyDateRow(kd.start, kd.end, kd.description, kd.plant, kd.deadline, bool(kd.done), kd.id) for kd in m.key_dates_of(task_id)]
 
 
 class TaskEditDialog(FormDialog):
@@ -207,6 +390,11 @@ class TaskEditDialog(FormDialog):
             w.edited.connect(self._show_during)
         self._show_during()
 
+        # ---- key dates (release 5.31, the key dates plan) ----
+        section(g, "Key dates")
+        self.key_dates = KeyDatesEditor(key_date_rows(m, task_id))
+        g.addWidget(self.key_dates)
+
         # ---- where it sits: parents (mods log round 2, M0040) and labels ----
         section(g, "Where it sits")
         self.parents_box = QWidget()
@@ -339,7 +527,7 @@ class TaskEditDialog(FormDialog):
         for w, name in ((self.lead_hours, "Lead hours"), (self.asg_hours, "Assignee hours")):
             if not w.is_valid():
                 return f"{name} isn't a number of hours."
-        return None
+        return self.key_dates.problem()
 
     def _accept(self) -> None:
         problem = self.problem()
@@ -360,6 +548,7 @@ class TaskEditDialog(FormDialog):
             "deadline_desc": self.deadline_desc.text(), "reminder": self.reminder.value(), "recurrence": recurrence,
             "repeat_until": self.repeat.value() if recurrence else None, "urgent": self.urgent.isChecked(), "meeting": self.meeting.isChecked(),
             "plant_event": self.plant_event.isChecked(), "parents": list(self.parents), "priority": self.priority.currentData(),
+            "key_dates": self.key_dates.rows(),
             **({"references": {name: box.text() for name, box in self.references.items()}} if self.references else {}),
         }
 

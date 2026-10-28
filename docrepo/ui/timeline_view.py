@@ -9,6 +9,12 @@ shows its dates, hours and people in a card above the chart; double-clicking a b
 ends stretched, and an undated task's name be dragged onto the chart for a working week; each drop is sent as
 ``set_dates`` for the browse window to save and log, and Ctrl+Z sends the step back. It takes the middle and right panes
 together, as Capacity does.
+
+Key dates (release 5.31, the key dates plan) are marks on their task's row: a window a thin segment under the bar (or in
+the bar's place when the task has none in view), a start alone an opening bracket, an end alone a closing tick, a Deadline
+end a red diamond, a plant activity amber, a done one grey. In Plan mode a key date that isn't done drags too (decision
+152): a window moves or its ends stretch, a start or an end alone moves. Each drop is sent as ``set_key_date``, and Ctrl+Z
+sends it back, in the same order as the bars' drops.
 """
 from __future__ import annotations
 
@@ -16,7 +22,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 
 from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPainterPath, QPen, QPolygonF
+from PySide6.QtGui import QBrush, QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen, QPolygonF
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -31,12 +37,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo import timeline
+from docrepo import key_dates, timeline
 from docrepo.dates import days_text, long_date, short, to_date
 from docrepo.detail import esc
-from docrepo.model import Model, Task
+from docrepo.model import KeyDate, Model, Task
 from docrepo.schedule import due_of, start_of
-from docrepo.timeline import Band, Row, Timeline
+from docrepo.timeline import Band, KeyMark, Row, Timeline
 from docrepo.ui.look import LOOK, Help
 from docrepo.ui.tree_view import GROUP_COLOURS
 from docrepo.ui.widgets import CheckMenuButton, FlowLayout, label_filter, people_filter
@@ -95,7 +101,8 @@ def week_from(day: date) -> tuple[date, date]:
 
 @dataclass
 class Drag:
-    """A drag in Plan mode: "new" (a name onto the chart), "move", "start" or "end", and where it's got to."""
+    """A drag in Plan mode: "new" (a name onto the chart), "move", "start" or "end", or a key date's "kd-move", "kd-start"
+    or "kd-end" (release 5.31), and where it's got to."""
 
     task: str
     mode: str
@@ -105,6 +112,8 @@ class Drag:
     start: date | None = None
     end: date | None = None
     moved: bool = False
+    key_id: int | None = None  # a key date's drag: its ID, and its kind ("window", "on", "from" or "by")
+    kind: str = ""
 
 
 #: The width of the names' column, and of the lane column before it while the rows are ordered by a field.
@@ -168,7 +177,7 @@ class TimelineHead(QWidget):
         self.focus_title = ""
         self.field = ""  # Order by's field, over the lane column
         self.sel: str | None = None
-        self.placed: list[tuple[QRectF, Band, float]] = []  # each event's bar, and the room its name has
+        self.placed: list[tuple[QRectF, Band, float, float]] = []  # each event's bar, the room its name has, and where it starts
         self.lanes = 1
         self.setMouseTracking(True)
 
@@ -193,7 +202,9 @@ class TimelineHead(QWidget):
         tl = self.scale.tl
         if tl is None:
             return
-        fm = self.fontMetrics()
+        bold = QFont(self.font())
+        bold.setBold(True)
+        fm = QFontMetrics(bold)  # the names are painted bold
         lane_end: list[float] = []
         placed: list[tuple[QRectF, Band, int]] = []
         for b in tl.events:
@@ -209,12 +220,18 @@ class TimelineHead(QWidget):
         self.lanes = max(1, len(lane_end))
         right = self.width() - 10 - self.scale.inset
         self.placed = []
+        ends: dict[int, float] = {}  # where the last name in each lane ends
         for i, (rect, b, lane) in enumerate(placed):
             nxt = next((r for r, _, ln in placed[i + 1:] if ln == lane), None)
-            self.placed.append((rect, b, max(24.0, (nxt.left() if nxt else right) - rect.left() - 6)))
+            text_x, width = rect.left() + 7, fm.horizontalAdvance(self._label(b)) + 4
+            if nxt is None and text_x + width > right:  # near the right edge: the name ends there instead of being cut off
+                text_x = max(ends.get(lane, 0.0) + 8, self.scale.NAME_W + 4, right - width - 4, 0.0)
+            room = max(24.0, (nxt.left() if nxt else right) - text_x - 2)
+            ends[lane] = text_x + min(width, room)
+            self.placed.append((rect, b, room, text_x))
 
     def event_at(self, x: float, y: float) -> Band | None:
-        return next((b for rect, b, _ in self.placed if rect.adjusted(0, 0, 4, 0).contains(QPointF(x, y))), None)
+        return next((b for rect, b, _, _ in self.placed if rect.adjusted(0, 0, 4, 0).contains(QPointF(x, y))), None)
 
     def paintEvent(self, _event) -> None:  # noqa: N802 - Qt's name
         tl = self.scale.tl
@@ -288,7 +305,7 @@ class TimelineHead(QWidget):
             p.setFont(small)
             p.setPen(QColor(FAINT))
             p.drawText(QRectF(self.scale.NAME_W + 6, lane_top, 200, self.LANE_H + 2), Qt.AlignmentFlag.AlignVCenter, "None in view")
-        for rect, b, room in self.placed:
+        for rect, b, room, text_x in self.placed:
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(_mix(EV_LINE, 0.35, EV_BG) if b.task == self.sel else QColor(EV_BG))
             p.drawRoundedRect(rect, 3, 3)
@@ -296,7 +313,7 @@ class TimelineHead(QWidget):
             p.setFont(bold)
             p.setPen(QColor(EV_INK))
             text = p.fontMetrics().elidedText(self._label(b), Qt.TextElideMode.ElideRight, int(room))
-            p.drawText(QRectF(rect.left() + 7, rect.top(), room, rect.height()), Qt.AlignmentFlag.AlignVCenter, text)
+            p.drawText(QRectF(text_x, rect.top(), room, rect.height()), Qt.AlignmentFlag.AlignVCenter, text)
         p.end()
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
@@ -331,6 +348,8 @@ class TimelineChart(QWidget):
     fold = Signal(str, bool)
     quick_edit = Signal(str, QRect)
     dropped = Signal(str, object, object, str)
+    #: A key date's drop in Plan mode (release 5.31): its task, its ID, its new first and last day, and its kind.
+    dropped_key = Signal(str, int, object, object, str)
 
     ROW_H, BAR_TOP, BAR_H, EDGE = 28, 6, 16, 6
 
@@ -347,6 +366,7 @@ class TimelineChart(QWidget):
         self.a_week = False
         self.order = "top"
         self.rows: list[Row] = []
+        self.hit_key: KeyMark | None = None  # the key date ``_hit`` found last, if any
         self.runs: list[tuple[int, int, int | None, str]] = []  # the lane column's bands: first and last row, key, name
         self.drag: Drag | None = None
         self.hover = -1  # the row under the mouse, lightly shaded
@@ -458,7 +478,16 @@ class TimelineChart(QWidget):
             x = self._mid(self.today)
             p.setPen(QPen(QColor(ACCENT), 2))
             p.drawLine(QPointF(x, 0), QPointF(x, bottom))
-        if self.drag and self.drag.moved and self.drag.start and self.drag.end:  # where the dragged bar goes
+        if self.drag and self.drag.moved and self.drag.start and self.drag.end and self.drag.key_id is not None:
+            top = self.top_of(self.drag.task)  # where the dragged key date goes
+            row = next((r for r in self.rows if r.task == self.drag.task), None)
+            if top is not None and row is not None:
+                cy, h = self._key_strip(row, top)
+                x0, x1 = self._x(self.drag.start), self._x(self.drag.end + timedelta(days=1))
+                p.setPen(QPen(QColor(ACCENT), 1, Qt.PenStyle.DashLine))
+                p.setBrush(_mix(ACCENT, 0.45))
+                p.drawRoundedRect(QRectF(x0, cy - h / 2 - 1, max(4.0, x1 - x0), h + 2), 2, 2)
+        elif self.drag and self.drag.moved and self.drag.start and self.drag.end:  # where the dragged bar goes
             top = self.top_of(self.drag.task)
             if top is not None:
                 x0, x1 = self._x(self.drag.start), self._x(self.drag.end + timedelta(days=1))
@@ -644,6 +673,8 @@ class TimelineChart(QWidget):
                 p.fillRect(QRectF(x1 - 2, y + h - tick, 2, tick), QColor(MUTED))
             for d in r.sub_deadlines:
                 self._diamond(p, self._mid(d), y + h / 2, 4.0, QColor("#ffffff"), QColor(BAD if d < self.today else FG))
+        for k in r.key_dates:  # release 5.31
+            self._paint_key(p, top, r, t, k)
         if self.plan and r.undated:
             box = QRectF(self.scale.NAME_W + 6, top + 4, self.scale.width_of(self) - 12, self.ROW_H - 8)
             p.setPen(QPen(QColor(LINE_STRONG), 1, Qt.PenStyle.DashLine))
@@ -653,6 +684,75 @@ class TimelineChart(QWidget):
             p.setPen(QColor(FAINT))
             p.drawText(box.adjusted(8, 0, 0, 0), Qt.AlignmentFlag.AlignVCenter, "Drag the name onto the chart to give it a week")
 
+    def _key_strip(self, r: Row, top: float) -> tuple[float, float]:
+        """Where a row's key dates go: the middle of a thin strip under the bar, or in the bar's place when the row has no
+        dates of its own in view; and a window's thickness there."""
+        return (top + 24.0, 4.0) if r.windows else (top + 14.0, 6.0)
+
+    def _key_colour(self, t: Task, r: Row, k: KeyMark) -> str:
+        """A key date's colour: grey when done (decision 153), amber for a plant activity (149), else its bar's."""
+        if k.done:
+            return LINE_STRONG
+        if k.plant:
+            return EV_LINE
+        if self.bars == "priority":
+            return PRIORITY_COLOURS.get(t.priority or "", MUTED)
+        return GROUP_COLOURS[r.colour % len(GROUP_COLOURS)]
+
+    def _paint_key(self, p: QPainter, top: float, r: Row, t: Task, k: KeyMark) -> None:
+        """One key date's mark: a window a thin segment, a start alone an opening bracket, an end alone a closing tick, and a
+        Deadline end a red diamond; faint while it's being dragged."""
+        assert self.tl is not None
+        cy, h = self._key_strip(r, top)
+        colour = QColor(self._key_colour(t, r, k))
+        dragging = self.drag is not None and self.drag.moved and self.drag.key_id == k.id
+        if dragging:
+            p.setOpacity(0.35)
+        if k.kind in ("window", "on"):
+            x0, x1 = self._x(k.first), self._x(k.last + timedelta(days=1))
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(colour)
+            p.drawRoundedRect(QRectF(x0, cy - h / 2, max(4.0, x1 - x0), h), 2, 2)
+        elif k.kind == "from" and k.first >= self.tl.start:  # [ an opening bracket at its first day's start
+            x = self._x(k.first)
+            p.setPen(QPen(colour, 2))
+            p.drawLine(QPointF(x + 1, cy - 5), QPointF(x + 1, cy + 5))
+            p.drawLine(QPointF(x + 1, cy - 5), QPointF(x + 5, cy - 5))
+            p.drawLine(QPointF(x + 1, cy + 5), QPointF(x + 5, cy + 5))
+        elif k.kind == "by" and k.last < self.tl.end and not k.deadline:  # ] a closing tick at its last day's end
+            x = self._x(k.last + timedelta(days=1))
+            p.setPen(QPen(colour, 2))
+            p.drawLine(QPointF(x - 1, cy - 5), QPointF(x - 1, cy + 5))
+            p.drawLine(QPointF(x - 1, cy - 5), QPointF(x - 5, cy - 5))
+            p.drawLine(QPointF(x - 1, cy + 5), QPointF(x - 5, cy + 5))
+        if k.deadline and k.kind != "from" and self.tl.start <= k.last < self.tl.end:  # a hard date: a red diamond (decision 147)
+            self._diamond(p, self._mid(k.last), cy, 5.0, QColor(LINE_STRONG if k.done else BAD), QColor("#ffffff"))
+        p.setOpacity(1.0)
+
+    def _key_at(self, r: Row, top: float, x: float, y: float) -> tuple[KeyMark, str] | None:
+        """In Plan mode, the key date under the mouse that isn't done, and where on it: "kd-start" or "kd-end" (a window's
+        ends, which stretch) or "kd-move" (decision 152)."""
+        cy, _ = self._key_strip(r, top)
+        if abs(y - cy) > 7:
+            return None
+        for k in reversed(r.key_dates):  # the last drawn is on top
+            if k.done:
+                continue
+            x0, x1 = self._x(k.first), self._x(k.last + timedelta(days=1))
+            if k.kind == "from":
+                x0 = x1 = self._x(k.first) + 3
+            elif k.kind == "by":
+                x0 = x1 = self._x(k.last + timedelta(days=1)) - 3
+            if not x0 - 6 <= x <= x1 + 6:
+                continue
+            if k.kind == "window" or (k.kind == "on" and x1 - x0 > 3 * self.EDGE):
+                if x <= x0 + self.EDGE:
+                    return k, "kd-start"
+                if x >= x1 - self.EDGE:
+                    return k, "kd-end"
+            return k, "kd-move"
+        return None
+
     @staticmethod
     def _diamond(p: QPainter, cx: float, cy: float, s: float, fill: QColor, edge: QColor) -> None:
         p.setPen(QPen(edge, 1.5))
@@ -661,7 +761,9 @@ class TimelineChart(QWidget):
 
     # ---- the mouse ----
     def _hit(self, x: float, y: float) -> tuple[Row | None, str]:
-        """What's under the mouse: "fold", "grip", "start", "end", "move" (a bar, in Plan mode), "row" or ""."""
+        """What's under the mouse: "fold", "grip", "start", "end", "move" (a bar, in Plan mode), a key date's "kd-start",
+        "kd-end" or "kd-move" (Plan mode, release 5.31; the key date is ``hit_key``), "row" or ""."""
+        self.hit_key = None
         r = self.row_at(y)
         if r is None:
             return None, ""
@@ -670,6 +772,10 @@ class TimelineChart(QWidget):
             return r, "fold"
         if self.plan and r.undated and self._grip_rect(r, top).adjusted(-2, -4, 2, 4).contains(QPointF(x, y)):
             return r, "grip"
+        key = self._key_at(r, top, x, y) if self.plan and x >= self.scale.NAME_W else None
+        if key is not None:
+            self.hit_key = key[0]
+            return r, key[1]
         bar = self.bar_rect(r, top) if self.plan else None
         if bar is not None and bar.adjusted(-2, -4, 2, 4).contains(QPointF(x, y)):
             if x <= bar.left() + self.EDGE:
@@ -689,7 +795,10 @@ class TimelineChart(QWidget):
         if what == "fold":
             self.fold.emit(r.task, not r.open)
             return
-        if what in ("grip", "start", "end", "move") and self.model is not None:
+        if what.startswith("kd-") and self.hit_key is not None:
+            k = self.hit_key
+            self.drag = Drag(r.task, what, x, k.first, k.last, key_id=k.id, kind=k.kind)
+        elif what in ("grip", "start", "end", "move") and self.model is not None:
             t = self.model.task(r.task)
             end = to_date(t.due or t.deadline) if (t.due or t.deadline) else None
             self.drag = Drag(r.task, "new" if what == "grip" else what, x, None if what == "grip" else start_of(t), end)
@@ -718,7 +827,7 @@ class TimelineChart(QWidget):
             self.update()
         shape = {"fold": Qt.CursorShape.PointingHandCursor, "grip": Qt.CursorShape.OpenHandCursor,
                  "move": Qt.CursorShape.OpenHandCursor, "start": Qt.CursorShape.SizeHorCursor,
-                 "end": Qt.CursorShape.SizeHorCursor}.get(what, Qt.CursorShape.ArrowCursor)
+                 "end": Qt.CursorShape.SizeHorCursor}.get(what.removeprefix("kd-"), Qt.CursorShape.ArrowCursor)
         self.setCursor(shape)
 
     def _drag_to(self, d: Drag, x: float) -> None:
@@ -733,9 +842,10 @@ class TimelineChart(QWidget):
             return
         n = round((x - d.x0) / self.scale.px_per_day(self))
         s, e = d.start0, d.end0
-        if d.mode == "move":
+        mode = d.mode.removeprefix("kd-")  # a key date moves and stretches as a bar does
+        if mode == "move":
             s, e = s + timedelta(days=n), e + timedelta(days=n)
-        elif d.mode == "start":
+        elif mode == "start":
             s = min(s + timedelta(days=n), e)
         else:
             e = max(e + timedelta(days=n), s)
@@ -754,6 +864,9 @@ class TimelineChart(QWidget):
             return
         self.update()
         if d.start is None or d.end is None or (d.mode != "new" and (d.start, d.end) == (d.start0, d.end0)):
+            return
+        if d.key_id is not None:
+            self.dropped_key.emit(d.task, d.key_id, d.start, d.end, d.kind)
             return
         self.dropped.emit(d.task, d.start, d.end, d.mode)
 
@@ -816,6 +929,9 @@ class TimelineView(QWidget):
     update_task = Signal(str)
     quick_edit = Signal(str, QRect)
     set_dates = Signal(str, object, object, str)
+    #: A key date's new dates (release 5.31, decision 152): its task, its ID, its Start and End (YYYY-MM-DD or None), and what
+    #: to say. The browse window saves it as ``edits.set_key_dates`` does, with the task's other key dates as they are.
+    set_key_date = Signal(str, int, object, object, str)
     folds_changed = Signal(list)
     #: The view's choices that are remembered (the playbook: the zoom kept): the range, Order by, the bars' colour,
     #: Total or A week, and Show routine.
@@ -838,7 +954,9 @@ class TimelineView(QWidget):
         self.focus: str | None = None
         self.open_ids: set[str] = set()
         self.sel: str | None = None
-        self.undo: list[tuple[str, str | None, str | None]] = []  # (task, its Start and Due before a drop)
+        # Each drop's step back: ("task", the task, its Start and Due before) or ("key", the task, the key date, its Start
+        # and End before), last first.
+        self.undo: list[tuple] = []
         self.scale = _Scale()
         lay = QVBoxLayout(self)
         lay.setContentsMargins(12, 8, 12, 8)
@@ -894,6 +1012,7 @@ class TimelineView(QWidget):
         self.chart.fold.connect(self.set_open)
         self.chart.quick_edit.connect(self.quick_edit)
         self.chart.dropped.connect(self._dropped)
+        self.chart.dropped_key.connect(self._dropped_key)
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -905,7 +1024,10 @@ class TimelineView(QWidget):
             '<span style="background-color:#ced9ee; border:1px solid #3b78c4">&nbsp;&nbsp;&nbsp;&nbsp;</span> Not started',
             '<span style="color:#b0261e"><b>▌</b></span> Late', "◆ Deadline", '<span style="color:#5a6571"><b>⊢⊣</b></span> Its subtasks\' span',
             '<span style="color:#3b78c4">●</span> Routine: each occurrence', '<span style="color:#1d5e98"><b>│</b></span> Today',
-            f'<span style="background-color:{EV_BG}; color:{EV_LINE}">&nbsp;{FLAG}&nbsp;</span> Plant event'))
+            f'<span style="background-color:{EV_BG}; color:{EV_LINE}">&nbsp;{FLAG}&nbsp;</span> Plant event',
+            # Key dates (release 5.31): a window, a start or an end alone, a hard deadline
+            '<span style="color:#3b78c4"><b>▬</b></span> Key date', "<b>[ ]</b> Its start or end",
+            '<span style="color:#b0261e">◆</span> Its deadline'))
         self.legend = QLabel(self.marks_legend, objectName="hint")  # one line: the marks, then what colours the bars
         self.legend.setWordWrap(True)
         if LOOK.classic:
@@ -1183,7 +1305,7 @@ class TimelineView(QWidget):
         if m is None:
             return
         t = m.task(task_id)
-        self.undo.append((task_id, t.start, t.due))
+        self.undo.append(("task", task_id, t.start, t.due))
         # Stretching one end leaves the other as it was; moving a bar that ends at its deadline gives it a Due.
         new_start = t.start if mode == "end" else start.isoformat()
         new_due = t.due if mode == "start" else end.isoformat()
@@ -1192,14 +1314,44 @@ class TimelineView(QWidget):
                 "move": f"now {long_date(start, self.today)} to {long_date(end, self.today)}"}[mode]
         self.set_dates.emit(task_id, new_start, new_due, f"{t.title}: {said}. Ctrl+Z undoes it.")
 
+    def _dropped_key(self, task_id: str, key_id: int, first: date, last: date, kind: str) -> None:
+        """A key date's drop in Plan mode (decision 152): its new dates, by its kind (a start alone stays one), kept for
+        Ctrl+Z and sent to be saved and logged."""
+        m = self.model
+        kd = next((k for k in m.key_dates_of(task_id) if k.id == key_id), None) if m is not None else None
+        if m is None or kd is None:
+            return
+        self.undo.append(("key", task_id, key_id, kd.start, kd.end))
+        start = None if kind == "by" else first.isoformat()
+        end = None if kind == "from" else last.isoformat()
+        moved = KeyDate(kd.id, task_id, start, end, kd.description)
+        self.set_key_date.emit(task_id, key_id, start, end,
+                               f"{m.task(task_id).title}: {kd.description or 'its key date'} now {key_dates.when_text(moved, self.today)}. "
+                               "Ctrl+Z undoes it.")
+
     def undo_last(self) -> None:
-        """Ctrl+Z: the last drop's dates put back, logged too."""
+        """Ctrl+Z: the last drop's dates put back, a bar's or a key date's, logged too."""
         if not self.undo or self.model is None:
             return
-        task_id, start, due = self.undo.pop()
+        step = self.undo.pop()
+        if step[0] == "key":
+            _, task_id, key_id, start, end = step
+            if task_id in self.model.tasks and any(k.id == key_id for k in self.model.key_dates_of(task_id)):
+                self.set_key_date.emit(task_id, key_id, start, end, f"{self.model.task(task_id).title}: its key date is back as it was.")
+            return
+        _, task_id, start, due = step
         if task_id not in self.model.tasks:
             return
         self.set_dates.emit(task_id, start, due, f"{self.model.task(task_id).title}: its dates are back as they were.")
+
+    @staticmethod
+    def _card_key_dates(m: Model, t: Task, today: date) -> str:
+        """The card's line of key dates (release 5.31): each with its marks, done ones grey."""
+        kds = m.key_dates_of(t.id)
+        if not kds:
+            return ""
+        items = [f"<span style='color:{FAINT if kd.done else FG}'>{esc(timeline.key_date_text(kd, today))}</span>" for kd in kds]
+        return f"<br><span style='color:{MUTED}'>Key dates:</span> " + " &nbsp;·&nbsp; ".join(items)
 
     def _card(self) -> None:
         """The card for the row clicked last: its title, state, path, dates, hours and people, with Open task, Quick edit and
@@ -1215,8 +1367,8 @@ class TimelineView(QWidget):
                                    "or a name for Quick edit.</span>")
             return
         due = due_of(t, today)
-        if timeline.is_undated(t, today):
-            dates = f'<span style="color:{MUTED}">No dates yet</span>'
+        if timeline.is_undated(t, today):  # none of its own: its key dates (release 5.31) are on the line below, if any
+            dates = f'<span style="color:{MUTED}">{"No dates of its own" if m.key_dates_of(t.id) else "No dates yet"}</span>'
         elif t.recurrence:
             dates = f"{esc(t.recurrence)} from {esc(long_date(start_of(t), today))}" + (f", next {esc(long_date(due.date, today))}" if due else "")
         else:
@@ -1237,7 +1389,7 @@ class TimelineView(QWidget):
         state = _chip(t.state, "st-ip" if t.state == "In progress" else "st-ns")
         self.card_text.setText(f"<b>{esc(t.title)}</b> {state}{chips}<br><span style='color:{MUTED}'>{esc(path)}</span><br>{dates}"
                                f"<br><span style='color:{MUTED}'>{esc(timeline.hours_words(m, t, today))} · Lead: {people(t.leads)} · "
-                               f"Assignees: {people(t.assignees)}</span>")
+                               f"Assignees: {people(t.assignees)}</span>" + self._card_key_dates(m, t, today))
         # A wrapped label's height isn't its layout's to squeeze: the card keeps room for every line.
         self.card_text.setMinimumHeight(self.card_text.heightForWidth(max(320, self.card_text.width())))
         self.card.setMinimumHeight(self.card_text.minimumHeight() + 14)

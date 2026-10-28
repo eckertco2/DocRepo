@@ -1,5 +1,6 @@
 """The browse tool's lists: Overdue and next 7 days, Reminders, Waiting on others, Assigned to me, Urgent,
-and No dates or hours. Each holds open tasks only, soonest first.
+and No dates or hours. Each holds open tasks only, soonest first. Overdue and next 7 days also has the key dates that are
+overdue or due soon (release 5.31, decision 150), each a row of its own (``key_dates_due``).
 """
 from __future__ import annotations
 
@@ -7,6 +8,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 
+from docrepo import key_dates
 from docrepo.dates import day_diff, to_date
 from docrepo.model import Model, Task
 from docrepo.schedule import due_of, is_open
@@ -45,6 +47,14 @@ LISTS = (
     TaskList("urgent", "Urgent", lambda t, today, me: t.urgent),
     TaskList("unplanned", "No dates or hours", _unplanned),
 )
+
+
+def key_dates_due(model: Model, today: date, me: str | None = None, mine_only: bool = False) -> list[key_dates.Due]:
+    """The key dates on Overdue and next 7 days and Today's Due in the next 7 days (release 5.31, decisions 148 and 150):
+    open ones on open tasks, overdue or due (or starting) in the next 7 days, soonest first, each a row of its own. With
+    Mine only, those on tasks I lead or am assigned to."""
+    ids = {t.id for t in model.tasks.values() if me in t.leads or me in t.assignees} if mine_only else None
+    return key_dates.due(model, today, task_ids=ids)
 
 
 def list_tasks(model: Model, task_list: TaskList, today: date, me: str | None) -> list[Task]:

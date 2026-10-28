@@ -207,6 +207,11 @@ class Stories:
                                         rm and f"Label{'s' if len(rm) > 1 else ''} {and_list(rm)} removed.") if x)
         if f == "Inherit parent labels":
             return "Inherits its parents' labels again." if after == "Yes" else "No longer inherits its parents' labels."
+        if f == "Key date":  # release 5.31: its description and dates, as key_dates.log_text writes them
+            return (f"Key date added: {after}." if is_none(before) else f"Key date taken off: {before}." if is_none(after)
+                    else f"Key date changed: {after}.")
+        if f == "Key date done":
+            return f"Key date done: {after}." if not is_none(after) else f"Key date not done after all: {before}."
         if f == "Discarded":  # mods log round 1, M0021: the value is the reason
             return "Brought back." if is_none(after) else f"Discarded: {(after or '').rstrip('.')}."
         return f"{f}: {'cleared' if is_none(after) else after}."

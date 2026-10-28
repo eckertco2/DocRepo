@@ -44,6 +44,7 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.28 | Copy open in the mods log (M0066), and headings that fold in the capture window, which arrive on the notes page as headings at the level typed (the mods log round 4, decisions 131 and 132) | Built 2026-10-27; hand-tested by the owner and on GitHub 2026-10-27. Next: testing on the corporate computer |
 | 5.29 | The timeline as one chart (the mods log round 4, M0067, decisions 133 to 135): a foldable row per project with summary bars, Order by and Colour bars by, hours in the bars, 3 and 12 months, and the plant events lane pinned with the scale | Built 2026-10-27, from the mock's design, with the owner's hand-test changes; hand-tested by the owner and on GitHub 2026-10-27. Next: testing on the corporate computer |
 | 5.30 | Planning on the timeline (decisions 136 to 138 and 142 to 145): Plan mode's drags with Ctrl+Z, Focus, Quick edit, and Parse and populate reading "Mike assists", "assign Mike" and "assignees Mike and Priya" | Built 2026-10-27, with 5.29; hand-tested by the owner and on GitHub 2026-10-27. Next: testing on the corporate computer |
+| 5.31 | Key dates (the key dates plan, decisions 146 to 155): any number of dated line items on a task, with Plant activity, Deadline and Done ticks, in Edit task, Quick edit, the capture window, the task page, Today, the lists and the timeline, and the `**date` line; schema version 12 | Built 2026-10-28, without a mock; hand-tested by the owner and on GitHub 2026-10-28. Next: testing on the corporate computer |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
 ## Decisions
@@ -478,6 +479,52 @@ The visual overhaul's O10, designed and mocked in the parent workspace (`docs/ui
   - **No button group:** the pane marks the open view itself, so that no row is marked while searching, and a click on the open view keeps it marked.
   - **The totals that left the sidebar** are beside their views' titles ("14 open", "7 active"), as `sidebar.md` said they'd be.
   - **The tooltip** shows only when a name is cut short. The headings' tooltips say Fold or Unfold.
+
+## Release 5.31: key dates (2026-10-28)
+
+Asked for by the owner in chat on 2026-10-28, planned in the parent workspace's `docs/mods/key-dates-plan.md` (items 56 to 61, decisions 146 to 155): line items of dates on a task, any number, for a task with several key activity dates that shouldn't each need a subtask. Decisions 146 to 149 are the owner's (a hybrid beside Start, Due and Deadline; a Deadline tick; Today and the Overdue list with a Done tick; Plant activity making a plant event); 150 to 154 as recommended; 155, built straight away without a mock, all in one release. Schema version 12. No new package.
+
+**The data (item 56):**
+- `docrepo/db.py`: schema version 12, `task_dates` (start_day, end_day, description, plant, deadline, done, pos).
+- `docrepo/model.py`: `KeyDate`; `Model.key_dates`, `key_dates_of`, `plant_activities`.
+- `docrepo/key_dates.py` (new): what kind a key date is, its words (`when_text`, `label`, `log_text`), `problem`, `due` (Today's and the list's rows, decision 150) and `span`.
+- `docrepo/tasks.py`: `KeyDateRow`, `set_key_dates` (adds, changes, takes off and ticks done, each logged), `key_date_rows`, `add_key_dates`, `set_key_date_done`.
+- `docrepo/edits.py`: `set_key_dates`, `set_key_date_done`, `key_date_subtask` (item 61), and `edit_task`'s `key_dates`, in its transaction.
+- `docrepo/stories.py`: "Key date added / changed / taken off / done" sentences. `docrepo/pages.py`: Task.md's Key dates section.
+- Tests: `tests/test_key_dates.py` (new); `tests/test_db.py`, version 12; `tests/test_pictures_tables.py`'s schema check takes later versions.
+
+**The timeline (item 58, decisions 149 and 152):**
+- `docrepo/timeline.py`: `KeyMark`, `key_marks` and `Row.key_dates`, so a task whose only dates in view are key dates is a row; `is_undated` and `own_span` count key dates, for the order, the summary spans and the undated list; a parent's sub-deadlines take in its subtasks' Deadline-ticked key dates; `Band.key_date` and `all_bands`, so `bands`, `during`, `during_text` and `tasks_during` include plant activities (titled by their description, or the task's title), a task's own key dates not counting for it; `key_date_text` and `key_date_lines` for the tooltip.
+- `docrepo/ui/timeline_view.py`: the marks (a window a thin segment under the bar, or in its place; a start an opening bracket, an end a closing tick, a Deadline end a red diamond; amber when a plant activity, grey when done); Plan mode drags a key date that isn't done (`_key_at`: moved, or its ends stretched; a start alone stays a start), as `set_key_date` (task, key date, start, end, what to say), with Ctrl+Z in the same undo stack as bar drops; the card's Key dates line, and "No dates of its own"; three more legend entries; a plant event's name near the right edge stops there rather than being cut off.
+- Capacity's week heads and the forms' "falls during" lines name plant activities through the same functions.
+- Tests: `tests/test_timeline.py`, marks and rows from key dates, plant activities as plant events, and a key date dragged and undone.
+
+**The browse tool (items 57, 59 and 61, decisions 148, 150 and 153):**
+- `docrepo/ui/task_forms.py`: Edit task's Key dates section under Dates (`KeyDatesEditor`, `KeyDateLine`, `key_date_rows`): a line per key date with Start, End, Description, the ⚑ Plant activity, ◆ Deadline and Done ticks, ↑ ↓ ✕, and Add key date; a new line left empty isn't saved; a line with no dates, an end before its start or a date that isn't one is refused in words ("Key date 2 needs a start, an end or both."); saved with the form's other fields through `edit_task`. Edit selected isn't changed.
+- `docrepo/planning.py`, `docrepo/ui/quick_edit.py`: Quick edit's compact lines under its dates (`Values.key_dates`), ✕ and "+ Key date"; it grows taller, not wider.
+- `docrepo/detail.py` (`key_dates_block`): the task page's Key dates under When, in both layouts: each line its Done box, dates and how far off (red once overdue), description, ⚑ and ◆, and Make it a subtask (`kd:` links); done lines grey and struck through, with the day; the heading counts the open ones.
+- `docrepo/lists.py` (`key_dates_due`), `docrepo/views.py` (`key_date_cell`, the list's count): Overdue and next 7 days has a Key dates heading with a row per key date (the task, its line with ⚑ and ◆, a Key date chip, its due cell, Done); Today's Due in the next 7 days has them among its tasks by day, Mine only filtering both.
+- `docrepo/ui/browse_window.py`: the rows, the `kd:` links (`key_date_done`, `key_date_subtask`), and `set_timeline_key_date`, saving a key date dragged on the timeline or put back by Ctrl+Z. `docrepo/activity.py`: a Key date chip on their lines.
+- Tests: `tests/test_key_dates_ui.py` (new).
+
+**Typing them (items 57 and 60, decision 154):**
+- `docrepo/items.py` (ported from the mockup's `items.js`, `keyDate`): the `**date` line in any capture (`**date`, `**date.` or `**date:`). Its date phrase is read with Parse and populate's rules: "from", "starting" or "starts" a start; "by", "due", "until", "till", "before" or "ends" an end; a range or two dates with "to", "-", "until" or "through" a window; "on" or a bare date a one-day milestone. "Plant activity", "plant event" or "major plant activity" tick Plant activity and "deadline" or "hard deadline" Deadline, both taken out of the description, which is what's left. It goes on its `#` task, else the task item it's listed under, else the capture's task or new task; with no date, or its end before its start, its card says so and it isn't made. Free text is never read as a key date. `KeyDateText`, `read_key_date`, `key_date_text`, `Item.key_date`.
+- `docrepo/save.py`: a `**date` item adds its key date to each of its tasks with `tasks.add_key_dates`, logged with the notes capture's ID, and makes no capture of its own, so its line stays in the notes; a card's edited title is the description. `NewTaskFields.key_dates` and `CaptureDraft.update_key_dates`, applied in Save's transaction.
+- `docrepo/ui/capture_window.py`: `KeyDatesEditor` in New task and Update ("Key dates (n)", folded until there's one, each row a description and ✕, then Start to End and the three ticks, and Add key date); Update's start as the task's own and are saved and logged only when changed, and its summary says so. `docrepo/ui/items_panel.py`: the `**date` card's tint, calendar icon and facts line ("1 Dec to 5 Dec · plant activity · on Installation"). `docrepo/ui/style.py`: its amber edge.
+- The mockup's `items.js` and `export.js`: the operator and a "Key dates from text" section of 11 test vector rows, the only change to `test-vectors.md` (copied into `tests/fixtures/`). The mockup's own Save doesn't make key dates: it has none.
+- Tests: `tests/test_key_dates_text.py` (new).
+
+953 pass in all, 1 skipped. The task page, Edit task, Quick edit, Today, the capture window and the timeline were drawn with the owner's example key dates, in both looks, and checked by eye. Built in parallel in three parts (the timeline; the browse tool; the capture window and `**date`) on the data layer, then wired together.
+
+## Decisions (release 5.31)
+
+- Decisions 146 to 155 as the plan says.
+- **Settled while building, for the owner's hand test:**
+  - **Key date changes are logged as "Browse tool"** from the forms, the page, the lists and the timeline, and with the notes capture's ID from a `**date` line, as other fields are.
+  - **A `**date` line makes no capture of its own**, unlike the other items: its line stays in the notes, and the key date is on the task.
+  - **Quick edit's lines only add and remove**; their order is Edit task's.
+  - **The capture window and Edit task each have their own Key dates rows** (`capture_window.KeyDatesEditor`, `task_forms.KeyDatesEditor`), laid out for their room; they could be made one later.
+  - **Known, from before this release:** in the Classic look, Edit task's form is about 70 px wider than its scroll area, so a line's ✕ can sit off its right edge.
 
 ## Releases 5.29 and 5.30: the timeline as one chart, and planning on it (2026-10-27)
 

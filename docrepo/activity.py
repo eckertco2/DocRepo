@@ -30,7 +30,7 @@ KINDS = (("task", "New tasks"), ("update", "Updates"), ("note", "Notes"), ("emai
          ("agenda", "Agendas"))
 #: A changed field's chip: what kind of change it was.
 CHANGE_CHIPS = {"State": "State", "Current status": "Status", "Due": "Date", "Deadline": "Date", "Start": "Date", "Reminder": "Date",
-                "Priority": "Priority"}
+                "Priority": "Priority", "Key date": "Key date", "Key date done": "Key date"}
 #: Where a change was made, when it wasn't in a capture or on a task's page.
 WHERE = {"Agenda view": "In the Agendas view", "Reminders list": "In the reminders list", "Today": "On Today", "Capture window": "In the capture window",
          "Priorities view": "On the Priorities board", "Activity view": "In the Activity view", "Excel import": "From the Excel import"}
