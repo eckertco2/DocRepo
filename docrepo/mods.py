@@ -2,7 +2,7 @@
 
 It's a plain Markdown file, ``Mods\\mods-log.md``, kept out of docs.db on purpose:
 it still works when something else is broken, and it never mixes with work data,
-so it can leave the computer on its own (by hand, with Copy log). Entries are
+so it can leave the computer on its own (by hand, with Copy open or Copy all). Entries are
 M0001, M0002 and so on, oldest first. An entry can be edited (mods log round 2,
 M0047); its heading then ends with the day, "· edited YYYY-MM-DD", so a copy of
 the log shows it changed.
@@ -105,6 +105,8 @@ def edit_entry(fs: SafeFS, data_root: Path, mod_id: str, area: str, text: str, d
     return entry
 
 
-def log_text(data_root: Path) -> str:
-    """The whole log as Markdown, for Copy log."""
-    return render(read_log(data_root))
+def log_text(data_root: Path, open_only: bool = False) -> str:
+    """The log as Markdown: the whole of it, for Copy all, or only the entries not marked done, for Copy open (mods log
+    round 4, M0066). Either way under the log's title and intro, each entry's heading as the file has it."""
+    entries = read_log(data_root)
+    return render([e for e in entries if not e.done] if open_only else entries)

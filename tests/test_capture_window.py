@@ -47,6 +47,7 @@ def window(ctx):
     w = CaptureWindow(ctx)
     w.show_capture()
     yield w
+    QApplication.processEvents()  # a timer the test left (opening the task picker) runs while the database is open
     w.hide()  # a window left showing can take focus in a later test, after its database is closed
     w.deleteLater()
 

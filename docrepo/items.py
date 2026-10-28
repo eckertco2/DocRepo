@@ -545,16 +545,26 @@ def store(text: str, names: Names, formatted: bool = False) -> str:
     its marks stay as they are around each name."""
     out = []
     for line in text.split("\n"):
+        h = markup.heading_of(line) if formatted else None
+        if h:  # a heading's words are kept as typed, without marks (release 5.28)
+            level, words = h
+            parts, at = [], 0
+            for x in scan(words, names):
+                parts.append(words[at:x.start])
+                parts.append(_stored(x, names) or words[x.start:x.end])
+                at = x.end
+            out.append(f"{'#' * level} {''.join(parts)}{words[at:]}")
+            continue
         if formatted:
             m = markup.LIST_LINE.match(line)
-            head, rest = (line[:m.end()], line[m.end():]) if m else ("", line)
+            head, rest = (line[:m.end()], line[m.end():]) if m else ("", markup.text_of(line))
             words = "".join(t for t, _, _ in markup._segments(rest))
             spans = [(x.start, x.end, s) for x in scan(words, names) if (s := _stored(x, names))]
             if not spans:
                 out.append(line)
             else:
                 new = markup.replace_spans(rest, spans)
-                out.append(head + new if m else markup.escape_line_start(new))
+                out.append(head + new if m else markup.escape_heading(markup.escape_line_start(new)))
         else:
             m = LIST_RE.match(line)
             head, rest = (line[:m.end()], line[m.end():]) if m else ("", line)

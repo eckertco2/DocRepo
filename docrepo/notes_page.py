@@ -202,7 +202,8 @@ def caption_text(c: Capture, label: str) -> str:
 def capture_markup(c: Capture, content: str | None, title: str = "") -> list[str]:
     """A capture's note text as page lines: its names as written (``@Tom Becker``), its file and link lines left out
     (they're file lines on the page), and empty lines at its ends dropped. A new task's text that's only its title isn't
-    repeated (decision 115)."""
+    repeated (decision 115). Its headings are the page's headings, at the level they were typed (release 5.28, the
+    mods log round 4's decision 132)."""
     if not content:
         return []
     content = items.unstore(content)
@@ -214,7 +215,7 @@ def capture_markup(c: Capture, content: str | None, title: str = "") -> list[str
         lines.pop()
     if title and len(lines) == 1 and re.sub(r"\.\Z", "", markup.to_plain(lines[0]).strip()) == title.strip():
         return []
-    return [text_line(line) for line in lines]
+    return [heading_line(h[1], h[0]) if (h := markup.heading_of(line)) else text_line(markup.text_of(line)) for line in lines]
 
 
 def block(model: Model, stories, c: Capture, task_id: str, content: str | None) -> list[str]:
@@ -276,15 +277,6 @@ def typed_content(c: Capture, content: str | None) -> str | None:
 
 
 # ---- placing blocks ----
-def _section_end(lines: list[Line], i: int) -> int:
-    """Where the section under the heading at ``i`` ends: the next heading at its level or above, or the end."""
-    level = lines[i].level
-    j = i + 1
-    while j < len(lines) and not (lines[j].kind == "heading" and lines[j].level <= level):
-        j += 1
-    return j
-
-
 def _trim_end(raw: list[str]) -> list[str]:
     while raw and not raw[-1].strip():
         raw = raw[:-1]
@@ -292,8 +284,9 @@ def _trim_end(raw: list[str]) -> list[str]:
 
 
 def add_block(page: str, new: list[str], day: date, day_headings: bool) -> str:
-    """The page with a block added: at the end, or, with day headings, at the end of its day's section, or under a new
-    heading for its day put in date order among the day headings (decisions 97, 113 and 119)."""
+    """The page with a block added: at the end, or, with day headings, at the end of its day's lines, or under a new
+    heading for its day put in date order among the day headings (decisions 97, 113 and 119). A day's lines run to the
+    next day heading, whatever headings of the owner's or the captures' own come between (release 5.28, decision 132)."""
     raw = page.split("\n") if page else []
     if not day_headings:
         return "\n".join(_trim_end(raw) + new)
@@ -301,7 +294,7 @@ def add_block(page: str, new: list[str], day: date, day_headings: bool) -> str:
     days = [(i, d) for i, x in enumerate(lines) if x.kind == "heading" and (d := day_of(x.text))]
     same = next((i for i, d in days if d == day), None)
     if same is not None:
-        end = _section_end(lines, same)
+        end = next((i for i, _ in days if i > same), len(raw))
         while end > same + 1 and not raw[end - 1].strip():
             end -= 1
         return "\n".join(raw[:end] + new + raw[end:])

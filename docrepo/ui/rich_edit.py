@@ -16,6 +16,14 @@ Checklists (release 5.26, the notes page plan's decisions 86 and 91): Ctrl+1 (On
 "[] " or "[ ] " at a line's start make checklist lines, a list item with a box; again takes the boxes off. A click on a box
 ticks it, and a ticked line's words go grey. Enter after a ticked line starts an unticked one. They're kept as ``- [ ]``
 and ``- [x]``. The new look draws its own tick box over Qt's.
+
+Headings (release 5.28, mods log round 4), in a box that ``takes_headings``: Ctrl+Alt+1, 2 and 3 make the line a heading,
+and Ctrl+Alt+0 text again, as on the notes page, or the format bar's Heading menu; Enter at a heading's end starts a line
+of text. They're kept as ``# ``, ``## `` and ``### `` (``docrepo.markup``). In a box that ``folds_here`` (the capture
+window's), each heading has an arrow beside it that folds the lines under it, down to the next heading at its level or
+above; Alt+Shift+- and Alt+Shift++ fold and unfold the section the caret is in, a folded heading says how many lines it
+holds, and the arrow keys pass over a folded section. Folds are only for the draft: everything folded is still saved.
+The notes page (``notes_edit``) has its own folding, with captions and tables.
 """
 from __future__ import annotations
 
@@ -23,8 +31,8 @@ import re
 from collections.abc import Callable
 
 from PySide6.QtCore import QEvent, QPoint, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import (QBrush, QColor, QFont, QKeySequence, QPainter, QPainterPath, QPen, QTextBlockFormat, QTextCharFormat,
-                           QTextCursor, QTextDocument, QTextListFormat)
+from PySide6.QtGui import (QBrush, QColor, QFont, QFontInfo, QFontMetrics, QKeySequence, QPainter, QPainterPath, QPen, QTextBlockFormat,
+                           QTextCharFormat, QTextCursor, QTextDocument, QTextFormat, QTextListFormat)
 from PySide6.QtWidgets import QHBoxLayout, QMenu, QTextEdit, QToolButton, QWidget
 
 from docrepo import markup
@@ -40,7 +48,15 @@ MARKER = QTextBlockFormat.MarkerType
 INDENT = 20
 
 #: Each format bar button's key, as its tooltip and the Ctrl key tips show it.
-KEYS = {"b": "Ctrl+B", "i": "Ctrl+I", "u": "Ctrl+U", "s": "Ctrl+-", "mark": "Ctrl+Alt+H", "ul": "Ctrl+.", "ol": "Ctrl+/", "check": "Ctrl+1"}
+KEYS = {"b": "Ctrl+B", "i": "Ctrl+I", "u": "Ctrl+U", "s": "Ctrl+-", "mark": "Ctrl+Alt+H", "ul": "Ctrl+.", "ol": "Ctrl+/", "check": "Ctrl+1",
+        "heading": "Ctrl+Alt+1"}
+
+#: A heading block's user state while its section is folded (here and on the notes page).
+FOLDED = 1
+#: Each heading level's size above the text's, in points (here and on the notes page).
+HEADING_SIZES = {1: 3.5, 2: 1.5, 3: 0.5}
+#: The room left of the text for the fold arrows, while the box has a heading (release 5.28).
+GUTTER = 18
 
 NUMBERED = (QTextListFormat.Style.ListDecimal, QTextListFormat.Style.ListLowerAlpha, QTextListFormat.Style.ListUpperAlpha,
             QTextListFormat.Style.ListLowerRoman, QTextListFormat.Style.ListUpperRoman)
@@ -91,8 +107,13 @@ def png_bytes(image) -> bytes:
     return bytes(data)
 
 
-def block_markup(block) -> tuple[str, bool]:
-    """One block (a line) as markup, and whether it's formatted: a list item, or any mark."""
+def block_markup(block, headings: bool = True) -> tuple[str, bool]:
+    """One block (a line) as markup, and whether it's formatted: a list item, a heading or any mark. With ``headings``
+    off (pasted HTML), a heading's line is read as text, with its marks."""
+    level = block.blockFormat().headingLevel()
+    if level and headings and block.textList() is None:  # a heading's words, without marks (release 5.28)
+        words = " ".join(block.text().replace("￼", "").replace("\xa0", " ").split())
+        return (markup.heading_line(words, level), True) if words else ("", False)
     segments = []
     only_break = block.text() in _SOFT_BREAKS and block.text() != ""
     it = block.begin()
@@ -125,17 +146,56 @@ def block_markup(block) -> tuple[str, bool]:
     return markup.escape_line_start(line), formatted
 
 
-def document_markup(doc: QTextDocument) -> tuple[str, bool]:
-    """The document as markup, and whether anything in it is formatted."""
+def document_markup(doc: QTextDocument, headings: bool = True) -> tuple[str, bool]:
+    """The document as markup, and whether anything in it is formatted. A line of text that would read as a heading
+    keeps a backslash before it (release 5.28)."""
     lines: list[str] = []
     formatted = False
     block = doc.begin()
     while block.isValid():
-        line, marked = block_markup(block)
+        line, marked = block_markup(block, headings)
+        if block.textList() is None and not (headings and block.blockFormat().headingLevel()):
+            line = markup.escape_heading(line)
         lines.append(line)
         formatted = formatted or marked
         block = block.next()
     return "\n".join(lines), formatted
+
+
+class _FoldGutter(QWidget):
+    """The strip left of a box's text with its headings' fold arrows (release 5.28): a click on one folds or opens it."""
+
+    def __init__(self, edit: RichEdit) -> None:
+        super().__init__(edit)
+        self.edit = edit
+        self.setMouseTracking(True)
+        self.hide()
+
+    def paintEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        for b in self.edit._visible_headings(event.rect().top(), event.rect().bottom()):
+            self.edit._paint_arrow(p, b)
+        p.end()
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        h = self.edit.heading_row_at(int(event.position().y()))
+        if event.button() == Qt.MouseButton.LeftButton and h is not None:
+            self.edit.toggle_fold(h)
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802
+        h = self.edit.heading_row_at(int(event.position().y()))
+        hover = h.blockNumber() if h is not None else -1
+        self.setCursor(Qt.CursorShape.PointingHandCursor if h is not None else Qt.CursorShape.ArrowCursor)
+        if hover != self.edit._hover:
+            self.edit._hover = hover
+            self.update()
+
+    def leaveEvent(self, event) -> None:  # noqa: N802
+        if self.edit._hover != -1:
+            self.edit._hover = -1
+            self.update()
+        super().leaveEvent(event)
 
 
 class RichEdit(QTextEdit):
@@ -146,6 +206,10 @@ class RichEdit(QTextEdit):
     image_pasted = Signal(object)
     #: Whether a pasted picture goes to ``image_pasted`` (the capture window and the notes page); else it's left out.
     takes_pictures = False
+    #: Whether its lines can be made headings, with the keys and the format bar's Heading menu (release 5.28).
+    takes_headings = False
+    #: Whether this box draws and handles its headings' fold arrows itself (the capture window's; the notes page has its own).
+    folds_here = False
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -166,10 +230,28 @@ class RichEdit(QTextEdit):
             "Ctrl+1": self.toggle_checklist,  # OneNote's to-do key (release 5.26, decision 86)
             # release 5.7's keys, kept (decision 56)
             "Ctrl+Shift+X": self.toggle_strike, "Ctrl+Shift+H": self.toggle_highlight, "Ctrl+Shift+L": bullets, "Ctrl+Shift+O": numbers}
+        if self.takes_headings:  # OneNote's heading keys, as on the notes page (release 5.28)
+            self._keys.update({f"Ctrl+Alt+{n}": (lambda n=n: self.set_heading(n)) for n in range(4)})
+        self._hover = -1
+        self._quiet_fold = False
+        if self.folds_here:
+            self._keys.update({"Alt+Shift+-": lambda: self.fold_here(True), "Alt+Shift+_": lambda: self.fold_here(True),
+                               "Alt+Shift++": lambda: self.fold_here(False), "Alt+Shift+=": lambda: self.fold_here(False)})
+            self._gutter = _FoldGutter(self)
+            self.verticalScrollBar().valueChanged.connect(self._gutter.update)
+            self._heading_timer = QTimer(self)
+            self._heading_timer.setSingleShot(True)
+            self._heading_timer.setInterval(0)
+            self._heading_timer.timeout.connect(self.headings_changed)
+            self.document().contentsChange.connect(self._contents_changed)
+            self.cursorPositionChanged.connect(self._caret_moved)
 
     def setDocument(self, document: QTextDocument) -> None:  # noqa: N802 - Qt's name
         super().setDocument(document)
         document.setIndentWidth(INDENT)
+        if self.folds_here:  # the pinned window shows the capture window's own text
+            document.contentsChange.connect(self._contents_changed)
+            self.headings_changed()
 
     def _key_action(self, event) -> Callable[[], None] | None:
         return self._keys.get(QKeySequence(event.keyCombination()).toString())
@@ -200,6 +282,7 @@ class RichEdit(QTextEdit):
         """Show saved content text: markup when ``formatted``, else plain text."""
         if formatted:
             self.setHtml(markup.to_html(text))
+            self.style_headings()
         else:
             self.setPlainText(text)
         cursor = self.textCursor()
@@ -408,6 +491,292 @@ class RichEdit(QTextEdit):
         c.endEditBlock()
         self.formatting.emit()
 
+    # ---- headings (release 5.28, mods log round 4) ----
+    def blocks(self):
+        b = self.document().begin()
+        while b.isValid():
+            yield b
+            b = b.next()
+
+    def _base_points(self) -> float:
+        return QFontInfo(self.font()).pointSizeF() or float(tokens.BODY)
+
+    def style_heading(self, block) -> None:
+        """Give a heading its look (a little larger, semi-bold, room above), or a line of text back its own."""
+        level = block.blockFormat().headingLevel()
+        bf = block.blockFormat()
+        if level:
+            bf.setTopMargin({1: 10, 2: 8}.get(level, 6) if block.previous().isValid() else 2)
+            bf.setBottomMargin(2)
+        else:
+            bf.clearProperty(QTextFormat.Property.BlockTopMargin)
+            bf.clearProperty(QTextFormat.Property.BlockBottomMargin)
+        c = QTextCursor(block)
+        c.setBlockFormat(bf)
+        ranges, it = [], block.begin()
+        while not it.atEnd():
+            frag = it.fragment()
+            ranges.append((frag.position(), frag.length(), QTextCharFormat(frag.charFormat())))
+            it += 1
+        for pos, length, fmt in ranges:
+            fmt.clearProperty(QTextFormat.Property.FontSizeAdjustment)
+            if level:
+                fmt.setFontPointSize(self._base_points() + HEADING_SIZES.get(level, 0.5))
+                fmt.setFontWeight(QFont.Weight.DemiBold)
+            else:
+                fmt.clearProperty(QTextFormat.Property.FontPointSize)
+                fmt.setFontWeight(QFont.Weight.Normal)
+            c.setPosition(pos)
+            c.setPosition(pos + length, QTextCursor.MoveMode.KeepAnchor)
+            c.setCharFormat(fmt)
+        cf = QTextCharFormat(block.charFormat())  # what's typed into an empty heading
+        cf.clearProperty(QTextFormat.Property.FontSizeAdjustment)
+        if level:
+            cf.setFontPointSize(self._base_points() + HEADING_SIZES.get(level, 0.5))
+            cf.setFontWeight(QFont.Weight.DemiBold)
+        else:
+            cf.clearProperty(QTextFormat.Property.FontPointSize)
+            cf.clearProperty(QTextFormat.Property.FontWeight)
+        QTextCursor(block).setBlockCharFormat(cf)
+
+    def style_headings(self) -> None:
+        """Every heading's look, after the box has been given saved text (Qt's own heading sizes are far larger)."""
+        for b in list(self.blocks()):
+            if b.blockFormat().headingLevel():
+                self.style_heading(b)
+        if self.folds_here:
+            self.headings_changed()
+
+    def set_heading(self, level: int) -> None:
+        """Ctrl+Alt+1, 2 and 3 (OneNote's keys): the line, or each selected line, becomes a heading of that level;
+        Ctrl+Alt+0 makes it text again. A list item is left as it is."""
+        if not self.takes_headings:
+            return
+        cursor = self.textCursor()
+        start, end = sorted((cursor.selectionStart(), cursor.selectionEnd()))
+        doc = self.document()
+        targets, b = [], doc.findBlock(start)
+        while b.isValid() and b.position() <= end:
+            if b.textList() is None:
+                targets.append(b)
+            b = b.next()
+        if not targets:
+            return
+        cursor.beginEditBlock()
+        for b in targets:
+            bf = b.blockFormat()
+            bf.setHeadingLevel(level)
+            QTextCursor(b).setBlockFormat(bf)
+            if not level:
+                b.setUserState(-1)
+            self.style_heading(b)
+        cursor.endEditBlock()
+        fmt = QTextCharFormat(self.currentCharFormat())
+        if level:
+            fmt.setFontPointSize(self._base_points() + HEADING_SIZES.get(level, 0.5))
+            fmt.setFontWeight(QFont.Weight.DemiBold)
+        else:
+            fmt.clearProperty(QTextFormat.Property.FontPointSize)
+            fmt.setFontWeight(QFont.Weight.Normal)
+        self.setCurrentCharFormat(fmt)
+        if self.folds_here:
+            self.headings_changed()
+
+    def heading_level(self) -> int:
+        """The caret's line's heading level, 0 for text."""
+        return self.textCursor().block().blockFormat().headingLevel()
+
+    # ---- folding, in a box that folds_here ----
+    def _contents_changed(self, *_args) -> None:
+        if not self._quiet_fold:
+            self._heading_timer.start()
+
+    def headings_changed(self) -> None:
+        """After an edit: the strip for the arrows while there's a heading, and the folds shown again. The strip is the
+        box's own margin, not the text's, so it never becomes a step of Ctrl+Z."""
+        has = any(b.blockFormat().headingLevel() for b in self.blocks())
+        if has != self._gutter.isVisible():
+            self.setViewportMargins(GUTTER if has else 0, 0, 0, 0)
+            self._gutter.setVisible(has)
+            self._place_gutter()
+        self.refold()
+
+    def _place_gutter(self) -> None:
+        cr = self.contentsRect()
+        self._gutter.setGeometry(cr.left(), cr.top(), GUTTER, cr.height())
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        super().resizeEvent(event)
+        if self.folds_here:
+            self._place_gutter()
+
+    def heading_of(self, block):
+        """The nearest heading at or above ``block``."""
+        b = block
+        while b.isValid() and not b.blockFormat().headingLevel():
+            b = b.previous()
+        return b if b.isValid() else None
+
+    def section_end(self, heading):
+        """The last line of a heading's section: up to the next heading at its level or above."""
+        level, last, b = heading.blockFormat().headingLevel(), heading, heading.next()
+        while b.isValid() and not (b.blockFormat().headingLevel() and b.blockFormat().headingLevel() <= level):
+            last, b = b, b.next()
+        return last
+
+    def refold(self) -> None:
+        """Show and hide lines from the headings' folds: a line is hidden under any folded heading above it at a higher
+        level. Only the lines that change are laid out again."""
+        lo = hi = hide_level = None
+        for b in self.blocks():
+            level = b.blockFormat().headingLevel()
+            if hide_level is not None and level and level <= hide_level:
+                hide_level = None
+            visible = hide_level is None
+            if b.isVisible() != visible:
+                b.setVisible(visible)
+                lo = b.position() if lo is None else lo
+                hi = b.position() + b.length()
+            if visible and level and b.userState() == FOLDED:
+                hide_level = level
+        if lo is not None:
+            self._quiet_fold = True
+            self.document().markContentsDirty(lo, hi - lo)
+            self._quiet_fold = False
+        if not self.textCursor().block().isVisible():
+            self._skip_hidden(-1, False)
+        self.viewport().update()
+        if self.folds_here:
+            self._gutter.update()
+
+    def toggle_fold(self, heading) -> None:
+        heading.setUserState(-1 if heading.userState() == FOLDED else FOLDED)
+        self.refold()
+
+    def fold_here(self, fold: bool) -> None:
+        """Alt+Shift+- and Alt+Shift++, as in OneNote: fold or unfold the section the caret is in."""
+        h = self.heading_of(self.textCursor().block())
+        if h is not None:
+            h.setUserState(FOLDED if fold else -1)
+            self.refold()
+
+    def reveal(self, block) -> None:
+        """Unfold every heading that hides ``block``."""
+        if block.isVisible():
+            return
+        bound, b = 99, block.previous()
+        while b.isValid() and bound > 1:
+            level = b.blockFormat().headingLevel()
+            if level and level < bound:
+                if b.userState() == FOLDED:
+                    b.setUserState(-1)
+                bound = level
+            b = b.previous()
+        self.refold()
+
+    def _caret_moved(self) -> None:
+        """A caret put inside a folded section by a click, Find or a list's key: the section opens."""
+        if not self._quiet_fold and not self.textCursor().block().isVisible():
+            self.reveal(self.textCursor().block())
+
+    def _skip_hidden(self, step: int, keep: bool) -> None:
+        """After an arrow key, a caret in a folded section goes on past it, as if the section weren't there."""
+        c = self.textCursor()
+        b = c.block()
+        if b.isVisible():
+            return
+        while b.isValid() and not b.isVisible():
+            b = b.next() if step > 0 else b.previous()
+        if not b.isValid():
+            b = self.document().lastBlock() if step > 0 else self.document().begin()
+            while b.isValid() and not b.isVisible():
+                b = b.previous() if step > 0 else b.next()
+        if not b.isValid():
+            return
+        pos = b.position() if step > 0 and b.position() > c.position() else b.position() + b.length() - 1
+        c.setPosition(pos, QTextCursor.MoveMode.KeepAnchor if keep else QTextCursor.MoveMode.MoveAnchor)
+        self._quiet_fold = True
+        self.setTextCursor(c)
+        self._quiet_fold = False
+
+    def section_lines(self, heading) -> int:
+        end, b, n = self.section_end(heading), heading.next(), 0
+        while b.isValid() and b.position() <= end.position():
+            n += 1
+            b = b.next()
+        return n
+
+    def heading_row_at(self, y: int):
+        """The heading whose line is at height ``y`` (the viewport's, which the strip shares), if any."""
+        b = self.cursorForPosition(QPoint(4, y)).block()
+        if b.isValid() and b.isVisible() and b.blockFormat().headingLevel():
+            r = self.cursorRect(QTextCursor(b))
+            if r.top() - 4 <= y <= r.bottom() + 4:
+                return b
+        return None
+
+    def _visible_headings(self, top: int, bottom: int):
+        """The headings shown between heights ``top`` and ``bottom`` of the viewport."""
+        layout = self.document().documentLayout()
+        b = self.cursorForPosition(QPoint(4, top)).block()
+        if b.previous().isValid():
+            b = b.previous()
+        while b.isValid():
+            if b.isVisible():
+                if layout.blockBoundingRect(b).top() - self.verticalScrollBar().value() > bottom:
+                    return
+                if b.blockFormat().headingLevel():
+                    yield b
+            b = b.next()
+
+    def _paint_pills(self, area) -> None:
+        """After a folded heading's words, how many lines it holds."""
+        p = None
+        for b in self._visible_headings(area.top(), area.bottom()):
+            if b.userState() == FOLDED:
+                if p is None:
+                    p = QPainter(self.viewport())
+                    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+                self._paint_pill(p, b)
+        if p is not None:
+            p.end()
+
+    def _paint_arrow(self, p: QPainter, b) -> None:
+        """A heading's arrow, in the strip left of the text: pointing down while open, right while folded."""
+        r = self.cursorRect(QTextCursor(b))
+        folded, hover = b.userState() == FOLDED, b.blockNumber() == self._hover
+        cx, cy, s = GUTTER / 2, r.center().y() + 0.5, 4.0
+        path = QPainterPath()
+        if folded:
+            path.moveTo(cx - s / 2, cy - s)
+            path.lineTo(cx + s * 0.75, cy)
+            path.lineTo(cx - s / 2, cy + s)
+        else:
+            path.moveTo(cx - s, cy - s / 2)
+            path.lineTo(cx + s, cy - s / 2)
+            path.lineTo(cx, cy + s * 0.75)
+        path.closeSubpath()
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor("#666666") if LOOK.classic else QColor(tokens.colour("text2" if folded or hover else "scroll")))
+        p.drawPath(path)
+
+    def _paint_pill(self, p: QPainter, b) -> None:
+        r = self.cursorRect(QTextCursor(b))
+        n = self.section_lines(b)
+        text = f"{n} line{'s' if n != 1 else ''}"
+        small = tokens.ui_font(tokens.CAPTION)
+        fm = QFontMetrics(small)
+        end = QTextCursor(b)
+        end.movePosition(QTextCursor.MoveOperation.EndOfBlock)
+        x = self.cursorRect(end).right() + 10  # after the heading's words (its layout may not be laid out yet)
+        pill = QRectF(x, r.center().y() - fm.height() / 2 - 1, fm.horizontalAdvance(text) + 12, fm.height() + 2)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(tokens.colour("hover")))
+        p.drawRoundedRect(pill, pill.height() / 2, pill.height() / 2)
+        p.setFont(small)
+        p.setPen(QColor(tokens.colour("text2")))
+        p.drawText(pill, Qt.AlignmentFlag.AlignCenter, text)
+
     def checkbox_at(self, pos: QPoint):
         """The checklist line whose box is at ``pos``, in the viewport, if any."""
         b = self.cursorForPosition(pos).block()
@@ -437,8 +806,13 @@ class RichEdit(QTextEdit):
         super().mouseMoveEvent(event)
 
     def paintEvent(self, event) -> None:  # noqa: N802 - Qt's name
-        """The new look's tick box over Qt's (a box with an X): an outline, or the accent with a white tick."""
+        """The new look's tick box over Qt's (a box with an X): an outline, or the accent with a white tick; and in a box
+        that folds, a folded heading's count of lines, with its arrow in the strip beside the text."""
         super().paintEvent(event)
+        if self.folds_here:
+            self._paint_pills(event.rect())
+            if self._gutter.isVisible():
+                self._gutter.update()
         if LOOK.classic:
             return
         area = event.rect()
@@ -506,10 +880,14 @@ class RichEdit(QTextEdit):
         return lst.format().indent() if lst is not None else 0
 
     def _unit(self, first: int, last: int) -> tuple[int, int]:
-        """Lines ``first`` to ``last``, with the list items under the last of them (a block, as DocRepo reads it)."""
+        """Lines ``first`` to ``last``, with the list items under the last of them (a block, as DocRepo reads it), or a
+        folded heading's section with it."""
         doc = self.document()
+        end = doc.findBlockByNumber(last)
+        if end.blockFormat().headingLevel() and end.userState() == FOLDED:
+            return first, self.section_end(end).blockNumber()
         level = self._level(doc.findBlockByNumber(first))
-        b = doc.findBlockByNumber(last).next()
+        b = end.next()
         while b.isValid() and self._level(b) > level:
             last, b = b.blockNumber(), b.next()
         return first, last
@@ -529,6 +907,8 @@ class RichEdit(QTextEdit):
             if first == 0:
                 return
             j = first - 1
+            while j > 0 and not doc.findBlockByNumber(j).isVisible():  # a folded section above goes past with its heading
+                j -= 1
             while j > 0 and self._level(doc.findBlockByNumber(j)) > self._level(doc.findBlockByNumber(first)):
                 j -= 1
             other = (j, first - 1)
@@ -540,11 +920,12 @@ class RichEdit(QTextEdit):
         lines = text.split("\n") if formatted else [doc.findBlockByNumber(n).text() for n in range(count)]
         if len(lines) != count:
             return
-        unit, moved = lines[first:last + 1], lines[other[0]:other[1] + 1]
         if step < 0:
-            new, new_first = lines[:other[0]] + unit + moved + lines[last + 1:], other[0]
+            order = [*range(other[0]), *range(first, last + 1), *range(other[0], other[1] + 1), *range(last + 1, count)]
         else:
-            new, new_first = lines[:first] + moved + unit + lines[other[1] + 1:], first + len(moved)
+            order = [*range(first), *range(other[0], other[1] + 1), *range(first, last + 1), *range(other[1] + 1, count)]
+        new, new_first = [lines[n] for n in order], order.index(first)
+        folded = {n for n in range(count) if doc.findBlockByNumber(n).userState() == FOLDED}
         offset, column = cursor.blockNumber() - first, cursor.positionInBlock()
         edit = QTextCursor(doc)
         edit.beginEditBlock()
@@ -557,6 +938,12 @@ class RichEdit(QTextEdit):
         else:
             edit.insertText("\n".join(new))
         edit.endEditBlock()
+        if formatted:
+            self.style_headings()
+        if folded:  # each folded heading stays folded where it went
+            for i, n in enumerate(order):
+                doc.findBlockByNumber(i).setUserState(FOLDED if n in folded else -1)
+            self.refold()
         block = doc.findBlockByNumber(min(doc.blockCount() - 1, new_first + offset))
         here = QTextCursor(block)
         here.setPosition(block.position() + min(column, block.length() - 1))
@@ -571,6 +958,29 @@ class RichEdit(QTextEdit):
         cursor = self.textCursor()
         block = cursor.block()
         key = event.key()
+        if self.folds_here and key in (Qt.Key.Key_Up, Qt.Key.Key_Down, Qt.Key.Key_Left, Qt.Key.Key_Right) \
+                and not event.modifiers() & Qt.KeyboardModifier.AltModifier:
+            self._quiet_fold = True  # a folded section is passed over, not opened
+            try:
+                super().keyPressEvent(event)
+            finally:
+                self._quiet_fold = False
+            self._skip_hidden(1 if key in (Qt.Key.Key_Down, Qt.Key.Key_Right) else -1,
+                              bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier))
+            return
+        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and block.blockFormat().headingLevel() and cursor.atBlockEnd() \
+                and not cursor.hasSelection():
+            # Enter at a heading's end starts a line of text under it (release 5.28); a folded heading opens first.
+            if block.userState() == FOLDED:
+                block.setUserState(-1)
+                if self.folds_here:
+                    self.refold()
+            cursor.beginEditBlock()
+            cursor.insertBlock(QTextBlockFormat(), QTextCharFormat())
+            cursor.endEditBlock()
+            self.setTextCursor(cursor)
+            self.setCurrentCharFormat(QTextCharFormat())
+            return
         if key in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab) and block.textList() is not None:
             self.indent_item(-1 if key == Qt.Key.Key_Backtab or event.modifiers() & Qt.KeyboardModifier.ShiftModifier else 1)
             return
@@ -624,7 +1034,7 @@ class RichEdit(QTextEdit):
             else:
                 doc = QTextDocument()
                 doc.setHtml(raw)
-                text, _ = document_markup(doc)
+                text, _ = document_markup(doc, headings=False)  # a pasted heading comes in as bold text, as before
                 diagnose.note_drag("paste", list(source.formats()), 0, 0, "formatted text, from its HTML")
             self.insert_markup(text.strip("\n"))
         elif source.hasText():
@@ -691,6 +1101,22 @@ class FormatBar(QWidget):
         menu.addAction("No highlight", lambda: (edit.set_highlight(None), self.sync()))
         self.buttons["mark"].setMenu(menu)
         self.buttons["mark"].setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
+        if edit.takes_headings:  # headings (release 5.28): a menu of the three levels and Text
+            b = QToolButton(text="H")
+            f = b.font()
+            f.setBold(True)
+            b.setFont(f)
+            b.setToolTip("Heading (Ctrl+Alt+1, 2 or 3; Ctrl+Alt+0 for text). A heading folds what's under it.")
+            b.setAccessibleName("Heading")
+            b.setCheckable(True)
+            b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            heading_menu = QMenu(self)
+            for level, name in ((1, "Heading 1"), (2, "Heading 2"), (3, "Heading 3"), (0, "Text")):
+                heading_menu.addAction(f"{name}\tCtrl+Alt+{level}", lambda n=level: (edit.set_heading(n), self.sync()))
+            b.setMenu(heading_menu)
+            b.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+            lay.insertWidget(0, b)
+            self.buttons["heading"] = b
         lay.addStretch()
         edit.formatting.connect(self.sync)
         self.sync()
@@ -727,5 +1153,9 @@ class FormatBar(QWidget):
                   "s": e.currentCharFormat().fontStrikeOut(), "mark": e.current_highlight() is not None,
                   "ul": lst is not None and lst.format().style() not in NUMBERED and not e.is_check(e.textCursor().block()),
                   "ol": lst is not None and lst.format().style() in NUMBERED, "check": e.is_check(e.textCursor().block())}
+        if "heading" in self.buttons:
+            level = e.textCursor().block().blockFormat().headingLevel()
+            states["heading"] = bool(level)
+            states["b"] = states["b"] and not level  # a heading's own weight isn't bold
         for key, on in states.items():
             self.buttons[key].setChecked(bool(on))

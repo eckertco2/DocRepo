@@ -53,6 +53,20 @@ def test_mods_log_matches_the_example(data_root, fs):
     assert mods.log_text(data_root) == example_block("Mods/mods-log.md")
 
 
+def test_copy_open_leaves_out_done_entries(data_root, fs):
+    """Mods log round 4 (M0066): Copy open copies only the entries not marked done, under the log's title and intro."""
+    for i, area in enumerate(("Capture window", "Browse tool", "General")):
+        mods.add_entry(fs, data_root, area, f"Change {i + 1}.", datetime(2026, 10, 8, 9, i))
+    mods.mark_done(fs, data_root, "M0002", date(2026, 10, 9))
+    mods.edit_entry(fs, data_root, "M0003", "General", "Change 3, reworded.", date(2026, 10, 9))
+    text = mods.log_text(data_root, open_only=True)
+    assert text.startswith(mods.TITLE + "\n\n" + mods.INTRO + "\n")
+    assert "## M0001 · 2026-10-08 09:00 · Capture window · open" in text
+    assert "## M0003 · 2026-10-08 09:02 · General · open · edited 2026-10-09\n\nChange 3, reworded." in text
+    assert "M0002" not in text and "Change 2." not in text
+    assert "M0002 · 2026-10-08 09:01 · Browse tool · done 2026-10-09" in mods.log_text(data_root)
+
+
 def test_mods_log_checks_its_input(data_root, fs):
     with pytest.raises(ValueError):
         mods.add_entry(fs, data_root, "General", "  ", datetime(2026, 10, 8))

@@ -1,6 +1,6 @@
 """The mods log panel: notes about changes the owner wants in DocRepo itself. It sits over the capture window,
 whose draft stays as it was. An open entry can be edited, to add to it rather than start another (mods log round 2,
-M0047)."""
+M0047). Copy open copies only the entries not marked done, and Copy all the whole log (mods log round 4, M0066)."""
 from __future__ import annotations
 
 from PySide6.QtCore import Signal
@@ -53,9 +53,14 @@ class ModsPanel(QWidget):
         self.cancel_button = QPushButton("Cancel edit")
         self.cancel_button.clicked.connect(self.cancel_edit)
         row.addWidget(self.cancel_button)
-        copy = QPushButton("Copy log")
-        copy.clicked.connect(self.copy_log)
-        row.addWidget(copy)
+        copy_open = QPushButton("Copy open")
+        copy_open.setToolTip("Copy the entries not marked done, as Markdown")
+        copy_open.clicked.connect(lambda: self.copy_log(open_only=True))
+        row.addWidget(copy_open)
+        copy_all = QPushButton("Copy all")
+        copy_all.setToolTip("Copy the whole log, done entries too, as Markdown")
+        copy_all.clicked.connect(lambda: self.copy_log())
+        row.addWidget(copy_all)
         row.addStretch()
         layout.addLayout(row)
         self.hint = QLabel()
@@ -156,7 +161,13 @@ class ModsPanel(QWidget):
         self.refresh()
         self.ctx.notify("Mods log", f"{mod_id} is marked done.")
 
-    def copy_log(self) -> None:
-        text = mods.log_text(self.ctx.data_root)
+    def copy_log(self, open_only: bool = False) -> None:
+        """Copy open (only the entries not marked done) or Copy all, as Markdown."""
+        text = mods.log_text(self.ctx.data_root, open_only)
+        if open_only:
+            n = sum(not e.done for e in mods.read_log(self.ctx.data_root))
+            what = f"{n} open {'entry' if n == 1 else 'entries'} copied"
+        else:
+            what = "Mods log copied"
         QGuiApplication.clipboard().setText(text)
-        self.ctx.notify("Mods log", f"Mods log copied ({len(text)} characters).")
+        self.ctx.notify("Mods log", f"{what} ({len(text):,} characters).")

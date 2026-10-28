@@ -6,12 +6,15 @@ A formatted capture's content text is kept in its capture.md as a small, readabl
   (yellow, green or pink);
 - a list item: two spaces per level, then ``- `` or a number and ``. ``;
 - a checklist line (release 5.26, decision 86): a list item whose text starts with a box, ``- [ ] `` or ``- [x] ``;
+- a heading (release 5.28, mods log round 4): ``# ``, ``## `` or ``### `` and its words, at levels 1 to 3, as on a
+  task's notes page. Its words are kept as typed, without marks;
 - any other line is a line of text, and an empty line stays empty.
 
 A backslash keeps a character as itself: ``\\*``, ``\\~``, ``\\<``, and ``\\-`` or ``1\\.`` at a line's start, so a line of
-text that starts like a list item stays text. A backslash before anything else is just a backslash, so paths read as
-they are. Whatever reads content text for its words (Parse and populate, titles, search) reads ``to_plain``; pages and
-the editor show ``to_html``. A capture with no formatting is kept as plain text, as before, and capture.md says which
+text that starts like a list item stays text; a line of text that would read as a heading starts with a backslash
+(``\\# Pump 3``). A backslash before anything else is just a backslash, so paths read as they are. Whatever reads content
+text for its words (Parse and populate, titles, search) reads ``to_plain``, which gives a heading's words alone; pages
+and the editor show ``to_html``. A capture with no formatting is kept as plain text, as before, and capture.md says which
 (``content_format``).
 """
 from __future__ import annotations
@@ -24,6 +27,13 @@ HIGHLIGHTS = {"yellow": "#fff1a8", "green": "#cdeccd", "pink": "#f8d0e3"}
 #: After a backslash, these stand for themselves.
 ESCAPABLE = frozenset("\\*~<-.")
 LIST_LINE = re.compile(r"^((?:  )*)(- |(\d+)\. )")
+#: A heading (release 5.28): its level's hashes, a space and its words, as the notes page keeps one.
+HEADING = re.compile(r"^(#{1,3}) (.*)$")
+#: How much larger than the text each heading level is shown, on the pages (Qt's steps of font size).
+HEADING_SIZES = {1: "large", 2: "medium", 3: "medium"}
+#: A line that a backslash keeps from reading as a heading, or that needs one: any backslashes, then a heading's start.
+_HEADING_LIKE = re.compile(r"^\\*#{1,3} ")
+_ESCAPED_HEADING = re.compile(r"^\\+#{1,3} ")
 #: A checklist line's box, at the start of a list item's text: "[ ] " or "[x] " (release 5.26).
 CHECK = re.compile(r"\[([ xX])\] ")
 #: Ticked lines' words are grey (decision 91).
@@ -59,9 +69,31 @@ def escape_line_start(line: str) -> str:
     return m.group(1) + ("\\-" if marker == "-" else marker[:-1] + "\\.") + line[m.end():]
 
 
+def escape_heading(line: str) -> str:
+    """A line of text, already markup, that would read as a heading (release 5.28): a backslash before it, so it stays
+    text. One that already starts with a backslash before a heading's start gets another, so it reads back as it was."""
+    return "\\" + line if _HEADING_LIKE.match(line) else line
+
+
+def heading_line(words: str, level: int) -> str:
+    """A heading's line, from its words: they're kept as typed, on one line."""
+    return f"{'#' * max(1, min(level, 3))} {' '.join(words.split())}"
+
+
+def heading_of(line: str) -> tuple[int, str] | None:
+    """A heading line's level and words, or None for any other line."""
+    m = HEADING.match(line)
+    return (len(m.group(1)), m.group(2)) if m else None
+
+
+def text_of(line: str) -> str:
+    """A line of text's markup, without the backslash that keeps it from reading as a heading."""
+    return line[1:] if _ESCAPED_HEADING.match(line) else line
+
+
 def escape(text: str) -> str:
     """Plain text as markup that reads as the same text."""
-    return "\n".join(escape_line_start(escape_inline(line)) for line in text.split("\n"))
+    return "\n".join(escape_heading(escape_line_start(escape_inline(line))) for line in text.split("\n"))
 
 
 def from_list_lines(text: str) -> str:
@@ -70,7 +102,7 @@ def from_list_lines(text: str) -> str:
     out = []
     for line in text.split("\n"):
         m = LIST_LINE.match(line)
-        out.append(line[:m.end()] + escape_inline(line[m.end():]) if m else escape_line_start(escape_inline(line)))
+        out.append(line[:m.end()] + escape_inline(line[m.end():]) if m else escape_heading(escape_line_start(escape_inline(line))))
     return "\n".join(out)
 
 
@@ -173,9 +205,15 @@ def replace_spans(text: str, spans: list[tuple[int, int, str]]) -> str:
 
 
 def to_plain(markup: str) -> str:
-    """The plain text: marks dropped, escapes undone. A list item keeps its marker and indent ("  - item")."""
+    """The plain text: marks dropped, escapes undone. A list item keeps its marker and indent ("  - item"); a heading is
+    its words alone."""
     lines = []
     for line in markup.split("\n"):
+        h = heading_of(line)
+        if h:
+            lines.append(h[1])
+            continue
+        line = text_of(line)
         m = LIST_LINE.match(line)
         head, rest = (line[:m.end()], line[m.end():]) if m else ("", line)
         lines.append(head + "".join(t for t, _, _ in _segments(rest)))
@@ -192,8 +230,9 @@ def check_of(line: str) -> bool | None:
 
 
 def is_formatted(markup: str) -> bool:
-    """Whether the markup has any list or mark, so it needs keeping as markup rather than as plain text."""
-    return any(LIST_LINE.match(line) or any(marks for _, marks, _ in _segments(line)) for line in markup.split("\n"))
+    """Whether the markup has any list, heading or mark, so it needs keeping as markup rather than as plain text."""
+    return any(LIST_LINE.match(line) or HEADING.match(line) or any(marks for _, marks, _ in _segments(text_of(line)))
+               for line in markup.split("\n"))
 
 
 def inline_html(text: str) -> str:
@@ -221,6 +260,14 @@ def to_html(markup: str) -> str:
             out.append(("</li>" if li_open else "") + f"</{kind}>")
 
     for line in markup.split("\n"):
+        h = heading_of(line)
+        if h:  # a heading (release 5.28): Qt's heading, a little larger than the text rather than its default sizes
+            close_to(0)
+            level, words = h
+            out.append(f'<h{level} style="margin-top:{8 if level == 1 else 6}px; margin-bottom:2px; font-size:{HEADING_SIZES[level]}; '
+                       f'font-weight:600; white-space:pre-wrap">{html.escape(words, quote=False) or "<br>"}</h{level}>')
+            continue
+        line = text_of(line)
         m = LIST_LINE.match(line)
         if not m:
             close_to(0)
@@ -251,9 +298,14 @@ def to_html(markup: str) -> str:
 
 def to_line_html(markup: str) -> str:
     """The markup as lines of HTML joined by ``<br>``, for text shown inside a paragraph (the raw text log): list items
-    as indented bullets and numbers."""
+    as indented bullets and numbers, and headings in bold."""
     out = []
     for line in markup.split("\n"):
+        h = heading_of(line)
+        if h:
+            out.append(f"<b>{html.escape(h[1], quote=False)}</b>")
+            continue
+        line = text_of(line)
         m = LIST_LINE.match(line)
         if m:
             marker, rest = f"{m.group(3)}." if m.group(3) else "•", line[m.end():]

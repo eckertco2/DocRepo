@@ -44,15 +44,12 @@ from docrepo import markup, notes_page
 from docrepo.notes_page import Line
 from docrepo.ui import tokens
 from docrepo.ui.look import LOOK
-from docrepo.ui.rich_edit import MARKER, NUMBERED, RichEdit, block_markup
+from docrepo.ui.rich_edit import FOLDED, HEADING_SIZES, MARKER, NUMBERED, RichEdit, block_markup
 
-FOLDED = 1  # a heading block's user state while its section is folded
 LEFT = 28   # the gutter beside the page, where the fold arrows go
 PAGE_MIME = "application/x-docrepo-notes-page"
 PROPORTIONAL = QTextBlockFormat.LineHeightTypes.ProportionalHeight.value
 SAVE_AFTER_MS = 800
-#: Each heading level's size above the body's, in points.
-HEADING_SIZES = {1: 3.5, 2: 1.5, 3: 0.5}
 #: The widest a picture shows on the page, in pixels (release 5.27).
 PICTURE_WIDTH = 560
 
@@ -71,6 +68,7 @@ class NotesEdit(RichEdit):
     files_dropped = Signal(list)  # local files dropped on the page (release 5.27)
     focus_changed = Signal(bool)  # the frame round the notes shows where you're typing (decision 130)
     takes_pictures = True
+    takes_headings = True  # the format bar's Heading menu (release 5.28); the page folds its headings itself
     #: A document's file, for its picture: set by the browse window.
     picture_path = None
 

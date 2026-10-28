@@ -232,6 +232,9 @@ class ContentEdit(RichEdit):
     dropped = Signal(str, list)
     #: Whether a web link dropped on it is added as a link, as the pinned window's box does, rather than typed in.
     take_links = False
+    #: Headings that fold, while the note is taken (release 5.28, mods log round 4).
+    takes_headings = True
+    folds_here = True
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # noqa: N802 - Qt's name
         if note_drag("enter", event.mimeData(), self.take_links):

@@ -41,6 +41,7 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.26 | Checklists on the notes page and the Checklist summary (the notes page plan's decisions 85 to 91 as redone, and 121 to 123), and the format bar on the notes | Built 2026-10-27; hand-tested by the owner and on GitHub 2026-10-27. Next: testing on the corporate computer |
 | 5.26.1 | Fixes: each email in a capture its own .msg file and attachments with unique names (two emails had both gone to email.msg, losing the first), and a file path with Copy as path's quotes, or one DocRepo can't find, in the content text | Built 2026-10-27; on GitHub 2026-10-27, before the owner's hand test. Next: the hand test here, then testing on the corporate computer with `release-5-26-1-test.md` |
 | 5.27 | Pictures, files and tables on the notes page (the notes page plan's decisions 124 to 129, with the hard rules' change in 127), and Notes in its frame (decision 130), schema version 11 | Built 2026-10-27; hand-tested by the owner and on GitHub 2026-10-27. Next: testing on the corporate computer with `release-5-27-test.md` |
+| 5.28 | Copy open in the mods log (M0066), and headings that fold in the capture window, which arrive on the notes page as headings at the level typed (the mods log round 4, decisions 131 and 132) | Built 2026-10-27; hand-tested by the owner and on GitHub 2026-10-27. Next: testing on the corporate computer |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
 ## Decisions
@@ -475,6 +476,29 @@ The visual overhaul's O10, designed and mocked in the parent workspace (`docs/ui
   - **No button group:** the pane marks the open view itself, so that no row is marked while searching, and a click on the open view keeps it marked.
   - **The totals that left the sidebar** are beside their views' titles ("14 open", "7 active"), as `sidebar.md` said they'd be.
   - **The tooltip** shows only when a name is cut short. The headings' tooltips say Fold or Unfold.
+
+## Release 5.28: Copy open, and headings in the capture window (2026-10-27)
+
+From the fourth copy of the mods log, planned in the parent workspace's `docs/mods/round-4-plan.md` (items 49 and 50, decisions 131 and 132): M0066, copying only the mods log's open entries, and headings while taking notes, asked for in chat on 2026-10-27 (first with release 5.26.1, and left until a capture's heading had a place on the notes page). Decision 132 is the owner's: a capture's headings are the page's, at the level typed, since captures aren't marked on the page mainly by day headings any more. No schema change and no new package.
+
+- `docrepo/mods.py`, `docrepo/ui/mods_panel.py` (M0066): `log_text(open_only=True)`; Copy log becomes **Copy open** and **Copy all**, and the message says how many open entries it copied.
+- `docrepo/markup.py`: heading lines, `# `, `## ` and `### ` and the heading's words, as the notes page keeps them (`HEADING`, `heading_of`, `heading_line`); a line of text that would read as one keeps a backslash (`escape_heading`, `text_of`, in `escape` and `from_list_lines`). `to_plain` gives a heading's words, `is_formatted` counts headings, `to_html` writes Qt's `<h1>` to `<h3>` a step larger than the text, and `to_line_html` bold.
+- `docrepo/items.py`: `store` keeps a heading's hashes while it keeps each `@` and `#` with its ID, and reads an escaped line's words without its backslash.
+- `docrepo/notes_page.py`: `capture_markup` puts a capture's headings on the page as headings, and a line that only looks like one as text; `add_block` puts a day's captures before the next day heading, whatever headings come between (`_section_end` went).
+- `docrepo/ui/rich_edit.py`: `takes_headings` (the keys, `set_heading`, `style_heading`, `style_headings`, and the format bar's **H** menu) and `folds_here` (`_FoldGutter`, the strip for the arrows as the box's viewport margin, so it never becomes a step of Ctrl+Z; `headings_changed`, `refold`, `toggle_fold`, `fold_here`, `reveal`, `_skip_hidden`, the folded heading's count of lines); `block_markup` and `document_markup` write headings, but not for pasted HTML (`headings=False`), where a heading still comes in as bold text; Enter at a heading's end starts a line of text; `move_lines` moves a folded heading with its section and keeps the folds. `FOLDED` and `HEADING_SIZES` moved here from `notes_edit.py`, which imports them.
+- `docrepo/ui/capture_window.py`: `ContentEdit` takes headings and folds them, in the capture window and the pinned window (which shows the same text). `docrepo/ui/notes_edit.py`: the notes page takes the format bar's H menu too, with its own folding as before. `docrepo/ui/keymap.py`: the heading and fold keys.
+- `tests/test_headings.py` (new): the markup, items, the notes page, a saved capture, and the box (keys, Enter, sizes, folding and the arrow keys, moving a folded heading, the H menu, one undo, pasted headings). `tests/test_prompts_mods.py`: Copy open. `tests/test_capture_window.py`: the window fixture runs a timer a test left (opening the task picker) before its database closes, which had failed `test_checklists.py` when run after it. 893 pass in all, 1 skipped.
+
+## Decisions (release 5.28)
+
+- Decisions 131 and 132, and the rest of round 4's for the timeline (133 to 140) are for releases 5.29 and 5.30, mocked first.
+- **Settled while building, for the owner's hand test:**
+  - **A heading's words are kept without marks**, as on the notes page: it's already semi-bold, and Bold isn't shown as on in one.
+  - **A list item can't be a heading**, as on the notes page.
+  - **Pasted headings stay bold text**, as before, so pasting a web page or a Word document doesn't fill the capture with headings.
+  - **"# " typed at a line's start stays text.** Only the keys and the H menu make headings, so `#` items (release 5.8) are never taken for one.
+  - **The arrows' strip shows only while the text has a heading**, so the text moves right by 18 px when the first heading is made.
+  - **A formatted capture saved before this release** with a line of text starting "# " now reads that line as a heading.
 
 ## Release 5.27: pictures, files and tables on the notes page, and Notes in its frame (2026-10-27)
 
