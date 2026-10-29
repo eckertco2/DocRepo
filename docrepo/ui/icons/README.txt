@@ -7,3 +7,6 @@ Parked and Closed; state-cl's tick stays white), and person for the owner in pla
 The sidebar (release 5.22) gives each view an icon: sun (Today), unfiled, tasks (the task tree), due, reminders, waiting,
 person (Assigned to me), urgent, unplanned, agenda, timeline, capacity, people, labels, file (Documents), discarded and
 settings, with chevron-down and chevron-right on the groups' headings (docrepo/ui/nav_pane.py, ICONS).
+The Task view (release 5.34) marks each file's type: type-doc (Word and text), type-sheet (Excel and CSV), type-slides
+(PowerPoint), type-pdf, type-picture, type-drawing (Visio and CAD), type-mail (emails), type-link and type-other, each
+painted in its type's colour from the tokens (type_doc and so on); the type is also in the file's name and the preview.

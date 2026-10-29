@@ -726,7 +726,7 @@ def test_one_letter_per_topic(browse, monkeypatch):
     keys["E"].activated.emit()
     assert shown == ["Keys", "Edit task T000012"]
     labels = [b.text() for b in browse.actions.findChildren(QPushButton)]
-    assert labels == ["Note", "Update", "Add to", "Edit", ""]  # More is an icon at the row's end (release 5.21)
+    assert labels == ["Note", "Update", "Add to", "Edit", "Task view", ""]  # More is an icon at the row's end (release 5.21); Task view, 5.34
 
 
 def test_the_task_page_bar_and_its_links(browse, monkeypatch):

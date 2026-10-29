@@ -29,7 +29,8 @@ from docrepo.model import Model
 from docrepo.pages import write_pages
 from docrepo.report import build_report
 from docrepo.safe_fs import SafeFS, WriteRefused
-from docrepo.sample import SAMPLE_AS_OF, SampleError, load_sample, write_sample_files
+from docrepo.sample import SAMPLE_AS_OF, SampleError, load_sample, read_sample, write_sample_files
+from docrepo.sample_large import add_large_project, add_pins_and_uses
 
 log = logging.getLogger(__name__)
 
@@ -66,6 +67,7 @@ def build_parser() -> argparse.ArgumentParser:
     as_of_help = "work as if it were this date (and time), YYYY-MM-DD or \"YYYY-MM-DD HH:MM\", for testing"
     sample = commands.add_parser("load-sample", help="fill a new, empty data root with the made-up sample data, for trying DocRepo")
     sample.add_argument("--as-of", type=as_of, metavar="WHEN", help=f"{as_of_help} (default: the sample's own date, 2026-10-08 07:58)")
+    sample.add_argument("--large", action="store_true", help="add a large made-up project, Line 2 debottleneck, for trying the Task view at scale")
     rebuild = commands.add_parser("rebuild", help="rebuild the capacity calendar, every generated page and the search index")
     rebuild.add_argument("--as-of", type=as_of, metavar="WHEN", help=as_of_help)
     report = commands.add_parser("report", help="print capacity, days until due, lists, labels, raw text logs and agendas")
@@ -196,11 +198,14 @@ def cmd_load_sample(args: argparse.Namespace) -> int:
     root, settings, fs, conn = opened
     with closing(conn):
         when = args.as_of or SAMPLE_AS_OF
-        load_sample(conn)
+        data = add_large_project(read_sample()) if args.large else None
+        load_sample(conn, data)
+        if args.large:
+            add_pins_and_uses(conn)
         if settings.me is None:
             settings.me = "P001"
             settings.save(fs, root)
-        files = write_sample_files(conn, root, fs)
+        files = write_sample_files(conn, root, fs, data)
         rows, pages = _rebuild(conn, root, settings, fs, when)
     log.info("load-sample: sample data loaded as of %s, %d files, %d calendar rows, %d pages", when, files, rows, pages)
     print(f"Loaded the sample data into {root}, as of {when:%Y-%m-%d %H:%M}.")

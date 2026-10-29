@@ -51,7 +51,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo import activity, bulk, capacity, db, edits, items, key_dates, notes_page, people, priorities, prompts, search
+from docrepo import activity, bulk, capacity, db, edits, items, key_dates, notes_page, people, pins, priorities, prompts, search
 from docrepo.lists import key_dates_due
 from docrepo.agenda import AgendaError
 from docrepo.captures import capture_folder, capture_md_path
@@ -222,12 +222,14 @@ class BrowseWindow(QWidget):
         self._model: Model | None = None
         self._contents: dict[str, tuple[int, str]] = {}
         self._placed = False
+        #: The open Task views (releases 5.34 and 5.35): one window per task.
+        self.task_views: dict = {}
         self._build()
         # One letter per topic (mods log round 2, M0036): N note, T new task, U update, A agenda, E edit, D Today, and
         # M meeting notes (release 5.8).
         for keys, handler in (("N", lambda: self._key("note")), ("T", lambda: self._key("new_task")), ("U", lambda: self._key("update")),
                               ("A", lambda: self._key("agenda")), ("E", lambda: self._key("edit")), ("D", lambda: self._key("today")),
-                              ("M", lambda: self._key("meeting")),
+                              ("M", lambda: self._key("meeting")), ("O", lambda: self._key("task_view")),
                               ("Ctrl+F", self.open_find), ("Ctrl+Shift+F", self.search_box.setFocus), ("F1", self.show_keys), ("F5", self.refresh),
                               ("Ctrl+B", lambda: self.show_views_pane(not self.views_button.isChecked())), ("Ctrl+K", self.open_palette)):
             QShortcut(QKeySequence(keys), self, handler)
@@ -601,6 +603,8 @@ class BrowseWindow(QWidget):
             self.sel = None
         if render:
             self.render_all()
+        for view in list(self.task_views.values()):  # the open Task views read the data again too
+            view.reload()
 
     def _exists(self, key: tuple[str, str]) -> bool:
         kind, item = key
@@ -668,7 +672,8 @@ class BrowseWindow(QWidget):
                     Command("Task", "Edit task", lambda: self.edit_task(tid), "E")]
             if task.meeting:
                 out.append(Command("Task", "Meeting notes", lambda: self.open_capture(task=tid, meeting=True), "M"))
-            out += [Command("Task", "Copy prompt", lambda: self.copy_prompt(tid)),
+            out += [Command("Task", "Open its Task view", lambda: self.open_task_view(tid), "O"),
+                    Command("Task", "Copy prompt", lambda: self.copy_prompt(tid)),
                     Command("Task", "Open folder", lambda: self.reveal(self.ctx.data_root / "Tasks" / tid))]
         out += [Command("View", v.label, lambda v=v.id: self.set_view(v)) for v in VIEWS]
         out += [Command("", "New capture", lambda: self.open_capture(), self.ctx.settings.hotkey),
@@ -1999,6 +2004,8 @@ class BrowseWindow(QWidget):
         edit.addSeparator()
         edit.addAction("Discard…", lambda: self.discard_task(task_id))
         self._action("Edit", tip="Edit any of its fields, move it in the tree, or discard it if it was made by mistake", menu=edit, icon_name="edit")
+        self._action("Task view", lambda: self.open_task_view(task_id), "Its Task view: a window of its own for finding its files, emails and notes",
+                     icon_name="open", key="O")
         # More: New subtask, the agenda, Copy (release 5.9: its people's email addresses, M0031, and each reference field,
         # M0034), Copy prompt for each summary type, and the folder.
         more = QMenu(self)
@@ -2105,6 +2112,8 @@ class BrowseWindow(QWidget):
             self.reveal_key(tuple(rest.split(":", 1)))
         elif kind == "copylink":
             self.copy_link(rest)
+        elif kind == "taskview":  # the Files tab's Open in Task view (decision 166)
+            self.open_task_view(rest)
         elif kind in ("tab", "scope", "order"):
             setattr(st, kind, rest)
             self.render_detail(keep_scroll=kind != "tab")
@@ -2440,6 +2449,7 @@ class BrowseWindow(QWidget):
             source = edits.source_of(root, m, item)
             if source:
                 self.reveal(source)
+                self._used(item, "show")
         elif kind == "copy":
             f = next((x for x in m.copies if str(x.id) == item), None)
             if f:
@@ -2647,6 +2657,8 @@ class BrowseWindow(QWidget):
             return
         if mode == "edit":
             self.edit_task(self.sel[1])
+        elif mode == "task_view":  # O: its Task view (decision 164)
+            self.open_task_view(self.sel[1])
         elif mode == "today":
             self.add_to_today(self.sel[1])
         elif mode == "agenda":
@@ -2873,7 +2885,47 @@ class BrowseWindow(QWidget):
         if d is None or not is_link(d.original):
             return
         QGuiApplication.clipboard().setText(d.original.strip())
+        self._used(document_id, "copy_link")
         self.say(f"Copied the link to {d.name}. Paste it into your browser to open it.")
+
+    def _used(self, document_id: str, action: str) -> None:
+        """Note a file shown or a link copied from the task page (the Task view's uses, decision 159)."""
+        task = self.sel[1] if self.sel and self.sel[0] == "task" else None
+        try:
+            pins.record_use(self.conn, document_id, task, action, self.ctx.now())
+        except Exception as e:  # noqa: BLE001 - a use that isn't kept never stops the action
+            log.warning("a use of %s wasn't kept: %s", document_id, type(e).__name__)
+
+    # ================= the Task view (releases 5.34 and 5.35) =================
+    def open_task_view(self, task_id: str | None = None) -> None:
+        """A task's Task view: a window of its own (decision 156), one per task, brought forward when it's open."""
+        task_id = task_id or (self.sel[1] if self.sel and self.sel[0] == "task" else None)
+        if not task_id or task_id not in self.model().tasks:
+            self.say("Select a task first. O opens the Task view of the task that's selected.")
+            return
+        from docrepo.ui.task_view import TaskView
+
+        view = self.task_views.get(task_id)
+        if view is None:
+            view = self.task_views[task_id] = TaskView(self, task_id)
+        view.show()
+        view.raise_()
+        view.activateWindow()
+        view.focus_box()
+
+    def task_view_closed(self, task_id: str) -> None:
+        view = self.task_views.pop(task_id, None)
+        if view is not None:
+            view.deleteLater()
+
+    def task_view_pins_changed(self, task_id: str) -> None:
+        """A pin changed: Task.md's Key documents line is written again."""
+        from docrepo.pages import write_task_page
+
+        try:
+            write_task_page(Model(self.conn), self.ctx.data_root, self.ctx.fs, task_id, self.today(), self.ctx.now())
+        except OSError as e:
+            log.warning("Task.md of %s wasn't written after a pin: %s", task_id, type(e).__name__)
 
     def copy_prompt(self, task_id: str) -> None:
         if not self._summary_types:

@@ -80,6 +80,10 @@ h2 { font-size: 15pt; font-weight: 600; margin-top: 2px; margin-bottom: 4px; }
 .rule { background-color: #d6dce3; }
 .tl { color: #1a1f25; }
 .tq { color: #5a6571; }
+.mark { background-color: #fff4ce; font-weight: 600; }
+.line { margin: 0; }
+.hitline { margin: 0; background-color: #fff4ce; }
+.gap { margin: 0; color: #5a6571; }
 """
 
 STATE_CLASS = {"Not started": "st-ns", "In progress": "st-ip", "Parked": "st-pk", "Closed": "st-cl"}
@@ -536,7 +540,9 @@ class Pages:
                     if f.kind == "Link" else link(self.show_key(f), f.name, "Show it in File Explorer"))
             rows.append(f'<tr><td>{name} <span class="sub">{esc(f.kind)}</span>'
                         f'{self.from_chip(f.task, t.id)}{"<br><span class=sub>" + esc(d.description) + "</span>" if d and d.description else ""}</td></tr>')
-        return f'<table cellspacing="0" cellpadding="4">{"".join(rows)}</table>' if rows else '<p class="note">No files yet.</p>'
+        # Decision 166: the Task view is where a task's files are searched, previewed and opened.
+        more = f'<p>{link(f"taskview:{t.id}", "Open in Task view")} <span class="sub">to search, preview and open its files (O)</span></p>'
+        return more + (f'<table cellspacing="0" cellpadding="4">{"".join(rows)}</table>' if rows else '<p class="note">No files yet.</p>')
 
     def show_key(self, f) -> str:
         if f.kind in ("Saved copy", "Old version"):

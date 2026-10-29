@@ -180,7 +180,10 @@ class Pages:
             else:
                 raw.append(f"- {minutes(e.at)} · {self._ref_link(here, e.version.document)} · Document version · {self.m.documents[e.version.document].name} changed")
         out += ["## Captures", "", *(raw or ["_None._"]), ""]
-        out += ["## Files", "", *([self._file_line(here, f) for f in self.m.files_of(t.id)] or ["_None._"]), ""]
+        # The Task view's pinned files (release 5.35, decision 160): its key documents, first under Files.
+        pinned = [self.m.documents[d].name for d in self.m.pins.get(t.id, []) if d in self.m.documents]
+        key_docs = [f"Key documents: {', '.join(pinned)}", ""] if pinned else []
+        out += ["## Files", "", *key_docs, *([self._file_line(here, f) for f in self.m.files_of(t.id)] or ["_None._"]), ""]
         return "\n".join(out)
 
     def _target(self, here: list[str], target: str) -> str:

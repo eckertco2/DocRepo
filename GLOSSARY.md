@@ -85,6 +85,7 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **The drag's own copy**: the full copy of an email (its `.msg`) that Outlook puts on a drag, which DocRepo's own drop target takes and saves as it is, read without Outlook (release 5.33). An attachment dragged from an email, or a file in a zip folder, comes the same way, as a file with no path on disk.
 - **Outlook category**: the task's name DocRepo adds to an Outlook email it files on that task, with Mark filed emails in Outlook on in Settings (release 5.33), so Outlook's own search finds it. It isn't a label.
 - **Link**: a web or SharePoint address kept as a document, with a file description, in place of a file. Its original is the address. DocRepo never opens or fetches it, so it has no extracted text; Copy link puts it on the clipboard.
+- **Pinned file**: a file pinned on a task in its Task view (release 5.35): one of the task's key documents, first on its Overview and listed in its Task.md. Pins are per task.
 - **Document version**: DocRepo's record that a tracked original has changed, with the difference. It isn't a capture; it becomes part of the raw text log of the tasks linked to that document.
 
 ## 5. Summaries and processing
@@ -113,6 +114,7 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Look**: how DocRepo's windows are drawn: the new look (from release 5.10), or the **Classic look**, release 5.9's colours, fonts and hints on the same layouts. Chosen in Settings.
 - **Show hints**: the setting that shows the help text, the **i** buttons and the key badges in every window. Off by default.
 - **Key tips**: the labels that show each control's key while Alt (letter keys) or Ctrl (Ctrl shortcuts) is held.
+- **Task view**: a window of its own for one task (releases 5.34 and 5.35), opened with O: its status at a glance, an outline of its subtasks, and a search that finds its files, emails, notes and updates as you type, with a preview, built for finding and opening its documents.
 - **Command palette**: the box Ctrl+K opens, listing every action and view, narrowed as you type.
 - **Pinned window**: the capture window shrunk to a small window at the bottom right (Pin, F12), for dropping files, emails and links on. It's the same capture.
 

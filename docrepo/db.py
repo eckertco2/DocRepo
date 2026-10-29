@@ -15,7 +15,7 @@ from pathlib import Path
 from docrepo.safe_fs import SafeFS
 
 DB_FILE = Path("System") / "docs.db"
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 #: Each kind of ID: its letter and how many digits follow it.
 ID_FORMATS = {"T": 6, "C": 6, "D": 6, "P": 3}
@@ -335,6 +335,26 @@ CREATE TABLE task_dates (
     CHECK (start_day IS NOT NULL OR end_day IS NOT NULL)
 );
 CREATE INDEX task_dates_task ON task_dates (task, pos);
+""",
+    13: """
+-- The Task view (release 5.35, the task overview design's decisions 159 and 160): what the owner did with a file from
+-- DocRepo (opened it, showed it in File Explorer, copied its path or link), for Recent, Last opened and the search's
+-- tie-breaks. And each task's pinned files, its key documents, in the owner's order. (No semicolons in comments: the
+-- script is run a statement at a time.)
+CREATE TABLE document_uses (
+    id       INTEGER PRIMARY KEY,
+    document TEXT NOT NULL REFERENCES documents(id),
+    task     TEXT REFERENCES tasks(id),
+    at       TEXT NOT NULL,
+    action   TEXT NOT NULL CHECK (action IN ('open', 'show', 'copy_path', 'copy_link'))
+);
+CREATE INDEX document_uses_document ON document_uses (document, at);
+CREATE TABLE task_pins (
+    task     TEXT NOT NULL REFERENCES tasks(id),
+    document TEXT NOT NULL REFERENCES documents(id),
+    pos      INTEGER NOT NULL,
+    PRIMARY KEY (task, document)
+);
 """,
 }
 

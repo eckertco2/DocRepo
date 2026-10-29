@@ -337,6 +337,10 @@ class Model:
         #: Each task's notes page (release 5.25; ``docrepo.notes_page``), and the days the owner edited it, with the time
         #: of the day's last edit.
         self.pages: dict[str, str] = {r["task"]: r["body"] for r in q("SELECT task, body FROM task_pages")}
+        #: Each task's pinned files, its key documents, in order (the Task view, release 5.35).
+        self.pins: dict[str, list[str]] = {}
+        for r in q("SELECT task, document FROM task_pins ORDER BY task, pos"):
+            self.pins.setdefault(r["task"], []).append(r["document"])
         self.page_edits: list[tuple[str, str, str]] = [(r["task"], r["day"], r["at"]) for r in q(
             "SELECT task, day, at FROM task_page_versions WHERE by_owner = 1 ORDER BY day, task")]
 

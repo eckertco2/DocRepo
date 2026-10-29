@@ -21,6 +21,7 @@ KEY_MAP = (
     ("B", "Browse tool", "Ctrl+Shift+B shows it", "", ""),
     ("P", "Parse, Plan", "", "On the timeline: Plan mode, to drag dates (Ctrl+Z undoes a drop)", "Alt+P runs Parse and populate"),
     ("M", "Meeting notes", "", "Meeting notes for the selected task: its meeting, or a new one under it", "Alt+M turns meeting notes on or off"),
+    ("O", "Open (Task view)", "", "The selected task's Task view: a window of its own for finding and opening its files", ""),
 )
 OTHER_KEYS = (
     ("Ctrl+Shift+Space", "Opens the capture window (the main hotkey)"),
@@ -37,6 +38,23 @@ OTHER_KEYS = (
     ("Alt+Up, Alt+Down", "On the Priorities board: moves the selected card up or down in its bucket. The arrow keys move between cards; "
                          "Enter opens the task"),
     ("F1", "This list"),
+)
+#: The Task view's keys (releases 5.34 and 5.35). The letters above act on its task there too, with Alt from its box.
+TASK_VIEW_KEYS = (
+    ("Typing", "Searches the task's files, emails, notes and updates, and subtasks; the best match is chosen"),
+    ("Up, Down, Page Up, Page Down", "Choose a row (the cursor stays in the box); Ctrl+Up and Ctrl+Down go by group"),
+    ("Enter", "Opens the chosen file in its own program (an attachment is shown in File Explorer; a link is copied)"),
+    ("Ctrl+Enter", "Shows it in File Explorer"),
+    ("Ctrl+Shift+C", "Copies its path (Ctrl+C in the list)"),
+    ("P, Alt+P", "Pins or unpins it; Alt+Shift+Up and Alt+Shift+Down move a pinned file"),
+    ("Space, Ctrl+Space", "Shows or hides the preview (Space in the list)"),
+    ("Ctrl+1 to Ctrl+5", "All, Files, Emails, Notes and updates, Subtasks"),
+    ("Ctrl+F, /", "Back to the search box"),
+    ("Ctrl+O", "Another task's Task view"),
+    ("Alt+Up", "The parent task's Task view"),
+    ("F6", "The next pane: the outline, the box, the list, the preview"),
+    ("Esc", "Clears what's typed; again, the filters; it never closes the window"),
+    ("Ctrl+W", "Closes the Task view"),
 )
 #: The content text's keys, as OneNote's (mods log round 3, M0055).
 EDITOR_KEYS = (
@@ -61,13 +79,15 @@ def key_map_html(main_hotkey: str = "Ctrl+Shift+Space") -> str:
     rows = "".join(f"<tr><td><b>{k}</b></td>{cell(topic)}{cell(g)}{cell(b)}{cell(c)}</tr>" for k, topic, g, b, c in KEY_MAP)
     other = "".join(f"<tr><td><b>{esc(main_hotkey if k == 'Ctrl+Shift+Space' else k)}</b></td><td>{esc(w)}</td></tr>" for k, w in OTHER_KEYS)
     editor = "".join(f"<tr><td><b>{esc(k)}</b></td><td>{esc(w)}</td></tr>" for k, w in EDITOR_KEYS)
+    task_view = "".join(f"<tr><td><b>{esc(k)}</b></td><td>{esc(w)}</td></tr>" for k, w in TASK_VIEW_KEYS)
     return ("<p class='note'>One letter per topic. In the browse tool the letter alone acts on the selected task (not while you type in "
             "a box); in the capture window it's Alt and the letter; anywhere in Windows it's Ctrl+Shift and the letter, once you set "
             "it in Settings. While DocRepo runs, a global hotkey is taken from other programs, such as Outlook's Ctrl+Shift+N for a new note.</p>"
             "<table cellspacing='0' cellpadding='4' width='100%'><tr><th align='left'>Key</th><th align='left'>Topic</th>"
             "<th align='left'>Global hotkey</th><th align='left'>Browse tool</th><th align='left'>Capture window</th></tr>"
             f"{rows}</table><p></p><table cellspacing='0' cellpadding='4'>{other}</table>"
-            f"<p><b>In the content text</b>, as in OneNote</p><table cellspacing='0' cellpadding='4'>{editor}</table>")
+            f"<p><b>In the content text</b>, as in OneNote</p><table cellspacing='0' cellpadding='4'>{editor}</table>"
+            f"<p><b>In the Task view</b> (O)</p><table cellspacing='0' cellpadding='4'>{task_view}</table>")
 
 
 class KeyMapDialog(QDialog):
