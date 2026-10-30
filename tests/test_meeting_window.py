@@ -61,7 +61,7 @@ def type_text(window, text: str) -> None:
 
 def test_items_are_read_as_you_type(window):
     window.set_task("T000008")
-    window.content.setPlainText("Walkdown done.\n- @Tom check the guards\n- **Decision. Rails go red.")
+    window.content.setPlainText("Walkdown done.\n- @Tom check the guards\n- **decision, rails go red.")
     window.draft_dirty = False
     window.read_items()
     assert not window.draft_dirty and not window._items_timer.isActive()  # the colours aren't a change to the text

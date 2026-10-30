@@ -133,23 +133,152 @@ Agenda items are links from a task, or a note with no task, to a meeting, anothe
 - Longest path in the sample data root: 122 characters.
 - `C:\Users\<user>\DocRepoData\Tasks\T000008\Files\_old versions\2026-09-22 Installation procedure (replaced 2026-10-05).docx`
 
-## Key dates from text (release 5.31)
+## Quick input (release 5.38)
 
-A `**date` line in a capture, read by `keyDate` in `docs/browse-tool/mockup/items.js` with today = 2026-10-08: its date phrase as Parse and populate reads dates ("from" a start, "by" or "due" an end, a range a window, "on" or a bare date one day), "plant activity" (or "plant event") and "deadline" as its ticks, and the rest its description.
+The `**` names in a capture, read by `read` and `itemText` in `docs/browse-tool/mockup/items.js` with today = 2026-10-08, and with two made-up reference fields in Settings, "Work order #" and "Permit no.". Each item reads as its name, what it says, and where it goes in brackets: home is the capture's task, item N a task item in the same text, and a task's ID that task. A value's problem makes a card that can't be ticked.
+
+### With a task picked
 
 | Line | Reads |
 |---|---|
-| **date Dec 1 to 5 Trial execution window, plant activity | Start 2026-12-01. End 2026-12-05. Description "Trial execution window". Plant activity. |
-| **date by Nov 25 Target for trial preparations, deadline | End 2026-11-25. Description "Target for trial preparations". Deadline. |
-| **date from Oct 12 Trial planning period | Start 2026-10-12. Description "Trial planning period". |
-| **date on Nov 2 Pump test | Start 2026-11-02. End 2026-11-02. Description "Pump test". |
-| **date Pump test Nov 2 | Start 2026-11-02. End 2026-11-02. Description "Pump test". |
-| **date Trial run Dec 1 - Dec 5 | Start 2026-12-01. End 2026-12-05. Description "Trial run". |
-| **date due Nov 25 Preparations done, hard deadline | End 2026-11-25. Description "Preparations done". Deadline. |
-| **date. Kickoff 2026-11-02, major plant activity | Start 2026-11-02. End 2026-11-02. Description "Kickoff". Plant activity. |
-| **date: Commissioning window 9 to 20 Nov | Start 2026-11-09. End 2026-11-20. Description "Commissioning window". |
-| **date by Friday Send the drawings | End 2026-10-09. Description "Send the drawings". |
-| **date Trial planning period | Description "Trial planning period". No date: add one, such as by 25 Nov. |
+| **key date, trial window from November 1st to November 5th, 2027. | Key date: Start 2027-11-01. End 2027-11-05. Description "Trial window". [home] |
+| **key date, trial window from 1 Nov to 5 Nov 2027, plant activity. | Key date: Start 2027-11-01. End 2027-11-05. Description "Trial window". Plant activity. [home] |
+| **Key Date, trial window from Nov. 1 to Nov. 5, 2027. | Key date: Start 2027-11-01. End 2027-11-05. Description "Trial window". [home] |
+| **key date, trial execution 1 Nov. to 5 Nov. | Key date: Start 2026-11-01. End 2026-11-05. Description "Trial execution". [home] |
+| **key date, changeover 28 Dec to 3 Jan 2028. | Key date: Start 2027-12-28. End 2028-01-03. Description "Changeover". [home] |
+| **keydate, Dec 1 to 5 trial execution window, plant activity. | Key date: Start 2026-12-01. End 2026-12-05. Description "Trial execution window". Plant activity. [home] |
+| **key date, by Nov 25 target for trial preparations, deadline. | Key date: End 2026-11-25. Description "Target for trial preparations". Deadline. [home] |
+| **key date, from Oct 12 trial planning period. | Key date: Start 2026-10-12. Description "Trial planning period". [home] |
+| **key date, on Nov 2 pump test | Key date: Start 2026-11-02. End 2026-11-02. Description "Pump test". [home] |
+| **key date, pump test Nov 2. | Key date: Start 2026-11-02. End 2026-11-02. Description "Pump test". [home] |
+| **key date, trial run Dec 1 - Dec 5. | Key date: Start 2026-12-01. End 2026-12-05. Description "Trial run". [home] |
+| **key date, due Nov 25 preparations done, hard deadline. | Key date: End 2026-11-25. Description "Preparations done". Deadline. [home] |
+| **key date, kickoff 2026-11-02, major plant activity. | Key date: Start 2026-11-02. End 2026-11-02. Description "Kickoff". Plant activity. [home] |
+| **key date, commissioning window 9 to 20 Nov. | Key date: Start 2026-11-09. End 2026-11-20. Description "Commissioning window". [home] |
+| **key date, by Friday send the drawings. | Key date: End 2026-10-09. Description "Send the drawings". [home] |
+| **key date, trial planning period. | Key date: Description "Trial planning period". No date: add one, such as by 25 Nov. [home] |
+| **key date, | Key date: Nothing after the comma. [home] |
+| **due, 5 Nov. | Due: 2026-11-05. [home] |
+| **Due, Nov. 5, 2027. | Due: 2027-11-05. [home] |
+| **due date, next Friday. | Due: 2026-10-16. [home] |
+| **start, 1 Nov. | Start: 2026-11-01. [home] |
+| **start, 1 to 5 Nov. | Start: 2026-11-01. [home] |
+| **deadline, 19 Nov, the external audit. | Deadline: 2026-11-19: The external audit. [home] |
+| **deadline description, the external audit. | Deadline description: The external audit. [home] |
+| **reminder, tomorrow. | Reminder: 2026-10-09. [home] |
+| **remind, Oct 20. | Reminder: 2026-10-20. [home] |
+| **repeat until, end of next year. | Repeat until: 2027-12-31. [home] |
+| **due, sometime soon. | Due: No date: add one, such as 25 Nov. [home] |
+| **start, 1 Nov. **due, 5 Nov. | Start: 2026-11-01. [home] / Due: 2026-11-05. [home] |
+| **start, 1 Nov **due, 5 Nov. | Start: 2026-11-01. [home] / Due: 2026-11-05. [home] |
+| Trial run is next month. **due, 5 Nov. Walkdown first. | Due: 2026-11-05. [home] |
+| **due, 5 Nov. then test. | Due: 2026-11-05. [home] |
+| **due, 5 Nov | Due: 2026-11-05. [home] |
+| **lead, Tom. | Lead: Tom Becker. [home] |
+| **lead, @Priya Shah. | Lead: Priya Shah. [home] |
+| **assignee, Tom, Mike and Priya. | Assignees: Tom Becker, Mike Ortiz, Priya Shah. [home] |
+| **assignees, @Tom and Sam Lee. | Assignees: Tom Becker, Sam Lee (new). [home] |
+| **lead, me. | Lead: Me. [home] |
+| **assignee, whoever is free next week. | Assignees: Can't read a name in: whoever is free next week. [home] |
+| **lead hours, 4. | Lead hours: 4. [home] |
+| **assignee hours, 12 hours. | Assignee hours: 12. [home] |
+| **hours, 2.5. | Assignee hours: 2.5. [home] |
+| **hours, 2 days. | Assignee hours: No hours: add a number, such as 12. [home] |
+| **hours, 2 hours a week. | Assignee hours: Give a total, such as 12 hours. [home] |
+| **hours, plenty. | Assignee hours: No hours: add a number, such as 12. [home] |
+| **title, Line 2 rework. | Title: Line 2 rework. [home] |
+| **description, rebuild the gearbox. | Description: Rebuild the gearbox. [home] |
+| **status, waiting on the vendor. Will chase on Friday. | Current status: Waiting on the vendor. [home] |
+| **current status, waiting on @Tom. | Current status: Waiting on Tom. [home] |
+| **state, parked. | State: Parked. [home] |
+| **state, sideways. | State: Say Not started, In progress, Parked or Closed. [home] |
+| **priority, high. | Priority: High. [home] |
+| **priority, Parking lot. | Priority: Parking lot. [home] |
+| **priority, soon. | Priority: Say Critical, High, Medium or Parking lot. [home] |
+| **recurrence, weekly. | Recurrence: Weekly. [home] |
+| **repeat, every Monday. | Recurrence: Weekly. [home] |
+| **recurrence, now and then. | Recurrence: Say Daily, Weekly, Bi-weekly, Monthly, Quarterly or Yearly. [home] |
+| **urgent, yes. | Urgent: Yes. [home] |
+| **plant event, no. | Plant event: No. [home] |
+| **meeting, maybe. | Meeting: Say yes or no. [home] |
+| **label, Safety. | Labels: Safety. [home] |
+| **labels, safety and Line 9. | Labels: Safety, Line 9 (new). [home] |
+| **parent, Rigging plan. | Parents: Rigging plan. [home] |
+| **parent, #T000012. | Parents: Rigging plan. [home] |
+| **parents, Rigging plan, Installation. | Parents: Rigging plan, Installation. [home] |
+| **parent, Nothing like it. | Parents: No task called Nothing like it. [home] |
+| **work order, 48213. | Work order #: 48213. [home] |
+| **Work order #, #48213. | Work order #: 48213. [home] |
+| **permit no., no. 7781. | Permit no.: 7781. [home] |
+| **permit, A-12.5. | Permit no.: A-12.5. [home] |
+| **decision, we go with option B. It's cheaper over five years. | Decision "We go with option B. It's cheaper over five years." [home] |
+| - **decision, we go with option B.\n  - It's cheaper\n  - It's quicker | Decision "We go with option B.\n- It's cheaper\n- It's quicker" [home] |
+| **decision, we go with option B.\n- It's cheaper | Decision "We go with option B." [home] |
+| **closed, #Rigging plan sling drawing approved. Will recheck Friday. | Update Closed "Sling drawing approved. Will recheck Friday." [T000012] |
+| **done, #Rigging plan. | Update Closed "" [T000012] |
+| **closed #Rigging plan | Update Closed "" [T000012] |
+| #Rigging plan **closed. | Update Closed "" [T000012] |
+| **in progress, #Rigging plan vendor has it. | Update In progress "Vendor has it." [T000012] |
+| **u, #Rigging plan waiting on the vendor. | Update "Waiting on the vendor." [T000012] |
+| **update, #Rigging plan waiting on the vendor. | Update "Waiting on the vendor." [T000012] |
+| **n, the old coupling goes back to stores. | Note "The old coupling goes back to stores." [home] |
+| **note, the old coupling goes back to stores. | Note "The old coupling goes back to stores." [home] |
+| **t, call the vendor by Friday. | Task "Call the vendor" due 2026-10-09 [home] |
+| **task, call the vendor by Friday. | Task "Call the vendor" due 2026-10-09 [home] |
+| **event, Spring outage, 3 to 14 Nov. | Plant event "Spring outage" start 2026-11-03 due 2026-11-14 [home] |
+| @Tom check the pump. **due, 5 Nov. | Task "Check the pump" for Tom Becker [home] / Due: 2026-11-05. [item 0] |
+| - @Tom check the pump\n  - **due, 5 Nov. | Task "Check the pump" for Tom Becker [home] / Due: 2026-11-05. [item 0] |
+| @Tom check the pump\n- **due, 5 Nov. | Task "Check the pump" for Tom Becker [home] / Due: 2026-11-05. [home] |
+| #Rigging plan **due, 5 Nov. | Due: 2026-11-05. Due is already 2026-10-14: change it with Update or Edit task. [T000012] |
+| **key date, by Nov 25 prep done, deadline, #Rigging plan. | Key date: End 2026-11-25. Description "Prep done". Deadline. [T000012] |
+| #Rigging plan\n**due, 5 Nov.\nNotes on it. | Due: 2026-11-05. Due is already 2026-10-14: change it with Update or Edit task. [T000012] / Note "Notes on it." [T000012] |
+| **vendor, Norvane. | **vendor: No field called vendor. [home] |
+| **dealine, 5 Nov. | **dealine: No field called dealine. [home] |
+| **date, Dec 1 to 5 trial window. | **date: Say which date: **start, **due, **deadline or **key date. [home] |
+| **date Dec 1 to 5 trial window | **date: Say which date: **start, **due, **deadline or **key date. [home] |
+| **date. Kickoff 2026-11-02 | **date: Say which date: **start, **due, **deadline or **key date. [home] |
+| **Closed. Mike confirmed. | **closed: Now written **closed, then your sentence. [home] |
+| **Decision. We go with option B. | **decision: Now written **decision, then your sentence. [home] |
+| **t call the vendor | **t: Now written **t, then your sentence. [home] |
+| **n A note on nothing | **n: Now written **n, then your sentence. [home] |
+| **u Waiting on the vendor | **u: Now written **u, then your sentence. [home] |
+| **event. Spring outage, 3 to 14 Nov | **event: Now written **event, then your sentence. [home] |
+| **due 5 Nov. | **due: Now written **due, then your sentence. [home] |
+| **urgent | **urgent: Now written **urgent, then your sentence. [home] |
+| ** due, 5 Nov. | Stays in the notes. |
+| **this is a long sentence of many words, and more. | Stays in the notes. |
+| **events are fun | Stays in the notes. |
+
+### On an existing task
+
+| Task | Line | Reads |
+|---|---|---|
+| T000012 | **due, 5 Nov. | Due: 2026-11-05. Due is already 2026-10-14: change it with Update or Edit task. [home] |
+| T000012 | **start, 5 Nov. | Start: 2026-11-05. Start is already 2026-10-05: change it with Update or Edit task. [home] |
+| T000012 | **reminder, 5 Nov. | Reminder: 2026-11-05. [home] |
+| T000012 | **deadline, 5 Nov. | Deadline: 2026-11-05. [home] |
+| T000012 | **assignee hours, 9. | Assignee hours: 9. Assignee hours is already 6: change it with Update or Edit task. [home] |
+| T000012 | **lead hours, 9. | Lead hours: 9. [home] |
+| T000012 | **state, parked. | State: Parked. State is already In progress: change it with Update or Edit task. [home] |
+| T000012 | **urgent, yes. | Urgent: Yes. [home] |
+| T000012 | **title, Another name. | Title: Another name. Title is already Rigging plan: change it with Update or Edit task. [home] |
+| T000012 | **key date, by Nov 25 prep done. | Key date: End 2026-11-25. Description "Prep done". [home] |
+| T000012 | **assignee, Tom. | Assignees: Tom Becker. [home] |
+| T000012 | **work order, 48213. | Work order #: 48213. [home] |
+| T000012 | **closed, sling drawing approved. | Update Closed "Sling drawing approved." [home] |
+| T000012 | #Installation #Rigging plan **due, 5 Nov. | Due: 2026-11-05. Due is already 2026-10-30: change it with Update or Edit task. [T000008, T000012] |
+| T000012 | @Tom check the pump. **due, 5 Nov. | Task "Check the pump" for Tom Becker [home] / Due: 2026-11-05. [item 0] |
+
+### With New task ticked
+
+| Line | Reads |
+|---|---|
+| Line 2 trial\n**due, 5 Nov.\n**lead, Tom. | Due: 2026-11-05. [home] / Lead: Tom Becker. [home] |
+| **due, 5 Nov.\nLine 2 trial\n@Tom prep it | Due: 2026-11-05. [home] / Task "Prep it" for Tom Becker [home] |
+| Line 2 trial **due, 5 Nov. | Its own line "Line 2 trial" / Due: 2026-11-05. [home] |
+| Line 2 trial #Rigging plan **due, 5 Nov. | Its own line "Line 2 trial" / Due: 2026-11-05. [home] |
+| **event, Spring outage, 3 to 14 Nov.\nScope agreed. | Its own line "Spring outage, 3 to 14 Nov." Plant event |
+| Line 2 trial\n- **due, 5 Nov. | Due: 2026-11-05. [home] |
 
 ## Parse and populate
 

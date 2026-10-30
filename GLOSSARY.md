@@ -16,6 +16,7 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Content text**: the text typed or pasted into the capture window's main box, kept with the capture once it's saved.
 - **Formatted content text**: content text with bold, italic, underline, strikethrough, highlights or lists (release 5.7). Its capture.md keeps it as Markdown; everything that reads its words reads it without the marks.
 - **Operator**: `@`, `@L.`, `@__`, `#` or `**` in the content text, saying what a line makes (release 5.8): a person, a lead, no one yet, a task it belongs to, or its kind.
+- **Parameter**: a field of a task that a `**name,` line fills from one sentence in the content text (release 5.38): `**due, 5 Nov.`
 - **Item**: a line of the content text (with the list items under it) that an operator makes into a task, a note, an update or a decision. Saving keeps each as a small capture of its own, linked to the capture it came from (its notes).
 - **Heading**: a line that's only `#` tasks. It covers the lines under it, until the next heading.
 - **Split**: what Save does with a note that names several `#` tasks and has no task picked (release 5.32): a capture per task, each with its part of the text and the files added while the cursor was in it, and an unfiled one for the rest. One `#` task fills the task picker instead.

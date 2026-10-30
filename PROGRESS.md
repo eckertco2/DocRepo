@@ -50,6 +50,7 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.33.1 | Add selected Outlook email copies the email whole, past Outlook's guard; a hotkey for it; and the category's colour on Outlook's list (decision 26 as the owner changed it) | Built 2026-10-28; on GitHub 2026-10-28. Next: testing on the corporate computer |
 | 5.34 | The Task view (the design workspace's task overview design, decisions 156 to 167; round 2's item 34, M0043, with M0025 and M0026): a window of its own for one task, built for finding its documents, with Overview, a search-as-you-type box with the best match chosen, the kinds, filters and typed filters, the outline of subtasks, the preview, and its keys | Built 2026-10-29, after the owner approved the mockup; hand-tested by the owner and on GitHub 2026-10-29. Next: testing on the corporate computer with `release-5-34-and-5-35-test.md` |
 | 5.35 | The Task view's Open (decision 158), its files' text as a second tier, pins and what was opened (decisions 159 and 160), schema version 13 | Built 2026-10-29, with 5.34; hand-tested by the owner and on GitHub 2026-10-29. Next: as 5.34 |
+| 5.38 | Quick input from round 5 (item 67): `**name,` then a sentence fills any field, in place of `**date`; `**decision,`, `**closed,` and the other kinds move to the same form | Built 2026-10-30, hand-tested by the owner and committed the same day on the `round5-quick-input` branch. Next: merging, then testing on the corporate computer with `release-5-38-test.md` |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
 ## Decisions
@@ -484,6 +485,30 @@ The visual overhaul's O10, designed and mocked in the parent workspace (`docs/ui
   - **No button group:** the pane marks the open view itself, so that no row is marked while searching, and a click on the open view keeps it marked.
   - **The totals that left the sidebar** are beside their views' titles ("14 open", "7 active"), as `sidebar.md` said they'd be.
   - **The tooltip** shows only when a name is cut short. The headings' tooltips say Fold or Unfold.
+
+## Release 5.38: quick input (2026-10-30)
+
+Round 5's item 67, thread B, with decisions 200 to 209 (the design workspace's `docs/mods/quick-input-plan.md`). No schema change. `**name,` then one sentence replaces `**date`, because a task now has several kinds of date. The owner also chose to move the kinds to the same form (decision 202).
+
+- **One table.** `items.OPERATORS` holds every `**` name: the kinds (task, note, update, decision, event and the state words) and the parameters (dates, people, hours, text, choices, ticks, lists). `TYPE_RE` is gone. Reference fields come from Settings through `Names.fields`, so no work term is in the code. A parameter that's a field `tasks.update_task` knows is one entry here, and its match in the mockup's `items.js`; `test_adding_a_parameter_is_one_entry` shows it. The mockup's table has the same names and is what the test vectors are made from.
+- **Reading.** `scan` gives a parameter a token with its sentence, up to its period by `text.sentences`, the line's end or the next `**` word. The `@` and `#` inside are marked `inside` and are the sentence's own, except that a parent's sentence is all value. `clean` drops a parameter with its sentence, so the rest of its line reads as usual. A line can have several, and each gets its own card beside what the rest of the line makes (`param_item` in `read`).
+- **Filling.** `save._fill_param`: a filled field on an existing task stays (`items.value_now`), a list adds, and a task made in this capture takes the line's value, even over the form. A value the task can't take, such as Repeat until with no recurrence, changes nothing. Save's message counts the lines not used (`SaveResult.unused`).
+- **A window's year** (decision 209): the owner's own example, `from November 1st to November 5th, 2027`, read as a year-long window, 2026-11-01 to 2027-11-05. `_window_start` gives the start its end's year when it has none of its own, and `1 Nov. to 5 Nov.` now reads as a window where it stopped at the first date.
+- **The cards** (`ui/items_panel.py`): a field's card is named for its field, and its value is read-only, as it's changed in its line. A key date's description stays editable. Its dates show the year when it isn't this year's. Dates in a card read as `Fri 30 Oct`.
+- **Old forms.** Nothing rereads a saved capture, so old `**date` and `**Closed.` lines stay as written. Typed now they make a red card with the new spelling. `**date` is one entry in the table (`gone`), which can come out once the habit has gone.
+- **Exports.** The test vectors' "Key dates from text" section is now "Quick input (release 5.38)", in three tables. `examples.md` and `stories.json` are unchanged.
+
+Tests: `tests/test_quick_input.py` (the vectors, reading, Save, and the cards in the window); the operators in the other tests moved to the new form.
+
+## Decisions (release 5.38)
+
+- Decisions 200 to 207 are the owner's answers on 2026-10-30, each as recommended except 202. 208 (where a value goes) and 209 (a window's year) were settled while designing it.
+- **Settled while building, for the owner's hand test:**
+  - A parameter's name without its comma (`**due 5 Nov.`) gets the same red card as an old form, as a slip that would otherwise add nothing silently.
+  - `**hours,` is Assignee hours, as the card says. `**hours, 2 hours a week.` asks for a total rather than working one out, since hours per day is thread A's.
+  - A plain line never holds the list items under it, as before: only a list item does. `- **decision, go with B.` with `  - It's cheaper` under it is one decision; `**decision, go with B.` with `- It's cheaper` isn't. The cards show which it is.
+  - A new person or a new label named in a line is added when it's saved, and its card says "(new)".
+- **Not done:** the mockup reads and shows the lines but doesn't save them, as it didn't for `**date`. Thread A's new parameters join the table after this merges.
 
 ## Releases 5.34 and 5.35: the Task view (2026-10-29)
 

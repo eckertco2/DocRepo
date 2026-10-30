@@ -20,7 +20,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
-from docrepo import agenda, captures, edits, items, layer0, markup, people, quick, search, tasks
+from docrepo import agenda, captures, edits, items, layer0, markup, people, priorities, quick, search, tasks
 from docrepo.config import Settings
 from docrepo.dates import long_date, short, stamp
 from docrepo.db import next_id, transaction
@@ -235,6 +235,8 @@ class SaveResult:
     parts: list[SaveResult] = field(default_factory=list)
     #: Each email saved with a task, and the task, for its category in Outlook (release 5.33).
     filed_emails: list[tuple[EmailItem, str]] = field(default_factory=list)
+    #: The lines whose items couldn't be made: they stay in the notes, as written (release 5.38, decision 205).
+    unused: int = 0
 
 
 def meeting_case(model: Model, task_id: str | None) -> str:
@@ -252,7 +254,7 @@ def meeting_name(model: Model, task_id: str | None, today: date) -> str:
 
 def item_names(model: Model, settings: Settings, refs: dict[str, str] | None = None) -> items.Names:
     """The people and tasks the content text's operators can name."""
-    return items.names_of(model, _parse_people(model, settings), refs)
+    return items.names_of(model, _parse_people(model, settings), refs, settings.reference_fields)
 
 
 def copy_name(day: str, name: str, taken: set[str]) -> str:
@@ -296,7 +298,9 @@ def quick_task_draft(model: Model, settings: Settings, line: str, today: date, o
     """A quick task from one line (mods log round 2, M0039): Parse and populate reads it as a new task, so "Call the vendor
     about seals by Fri" gets its title and Due date. Only people already on the list are kept: a one-liner adds no one.
     ``on_today`` puts it on Today; Make it a task, on a note already there, leaves that to the note's own item."""
-    r = parse_capture(line, "new_task", today, _parse_people(model, settings), _parse_labels(model), settings.event_words)
+    # A line's own ** parameters aren't for Parse and populate: Save fills them in, and the title leaves them out.
+    r = parse_capture(items.without_params(line, item_names(model, settings)), "new_task", today, _parse_people(model, settings), _parse_labels(model),
+                      settings.event_words)
 
     def iso(d: date | None) -> str | None:
         return d.isoformat() if d else None
@@ -405,7 +409,7 @@ def _save_split(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings:
     out = SaveResult(first.capture_id, None, None, [], list(dict.fromkeys(name for r in results for name in r.added_people)), "",
                      problems=[x for r in results for x in r.problems], agenda_targets=first.agenda_targets, picked_task=parts[0].task,
                      items=[c for r in results for c in r.items], made=made, parts=results,
-                     filed_emails=[x for r in results for x in r.filed_emails])
+                     filed_emails=[x for r in results for x in r.filed_emails], unused=sum(r.unused for r in results))
     model = Model(conn)
     kept = [(p, r) for p, r in zip(parts, results) if r.capture_id]
     said = [f"{r.capture_id}, {'a note on ' + model.task(p.task).title if p.task else 'an unfiled note'}"
@@ -417,6 +421,8 @@ def _save_split(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings:
     counts = [f"{n} {items.KIND_NAMES[k].lower()}{'s' if n > 1 else ''}" for k, n in made.items() if n]
     if counts:
         text += f" Made {_and_list(counts)} from their items."
+    if out.unused:
+        text += f" {_unused_text(out.unused)}"
     if out.added_people:
         text += f" Added {' and '.join(out.added_people)} to people."
     out.message = text
@@ -466,6 +472,9 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
                                + [markup.escape(e.text()) if formatted else e.text() for e in emails])
     full_words = "\n\n".join([words] * bool(words) + [e.text() for e in emails])
     title_words = "\n\n".join([items.words(words, names)] * bool(words) + [e.text() for e in emails])
+    # A new task's title and description leave out the lines that only fill its fields (release 5.38).
+    own_words = items.without_params(words, names)
+    task_words = "\n\n".join([items.words(own_words, names)] * bool(own_words) + [e.text() for e in emails])
     summary = draft.summary.strip()
     targets = list(dict.fromkeys(draft.agenda)) if draft.agenda_shown() else []
     keep = bool(content or draft.files or summary) and not draft.from_capture
@@ -504,8 +513,8 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
             source = full_words
             # With operators on its first line (release 5.8), that line without them gives the title, and its @ and #
             # fill the new task's people and parents.
-            title = (nt.title.strip() or _parsed_title(conn, own.text if own and own.any else title_words, at, settings)
-                     or first_sentence(plain_text(title_words)) or "Untitled task")
+            title = (nt.title.strip() or _parsed_title(conn, own.text if own and own.any else task_words, at, settings)
+                     or first_sentence(plain_text(task_words)) or "Untitled task")
             holder_title = title
             parents = [t] if t else [quick.ensure_parent(conn, settings, at)] if quick_task else []
             parents += [p for p in (own.tasks if own else []) if p not in parents]
@@ -515,7 +524,7 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
             # keeps the window's whole text: the page gets the capture's own, so the window's would be kept nowhere else.
             created = tasks.create_task(
                 conn, settings, title=title, at=at, created_by=via, parents=parents,
-                description=first_line(plain_text(words)) if words and not draft.from_capture else plain_text(source),
+                description=first_line(plain_text(own_words)) if words and not draft.from_capture else plain_text(source),
                 # Start left at today is no Start, except for a plant event, whose given Start makes it a range (release 5.30).
                 state=nt.state, start=nt.start if nt.start and (nt.start != day or nt.plant_event) else None, due=nt.due, deadline=nt.deadline,
                 deadline_desc=nt.deadline_desc, reminder=nt.reminder, recurrence=nt.recurrence, repeat_until=nt.repeat_until,
@@ -610,8 +619,10 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
             agenda.add_item(conn, subject=None if subject == target else subject, target=target, note=note_text, added=when, added_by=via)
         item_files: list[tuple[str, str, bool]] = []  # (item capture, its block, whether it's markup)
         made: dict[str, int] = {}
+        unused = 0
         if capture_id and reading:
-            item_files, made = _save_items(conn, settings, reading, names, content, formatted, capture_id, created or t, when, at, person)
+            item_files, made, unused = _save_items(conn, settings, reading, names, content, formatted, capture_id, created or t, when, at, person,
+                                                   home_is_new=bool(created or meeting_made))
         # Meeting notes: the agenda items the notes worked through close as Discussed.
         discussed = 0
         if agenda_task and capture_id:
@@ -622,7 +633,7 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
 
     result = SaveResult(capture_id, created, t if is_upd else None, changes, added_people, "", agenda_targets=targets,
                         filed_capture=source_capture.id if source_capture else None, picked_task=draft.task,
-                        meeting=t if draft.meeting else None, items=[cid for cid, _, _ in item_files], made=made, discussed=discussed)
+                        meeting=t if draft.meeting else None, items=[cid for cid, _, _ in item_files], made=made, discussed=discussed, unused=unused)
     if capture_id:
         model = Model(conn)
         if names.people != (now := _parse_people(model, settings)):  # someone was added: their @ is kept with their ID too
@@ -668,17 +679,19 @@ def first_line(text: str) -> str:
 
 
 def _save_items(conn: sqlite3.Connection, settings: Settings, reading: items.Reading, names: items.Names, content: str, formatted: bool,
-                notes_id: str, home: str | None, when: str, at: datetime, person: Callable[[Who], str]) -> tuple[list[tuple[str, str]], dict[str, int]]:
+                notes_id: str, home: str | None, when: str, at: datetime, person: Callable[[Who], str],
+                home_is_new: bool = False) -> tuple[list[tuple[str, str, bool]], dict[str, int], int]:
     """Each ticked item as a small capture of its own, linked to the notes (release 5.8). A task item makes its task,
     under the capture's task (or meeting, or new task) and its # tasks; a note, an update or a decision is filed to each
-    of its tasks. A key date (release 5.31) is added to each of its tasks, logged as the notes', with no capture of its
-    own: its line stays in the notes. Returns each item's capture with its block as written (and whether that's markup),
-    and how many of each kind were made."""
+    of its tasks. A parameter (release 5.38), a key date among them, fills in or adds to each of its tasks, logged as the
+    notes', with no capture of its own: its line stays in the notes. Returns each item's capture with its block as written
+    (and whether that's markup), how many of each kind were made, and how many lines couldn't be used."""
     lines = content.split("\n")
     files: list[tuple[str, str, bool]] = []
     made: dict[str, int] = {}
     item_task: dict[str, str] = {}  # a task item's task, by its key, for the items listed under it
     day = at.date().isoformat()
+    unused = sum(bool(x.problem) for x in reading.items)
     for it in (x for x in reading.items if x.on):
         block = "\n".join(lines[n] for n in it.lines if n < len(lines))
         block_formatted = formatted and markup.is_formatted(block)
@@ -698,6 +711,14 @@ def _save_items(conn: sqlite3.Connection, settings: Settings, reading: items.Rea
             for task_id in where:
                 tasks.add_key_dates(conn, task_id, [tasks.KeyDateRow(kd.start, kd.end, description, kd.plant, kd.deadline)], at=at, via=notes_id)
             made["date"] = made.get("date", 0) + 1
+            continue
+        if it.kind == "param":
+            # Nothing is being edited on a task this capture is making, so its line's value is used (decision 200).
+            made_here = {*item_task.values(), *([home] if home_is_new and home else [])}
+            if any([_fill_param(conn, settings, it, task_id, task_id in made_here, at, notes_id, person) for task_id in where]):
+                made["param"] = made.get("param", 0) + 1
+            else:
+                unused += 1
             continue
         if it.kind == "task":
             cid = next_id(conn, "C")
@@ -723,7 +744,40 @@ def _save_items(conn: sqlite3.Connection, settings: Settings, reading: items.Rea
                                      title=title, task=task_id, formatted=block_formatted, from_notes=notes_id, item=it.kind)
                 files.append((cid, text, block_formatted))
         made[it.kind] = made.get(it.kind, 0) + 1
-    return files, {k: made[k] for k in items.KIND_NAMES if k in made}
+    return files, {k: made[k] for k in items.KIND_NAMES if k in made}, unused
+
+
+def _fill_param(conn: sqlite3.Connection, settings: Settings, it: items.Item, task_id: str, made_here: bool, at: datetime, via: str,
+                person: Callable[[Who], str]) -> bool:
+    """A parameter's value on a task (decisions 200 and 207). A filled field stays, unless the task is being made in this
+    capture; a list adds. Returns whether it did anything. A value the task can't take, such as Repeat until with no
+    recurrence, changes nothing and counts as not used."""
+    op, value = it.op, it.value
+    if op is None or value is None:
+        return False
+    t = tasks.get_task(conn, task_id)
+    if not made_here and items.value_now(t, op):
+        return False
+    changes = dict(value.changes)
+    try:
+        for parent in changes.pop("parents", []):
+            if conn.execute("SELECT 1 FROM task_parents WHERE child = ? AND parent = ?", (task_id, parent)).fetchone() is None:
+                tasks.add_parent(conn, task_id, parent, at=at, via=via)
+        if "priority" in changes:
+            priorities.place(conn, task_id, changes.pop("priority"), at=at, via=via)
+        for key in ("leads", "assignees"):
+            if key in changes:
+                changes[key] = list(dict.fromkeys([*getattr(t, key), *(person(w) for w in changes[key])]))
+        if "labels" in changes:
+            for name in changes["labels"]:
+                if conn.execute("SELECT 1 FROM labels WHERE name = ?", (name,)).fetchone() is None:
+                    people.add_label(conn, name)
+            changes["labels"] = list(dict.fromkeys([*t.labels, *changes["labels"]]))
+        if changes:
+            tasks.update_task(conn, settings, task_id, at=at, via=via, **changes)
+    except tasks.TaskError:
+        return False
+    return True
 
 
 def add_quick_task(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, line: str, at: datetime) -> SaveResult:
@@ -852,6 +906,10 @@ def _record_text(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
         )
 
 
+def _unused_text(n: int) -> str:
+    return "1 line wasn't used: it stays in the notes." if n == 1 else f"{n} lines weren't used: they stay in the notes."
+
+
 def _message(conn: sqlite3.Connection, draft: CaptureDraft, r: SaveResult, targets: list[str], typed_title: bool) -> str:
     """What Save did, in a sentence or two, for the notification."""
     model = Model(conn)
@@ -881,6 +939,8 @@ def _message(conn: sqlite3.Connection, draft: CaptureDraft, r: SaveResult, targe
     counts = [f"{n} {items.KIND_NAMES[k].lower()}{'s' if n > 1 else ''}" for k, n in r.made.items() if n]
     if counts:
         bits.append(f"Made {_and_list(counts)} from its items.")
+    if r.unused:
+        bits.append(_unused_text(r.unused))
     if r.discussed:
         bits.append(f"{r.discussed} agenda item{'s' if r.discussed > 1 else ''} closed as Discussed.")
     text = (f"Saved {r.capture_id}. " if r.capture_id else "") + " ".join(b for b in bits if b)

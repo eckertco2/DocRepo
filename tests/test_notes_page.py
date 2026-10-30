@@ -142,7 +142,7 @@ def test_a_file_is_a_line_with_its_description(root, tmp_path):
 
 
 def test_meeting_notes_go_on_the_meeting_and_an_item_on_its_task(root):
-    r = save(root, CaptureDraft(content="Crane is booked.\n#Rigging plan **decision. Lift on the 20th.", task="T000010", meeting=True))
+    r = save(root, CaptureDraft(content="Crane is booked.\n#Rigging plan **decision, Lift on the 20th.", task="T000010", meeting=True))
     meeting = r.meeting
     lines = lines_of(page(root, meeting))
     assert lines[0].kind == "heading" and lines[0].text == "Fri 16 Oct 2026"  # a meeting's day headings are on (decision 119)

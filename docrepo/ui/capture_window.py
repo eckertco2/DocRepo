@@ -347,7 +347,7 @@ class _KeyDateLine(QFrame):
 class KeyDatesEditor(QWidget):
     """Key dates (release 5.31, the key dates plan, item 57) in New task and Update: any number of rows, each a start, an
     end, a description and the Plant activity, Deadline and Done ticks, with ✕, and Add key date. Folded under its link
-    until there's one. A ``**date`` line's card adds its key date only when the capture is saved, not here."""
+    until there's one. A ``**key date,`` line's card adds its key date only when the capture is saved, not here."""
 
     changed = Signal()
 
@@ -2049,8 +2049,8 @@ class CaptureWindow(QWidget):
         self.content_field.property("label").setText("Meeting notes" if self.meeting_on else self.content_field.property("label").text())
         self.content_hint.setText(
             f"The content text of {self.from_capture}. It stays in that capture." if self.from_capture else
-            "Each line with an operator becomes an item when you save: @Tom a task for Tom, #Rigging plan a note on it, **Closed. an update, "
-            "**Decision. a decision. Type @ or # for a list." if self.meeting_on else
+            "Each line with an operator becomes an item when you save: @Tom a task for Tom, #Rigging plan a note on it, **closed, an update, "
+            "**decision, a decision. Type @ or # for a list." if self.meeting_on else
             "Type or paste. Drop files or Outlook emails anywhere on this window. Start with “Closed.” or another state for a quick update. "
             "@, # and ** make items (Items, on the right).")
         self._fit_timer.start()
@@ -2520,8 +2520,8 @@ class CaptureWindow(QWidget):
                           recurrence=self.n_recurrence.currentText() if self.n_recurrence.currentIndex() else "")
             r = parse_capture(text, "new_task", today, people, labels, events, known, refs=self.ctx.settings.reference_fields)
             own = items.self_fields(self.reading, self.names()) if self.reading else None
-            if own and own.plant_event and not r.plant_event:  # **event on its own line (mods log round 3, M0059)
-                as_plant_event(r, "**event")
+            if own and own.plant_event and not r.plant_event:  # **event, on its own line (mods log round 3, M0059)
+                as_plant_event(r, "**event,")
             self._fill("new", r)
             for name in r.labels:
                 if name not in self.n_labels.values():

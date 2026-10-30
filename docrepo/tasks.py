@@ -436,7 +436,7 @@ def key_date_rows(conn: sqlite3.Connection, task_id: str) -> list[KeyDateRow]:
 
 
 def add_key_dates(conn: sqlite3.Connection, task_id: str, rows: Sequence[KeyDateRow], *, at: datetime, via: str) -> list[Change]:
-    """Add key dates at the end of a task's own, as a capture's ``**date`` lines do. Returns what was logged."""
+    """Add key dates at the end of a task's own, as a capture's ``**key date,`` lines do. Returns what was logged."""
     return set_key_dates(conn, task_id, [*key_date_rows(conn, task_id), *rows], at=at, via=via)
 
 
