@@ -242,12 +242,12 @@ def test_a_hand_pick_isnt_changed_by_the_text(window):
 
 
 def test_update_follows_the_hash_task(window):
-    type_text(window, "#Installation\n**u Crane booked.")
+    type_text(window, "#Installation\n**u, crane booked.")
     window.set_type("update", True)
     assert window.types == {"update"} and window.task == INSTALLATION
-    type_text(window, "**u Crane booked.")  # the # gone: no task, and Update stays checked until it comes back
+    type_text(window, "**u, crane booked.")  # the # gone: no task, and Update stays checked until it comes back
     assert window.task is None and "update" in window.types
-    type_text(window, "#Installation\n**u Crane booked.")
+    type_text(window, "#Installation\n**u, crane booked.")
     assert window.task == INSTALLATION and "updates <b>Installation</b>" in window.does.text()
 
 

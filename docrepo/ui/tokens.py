@@ -276,6 +276,10 @@ QTextEdit#checkText, QTextEdit#checkText:focus { border: none; border-radius: 0;
 QLabel#checkCount, QLabel#checkHeading { color: $text2; }
 QLabel#checkHeading { padding-top: 6px; padding-left: 4px; }
 QToolButton#checkFold, QToolButton#rowAction { border: none; background: transparent; padding: 0 2px; }
+QToolButton#linkMark { border: none; background: transparent; padding: 0 3px; color: $text2; font-size: ${caption}pt; }
+QToolButton#linkMark:hover { background: $hover; color: $accent; }
+QLabel#linkLeaving { color: $caution; font-size: ${caption}pt; }
+QLineEdit[worked="true"] { color: $text2; font-style: italic; }
 QWidget#checkRow QCheckBox { spacing: 0; padding-top: 3px; }
 QWidget#checkRow QCheckBox::indicator { width: 13px; height: 13px; }
 QLineEdit#addItem { margin-top: 4px; }
@@ -315,6 +319,12 @@ QPushButton#today:checked { background: $selected; color: $accent; border-color:
 QFrame#fileRow { border: 1px solid $stroke; border-radius: 6px; background: $content; }
 QToolButton#chip { border: 1px solid $stroke; border-radius: 10px; background: $hover; padding: 1px 8px; font-size: ${caption}pt; }
 QToolButton#chip[filled="true"] { background: $caution_bg; border-color: $caution_line; color: $text; }
+QFrame#personChip { border: 1px solid $stroke; border-radius: 10px; background: $hover; }
+QFrame#personChip:focus { border: 1px solid $accent; }
+QFrame#personChip QLabel { font-size: ${caption}pt; background: transparent; }
+QFrame#personChip QLabel#personShare { color: $accent; font-weight: 600; }
+QFrame#personChip QToolButton { border: none; background: transparent; padding: 0 2px; font-size: ${caption}pt; }
+QFrame#involvementBox { border: 1px solid $stroke_strong; background: $content; }
 QWidget#chips { border: 1px solid $stroke; border-bottom: 1px solid $control; border-radius: 4px; background: $content; }
 QWidget#chips QLineEdit { background: transparent; border: none; padding: 4px 2px; min-height: 20px; }
 QWidget#chips QLineEdit:focus { border: none; }

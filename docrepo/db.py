@@ -15,7 +15,7 @@ from pathlib import Path
 from docrepo.safe_fs import SafeFS
 
 DB_FILE = Path("System") / "docs.db"
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 17
 
 #: Each kind of ID: its letter and how many digits follow it.
 ID_FORMATS = {"T": 6, "C": 6, "D": 6, "P": 3}
@@ -355,6 +355,95 @@ CREATE TABLE task_pins (
     pos      INTEGER NOT NULL,
     PRIMARY KEY (task, document)
 );
+""",
+    14: """
+-- Task templates (release 5.44, the task templates design's decisions 180 to 195): a template is its own records, so
+-- nothing that reads tasks can see one. It's a small tree of rows, and its name and description are its top row's.
+-- A row's notes are its starting notes, as notes page markup, copied once to each task made from it.
+CREATE TABLE templates (
+    id             INTEGER PRIMARY KEY,
+    created        TEXT NOT NULL,
+    discarded      TEXT,
+    discard_reason TEXT
+);
+CREATE TABLE template_rows (
+    id             INTEGER PRIMARY KEY,
+    template       INTEGER NOT NULL REFERENCES templates(id),
+    parent         INTEGER REFERENCES template_rows(id),
+    place          INTEGER NOT NULL,
+    title          TEXT NOT NULL CHECK (title <> ''),
+    description    TEXT NOT NULL DEFAULT '',
+    inherit_labels INTEGER NOT NULL DEFAULT 1,
+    lead_hours     REAL CHECK (lead_hours IS NULL OR lead_hours >= 0),
+    assignee_hours REAL CHECK (assignee_hours IS NULL OR assignee_hours >= 0),
+    urgent         INTEGER NOT NULL DEFAULT 0,
+    meeting        INTEGER NOT NULL DEFAULT 0,
+    plant_event    INTEGER NOT NULL DEFAULT 0,
+    recurrence     TEXT CHECK (recurrence IN ('Daily', 'Weekly', 'Bi-weekly', 'Monthly', 'Quarterly', 'Yearly')),
+    notes          TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX template_rows_tree ON template_rows (template, parent, place);
+CREATE TABLE template_row_people (
+    id     INTEGER PRIMARY KEY,
+    row_id INTEGER NOT NULL REFERENCES template_rows(id),
+    person TEXT NOT NULL REFERENCES people(id),
+    role   TEXT NOT NULL CHECK (role IN ('lead', 'assignee')),
+    UNIQUE (row_id, person, role)
+);
+CREATE TABLE template_row_labels (
+    id     INTEGER PRIMARY KEY,
+    row_id INTEGER NOT NULL REFERENCES template_rows(id),
+    label  INTEGER NOT NULL REFERENCES labels(id),
+    UNIQUE (row_id, label)
+);
+-- Which row a task was made from, and its tree's top task. Kept apart from tasks, so the Task record is unchanged.
+CREATE TABLE task_template (
+    task   TEXT PRIMARY KEY REFERENCES tasks(id),
+    row_id INTEGER NOT NULL REFERENCES template_rows(id),
+    tree   TEXT NOT NULL REFERENCES tasks(id)
+);
+CREATE INDEX task_template_row ON task_template (row_id);
+CREATE INDEX task_template_tree ON task_template (tree);
+-- The fields of a task that still follow its row (decisions 183 and 184), named as tasks.update_task names them.
+CREATE TABLE task_links (
+    task  TEXT NOT NULL REFERENCES tasks(id),
+    field TEXT NOT NULL,
+    PRIMARY KEY (task, field)
+);
+""",
+    15: """
+-- A template's Changes list (release 5.45, decision 187): one line a save, in its words as they stood, since a row can be
+-- taken out later. what is changed, added or removed. reached is how many tasks or trees it changed (for removed, the tasks
+-- discarded), and left_out how many it offered and left as they were (for removed, the tasks kept).
+CREATE TABLE template_log (
+    id       INTEGER PRIMARY KEY,
+    template INTEGER NOT NULL REFERENCES templates(id),
+    at       TEXT NOT NULL,
+    what     TEXT NOT NULL CHECK (what IN ('changed', 'added', 'removed')),
+    text     TEXT NOT NULL,
+    reached  INTEGER NOT NULL DEFAULT 0,
+    left_out INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX template_log_template ON template_log (template, id);
+""",
+    16: """
+-- Duration and hours a day (release 5.46, the task templates design's decisions 189 to 191), on tasks and template rows:
+-- a length in days, kept when the dates move, whether those days run through weekends, and each role's rate. With a rate,
+-- lead_hours or assignee_hours stays the total, worked out from it and the length.
+ALTER TABLE tasks ADD COLUMN duration INTEGER CHECK (duration IS NULL OR duration >= 1);
+ALTER TABLE tasks ADD COLUMN calendar_days INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE tasks ADD COLUMN lead_per_day REAL CHECK (lead_per_day IS NULL OR lead_per_day >= 0);
+ALTER TABLE tasks ADD COLUMN assignee_per_day REAL CHECK (assignee_per_day IS NULL OR assignee_per_day >= 0);
+ALTER TABLE template_rows ADD COLUMN duration INTEGER CHECK (duration IS NULL OR duration >= 1);
+ALTER TABLE template_rows ADD COLUMN calendar_days INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE template_rows ADD COLUMN lead_per_day REAL CHECK (lead_per_day IS NULL OR lead_per_day >= 0);
+ALTER TABLE template_rows ADD COLUMN assignee_per_day REAL CHECK (assignee_per_day IS NULL OR assignee_per_day >= 0);
+""",
+    17: """
+-- Involvement (release 5.47, the task templates design's decisions 192 and 196): the percentage of a role's hours that land on
+-- one person on one task, 100 by default. It isn't a split: on a 12-hour task, 25 is 3 hours and 100 is still 12.
+ALTER TABLE task_people ADD COLUMN involvement INTEGER NOT NULL DEFAULT 100 CHECK (involvement BETWEEN 0 AND 100);
+ALTER TABLE template_row_people ADD COLUMN involvement INTEGER NOT NULL DEFAULT 100 CHECK (involvement BETWEEN 0 AND 100);
 """,
 }
 

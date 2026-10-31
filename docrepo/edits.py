@@ -358,11 +358,13 @@ def edit_task(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: S
     stays unset. ``parents`` puts the task under exactly those tasks (mods log round 2, M0040), as one Parents change.
     ``priority`` (release 5.23) puts it in a bucket ("" for Not ranked), at the bucket's end, when that's a change.
     ``key_dates`` (release 5.31), a list of ``tasks.KeyDateRow``, makes its key dates those, each change logged.
+    ``follow`` (release 5.45, decision 184), from the form's chain marks and ↺, says which fields follow its template now.
     """
     added: list[str] = []
     parents = values.pop("parents", None)
     key_dates = values.pop("key_dates", None)
     priority = values.pop("priority", None)
+    follow = values.pop("follow", None)
     day_headings = values.pop("day_headings", "unset")  # decision 119: a setting of the page, not logged
     with transaction(conn):
         if day_headings != "unset":
@@ -374,6 +376,7 @@ def edit_task(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: S
             if conn.execute("SELECT 1 FROM labels WHERE name = ?", (name.strip(),)).fetchone() is None:
                 people.add_label(conn, name)
         note = f"Added on {at.date().isoformat()} in the browse tool. Aliases and hours aren't set yet."
+        named: dict[str, str] = {}
         for key in ("leads", "assignees"):
             if key in values:
                 ids = []
@@ -385,8 +388,13 @@ def edit_task(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: S
                     if new:
                         added.append(w.name.strip())
                     ids.append(person_id)
+                    named[w.name] = person_id
                 values[key] = ids
-        logged = tasks.update_task(conn, settings, task_id, at=at, via=BROWSE, **values)
+        if values.get("involvement"):  # someone just added has their Involvement under their name until now
+            values["involvement"] = {(role, named.get(p, p)): share for (role, p), share in values["involvement"].items()}
+        logged = tasks.update_task(conn, settings, task_id, at=at, via=BROWSE, keep_links=follow is not None, **values)
+        if follow is not None:
+            logged += tasks.set_links(conn, task_id, follow, at=at, via=BROWSE)
         moved = tasks.set_parents(conn, task_id, parents, at=at, via=BROWSE) if parents is not None else None
         if moved:
             logged.append(moved)

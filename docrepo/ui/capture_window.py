@@ -62,6 +62,7 @@ from PySide6.QtWidgets import (
 )
 
 from docrepo import diagnose, items, key_dates, msg, outlook, timeline
+from docrepo.dates import workday_numbers
 from docrepo.db import RECURRENCES, STATES
 from docrepo.extract import extract_text, to_unc
 from docrepo.layer0 import Part, size_text
@@ -89,8 +90,8 @@ from docrepo.save import (
     save_capture,
     split_parts,
 )
-from docrepo.schedule import is_open, start_of
-from docrepo.tasks import KeyDateRow
+from docrepo.schedule import is_open, length_of, start_of
+from docrepo.tasks import KeyDateRow, stated
 from docrepo.ui import tokens
 from docrepo.ui.context import AppContext
 from docrepo.ui.drop_target import DropOverlay, DropRead
@@ -102,6 +103,7 @@ from docrepo.ui.mods_panel import ModsPanel
 from docrepo.ui.palette import Command, CommandPalette
 from docrepo.ui.rich_edit import KEYS as FORMAT_KEYS, FormatBar, RichEdit
 from docrepo.ui.style import style_sheet
+from docrepo.ui.task_forms import BAD_DURATION, HoursRow, days_valid, typed_days
 from docrepo.ui.task_picker import TaskPicker, full_path, path_text
 from docrepo.ui.widgets import (
     Chip,
@@ -347,7 +349,7 @@ class _KeyDateLine(QFrame):
 class KeyDatesEditor(QWidget):
     """Key dates (release 5.31, the key dates plan, item 57) in New task and Update: any number of rows, each a start, an
     end, a description and the Plant activity, Deadline and Done ticks, with ✕, and Add key date. Folded under its link
-    until there's one. A ``**date`` line's card adds its key date only when the capture is saved, not here."""
+    until there's one. A ``**key date,`` line's card adds its key date only when the capture is saved, not here."""
 
     changed = Signal()
 
@@ -971,10 +973,15 @@ class CaptureWindow(QWidget):
                                              (self.n_reminder, "Reminder", "reminder"), (self.n_recurrence, "Recurrence", "recurrence"))):
             more.addWidget(field(label, w, key), i // 2, i % 2)
         more.addWidget(self.n_repeat_field, 2, 0)
-        more.addWidget(field("Lead hours", self.n_lead_hours, "hours"), 3, 0)
-        more.addWidget(field("Assignee hours", self.n_asg_hours), 3, 1)
+        # Release 5.46: hours with their unit, and a Duration. What they come to is worked out when it's saved.
+        self.n_lead_row = HoursRow(self.n_lead_hours, self._new_length, lambda: len(self.n_leads.chips()))
+        self.n_asg_row = HoursRow(self.n_asg_hours, self._new_length, lambda: len(self.n_assignees.chips()))
+        more.addWidget(field("Lead hours", self.n_lead_row, "hours"), 3, 0)
+        more.addWidget(field("Assignee hours", self.n_asg_row), 3, 1)
+        self.n_duration, self.n_calendar, self.n_length = self._length_fields()
+        more.addWidget(self.n_length, 4, 0, 1, 2)
         self.n_refs_grid = QGridLayout()  # the reference fields' boxes (release 5.9), built by _sync_refs
-        more.addLayout(self.n_refs_grid, 4, 0, 1, 2)
+        more.addLayout(self.n_refs_grid, 5, 0, 1, 2)
         self.n_refs: dict[str, QLineEdit] = {}
         self.n_more.hide()
         g.addWidget(self.n_more)
@@ -1018,20 +1025,24 @@ class CaptureWindow(QWidget):
         self.u_leads = ChipPicker(self._people_options, "Search names and aliases", "Add “{}” to people")
         self.u_assignees = ChipPicker(self._people_options, "Search names and aliases", "Add “{}” to people")
         self.u_lead_hours, self.u_asg_hours = HoursField(), HoursField()
+        self.u_lead_row = HoursRow(self.u_lead_hours, self._upd_length, lambda: len(self.u_leads.chips()))
+        self.u_asg_row = HoursRow(self.u_asg_hours, self._upd_length, lambda: len(self.u_assignees.chips()))
+        self.u_duration, self.u_calendar, self.u_length = self._length_fields()
         self.u_start, self.u_reminder, self.u_repeat = DateField(), DateField(), DateField()
         self.u_recurrence = QComboBox()
         self.u_recurrence.addItems(["No recurrence", *RECURRENCES])
         self.u_urgent, self.u_meeting, self.u_plant = QCheckBox("Urgent"), QCheckBox("Meeting"), QCheckBox("Plant event")
         self.u_repeat_field = field("Repeat until", self.u_repeat, "repeatUntil")
         cells = [(field("Lead", self.u_leads, "leads"), 0, 0), (field("Assignees", self.u_assignees, "assignees"), 0, 1),
-                 (field("Lead hours", self.u_lead_hours, "hours"), 1, 0), (field("Assignee hours", self.u_asg_hours), 1, 1),
+                 (field("Lead hours", self.u_lead_row, "hours"), 1, 0), (field("Assignee hours", self.u_asg_row), 1, 1),
                  (field("Start", self.u_start, "start"), 2, 0), (field("Reminder", self.u_reminder, "reminder"), 2, 1),
                  (field("Recurrence", self.u_recurrence, "recurrence"), 3, 0), (self.u_repeat_field, 3, 1),
                  (self.u_urgent, 4, 0), (self.u_meeting, 4, 1), (self.u_plant, 5, 0)]
         for w, r, c in cells:
             more.addWidget(w, r, c)
+        more.addWidget(self.u_length, 6, 0, 1, 2)
         self.u_refs_grid = QGridLayout()  # the reference fields' boxes (release 5.9), built by _sync_refs
-        more.addLayout(self.u_refs_grid, 6, 0, 1, 2)
+        more.addLayout(self.u_refs_grid, 7, 0, 1, 2)
         self.u_refs: dict[str, QLineEdit] = {}
         self.u_more.hide()
         g.addWidget(self.u_more)
@@ -1050,6 +1061,51 @@ class CaptureWindow(QWidget):
                             "urgent": self.u_urgent, "meeting": self.u_meeting, "plant_event": self.u_plant})
         for chips in (self.u_leads, self.u_assignees):
             chips.changed.connect(self.refresh)
+
+    # ---- Duration and hours a day (release 5.46, decisions 189 to 191) ----
+    def _length_fields(self) -> tuple[QLineEdit, QCheckBox, QWidget]:
+        """A Duration box and its Runs through weekends tick, in a row of their own. A date worked out from them is worked out
+        when the capture is saved, by the same rules as Edit task."""
+        box = QLineEdit()
+        box.setFixedWidth(64)
+        box.setAccessibleName("Duration in days")
+        box.setToolTip("How many days it takes. With one, changing Start or Due moves the block.")
+        tick = QCheckBox("Runs through weekends")
+        tick.setToolTip("Count every day, for its Due and where its hours land, not only workdays")
+        holder = QWidget()
+        row = QHBoxLayout(holder)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(6)
+        row.addWidget(box)
+        row.addWidget(QLabel("days", objectName="hint"))
+        row.addSpacing(10)
+        row.addWidget(tick)
+        row.addStretch()
+        wrap = field("Duration", holder)
+        box.textEdited.connect(lambda _: self._length_edited())
+        tick.toggled.connect(lambda _: self._length_edited())
+        return box, tick, wrap
+
+    def _length_edited(self) -> None:
+        for row in (self.n_lead_row, self.n_asg_row, self.u_lead_row, self.u_asg_row):
+            row.show_line()
+
+    def _workdays(self) -> frozenset[int]:
+        return workday_numbers(self.ctx.settings.workdays)
+
+    def _new_length(self) -> int | None:
+        """The new task's days. Start left at today is no Start, as saving has it."""
+        start = self.n_start.value() if self.n_start.is_valid() else None
+        due = self.n_due.value() if self.n_due.is_valid() else None
+        return length_of(None if start == self.ctx.now().date().isoformat() else start, due, typed_days(self.n_duration), self._workdays(), self.n_calendar.isChecked())
+
+    def _upd_length(self) -> int | None:
+        t = self.ctx.model().tasks.get(self.task) if self.task else None
+        start = self.u_start.value() if self.u_start.is_valid() else None
+        if t is not None and not t.start and start == start_of(t).isoformat():
+            start = None
+        due = self.u_due.value() if self.u_due.is_valid() else None
+        return length_of(start, due, typed_days(self.u_duration), self._workdays(), self.u_calendar.isChecked())
 
     @staticmethod
     def _during_label(g: QVBoxLayout) -> QLabel:
@@ -1819,8 +1875,13 @@ class CaptureWindow(QWidget):
             w = self.files_box.itemAt(i).widget()
             if w:
                 w.deleteLater()
-        for w in (self.title, self.n_deadline_desc, self.u_deadline_desc, self.n_lead_hours, self.n_asg_hours, self.u_lead_hours, self.u_asg_hours):
+        for w in (self.title, self.n_deadline_desc, self.u_deadline_desc, self.n_lead_hours, self.n_asg_hours, self.u_lead_hours, self.u_asg_hours,
+                  self.n_duration, self.u_duration):
             w.clear()
+        for row in (self.n_lead_row, self.n_asg_row, self.u_lead_row, self.u_asg_row):
+            row.set_per_day(False)
+        for box in (self.n_calendar, self.u_calendar):
+            box.setChecked(False)
         for w in (self.content, self.summary, self.u_status):
             w.clear()
         for d in (self.n_due, self.n_deadline, self.n_reminder, self.n_repeat, self.u_due, self.u_deadline, self.u_start, self.u_reminder, self.u_repeat):
@@ -1943,8 +2004,10 @@ class CaptureWindow(QWidget):
         self.u_deadline_desc.setText(t.deadline_desc or "")
         self.u_leads.set_chips([Chip(p, m.person_name(p)) for p in t.leads])
         self.u_assignees.set_chips([Chip(p, m.person_name(p)) for p in t.assignees])
-        self.u_lead_hours.set_value(t.lead_hours)
-        self.u_asg_hours.set_value(t.assignee_hours)
+        self.u_lead_row.set_stated(stated(t, "lead_hours"))
+        self.u_asg_row.set_stated(stated(t, "assignee_hours"))
+        self.u_duration.setText("" if t.duration is None else str(t.duration))
+        self.u_calendar.setChecked(t.calendar_days)
         self.u_start.set_value(start_of(t).isoformat())
         self.u_reminder.set_value(t.reminder)
         self.u_recurrence.setCurrentText(t.recurrence or "No recurrence")
@@ -1994,6 +2057,11 @@ class CaptureWindow(QWidget):
         self.n_inherit_row.setVisible(bool(t))
         self.n_inherited.setText(("Inherited: " + ", ".join(inherited) if inherited else "The parent has none.") if self.n_inherit.isChecked() else "")
         self.n_repeat_field.setVisible(self.n_recurrence.currentIndex() > 0)
+        for routine, rows, length in ((self.n_recurrence.currentIndex() > 0, (self.n_lead_row, self.n_asg_row), self.n_length),
+                                      (self.u_recurrence.currentIndex() > 0, (self.u_lead_row, self.u_asg_row), self.u_length)):
+            for row in rows:  # a routine task has no Duration or rate (release 5.46)
+                row.set_routine(routine)
+            length.setVisible(not routine)
         self.upd_group.setVisible(upd and bool(t))
         if t:
             if LOOK.classic:
@@ -2049,8 +2117,8 @@ class CaptureWindow(QWidget):
         self.content_field.property("label").setText("Meeting notes" if self.meeting_on else self.content_field.property("label").text())
         self.content_hint.setText(
             f"The content text of {self.from_capture}. It stays in that capture." if self.from_capture else
-            "Each line with an operator becomes an item when you save: @Tom a task for Tom, #Rigging plan a note on it, **Closed. an update, "
-            "**Decision. a decision. Type @ or # for a list." if self.meeting_on else
+            "Each line with an operator becomes an item when you save: @Tom a task for Tom, #Rigging plan a note on it, **closed, an update, "
+            "**decision, a decision. Type @ or # for a list." if self.meeting_on else
             "Type or paste. Drop files or Outlook emails anywhere on this window. Start with “Closed.” or another state for a quick update. "
             "@, # and ** make items (Items, on the right).")
         self._fit_timer.start()
@@ -2520,9 +2588,10 @@ class CaptureWindow(QWidget):
                           recurrence=self.n_recurrence.currentText() if self.n_recurrence.currentIndex() else "")
             r = parse_capture(text, "new_task", today, people, labels, events, known, refs=self.ctx.settings.reference_fields)
             own = items.self_fields(self.reading, self.names()) if self.reading else None
-            if own and own.plant_event and not r.plant_event:  # **event on its own line (mods log round 3, M0059)
-                as_plant_event(r, "**event")
+            if own and own.plant_event and not r.plant_event:  # **event, on its own line (mods log round 3, M0059)
+                as_plant_event(r, "**event,")
             self._fill("new", r)
+            self._hours_read(r, self.n_lead_row, self.n_asg_row)
             for name in r.labels:
                 if name not in self.n_labels.values():
                     self.n_labels.set_chips([*self.n_labels.chips(), Chip(name, name, filled=True)])
@@ -2544,11 +2613,19 @@ class CaptureWindow(QWidget):
                 r.due = r.deadline = None
                 r.deadline_desc = ""
             self._fill("upd", r)
+            self._hours_read(r, self.u_lead_row, self.u_asg_row)
             if any(f.key in ("plant_event", "refs") and not f.why for f in r.found):
                 self._set_more(self.u_more, self.u_more_button, True)
             found += [("Update: " if "new_task" in self.types else "", f) for f in r.found]
         self._show_found(found)
         self.refresh()
+
+    @staticmethod
+    def _hours_read(r: Any, lead: HoursRow, assignee: HoursRow) -> None:
+        """Parse and populate reads a total, so a box it filled means hours in all."""
+        for f in r.found:
+            if not f.why and f.key in ("lead_hours", "assignee_hours"):
+                (lead if f.key == "lead_hours" else assignee).set_per_day(False)
 
     def _fill(self, prefix: str, r: Any) -> None:
         fields = self.__dict__.get("_fields", {})
@@ -2671,6 +2748,15 @@ class CaptureWindow(QWidget):
         if focus is not None:
             focus.setFocus()
 
+    @staticmethod
+    def _hours_values(lead: HoursRow, assignee: HoursRow) -> dict[str, Any]:
+        """Each role's hours: a rate, whose total is worked out, or a total, with no rate (decision 189)."""
+        out: dict[str, Any] = {}
+        for row, hours, rate in ((lead, "lead_hours", "lead_per_day"), (assignee, "assignee_hours", "assignee_per_day")):
+            n = row.number()
+            out.update({rate: n} if row.per_day() and n is not None else {hours: n, rate: None})
+        return out
+
     def _chips_people(self, chips: ChipPicker) -> list[Who]:
         return [Who(name=c.value) if c.new else Who(c.value) for c in chips.chips()]
 
@@ -2681,8 +2767,7 @@ class CaptureWindow(QWidget):
             "state": self.u_state.currentText(), "current_status": self.u_status.toPlainText().strip(), "due": self.u_due.value(),
             "deadline": self.u_deadline.value(), "deadline_desc": self.u_deadline_desc.text().strip() or None,
             "leads": self._chips_people(self.u_leads), "assignees": self._chips_people(self.u_assignees),
-            "lead_hours": self.u_lead_hours.value() if self.u_lead_hours.is_valid() else None,
-            "assignee_hours": self.u_asg_hours.value() if self.u_asg_hours.is_valid() else None,
+            **self._hours_values(self.u_lead_row, self.u_asg_row), "duration": typed_days(self.u_duration), "calendar_days": self.u_calendar.isChecked(),
             "start": self.u_start.value(), "reminder": self.u_reminder.value(), "recurrence": recurrence,
             "repeat_until": self.u_repeat.value() if recurrence else None, "urgent": self.u_urgent.isChecked(), "meeting": self.u_meeting.isChecked(),
             "plant_event": self.u_plant.isChecked(), "references": {name: box.text().strip() for name, box in self.u_refs.items()},
@@ -2696,7 +2781,8 @@ class CaptureWindow(QWidget):
             "state": t.state, "current_status": t.current_status, "due": t.due, "deadline": t.deadline, "deadline_desc": t.deadline_desc,
             "leads": [Who(p) for p in t.leads], "assignees": [Who(p) for p in t.assignees], "lead_hours": t.lead_hours,
             "assignee_hours": t.assignee_hours, "start": start_of(t).isoformat(), "reminder": t.reminder, "recurrence": t.recurrence,
-            "repeat_until": t.repeat_until, "urgent": t.urgent, "meeting": t.meeting, "plant_event": t.plant_event,
+            "repeat_until": t.repeat_until, "urgent": t.urgent, "meeting": t.meeting, "plant_event": t.plant_event, "duration": t.duration,
+            "calendar_days": t.calendar_days, "lead_per_day": t.lead_per_day, "assignee_per_day": t.assignee_per_day,
         }
         values = self.update_values()
         out = {k: v for k, v in values.items() if k != "references" and v != current[k]}
@@ -2717,6 +2803,10 @@ class CaptureWindow(QWidget):
             if not w.is_valid():
                 hours = isinstance(w, HoursField)
                 self._fail(f"{name} isn't {'a number of hours' if hours else 'a date. Use YYYY-MM-DD'}.", w if hours else w.line)
+                return False
+        for on, box in (("new_task" in self.types, self.n_duration), ("update" in self.types, self.u_duration)):
+            if on and not days_valid(box):
+                self._fail(BAD_DURATION, box)
                 return False
         for on, editor in (("new_task" in self.types, self.n_keydates), ("update" in self.types and bool(self.task), self.u_keydates)):
             p = editor.problem() if on else None
@@ -2744,9 +2834,9 @@ class CaptureWindow(QWidget):
             deadline=self.n_deadline.value(), deadline_desc=self.n_deadline_desc.text().strip() or None, urgent=self.n_urgent.isChecked(),
             meeting=self.n_meeting.isChecked(), state=self.n_state.currentText(), start=start, reminder=self.n_reminder.value(),
             recurrence=recurrence, repeat_until=self.n_repeat.value() if recurrence else None,
-            lead_hours=self.n_lead_hours.value(), assignee_hours=self.n_asg_hours.value(), plant_event=self.n_plant.isChecked(),
-            references={name: box.text().strip() for name, box in self.n_refs.items() if box.text().strip()},
-            key_dates=self.n_keydates.rows(),
+            plant_event=self.n_plant.isChecked(), references={name: box.text().strip() for name, box in self.n_refs.items() if box.text().strip()},
+            key_dates=self.n_keydates.rows(), duration=typed_days(self.n_duration), calendar_days=self.n_calendar.isChecked(),
+            **self._hours_values(self.n_lead_row, self.n_asg_row),
         )
         t = self.ctx.model().tasks.get(self.task) if self.task else None
         summary_type = self._summary_types[self.prompt_type.currentIndex()].name if not self.summary_field.isHidden() and self._summary_types else None
