@@ -10,11 +10,12 @@ from datetime import datetime  # noqa: E402
 import pytest  # noqa: E402
 from PySide6.QtCore import QEvent, QPoint, Qt  # noqa: E402
 from PySide6.QtGui import QKeyEvent  # noqa: E402
-from PySide6.QtWidgets import QApplication, QSystemTrayIcon  # noqa: E402
+from PySide6.QtWidgets import QApplication, QPushButton, QSystemTrayIcon  # noqa: E402
 
 from docrepo import capacity, db, edits, hotkey, panel_rules, prompts, wheels_config as wc  # noqa: E402
 from docrepo.app import CaptureApp  # noqa: E402
 from docrepo.config import Settings  # noqa: E402
+from docrepo.lists import reminders_due  # noqa: E402
 from docrepo.model import Model  # noqa: E402
 from docrepo.panel_rules import Hover, Monitor, Place, Rect  # noqa: E402
 from docrepo.sample import load_sample  # noqa: E402
@@ -466,6 +467,49 @@ def test_a_click_only_takes_the_keyboard_on_the_box():
 def test_folds_remember(app, panel):
     assert db.get_state(app.ctx.conn, "today_panel_due_open") in (None, "0")
     panel._fold_clicked = None
-    fold = next(w for w in panel.extras if w.objectName() == "tpFold")
+    fold = next(w for w in panel.extras if w.objectName() == "tpFold" and "Due in the next 7 days" in w.text())
     fold.click()
     assert db.get_state(app.ctx.conn, "today_panel_due_open") == "1"
+
+
+def _reminder_fold(panel):
+    return next((w for w in panel.extras if w.objectName() == "tpFold" and "Reminders" in w.text()), None)
+
+
+def _reminder_links(panel):
+    """Each reminder's row, as the names of its links, while Due in the next 7 days stays folded."""
+    return [[b.text() for b in w.findChildren(QPushButton)] for w in panel.extras if w.objectName() == "tpRow"]
+
+
+def _click(panel, row, name):
+    rows = [w for w in panel.extras if w.objectName() == "tpRow"]
+    next(b for b in rows[row].findChildren(QPushButton) if b.text() == name).click()
+
+
+def test_reminders_reach_the_panel_as_they_do_today(app, panel):
+    """Thread E's reminders (decisions 236 to 238) under a folded heading of their own (decision 224), read from the same place."""
+    due = reminders_due(Model(app.ctx.conn), NOW.date())
+    assert len(due) == 2
+    fold = _reminder_fold(panel)
+    assert fold.text() == "▸ Reminders · 2" and not _reminder_links(panel)  # folded to start with, like its neighbours
+    assert [w.text() for w in panel.extras if w.objectName() == "tpFold"][1].startswith("▸ Due in the next 7 days")  # above Due, as on Today
+    fold.click()
+    assert db.get_state(app.ctx.conn, "today_panel_reminders_open") == "1"
+    assert _reminder_links(panel) == [["Add", "Clear"], ["Add", "Clear"]]
+
+
+def test_a_reminder_in_the_panel_can_be_added_and_cleared(app, panel):
+    conn = app.ctx.conn
+    _reminder_fold(panel).click()
+    first, second = reminders_due(Model(conn), NOW.date())
+    _click(panel, 0, "Add")
+    m = Model(conn)
+    assert first.id in [a.subject for a in m.today_items()] and m.task(first.id).reminder == first.reminder  # on Today, reminder kept
+    assert _reminder_links(panel) == [["Clear"], ["Add", "Clear"]]  # the panel heard, and it can't be added twice
+    _click(panel, 0, "Clear")
+    m = Model(conn)
+    assert m.task(first.id).reminder is None and [e.via for e in m.status_log_of(first.id) if e.field == "Reminder"][-1] == "Today"
+    assert _reminder_fold(panel).text() == "▾ Reminders · 1" and _reminder_links(panel) == [["Add", "Clear"]]
+    _click(panel, 0, "Clear")
+    assert Model(conn).task(second.id).reminder is None
+    assert _reminder_fold(panel) is None  # only while there are any

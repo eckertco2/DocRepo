@@ -689,7 +689,7 @@ The Today view as a floating strip, always on top, opened by its hotkey (`today_
 | State | Width | Shows |
 |---|---|---|
 | Resting | `rest_width`, 180 px | The count, and one line per item, grouped, with a tick box |
-| Widened | `hover_width`, 320 px | A second line, its due date, Done and Remove on the row under the pointer, the box for a quick task or note, and folded Due in the next 7 days and Done today, which remember whether they're open |
+| Widened | `hover_width`, 320 px | A second line, its due date, Done and Remove on the row under the pointer, the box for a quick task or note, and folded Reminders (only while one's day has come, each with Add and Clear), Due in the next 7 days and Done today, which remember whether they're open |
 | Detail | `detail_width`, 420 px | The task's page to read, with Done, Remove, Edit and Open in the browse tool; or a note's text, with Edit and Make it a task |
 
 It widens after the pointer rests on it for Windows' hover time (or `hover_ms`), or `inner_edge_hover_ms` on an edge between two monitors, and contracts `contract_ms` after the pointer leaves, never while the pointer is on it, its box has the cursor, a menu is open or a detail is showing. `hover` turns that off, and a click on its top line or its hotkey widens it. A click on anything but the box leaves the keyboard where it is. Its hotkey brings the keyboard to it: Up and Down move, Enter opens the detail, Space ticks Done, Delete removes, and Esc goes back, then contracts it and returns to the window you were in. Done asks "Update the task too?", as the Today view does.

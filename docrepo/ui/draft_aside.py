@@ -23,11 +23,12 @@ log = logging.getLogger(__name__)
 ASIDE_FILE = Path("System") / "capture-draft-aside.json"
 ASIDE_NOTE = "Your draft is set aside. It comes back when you save or close this one."
 #: The form's fields, by kind, beyond what the draft file keeps.
-TEXTS = ("n_deadline_desc", "u_deadline_desc", "n_lead_hours", "n_asg_hours", "u_lead_hours", "u_asg_hours")
+TEXTS = ("n_deadline_desc", "u_deadline_desc", "n_lead_hours", "n_asg_hours", "u_lead_hours", "u_asg_hours", "n_duration", "u_duration")
+UNITS = ("n_lead_row", "n_asg_row", "u_lead_row", "u_asg_row")
 PLAIN = ("summary", "u_status")
 DATES = ("n_due", "n_deadline", "n_reminder", "n_repeat", "n_start", "u_due", "u_deadline", "u_start", "u_reminder", "u_repeat")
 CHIPS = ("n_labels", "n_leads", "n_assignees", "u_leads", "u_assignees", "agenda")
-TICKS = ("n_urgent", "n_meeting", "n_plant", "u_urgent", "u_meeting", "u_plant", "n_inherit", "same_all")
+TICKS = ("n_urgent", "n_meeting", "n_plant", "u_urgent", "u_meeting", "u_plant", "n_inherit", "same_all", "n_calendar", "u_calendar")
 COMBOS = ("n_state", "n_recurrence", "u_state", "u_recurrence")
 
 
@@ -58,6 +59,7 @@ class DraftAside:
         c = self.capture
         return {
             "texts": {n: getattr(c, n).text() for n in TEXTS},
+            "units": {n: getattr(c, n).per_day() for n in UNITS},
             "plain": {n: getattr(c, n).toPlainText() for n in PLAIN},
             "dates": {n: getattr(c, n).value() for n in DATES},
             "chips": {n: [[x.value, x.label, x.new] for x in getattr(c, n).chips()] for n in CHIPS},
@@ -71,6 +73,8 @@ class DraftAside:
         c = self.capture
         for n, v in form.get("texts", {}).items():
             getattr(c, n).setText(str(v or ""))
+        for n, v in form.get("units", {}).items():
+            getattr(c, n).set_per_day(bool(v))
         for n, v in form.get("plain", {}).items():
             getattr(c, n).setPlainText(str(v or ""))
         for n, v in form.get("dates", {}).items():

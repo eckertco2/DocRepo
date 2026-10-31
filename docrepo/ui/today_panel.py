@@ -1,8 +1,8 @@
 """The Today side panel (release 5.43; ``docs/ui-design/wheel-design.md``, section 7, decisions 217 to 223).
 
 The Today view, pinned as a floating strip: a readable list at rest, more on hover, and a task's page on a click. **One list,
-not two:** its rows come from what the Today view reads (``views.today_groups``, ``views.today_due_entries``, ``Model.done_on``),
-and Done, Remove, Edit and the box call the browse tool's own methods, so an item done here is done there.
+not two:** its rows come from what the Today view reads (``views.today_groups``, ``lists.reminders_due``, ``views.today_due_entries``,
+``Model.done_on``), and Done, Remove, Edit and the box call the browse tool's own methods, so an item done here is done there.
 
 It never takes the keyboard from the window you're in, except when you click in its box or press its hotkey, so you can tick
 something off and carry on typing in Outlook. Answering WM_MOUSEACTIVATE with "don't activate" isn't enough for that: tried with
@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import time
+from collections.abc import Callable
 from ctypes import wintypes
 from datetime import date
 from typing import TYPE_CHECKING
@@ -39,9 +40,12 @@ from PySide6.QtWidgets import (
 )
 
 from docrepo import db, key_dates, markup, notes_page, panel_rules, selection
+from docrepo.dates import to_date
 from docrepo.detail import Pages, PageState, esc
+from docrepo.lists import reminders_due
 from docrepo.model import Model
 from docrepo.panel_rules import OPEN_KEY, Hover, Monitor, Place, Rect
+from docrepo.schedule import DueDate
 from docrepo.ui import tokens
 from docrepo.ui.browse_window import TODAY_MINE_KEY
 from docrepo.ui.context import AppContext
@@ -59,6 +63,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 PLACE_KEY = "today_panel_place"
+REMINDERS_OPEN_KEY = "today_panel_reminders_open"
 DUE_OPEN_KEY = "today_panel_due_open"
 DONE_OPEN_KEY = "today_panel_done_open"
 HOVER_TICK_MS = 40
@@ -431,6 +436,8 @@ class TodayPanel(QWidget):
                 self._add(row)
         if not total:
             self._add(QLabel("Nothing on Today.", objectName="tpSub"))
+        self.extras = []
+        self._add_reminder_section(m, today)
         self._add_due_section(m, today)
         self._add_done_section(m, today)
         self.list_lay.addStretch()
@@ -457,8 +464,36 @@ class TodayPanel(QWidget):
         self._add(fold)
         return is_open
 
+    def _add_line(self, text: str, when: str, links: list[tuple[str, str, Callable[[], object]]]) -> None:
+        """A row under a folded heading: its words, its date, and each link's name, tooltip and what it does."""
+        line = QFrame(objectName="tpRow")
+        lay = QHBoxLayout(line)
+        lay.setContentsMargins(4, 2, 4, 2)
+        lay.setSpacing(4)
+        lay.addWidget(_Elided(text, "tpSub"), 1)
+        if when:
+            lay.addWidget(QLabel(when, objectName="tpSub"))
+        for name, tip, do in links:
+            link = QPushButton(name, objectName="tpLink")
+            link.setToolTip(tip)
+            link.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            link.clicked.connect(lambda _=False, do=do: do())
+            lay.addWidget(link)
+        self.extras.append(line)
+        self._add(line)
+
+    def _add_reminder_section(self, m: Model, today: date) -> None:
+        """Reminders whose day has come, as on the Today view (decisions 224 and 236 to 238), only while there are any."""
+        due = reminders_due(m, today)
+        if not due or not self._fold(REMINDERS_OPEN_KEY, f"Reminders · {len(due)}"):
+            return
+        on_today = {a.subject for a in m.today_items() if a.subject}
+        for t in due:
+            links = [] if t.id in on_today else [("Add", "Put it on Today; the reminder stays until it's cleared", lambda i=t.id: self.browse.add_to_today(i))]
+            links.append(("Clear", "Clear this reminder. Its status log records it.", lambda i=t.id: self.browse.clear_reminder(i, "Today")))
+            self._add_line(t.title, due_cell(t, today, DueDate(to_date(t.reminder), "Reminder"), use_due=False).text, links)
+
     def _add_due_section(self, m: Model, today: date) -> None:
-        self.extras = []
         mine = db.get_state(self.ctx.conn, TODAY_MINE_KEY) == "1"
         entries = today_due_entries(m, today, self.ctx.settings.me, mine)
         if not self._fold(DUE_OPEN_KEY, f"Due in the next 7 days · {len(entries)}"):
@@ -468,21 +503,8 @@ class TodayPanel(QWidget):
             task = t.task if is_key_date else t
             text = (key_dates.label(t.key_date, today) + " · " + task.title) if is_key_date else task.title
             cell = due_cell(task, today) if not is_key_date else None
-            line = QFrame(objectName="tpRow")
-            lay = QHBoxLayout(line)
-            lay.setContentsMargins(4, 2, 4, 2)
-            lay.setSpacing(4)
-            lay.addWidget(_Elided(text, "tpSub"), 1)
-            if cell:
-                lay.addWidget(QLabel(cell.text, objectName="tpSub"))
-            if not is_key_date:
-                add = QPushButton("Add", objectName="tpLink")
-                add.setToolTip("Put it on Today")
-                add.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-                add.clicked.connect(lambda _=False, i=task.id: self.browse.add_to_today(i))
-                lay.addWidget(add)
-            self.extras.append(line)
-            self._add(line)
+            links = [] if is_key_date else [("Add", "Put it on Today", lambda i=task.id: self.browse.add_to_today(i))]
+            self._add_line(text, cell.text if cell else "", links)
 
     def _add_done_section(self, m: Model, today: date) -> None:
         done = m.done_on(today)

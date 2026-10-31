@@ -615,7 +615,7 @@ Round 5's thread C: stage 20, items 68 and 69. The research is `../docs/ui-desig
 **Release 5.43: the Today side panel,** `docrepo/ui/today_panel.py` and `docrepo/panel_rules.py` (hovering, snapping and finding a monitor, without Qt).
 
 - **At rest,** 180 px: the count and one line per item, grouped as the Today view does. **Widened,** 320 px after 0.4 s at rest on it, or 0.7 s on an edge between two monitors: a second line, the due date, Done and Remove on the row under the pointer, the box for a quick task or note, and folded Due in the next 7 days and Done today. It contracts 1.5 s after the pointer leaves, and never while the pointer is on it, its box has the cursor, a menu is open, or a detail is showing. **Detail,** 420 px: the task's page to read, with Done, Remove, Edit and Open in the browse tool. A note shows its text, with Edit and Make it a task.
-- **One list, not two:** its rows are `today_groups`, `today_due_entries` (the Today view's Due rows, moved to `views.py`) and `done_on`; its buttons are the browse tool's own methods.
+- **One list, not two:** its rows are `today_groups`, `reminders_due` (release 5.36's, taken in at the merge), `today_due_entries` (the Today view's Due rows, moved to `views.py`) and `done_on`; its buttons are the browse tool's own methods.
 - **Never taking the keyboard:** the window has WS_EX_NOACTIVATE, so a click on anything but its box leaves the keyboard where it is. A click in the box, or its hotkey, lifts that and takes the keyboard; Up, Down, Enter, Space, Delete and Esc work there, and it's put back when the panel loses the keyboard.
 - **Moving:** drag the top line, and it snaps to the nearer side of the monitor it's over. Move to next screen is on the top line's right-click. It finds its monitor again by name, serial number and size; if the monitor goes, it moves to the main one and returns with it.
 - **Full screen:** hidden while a full-screen window or a slide show covers its monitor. `exclude_from_capture` is off until the owner has checked with IT.
@@ -638,7 +638,9 @@ Round 5's thread C: stage 20, items 68 and 69. The research is `../docs/ui-desig
   - **More modules than the design's table:** `docrepo/ui/wheels.py` (the config, opening and running), `docrepo/ui/draft_aside.py`, `docrepo/ui/selection_capture.py` and `docrepo/panel_rules.py`, so the shared windows take small additions only.
   - **`settings.json` holds the wheels' hotkeys only once they're set,** so the documented example in `tests/fixtures/examples.md` (thread B's) doesn't change.
   - **The hard rules' text** gained three small things, all DocRepo's own files: `SafeFS` writes `.jsonc` and `.csv`, it can add a line to a text file (`append_text`), and `opener.start_own_file` opens one file, `Config\wheels.jsonc`.
-- **At merge:** bring in `main`, run all the tests, and take thread E's reminders into the panel's rows, in `TodayPanel.refresh`. Thread A's new capture form fields, if any, join `draft_aside.py`'s lists, or they won't come back with a draft set aside.
+- **At the merge (2026-10-30):**
+  - **Decision 224, reminders in the panel:** a folded heading of their own, Reminders · N, between the day's items and Due in the next 7 days, like its neighbours, only while one's day has come. Each row has its date, Add (unless it's on Today) and Clear, which the status log records as "Today". For the owner's hand test.
+  - **`draft_aside.py`** keeps release 5.46's capture fields too (Duration, Runs through weekends and the hours' units), so they come back with a draft set aside.
 
 ## Release 5.38: quick input (2026-10-30)
 

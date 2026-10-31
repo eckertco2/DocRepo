@@ -561,6 +561,22 @@ def test_closing_the_blank_capture_empty_brings_the_draft_back(capture):
     assert "came back" in capture.draft_label.text() and capture.aside.data is None
 
 
+def test_a_draft_set_aside_keeps_its_duration_and_hours_unit(capture):
+    """Release 5.46's fields in the capture window come back with the rest of the form."""
+    capture.show_capture()
+    type_draft(capture)
+    capture.types = {"new_task"}
+    capture.n_duration.setText("5")
+    capture.n_calendar.setChecked(True)
+    capture.n_asg_hours.setText("6")
+    capture.n_asg_row.set_per_day(True)
+    capture.open_blank()
+    assert capture.n_duration.text() == "" and not capture.n_calendar.isChecked() and not capture.n_asg_row.per_day()
+    capture.hide()
+    assert capture.n_duration.text() == "5" and capture.n_calendar.isChecked()
+    assert capture.n_asg_hours.text() == "6" and capture.n_asg_row.per_day()
+
+
 def test_saving_the_blank_capture_brings_the_draft_back(capture):
     capture.show_capture()
     type_draft(capture)
