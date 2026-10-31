@@ -60,6 +60,9 @@ class Task:
     calendar_days: bool = False
     lead_per_day: float | None = None
     assignee_per_day: float | None = None
+    #: Release 5.49 (decision 260): each role's hours a week, instead of a day. A role has one rate at most.
+    lead_per_week: float | None = None
+    assignee_per_week: float | None = None
     leads: list[str] = field(default_factory=list)
     assignees: list[str] = field(default_factory=list)
     labels: list[str] = field(default_factory=list)
@@ -67,6 +70,11 @@ class Task:
     references: dict[str, str] = field(default_factory=dict)
     #: Release 5.47 (decision 196): each person's Involvement where it isn't 100: {(role, person): percent}, role being "lead" or "assignee".
     involvement: dict[tuple[str, str], int] = field(default_factory=dict)
+
+    def rate_of(self, role: str) -> tuple[float, str] | None:
+        """A role's rate and what it's per, ``(6.0, "day")`` or ``(3.0, "week")``, or None when its hours are a total."""
+        day, week = (self.lead_per_day, self.lead_per_week) if role == "lead" else (self.assignee_per_day, self.assignee_per_week)
+        return (day, "day") if day is not None else (week, "week") if week is not None else None
 
     def share(self, role: str, person: str) -> int:
         """How much of a role's hours land on one person: their Involvement, 100 by default."""
@@ -286,7 +294,7 @@ def _unique(items: Iterable[str]) -> list[str]:
 _TASK_COLUMNS = (
     "id, title, state, closed, urgent, meeting, recurrence, repeat_until, start, due, deadline, deadline_desc, reminder, "
     "lead_hours, assignee_hours, inherit_labels, description, current_status, created, created_by, discarded, discard_reason, plant_event, "
-    "priority, priority_rank, day_headings, duration, calendar_days, lead_per_day, assignee_per_day"
+    "priority, priority_rank, day_headings, duration, calendar_days, lead_per_day, assignee_per_day, lead_per_week, assignee_per_week"
 )
 
 

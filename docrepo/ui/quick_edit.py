@@ -38,7 +38,7 @@ from docrepo.dates import workday_numbers
 from docrepo.db import RECURRENCES
 from docrepo.model import Model
 from docrepo.schedule import placed
-from docrepo.tasks import RATES
+from docrepo.tasks import unit_span
 from docrepo.ui import tokens
 from docrepo.ui.context import AppContext
 from docrepo.ui.icons import icon, icon_size
@@ -49,7 +49,8 @@ from docrepo.ui.task_forms import BAD_DURATION, KeyDatesEditor, days_valid, key_
 from docrepo.ui.widgets import DateField, FlowLayout, HoursField, set_filled
 
 #: Its width (decision 145: about the pinned capture window's size, a little larger for the chips and the during line).
-WIDTH = 352
+WIDTH = 362
+UNITS = ("all", "day", "week")  # the unit box's choices, in order
 CHIP_TEXT = 102  # what a person's chip has room for beside the hours and their unit: a longer name is shortened
 #: The top line's height: dragging it, outside its buttons, moves the window.
 HEAD = 32
@@ -285,8 +286,8 @@ class QuickEdit(QWidget):
             h.textEdited.connect(lambda _, hkey=hkey: self._field_edited(hkey))
             who.addWidget(h, r, 2, Qt.AlignmentFlag.AlignTop)
             unit = QComboBox()
-            unit.addItems(["h in all", "h a day"])
-            unit.setFixedWidth(84)
+            unit.addItems(["h in all", "h a day", "h a week"])
+            unit.setFixedWidth(94)
             unit.setAccessibleName(f"{planning.NAMES[hkey]} unit")
             unit.activated.connect(lambda _, hkey=hkey: self._unit_changed(hkey))
             who.addWidget(unit, r, 3, Qt.AlignmentFlag.AlignTop)
@@ -353,10 +354,9 @@ class QuickEdit(QWidget):
             people_row.set_ids(getattr(v, key), key in filled)
         routine = bool(v.recurrence)
         for key, h in self.hours.items():
-            rate = getattr(v, RATES[key])
             if key != skip:
-                h.set_value(rate if rate is not None else getattr(v, key))
-            self.units[key].setCurrentIndex(0 if rate is None else 1)
+                h.set_value(planning.number_of(v, key))
+            self.units[key].setCurrentIndex(UNITS.index(planning.unit_of(v, key)))
             self.units[key].setVisible(not routine)  # a routine task's hours are for each time
             set_filled(h, key in filled)
         self.length_row.setVisible(not routine)
@@ -435,7 +435,7 @@ class QuickEdit(QWidget):
             if not h.is_valid():
                 self.off.add(key)
                 return  # kept as typed; Save says what's wrong
-            setattr(self.base, RATES[key] if self.units[key].currentIndex() == 1 and h.value() is not None else key, h.value())
+            planning.set_hours(self.base, key, UNITS[self.units[key].currentIndex()], h.value())
         elif key == "plant_event":
             self.base.plant_event = self.plant_event.isChecked()
         self.off.add(key)
@@ -448,17 +448,16 @@ class QuickEdit(QWidget):
         b.start, b.due = start or "", due or ""
 
     def _unit_changed(self, key: str) -> None:
-        """h in all or h a day: switching keeps the total, when the task has a length; without one, it keeps the number,
-        read as the new unit (decision 189)."""
+        """h in all, h a day or h a week: switching keeps the total, when the task has a length; without one, it keeps the number,
+        read as the new unit (decisions 189, 260)."""
         if self._setting:
             return
-        rate_key, per_day = RATES[key], self.units[key].currentIndex() == 1
-        v, days = self.values(), planning.length(self.values(), self.workdays)
-        number = getattr(v, rate_key) if getattr(v, rate_key) is not None else getattr(v, key)
+        unit = UNITS[self.units[key].currentIndex()]
+        v = self.values()
+        days, was, number = planning.length(v, self.workdays), planning.unit_of(v, key), planning.number_of(v, key)
         if number is not None and days:
-            number = round(number / days, 2) if per_day else round(number * days, 2)
-        setattr(self.base, rate_key, number if per_day else None)
-        setattr(self.base, key, None if per_day else number)
+            number = round(number * unit_span(was, days, self.workdays, v.calendar_days) / unit_span(unit, days, self.workdays, v.calendar_days), 2)
+        planning.set_hours(self.base, key, unit, number)
         self.off.add(key)
         self._changed_by_user(None)
 

@@ -155,6 +155,8 @@ class NewTaskFields:
     calendar_days: bool = False
     lead_per_day: float | None = None
     assignee_per_day: float | None = None
+    lead_per_week: float | None = None  # release 5.49
+    assignee_per_week: float | None = None
 
 
 @dataclass
@@ -536,6 +538,7 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
                 lead_hours=nt.lead_hours, assignee_hours=nt.assignee_hours, labels=nt.labels, inherit_labels=nt.inherit_labels,
                 plant_event=nt.plant_event or bool(own and own.plant_event), references=nt.references, duration=nt.duration,
                 calendar_days=nt.calendar_days, lead_per_day=nt.lead_per_day, assignee_per_day=nt.assignee_per_day,
+                lead_per_week=nt.lead_per_week, assignee_per_week=nt.assignee_per_week,
             )
             if nt.key_dates:  # its key dates (release 5.31), logged as the capture's
                 tasks.add_key_dates(conn, created, nt.key_dates, at=at, via=via)

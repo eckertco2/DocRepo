@@ -123,7 +123,7 @@ def _chip(w: QuickEdit, start: str) -> QToolButton:
 
 def test_typing_fills_the_fields_tinted_and_a_chip_unticks(qapp, ctx):
     w = _window(qapp, ctx)
-    assert w.isVisible() and w.width() == 352 and w.box.hasFocus()
+    assert w.isVisible() and w.width() == 362 and w.box.hasFocus()
     QTest.keyClicks(w.box, PLAN)
     assert w.dates["due"].value() == "2026-11-20" and w.dates["due"].line.property("filled")
     assert w.hours["assignee_hours"].value() == 18.0 and w.hours["assignee_hours"].property("filled")

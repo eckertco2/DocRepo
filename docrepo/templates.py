@@ -35,7 +35,7 @@ from docrepo.parse import Who
 from docrepo.safe_fs import SafeFS
 from docrepo.schedule import length_of
 from docrepo.stories import clip
-from docrepo.tasks import FIELD_NAMES, RATES, TEMPLATE_LINK, Change, TaskError, _normalize, stated, worked_out
+from docrepo.tasks import FIELD_NAMES, RATE_FIELDS, RATES, TEMPLATE_LINK, WEEK_RATES, Change, TaskError, _normalize, hours_values, stated, worked_out
 
 log = logging.getLogger(__name__)
 
@@ -74,6 +74,8 @@ class Row:
     calendar_days: bool = False
     lead_per_day: float | None = None
     assignee_per_day: float | None = None
+    lead_per_week: float | None = None
+    assignee_per_week: float | None = None
     leads: list[str] = field(default_factory=list)
     assignees: list[str] = field(default_factory=list)
     labels: list[str] = field(default_factory=list)
@@ -144,7 +146,7 @@ class Library:
         for r in q("SELECT * FROM template_rows ORDER BY place, id"):
             row = Row(r["id"], r["template"], r["parent"], r["place"], r["title"], r["description"], bool(r["inherit_labels"]), r["lead_hours"],
                       r["assignee_hours"], bool(r["urgent"]), bool(r["meeting"]), bool(r["plant_event"]), r["recurrence"], r["notes"],
-                      r["duration"], bool(r["calendar_days"]), r["lead_per_day"], r["assignee_per_day"])
+                      r["duration"], bool(r["calendar_days"]), r["lead_per_day"], r["assignee_per_day"], r["lead_per_week"], r["assignee_per_week"])
             self.rows[row.id] = row
             if row.parent is None:
                 self.templates[row.template].top = row.id
@@ -231,7 +233,7 @@ def field_text(m: Model | None, key: str, value) -> str:
     if value is None or value == "" or value == []:
         return "None"
     if key in RATES:
-        return f"{num(value[1])} h a day" if isinstance(value, tuple) else f"{num(value)} h"
+        return f"{num(value[1])} h {value[0]}" if isinstance(value, tuple) else f"{num(value)} h"
     if key == "duration":
         return days_text(value)
     if key in ("start", "due"):
@@ -263,13 +265,15 @@ def _checked(conn: sqlite3.Connection, values: Mapping) -> dict:
     """A form's values for a row, checked as a task's are. ``notes`` is markup. A rate stands for its total, and a row that
     repeats has no Duration or rate, as a routine task hasn't."""
     out = {k: _normalize(conn, k, values.get(k)) for k in ("title", "description", "lead_hours", "assignee_hours", "recurrence", "leads", "assignees", "labels",
-                                                            "duration", "lead_per_day", "assignee_per_day")}
+                                                            "duration", *RATE_FIELDS)}
     out.update(inherit_labels=bool(values.get("inherit_labels", True)), urgent=bool(values.get("urgent")), meeting=bool(values.get("meeting")),
                plant_event=bool(values.get("plant_event")), calendar_days=bool(values.get("calendar_days")), notes=(values.get("notes") or "").strip("\n"))
     if out["recurrence"]:
-        out.update(duration=None, calendar_days=False, lead_per_day=None, assignee_per_day=None)
-    for hours, rate in RATES.items():
-        if out[rate] is not None:
+        out.update(duration=None, calendar_days=False, **dict.fromkeys(RATE_FIELDS))
+    for hours in RATES:  # one rate at most, and it stands for the total
+        if out[RATES[hours]] is not None:
+            out[WEEK_RATES[hours]] = None
+        if out[RATES[hours]] is not None or out[WEEK_RATES[hours]] is not None:
             out[hours] = None
     out["involvement"] = {(role, p): share for (role, p), share in tasks.shares_of(values.get("involvement")).items()
                           if p in out["leads" if role == "lead" else "assignees"]}
@@ -277,7 +281,7 @@ def _checked(conn: sqlite3.Connection, values: Mapping) -> dict:
 
 
 _COLUMNS = ("title", "description", "inherit_labels", "lead_hours", "assignee_hours", "urgent", "meeting", "plant_event", "recurrence", "notes", "duration",
-            "calendar_days", "lead_per_day", "assignee_per_day")
+            "calendar_days", *RATE_FIELDS)
 
 
 def _store_lists(conn: sqlite3.Connection, row_id: int, v: Mapping) -> None:
@@ -387,8 +391,8 @@ def _as_changes(row: Row, keys: Sequence[str], t) -> dict[str, object]:
     out: dict[str, object] = {}
     for k in keys:
         if k in RATES:
-            rate = getattr(row, RATES[k])
-            out.update({RATES[k]: rate} if rate is not None else {k: getattr(row, k), RATES[k]: None})
+            value = stated(row, k)
+            out.update(hours_values(k, value[0][2:], value[1]) if isinstance(value, tuple) else hours_values(k, "all", value))
         else:
             out[k] = getattr(row, k)
         if k in ROLES:
@@ -403,7 +407,7 @@ def _plan_row(conn: sqlite3.Connection, settings: Settings, row_id: int, v: Mapp
     before = lib.rows.get(row_id)
     if before is None:
         raise TaskError("That row isn't in a template any more.")
-    after = replace(before, **{k: v[k] for k in (*FIELDS, "notes", "lead_per_day", "assignee_per_day", "involvement")})
+    after = replace(before, **{k: v[k] for k in (*FIELDS, "notes", *RATE_FIELDS, "involvement")})
     changed = [k for k in FIELDS if stated(before, k) != stated(after, k)]
     name = after.title if before.parent is None else lib.name(before.template)
     plan = RowPlan(row_id, after.title, before.template, name, changed, [_change_line(m, k, stated(before, k), stated(after, k)) for k in changed],
@@ -517,7 +521,7 @@ def _plan_add(conn: sqlite3.Connection, parent: int, v: Mapping) -> AddPlan:
     p = lib.rows.get(parent)
     if p is None:
         raise TaskError("That row isn't in a template any more.")
-    row = Row(0, p.template, parent, 0, **{k: v[k] for k in (*FIELDS, "notes", "lead_per_day", "assignee_per_day", "involvement")})
+    row = Row(0, p.template, parent, 0, **{k: v[k] for k in (*FIELDS, "notes", *RATE_FIELDS, "involvement")})
     plan = AddPlan(row.title, parent, p.title, p.template, lib.name(p.template), summary(row))
     for c in lib.trees(p.template):
         t = m.tasks.get(c.task)
@@ -683,6 +687,51 @@ def reparent_row(conn: sqlite3.Connection, row_id: int, parent: int) -> None:
         conn.execute("UPDATE template_rows SET parent = ?, place = ? WHERE id = ?", (parent, place, row_id))
 
 
+def place_row(conn: sqlite3.Connection, row_id: int, target: int, where: str) -> bool:
+    """Put a row before or after another, or ``in`` it, at its end: what dragging a row does (decision 261). Only trees made afterwards
+    see it (decision 188). Says whether it moved."""
+    with transaction(conn):
+        lib = Library(conn)
+        if not can_place(lib, row_id, target, where):
+            raise TaskError("A row can only go beside or under another row of its template, and not under itself.")
+        row, near = lib.rows[row_id], lib.rows[target]
+        parent = near.id if where == "in" else near.parent
+        before = [r.id for r in lib.children(parent)]
+        ids = [x for x in before if x != row_id]
+        ids.insert(len(ids) if where == "in" else ids.index(target) + (where == "after"), row_id)
+        if ids == before and row.parent == parent:
+            return False
+        conn.execute("UPDATE template_rows SET parent = ? WHERE id = ?", (parent, row_id))
+        _renumber(conn, ids)
+    return True
+
+
+def can_place(lib: Library, row_id: int, target: int, where: str) -> bool:
+    """Whether a row can go there: not the top row, not into another template, not under itself, and not beside a top row."""
+    row, near = lib.rows.get(row_id), lib.rows.get(target)
+    if row is None or near is None or row.parent is None or row.template != near.template or target in [x.id for x, _ in lib.walk(row_id)]:
+        return False
+    return where == "in" or near.parent is not None
+
+
+def duplicate(conn: sqlite3.Connection, template_id: int, name: str, at: datetime) -> int:
+    """A new template with the same rows, in the same order, and all they hold (decision 262). It's a template of its own: no trees,
+    no Changes, and no tie to the original. Returns its top row."""
+    name = name.strip()
+    if not name:
+        raise TaskError("A template needs a name.")
+    with transaction(conn):
+        lib = Library(conn)
+        copy = conn.execute("INSERT INTO templates (created) VALUES (?)", (stamp(at),)).lastrowid
+        made: dict[int, int] = {}
+        for row, _ in lib.walk(lib.templates[template_id].top):
+            values = {k: getattr(row, k) for k in (*_COLUMNS, "leads", "assignees", "labels", "involvement")}
+            if row.parent is None:
+                values["title"] = name
+            made[row.id] = _insert_row(conn, copy, made.get(row.parent), values)
+    return made[lib.templates[template_id].top]
+
+
 def set_discarded(conn: sqlite3.Connection, template_id: int, reason: str | None, at: datetime) -> None:
     """Discard a template, with the reason, or bring it back (``reason`` None). It's never deleted, and its tasks keep their
     values and stop showing marks until it's back."""
@@ -756,7 +805,7 @@ def _copy_row(conn: sqlite3.Connection, settings: Settings, row: Row, title: str
         conn, settings, title=title, at=at, created_by=created_by, parents=parents, description=row.description, start=c.start or None,
         recurrence=row.recurrence, urgent=row.urgent, meeting=row.meeting, plant_event=row.plant_event, leads=copy.leads, assignees=copy.assignees,
         lead_hours=row.lead_hours, assignee_hours=row.assignee_hours, labels=row.labels, inherit_labels=row.inherit_labels, duration=copy.duration,
-        calendar_days=row.calendar_days, lead_per_day=row.lead_per_day, assignee_per_day=row.assignee_per_day, involvement=row.involvement)
+        calendar_days=row.calendar_days, **{k: getattr(row, k) for k in RATE_FIELDS}, involvement=row.involvement)
     conn.execute("INSERT INTO task_template (task, row_id, tree) VALUES (?, ?, ?)", (task_id, row.id, tree or task_id))
     conn.executemany("INSERT INTO task_links (task, field) VALUES (?, ?)",
                      [(task_id, k) for k in FIELDS if fills(row, k) and stated(copy, k) == stated(row, k) and not (k == "title" and top)])
@@ -815,15 +864,14 @@ def save_as_template(conn: sqlite3.Connection, settings: Settings, task_id: str,
             t = m.task(tid)
             days = t.duration if t.recurrence else length_of(t.start, t.due, t.duration, workdays, t.calendar_days)
             v = _checked(conn, {k: getattr(t, k) for k in FIELDS} | {"title": title if parent is None else t.title, "duration": days,
-                                                                      "lead_per_day": t.lead_per_day, "assignee_per_day": t.assignee_per_day,
-                                                                      "involvement": t.involvement})
+                                                                      **{k: getattr(t, k) for k in RATE_FIELDS}, "involvement": t.involvement})
             row_id = _insert_row(conn, template, parent, v)
             top = top or row_id
             if link:
                 conn.execute("DELETE FROM task_links WHERE task = ?", (tid,))
                 conn.execute("INSERT INTO task_template (task, row_id, tree) VALUES (?, ?, ?) "
                              "ON CONFLICT(task) DO UPDATE SET row_id = excluded.row_id, tree = excluded.tree", (tid, row_id, task_id))
-                row = Row(row_id, template, parent, 0, v["title"], **{k: v[k] for k in (*FIELDS, "lead_per_day", "assignee_per_day", "involvement") if k != "title"})
+                row = Row(row_id, template, parent, 0, v["title"], **{k: v[k] for k in (*FIELDS, *RATE_FIELDS, "involvement") if k != "title"})
                 conn.executemany("INSERT INTO task_links (task, field) VALUES (?, ?)",
                                  [(tid, k) for k in FIELDS if fills(row, k) and not (k == "title" and parent is None)])
                 tasks.record(conn, tid, at, via, [Change(TEMPLATE_LINK, None, f"Follows {title}")])

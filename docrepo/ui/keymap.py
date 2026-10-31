@@ -36,7 +36,7 @@ OTHER_KEYS = (
     ("Ctrl, held", "Shows the Ctrl shortcuts in the window, after half a second"),
     ("1 to 4, 0", "On the Priorities board: puts the selected card in Critical, High, Medium or Parking lot, or takes it out (0)"),
     ("Alt+Up, Alt+Down", "On the Priorities board: moves the selected card up or down in its bucket. The arrow keys move between cards; "
-                         "Enter opens the task"),
+                         "Enter opens the task. In Templates: moves the selected row among those beside it"),
     ("F1", "This list"),
 )
 #: The Task view's keys (releases 5.34 and 5.35). The letters above act on its task there too, with Alt from its box.

@@ -24,7 +24,7 @@ from docrepo import timeline
 from docrepo.model import Model, Task
 from docrepo.parse import EVENT_WORDS, ROLE_HOURS_RE, Known, ParsePerson, Who, parse_capture, work_weeks
 from docrepo.schedule import length_of
-from docrepo.tasks import RATES, KeyDateRow
+from docrepo.tasks import RATES, WEEK_RATES, KeyDateRow, hours_values, rate_total
 
 MON_TO_FRI = frozenset(range(5))
 #: The fields Quick edit has, in the order its chips are listed.
@@ -62,6 +62,9 @@ class Values:
     assignee_per_day: float | None = None
     #: Release 5.47: each person's Involvement where it isn't 100, set in Edit task; it counts in the total and shows on a chip.
     involvement: dict[tuple[str, str], int] = field(default_factory=dict)
+    #: Release 5.49 (decision 260): each role's hours a week, instead of a day.
+    lead_per_week: float | None = None
+    assignee_per_week: float | None = None
 
     def copy(self) -> Values:
         return replace(self, leads=list(self.leads), assignees=list(self.assignees), key_dates=[replace(r) for r in self.key_dates],
@@ -72,7 +75,7 @@ def values_of(t: Task, key_dates: Sequence[KeyDateRow] = ()) -> Values:
     """A task's fields as Quick edit shows them. A Start that isn't set stays empty (the task starts the day it was made)."""
     return Values(t.start or "", t.due or "", t.deadline or "", t.deadline_desc or "", t.recurrence or "", list(t.leads),
                   list(t.assignees), t.lead_hours, t.assignee_hours, bool(t.plant_event), [replace(r) for r in key_dates],
-                  t.duration, t.calendar_days, t.lead_per_day, t.assignee_per_day, dict(t.involvement))
+                  t.duration, t.calendar_days, t.lead_per_day, t.assignee_per_day, dict(t.involvement), t.lead_per_week, t.assignee_per_week)
 
 
 @dataclass(frozen=True)
@@ -212,6 +215,7 @@ def shown(base: Values, reading: Reading) -> Values:
         setattr(v, key, list(value) if isinstance(value, list) else value)
         if key in RATES:  # the box reads a total, which takes a rate's place
             setattr(v, RATES[key], None)
+            setattr(v, WEEK_RATES[key], None)
     return v
 
 
@@ -221,13 +225,27 @@ def length(v: Values, workdays: Collection[int] = MON_TO_FRI) -> int | None:
     return length_of(_iso(start) or None, _iso(due) or None, v.duration, workdays, v.calendar_days)
 
 
+def unit_of(v: Values, key: str) -> str:
+    """How a role's hours are stated: "all", "day" or "week"."""
+    return "day" if getattr(v, RATES[key]) is not None else "week" if getattr(v, WEEK_RATES[key]) is not None else "all"
+
+
+def number_of(v: Values, key: str) -> float | None:
+    """The number a role's hours are stated by: its rate, or its total."""
+    unit = unit_of(v, key)
+    return getattr(v, RATES[key] if unit == "day" else WEEK_RATES[key] if unit == "week" else key)
+
+
+def set_hours(v: Values, key: str, unit: str, number: float | None) -> None:
+    setattr(v, RATES[key], number if unit == "day" else None)
+    setattr(v, WEEK_RATES[key], number if unit == "week" else None)
+    setattr(v, key, number if unit == "all" else None)
+
+
 def role_total(v: Values, key: str, workdays: Collection[int] = MON_TO_FRI) -> float | None:
-    """A role's total, worked out from its rate when it has one (decision 189)."""
-    rate = getattr(v, RATES[key])
-    if rate is None:
-        return getattr(v, key)
-    days = length(v, workdays)
-    return round(rate * days, 2) if days else None
+    """A role's total, worked out from its rate when it has one (decisions 189, 260)."""
+    unit = unit_of(v, key)
+    return getattr(v, key) if unit == "all" else rate_total((f"a {unit}", number_of(v, key)), length(v, workdays), workdays, v.calendar_days)
 
 
 def total_hours(v: Values, workdays: Collection[int] = MON_TO_FRI) -> float:
@@ -245,8 +263,9 @@ def total_text(v: Values, task: Task, workdays: Collection[int] = MON_TO_FRI) ->
     """The line under the people: the total, and about how much a week over the task's workdays (a routine task's are
     for each time it comes round). A rate with no length says it needs one."""
     total = total_hours(v, workdays)
-    if not total and (v.lead_per_day is not None or v.assignee_per_day is not None):
-        return f"{hours_text(v.assignee_per_day if v.assignee_per_day is not None else v.lead_per_day)} h a day, needs a length"
+    rated = next((k for k in ("assignee_hours", "lead_hours") if unit_of(v, k) != "all"), None)
+    if not total and rated:
+        return f"{hours_text(number_of(v, rated))} h a {unit_of(v, rated)}, needs a length"
     if not total:
         return "No hours yet: its bar on the timeline stays blank."
     if v.recurrence:
@@ -279,8 +298,8 @@ def problem(v: Values) -> str | None:
 def edit_values(v: Values) -> dict[str, Any]:
     """The fields as ``edits.edit_task`` takes them: each role's hours as a rate, or as a total with no rate."""
     hours: dict[str, Any] = {}
-    for key, rate in RATES.items():
-        hours.update({rate: getattr(v, rate)} if getattr(v, rate) is not None else {key: getattr(v, key), rate: None})
+    for key in RATES:
+        hours.update(hours_values(key, unit_of(v, key), number_of(v, key)))
     return {"start": v.start or None, "due": v.due or None, "deadline": v.deadline or None, "deadline_desc": v.deadline_desc,
             "recurrence": v.recurrence or None, "leads": [Who(p) for p in v.leads], "assignees": [Who(p) for p in v.assignees],
             **hours, "plant_event": v.plant_event, "key_dates": [replace(r) for r in v.key_dates],

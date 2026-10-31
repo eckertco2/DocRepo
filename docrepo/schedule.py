@@ -59,6 +59,11 @@ def _counts(day: date, workdays: Collection[int], every_day: bool) -> bool:
     return every_day or not workdays or day.weekday() in workdays
 
 
+def week_of(workdays: Collection[int], every_day: bool = False) -> int:
+    """How many days make a week, for h a week (decision 260): the workdays in Settings, or 7 with Runs through weekends."""
+    return 7 if every_day else len(workdays) or 7
+
+
 def days_in(first: date, last: date, workdays: Collection[int], every_day: bool = False) -> int:
     """How many days a task from ``first`` to ``last`` has: its workdays, or every day with Runs through weekends (decision
     190). One that holds no workday counts its calendar days, as the capacity calendar spreads its hours over them."""

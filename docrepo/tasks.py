@@ -19,13 +19,14 @@ from docrepo.dates import check_date, stamp, to_date, workday_numbers
 from docrepo.db import RECURRENCES, STATES, next_id, transaction
 from docrepo.model import Task, load_tasks
 from docrepo.pages import num
-from docrepo.schedule import days_in, due_after, length_of, placed
+from docrepo.schedule import days_in, due_after, length_of, placed, week_of
 
 #: The fields a change can set, with their names in the status log, in the order the log lists them.
 FIELDS = (
     ("state", "State"), ("current_status", "Current status"), ("due", "Due"), ("deadline", "Deadline"),
     ("deadline_desc", "Deadline description"), ("duration", "Duration"), ("calendar_days", "Runs through weekends"), ("leads", "Lead"),
-    ("assignees", "Assignees"), ("lead_per_day", "Lead hours a day"), ("assignee_per_day", "Assignee hours a day"), ("lead_hours", "Lead hours"),
+    ("assignees", "Assignees"), ("lead_per_day", "Lead hours a day"), ("assignee_per_day", "Assignee hours a day"), ("lead_per_week", "Lead hours a week"),
+    ("assignee_per_week", "Assignee hours a week"), ("lead_hours", "Lead hours"),
     ("assignee_hours", "Assignee hours"), ("urgent", "Urgent"), ("meeting", "Meeting"), ("plant_event", "Plant event"), ("start", "Start"),
     ("reminder", "Reminder"), ("recurrence", "Recurrence"), ("repeat_until", "Repeat until"), ("title", "Title"),
     ("description", "Description"), ("labels", "Labels"), ("inherit_labels", "Inherit parent labels"),
@@ -40,11 +41,14 @@ REFERENCES = "references"
 INVOLVEMENT = "involvement"
 #: A link to a template ending or starting, in the status log (release 5.44): its value is the whole sentence.
 TEMPLATE_LINK = "Template link"
-HOUR_FIELDS = ("lead_hours", "assignee_hours", "lead_per_day", "assignee_per_day")
-#: Each role's total and its rate (release 5.46, decision 189). With a rate, the total is worked out from it and the task's days.
+HOUR_FIELDS = ("lead_hours", "assignee_hours", "lead_per_day", "assignee_per_day", "lead_per_week", "assignee_per_week")
+#: Each role's total and its rates (release 5.46, decision 189; release 5.49, decision 260). A role has one rate at most, and with
+#: one the total is worked out from it and the task's days.
 RATES = {"lead_hours": "lead_per_day", "assignee_hours": "assignee_per_day"}
+WEEK_RATES = {"lead_hours": "lead_per_week", "assignee_hours": "assignee_per_week"}
+RATE_FIELDS = (*RATES.values(), *WEEK_RATES.values())
 ROLES = {"leads": "lead", "assignees": "assignee"}
-_RATE_FIELD = {rate: hours for hours, rate in RATES.items()}  # a rate's change is a change to the hours it states
+_RATE_FIELD = {rate: hours for hours, rate in (*RATES.items(), *WEEK_RATES.items())}  # a rate's change is a change to the hours it states
 
 
 class TaskError(ValueError):
@@ -66,6 +70,8 @@ def stated(item: Any, key: str) -> Any:
     the total worked out from it follows the task's days (decision 189)."""
     if key in RATES and getattr(item, RATES[key]) is not None:
         return ("a day", getattr(item, RATES[key]))
+    if key in WEEK_RATES and getattr(item, WEEK_RATES[key]) is not None:
+        return ("a week", getattr(item, WEEK_RATES[key]))
     if key in ROLES:  # the people, each with their Involvement: one field for each role (the design's table)
         return [(p, item.involvement.get((ROLES[key], p), 100)) for p in getattr(item, key)]
     return getattr(item, key)
@@ -252,7 +258,8 @@ def _row_values(conn: sqlite3.Connection, task_id: str) -> dict[str, Any]:
         return {}
     values: dict[str, Any] = {k: r[k] for k in ("title", "description", "recurrence", "duration")}
     values.update({k: bool(r[k]) for k in ("inherit_labels", "urgent", "meeting", "plant_event", "calendar_days")})
-    values.update({hours: ("a day", r[rate]) if r[rate] is not None else r[hours] for hours, rate in RATES.items()})
+    values.update({hours: ("a day", r[RATES[hours]]) if r[RATES[hours]] is not None else ("a week", r[WEEK_RATES[hours]]) if r[WEEK_RATES[hours]] is not None else r[hours]
+                   for hours in RATES})
     for key, role in ROLES.items():
         values[key] = [(p["person"], p["involvement"]) for p in conn.execute(
             "SELECT person, involvement FROM template_row_people WHERE row_id = ? AND role = ? ORDER BY id", (r["id"], role))]
@@ -294,7 +301,28 @@ def set_links(conn: sqlite3.Connection, task_id: str, fields: Collection[str], *
     return logged
 
 
-# ---- dates and hours (release 5.46, decisions 189 to 191) ----
+# ---- dates and hours (release 5.46, decisions 189 to 191; release 5.49, decision 260) ----
+def hours_values(hours: str, unit: str, number: float | None) -> dict[str, Any]:
+    """A role's hours as a change takes them: a rate, with the other cleared, or a total with no rate. ``unit`` is "all", "day"
+    or "week", and with no number it's a total of nothing."""
+    if number is not None and unit == "day":
+        return {RATES[hours]: number, WEEK_RATES[hours]: None}
+    if number is not None and unit == "week":
+        return {WEEK_RATES[hours]: number, RATES[hours]: None}
+    return {hours: number, RATES[hours]: None, WEEK_RATES[hours]: None}
+
+
+def unit_span(unit: str, days: int, workdays: Collection[int], every_day: bool = False) -> float:
+    """What a number in a unit is multiplied by to make the total, over a task's days: its days, or the weeks they make, part weeks
+    included, as 7 workdays is 1.4 weeks. So switching a unit can keep the total."""
+    return days if unit == "day" else days / week_of(workdays, every_day) if unit == "week" else 1
+
+
+def rate_total(stated_rate: tuple[str, float], days: int | None, workdays: Collection[int], every_day: bool = False) -> float | None:
+    """What ``("a week", 3)`` comes to over a task's days, or None until it has a length."""
+    return round(stated_rate[1] * unit_span(stated_rate[0][2:], days, workdays, every_day), 2) if days else None
+
+
 def worked_out(task: Task, changes: dict[str, Any], workdays: Collection[int], dragged: bool = False) -> tuple[dict[str, Any], set[str]]:
     """What a change to a task comes to, with its dates and totals following (the rules live here once, so every form, capture
     and drag keeps to them), and which fields were worked out rather than given.
@@ -306,11 +334,16 @@ def worked_out(task: Task, changes: dict[str, Any], workdays: Collection[int], d
     until it has a length. A routine task has no Duration and no rate: its hours are for each time."""
     new, calculated = dict(changes), set()
     if new.get("recurrence", task.recurrence):
-        new.update(duration=None, calendar_days=False, lead_per_day=None, assignee_per_day=None)
+        new.update(duration=None, calendar_days=False, **dict.fromkeys(RATE_FIELDS))
         return new, calculated
-    for hours, rate in RATES.items():
-        if rate not in new and hours in new and new[hours] != getattr(task, hours):
-            new[rate] = None
+    for hours in RATES:
+        day, week = RATES[hours], WEEK_RATES[hours]
+        if new.get(day) is not None:
+            new[week] = None
+        elif new.get(week) is not None:
+            new[day] = None
+        elif hours in new and new[hours] != getattr(task, hours):
+            new[day] = new[week] = None
     days, every = new.get("duration", task.duration), new.get("calendar_days", task.calendar_days)
     start, due = new.get("start", task.start), new.get("due", task.due)
     if days is not None:
@@ -339,11 +372,10 @@ def worked_out(task: Task, changes: dict[str, Any], workdays: Collection[int], d
             new["due"] = due
             calculated.add("due")
     length = length_of(start, due, days, workdays, every)
-    for hours, rate in RATES.items():
-        per_day = new.get(rate, getattr(task, rate))
-        if per_day is not None:
-            total = round(per_day * length, 2) if length else None
-            new[hours] = total
+    for hours in RATES:
+        per_day, per_week = new.get(RATES[hours], getattr(task, RATES[hours])), new.get(WEEK_RATES[hours], getattr(task, WEEK_RATES[hours]))
+        if per_day is not None or per_week is not None:
+            new[hours] = rate_total(("a day", per_day) if per_day is not None else ("a week", per_week), length, workdays, every)
             calculated.add(hours)
     return new, calculated
 
@@ -363,7 +395,7 @@ def create_task(
     lead_hours: float | None = None, assignee_hours: float | None = None, labels: Sequence[str] = (),
     inherit_labels: bool = True, plant_event: bool = False, references: dict[str, str] | None = None, duration: int | None = None,
     calendar_days: bool = False, lead_per_day: float | None = None, assignee_per_day: float | None = None,
-    involvement: dict[tuple[str, str], int] | None = None,
+    lead_per_week: float | None = None, assignee_per_week: float | None = None, involvement: dict[tuple[str, str], int] | None = None,
 ) -> str:
     """Create a task, under ``parents`` if any are given (a top-level task if not). Returns its ID.
 
@@ -375,6 +407,7 @@ def create_task(
         "repeat_until": repeat_until, "urgent": urgent, "meeting": meeting, "lead_hours": lead_hours,
         "assignee_hours": assignee_hours, "inherit_labels": inherit_labels, "plant_event": plant_event, "duration": duration,
         "calendar_days": calendar_days, "lead_per_day": lead_per_day, "assignee_per_day": assignee_per_day,
+        "lead_per_week": lead_per_week, "assignee_per_week": assignee_per_week,
     }
     with transaction(conn):
         values = {k: _normalize(conn, k, v) for k, v in values.items()}

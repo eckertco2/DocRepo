@@ -117,7 +117,7 @@ def test_quick_edit_has_the_same_rows(ctx):
     qe.save()
     kds = Model(ctx.conn).key_dates_of("T000008")
     assert [(kd.description, kd.end, kd.deadline) for kd in kds] == [("Trial planning period", None, False), ("Crane booked", "2026-10-12", True)]
-    assert qe.width() == 352  # kept to the window's width
+    assert qe.width() == 362  # kept to the window's width
 
 
 # ---- the task page (items 57 and 61) ----

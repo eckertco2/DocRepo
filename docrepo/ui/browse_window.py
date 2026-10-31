@@ -781,6 +781,7 @@ class BrowseWindow(QWidget):
                    "people": self._people_view, "templates": self.templates.render_list,
                    "labels": self._labels_view, "docs": self._docs_view, "search": self._search_view,
                    "discarded": self._discarded_view, "activity": self._activity_view}.get(self.view)
+        self.tree.stop_row_moves()  # the Templates view turns it back on
         self.tree.begin()
         try:
             if builder:
