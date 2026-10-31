@@ -634,7 +634,7 @@ def test_reference_fields_and_plant_events_in_the_capture_window(window, ctx):
 
 def test_parse_ticks_plant_event(window, ctx):
     """Mods log round 3 (M0059, decision 58): Parse and populate ticks Plant event from "plant event" or "major event",
-    or from **event on the new task's own line, as a field it filled; the event's end date is its Due."""
+    or from **event, on the new task's own line, as a field it filled; the event's end date is its Due."""
     window.set_task("T000010")
     window.set_type("new_task", True)
     window.content.setPlainText("Plant event: Spring outage, 2 to 6 Nov.")
@@ -644,7 +644,7 @@ def test_parse_ticks_plant_event(window, ctx):
     window.clear()
     window.set_task("T000010")
     window.set_type("new_task", True)
-    window.content.setPlainText("**event Fall turnaround, 2 to 6 Nov")
+    window.content.setPlainText("**event, Fall turnaround, 2 to 6 Nov")
     window.parse()
     assert window.n_plant.isChecked() and "Plant event" in window.found_label.text()
     window.save()
@@ -653,9 +653,9 @@ def test_parse_ticks_plant_event(window, ctx):
 
 
 def test_an_event_line_makes_a_plant_event(window, ctx):
-    """Release 5.9 (decision 22): **event. makes its line a task with Plant event ticked, from its Start to its Due."""
+    """Release 5.9 (decision 22): **event, makes its line a task with Plant event ticked, from its Start to its Due."""
     window.set_task("T000010")
-    window.content.setPlainText("Planning review.\n**event. Spring outage, 3 to 14 Nov")
+    window.content.setPlainText("Planning review.\n**event, Spring outage, 3 to 14 Nov")
     window.read_items()
     card = window.item_cards.cards[0]
     assert card.tick.text() == "Plant event" and card.title.text() == "Spring outage"

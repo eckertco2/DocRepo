@@ -27,6 +27,9 @@ from docrepo.text import is_file_line, plain_text, sentences
 ContentOf = Callable[[str], str]
 
 _DATE = re.compile(r"\d{4}-\d\d-\d\d\Z")
+#: The fields a template can change on a task, as the status log names them (release 5.45).
+TEMPLATE_FIELDS = ("Title", "Description", "Labels", "Inherit parent labels", "Lead", "Assignees", "Lead hours", "Assignee hours", "Urgent", "Meeting",
+                   "Plant event", "Recurrence", "Duration", "Runs through weekends", "Lead hours a day", "Assignee hours a day")
 
 
 def is_none(value: str | None) -> bool:
@@ -152,6 +155,10 @@ class Stories:
         def many(xs: list[str]) -> bool:
             return len(xs) > 1 or self._is_me(xs[0])
 
+        if f in TEMPLATE_FIELDS and e.via.startswith("Template: "):  # release 5.45 (decision 187): a template's own change
+            if f == "Description":
+                return f"Description reworded · {e.via}."
+            return f"{f} {'None' if is_none(before) else before} → {'None' if is_none(after) else after} · {e.via}."
         if f == "Agenda":
             if e.target == TODAY:  # mods log round 1, M0016
                 return "Added to Today." if is_none(before) else "Done for today." if after == "Done" else "Taken off Today."
@@ -180,9 +187,22 @@ class Stories:
             add, rm = diff(r",\s*")
             return " ".join(x for x in (add and f"{who(add)} {'were' if len(add) > 1 else 'was'} assigned.",
                                         rm and f"{who(rm)} {'were' if len(rm) > 1 else 'was'} unassigned.") if x)
+        if f.endswith("'s involvement"):  # release 5.47
+            tail = f" · {e.via}" if e.via.startswith("Template: ") else ""
+            return f"{f} {before} → {after}{tail}."
+        if f == "Duration":  # release 5.46
+            days = f"{after} day{'' if after == '1' else 's'}"
+            return "Duration cleared." if is_none(after) else f"Duration set to {days}." if is_none(before) else f"Duration {before} → {days}."
+        if f == "Runs through weekends":
+            return "Runs through weekends." if after == "Yes" else "Counts workdays only."
+        if f in ("Lead hours a day", "Assignee hours a day"):
+            return f"{f} cleared." if is_none(after) else f"{f} set to {after}." if is_none(before) else f"{f} {before} → {after}."
         if f in ("Lead hours", "Assignee hours"):
             if is_none(after):
                 return f"{f} cleared."
+            t = self.m.tasks.get(e.task)
+            if t is not None and not is_none(before) and (t.duration is not None or t.lead_per_day is not None or t.assignee_per_day is not None or e.task in self.m.origins):
+                return f"{f} {before} → {after}."  # the design's "Assignee hours 30 → 18", on tasks with a length to follow
             value = f"{after} h" if re.fullmatch(r"\d+(\.\d+)?", after or "") else after
             return f"{f} set to {value}."
         if f == "Urgent":
@@ -207,6 +227,8 @@ class Stories:
                                         rm and f"Label{'s' if len(rm) > 1 else ''} {and_list(rm)} removed.") if x)
         if f == "Inherit parent labels":
             return "Inherits its parents' labels again." if after == "Yes" else "No longer inherits its parents' labels."
+        if f == "Template link":  # release 5.44 (decision 187): the whole sentence is the value
+            return f"{before if is_none(after) else after}."
         if f == "Key date":  # release 5.31: its description and dates, as key_dates.log_text writes them
             return (f"Key date added: {after}." if is_none(before) else f"Key date taken off: {before}." if is_none(after)
                     else f"Key date changed: {after}.")

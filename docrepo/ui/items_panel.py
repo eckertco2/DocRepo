@@ -11,8 +11,10 @@ Ported from the mockup's ``items.js`` and ``capture.js``. ``docrepo.items`` read
 """
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from datetime import date
+from html import escape as esc
 
 from PySide6.QtCore import QPoint, Qt, Signal
 from PySide6.QtGui import QColor, QSyntaxHighlighter, QTextCharFormat, QTextDocument
@@ -31,7 +33,7 @@ from PySide6.QtWidgets import (
 )
 
 from docrepo import items
-from docrepo.dates import short
+from docrepo.dates import long_date, short
 from docrepo.model import AgendaItem, Model
 from docrepo.ui import tokens
 from docrepo.ui.icons import icon
@@ -39,7 +41,7 @@ from docrepo.ui.look import LOOK, Help
 from docrepo.ui.widgets import DateField
 
 #: Each line's tint, by the part it plays: the item it makes, the new task's own line, or a heading.
-TINTS = {"task": "#e3ecf7", "note": "#e0f1ee", "update": "#f6ecd8", "decision": "#ece6f6", "date": "#e8f0dc", "heading": "#e9edf1"}
+TINTS = {"task": "#e3ecf7", "note": "#e0f1ee", "update": "#f6ecd8", "decision": "#ece6f6", "date": "#e8f0dc", "param": "#e8f0dc", "heading": "#e9edf1"}
 #: The operators' colours: (text, background).
 REF_COLOURS = {"person": ("#1d5e98", "#dbe8f5"), "new": ("#875700", "#fcefcf"), "none": ("#5a6571", "#e9edf1"),
                "task": ("#22706a", "#d6eeea"), "type": ("#875700", "#fcefcf")}
@@ -72,7 +74,7 @@ class OperatorHighlighter(QSyntaxHighlighter):
         # A list item made with the list buttons has no "- " in its text; one typed as text has.
         base = 0 if self.currentBlock().textList() is not None else line.off
         for x in line.toks:
-            key = "type" if x.kind == "type" else "task" if x.kind == "task" else "none" if x.none else "new" if x.is_new else "person"
+            key = "type" if x.kind in ("type", "param") else "task" if x.kind == "task" else "none" if x.none else "new" if x.is_new else "person"
             fg, bg = REF_COLOURS[key]
             fmt = QTextCharFormat()
             fmt.setForeground(QColor(fg))
@@ -93,6 +95,19 @@ def _drop(layout) -> None:
             w.deleteLater()
 
 
+def _pretty(text: str) -> str:
+    """A parameter's words with its dates as you'd read them: "Due is already Fri 30 Oct"."""
+    today = date.today()
+
+    def one(m: re.Match[str]) -> str:
+        try:
+            return long_date(date.fromisoformat(m.group(0)), today)
+        except ValueError:
+            return m.group(0)  # a reference number that only looks like a date
+
+    return re.sub(r"\d{4}-\d{2}-\d{2}", one, text)
+
+
 def _facts(it: items.Item, where: str) -> str:
     who = lambda xs: ", ".join(x.name + (" (new)" if x.is_new else "") for x in xs)  # noqa: E731
     out = []
@@ -107,11 +122,15 @@ def _facts(it: items.Item, where: str) -> str:
         if it.assignee_hours or it.lead_hours:
             out.append(f"{it.assignee_hours or it.lead_hours} h")
         out.append(f"under {where}")
+    elif it.kind == "param":  # whose field it fills (release 5.38)
+        if it.where:
+            out.append(f"on {where}")
     elif it.kind == "date" and it.key_date:  # a key date (release 5.31): its dates, its ticks, and whose it is
         kd = it.key_date
         a, b = (date.fromisoformat(kd.start) if kd.start else None), (date.fromisoformat(kd.end) if kd.end else None)
-        out.append(f"on {short(a, a)}" if a and a == b else f"{short(a, a)} to {short(b, b)}" if a and b
-                   else f"from {short(a, a)}" if a else f"by {short(b, b)}" if b else "")
+        today = date.today()  # the year shows when it isn't this year's
+        out.append(f"on {short(a, today)}" if a and a == b else f"{short(a, today)} to {short(b, today)}" if a and b
+                   else f"from {short(a, today)}" if a else f"by {short(b, today)}" if b else "")
         out += ["plant activity" * kd.plant, "deadline" * kd.deadline]
         if it.where:
             out.append(f"on {where}")
@@ -146,7 +165,7 @@ class ItemCard(QFrame):
         lay.setContentsMargins(8, 5, 6, 6)
         lay.setSpacing(3)
         top = QHBoxLayout()
-        name = "Plant event" if it.plant_event else items.KIND_NAMES[it.kind]
+        name = "Plant event" if it.plant_event else it.label or items.KIND_NAMES[it.kind]
         self.tick = QCheckBox(name + (f": {it.state}" if it.state else ""))
         if not LOOK.classic:
             self.tick.setIcon(icon("task" if it.kind == "task" else "calendar" if it.kind == "date"
@@ -164,12 +183,13 @@ class ItemCard(QFrame):
         line.clicked.connect(lambda: self.go.emit(it.line))
         top.addWidget(line)
         lay.addLayout(top)
-        self.title = QLineEdit(it.title)
+        self.title = QLineEdit(_pretty(it.title) if it.kind == "param" else it.title)
         self.title.setAccessibleName(f"{name} title")
         self.title.setEnabled(it.on)
+        self.title.setReadOnly(it.kind == "param")  # a field's value is read from its line, and changed there
         self.title.textEdited.connect(lambda text: self.changed.emit(self.key, "title", text))
         lay.addWidget(self.title)
-        facts = QLabel(_facts(it, where) + (f"  <b style='color:#b0261e'>{it.problem}</b>" if it.problem else ""), objectName="hint")
+        facts = QLabel(_facts(it, where) + (f"  <b style='color:#b0261e'>{esc(_pretty(it.problem))}</b>" if it.problem else ""), objectName="hint")
         facts.setWordWrap(True)
         facts.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         lay.addWidget(facts)
@@ -247,8 +267,9 @@ class ItemCards(QFrame):
             "Each line with an operator is a card. Untick one to skip it, or change its title or due date here: your change stays "
             "even when you edit the line." if its or (own and own.any) else
             "In any capture, <b>@Tom</b> makes a task for Tom, <b>@L.Tom</b> makes him its lead, <b>@__</b> a task for no one yet, "
-            "<b>#Rigging plan</b> files a note to that task, and <b>**Closed.</b>, <b>**u</b>, <b>**n</b>, <b>**t</b>, <b>**Decision.</b> "
-            "or <b>**event.</b> say what a line is; <b>**date Dec 1 to 5 Trial run, plant activity</b> adds a key date. Type @ or # for a list.")
+            "<b>#Rigging plan</b> files a note to that task, and <b>**closed,</b>, <b>**u,</b>, <b>**n,</b>, <b>**t,</b>, <b>**decision,</b> "
+            "or <b>**event,</b> say what a line is. <b>**due, 5 Nov.</b> or <b>**key date, trial run 1 to 5 Dec, plant activity.</b> fills in "
+            "a field: any field, by its name. Type @ or # for a list.")
         self.setProperty("empty", not its and not (own and own.any))
         self.style().unpolish(self)
         self.style().polish(self)

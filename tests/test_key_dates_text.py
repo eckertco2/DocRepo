@@ -1,5 +1,5 @@
-"""Key dates from text and the capture window (release 5.31, the key dates plan, items 57 and 60): a ``**date`` line read
-as the mockup's test vectors say, saved onto its task, and New task's and Update's Key dates rows."""
+"""Key dates from text and the capture window (release 5.31, the key dates plan, items 57 and 60; since release 5.38 a
+``**key date,`` line, read as ``test_quick_input.py`` checks): saved onto its task, and New task's and Update's Key dates rows."""
 from __future__ import annotations
 
 import os
@@ -11,39 +11,16 @@ from datetime import datetime  # noqa: E402
 import pytest  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from docrepo import captures, items, tasks  # noqa: E402
+from docrepo import captures, tasks  # noqa: E402
 from docrepo.config import Settings  # noqa: E402
 from docrepo.model import Model  # noqa: E402
 from docrepo.save import CaptureDraft, NewTaskFields, save_capture  # noqa: E402
 from docrepo.tasks import KeyDateRow  # noqa: E402
 from docrepo.ui.capture_window import CaptureWindow  # noqa: E402
 from docrepo.ui.context import AppContext  # noqa: E402
-from test_parse_vectors import PEOPLE, TODAY, split_row  # noqa: E402
-from conftest import FIXTURES  # noqa: E402
 
 AT = datetime(2026, 10, 8, 9, 30)
 SETTINGS = Settings(me="P001")
-
-
-def _vector_rows() -> list[list[str]]:
-    text = (FIXTURES / "test-vectors.md").read_text(encoding="utf-8")
-    part = text[text.index("## Key dates from text"):text.index("## Parse and populate")]
-    return [split_row(line) for line in part.split("\n") if line.startswith("| ") and not line.startswith(("|---", "| Line"))]
-
-
-ROWS = _vector_rows()
-
-
-def test_the_vectors_were_read():
-    assert len(ROWS) >= 10
-
-
-@pytest.mark.parametrize("line, expected", ROWS, ids=[row[0][:50] for row in ROWS])
-def test_a_date_line_reads_as_the_mockup_does(line, expected):
-    r = items.read(line, items.Names(PEOPLE, []), TODAY, home=True)
-    it = r.items[0]
-    assert it.kind == "date" and items.key_date_text(it.key_date) == expected
-    assert bool(it.problem) == ("No date" in expected)  # a line with no date is shown, but can't be made
 
 
 def key_dates_of(conn, task_id: str) -> list[tuple]:
@@ -52,8 +29,8 @@ def key_dates_of(conn, task_id: str) -> list[tuple]:
 
 def test_saving_adds_each_date_line_to_its_task(sample_root):
     conn, root, fs = sample_root
-    content = ("Walkdown with Tom.\n**date Dec 1 to 5 Trial execution window, plant activity\n"
-               "**date by Nov 25 Prep done, deadline #Rigging plan\n**date Trial planning period")
+    content = ("Walkdown with Tom.\n**key date, Dec 1 to 5 trial execution window, plant activity.\n"
+               "**key date, by Nov 25 prep done, deadline, #Rigging plan.\n**key date, trial planning period.")
     r = save_capture(conn, root, fs, SETTINGS, CaptureDraft(content=content, task="T000008"), AT)
     assert key_dates_of(conn, "T000008") == [("2026-12-01", "2026-12-05", "Trial execution window", True, False)]
     assert key_dates_of(conn, "T000012") == [(None, "2026-11-25", "Prep done", False, True)]  # its # task's
@@ -61,13 +38,13 @@ def test_saving_adds_each_date_line_to_its_task(sample_root):
     log = conn.execute("SELECT field, via FROM status_log WHERE task = 'T000008' AND field = 'Key date'").fetchall()
     assert [tuple(x) for x in log] == [("Key date", r.capture_id)]  # logged as the notes'
     c = Model(conn).captures[r.capture_id]
-    assert "**date Dec 1 to 5 Trial execution window, plant activity" in captures.read_content(root, c)  # the notes keep the line
+    assert "**key date, Dec 1 to 5 trial execution window, plant activity." in captures.read_content(root, c)  # the notes keep the line
     assert not any(x.item == "date" for x in Model(conn).captures.values())  # no capture of its own
 
 
 def test_an_unticked_card_adds_nothing_and_a_changed_title_is_its_description(sample_root):
     conn, root, fs = sample_root
-    content = "Notes.\n**date on Nov 2 Pump test\n**date by Nov 9 Seal check"
+    content = "Notes.\n**key date, on Nov 2 pump test.\n**key date, by Nov 9 seal check."
     save_capture(conn, root, fs, SETTINGS, CaptureDraft(content=content, task="T000008",
                                                          item_overrides={"0": {"off": True}, "1": {"title": "Seal check, both pumps"}}), AT)
     assert key_dates_of(conn, "T000008") == [(None, "2026-11-09", "Seal check, both pumps", False, False)]
@@ -75,7 +52,7 @@ def test_an_unticked_card_adds_nothing_and_a_changed_title_is_its_description(sa
 
 def test_a_new_task_takes_its_rows_and_its_date_lines(sample_root):
     conn, root, fs = sample_root
-    draft = CaptureDraft(content="New product trial 1\n**date by Nov 25 Target for trial preparations", types={"new_task"},
+    draft = CaptureDraft(content="New product trial 1\n**key date, by Nov 25 target for trial preparations.", types={"new_task"},
                          new_task=NewTaskFields(title="New product trial 1", key_dates=[
                              KeyDateRow("2026-10-12", None, "Trial planning period"),
                              KeyDateRow("2026-12-01", "2026-12-05", "Trial execution window", plant=True)]))

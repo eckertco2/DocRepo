@@ -1269,7 +1269,7 @@ def parse_capture(
 
 def as_plant_event(r: ParseResult, source: str) -> None:
     """Tick Plant event (mods log round 3, M0059). A plant event runs from its Start to its Due: the end date its own name
-    made a Deadline ("Plant event: Spring outage, 2 to 6 Nov") is its Due, as for a **event item."""
+    made a Deadline ("Plant event: Spring outage, 2 to 6 Nov") is its Due, as for a **event, item."""
     r.plant_event = True
     r.found.append(Found("plant_event", "Plant event", "Yes", source))
     if r.deadline and not r.due:

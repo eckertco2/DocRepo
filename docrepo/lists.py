@@ -1,6 +1,7 @@
 """The browse tool's lists: Overdue and next 7 days, Reminders, Waiting on others, Assigned to me, Urgent,
 and No dates or hours. Each holds open tasks only, soonest first. Overdue and next 7 days also has the key dates that are
-overdue or due soon (release 5.31, decision 150), each a row of its own (``key_dates_due``).
+overdue or due soon (release 5.31, decision 150), each a row of its own (``key_dates_due``). Today shows the reminders
+whose day has come (release 5.36, ``reminders_due``).
 """
 from __future__ import annotations
 
@@ -55,6 +56,13 @@ def key_dates_due(model: Model, today: date, me: str | None = None, mine_only: b
     Mine only, those on tasks I lead or am assigned to."""
     ids = {t.id for t in model.tasks.values() if me in t.leads or me in t.assignees} if mine_only else None
     return key_dates.due(model, today, task_ids=ids)
+
+
+def reminders_due(model: Model, today: date) -> list[Task]:
+    """Today's Reminders (item 77, decisions 236 and 237): open tasks whose reminder has come, today or before, the oldest
+    first. A reminder still to come stays on the Reminders list until its day."""
+    reminders = next(x for x in LISTS if x.id == "reminders")
+    return [t for t in list_tasks(model, reminders, today, None) if to_date(t.reminder) <= today]
 
 
 def list_tasks(model: Model, task_list: TaskList, today: date, me: str | None) -> list[Task]:

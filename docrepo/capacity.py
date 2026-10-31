@@ -9,7 +9,8 @@ It's a cache built from the task fields, and can be rebuilt at any time:
 3. For each window and person, spread their hours evenly over the window's
    workdays. A window with no workdays spreads over its calendar days. A lead
    gets the lead hours, an assignee the assignee hours, and someone who is both
-   gets both. A closed task's days after its close date are dropped.
+   gets both, each by their Involvement on that role (25% of 12 hours is 3). A
+   closed task's days after its close date are dropped.
 """
 from __future__ import annotations
 
@@ -30,8 +31,9 @@ def horizon(today: date, settings: Settings) -> date:
 
 
 def roles_of(task: Task) -> list[tuple[str, float]]:
-    """(person, hours) for each lead, then each assignee."""
-    return [(p, task.lead_hours or 0) for p in task.leads] + [(p, task.assignee_hours or 0) for p in task.assignees]
+    """(person, hours) for each lead, then each assignee: their share of the role's hours, by their Involvement (decision 196)."""
+    return ([(p, (task.lead_hours or 0) * task.share("lead", p) / 100) for p in task.leads]
+            + [(p, (task.assignee_hours or 0) * task.share("assignee", p) / 100) for p in task.assignees])
 
 
 def task_rows(task: Task, today: date, settings: Settings) -> dict[tuple[str, date], float]:
@@ -44,7 +46,7 @@ def task_rows(task: Task, today: date, settings: Settings) -> dict[tuple[str, da
     rows: dict[tuple[str, date], float] = defaultdict(float)
     for first, last in windows(task, horizon(today, settings)):
         span = [first + timedelta(days=i) for i in range((last - first).days + 1)]
-        days = [d for d in span if d.weekday() in workdays] or span
+        days = span if task.calendar_days else [d for d in span if d.weekday() in workdays] or span  # Runs through weekends (decision 190)
         for person, hours in roles:
             if not hours:
                 continue
@@ -104,7 +106,7 @@ def unplaced(model: Model, today: date, settings: Settings) -> tuple[list[str], 
         roles = roles_of(t)
         if t.state == "Parked" or not roles:
             continue
-        if not any(h for _, h in roles):
+        if not ((t.leads and t.lead_hours) or (t.assignees and t.assignee_hours)):  # someone at 0% doesn't make it unestimated
             if is_open(t):
                 unestimated.append(t.id)
         elif not windows(t, horizon(today, settings)) and is_open(t):

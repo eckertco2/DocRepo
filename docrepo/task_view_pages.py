@@ -169,6 +169,11 @@ def still_searching() -> str:
     return '<p align="center" class="note">No names or notes match. Searching the files\' text…</p>'
 
 
+def nothing_clicked() -> str:
+    """The preview on the Notes page tab, before anything on the page has been clicked."""
+    return '<p class="note">Click a caption or a file line on the page to see it here.</p>'
+
+
 def nothing_of_kind(kind: str, scope_title: str, narrowed: bool) -> str:
     out = f'<p align="center"><b>No {esc(KIND_NAMES[kind].lower())} in {esc(scope_title)}.</b></p>'
     return out + (f'<p align="center">{link("do:whole", "Show the whole task")}</p>' if narrowed else "")

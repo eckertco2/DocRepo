@@ -12,7 +12,7 @@ cells of ``model.js`` (``dueCell``, ``remText``).
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 
@@ -46,7 +46,8 @@ LIST_NOTES = {
 
 TODAY_NOTE = ("Your list for today. Each item stays until you mark it Done, carrying over to the next day. Put a task on it with D "
               "while browsing, or Add to Today on its page. The box makes a quick task (under Quick tasks until you file it), or a "
-              "note; Ctrl+Shift+D does the same from anywhere. Below it, the tasks due in the next 7 days that aren't on it yet.")
+              "note; Ctrl+Shift+D does the same from anywhere. Below it, reminders whose day has come, and the tasks due in the next "
+              "7 days that aren't on it yet.")
 
 ACTIVITY_NOTE = ("What happened, under the tasks it happened to: captures, changes, document versions and agenda items. For meeting "
                  "prep, Select, tick tasks or lines, then Add to agenda: a ticked line goes on as its task, with the line as the "
@@ -55,6 +56,8 @@ PRIORITIES_NOTE = ("Open tasks by priority. Drag a card to another column or wit
                    "card in a bucket and 0 takes it out, Alt+Up and Alt+Down move it within its bucket, the arrow keys move between "
                    "cards, and Enter opens the task. A move to another column goes into the task's status log. Urgent stays a flag "
                    "of its own; parked, closed and routine tasks aren't here.")
+TEMPLATES_NOTE = ("Trees of tasks without dates. Nothing here shows on the task tree, the lists, the timeline or Capacity until you make "
+                  "tasks from it.")
 
 VIEWS: tuple[ViewDef, ...] = (
     ViewDef("today", "Today", note=TODAY_NOTE),  # mods log round 1, M0016
@@ -68,6 +71,7 @@ VIEWS: tuple[ViewDef, ...] = (
     ViewDef("capacity", "Capacity", "Plan"),
     ViewDef("people", "People", "Manage"),
     ViewDef("labels", "Labels", "Manage"),
+    ViewDef("templates", "Templates", "Manage", TEMPLATES_NOTE),  # release 5.44: docrepo/templates.py
     ViewDef("docs", "Documents", "Manage"),
     ViewDef("discarded", "Discarded", "Manage", "Tasks and captures discarded as made by mistake, newest first. Nothing is deleted: "
                                                  "they're hidden from the other views, the lists, the pickers and search. Bring back "
@@ -503,8 +507,9 @@ class DiscardedRow:
     when: str  # when it was discarded, as a row shows it
 
 
-def discarded_rows(m: Model, today: date) -> list[DiscardedRow]:
-    """Discarded tasks and captures, the most recently discarded first."""
+def discarded_rows(m: Model, today: date, others: Iterable[tuple[str, str, str, str, str, str]] = ()) -> list[DiscardedRow]:
+    """Discarded tasks and captures, and ``others`` (templates, as their kind, ID, title, sub-line, reason and when), the most
+    recently discarded first."""
     def when(at: str) -> str:
         return at[11:16] if at[:10] == today.isoformat() else short(to_date(at), today)
 
@@ -512,6 +517,7 @@ def discarded_rows(m: Model, today: date) -> list[DiscardedRow]:
                                               t.discard_reason or "", when(t.discarded or ""))) for t in m.discarded_tasks()]
     items += [(c.discarded or "", DiscardedRow("capture", c.id, c.title, f"Capture {c.id} · saved {short(to_date(c.saved), today)}",
                                                c.discard_reason or "", when(c.discarded or ""))) for c in m.discarded_captures()]
+    items += [(at, DiscardedRow(kind, item, title, sub, reason, when(at))) for kind, item, title, sub, reason, at in others]
     return [row for _, row in sorted(items, key=lambda x: x[0], reverse=True)]
 
 

@@ -8,22 +8,24 @@ calendar are rebuilt in the same transaction, so the calendar always matches.
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
 from docrepo import capacity
 from docrepo.config import Settings
-from docrepo.dates import check_date, stamp
+from docrepo.dates import check_date, stamp, to_date, workday_numbers
 from docrepo.db import RECURRENCES, STATES, next_id, transaction
 from docrepo.model import Task, load_tasks
 from docrepo.pages import num
+from docrepo.schedule import days_in, due_after, length_of, placed
 
 #: The fields a change can set, with their names in the status log, in the order the log lists them.
 FIELDS = (
     ("state", "State"), ("current_status", "Current status"), ("due", "Due"), ("deadline", "Deadline"),
-    ("deadline_desc", "Deadline description"), ("leads", "Lead"), ("assignees", "Assignees"), ("lead_hours", "Lead hours"),
+    ("deadline_desc", "Deadline description"), ("duration", "Duration"), ("calendar_days", "Runs through weekends"), ("leads", "Lead"),
+    ("assignees", "Assignees"), ("lead_per_day", "Lead hours a day"), ("assignee_per_day", "Assignee hours a day"), ("lead_hours", "Lead hours"),
     ("assignee_hours", "Assignee hours"), ("urgent", "Urgent"), ("meeting", "Meeting"), ("plant_event", "Plant event"), ("start", "Start"),
     ("reminder", "Reminder"), ("recurrence", "Recurrence"), ("repeat_until", "Repeat until"), ("title", "Title"),
     ("description", "Description"), ("labels", "Labels"), ("inherit_labels", "Inherit parent labels"),
@@ -31,11 +33,18 @@ FIELDS = (
 FIELD_NAMES = dict(FIELDS)
 DATE_FIELDS = ("due", "deadline", "start", "reminder", "repeat_until")
 TEXT_FIELDS = ("title", "current_status", "deadline_desc", "description")
-FLAG_FIELDS = ("urgent", "meeting", "inherit_labels", "plant_event")
+FLAG_FIELDS = ("urgent", "meeting", "inherit_labels", "plant_event", "calendar_days")
 #: Reference fields (mods log round 2, M0034, release 5.9): named in Settings, each logged under its own name.
 REFERENCES = "references"
-HOUR_FIELDS = ("lead_hours", "assignee_hours")
+#: Each person's Involvement (release 5.47, decision 196): {(role, person): percent}. Logged under the person's name.
+INVOLVEMENT = "involvement"
+#: A link to a template ending or starting, in the status log (release 5.44): its value is the whole sentence.
+TEMPLATE_LINK = "Template link"
+HOUR_FIELDS = ("lead_hours", "assignee_hours", "lead_per_day", "assignee_per_day")
+#: Each role's total and its rate (release 5.46, decision 189). With a rate, the total is worked out from it and the task's days.
+RATES = {"lead_hours": "lead_per_day", "assignee_hours": "assignee_per_day"}
 ROLES = {"leads": "lead", "assignees": "assignee"}
+_RATE_FIELD = {rate: hours for hours, rate in RATES.items()}  # a rate's change is a change to the hours it states
 
 
 class TaskError(ValueError):
@@ -52,7 +61,27 @@ class Change:
 
 
 # ---- checking values ----
+def stated(item: Any, key: str) -> Any:
+    """A linked field's value on a task or a template row, as it was stated: hours are their rate when there is one, since
+    the total worked out from it follows the task's days (decision 189)."""
+    if key in RATES and getattr(item, RATES[key]) is not None:
+        return ("a day", getattr(item, RATES[key]))
+    if key in ROLES:  # the people, each with their Involvement: one field for each role (the design's table)
+        return [(p, item.involvement.get((ROLES[key], p), 100)) for p in getattr(item, key)]
+    return getattr(item, key)
+
+
 def _normalize(conn: sqlite3.Connection, key: str, value: Any) -> Any:
+    if key == "duration":
+        if value is None or value == "":
+            return None
+        try:
+            days = float(value)
+        except (TypeError, ValueError):
+            days = 0.0
+        if days < 1 or not days.is_integer():
+            raise TaskError("Duration is a whole number of days, 1 or more.")
+        return int(days)
     if key in DATE_FIELDS:
         return check_date(value) if value else None
     if key in TEXT_FIELDS:
@@ -102,6 +131,8 @@ def _shown(conn: sqlite3.Connection, key: str, value: Any) -> str | None:
         return "Yes" if value else "No"
     if key in HOUR_FIELDS:
         return None if value is None else num(value)
+    if key == "duration":
+        return None if value is None else str(value)
     if key in ROLES:
         names = [conn.execute("SELECT name FROM people WHERE id = ?", (p,)).fetchone()["name"] for p in value]
         return ", ".join(names) or None
@@ -118,6 +149,40 @@ def _apply_lists(conn: sqlite3.Connection, task_id: str, key: str, value: list[s
     else:
         conn.execute("DELETE FROM task_labels WHERE task = ?", (task_id,))
         conn.executemany("INSERT INTO task_labels (task, label) SELECT ?, id FROM labels WHERE name = ?", [(task_id, n) for n in value])
+
+
+def shares_of(value: Any) -> dict[tuple[str, str], int]:
+    """Involvement as it's kept: whole numbers from 0 to 100, with 100 left out, as it's the default."""
+    out: dict[tuple[str, str], int] = {}
+    for key, percent in dict(value or {}).items():
+        try:
+            share = float(percent)
+        except (TypeError, ValueError):
+            share = -1.0
+        if not 0 <= share <= 100 or not share.is_integer():
+            raise TaskError("Involvement is a whole number from 0 to 100.")
+        if share != 100:
+            out[tuple(key)] = int(share)
+    return out
+
+
+def _apply_involvement(conn: sqlite3.Connection, task_id: str, people: dict[str, list[str]], before: dict[tuple[str, str], int],
+                       wanted: dict[tuple[str, str], int]) -> tuple[list[Change], list[str]]:
+    """Set each person's Involvement, as ``_apply_lists`` makes their rows afresh. Someone taken off loses theirs. Returns a
+    line for each that changed, "Tom Becker's involvement 100% → 25%", and the roles it changed in."""
+    conn.execute("UPDATE task_people SET involvement = 100 WHERE task = ?", (task_id,))
+    logged: list[Change] = []
+    roles: list[str] = []
+    for key, role in ROLES.items():
+        for p in people[key]:
+            old, new = before.get((role, p), 100), wanted.get((role, p), 100)
+            if new != 100:
+                conn.execute("UPDATE task_people SET involvement = ? WHERE task = ? AND person = ? AND role = ?", (new, task_id, p, role))
+            if old != new:
+                name = conn.execute("SELECT name FROM people WHERE id = ?", (p,)).fetchone()["name"]
+                logged.append(Change(f"{name}'s involvement", f"{old}%", f"{new}%"))
+                roles.append(key)
+    return logged, roles
 
 
 def _references(value: Any) -> dict[str, str]:
@@ -158,6 +223,136 @@ def _check_repeat(recurrence: str | None, repeat_until: str | None) -> None:
         raise TaskError("Repeat until can only be set on a task with a recurrence.")
 
 
+def template_name(conn: sqlite3.Connection, task_id: str) -> str | None:
+    """The name of the template a task was made from: its top row's title (release 5.44)."""
+    r = conn.execute("SELECT top.title FROM task_template x JOIN template_rows r ON r.id = x.row_id "
+                     "JOIN template_rows top ON top.template = r.template AND top.parent IS NULL WHERE x.task = ?", (task_id,)).fetchone()
+    return r["title"] if r else None
+
+
+def _linked_fields(conn: sqlite3.Connection, task_id: str) -> set[str]:
+    return {r["field"] for r in conn.execute("SELECT field FROM task_links WHERE task = ?", (task_id,))}
+
+
+def _end_links(conn: sqlite3.Connection, task_id: str, changed: Sequence[str]) -> list[Change]:
+    """A linked field given a different value stops following its template, and says so (decision 184). Every change to a
+    task's fields comes through ``update_task``, so the rule is here once."""
+    linked = _linked_fields(conn, task_id) & set(changed)
+    if not linked:
+        return []
+    name = template_name(conn, task_id)
+    conn.executemany("DELETE FROM task_links WHERE task = ? AND field = ?", [(task_id, k) for k in linked])
+    return [Change(TEMPLATE_LINK, f"{FIELD_NAMES[k]}: no longer follows {name}", None) for k, _ in FIELDS if k in linked]
+
+
+def _row_values(conn: sqlite3.Connection, task_id: str) -> dict[str, Any]:
+    """What a task's template row states, under the task's field names."""
+    r = conn.execute("SELECT r.* FROM task_template x JOIN template_rows r ON r.id = x.row_id WHERE x.task = ?", (task_id,)).fetchone()
+    if r is None:
+        return {}
+    values: dict[str, Any] = {k: r[k] for k in ("title", "description", "recurrence", "duration")}
+    values.update({k: bool(r[k]) for k in ("inherit_labels", "urgent", "meeting", "plant_event", "calendar_days")})
+    values.update({hours: ("a day", r[rate]) if r[rate] is not None else r[hours] for hours, rate in RATES.items()})
+    for key, role in ROLES.items():
+        values[key] = [(p["person"], p["involvement"]) for p in conn.execute(
+            "SELECT person, involvement FROM template_row_people WHERE row_id = ? AND role = ? ORDER BY id", (r["id"], role))]
+    values["labels"] = [x["name"] for x in conn.execute("SELECT l.name FROM template_row_labels x JOIN labels l ON l.id = x.label WHERE x.row_id = ? ORDER BY x.id", (r["id"],))]
+    return values
+
+
+def _fallen_behind(conn: sqlite3.Connection, task_id: str, while_: str) -> list[Change]:
+    """A closed or discarded task never changes, so a linked field can fall behind its template. When the task comes back,
+    each such field becomes its own, with the template's value offered by Edit task's ↺, so its hours don't jump (decision 185)."""
+    linked = _linked_fields(conn, task_id)
+    if not linked:
+        return []
+    row, task = _row_values(conn, task_id), get_task(conn, task_id)
+    behind = {k for k in linked if k in row and stated(task, k) != row[k]}
+    if not behind:
+        return []
+    name = template_name(conn, task_id)
+    conn.executemany("DELETE FROM task_links WHERE task = ? AND field = ?", [(task_id, k) for k in behind])
+    return [Change(TEMPLATE_LINK, f"{FIELD_NAMES[k]}: fell behind {name} while {while_}, and stays as it is", None) for k, _ in FIELDS if k in behind]
+
+
+def set_links(conn: sqlite3.Connection, task_id: str, fields: Collection[str], *, at: datetime, via: str) -> list[Change]:
+    """Make these the fields that follow a task's template, from Edit task's marks (decision 184). Each one it stops or starts
+    following goes into the status log. Returns those."""
+    name = template_name(conn, task_id)
+    if name is None:
+        return []
+    had = _linked_fields(conn, task_id)
+    logged = []
+    for key, field_name in FIELDS:
+        if key in had and key not in fields:
+            conn.execute("DELETE FROM task_links WHERE task = ? AND field = ?", (task_id, key))
+            logged.append(Change(TEMPLATE_LINK, f"{field_name}: no longer follows {name}", None))
+        elif key in fields and key not in had:
+            conn.execute("INSERT INTO task_links (task, field) VALUES (?, ?)", (task_id, key))
+            logged.append(Change(TEMPLATE_LINK, None, f"{field_name}: follows {name} again"))
+    _log(conn, task_id, at, via, logged)
+    return logged
+
+
+# ---- dates and hours (release 5.46, decisions 189 to 191) ----
+def worked_out(task: Task, changes: dict[str, Any], workdays: Collection[int], dragged: bool = False) -> tuple[dict[str, Any], set[str]]:
+    """What a change to a task comes to, with its dates and totals following (the rules live here once, so every form, capture
+    and drag keeps to them), and which fields were worked out rather than given.
+
+    With a Duration, changing Start moves Due, changing Due moves Start, and changing the Duration or Runs through weekends
+    moves Due, or Start if there's no Start. Clearing either date clears both. Two new dates typed together are the new length.
+    ``dragged`` is Plan mode's: a bar moved, or an undated one dropped, keeps its days, and one with an end stretched takes the
+    new length. A total typed over a rate ends the rate. With a rate, the total is the rate times the task's days, or none
+    until it has a length. A routine task has no Duration and no rate: its hours are for each time."""
+    new, calculated = dict(changes), set()
+    if new.get("recurrence", task.recurrence):
+        new.update(duration=None, calendar_days=False, lead_per_day=None, assignee_per_day=None)
+        return new, calculated
+    for hours, rate in RATES.items():
+        if rate not in new and hours in new and new[hours] != getattr(task, hours):
+            new[rate] = None
+    days, every = new.get("duration", task.duration), new.get("calendar_days", task.calendar_days)
+    start, due = new.get("start", task.start), new.get("due", task.due)
+    if days is not None:
+        length_changed = days != task.duration or every != task.calendar_days
+        start_changed, due_changed = start != task.start, due != task.due
+        if (start_changed and not start) or (due_changed and not due):
+            start, due = None, None
+        elif length_changed:
+            start, due = placed(start, due, days, "duration", workdays, every)
+        elif start_changed and due_changed:
+            if dragged:
+                due = due_after(to_date(start), days, workdays, every).isoformat()
+            elif to_date(due) >= to_date(start):
+                days = days_in(to_date(start), to_date(due), workdays, every)
+                new["duration"] = days
+        elif dragged and (start_changed or due_changed):
+            if start and due and to_date(due) >= to_date(start):
+                days = days_in(to_date(start), to_date(due), workdays, every)
+                new["duration"] = days
+        elif start_changed or due_changed:
+            start, due = placed(start, due, days, "start" if start_changed else "due", workdays, every)
+        if start != new.get("start", task.start):
+            new["start"] = start
+            calculated.add("start")
+        if due != new.get("due", task.due):
+            new["due"] = due
+            calculated.add("due")
+    length = length_of(start, due, days, workdays, every)
+    for hours, rate in RATES.items():
+        per_day = new.get(rate, getattr(task, rate))
+        if per_day is not None:
+            total = round(per_day * length, 2) if length else None
+            new[hours] = total
+            calculated.add(hours)
+    return new, calculated
+
+
+def _blank_task(state: str) -> Task:
+    """A task with nothing in it, to work out a new one's dates and totals from."""
+    return Task("", "", state, None, False, False, None, None, None, None, None, None, None, None, None, True, "", "", "", "")
+
+
 # ---- creating ----
 def create_task(
     conn: sqlite3.Connection, settings: Settings, *, title: str, at: datetime, created_by: str,
@@ -166,7 +361,9 @@ def create_task(
     reminder: str | None = None, recurrence: str | None = None, repeat_until: str | None = None,
     urgent: bool = False, meeting: bool = False, leads: Sequence[str] = (), assignees: Sequence[str] = (),
     lead_hours: float | None = None, assignee_hours: float | None = None, labels: Sequence[str] = (),
-    inherit_labels: bool = True, plant_event: bool = False, references: dict[str, str] | None = None,
+    inherit_labels: bool = True, plant_event: bool = False, references: dict[str, str] | None = None, duration: int | None = None,
+    calendar_days: bool = False, lead_per_day: float | None = None, assignee_per_day: float | None = None,
+    involvement: dict[tuple[str, str], int] | None = None,
 ) -> str:
     """Create a task, under ``parents`` if any are given (a top-level task if not). Returns its ID.
 
@@ -176,10 +373,12 @@ def create_task(
         "title": title, "state": state, "current_status": current_status, "start": start, "due": due,
         "deadline": deadline, "deadline_desc": deadline_desc, "reminder": reminder, "recurrence": recurrence,
         "repeat_until": repeat_until, "urgent": urgent, "meeting": meeting, "lead_hours": lead_hours,
-        "assignee_hours": assignee_hours, "inherit_labels": inherit_labels, "plant_event": plant_event,
+        "assignee_hours": assignee_hours, "inherit_labels": inherit_labels, "plant_event": plant_event, "duration": duration,
+        "calendar_days": calendar_days, "lead_per_day": lead_per_day, "assignee_per_day": assignee_per_day,
     }
     with transaction(conn):
         values = {k: _normalize(conn, k, v) for k, v in values.items()}
+        values, _ = worked_out(_blank_task(values["state"]), values, workday_numbers(settings.workdays))
         people = {k: _normalize(conn, k, v) for k, v in (("leads", leads), ("assignees", assignees))}
         label_names = _normalize(conn, "labels", labels)
         _check_repeat(values["recurrence"], values["repeat_until"])
@@ -194,6 +393,7 @@ def create_task(
         conn.execute(f"INSERT INTO tasks ({', '.join(columns)}) VALUES ({', '.join('?' * len(columns))})", tuple(columns.values()))
         for key, ids in people.items():
             _apply_lists(conn, task_id, key, ids)
+        _apply_involvement(conn, task_id, people, {}, shares_of(involvement))
         _apply_lists(conn, task_id, "labels", label_names)
         _apply_references(conn, task_id, {}, _references(references))
         conn.executemany("INSERT INTO task_parents (child, parent) VALUES (?, ?)", [(task_id, p) for p in dict.fromkeys(parents)])
@@ -209,27 +409,34 @@ def get_task(conn: sqlite3.Connection, task_id: str) -> Task:
     return task
 
 
-def update_task(conn: sqlite3.Connection, settings: Settings, task_id: str, *, at: datetime, via: str, **changes: Any) -> list[Change]:
+def update_task(conn: sqlite3.Connection, settings: Settings, task_id: str, *, at: datetime, via: str, keep_links: bool = False, dragged: bool = False,
+                **changes: Any) -> list[Change]:
     """Change a task's fields. Fields not given stay as they are. Returns what changed, as logged.
 
     Closing a task records the day it closed; reopening clears it. Clearing the
-    recurrence clears Repeat until too.
+    recurrence clears Repeat until too. Dates and totals follow by ``worked_out``, which has ``dragged``. A different value on a
+    linked field ends its link, unless ``keep_links`` says the caller sees to them: a template's own change, or Edit task's
+    marks. A total worked out from a rate is no different value: the rate is what's stated.
     """
-    unknown = sorted(set(changes) - set(FIELD_NAMES) - {REFERENCES})
+    unknown = sorted(set(changes) - set(FIELD_NAMES) - {REFERENCES, INVOLVEMENT})
     if unknown:
         raise TaskError(f"Not task fields: {', '.join(unknown)}.")
     with transaction(conn):
         task = get_task(conn, task_id)
         refs = _references(changes.pop(REFERENCES, None))
+        shares = changes.pop(INVOLVEMENT, None)
         new = {k: _normalize(conn, k, v) for k, v in changes.items()}
         if "recurrence" in new and not new["recurrence"]:
             new["repeat_until"] = None
         _check_repeat(new.get("recurrence", task.recurrence), new.get("repeat_until", task.repeat_until))
+        new, calculated = worked_out(task, new, workday_numbers(settings.workdays), dragged)
         logged: list[Change] = []
         columns: dict[str, Any] = {}
+        changed: list[str] = []
         for key, name in FIELDS:
             if key not in new or getattr(task, key) == new[key]:
                 continue
+            changed.append(key)
             logged.append(Change(name, _shown(conn, key, getattr(task, key)), _shown(conn, key, new[key])))
             if key in ROLES or key == "labels":
                 _apply_lists(conn, task_id, key, new[key])
@@ -238,7 +445,16 @@ def update_task(conn: sqlite3.Connection, settings: Settings, task_id: str, *, a
         if "state" in columns:
             columns["closed"] = at.date().isoformat() if columns["state"] == "Closed" else None
         _apply_columns(conn, task_id, columns)
+        if shares is not None or any(k in ROLES for k in changed):  # someone kept on keeps their Involvement
+            people = {k: new.get(k, getattr(task, k)) for k in ROLES}
+            share_lines, share_roles = _apply_involvement(conn, task_id, people, task.involvement, task.involvement if shares is None else shares_of(shares))
+            logged += share_lines
+            changed += share_roles
         logged += _apply_references(conn, task_id, task.references, refs)
+        if not keep_links:
+            logged += _end_links(conn, task_id, list(dict.fromkeys(_RATE_FIELD.get(k, k) for k in changed if k not in calculated)))
+        if task.state == "Closed" and columns.get("state", "Closed") != "Closed":
+            logged += _fallen_behind(conn, task_id, "closed")
         _log(conn, task_id, at, via, logged)
         capacity.rebuild_task(conn, task_id, at.date(), settings)
     return logged
@@ -253,7 +469,8 @@ def set_discarded(conn: sqlite3.Connection, settings: Settings, task_id: str, re
             raise TaskError(f"{t.title} is {'already' if t.discarded else 'not'} discarded.")
         conn.execute("UPDATE tasks SET discarded = ?, discard_reason = ? WHERE id = ?", (stamp(at) if reason else None, reason, task_id))
         change = Change("Discarded", t.discard_reason or None, reason)
-        _log(conn, task_id, at, via, [change])
+        behind = _fallen_behind(conn, task_id, "discarded") if t.discarded and t.state != "Closed" else []
+        _log(conn, task_id, at, via, [change, *behind])
         capacity.rebuild_task(conn, task_id, at.date(), settings)
     return change
 
@@ -436,7 +653,7 @@ def key_date_rows(conn: sqlite3.Connection, task_id: str) -> list[KeyDateRow]:
 
 
 def add_key_dates(conn: sqlite3.Connection, task_id: str, rows: Sequence[KeyDateRow], *, at: datetime, via: str) -> list[Change]:
-    """Add key dates at the end of a task's own, as a capture's ``**date`` lines do. Returns what was logged."""
+    """Add key dates at the end of a task's own, as a capture's ``**key date,`` lines do. Returns what was logged."""
     return set_key_dates(conn, task_id, [*key_date_rows(conn, task_id), *rows], at=at, via=via)
 
 

@@ -54,11 +54,42 @@ class Task:
     #: Whether new captures go under a heading for their day on its notes page (release 5.25, decision 119): None is the
     #: default, which is on for a meeting and off for any other task (``uses_day_headings``).
     day_headings: bool | None = None
+    #: Release 5.46 (decisions 189 to 191): its length in days, kept when its dates move, whether those days run through
+    #: weekends, and each role's hours a day. With a rate, ``lead_hours`` or ``assignee_hours`` is the total worked out from it.
+    duration: int | None = None
+    calendar_days: bool = False
+    lead_per_day: float | None = None
+    assignee_per_day: float | None = None
     leads: list[str] = field(default_factory=list)
     assignees: list[str] = field(default_factory=list)
     labels: list[str] = field(default_factory=list)
     #: Its reference fields (M0034), named in Settings, such as a change record's number: {name: value}.
     references: dict[str, str] = field(default_factory=dict)
+    #: Release 5.47 (decision 196): each person's Involvement where it isn't 100: {(role, person): percent}, role being "lead" or "assignee".
+    involvement: dict[tuple[str, str], int] = field(default_factory=dict)
+
+    def share(self, role: str, person: str) -> int:
+        """How much of a role's hours land on one person: their Involvement, 100 by default."""
+        return self.involvement.get((role, person), 100)
+
+
+@dataclass(frozen=True)
+class TemplateOrigin:
+    """Where a task made from a template came from (release 5.44, decision 180): the row, and the titles from the template's
+    top row, which names it, down to that row. Only this reaches the Model: a template is never a Task."""
+
+    row: int
+    tree: str
+    path: tuple[str, ...]
+    discarded: bool = False
+
+    @property
+    def template(self) -> str:
+        return self.path[0]
+
+    def words(self) -> str:
+        """As Task.md says it: "Product trial, Trial execution window", or the template's name for its top row."""
+        return self.path[0] if len(self.path) == 1 else f"{self.path[0]}, {self.path[-1]}"
 
 
 @dataclass
@@ -255,8 +286,25 @@ def _unique(items: Iterable[str]) -> list[str]:
 _TASK_COLUMNS = (
     "id, title, state, closed, urgent, meeting, recurrence, repeat_until, start, due, deadline, deadline_desc, reminder, "
     "lead_hours, assignee_hours, inherit_labels, description, current_status, created, created_by, discarded, discard_reason, plant_event, "
-    "priority, priority_rank, day_headings"
+    "priority, priority_rank, day_headings, duration, calendar_days, lead_per_day, assignee_per_day"
 )
+
+
+def template_origins(conn: sqlite3.Connection) -> dict[str, TemplateOrigin]:
+    """Each task made from a template: where it came from (release 5.44)."""
+    made = conn.execute("SELECT task, row_id, tree FROM task_template").fetchall()
+    if not made:
+        return {}
+    rows = {r["id"]: r for r in conn.execute("SELECT id, parent, title, template FROM template_rows")}
+    gone = {r["id"] for r in conn.execute("SELECT id FROM templates WHERE discarded IS NOT NULL")}
+    out: dict[str, TemplateOrigin] = {}
+    for r in made:
+        path, x = [], rows[r["row_id"]]
+        while x is not None:
+            path.insert(0, x["title"])
+            x = rows.get(x["parent"])
+        out[r["task"]] = TemplateOrigin(r["row_id"], r["tree"], tuple(path), rows[r["row_id"]]["template"] in gone)
+    return out
 
 
 def load_tasks(conn: sqlite3.Connection, task_ids: Iterable[str] | None = None) -> dict[str, Task]:
@@ -270,10 +318,13 @@ def load_tasks(conn: sqlite3.Connection, task_ids: Iterable[str] | None = None) 
         tasks[r["id"]] = Task(**{k: r[k] for k in r.keys()})
         t = tasks[r["id"]]
         t.urgent, t.meeting, t.inherit_labels, t.plant_event = bool(t.urgent), bool(t.meeting), bool(t.inherit_labels), bool(t.plant_event)
+        t.calendar_days = bool(t.calendar_days)
         t.day_headings = None if t.day_headings is None else bool(t.day_headings)
-    for r in conn.execute("SELECT task, person, role FROM task_people ORDER BY id"):
+    for r in conn.execute("SELECT task, person, role, involvement FROM task_people ORDER BY id"):
         if r["task"] in tasks:
             (tasks[r["task"]].leads if r["role"] == "lead" else tasks[r["task"]].assignees).append(r["person"])
+            if r["involvement"] != 100:
+                tasks[r["task"]].involvement[(r["role"], r["person"])] = r["involvement"]
     for r in conn.execute("SELECT tl.task, l.name FROM task_labels tl JOIN labels l ON l.id = tl.label ORDER BY tl.id"):
         if r["task"] in tasks:
             tasks[r["task"]].labels.append(r["name"])
@@ -343,6 +394,8 @@ class Model:
             self.pins.setdefault(r["task"], []).append(r["document"])
         self.page_edits: list[tuple[str, str, str]] = [(r["task"], r["day"], r["at"]) for r in q(
             "SELECT task, day, at FROM task_page_versions WHERE by_owner = 1 ORDER BY day, task")]
+        #: The tasks made from a template, and where each came from (release 5.44).
+        self.origins: dict[str, TemplateOrigin] = template_origins(conn)
 
     # ---- names ----
     def uses_day_headings(self, task_id: str) -> bool:
