@@ -2,7 +2,8 @@
 
 ``Config/wheels.jsonc`` in the data root: JSON with ``//`` comments, since comments are the point of a file you edit by
 hand and no YAML package is approved. DocRepo strips them itself, minding strings, and writes the file only when it isn't
-there, so your comments stay. Beside it, ``wheels.schema.json`` lets VS Code check it as you type.
+there, so your comments stay. (One exception, ``draw_at_once``: release 5.43.1 changes one old value and its comment.)
+Beside it, ``wheels.schema.json`` lets VS Code check it as you type.
 
 A slot can name only a command in the registry (``docrepo/ui/wheel_commands.py``), so a config can't start a program, and
 captured content can never become a command. Every problem names its field and what's allowed; ``load`` raises
@@ -84,11 +85,12 @@ class Wheel:
 
 @dataclass(frozen=True)
 class Timing:
-    """Every timing constant, in ms. The research's section 5 justifies each default."""
+    """Every timing constant, in ms. The research's section 5 justifies each default, but ``draw_ms``: the research's 333
+    held the ring back, and the owner wants the whole wheel at once (decision 175 as changed, release 5.43.1)."""
 
     tap_ms: int = 200
     release_grace_ms: int = 80
-    draw_ms: int = 333
+    draw_ms: int = 0
     idle_ms: int = 10_000
     animation_ms: int = 80
 
@@ -386,7 +388,7 @@ DEFAULT_TEXT = """\
       "slots": {
         // browse.view: the browse tool on a view. "view" is any of its views: today, tasks, agenda, activity, priorities and so on.
         "N": { "label": "Task tree", "icon": "tasks", "command": "browse.view", "args": { "view": "tasks" } },
-        // search.tasks: task search. "then" is what Enter opens: page (the task's page) or task_view; Ctrl+Enter opens the other.
+        // search.tasks: task search. "then" is what Enter opens: task_view, or page (the task's page in the browse tool); Ctrl+Enter opens the other.
         "E": { "label": "Task search", "icon": "task", "command": "search.tasks" },
         // search.files: file search, across every task's files and saved emails.
         "S": { "label": "File search", "icon": "file", "command": "search.files" },
@@ -409,9 +411,9 @@ DEFAULT_TEXT = """\
     }
   ],
   // Times are in ms. tap_ms: a hotkey up by then leaves the wheel open. release_grace_ms: a diagonal's second key has this long.
-  // draw_ms: the full wheel draws then, so a pick made by then never shows it (0 draws it at once).
-  // idle_ms: an untouched wheel closes then. animation_ms: its fade in (0 for none; none when Windows' animation effects are off).
-  "timing": { "tap_ms": 200, "release_grace_ms": 80, "draw_ms": 333, "idle_ms": 10000, "animation_ms": 80 },
+  // draw_ms: 0 shows the whole wheel at once. Above that, only its centre shows until then, so a pick made by then never shows the rest.
+  // idle_ms: an untouched wheel closes then. animation_ms: that later ring's fade in, and the panel's widening (0 for none; none when Windows' animation effects are off).
+  "timing": { "tap_ms": 200, "release_grace_ms": 80, "draw_ms": 0, "idle_ms": 10000, "animation_ms": 80 },
   // The Today side panel. hover_ms: null uses Windows' own hover time (0.4 s). inner_edge_hover_ms: on an edge between monitors.
   // exclude_from_capture: keeps it out of screen shares, and so out of screenshots and compliance recordings too. Ask IT first.
   "today_panel": { "rest_width": 180, "hover_width": 320, "detail_width": 420, "hover": true, "hover_ms": null,
@@ -420,11 +422,32 @@ DEFAULT_TEXT = """\
 """
 
 
+#: What releases 5.41 to 5.43 wrote about ``draw_ms``.
+_OLD_DRAW_COMMENT = "// draw_ms: the full wheel draws then, so a pick made by then never shows it (0 draws it at once)."
+_OLD_DRAW_VALUE = '"draw_ms": 333'
+_DRAW_COMMENT = "// draw_ms: 0 shows the whole wheel at once. Above that, only its centre shows until then, so a pick made by then never shows the rest."
+
+
+def draw_at_once(text: str) -> str:
+    """Release 5.43.1: a file that still has the old value beside the old comment shows the whole wheel at once. The old
+    comment goes with it, so a 333 you set yourself afterwards stays, and every other line is left as it was."""
+    if _OLD_DRAW_COMMENT in text and _OLD_DRAW_VALUE in text:
+        return text.replace(_OLD_DRAW_COMMENT, _DRAW_COMMENT).replace(_OLD_DRAW_VALUE, '"draw_ms": 0')
+    return text
+
+
 def write_defaults(fs: SafeFS, data_root: Path, registry: Mapping[str, CommandSpec], icons: Iterable[str]) -> None:
     """The config file, if there isn't one, and always the schema beside it, which is DocRepo's own."""
     path = data_root / CONFIG_FILE
     if not path.exists():
         fs.write_text(path, DEFAULT_TEXT)
+    else:
+        try:
+            text = path.read_bytes().decode("utf-8-sig")  # as bytes, so its line endings stay
+        except (OSError, UnicodeDecodeError):
+            text = ""  # loading it says what's wrong
+        if draw_at_once(text) != text:
+            fs.write_text(path, draw_at_once(text))
     fs.write_text(data_root / SCHEMA_FILE, json.dumps(schema(registry, icons), indent=1) + "\n")
 
 

@@ -653,7 +653,7 @@ A hotkey shows a small wheel of actions, picked with the arrow keys. **A wheel**
 
 **Keys.** One arrow lights a cardinal direction; two at right angles a diagonal; opposites, or three or more, nothing. A pick commits when all the arrows are up, with `release_grace_ms` for a diagonal's second key; holding one key past that re-aims at it. If the hotkey comes up within `tap_ms` with no arrow down, the wheel stays until a pick or a cancel; held longer, it lasts only while held, and letting go with an arrow still down leaves the pick to that arrow's coming up. The numpad's digits are spatial and commit on key-up, and 5 cancels. Enter runs what's lit and confirms a slot marked `confirm`. Esc, the hotkey again, losing the focus, or `idle_ms` with no key cancel. Ctrl+K closes it and opens the command palette. Every other key is swallowed. Nothing watches the keyboard: there's no hook, and the hotkey's own keys are read only while a wheel is open.
 
-**Drawing.** The window is made once and hidden. Its centre shows at once, in the middle of the monitor holding the window you were in (or the cursor's); the full wheel draws at `draw_ms`, so a pick made by then never shows it.
+**Drawing.** The window is made once and hidden, and each wheel is painted once, unseen, at the start, so its fonts and icons are ready. The whole wheel shows at once (since release 5.43.1), in the middle of the monitor holding the window you were in (or the cursor's). A `draw_ms` above 0 shows only its centre until then, so a pick made by then never shows the rest.
 
 **The config** is `Config\wheels.jsonc` in the data root: JSON with comments, written once and never again, with `wheels.schema.json` beside it. A slot has a `label`, an optional `icon` (one of DocRepo's own), and a `command` with `args`, an optional `confirm`, or `held`. A problem names the field and what's allowed, shows in a notification and the log, and the last good wheels stay in use. It's reloaded when the file changes.
 
@@ -668,7 +668,7 @@ A hotkey shows a small wheel of actions, picked with the arrow keys. **A wheel**
 | `today.new_item` | | A quick task on Today |
 | `today.panel` | `do` (toggle, open or close) | The Today side panel |
 | `browse.view` | `view` (any of the browse tool's views) | The browse tool on that view |
-| `search.tasks` | `then` (page or task_view) | Task search |
+| `search.tasks` | `then` (task_view or page) | Task search |
 | `search.files` | | File search |
 | `search.everything` | | The browse tool, with the cursor in Search everything |
 | `task_view.current` | | The selected task's Task view, or the last one opened; with neither, task search |
@@ -685,7 +685,7 @@ At the hotkey DocRepo notes the window you were in, asking the program nothing: 
 
 ### 12.4 Task search and file search
 
-**Task search** is the task picker on its own: Enter opens the task's page, Ctrl+Enter its Task view. It also finds closed tasks, marked as closed, and with no match it offers Search everything, carrying what was typed. **File search** is a window with a box, the Task view's list and a preview, across every task's files and saved emails, each file once. It uses the Task view's search (`docrepo/finder.py`), filters included. Enter opens through `docrepo/opener.py`'s allow-list, Ctrl+Enter shows it in File Explorer, Ctrl+Shift+C copies the path, and Tab goes to its task's page.
+**Task search** is the task picker on its own: Enter opens the task's Task view, Ctrl+Enter its page in the browse tool (a slot's `then` can swap them). It also finds closed tasks, marked as closed, and with no match it offers Search everything, carrying what was typed. **File search** is a window with a box, the Task view's list and a preview, across every task's files and saved emails, each file once. It uses the Task view's search (`docrepo/finder.py`), filters included. Enter opens through `docrepo/opener.py`'s allow-list, Ctrl+Enter shows it in File Explorer, Ctrl+Shift+C copies the path, and Tab goes to its task's page.
 
 ### 12.5 The Today side panel
 

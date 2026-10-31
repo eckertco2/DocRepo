@@ -9,7 +9,7 @@ import json  # noqa: E402
 from datetime import datetime  # noqa: E402
 
 import pytest  # noqa: E402
-from PySide6.QtCore import QEvent, QPointF, Qt  # noqa: E402
+from PySide6.QtCore import QEvent, QPointF, Qt, QVariantAnimation  # noqa: E402
 from PySide6.QtGui import QKeyEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon  # noqa: E402
 
@@ -80,16 +80,55 @@ def test_an_arrow_runs_its_slot_as_it_comes_up(wheel_window):
     release(w, UP)
     assert [p.slot.command for p in w.picks] == ["capture.new"]
     assert not w.isVisible() and not w.is_open()
-    assert w.picks[0].how == "arrows" and w.picks[0].pick_ms == 60 and not w.picks[0].drawn
+    assert w.picks[0].how == "arrows" and w.picks[0].pick_ms == 60 and w.picks[0].drawn
 
 
-def test_a_pick_after_the_draw_time_says_the_wheel_had_drawn(wheel_window):
+def test_the_whole_wheel_is_there_before_it_shows(wheel_window, monkeypatch):
+    """Decision 175 as the owner changed it (release 5.43.1): no wait and no fade, from its first paint."""
     w = wheel_window
+    at_show = []
+    monkeypatch.setattr(w, "show", lambda: at_show.append(w.ring))
     open_tapped(w)
-    w.ring = 1.0
+    assert at_show == [1.0] and w.ring == 1.0
+    assert not w._draw_timer.isActive() and w._fade.state() != QVariantAnimation.State.Running
+
+
+def test_a_wait_in_the_config_holds_the_ring_back(wheel_window):
+    w = wheel_window
+    w.open_wheel(CONFIG.wheel("capture"), wc.Timing(draw_ms=333), QPointF(500, 400), None)
+    assert w.ring == 0 and w._draw_timer.isActive()
+    press(w, UP)
+    release(w, UP)
+    assert not w.picks[0].drawn and not w._draw_timer.isActive()
+
+
+def test_a_pick_after_the_wait_says_the_wheel_had_drawn(wheel_window):
+    w = wheel_window
+    w.open_wheel(CONFIG.wheel("capture"), wc.Timing(draw_ms=333, animation_ms=0), QPointF(500, 400), None)
+    w._draw_timer.stop()
+    w.draw_ring()
+    assert w.ring == 1.0
     press(w, RIGHT)
     release(w, RIGHT)
     assert w.picks[0].drawn and w.picks[0].direction == "E"
+
+
+def test_the_next_wheel_after_a_wait_doesnt_keep_it(wheel_window):
+    w = wheel_window
+    w.open_wheel(CONFIG.wheel("capture"), wc.Timing(draw_ms=333), QPointF(500, 400), None)
+    open_tapped(w, "browse")
+    assert w.ring == 1.0 and not w._draw_timer.isActive()
+
+
+def test_each_wheel_is_painted_once_unseen_so_the_first_opening_is_quick(wheel_window):
+    w = wheel_window
+    w.prepare(CONFIG.wheels)
+    assert not w.isVisible() and w.wheel is None and w.ring == 0 and not w.is_open()
+    painted = {name for name, _colour, _scale in w._icons}
+    assert {"add", "mail", "sun", "people", "tasks", "task", "file", "search", "sidebar", "open"} <= painted
+    open_tapped(w)
+    w.prepare(CONFIG.wheels)  # a wheel that's open is left alone
+    assert w.wheel.id == "capture" and w.ring == 1.0
 
 
 def test_a_chord_on_a_cross_selects_nothing_and_stays_open(wheel_window):
@@ -406,7 +445,7 @@ def test_the_usage_log_holds_no_content(app, data_root):
     text = (data_root / USAGE_LOG).read_bytes().decode("utf-8")
     lines = text.splitlines()
     assert text.startswith(USAGE_HEADER) and len(lines) == 2
-    assert lines[1].split(",")[:6] == ["2026-10-08T14:10:00", "browse", "N", "browse.view", "arrows", "0"]
+    assert lines[1].split(",")[:6] == ["2026-10-08T14:10:00", "browse", "N", "browse.view", "arrows", "1"]
 
 
 def test_a_bad_save_names_the_field_and_keeps_the_last_good_wheels(app, data_root, fs):

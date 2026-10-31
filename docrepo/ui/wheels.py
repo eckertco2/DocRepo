@@ -61,6 +61,7 @@ class Wheels(QObject):
             log.warning("the wheels' config couldn't be written: %s", type(e).__name__)
         self._watch()
         self.reload(quiet=True)
+        self.window.prepare(self.config.wheels)
         self.started = True
 
     # ---- the config ----
@@ -233,7 +234,7 @@ class Wheels(QObject):
     def capture_selection(self) -> None:
         self.app.window.capture_selection(self.snapshot)
 
-    def task_search(self, then: str = "page") -> None:
+    def task_search(self, then: str = "task_view") -> None:
         from docrepo.ui.task_search import TaskSearch
 
         if self._task_search is None:

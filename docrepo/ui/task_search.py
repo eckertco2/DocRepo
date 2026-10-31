@@ -3,8 +3,8 @@ cursor in its box, so it's the same list as a parent's: Recent, the tree, then m
 
 A menu opened from no window can't take the keyboard, because Windows gives it to the active window of the program. So a
 tiny window of DocRepo's own is shown and activated first, and the menu opens from that: it's a host and nothing else.
-Enter opens the task's page in the browse tool, and Ctrl+Enter its Task view. Unlike when picking a parent, it also finds
-closed tasks, marked as closed, since you browse those too.
+Enter opens the task's Task view, and Ctrl+Enter its page in the browse tool (decision 213 as the owner changed it, release
+5.43.1). Unlike when picking a parent, it also finds closed tasks, marked as closed, since you browse those too.
 """
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ class TaskSearch(QWidget):
     def __init__(self, app: CaptureApp) -> None:
         super().__init__(None, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.app = app
-        self.then = "page"
+        self.then = "task_view"
         self.setFixedSize(1, 1)
         self.setObjectName("capture")
         self.setStyleSheet(style_sheet())
@@ -44,7 +44,7 @@ class TaskSearch(QWidget):
 
     def open_it(self, then: str, screen) -> None:
         self.then = then
-        self.picker.hint = HINT.get(then, HINT["page"])
+        self.picker.hint = HINT.get(then, HINT["task_view"])
         self._chose = False
         area = screen.availableGeometry()
         at = QPoint(area.x() + (area.width() - WIDTH) // 2, area.y() + area.height() // 6)

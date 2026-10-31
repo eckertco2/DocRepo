@@ -389,6 +389,24 @@ def test_closing_task_search_gives_the_keyboard_back_and_a_pick_doesnt(app, monk
     assert given == [True] and not s.isVisible()
 
 
+def test_the_browse_wheels_task_search_opens_the_task_view_and_ctrl_its_page(app, monkeypatch):
+    """Decision 213 as the owner changed it (release 5.43.1): not the task tree."""
+    slot = app.wheels.config.wheel("browse").slots["E"]
+    app.wheels.run(slot.command, slot.args)
+    s = app.wheels._task_search
+    assert "Enter opens its Task view" in s.picker.hint
+    s.picker.pick("T000008")
+    QApplication.processEvents()
+    view = app.browse.task_views["T000008"]
+    assert view.isVisible() and not app.browse.isVisible() and not s.isVisible()
+    view.hide()
+    app.wheels.run(slot.command, slot.args)
+    monkeypatch.setattr(QGuiApplication, "keyboardModifiers", staticmethod(lambda: Qt.KeyboardModifier.ControlModifier))
+    s.picker.pick("T000002")
+    assert app.browse.isVisible() and app.browse.sel == ("task", "T000002")
+    assert "T000002" not in app.browse.task_views
+
+
 def test_ctrl_enter_opens_the_task_view(app, monkeypatch):
     app.wheels.task_search("page")
     s = app.wheels._task_search
