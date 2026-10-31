@@ -16,14 +16,18 @@ in view are key dates has a row of its own, and a parent's summary bar takes in 
 as a plant activity is a plant event of its own (decision 149): a ``Band`` with its ``key_date``, in the events lane, down
 the chart and in the lines naming what falls during one.
 
+A range typed by hand (release 5.39, item 70, decision 225) is those exact days, from any day of the week: ``build``'s
+``days``, which ``Timeline.days`` then gives. ``read_range_day`` reads what's typed.
+
 Nothing here draws anything: ``docrepo/ui/timeline_view.py`` paints it. Ported from the mockup's ``timeline.js``.
 """
 from __future__ import annotations
 
+import calendar
 import math
 from collections.abc import Collection
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from docrepo import key_dates, quick
 from docrepo.dates import add_months, long_date, monday_of, to_date
@@ -40,6 +44,8 @@ BARS = (("project", "Project"), ("hours", "Hours a week"), ("priority", "Priorit
 HOUR_BINS = ((2.0, "Under 2"), (5.0, "2 to 5"), (10.0, "5 to 10"), (20.0, "10 to 20"), (math.inf, "20 or more"))
 #: The ranges the view offers, in weeks.
 RANGES = ((9, "9 weeks"), (13, "3 months"), (26, "6 months"), (52, "12 months"))
+#: The longest range that can be typed, in days: five years, the capacity calendar's usual horizon.
+MAX_RANGE_DAYS = 1830
 #: How far a routine task is looked ahead for occurrences, and an undated task for any window at all.
 _FAR = timedelta(days=3650)
 #: The days a week of work is counted over, for hours a week.
@@ -108,32 +114,36 @@ class Row:
 
 @dataclass(frozen=True)
 class Timeline:
-    start: date  # a Monday
-    weeks: int
+    start: date  # a Monday, unless the range was typed
+    weeks: int  # a typed range's weeks are rounded up, for how the scale is drawn
     rows: tuple[Row, ...]
     undated: tuple[str, ...]  # open tasks with no dates at all, which aren't on it (outside Plan mode)
     events: tuple[Band, ...] = ()  # the plant events in view
     keys: tuple[str, ...] = ()  # Order by's keys, in order, for the titles' colours and their legend
+    typed_days: int | None = None  # a typed range's length in days
 
     @property
     def end(self) -> date:
         """The day after the last one shown."""
-        return self.start + timedelta(weeks=self.weeks)
+        return self.start + timedelta(days=self.days)
 
     @property
     def days(self) -> int:
-        return self.weeks * 7
+        return self.typed_days or self.weeks * 7
 
     def week_starts(self) -> list[date]:
-        """The Mondays marked on the scale: each week up to three months, every fourth beyond."""
-        every = 4 if self.weeks > 13 else 1
-        return [self.start + timedelta(weeks=i) for i in range(0, self.weeks, every)]
+        """The Mondays marked on the scale: each week up to three months, every fourth beyond, every thirteenth over two
+        years."""
+        every = 13 if self.weeks > 104 else 4 if self.weeks > 13 else 1
+        first = self.start + timedelta(days=-self.start.weekday() % 7)
+        return [first + timedelta(weeks=i) for i in range(0, math.ceil((self.end - first).days / 7), every)]
 
     def months(self) -> list[date]:
-        """Where each month's name goes: its first day, and the range's first day when a week or more of that month is in view."""
+        """Where each month's name goes: its first day, and the range's first day when a week or more of that month is in
+        view, or when no month would be named otherwise."""
         out = []
         first_next = add_months(self.start.replace(day=1), 1)
-        if (first_next - self.start).days >= 7:
+        if (first_next - self.start).days >= 7 or first_next >= self.end:
             out.append(self.start)
         d = first_next
         while d < self.end:
@@ -150,6 +160,35 @@ def default_start(today: date) -> date:
 def step(weeks: int) -> int:
     """How far Earlier and Later move, in weeks."""
     return 26 if weeks > 26 else 13 if weeks > 13 else 4
+
+
+def step_days(weeks: int, typed_days: int | None = None) -> int:
+    """How far Earlier and Later move, in days: ``step``, or for a typed range ``step`` of its length, but never further
+    than the range itself, so no days are skipped."""
+    if not typed_days:
+        return step(weeks) * 7
+    return min(step(math.ceil(typed_days / 7)) * 7, typed_days)
+
+
+def read_range_day(text: str, last: bool = False) -> date | None:
+    """A day typed for the range: 2027-01-31, 31 Jan 2027, Sun 31 Jan 2027, Jan 31, 2027, or a month, Jan 2027, which is its
+    first day, or its last with ``last``. None when it's none of these, or a year that can only be a slip."""
+    s = " ".join(text.replace(",", " ").split())
+
+    def read(*forms: str) -> date | None:
+        for form in forms:
+            try:
+                return datetime.strptime(s, form).date()
+            except ValueError:
+                continue
+        return None
+
+    day = read("%Y-%m-%d", "%a %d %b %Y", "%d %b %Y", "%d %B %Y", "%b %d %Y", "%B %d %Y")
+    if day is None:
+        day = read("%b %Y", "%B %Y")
+        if day is not None and last:
+            day = day.replace(day=calendar.monthrange(day.year, day.month)[1])
+    return day if day is not None and 1900 <= day.year <= 2199 else None
 
 
 def _colours(m: Model) -> dict[str, int]:
@@ -282,10 +321,13 @@ def key_of(m: Model, task_id: str, order: str, keys: list[tuple[str, str]] | Non
 
 def build(m: Model, today: date, start: date, weeks: int, order: str = "top", labels: tuple[str, ...] = (),
           people: tuple[str, ...] = (), routine: bool = True, open_ids: Collection[str] = (), plan: bool = False,
-          focus: str | None = None) -> Timeline:
-    """The timeline from ``start`` (a Monday) for ``weeks`` weeks: the tree's rows, each shown under its parent when that's
-    in ``open_ids``. In Plan mode, tasks with no dates are rows too. ``focus`` shows that task and what's under it."""
-    end = start + timedelta(weeks=weeks)
+          focus: str | None = None, typed_days: int | None = None) -> Timeline:
+    """The timeline from ``start`` (a Monday) for ``weeks`` weeks, or from any day for ``typed_days`` days when the range was
+    typed: the tree's rows, each shown under its parent when that's in ``open_ids``. In Plan mode, tasks with no dates are
+    rows too. ``focus`` shows that task and what's under it."""
+    if typed_days:
+        weeks = math.ceil(typed_days / 7)
+    end = start + timedelta(days=typed_days or weeks * 7)
     colours = _colours(m)
     keys = order_keys(m, order)
 
@@ -354,7 +396,8 @@ def build(m: Model, today: date, start: date, weeks: int, order: str = "top", la
     walk([focus] if focus and focus in m.tasks else [t.id for t in m.top_level()], 0)
     # The built-in Quick tasks (mods log round 2) has no dates of its own, so it's left out of them.
     undated = () if plan else tuple(t.id for t in m.tasks.values() if base(t) and is_undated(t, today, m))
-    return Timeline(start, weeks, tuple(rows), undated, bands(m, start, end), tuple(name for _, name in keys) if order != "top" else ())
+    return Timeline(start, weeks, tuple(rows), undated, bands(m, start, end), tuple(name for _, name in keys) if order != "top" else (),
+                    typed_days)
 
 
 def all_bands(m: Model, until: date) -> list[Band]:

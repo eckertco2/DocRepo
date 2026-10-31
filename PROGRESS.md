@@ -485,6 +485,22 @@ The visual overhaul's O10, designed and mocked in the parent workspace (`docs/ui
   - **The totals that left the sidebar** are beside their views' titles ("14 open", "7 active"), as `sidebar.md` said they'd be.
   - **The tooltip** shows only when a name is cut short. The headings' tooltips say Fold or Unfold.
 
+## Release 5.39: a time range typed by hand (2026-10-30)
+
+The mods log round 5's item 70 (the parent workspace's `docs/mods/round-5-plan.md`, stage 21, thread D). No schema change, no new package.
+
+- `docrepo/timeline.py`: `Timeline.typed_days`, with `days` and `end` following it, and `build`'s `typed_days`; `week_starts` marks the Mondays from any first day, and every thirteenth over two years; `months` names a month when a short range would otherwise name none. `step_days` (Earlier and Later, by no more than a typed range's length), `read_range_day` (what can be typed) and `MAX_RANGE_DAYS`.
+- `docrepo/ui/timeline_view.py`: `range_box` with From and To, kept across the redraws that rebuild the other controls, so the caret stays in them; `_range_typed`, `_show_range` and `range_note`; Show's "Show these dates"; the two dates in `settings` and `restore`; `shift` for a typed range. `TimelineHead` leaves out a month's name that wouldn't fit.
+- `docrepo/ui/widgets.py`: `DateField.picked`, for a day chosen from its menu rather than typed.
+- `tests/test_timeline.py`: the range's days and scale, `read_range_day`, what falls in a typed range, and the view (typing, kept and read back, Earlier and Later and This week, a From past To, a Show choice, what can't be read, what's kept that makes no sense, the boxes across a redraw, the calendar).
+
+1060 pass in all, 1 skipped. The view was checked by eye offscreen with Windows' fonts at 1400 × 900, over a short range, a wrong date and three years.
+
+## Decisions (release 5.39)
+
+- **Decision 225,** built straight away at the owner's word, so its details are for the hand test: From and To always say what's in view; a typed range is those exact days, from any day of the week, kept for next time until a Show choice replaces it; a From past To takes To along, keeping the length; up to five years.
+- **A typed range is kept across restarts,** unlike Show's ranges, which start again from last week. Typing dates says you want those dates.
+
 ## Releases 5.34 and 5.35: the Task view (2026-10-29)
 
 Asked for by the owner in chat on 2026-10-29 as an intensive design of a task overview built for finding documents; it's round 2's item 34 (M0043, the Task view), with item 38 (M0025, finding documents) and M0026 (live search). Researched, designed and mocked in the design workspace (`docs/ui-design/task-overview-research.md` and `task-overview-design.md`, the browse tool mockup's Task view with three layouts), and decisions 156 to 167 taken as recommended. Built in one go as two releases: 5.34 the window and its search, with nothing new in docs.db; 5.35 Open, the files' text, pins and uses, with schema version 13.
