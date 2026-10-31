@@ -30,9 +30,21 @@ class AppContext:
     wheel_palette: Callable[[], list] = lambda: []
     #: Told when Today may have changed, so the Today side panel draws it again (release 5.43).
     today_changed: Callable[[], None] = lambda: None
+    #: The Model last loaded, and the database's state when it was (``model``).
+    _model: Model | None = field(default=None, init=False, repr=False)
+    _model_at: tuple[int, int] | None = field(default=None, init=False, repr=False)
 
     def model(self) -> Model:
-        return Model(self.conn)
+        """Everything in docs.db, loaded again only once the database has changed (release 5.52): the capture window asks on
+        each key pressed, and a load reads every table. All who ask share one Model, so it's read-only. ``total_changes``
+        moves with this connection's writes and ``data_version`` with another's. Inside a transaction nothing is kept, since
+        what's read there could still be rolled back."""
+        if self.conn.in_transaction:
+            return Model(self.conn)
+        at = (self.conn.total_changes, self.conn.execute("PRAGMA data_version").fetchone()[0])
+        if self._model is None or at != self._model_at:
+            self._model, self._model_at = Model(self.conn), at
+        return self._model
 
     def parse_people(self, model: Model) -> list[ParsePerson]:
         return [ParsePerson(p.id, p.name, tuple(p.aliases), p.status, p.id == self.settings.me) for p in model.people.values()]
