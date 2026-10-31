@@ -16,6 +16,7 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Content text**: the text typed or pasted into the capture window's main box, kept with the capture once it's saved.
 - **Formatted content text**: content text with bold, italic, underline, strikethrough, highlights or lists (release 5.7). Its capture.md keeps it as Markdown; everything that reads its words reads it without the marks.
 - **Operator**: `@`, `@L.`, `@__`, `#` or `**` in the content text, saying what a line makes (release 5.8): a person, a lead, no one yet, a task it belongs to, or its kind.
+- **Parameter**: a field of a task that a `**name,` line fills from one sentence in the content text (release 5.38): `**due, 5 Nov.`
 - **Item**: a line of the content text (with the list items under it) that an operator makes into a task, a note, an update or a decision. Saving keeps each as a small capture of its own, linked to the capture it came from (its notes).
 - **Heading**: a line that's only `#` tasks. It covers the lines under it, until the next heading.
 - **Split**: what Save does with a note that names several `#` tasks and has no task picked (release 5.32): a capture per task, each with its part of the text and the files added while the cursor was in it, and an unfiled one for the rest. One `#` task fills the task picker instead.
@@ -64,6 +65,20 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Discard**: hiding a task or capture made by mistake, with a reason. Nothing is deleted, and Bring back restores it. It's how DocRepo "deletes" anything.
 - **Scope**: which tasks a view or prompt draws on: this task, with ancestors, with subtasks, or family. Family is all ancestors plus all descendants.
 - **Event**: a dated happening, such as an audit or a turnaround, entered as a task's Deadline. "Event" means nothing else, except in "plant event".
+
+- **Template**: a small tree of tasks without dates, kept apart from tasks, that Make tasks copies into the task tree (release 5.44). Its name is its top row's title.
+- **Template row**: one task in a template.
+- **Make tasks**: copying a template, or a row and what's under it, into the task tree. The copies are ordinary tasks.
+- **Starting notes**: what a template row copies onto each new task's notes page, once. The page is the task's own from then on.
+- **Linked field**: a field on a task that follows its template row until it's changed on the task.
+- **Detach**: ending all of a task's links to its template, keeping its values.
+- **Duration**: a task's length in days, kept when its dates move once it's typed (release 5.46).
+- **Runs through weekends**: a tick saying a task's days are every day, not only workdays.
+- **Hours a day**: a role's hours stated as a rate (**h a day**), whose total (**h in all**) is the rate times the task's days. The total is what the lists, the timeline and Capacity read.
+- **Involvement**: the percentage of a role's hours that land on one person on one task. 100% by default, and not a split.
+- **Preview** (of a template change): the window saying which tasks or trees a change to a template would reach, each with a tick, before it's made. An unticked task keeps its value and stops following.
+- **Changes** (of a template): the list on a template's page of what was changed and what it did to its tasks.
+- **Tree** (of a template): the tasks one Make tasks made, or one Save as template linked.
 
 ## 3. People and hours
 

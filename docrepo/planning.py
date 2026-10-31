@@ -15,7 +15,7 @@ The window (``docrepo/ui/quick_edit.py``) only draws what this module works out.
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Any
@@ -23,8 +23,10 @@ from typing import Any
 from docrepo import timeline
 from docrepo.model import Model, Task
 from docrepo.parse import EVENT_WORDS, ROLE_HOURS_RE, Known, ParsePerson, Who, parse_capture, work_weeks
-from docrepo.tasks import KeyDateRow
+from docrepo.schedule import length_of
+from docrepo.tasks import RATES, KeyDateRow
 
+MON_TO_FRI = frozenset(range(5))
 #: The fields Quick edit has, in the order its chips are listed.
 KEYS = ("start", "due", "deadline", "deadline_desc", "recurrence", "leads", "assignees", "lead_hours", "assignee_hours", "plant_event")
 #: A field's name, as a chip, the window and its messages say it.
@@ -53,15 +55,24 @@ class Values:
     plant_event: bool = False
     #: Its key dates (release 5.31), as the form's rows; the box never fills them.
     key_dates: list[KeyDateRow] = field(default_factory=list)
+    #: Release 5.46: its Duration, Runs through weekends, and each role's rate. With a rate, its total is worked out.
+    duration: int | None = None
+    calendar_days: bool = False
+    lead_per_day: float | None = None
+    assignee_per_day: float | None = None
+    #: Release 5.47: each person's Involvement where it isn't 100, set in Edit task; it counts in the total and shows on a chip.
+    involvement: dict[tuple[str, str], int] = field(default_factory=dict)
 
     def copy(self) -> Values:
-        return replace(self, leads=list(self.leads), assignees=list(self.assignees), key_dates=[replace(r) for r in self.key_dates])
+        return replace(self, leads=list(self.leads), assignees=list(self.assignees), key_dates=[replace(r) for r in self.key_dates],
+                       involvement=dict(self.involvement))
 
 
 def values_of(t: Task, key_dates: Sequence[KeyDateRow] = ()) -> Values:
     """A task's fields as Quick edit shows them. A Start that isn't set stays empty (the task starts the day it was made)."""
     return Values(t.start or "", t.due or "", t.deadline or "", t.deadline_desc or "", t.recurrence or "", list(t.leads),
-                  list(t.assignees), t.lead_hours, t.assignee_hours, bool(t.plant_event), [replace(r) for r in key_dates])
+                  list(t.assignees), t.lead_hours, t.assignee_hours, bool(t.plant_event), [replace(r) for r in key_dates],
+                  t.duration, t.calendar_days, t.lead_per_day, t.assignee_per_day, dict(t.involvement))
 
 
 @dataclass(frozen=True)
@@ -199,22 +210,43 @@ def shown(base: Values, reading: Reading) -> Values:
     v = base.copy()
     for key, value in reading.fills.items():
         setattr(v, key, list(value) if isinstance(value, list) else value)
+        if key in RATES:  # the box reads a total, which takes a rate's place
+            setattr(v, RATES[key], None)
     return v
 
 
-def total_hours(v: Values) -> float:
-    """The task's whole work, as Capacity counts it: the lead hours for each lead, the assignee hours for each assignee."""
-    return (v.lead_hours or 0) * len(v.leads) + (v.assignee_hours or 0) * len(v.assignees)
+def length(v: Values, workdays: Collection[int] = MON_TO_FRI) -> int | None:
+    """The fields' length in days: the Duration, or what the two dates hold."""
+    start, due = _day(v.start), _day(v.due)
+    return length_of(_iso(start) or None, _iso(due) or None, v.duration, workdays, v.calendar_days)
+
+
+def role_total(v: Values, key: str, workdays: Collection[int] = MON_TO_FRI) -> float | None:
+    """A role's total, worked out from its rate when it has one (decision 189)."""
+    rate = getattr(v, RATES[key])
+    if rate is None:
+        return getattr(v, key)
+    days = length(v, workdays)
+    return round(rate * days, 2) if days else None
+
+
+def total_hours(v: Values, workdays: Collection[int] = MON_TO_FRI) -> float:
+    """The task's whole work, as Capacity counts it: each person's share of their role's hours."""
+    lead, assignee = role_total(v, "lead_hours", workdays) or 0, role_total(v, "assignee_hours", workdays) or 0
+    return (sum(lead * v.involvement.get(("lead", p), 100) / 100 for p in v.leads)
+            + sum(assignee * v.involvement.get(("assignee", p), 100) / 100 for p in v.assignees))
 
 
 def hours_text(x: float) -> str:
     return str(int(x)) if float(x).is_integer() else f"{x:.1f}".rstrip("0").rstrip(".")
 
 
-def total_text(v: Values, task: Task) -> str:
+def total_text(v: Values, task: Task, workdays: Collection[int] = MON_TO_FRI) -> str:
     """The line under the people: the total, and about how much a week over the task's workdays (a routine task's are
-    for each time it comes round)."""
-    total = total_hours(v)
+    for each time it comes round). A rate with no length says it needs one."""
+    total = total_hours(v, workdays)
+    if not total and (v.lead_per_day is not None or v.assignee_per_day is not None):
+        return f"{hours_text(v.assignee_per_day if v.assignee_per_day is not None else v.lead_per_day)} h a day, needs a length"
     if not total:
         return "No hours yet: its bar on the timeline stays blank."
     if v.recurrence:
@@ -245,8 +277,11 @@ def problem(v: Values) -> str | None:
 
 
 def edit_values(v: Values) -> dict[str, Any]:
-    """The fields as ``edits.edit_task`` takes them."""
+    """The fields as ``edits.edit_task`` takes them: each role's hours as a rate, or as a total with no rate."""
+    hours: dict[str, Any] = {}
+    for key, rate in RATES.items():
+        hours.update({rate: getattr(v, rate)} if getattr(v, rate) is not None else {key: getattr(v, key), rate: None})
     return {"start": v.start or None, "due": v.due or None, "deadline": v.deadline or None, "deadline_desc": v.deadline_desc,
             "recurrence": v.recurrence or None, "leads": [Who(p) for p in v.leads], "assignees": [Who(p) for p in v.assignees],
-            "lead_hours": v.lead_hours, "assignee_hours": v.assignee_hours, "plant_event": v.plant_event,
-            "key_dates": [replace(r) for r in v.key_dates]}
+            **hours, "plant_event": v.plant_event, "key_dates": [replace(r) for r in v.key_dates],
+            "duration": v.duration, "calendar_days": v.calendar_days, "involvement": dict(v.involvement)}

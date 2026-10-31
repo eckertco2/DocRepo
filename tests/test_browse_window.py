@@ -224,6 +224,71 @@ def test_clearing_a_reminder_from_the_list(browse):
     assert ("task", "T000018") not in rows(browse)
 
 
+def _title_cell(browse, task_id: str) -> str:
+    return next(i for i in browse.tree.items() if i.data(0, KEY_ROLE) == ("task", task_id)).data(0, HTML_ROLE)
+
+
+def test_the_task_tree_s_rows_name_their_own_labels(browse):
+    """Item 76 (decision 235): quiet words after the title, not chips, on the task tree only."""
+    browse.set_view("tasks")
+    browse.open.update(Model(browse.conn).tasks)
+    browse.render_list()
+    assert 'class="sub">&nbsp;Line 1 · Strategic Plan</span>' in _title_cell(browse, "T000001")
+    assert "Safety</span>" in _title_cell(browse, "T000019") and "Urgent" in _title_cell(browse, "T000019")  # after its chips
+    assert "Line 1" not in _title_cell(browse, "T000012")  # a subtask doesn't repeat what it inherits
+    assert 'class="sub"' not in _title_cell(browse, "T000016")  # no labels, nothing added
+    browse.set_view("due")
+    assert "Safety" not in _title_cell(browse, "T000019")  # the other lists are as they were
+
+
+def test_a_dimmed_parent_and_a_label_s_own_section_leave_the_words_off(browse):
+    browse.set_view("tasks")
+    browse._set_filter("labels", ["Safety"])
+    assert "Line 1" not in _title_cell(browse, "T000001")  # there for context, as the row of a parent that doesn't match
+    assert "Safety</span>" in _title_cell(browse, "T000019")
+    browse._set_filter("labels", [])
+    browse._set_tree_group("label")
+    assert "Line 1" not in _title_cell(browse, "T000001") and "Strategic Plan</span>" in _title_cell(browse, "T000001")  # first under Line 1
+    browse._set_tree_group("group")
+    assert "Line 1 · Strategic Plan</span>" in _title_cell(browse, "T000001")
+
+
+def _today_heading(browse, name: str):
+    return next((i for i in browse.tree.items() if i.data(0, KEY_ROLE) is None and f"<b>{name}</b>" in (i.data(0, HTML_ROLE) or "")), None)
+
+
+def test_reminders_whose_day_has_come_are_on_today(browse):
+    """Item 77 (decisions 236 to 238): under their own heading, oldest first, with Add to Today and Clear. Tomorrow's stays
+    on the Reminders list until its day."""
+    browse.set_view("today")
+    head = _today_heading(browse, "Reminders")
+    rows_under = [head.child(i) for i in range(head.childCount())]
+    assert [r.data(0, KEY_ROLE) for r in rows_under] == [("task", "T000016"), ("task", "T000018")]  # not T000019, tomorrow's
+    assert "1 d ago" in rows_under[0].data(2, HTML_ROLE) and "Today" in rows_under[1].data(2, HTML_ROLE) and "Reminder" in rows_under[0].data(1, HTML_ROLE)
+    links = [b.text() for b in browse.tree.itemWidget(rows_under[1], 3).findChildren(QPushButton)]
+    assert links == ["Add to Today", "Clear"]
+    today_rows = browse.tree.keys()
+    assert today_rows.index(("task", "T000018")) < today_rows.index(("task", "T000012"))  # above what's due in the next 7 days
+
+
+def test_a_reminder_on_today_can_be_added_and_cleared(browse):
+    browse.set_view("today")
+    head = _today_heading(browse, "Reminders")
+    buttons = {b.text(): b for b in browse.tree.itemWidget(head.child(1), 3).findChildren(QPushButton)}
+    buttons["Add to Today"].click()
+    m = Model(browse.conn)
+    assert [a.subject for a in m.today_items()] == ["T000018"] and m.task("T000018").reminder == "2026-10-08"  # on Today, reminder kept
+    head = _today_heading(browse, "Reminders")
+    row = next(head.child(i) for i in range(head.childCount()) if head.child(i).data(0, KEY_ROLE) == ("task", "T000018"))
+    buttons = {b.text(): b for b in browse.tree.itemWidget(row, 3).findChildren(QPushButton)}
+    assert list(buttons) == ["Clear"]  # already on Today
+    buttons["Clear"].click()
+    m = Model(browse.conn)
+    assert m.task("T000018").reminder is None and [e.via for e in m.status_log_of("T000018") if e.field == "Reminder"][-1] == "Today"
+    browse.clear_reminder("T000016", "Today")
+    assert _today_heading(browse, "Reminders") is None  # the heading goes with its last reminder
+
+
 def test_discussed_closes_the_item_and_opens_an_update(browse):
     browse.set_view("agenda")
     item = next(a for a in Model(browse.conn).open_items_for("T000010") if a.subject == "T000001")

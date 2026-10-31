@@ -11,44 +11,59 @@ added email), and only after a space, a "(" or the start of a line, so an addres
   it. On a line of its own (a heading), it covers the lines under it, until the next heading. With no task picked, one
   ``#`` task fills the task picker, and several split a note into a capture per task (release 5.32: ``named_tasks``,
   ``sections``); a note naming only the capture's own task makes no item (``own``).
-- ``**t``, ``**n``: a task, or a note, said outright. ``**Closed.``, ``**Done.``, ``**Parked.``, ``**In progress.``,
-  ``**Started.``: an update to the ``#`` task with that state; the rest is its current status. ``**u``: an update with
-  no state change. ``**Decision.``: a decision, on the ``#`` task, else on the capture's task or meeting.
-  ``**event.``: a task with Plant event ticked (release 5.9, decision 22): ``**event. Spring outage, 3 to 14 Nov``.
-- ``**date``: a key date (release 5.31, the key dates plan, item 60) on the ``#`` task, else the task item it's listed
-  under, else the capture's task or new task: ``**date Dec 1 to 5 Trial execution window, plant activity``. Its date
-  phrase is read as Parse and populate reads dates ("from" a start, "by" or "due" an end, a range a window, "on" or a
-  bare date one day), "plant activity" (or "plant event") and "deadline" are its ticks, and the rest is its description
-  (``read_key_date``). Free text is never a key date (decision 154).
+- ``**name,``, then the rest: a name from ``OPERATORS`` (release 5.38, round 5's item 67, decisions 200 to 209). Either it
+  says what a line is, and takes its whole line and the list items under it (decision 203):
+  ``**t,`` or ``**task,``, ``**n,`` or ``**note,``: a task, or a note, said outright. ``**closed,``, ``**done,``,
+  ``**parked,``, ``**in progress,``, ``**started,``: an update to the ``#`` task with that state; the rest is its current
+  status. ``**u,`` or ``**update,``: an update with no state change. ``**decision,``: a decision, on the ``#`` task, else
+  on the capture's task or meeting. ``**event,``: a task with Plant event ticked (release 5.9, decision 22):
+  ``**event, Spring outage, 3 to 14 Nov.`` With nothing to say, these need no comma: ``#Rigging plan **closed.``
+- Or it fills a parameter, from one sentence up to its period or the line's end (decision 204): ``**due, 5 Nov.``,
+  ``**lead, Tom.``, ``**key date, trial window from 1 Nov to 5 Nov 2027, plant activity.`` (``read_key_date``), or a
+  reference field by the name Settings gives it. A filled field on an existing task stays, and a list adds (decision
+  200). It goes on the nearest of: a ``#`` task in its sentence, the task item on its line, a ``#`` task on its line, the
+  task item it's listed under, the new task it's listed under, a ``#`` above, the capture's task (decision 208).
 
-A ``**`` type wins; else an ``@`` makes a task; else a ``#`` alone makes a note; a block with none stays in the notes.
-``**`` and a space is never an operator, and ``#`` is a link only when it names a task, so "Pump #3" stays text.
+A ``**`` kind wins; else an ``@`` makes a task; else a ``#`` alone makes a note; a block with none stays in the notes.
+Parameters make their own cards beside whatever the rest of their line makes. ``**`` and a space is never an operator, and
+``#`` is a link only when it names a task, so "Pump #3" stays text. A name not in the table, and an old form such as
+``**Closed. Mike confirmed``, make a card that can't be ticked, saying what to write (decisions 205 and 206).
 
 capture.md keeps each ``@`` and ``#`` with its ID (M0049): ``@[Tom Becker](P003)``, ``@L.[Priya Shah](P002)``,
 ``#[Rigging plan](T000012)``, so renaming a person or a task never breaks it (``store``, ``unstore``).
 
-Ported from the mockup's ``items.js``; decisions 37 to 52 of the round 2 plan.
+Ported from the mockup's ``items.js``; decisions 37 to 52 of the round 2 plan, and 200 to 209 of round 5's quick input plan.
 """
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import date
+from typing import Any
 
 from docrepo import markup
-from docrepo.parse import EVENT_WORDS, STATE_WORDS, ParseLabel, ParsePerson, Who, find_dates, parse_capture, quick_update
-from docrepo.text import first_sentence
+from docrepo.db import RECURRENCES
+from docrepo.model import PRIORITY_NAMES
+from docrepo.parse import (
+    EVENT_WORDS, REF_SUFFIX, DateHit, ParseLabel, ParsePerson, Who, find_dates, find_hours, ok_day, one_decimal, parse_capture, quick_update,
+)
+from docrepo.text import first_sentence, sentences
 
-KIND_NAMES = {"task": "Task", "note": "Note", "update": "Update", "decision": "Decision", "date": "Key date"}
-TYPE_RE = re.compile(rf"^\*\*(?:([tnu])(?![A-Za-z0-9_])|(decision)\b[.:]?|({STATE_WORDS})\b[.:]?|(event)\b[.:]?|(date)\b[.:]?)", re.I)
-# A **date line's ticks and the words before its date (release 5.31).
+KIND_NAMES = {"task": "Task", "note": "Note", "update": "Update", "decision": "Decision", "date": "Key date", "param": "Field"}
+#: The kinds of item a parameter makes: they go on a task, with no capture of their own.
+PARAM_KINDS = ("date", "param")
+_NAME = re.compile(r"\*\*([A-Za-z][^,*\n]{0,40}),")
+_UNKNOWN_NAME = re.compile(r"[a-z0-9][a-z0-9 '#&/-]*")
+_NEXT_STAR = re.compile(r"(?:^|\s)\*\*[A-Za-z]")
+# A key date's ticks and the words before its date (release 5.31).
 _KD_PLANT = re.compile(r"\b(?:major\s+)?plant\s+(?:activity|event)\b", re.I)
 _KD_DEADLINE = re.compile(r"\b(?:hard\s+)?deadline\b", re.I)
 _KD_WORD = re.compile(r"\b(from|starting|starts?|by|due|until|till|before|ends?|on)\s*\Z", re.I)
 _KD_FROM = re.compile(r"(?:from|starting|starts?)\Z", re.I)
 _KD_BY = re.compile(r"(?:by|due|until|till|before|ends?)\Z", re.I)
-_KD_JOIN = re.compile(r"\s*(?:-|–|—|to|until|till|through|thru)\s*", re.I)
+_KD_JOIN = re.compile(r"\s*\.?\s*(?:-|–|—|to|until|till|through|thru)\s*", re.I)
+_YEAR_TYPED = re.compile(r"\b\d{4}\b|\d/\d{2}\b")
 LIST_RE = re.compile(r"^([ \t]*)([-*•]|\d+[.)])\s+")
 #: An @ or # kept with its ID in capture.md.
 STORED = re.compile(r"(@L\.|@|#)\[([^\]\n]+)\]\(([PT]\d+)\)", re.I)
@@ -79,7 +94,11 @@ class Names:
     """The people and tasks operators can name. ``prefer`` maps a name as written ("@tom becker", "#rigging plan", in
     lower case) to the ID it was picked as, or kept as in capture.md, ahead of the lists."""
 
-    def __init__(self, people: Sequence[ParsePerson], tasks: Sequence[RefTask], prefer: Mapping[str, str] | None = None) -> None:
+    def __init__(self, people: Sequence[ParsePerson], tasks: Sequence[RefTask], prefer: Mapping[str, str] | None = None,
+                 fields: Sequence[str] = (), records: Mapping[str, Any] | None = None, labels: Sequence[str] = ()) -> None:
+        self.field_ops = {key: op for op in map(_field_op, fields) for key in op.names}  # the reference fields, named in Settings
+        self.records = records or {}  # the tasks themselves, for what a field already holds
+        self.labels = list(labels)
         self.people = list(people)
         self.active = [p for p in self.people if p.status == "active"]
         self.person_by_id = {p.id: p for p in self.people}
@@ -99,9 +118,11 @@ class Names:
         return t.title if t else task_id
 
 
-def names_of(model, people: Sequence[ParsePerson], prefer: Mapping[str, str] | None = None) -> Names:
-    """The Names for a Model: its people (as Parse and populate sees them) and its tasks, but discarded ones."""
-    return Names(people, [RefTask(t.id, t.title, t.state != "Closed") for t in model.tasks.values() if not t.discarded], prefer)
+def names_of(model, people: Sequence[ParsePerson], prefer: Mapping[str, str] | None = None, fields: Sequence[str] = ()) -> Names:
+    """The Names for a Model: its people (as Parse and populate sees them) and its tasks, but discarded ones; ``fields``
+    are the reference fields Settings names."""
+    return Names(people, [RefTask(t.id, t.title, t.state != "Closed") for t in model.tasks.values() if not t.discarded], prefer, fields,
+                 model.tasks, [x.name for x in model.labels])
 
 
 # ---- reading operators ----
@@ -117,8 +138,16 @@ class Token:
     name: str = ""  # the person's name (a new person's as written)
     lead: bool = False  # @L.
     none: bool = False  # @__
-    event: bool = False  # **event.: a task that's a plant event
+    event: bool = False  # **event,: a task that's a plant event
     size: int = 0
+    # A parameter: its entry in the table (none for a name it can't take), what its card says, its sentence and where that
+    # ends, and what stops it. ``inside``: an @ or # inside a parameter's sentence, which is the sentence's own.
+    op: Operator | None = None
+    label: str = ""
+    sentence: str = ""
+    until: int = 0
+    problem: str = ""
+    inside: bool = False
 
     @property
     def is_new(self) -> bool:
@@ -136,17 +165,61 @@ def _match_name(after: str, entries: list[tuple[str, str]]) -> tuple[str, str] |
     return None
 
 
-def _type(rest: str) -> Token | None:
-    m = TYPE_RE.match(rest)
-    if not m:
+def _norm(name: str) -> str:
+    return re.sub(r"\s+", " ", name.strip().lower())
+
+
+def _value_token(rest: str, head: int, *, op: Operator | None = None, label: str, problem: str = "", sentenced: bool = True) -> Token:
+    """A parameter's token: what its value is read from runs up to the next ** word, and a value is one sentence, up to its
+    end by ``text.sentences`` or the line's (decision 204). ``sentenced`` False takes all of it: an old form's words."""
+    after = rest[head:]
+    cut = _NEXT_STAR.search(after)
+    held = after[:cut.start()] if cut else after
+    if not sentenced:
+        return Token("param", op=op, label=label, problem=problem, size=head, until=head + len(held), sentence=re.sub(r"^[.:]\s*", "", held).strip())
+    found = sentences(held)
+    first = found[0] if found else None
+    return Token("param", op=op, label=label, problem=problem, size=head, until=head + (first.end if first else 0),
+                 sentence=re.sub(r"[.!?]+\Z", "", first.text).strip() if first else "")
+
+
+def _kind_token(op: Operator, size: int) -> Token:
+    return Token("type", item_type=op.item, state=op.state, event=op.event, size=size)
+
+
+def _nothing_after(after: str, names: Names) -> bool:
+    """Whether a kind has nothing to say: the line's end, or only # tasks and other operators."""
+    t = re.sub(r"^[.:]", "", after)
+    return not re.sub(r"[\s.:;,]", "", clean(t, scan(t, names), names))
+
+
+def _star(rest: str, names: Names) -> Token | None:
+    """A ** at the start of ``rest``: a name from the table and its comma; a kind with nothing to say; or a name written
+    the old way, or not in the table, which makes a card saying so (decisions 205 and 206)."""
+    m = _NAME.match(rest)
+    if m:
+        name = _norm(m.group(1))
+        op = _op_of(name, names)
+        label = f"**{name}"
+        if op and op.item:
+            return _kind_token(op, m.end())
+        if op and op.gone:
+            return _value_token(rest, m.end(), label=label, problem=op.gone)
+        if op:
+            return _value_token(rest, m.end(), op=op, label=op.label)
+        if _UNKNOWN_NAME.fullmatch(name) and len(name.split(" ")) <= 4:
+            return _value_token(rest, m.end(), label=label, problem=f"No field called {name}")
+    bare = next((n for n in _names_longest(names) if rest[2:2 + len(n)].lower() == n and not _is_word(rest[2 + len(n):3 + len(n)])
+                 and rest[2 + len(n):3 + len(n)] != "*"), None)
+    if not bare:
         return None
-    if m.group(5):
-        return Token("type", item_type="date", size=m.end())
-    if m.group(4):
-        return Token("type", item_type="task", event=True, size=m.end())
-    kind = {"t": "task", "n": "note", "u": "update"}[m.group(1).lower()] if m.group(1) else "decision" if m.group(2) else "update"
-    state = quick_update(m.group(3) + ".").state if m.group(3) else ""
-    return Token("type", item_type=kind, state=state, size=m.end())
+    op = _op_of(bare, names)
+    head = 2 + len(bare)
+    after = rest[head:]
+    mark = 1 if after[:1] in (".", ":") else 0
+    if op.item and _nothing_after(after, names):
+        return _kind_token(op, head + mark)
+    return _value_token(rest, head + mark, label=f"**{bare}", problem=op.gone or f"Now written **{bare}, then your sentence", sentenced=False)
 
 
 def _person(rest: str, names: Names) -> Token | None:
@@ -185,27 +258,43 @@ def _task(rest: str, names: Names) -> Token | None:
 
 
 def scan(text: str, names: Names) -> list[Token]:
-    """The operators in one line's text, in order."""
+    """The operators in one line's text, in order. A parameter's ``end`` is its name and comma's and its ``until`` its
+    sentence's; the @ and # inside that sentence are marked ``inside``, except that a parent's sentence is all value."""
     out: list[Token] = []
-    i = 0
+    i = held = 0
     while i < len(text):
         ch = text[i]
         if ch not in "@#*" or (i > 0 and not (text[i - 1].isspace() or text[i - 1] == "(")):
             i += 1
             continue
         rest = text[i:]
-        tok = _type(rest) if ch == "*" else _person(rest, names) if ch == "@" else _task(rest, names)
-        if tok:
-            out.append(replace(tok, start=i, end=i + tok.size))
-            i += tok.size
-        else:
+        tok = _star(rest, names) if ch == "*" else _person(rest, names) if ch == "@" else _task(rest, names)
+        if not tok:
             i += 1
+            continue
+        until = i + tok.until if tok.kind == "param" else 0
+        out.append(replace(tok, start=i, end=i + tok.size, until=until, inside=i < held))
+        if tok.kind == "param":
+            held = until
+            if tok.op and tok.op.whole:
+                i = max(until, i + tok.size)
+                continue
+        i += tok.size
     return out
 
 
 def clean(text: str, toks: list[Token], names: Names) -> str:
     """A line's text without its operators, for a title or a description. An operator at the start or the end of the
-    line goes; one inside a sentence keeps its name, without the @ or # ("Ask @Tom about it" reads "Ask Tom about it")."""
+    line goes; one inside a sentence keeps its name, without the @ or # ("Ask @Tom about it" reads "Ask Tom about it"). A
+    parameter goes with its sentence."""
+    if any(x.kind == "param" for x in toks):
+        left, at = [], 0
+        for x in toks:
+            if x.kind == "param":
+                left.append(text[at:x.start])
+                at = x.until
+        text = "".join(left) + text[at:]
+        toks = [x for x in scan(text, names) if x.kind != "param"]
     out, at, named = [], 0, False  # named: a person's operator at the start went, so "to" or "will" after it goes too
     for i, x in enumerate(toks):
         before = text[toks[i - 1].end if i else 0:x.start]
@@ -227,13 +316,15 @@ def clean(text: str, toks: list[Token], names: Names) -> str:
     s = re.sub(r"^and\s+", "", s, flags=re.I).strip()
     if named:
         s = _LEAD_IN.sub("", s, count=1)
+    if not re.search(r"[^\s.,;:!?&–—-]", s):
+        return ""
     return s[:1].upper() + s[1:] if s else ""
 
 
-# ---- a **date line's key date (release 5.31, the key dates plan, item 60) ----
+# ---- a key date's sentence (release 5.31, the key dates plan, item 60; decision 209) ----
 @dataclass(frozen=True)
 class KeyDateText:
-    """What a ``**date`` line says: its dates (YYYY-MM-DD, or None), description, ticks, and what stops it, if anything."""
+    """What a key date's sentence says: its dates (YYYY-MM-DD, or None), description, ticks, and what stops it, if anything."""
 
     start: str | None
     end: str | None
@@ -243,8 +334,20 @@ class KeyDateText:
     problem: str = ""
 
 
+def _window_start(a: DateHit, b: DateHit) -> date:
+    """A window's start takes its end's year when only the end has one: "1 Nov to 5 Nov 2027", "28 Dec to 3 Jan 2028"."""
+    if not _YEAR_TYPED.search(b.text) or _YEAR_TYPED.search(a.text):
+        return a.date
+
+    def on(year: int) -> date | None:
+        return date(year, a.date.month, a.date.day) if ok_day(year, a.date.month - 1, a.date.day) else None
+
+    same = on(b.date.year)
+    return same if same and same <= b.date else on(b.date.year - 1) or a.date
+
+
 def read_key_date(text: str, today: date) -> KeyDateText:
-    """A ``**date`` line's text, after its operator, as a key date: its first date phrase, read with Parse and populate's
+    """A ``**key date,`` sentence as a key date: its first date phrase, read with Parse and populate's
     date rules ("from" makes it a start, "by" or "due" an end, a range or two dates joined by "to" or a dash a window, "on"
     or a bare date one day); "plant activity" (or "plant event") and "deadline" as its ticks; the rest its description.
     Ported from the mockup's ``keyDate``."""
@@ -258,11 +361,12 @@ def read_key_date(text: str, today: date) -> KeyDateText:
         w = _KD_WORD.search(text[:h.start])
         nxt = hits[1] if len(hits) > 1 else None
         joined = bool(nxt and _KD_JOIN.fullmatch(text[h.end:nxt.start]))
-        cut_from, cut_to = (h.start - len(w.group(0))) if w else h.start, nxt.end if joined and nxt else h.end
+        stop = nxt.end if joined and nxt else h.end
+        cut_from, cut_to = (h.start - len(w.group(0))) if w else h.start, stop + (text[stop:stop + 1] == ".")
         if h.from_:
             start, end = h.from_.isoformat(), h.date.isoformat()
         elif joined and nxt:
-            start, end = h.date.isoformat(), nxt.date.isoformat()
+            start, end = _window_start(h, nxt).isoformat(), nxt.date.isoformat()
         elif w and _KD_FROM.match(w.group(1)):
             start = h.date.isoformat()
         elif w and _KD_BY.match(w.group(1)):
@@ -289,6 +393,241 @@ def key_date_text(kd: KeyDateText) -> str:
     parts = [kd.start and f"Start {kd.start}", kd.end and f"End {kd.end}", kd.description and f'Description "{kd.description}"',
              kd.plant and "Plant activity", kd.deadline and "Deadline", kd.problem]
     return ". ".join(p for p in parts if p) + "."
+
+
+# ---- reading a parameter's sentence ----
+@dataclass(frozen=True)
+class Value:
+    """What a parameter's sentence says: the changes it makes (``tasks.update_task``'s names, with "parents" and "priority"
+    beside them), how it reads, and what stops it, if anything."""
+
+    changes: Mapping[str, Any] = field(default_factory=dict)
+    shown: str = ""
+    problem: str = ""
+    key_date: KeyDateText | None = None
+
+
+@dataclass(frozen=True)
+class ReadWith:
+    today: date
+    names: Names
+    events: Sequence[str] = EVENT_WORDS
+
+
+_NOTHING = Value(problem="Nothing after the comma")
+_NO_DATE = Value(problem="No date: add one, such as 25 Nov")
+_CHUNK = re.compile(r"\s*(?:,|;|&|\band\b)\s*", re.I)
+
+
+def _chunks(x: str) -> list[str]:
+    return [c.strip() for c in _CHUNK.split(x) if c.strip()]
+
+
+def _read_date(x: str, c: ReadWith, op: Operator) -> Value:
+    hits = find_dates(x, c.today)
+    return Value({op.task_field: hits[0].date.isoformat()}, hits[0].date.isoformat()) if hits else _NO_DATE if x else _NOTHING
+
+
+def _read_start(x: str, c: ReadWith, op: Operator) -> Value:
+    hits = find_dates(x, c.today)
+    if not hits:
+        return _NO_DATE if x else _NOTHING
+    day = (hits[0].from_ or hits[0].date).isoformat()
+    return Value({op.task_field: day}, day)
+
+
+def _read_deadline(x: str, c: ReadWith, op: Operator) -> Value:
+    k = read_key_date(x, c.today)
+    day = k.end or k.start
+    if not day:
+        return _NO_DATE if x else _NOTHING
+    return Value({op.task_field: day, **({"deadline_desc": k.description} if k.description else {})}, day + (f": {k.description}" if k.description else ""))
+
+
+def _read_key_date(x: str, c: ReadWith, op: Operator) -> Value:
+    if not x:
+        return _NOTHING
+    kd = read_key_date(clean(x, scan(x, c.names), c.names), c.today)
+    return Value(problem=kd.problem, key_date=kd)
+
+
+def _read_text(x: str, c: ReadWith, op: Operator) -> Value:
+    t = clean(x, scan(x, c.names), c.names)
+    return Value({op.task_field: t}, t) if t else _NOTHING
+
+
+def _read_people(x: str, c: ReadWith, op: Operator) -> Value:
+    who, shown = [], []
+    known = [(n.lower(), v) for n, v in (*c.names.prefer_people, *c.names.person_names)]
+    for chunk in _chunks(x):
+        after = re.sub(r"^@(?:L\.)?", "", chunk, flags=re.I)
+        low = after.lower()
+        pid = next((p.id for p in c.names.active if p.me), None) if low in ("me", "i") else next((v for n, v in known if n == low), None)
+        if pid:
+            who.append(Who(pid, c.names.person_name(pid)))
+            shown.append(c.names.person_name(pid))
+        elif re.fullmatch(r"[A-Za-z][A-Za-z'-]*(?: [A-Za-z][A-Za-z'-]*)?", after):
+            who.append(Who(None, after))
+            shown.append(f"{after} (new)")
+        else:
+            return Value(problem=f"Can't read a name in: {chunk}")
+    return Value({op.task_field: who}, ", ".join(shown)) if who else _NOTHING
+
+
+def _read_hours(x: str, c: ReadWith, op: Operator) -> Value:
+    if re.fullmatch(r"\d+(?:\.\d+)?|\.\d+", x):
+        return Value({op.task_field: float(x)}, one_decimal(float(x)))
+    if not x:
+        return _NOTHING
+    hits = find_hours(x)
+    if not hits:
+        return Value(problem="No hours: add a number, such as 12")
+    if hits[0].per:
+        return Value(problem="Give a total, such as 12 hours")
+    return Value({op.task_field: hits[0].hours}, one_decimal(hits[0].hours))
+
+
+def _read_state(x: str, c: ReadWith, op: Operator) -> Value:
+    q = quick_update(x + ".")
+    return Value({op.task_field: q.state}, q.state) if q and not q.rest else Value(problem="Say Not started, In progress, Parked or Closed")
+
+
+def _read_priority(x: str, c: ReadWith, op: Operator) -> Value:
+    low = _norm(x)
+    key = next((k for k, name in PRIORITY_NAMES.items() if low in (k, name.lower())), None)
+    return Value({op.task_field: key}, PRIORITY_NAMES[key]) if key else Value(problem="Say Critical, High, Medium or Parking lot")
+
+
+def _read_recurrence(x: str, c: ReadWith, op: Operator) -> Value:
+    low = _norm(x)
+    hit = next((r for r in RECURRENCES if r.lower() == low), "") or (parse_capture(x, "new_task", c.today, (), (), c.events).recurrence if x else "")
+    return Value({op.task_field: hit}, hit) if hit else Value(problem="Say Daily, Weekly, Bi-weekly, Monthly, Quarterly or Yearly")
+
+
+def _read_yes_no(x: str, c: ReadWith, op: Operator) -> Value:
+    if re.fullmatch(r"y(?:es)?", x, re.I):
+        return Value({op.task_field: True}, "Yes")
+    if re.fullmatch(r"no?", x, re.I):
+        return Value({op.task_field: False}, "No")
+    return Value(problem="Say yes or no")
+
+
+def _read_labels(x: str, c: ReadWith, op: Operator) -> Value:
+    known = {n.lower(): n for n in c.names.labels}
+    chunks = _chunks(x)
+    return (Value({op.task_field: [known.get(k.lower(), k) for k in chunks]}, ", ".join(known.get(k.lower(), f"{k} (new)") for k in chunks))
+            if chunks else _NOTHING)
+
+
+def _read_parents(x: str, c: ReadWith, op: Operator) -> Value:
+    def found(chunk: str) -> str | None:
+        low = chunk.removeprefix("#").strip().lower()
+        if re.fullmatch(r"t\d{6}", low) and low.upper() in c.names.tasks:
+            return low.upper()
+        return next((v for n, v in c.names.task_names if n.lower() == low), None)
+
+    whole = found(x)
+    if whole:
+        return Value({op.task_field: [whole]}, c.names.task_title(whole))
+    chunks = _chunks(x)
+    miss = next((k for k in chunks if not found(k)), None)
+    if not chunks:
+        return _NOTHING
+    if miss:
+        return Value(problem=f"No task called {miss.removeprefix('#')}")
+    ids = [found(k) for k in chunks]
+    return Value({op.task_field: ids}, ", ".join(c.names.task_title(i) for i in ids))
+
+
+def _read_reference(x: str, c: ReadWith, op: Operator) -> Value:
+    v = re.sub(r"^(?:#|no\.?(?=\s|\d|\Z)|number)\s*[:#-]?\s*", "", x, flags=re.I).strip()
+    return Value({"references": {op.label: v}}, v) if v else _NOTHING
+
+
+# ---- the ** names: one entry each (decisions 202, 206 and 207) ----
+@dataclass(frozen=True)
+class Operator:
+    """A ** name. A kind says what a line is: ``item``, with an update's ``state`` or an event's tick. A parameter has its
+    card's ``label``, how its sentence is read, and the task's field: a filled field stays (decision 200), and ``adds``
+    marks a list, which never fills. ``whole``: its sentence is all value, so a # in it is no link. ``gone``: no longer an
+    operator, and what to say instead (decision 206). A new parameter that's a field ``tasks.update_task`` knows needs
+    only an entry here, and its match in the mockup's ``items.js``."""
+
+    names: tuple[str, ...]
+    item: str = ""
+    state: str = ""
+    event: bool = False
+    label: str = ""
+    task_field: str = ""
+    read: Callable[[str, ReadWith, Operator], Value] | None = None
+    kind: str = "param"
+    adds: bool = False
+    whole: bool = False
+    gone: str = ""
+    reference: bool = False  # a reference field, whose label is its name in Settings
+
+
+OPERATORS: tuple[Operator, ...] = (
+    Operator(("t", "task"), item="task"),
+    Operator(("n", "note"), item="note"),
+    Operator(("u", "update"), item="update"),
+    Operator(("decision",), item="decision"),
+    Operator(("event",), item="task", event=True),
+    Operator(("closed", "done", "complete", "completed", "finished"), item="update", state="Closed"),
+    Operator(("in progress", "started", "under way", "underway", "reopened", "re-opened"), item="update", state="In progress"),
+    Operator(("parked", "on hold"), item="update", state="Parked"),
+    Operator(("not started",), item="update", state="Not started"),
+    Operator(("start", "start date"), label="Start", task_field="start", read=_read_start),
+    Operator(("due", "due date"), label="Due", task_field="due", read=_read_date),
+    Operator(("deadline",), label="Deadline", task_field="deadline", read=_read_deadline),
+    Operator(("deadline description",), label="Deadline description", task_field="deadline_desc", read=_read_text),
+    Operator(("reminder", "remind"), label="Reminder", task_field="reminder", read=_read_date),
+    Operator(("repeat until",), label="Repeat until", task_field="repeat_until", read=_read_date),
+    Operator(("key date", "keydate"), label="Key date", kind="date", adds=True, read=_read_key_date),
+    Operator(("lead", "leads"), label="Lead", task_field="leads", adds=True, read=_read_people),
+    Operator(("assignee", "assignees"), label="Assignees", task_field="assignees", adds=True, read=_read_people),
+    Operator(("lead hours",), label="Lead hours", task_field="lead_hours", read=_read_hours),
+    Operator(("assignee hours", "hours"), label="Assignee hours", task_field="assignee_hours", read=_read_hours),
+    Operator(("title",), label="Title", task_field="title", read=_read_text),
+    Operator(("description",), label="Description", task_field="description", read=_read_text),
+    Operator(("status", "current status"), label="Current status", task_field="current_status", read=_read_text),
+    Operator(("state",), label="State", task_field="state", read=_read_state),
+    Operator(("priority",), label="Priority", task_field="priority", read=_read_priority),
+    Operator(("recurrence", "repeat"), label="Recurrence", task_field="recurrence", read=_read_recurrence),
+    Operator(("urgent",), label="Urgent", task_field="urgent", read=_read_yes_no),
+    Operator(("plant event",), label="Plant event", task_field="plant_event", read=_read_yes_no),
+    Operator(("meeting",), label="Meeting", task_field="meeting", read=_read_yes_no),
+    Operator(("label", "labels"), label="Labels", task_field="labels", adds=True, read=_read_labels),
+    Operator(("parent", "parents"), label="Parents", task_field="parents", adds=True, whole=True, read=_read_parents),
+    # An old form still in the hands (decision 206): this entry comes out once the habit has gone.
+    Operator(("date",), gone="Say which date: **start, **due, **deadline or **key date"),
+)
+_BY_NAME = {name: op for op in OPERATORS for name in op.names}
+
+
+def _field_op(name: str) -> Operator:
+    """A reference field's entry: named in Settings, with or without its "#" or "no."."""
+    return Operator(tuple(dict.fromkeys((_norm(name), _norm(REF_SUFFIX.sub("", name))))), label=name, read=_read_reference, reference=True)
+
+
+def _op_of(name: str, names: Names) -> Operator | None:
+    return _BY_NAME.get(name) or names.field_ops.get(name)
+
+
+def _names_longest(names: Names) -> list[str]:
+    return sorted((*_BY_NAME, *names.field_ops), key=lambda n: -len(n))
+
+
+def value_now(task: Any, op: Operator) -> str:
+    """What a task already has in a parameter's field, in words, or "" when it's empty (decision 200)."""
+    v = task.references.get(op.label, "") if op.reference else getattr(task, op.task_field, None)
+    if op.adds or v is None or v is False or v == "" or (op.task_field == "state" and v == "Not started"):
+        return ""
+    if v is True:
+        return "Yes"
+    if op.task_field == "priority":
+        return PRIORITY_NAMES.get(v, v)
+    return one_decimal(v) if isinstance(v, float) else str(v)
 
 
 # ---- blocks and items ----
@@ -359,8 +698,12 @@ class Item:
     recurrence: str = ""
     reminder: str | None = None
     start: str | None = None
-    plant_event: bool = False  # made by **event. (release 5.9)
-    key_date: KeyDateText | None = None  # made by **date (release 5.31)
+    plant_event: bool = False  # made by **event, (release 5.9)
+    key_date: KeyDateText | None = None  # made by **key date, (release 5.31)
+    # A parameter (release 5.38): what its card is called, its entry in the table, and what its sentence says.
+    label: str = ""
+    op: Operator | None = None
+    value: Value | None = None
     where: list[Where] = field(default_factory=list)
     on: bool = True
     changed: bool = False
@@ -383,7 +726,7 @@ class SelfFields:
     tasks: list[str]
     text: str
     any: bool
-    plant_event: bool = False  # **event on the new task's own line (mods log round 3, M0059)
+    plant_event: bool = False  # **event, on the new task's own line (mods log round 3, M0059)
 
 
 def _tasks_of(toks: list[Token]) -> list[str]:
@@ -446,14 +789,14 @@ def read(content: str, names: Names, today: date, *, labels: Sequence[ParseLabel
         L.block = b.i if b else None
         if L.is_list and b:  # a plain list item outside any block stays in the notes, and holds nothing under it
             stack.append((L.level, b.i))
-    first = next((L for L in lines if L.raw.strip()), None)
+    first = next((L for L in lines if L.raw.strip() and not (any(x.kind == "param" for x in L.toks) and not clean(L.text, L.toks, names))), None)
     self_block = None
     if new_task and first:
         self_block = blocks[first.block] if first.block is not None else Block(-1, first.n, [first.n], None, None)
         self_block.is_self = True
 
     def ctx_tasks(b: Block) -> list[str]:
-        own = _tasks_of(lines[b.owner].toks) if b.owner is not None else []
+        own = _tasks_of([x for x in lines[b.owner].toks if not x.inside]) if b.owner is not None else []
         return own or (ctx_tasks(blocks[b.parent]) if b.parent is not None else b.heading.tasks if b.heading else [])
 
     def text_of(b: Block) -> str:
@@ -467,67 +810,109 @@ def read(content: str, names: Names, today: date, *, labels: Sequence[ParseLabel
                 parts.append("  " * max(0, L.level - base) + L.raw.strip() if L.is_list else L.raw.strip())
         return "\n".join(p for p in parts if p)
 
-    items: list[Item] = []
-    for b in blocks:
-        if b.is_self:
-            continue
-        toks = lines[b.owner].toks if b.owner is not None else []
-        typ = next((x for x in toks if x.kind == "type"), None)
-        people = [x for x in toks if x.kind == "person"]
-        kind = typ.item_type if typ else "task" if people else "note"
-        parent_item = next((x for x in items if x.block == b.parent), None) if b.parent is not None else None
-        it = Item(str(len(items)), b.i, kind, text_of(b), "\n".join(lines[n].raw for n in b.lines), b.owner if b.owner is not None else b.lines[0],
-                  list(b.lines), b.owner is None, state=typ.state if typ else "", assignees=[x for x in people if not x.lead and not x.none],
-                  leads=[x for x in people if x.lead and not x.none], none=any(x.none for x in people), tasks=ctx_tasks(b),
-                  parent_item=parent_item.key if parent_item and parent_item.kind == "task" else None,
-                  parent_self=b.parent is not None and blocks[b.parent].is_self, plant_event=bool(typ and typ.event))
-        if kind == "date":  # a key date (item 60): from its own line, without the operator
-            it.key_date = read_key_date(clean(lines[b.owner].text, toks, names) if b.owner is not None else it.text, today)
-            it.title = it.key_date.description or KIND_NAMES["date"]
-        elif kind == "task":
-            r = parse_capture(it.text, "new_task", today, names.people, labels, events)
-            it.title = r.title or first_sentence(it.text) or "Untitled task"
-            it.due, it.deadline, it.deadline_desc, it.urgent = _iso(r.due), _iso(r.deadline), r.deadline_desc, r.urgent
-            it.labels, it.lead_hours, it.assignee_hours = list(r.labels), r.lead_hours, r.assignee_hours
-            it.recurrence, it.reminder, it.start = r.recurrence, _iso(r.reminder), _iso(r.start)
-            it.plant_event = it.plant_event or r.plant_event  # "plant event" in its block, as for the new task (M0059)
-            # A plant event runs from its Start to its Due: the end date its own name made a Deadline ("Spring outage,
-            # 3 to 14 Nov") is its Due.
-            if it.plant_event and it.deadline and not it.due:
-                it.due, it.deadline, it.deadline_desc = it.deadline, None, ""
+    reading_with = ReadWith(today, names, events)
+    home_task = None if new_task else own
+
+    def param_item(p: Token, b: Block, mine: Item | None, parent_item: Item | None) -> Item:
+        """A parameter's card (decision 208): nearest first, a # in its sentence, the task item on its line, a # on its
+        line, the task item it's listed under, the new task it's listed under, a # above, the capture's task."""
+        L = lines[b.owner]
+        up_block = blocks[b.parent] if b.parent is not None else None
+        inner = _tasks_of([x for x in L.toks if x.inside and p.start <= x.start < p.until])
+        on_line = _tasks_of([x for x in L.toks if not x.inside])
+        above = ctx_tasks(b)
+        if inner:
+            where = [Where("task", t) for t in inner]
+        elif mine and mine.kind == "task":
+            where = [Where("item", mine.key)]
+        elif not b.is_self and on_line:
+            where = [Where("task", t) for t in on_line]
+        elif parent_item and parent_item.kind == "task":
+            where = [Where("item", parent_item.key)]
+        elif b.is_self or (up_block and up_block.is_self):
+            where = [Where("home")]
         else:
-            it.title = first_sentence(_MARKER.sub("", it.text)) or (it.state if kind == "update" and it.state else "")
-        # Where it goes. A task: under the item it's listed under, else the capture's task (or meeting, or new task),
-        # and under each # task; with none, under Quick tasks. A note, update or decision: on each # task, else on the
-        # task item it's listed under, else on the capture's task.
-        up = [Where("item", it.parent_item)] if it.parent_item else [Where("home")] if it.parent_self or home else []
-        if kind == "task":
-            it.where = [*up, *(Where("task", t) for t in it.tasks)] or [Where("quick")]
-        else:
-            it.where = [Where("task", t) for t in it.tasks] if it.tasks else up
-            if kind == "note" and own and it.tasks:
-                it.where = [w for w in it.where if w.ref != own]
-                if not it.where:
-                    continue  # its lines stay the capture's own note, with no item of their own
-        # A card's changes stay, even when the block is edited later.
+            where = [Where("task", t) for t in above] if above else [Where("home")] if home else []
+        op = p.op
+        v = Value() if p.problem else op.read(p.sentence, reading_with, op)
+        it = Item(str(len(items)), b.i, op.kind if op else "param", p.sentence, L.raw, b.owner, [b.owner], False, tasks=inner or above, where=where,
+                  label=p.label, op=op, value=v, key_date=v.key_date)
+        it.title = (v.key_date.description or KIND_NAMES["date"]) if v.key_date else v.shown or p.sentence
         ov = (overrides or {}).get(it.key, {})
         it.on = not ov.get("off")
-        if ov.get("title") is not None:
-            it.title = str(ov["title"])
-        if ov.get("due") is not None:
-            it.due = str(ov["due"]) or None
-        it.changed = ov.get("title") is not None or ov.get("due") is not None
-        if kind == "date" and it.key_date and it.key_date.problem:
-            it.problem = it.key_date.problem
-        elif kind != "task" and not it.where:
-            it.problem = "Needs a #task to update" if kind == "update" else "No task to put it on: it stays in the notes"
-        elif kind == "update" and not it.state and not it.text:
-            it.problem = "Nothing to update: add a state or some text"
-        elif kind == "note" and not it.text:
-            it.problem = "Nothing under it yet"
+        if v.key_date and ov.get("title") is not None:
+            it.title, it.changed = str(ov["title"]), True
+        ids = [w.ref if w.kind == "task" else home_task if w.kind == "home" else None for w in where]
+        filled = [value_now(names.records[i], op) if i in names.records else "" for i in ids] if op and not p.problem and not v.problem else []
+        it.problem = (p.problem or v.problem or ("" if where else "No task to put it on: it stays in the notes")
+                      or (f"{p.label} is already {filled[0]}: change it with Update or Edit task" if filled and all(filled) else ""))
         if it.problem:
             it.on = False
-        items.append(it)
+        return it
+
+    items: list[Item] = []
+    for b in blocks:
+        all_toks = lines[b.owner].toks if b.owner is not None else []
+        params = [x for x in all_toks if x.kind == "param"]
+        toks = [x for x in all_toks if x.kind != "param" and not x.inside]
+        typ = next((x for x in toks if x.kind == "type"), None)
+        people = [x for x in toks if x.kind == "person"]
+        parent_item = next((x for x in items if x.block == b.parent), None) if b.parent is not None else None
+        text = text_of(b)
+        mine = None
+        # A line of parameters makes only their cards, unless the rest of it says more.
+        if not b.is_self and (not params or typ or people or (toks and text)):
+            kind = typ.item_type if typ else "task" if people else "note"
+            it = Item(str(len(items)), b.i, kind, text, "\n".join(lines[n].raw for n in b.lines), b.owner if b.owner is not None else b.lines[0],
+                      list(b.lines), b.owner is None, state=typ.state if typ else "", assignees=[x for x in people if not x.lead and not x.none],
+                      leads=[x for x in people if x.lead and not x.none], none=any(x.none for x in people), tasks=ctx_tasks(b),
+                      parent_item=parent_item.key if parent_item and parent_item.kind == "task" else None,
+                      parent_self=b.parent is not None and blocks[b.parent].is_self, plant_event=bool(typ and typ.event))
+            if kind == "task":
+                r = parse_capture(it.text, "new_task", today, names.people, labels, events)
+                it.title = r.title or first_sentence(it.text) or "Untitled task"
+                it.due, it.deadline, it.deadline_desc, it.urgent = _iso(r.due), _iso(r.deadline), r.deadline_desc, r.urgent
+                it.labels, it.lead_hours, it.assignee_hours = list(r.labels), r.lead_hours, r.assignee_hours
+                it.recurrence, it.reminder, it.start = r.recurrence, _iso(r.reminder), _iso(r.start)
+                it.plant_event = it.plant_event or r.plant_event  # "plant event" in its block, as for the new task (M0059)
+                # A plant event runs from its Start to its Due: the end date its own name made a Deadline ("Spring outage,
+                # 3 to 14 Nov") is its Due.
+                if it.plant_event and it.deadline and not it.due:
+                    it.due, it.deadline, it.deadline_desc = it.deadline, None, ""
+            else:
+                it.title = first_sentence(_MARKER.sub("", it.text)) or (it.state if kind == "update" and it.state else "")
+            # Where it goes. A task: under the item it's listed under, else the capture's task (or meeting, or new task),
+            # and under each # task; with none, under Quick tasks. A note, update or decision: on each # task, else on the
+            # task item it's listed under, else on the capture's task.
+            up = [Where("item", it.parent_item)] if it.parent_item else [Where("home")] if it.parent_self or home else []
+            if kind == "task":
+                it.where = [*up, *(Where("task", t) for t in it.tasks)] or [Where("quick")]
+            else:
+                it.where = [Where("task", t) for t in it.tasks] if it.tasks else up
+            # A note naming only the capture's own task is its own note, with no item of its own.
+            if kind == "note" and own and it.tasks:
+                it.where = [w for w in it.where if w.ref != own]
+            if not (kind == "note" and own and it.tasks and not it.where):
+                # A card's changes stay, even when the block is edited later.
+                ov = (overrides or {}).get(it.key, {})
+                it.on = not ov.get("off")
+                if ov.get("title") is not None:
+                    it.title = str(ov["title"])
+                if ov.get("due") is not None:
+                    it.due = str(ov["due"]) or None
+                it.changed = ov.get("title") is not None or ov.get("due") is not None
+                if kind != "task" and not it.where:
+                    it.problem = "Needs a #task to update" if kind == "update" else "No task to put it on: it stays in the notes"
+                elif kind == "update" and not it.state and not it.text:
+                    it.problem = "Nothing to update: add a state or some text"
+                elif kind == "note" and not it.text:
+                    it.problem = "Nothing under it yet"
+                if it.problem:
+                    it.on = False
+                items.append(it)
+                mine = it
+        for p in params:
+            items.append(param_item(p, b, mine, parent_item))
     return Reading(lines, blocks, items, headings, self_block)
 
 
@@ -536,23 +921,26 @@ def self_fields(r: Reading, names: Names) -> SelfFields | None:
     if not r.self_block or r.self_block.owner is None:
         return None
     L = r.lines[r.self_block.owner]
-    people = [x for x in L.toks if x.kind == "person" and not x.none]
-    return SelfFields([x for x in people if x.lead], [x for x in people if not x.lead], _tasks_of(L.toks), clean(L.text, L.toks, names), bool(L.toks),
+    people = [x for x in L.toks if x.kind == "person" and not x.none and not x.inside]
+    return SelfFields([x for x in people if x.lead], [x for x in people if not x.lead], _tasks_of([x for x in L.toks if not x.inside]), clean(L.text, L.toks, names), bool(L.toks),
                       any(x.kind == "type" and x.event for x in L.toks))
 
 
 def line_kinds(r: Reading) -> dict[int, str]:
-    """Each line's part, for the colours: "task", "note", "update" or "decision" (its item's kind), "self", "heading",
-    or "off" (an item that's unticked or can't be made). Lines that stay in the notes aren't listed."""
+    """Each line's part, for the colours: "task", "note", "update" or "decision" (its item's kind), "date" or "param" (a
+    parameter's own line), "self", "heading", or "off" (an item that's unticked or can't be made). Lines that stay in the
+    notes aren't listed."""
     out: dict[int, str] = {}
-    by_block = {it.block: it for it in r.items}
+    by_block: dict[int, Item] = {}
+    for it in r.items:
+        by_block.setdefault(it.block, it)
     for L in r.lines:
         if L.heading:
             out[L.n] = "heading"
         elif L.block is not None:
             b = r.blocks[L.block]
             it = by_block.get(L.block)
-            out[L.n] = "self" if b.is_self else ("off" if not it.on else it.kind) if it else ""
+            out[L.n] = "self" if b.is_self else ("off" if not it.on else it.kind) if it and L.n in it.lines else ""
     if r.self_block and r.self_block.i == -1:
         out[r.self_block.owner] = "self"
     return {k: v for k, v in out.items() if v}
@@ -561,13 +949,17 @@ def line_kinds(r: Reading) -> dict[int, str]:
 def parse_text(r: Reading, names: Names) -> str:
     """What Parse and populate reads for the capture's own fields: the lines that aren't items, with the new task's
     own operators taken out (its @ and # fill its fields when it's saved)."""
-    item_blocks = {it.block for it in r.items}
+    item_blocks = {it.block for it in r.items if it.kind not in PARAM_KINDS}
     out = []
     for L in r.lines:
         if L.block is not None and L.block in item_blocks or L.heading:
             continue
         if r.self_block and L.n == r.self_block.owner:
             out.append(L.raw[:L.off] + clean(L.text, L.toks, names))
+        elif any(x.kind == "param" for x in L.toks):  # a parameter's sentence is its own; the rest of its line isn't
+            words_left = clean(L.text, L.toks, names)
+            if words_left:
+                out.append(L.raw[:L.off] + words_left)
         else:
             out.append(L.raw)
     return "\n".join(out)
@@ -594,7 +986,7 @@ def sections(r: Reading) -> tuple[list[Section], list[int]]:
     """The content text by # task (decision 29): each task's section, and the lines under no # task. A line under a
     heading is its heading's first task's; before the first heading, a note block naming a # task (with the list items
     under it) is that task's, and anything else is under no task."""
-    by_block = {it.block: it for it in r.items}
+    by_block = {it.block: it for it in r.items if it.kind not in PARAM_KINDS}
     parts: dict[str, Section] = {}
     rest: list[int] = []
     heading: Heading | None = None
@@ -725,11 +1117,56 @@ def refs_of(text: str) -> dict[str, str]:
 
 
 def words(text: str, names: Names) -> str:
-    """The content text without its operators, for a capture's title."""
+    """The content text without its operators, for a capture's title. A line of parameters only gives its name and
+    sentence: a capture of nothing else is still called something."""
     out = []
     for line in text.split("\n"):
         m = LIST_RE.match(line)
         head, rest = (line[:m.end()], line[m.end():]) if m else ("", line)
         toks = scan(rest, names)
-        out.append(head + clean(rest, toks, names) if toks else line)
+        left = clean(rest, toks, names) if toks else line
+        p = next((x for x in toks if x.kind == "param"), None)
+        if p and not left:
+            said = rest[p.start + 2:p.until]
+            left = said[:1].upper() + said[1:]
+        out.append(head + left if toks else line)
     return "\n".join(out)
+
+
+def without_params(text: str, names: Names) -> str:
+    """The content text without its parameters and their sentences, for a new task's title and description: a line of
+    parameters only goes, and any other line stays as it is."""
+    out = []
+    for line in text.split("\n"):
+        m = LIST_RE.match(line)
+        head, rest = (line[:m.end()], line[m.end():]) if m else ("", line)
+        toks = scan(rest, names)
+        if not any(x.kind == "param" for x in toks):
+            out.append(line)
+            continue
+        left, at = [], 0
+        for x in toks:
+            if x.kind == "param":
+                left.append(rest[at:x.start])
+                at = x.until
+        kept = re.sub(r"\s+", " ", "".join(left) + rest[at:]).strip()
+        if kept:
+            out.append(head + kept)
+    return "\n".join(out)
+
+
+def item_text(it: Item, names: Names) -> str:
+    """An item in words, as the test vectors list it (the mockup's ``itemText``)."""
+    where = ", ".join("quick" if w.kind == "quick" else "home" if w.kind == "home" else f"item {w.ref}" if w.kind == "item" else w.ref or "" for w in it.where)
+    on = f" [{where}]" if where else ""
+    if it.kind in PARAM_KINDS:
+        kd = it.key_date
+        said = key_date_text(kd) if kd else f"{it.value.shown}." if it.value and it.value.shown else ""
+        more = f"{it.problem}." if it.problem and not (kd and kd.problem == it.problem) else ""
+        return f"{it.label}: {' '.join(x for x in (said, more) if x)}{on}"
+    name = "Plant event" if it.plant_event else KIND_NAMES[it.kind] + (f" {it.state}" if it.state else "")
+    who = lambda xs: ", ".join(names.person_name(x.id) if x.id else x.name for x in xs)  # noqa: E731
+    facts = [] if it.kind != "task" else [it.start and f"start {it.start}", it.due and f"due {it.due}", it.deadline and f"deadline {it.deadline}",
+                                          it.assignees and f"for {who(it.assignees)}", it.leads and f"lead {who(it.leads)}"]
+    tail = "".join(f" {f}" for f in facts if f)
+    return f'{name} "{it.title if it.kind == "task" else it.text}"{tail}{f" {it.problem}." if it.problem else ""}{on}'

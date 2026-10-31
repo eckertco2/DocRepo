@@ -21,13 +21,13 @@ Yes, 14 to 18 Dec.
 Impeller is on site.
 - @Tom get the alignment report by Friday, 2 hours
   - include the shaft runout
-- **Decision. We go with the 50 t crane.
+- **decision, we go with the 50 t crane.
 
 #Q4 overtime budget
-- **u Waiting on the vendor quote
+- **u, waiting on the vendor quote
 - @Sam to book the scaffolding
 
-**Closed. #Rigging plan sling drawing approved"""
+**closed, #Rigging plan sling drawing approved"""
 
 
 @pytest.fixture
@@ -122,7 +122,7 @@ def test_a_new_meeting_needs_a_name(env):
 
 def test_items_in_an_ordinary_capture(env):
     conn, _, _ = env
-    r = save(env, CaptureDraft(content="Markups finished.\n**Closed. Drawings sent to Mike for sign-off.", task="T000018", types={"note"}))
+    r = save(env, CaptureDraft(content="Markups finished.\n**closed, drawings sent to Mike for sign-off.", task="T000018", types={"note"}))
     m = Model(conn)
     assert m.task("T000018").state == "Closed" and m.task("T000018").current_status == "Drawings sent to Mike for sign-off."
     assert m.captures[r.capture_id].title == "Markups finished" and r.meeting is None
@@ -148,7 +148,7 @@ def test_the_pages_show_the_items(env):
     pages = Pages(m, AT.date(), lambda cid: captures.read_content(root, m.captures[cid]) or "", "P001", conn)
     log = pages.task_page("T000001", PageState())
     assert "Decision</span>" in log and "· from the notes of</span>" in log and "Business team meeting 8 Oct</a>" in log
-    assert "We go with the 50 t crane" in log and "**Decision" not in log  # a one-line item shows only its title
+    assert "We go with the 50 t crane" in log and "**decision" not in log  # a one-line item shows only its title
     notes_page = pages.capture_page(r.capture_id, captures.read_content(root, m.captures[r.capture_id]))
     assert "Made the meeting" in notes_page and "Made 6 items" in notes_page and "Discussed Reactor impeller upgrade" in notes_page
     assert "#Reactor impeller upgrade" in notes_page and "](T000001)" not in notes_page  # names, not IDs

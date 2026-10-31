@@ -50,9 +50,16 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.33.1 | Add selected Outlook email copies the email whole, past Outlook's guard; a hotkey for it; and the category's colour on Outlook's list (decision 26 as the owner changed it) | Built 2026-10-28; on GitHub 2026-10-28. Next: testing on the corporate computer |
 | 5.34 | The Task view (the design workspace's task overview design, decisions 156 to 167; round 2's item 34, M0043, with M0025 and M0026): a window of its own for one task, built for finding its documents, with Overview, a search-as-you-type box with the best match chosen, the kinds, filters and typed filters, the outline of subtasks, the preview, and its keys | Built 2026-10-29, after the owner approved the mockup; hand-tested by the owner and on GitHub 2026-10-29. Next: testing on the corporate computer with `release-5-34-and-5-35-test.md` |
 | 5.35 | The Task view's Open (decision 158), its files' text as a second tier, pins and what was opened (decisions 159 and 160), schema version 13 | Built 2026-10-29, with 5.34; hand-tested by the owner and on GitHub 2026-10-29. Next: as 5.34 |
+| 5.36 | Small fixes from the voice memos of 2026-10-30 (round 5, thread E; decisions 235 to 238): Shift+Tab really moves a list item back, the content text stays as wide as its box after the window has been pinned, labels on the task tree's rows, and reminders on Today | Built 2026-10-30, without a mock. Next: the owner's hand test |
+| 5.37 | Notes in the Task view (round 5, thread E, item 78; decisions 239 to 244): a Notes page tab with the task's whole Notes frame, a preview beside it, and the same page live in the browse tool too. No schema change | Built 2026-10-30, without a mock. Next: the owner's hand test |
+| 5.38 | Quick input from round 5 (item 67): `**name,` then a sentence fills any field, in place of `**date`; `**decision,`, `**closed,` and the other kinds move to the same form | Built 2026-10-30, hand-tested by the owner and merged to `main` the same day. Next: testing on the corporate computer with `release-5-38-test.md` |
 | 5.41 | The navigation wheels: a hotkey per wheel, picked with the arrow keys or the numpad, their config file with its checking and reload, the registry of commands, Settings' boxes, the tray and the palette, the usage log, and the blank capture with a draft set aside (decisions 168 to 176, 178, 210 to 212, 215 and 216) | Built 2026-10-30 in the `round5-wheels` worktree, from the approved mock. Next: the owner's hand test, then `handoff/docrepo/release-5-41-to-5-43-test.md` |
 | 5.42 | The wheels' selection and searches: the Capture wheel's Email or file (File Explorer's and Outlook's selection, Outlook kept off the window's thread), task search and file search (decisions 213 and 214) | Built 2026-10-30, with 5.41 and 5.43. Next: as 5.41 |
 | 5.43 | The Today side panel: the Today view as a floating strip that widens on hover, with a task's page on a click (decisions 217 to 223) | Built 2026-10-30, with 5.41 and 5.42. Next: as 5.41 |
+| 5.44 | Task templates (round 5's stage 18, the design workspace's task templates design, decisions 180 to 199): the Templates view, rows and starting notes, Make tasks, Save as template, links recorded and the "From template" line, schema version 14 | Built 2026-10-30, from the approved mock, in the `round5-templates` worktree, and merged to `main` the same day, before the owner's hand test. Next: the owner's hand test, then `handoff/docrepo/release-5-44-to-5-47-test.md` |
+| 5.45 | Linked fields and the preview (decisions 183 to 188, 192 and 198): chain marks and ↺ in Edit task, Detach, the preview in its three forms, what a change reaches, and a template's Changes, schema version 15 | Built 2026-10-30, with 5.44, and merged to `main` the same day, before the owner's hand test. Next: as 5.44 |
+| 5.46 | Duration and hours a day (decisions 189 to 191): one date and a Duration, Runs through weekends, and h a day, in Edit task, Quick edit, the capture window, template rows and Make tasks, schema version 16 | Built 2026-10-30, with 5.44 and 5.45, and merged to `main` the same day, before the owner's hand test. Next: as 5.44 |
+| 5.47 | Involvement (decision 196): each person's share of a role's hours, in Capacity, on the task page, in Edit task's and a row's chips, in links and the preview, schema version 17 | Built 2026-10-30, with 5.44 to 5.46, and merged to `main` the same day, before the owner's hand test. Next: as 5.44 |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
 ## Decisions
@@ -488,6 +495,102 @@ The visual overhaul's O10, designed and mocked in the parent workspace (`docs/ui
   - **The totals that left the sidebar** are beside their views' titles ("14 open", "7 active"), as `sidebar.md` said they'd be.
   - **The tooltip** shows only when a name is cut short. The headings' tooltips say Fold or Unfold.
 
+## Release 5.47: Involvement (2026-10-30)
+
+Round 5's thread A, item 66, as the design has it (decision 196). Built on releases 5.44 to 5.46, straight after them at the owner's word, so none of the four has had a hand test yet.
+
+- `docrepo/db.py`: schema version 17, `involvement` on `task_people` and `template_row_people`, default 100.
+- `docrepo/model.py`: `Task.involvement` and `Task.share`. `docrepo/tasks.py`: `shares_of`, `_apply_involvement`, and `stated`, which now gives a role's people with their shares, so links compare them. `docrepo/capacity.py`: `roles_of` multiplies by the share. `docrepo/stories.py`, `docrepo/pages.py` and `docrepo/detail.py`: the words, and each person's own hours.
+- `docrepo/templates.py`: rows hold shares, `field_text`, `_as_changes` (one role's change leaves the other's), `_task_lines`, `work_of`, Make tasks and Save as template. `docrepo/template_pages.py`: the row's page.
+- `docrepo/ui/task_forms.py`: `PersonChip`, `PeoplePicker` and the popup `ShareBox`, in Edit task and a row's form, with the people's line under the hours. `docrepo/ui/widgets.py`: `ChipPicker._chip_widget`, so a picker can draw its own chips. `docrepo/ui/tokens.py` and `docrepo/ui/style.py`: their look. `docrepo/ui/templates_view.py`: the row's form, and Make tasks' chips. `docrepo/planning.py` and `docrepo/ui/quick_edit.py`: the total, the chips, and keeping it on Save.
+- `tests/test_involvement.py` (new); `test_db.py` follows (1227 pass in all, 1 skipped; 1364 with release 5.38 merged in). Edit task, the box, a row's form, Make tasks and Quick edit were drawn over a sample data root with Windows' own fonts and checked by eye.
+
+## Decisions (release 5.47)
+
+- Decision 196, as the design has it. Involvement joins thread B's parameter table after it merges.
+- **Judgement calls, for the owner's hand test:**
+  - **The box is a popup, with no Done button,** as the design's "small box" has none. Built first inside the form, it didn't fit under a chip in the Lead column and pushed the form wider.
+  - **Esc puts back the number the box opened with,** since it applies as you type. Enter, F2 and a click elsewhere keep it. The design doesn't say.
+  - **A different share ends the role's link,** as it's part of that field, and a row's share reaches a task as the field does.
+  - **Someone kept on keeps their share** when the people change without saying so, as in an Update capture or Edit selected. Someone taken off and added back is at 100%.
+  - **A share with no hours is kept and shows,** so it's there once hours are set.
+  - **Someone at 0%** has no hours, and doesn't make the task "unestimated".
+  - **Quick edit and Make tasks show shares and don't set them.** Someone added in Make tasks has 100%.
+  - **Quick edit's chips are a little slimmer,** and shorten a name too long for them, as 5.46's units took their room.
+  - **Each person's hours are rounded to two places** on the page and in the box. Capacity keeps them exact.
+- **Left for 5.48:** the timeline's hours text (`timeline.py`, thread D's file) still counts each person's whole hours, so it can disagree with Capacity for a task with shares.
+
+## Release 5.46: Duration and hours a day (2026-10-30)
+
+Round 5's thread A, items 64 and 65, as the design has them (decisions 189 to 191). Built on releases 5.44 and 5.45, straight after them at the owner's word, so none of the three has had a hand test yet.
+
+- `docrepo/db.py`: schema version 16, `duration`, `calendar_days`, `lead_per_day` and `assignee_per_day` on tasks and template rows.
+- `docrepo/schedule.py`: `days_in`, `due_after`, `start_before`, `placed` and `length_of`, and `windows` leaving out a task with a Duration and no Start or Due.
+- `docrepo/tasks.py`: `worked_out`, the rules for dates and totals, run by `create_task` and `update_task`, with `dragged` for Plan mode; `RATES` and `stated`, so a link compares what's stated, not a total worked out from it. `docrepo/capacity.py`: Runs through weekends. `docrepo/stories.py`, `docrepo/pages.py` and `docrepo/detail.py`: the words.
+- `docrepo/templates.py`: rows hold them, `field_text`, `_as_changes` and `_task_lines` (a preview shows the dates and totals a change comes to), Make tasks' days (`Choice.duration`), Save as template's length. `docrepo/template_pages.py`: the row's page.
+- `docrepo/ui/task_forms.py`: `HoursRow`, and Duration in Edit task, moving the block as you type, with worked-out dates muted. `docrepo/ui/templates_view.py`: the row's form, and Make tasks' Days, Due and Hours. `docrepo/planning.py` and `docrepo/ui/quick_edit.py`: Quick edit's. `docrepo/ui/capture_window.py` and `docrepo/save.py`: New task's and Update's, under More fields. `docrepo/ui/browse_window.py`: Plan mode's drops marked as drags.
+- `tests/test_duration.py` (new); `test_db.py`, `test_templates.py` and `test_templates_ui.py` follow (1185 pass in all, 1 skipped). Edit task, a row's form, Make tasks, Quick edit, the capture window's fields and the task page were drawn over a sample data root with Windows' own fonts and checked by eye.
+
+## Decisions (release 5.46)
+
+- Decisions 189 to 191, as the design has them. Involvement came in 5.47, and Duration joins thread B's parameter table after it merges.
+- **Judgement calls, for the owner's hand test:**
+  - **Plan mode's rules came a release early.** The design has them in 5.48, after thread D merges. Without them, stretching a bar with a Duration would have moved it instead, so `set_timeline_dates` marks a drop as a drag, with no change to `timeline_view.py`. What 5.48 still has: the bar's width while it's being dragged, what the drop says, and the timeline's hours text.
+  - **Edit task's row** is Start, Duration and Due, with Deadline on the next, not all four: they don't fit the form.
+  - **The line about moving the block** shows only with a Duration typed, since it's what surprises.
+  - **Two dates typed together** are the new length, as a capture can say "from … to …". The design only says a single date moves the block.
+  - **A total typed over a rate ends the rate,** as an Update capture and Quick edit's box read totals.
+  - **Setting a recurrence clears Duration and the rates,** and the total stays, as each time.
+  - **Start for a task with no Start of its own:** Edit task shows the day it was made, as ever, until a Duration is typed, when it goes empty, as that day counts for nothing. A rate needs a typed Start or a Duration, so a Due alone leaves it "needs a length".
+  - **The capture window** works dates out on Save rather than as you type, and has Duration under More fields: it's rare there, and the capture window has no room for live dates. Its message says what changed.
+  - **Totals are rounded to two places.**
+
+## Release 5.45: linked fields and the preview (2026-10-30)
+
+Round 5's thread A, item 63, as the design has it (decisions 183 to 188, 192 and 198). Built on release 5.44, straight after it at the owner's word, so neither has had a hand test yet.
+
+- `docrepo/db.py`: schema version 15, `template_log`.
+- `docrepo/templates.py`: `preview_row` and `apply_row` (`RowPlan`, `Reached`, `NotChanging`: who a changed field reaches, by decisions 185, 186 and 198), `preview_new_row` and `add_row` (`AddPlan`, `TreeOffer`), `preview_remove` and `remove_row` (`RemovePlan`, `CopyOffer`), `task_link`, `detach`, `field_text`, and `LogLine`. The previews run as Edit selected's does, made and rolled back, so a new person or label typed in the form isn't kept.
+- `docrepo/tasks.py`: `update_task`'s `keep_links`, `_fallen_behind` (reopening, and bringing back, in `set_discarded`), `set_links` and `_row_values`. `docrepo/edits.py`: `edit_task`'s `follow`. `docrepo/stories.py`: "Assignee hours 30 → 10 · Template: Product trial."
+- `docrepo/ui/templates_view.py`: `PreviewDialog` and its three forms, and Back returning to the form as typed. `docrepo/ui/task_forms.py`: `FieldLink`, the marks, and the form's line with the row and Detach. `docrepo/ui/browse_window.py`: More's Detach. `docrepo/template_pages.py`: Changes.
+- `tests/test_templates.py` and `tests/test_templates_ui.py` take it in (1120 pass in all, 1 skipped). The three previews, the marks, Changes and the status log were drawn over a sample data root with Windows' own fonts and checked by eye.
+
+## Decisions (release 5.45)
+
+- Decisions 183 to 188, 192 and 198, as the design has them. Release 5.44's stand-in, where saving a row ended the links of what changed, is gone.
+- **Judgement calls, for the owner's hand test:**
+  - **Changes starts once tasks have been made from a template.** The mock listed every row as "Added…", so a template built by hand opened with a screenful of them. Building a template isn't a change to anything.
+  - **`template_log` has a line a save,** with the words as they stood, not the field-by-field columns the design sketched: a row can be taken out later, and nothing reads the columns.
+  - **Starting notes changing gets a Changes line,** though it reaches no task. The mock left it out.
+  - **A closed task's Edit task** shows ↺ on a field that fell behind, and saving it leaves the link. Only reopening makes the field its own.
+  - **"Fell behind" goes in the status log,** rather than a message when the task reopens, since a task can reopen from an Update capture or Edit selected, which have nowhere to say it.
+  - **Discarding a copy needs nothing on it:** the plan's "nothing on them" is read as no current status, captures, key dates, saved copies or agenda items, and a notes page with only its starting notes.
+- **Edit task's top row is narrower for every task,** State 170 and Priority 140, not 200 and 160, and the form is 640 px wide with marks. That row was a few pixels wider than the form, which clipped Meeting and the fields' right edges, and marks would have made it worse. Lead and Assignees now line up at the top. Neither is from the design.
+
+## Release 5.44: task templates (2026-10-30)
+
+Round 5's thread A, item 62 (`docs/mods/task-templates-design.md` in the parent workspace, decisions 180 to 199), brainstormed with the owner, mocked and approved. Linked fields' marks and the preview (5.45), Duration and h a day (5.46), and Involvement (5.47) come next.
+
+- `docrepo/db.py`: schema version 14, `templates`, `template_rows`, `template_row_people`, `template_row_labels`, `task_template` and `task_links`.
+- `docrepo/templates.py` (new): `Library`, a snapshot of the templates and which tasks were made from them (`walk`, `path`, `copies_of`, `trees`, `in_tree`); `fills`, `summary` and `own_fields`; `new_template`, `add_row`, `update_row`, `remove_row`, `shift_row`, `reparent_row` and `set_discarded`; `make_tasks` with its `Choice`s, and `page_body` for starting notes; `save_as_template`; and the browse tool's `save_row`, `new_row`, `take_out`, `make` and `save_as`, each with its files.
+- `docrepo/template_pages.py` (new): `row_page`, a template's or a row's page, with who follows it and the trees made from it.
+- `docrepo/ui/templates_view.py` (new): `TemplatesPane` (the list, the detail pane's bar, the `tplrow:` links and the changes), `RowDialog`, `MakeTasksDialog`, `NewTemplateDialog` and `SaveAsDialog`. `docrepo/ui/browse_window.py` hands it the view, with small additions. `docrepo/ui/nav_pane.py` and `docrepo/ui/icons/templates.svg`: the sidebar's row.
+- `docrepo/tasks.py`: `template_name`, and `_end_links` in `update_task`. Every write to a linked field goes through `update_task` (checked: the only other `UPDATE tasks` are priority, `day_headings` and discarding, none of them linked). `docrepo/stories.py`: the "Template link" sentence.
+- `docrepo/model.py`: `TemplateOrigin` and `template_origins`, all the Model knows of templates (`Model.origins`). `docrepo/detail.py`: the task page's "From template" line. `docrepo/pages.py`: `Task.md`'s row. `docrepo/views.py`: the view, and `discarded_rows` takes others' rows.
+- `tests/test_templates.py` and `tests/test_templates_ui.py` (new); `test_db.py` and `test_nav_pane.py` follow (1080 pass in all, 1 skipped). The view and forms were drawn over a sample data root with Windows' own fonts and checked by eye.
+
+## Decisions (release 5.44)
+
+- Decisions 180 to 199, as the design has them, but what comes with later releases: chain marks, ↺ and Detach, the preview and Changes (5.45), Duration, Runs through weekends and h a day (5.46), and Involvement (5.47).
+- **Judgement calls, for the owner's hand test:**
+  - **A link ends one release early.** The design has breaking a link in 5.45. Writing a different value ends it here already, with its status log line, so a link made in 5.44 can't hold a value that isn't its row's by the time the preview arrives.
+  - **Saving a row ends the links of what changed.** Nothing reached a task until the preview, so a task following a changed field kept its value and stopped following, as an unticked task does in the preview. Release 5.45 replaced this.
+  - **Taking a row out** asks, then ends the copies' links; the row itself is deleted, as nothing refers to it any more. Release 5.45 added the offer to discard copies not started.
+  - **Move** (up, down, under another row) isn't in the mock. Decision 188 says what a move does, so it needed a way to happen.
+  - **A discarded template is in the Discarded view,** as Discard is everywhere; the mock only had a toast with Bring back.
+  - **Make tasks shows no Start box** on a row with rows under it and no hours of its own, as the mock has it, since its dates come from what's under it.
+  - **Urgent, Meeting, Plant event and Repeats** are under More options on a row's form, as they're rare there.
+
 ## Releases 5.41 to 5.43: the navigation wheels and the Today side panel (2026-10-30)
 
 Round 5's thread C: stage 20, items 68 and 69. The research is `../docs/ui-design/wheel-research.md`, the design and its decisions `../docs/ui-design/wheel-design.md`, and the mock `../docs/browse-tool/mockup/wheels.js`. **No schema change, and no new package.** The panel's place and open state are in `app_state`; everything else is in files.
@@ -536,6 +639,75 @@ Round 5's thread C: stage 20, items 68 and 69. The research is `../docs/ui-desig
   - **`settings.json` holds the wheels' hotkeys only once they're set,** so the documented example in `tests/fixtures/examples.md` (thread B's) doesn't change.
   - **The hard rules' text** gained three small things, all DocRepo's own files: `SafeFS` writes `.jsonc` and `.csv`, it can add a line to a text file (`append_text`), and `opener.start_own_file` opens one file, `Config\wheels.jsonc`.
 - **At merge:** bring in `main`, run all the tests, and take thread E's reminders into the panel's rows, in `TodayPanel.refresh`. Thread A's new capture form fields, if any, join `draft_aside.py`'s lists, or they won't come back with a draft set aside.
+
+## Release 5.38: quick input (2026-10-30)
+
+Round 5's item 67, thread B, with decisions 200 to 209 (the design workspace's `docs/mods/quick-input-plan.md`). No schema change. `**name,` then one sentence replaces `**date`, because a task now has several kinds of date. The owner also chose to move the kinds to the same form (decision 202).
+
+- **One table.** `items.OPERATORS` holds every `**` name: the kinds (task, note, update, decision, event and the state words) and the parameters (dates, people, hours, text, choices, ticks, lists). `TYPE_RE` is gone. Reference fields come from Settings through `Names.fields`, so no work term is in the code. A parameter that's a field `tasks.update_task` knows is one entry here, and its match in the mockup's `items.js`; `test_adding_a_parameter_is_one_entry` shows it. The mockup's table has the same names and is what the test vectors are made from.
+- **Reading.** `scan` gives a parameter a token with its sentence, up to its period by `text.sentences`, the line's end or the next `**` word. The `@` and `#` inside are marked `inside` and are the sentence's own, except that a parent's sentence is all value. `clean` drops a parameter with its sentence, so the rest of its line reads as usual. A line can have several, and each gets its own card beside what the rest of the line makes (`param_item` in `read`).
+- **Filling.** `save._fill_param`: a filled field on an existing task stays (`items.value_now`), a list adds, and a task made in this capture takes the line's value, even over the form. A value the task can't take, such as Repeat until with no recurrence, changes nothing. Save's message counts the lines not used (`SaveResult.unused`).
+- **A window's year** (decision 209): the owner's own example, `from November 1st to November 5th, 2027`, read as a year-long window, 2026-11-01 to 2027-11-05. `_window_start` gives the start its end's year when it has none of its own, and `1 Nov. to 5 Nov.` now reads as a window where it stopped at the first date.
+- **The cards** (`ui/items_panel.py`): a field's card is named for its field, and its value is read-only, as it's changed in its line. A key date's description stays editable. Its dates show the year when it isn't this year's. Dates in a card read as `Fri 30 Oct`.
+- **Old forms.** Nothing rereads a saved capture, so old `**date` and `**Closed.` lines stay as written. Typed now they make a red card with the new spelling. `**date` is one entry in the table (`gone`), which can come out once the habit has gone.
+- **Exports.** The test vectors' "Key dates from text" section is now "Quick input (release 5.38)", in three tables. `examples.md` and `stories.json` are unchanged.
+
+Tests: `tests/test_quick_input.py` (the vectors, reading, Save, and the cards in the window); the operators in the other tests moved to the new form.
+
+## Decisions (release 5.38)
+
+- Decisions 200 to 207 are the owner's answers on 2026-10-30, each as recommended except 202. 208 (where a value goes) and 209 (a window's year) were settled while designing it.
+- **Settled while building, for the owner's hand test:**
+  - A parameter's name without its comma (`**due 5 Nov.`) gets the same red card as an old form, as a slip that would otherwise add nothing silently.
+  - `**hours,` is Assignee hours, as the card says. `**hours, 2 hours a week.` asks for a total rather than working one out, since hours per day is thread A's.
+  - A plain line never holds the list items under it, as before: only a list item does. `- **decision, go with B.` with `  - It's cheaper` under it is one decision; `**decision, go with B.` with `- It's cheaper` isn't. The cards show which it is.
+  - A new person or a new label named in a line is added when it's saved, and its card says "(new)".
+- **Not done:** the mockup reads and shows the lines but doesn't save them, as it didn't for `**date`. Thread A's new parameters join the table after this merges.
+
+## Release 5.37: notes in the Task view (2026-10-30)
+
+From the owner's voice memos of 2026-10-30 (the design workspace's round 5 plan, thread E, item 78). The Task view's design left the notes page's editor off on purpose, for the task page to be where the story is read and written. This changes that one thing: Overview, with the cursor in the search box, is still what the window opens on.
+
+- **The tab (decisions 239 and 240).** Notes page, Ctrl+6, the sixth of the kinds' tabs, shows the page of the task picked in the outline in place of the list: Whole task is the top task's own page, and a subtask's is its own, its name in the frame's heading. `kind` holds it (`PAGE`), so anything that picks another kind leaves the page. The Type, Date and From row and the chips go while it shows, and the preview button moved up to the tabs' row, so it's in one place on every tab.
+- **The frame (decision 243).** `TaskPane` again, with its facts and history hidden (`notes_only`), made the first time the tab is opened, so the window opens as fast as it did. `BrowseWindow.wire_notes` connects a page's signals for either window, and the notes handlers (`load_notes`, `_save_notes`, `_picture_pasted`, `_files_dropped`, `_save_folds`, `_save_summary_folded`, `_notes_menu`, `page_history`) take the pane they're for, each saying its messages in that pane's window. `note_panes` and `save_open_notes` are for what has to save every open page first (Add again, Discard, Page history). Edit task takes its checklist from whichever open page has the task. A file dropped on the page goes on the page; an email or a link dropped there goes to the capture window, as anywhere else in the window, not in as text, which is what the task page's editor does with an email's drag.
+- **The preview (decision 241).** Hidden on the tab until a caption, file line or picture is clicked, then that thing's preview and buttons, in this window. It keeps its own on or off (`page_preview`), so the list's is as you left it. What isn't this task's opens in the browse tool, as it does from the task page.
+- **Search and jumps (decision 242).** What's typed in the box shows results in place of the page, and Esc, or emptying the box, comes back (`back_to_page`). Open on the notes page and Enter on a note or update open its block here, on its task's page (`open_note`); a note also has Open capture now. Esc in the page goes to the box, and Tab, Down or Enter from the box go into the page.
+- **Two windows (decision 244).** `_page_changed`: a save in one window puts the page in any other showing it at once, through `load_notes`, which merges if that one has unsaved typing, as it already does for a capture arriving. A Task view marks its records `stale` on any page's save and reads them when it next draws a list, so typing doesn't redraw it. That also ends a small gap: an open Task view didn't hear of a save on the task page until the next refresh.
+- **The header's height.** On opening, the Task view's header was fitted to the width it had before the layout ran, so it stood 66 px taller than its text until the first resize. It's fitted after the layout now, which gives that room to whatever's below it. It was like this from 5.34.
+- **Measured** at the window's usual 1280 px: the page is 999 px wide alone, and 582 px with the preview on. The frame stays usable at 1,000 px wide (the format bar needs 532 px). Tests: `tests/test_task_view_notes.py`, over the sample data; `tests/test_task_view.py` for the header.
+
+No schema change. 1103 pass in all, 1 skipped.
+
+## Decisions (release 5.37)
+
+Taken as recommended on 2026-10-30.
+
+- **Decision 239, where it sits:** a sixth tab, Notes page, Ctrl+6, after Subtasks, with the editor in the list's place and the Type, Date and From row gone while it shows. The window still opens on Overview with the cursor in the box. With the caret in the page, Ctrl+1 stays the checklist key and Alt+Shift+Up and Down move lines; `RichEdit` already claims them ahead of the window's shortcuts. Not an entry in the outline: the outline picks which task, and the tab picks what to show.
+- **Decision 240, which page:** the task picked in the outline, with no roll-up of subtasks' pages. Notes and updates still searches across the branch.
+- **Decision 241, the right pane:** hidden on the Notes page until something on it is clicked, which shows its preview here instead of jumping to the browse tool. Ctrl+Space shows or hides it.
+- **Decision 242, search and jumps:** the box keeps working as it does on every tab, and Esc comes back to the page. Open on the notes page and Enter on a note open it here. The Task page button stays, for the status log and Details. No Find within the page in this release.
+- **Decision 243, what comes with it:** the whole Notes frame: the format bar, Checklist summary, ⋯ menu, tables, pasted pictures and dropped files.
+- **Decision 244, the same page in two windows:** both can edit it. Each saves 0.8 seconds after typing stops and when the caret leaves, and the other updates at once. Ctrl+Z undoes only what was typed in that window since it last updated. Typing in both within the same 0.8 seconds isn't merged and the last save wins; with one keyboard that shouldn't come up, and each day's version is in Page history.
+- **Left as they are, for the owner's call:** folding a heading in one window doesn't fold it in the other until that one next loads the page, as folds are saved per task and read on loading. An email dragged onto the task page's editor still comes in as text.
+
+## Release 5.36: small fixes (2026-10-30)
+
+From the owner's voice memos of 2026-10-30 (the design workspace's round 5 plan, thread E, items 74 to 77). Both bugs were reproduced first, with real key presses and the widths measured, and each test failed before its fix.
+
+- **Shift+Tab (item 74).** On a list line, Tab and Shift+Tab changed the level in the markup, so saved text was always right, but on screen Shift+Tab moved the words further in, and Tab two levels' worth. Qt's `QTextList.remove` hands the list's indent to the line, and a line's indent and its list's add up. `RichEdit.leave_list` takes a line out with no indent of its own, and `_unlist`, `indent_item`, `toggle_checklist` and meeting notes' Add open items use it. A level in or out is now one step of undo. Alt+Shift+Left and Right share the code and the fix. Tests: `tests/test_markup.py`, measuring where the words are.
+- **The content text's width (item 75).** The pinned window's box shows the capture window's own document, and a document has one width, which any box showing it sets when its scroll bar comes or goes, even a hidden box. So once the window had been pinned, until DocRepo restarted, the full window's text could shrink to the pinned box's 290 px, about a third of the box: at once on coming back, or a few lines into typing, when the text outgrew the small box. It came back when the full box's own width changed (its scroll bar, or the window's width). The other way round, the hidden full box could make the pinned box's text run off its right edge. `RichEdit.show_text_of` marks both boxes: a hidden one holds its scroll bar as it is, and one coming back takes the width. A box that doesn't share its document is as it was, and a window that's never been pinned never showed this. Tests: `tests/test_pin_window.py`, typing line by line through a pin, Esc, a save and F11.
+- **Labels on the task tree's rows (item 76, decision 235).** `BrowseWindow._label_words`. Tests: `tests/test_browse_window.py`.
+- **Reminders on Today (item 77, decisions 236 to 238).** `lists.reminders_due`, `BrowseWindow._today_reminder_rows`, and `edits.clear_reminder`'s `via`, so a Clear from Today says so in the status log. Tests: `tests/test_browse_window.py`, `tests/test_today.py`.
+
+No schema change. 1057 pass in all, 1 skipped.
+
+## Decisions (release 5.36)
+
+- **Decision 235, labels on the rows:** the task's own labels, as quiet grey words after its title and chips. Not chips, which would compete with Urgent and the state. Not the ones it inherits, or every subtask would repeat its parent's. Not on a dimmed parent, nor the label its section is named for under Group by. On the task tree only, with no setting to turn them off.
+- **Decision 236, which reminders:** those whose day has come, today or before. One still to come stays on the Reminders list until its day, so it isn't on Today early.
+- **Decision 237, where:** under a heading of their own, Reminders, between Today's items and Due in the next 7 days, oldest first, and only while there are any. Mine only doesn't touch them, and they don't count in Today's number.
+- **Decision 238, what a row does:** like a key date's row, a chip, its date ("3 d ago", "Today") and links: Add to Today (not when it's on Today already) and Clear. Adding it doesn't clear it, and Clear is in the status log as "Today". A task can be on both Reminders and Due in the next 7 days, as they say different things.
+- **Left as they were, for the owner's call:** Tab on a line of text types a tab, as Shift+Tab does nothing there; with several lines selected, Tab and Shift+Tab move only the line the caret is on; and a list item moves without the items under it. OneNote does all three differently.
 
 ## Releases 5.34 and 5.35: the Task view (2026-10-29)
 

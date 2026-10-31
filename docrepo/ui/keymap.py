@@ -48,12 +48,12 @@ TASK_VIEW_KEYS = (
     ("Ctrl+Shift+C", "Copies its path (Ctrl+C in the list)"),
     ("P, Alt+P", "Pins or unpins it; Alt+Shift+Up and Alt+Shift+Down move a pinned file"),
     ("Space, Ctrl+Space", "Shows or hides the preview (Space in the list)"),
-    ("Ctrl+1 to Ctrl+5", "All, Files, Emails, Notes and updates, Subtasks"),
+    ("Ctrl+1 to Ctrl+6", "All, Files, Emails, Notes and updates, Subtasks, Notes page (in the page, Ctrl+1 is its checklist key)"),
     ("Ctrl+F, /", "Back to the search box"),
     ("Ctrl+O", "Another task's Task view"),
     ("Alt+Up", "The parent task's Task view"),
-    ("F6", "The next pane: the outline, the box, the list, the preview"),
-    ("Esc", "Clears what's typed; again, the filters; it never closes the window"),
+    ("F6", "The next pane: the outline, the box, the list or the page, the preview"),
+    ("Esc", "Clears what's typed; again, the filters; it never closes the window. In the notes page, to the box; a search begun there, back to the page"),
     ("Ctrl+W", "Closes the Task view"),
 )
 #: The content text's keys, as OneNote's (mods log round 3, M0055).

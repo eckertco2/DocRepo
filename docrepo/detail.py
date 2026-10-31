@@ -315,7 +315,12 @@ class Pages:
             folded = short_text != t.description
             more = f' {link("fold:desc", "Less" if state.desc else "More")}' if folded else ""
             desc = f'<p class="desc">{multiline(t.description if state.desc or not folded else short_text)}{more}</p>'
-        return f'{crumbs}<h2 title="{t.id}">{esc(t.title)}</h2><p class="tags">{tags}</p>{desc}'
+        origin = m.origins.get(t.id)
+        made = ""
+        if origin:  # release 5.44: the template it came from
+            gone = " (discarded)" if origin.discarded else ""
+            made = f'<p class="rel">From template: {link(f"tplrow:{origin.row}", " › ".join(origin.path), "Open it in Templates")}{gone}</p>'
+        return f'{crumbs}<h2 title="{t.id}">{esc(t.title)}</h2><p class="tags">{tags}</p>{desc}{made}'
 
     def status_since(self, t: Task) -> str | None:
         """When the current status last changed: its latest status log entry, or the day the task was made, for a status
@@ -398,6 +403,9 @@ class Pages:
             rows.append(("Deadline", dated(t.deadline, note(t.deadline_desc) if t.deadline_desc else "")))
         if open_ and t.start and to_date(t.start) > today:
             rows.append(("Starts", dated(t.start)))
+        if t.duration:  # release 5.46
+            rows.append(("Duration", esc(f"{t.duration} day{'' if t.duration == 1 else 's'}, through weekends" if t.calendar_days
+                                         else f"{t.duration} workday{'' if t.duration == 1 else 's'}")))
         if open_ and t.reminder:
             r = to_date(t.reminder)
             rows.append(("Reminder", f'{esc(long_date(r, today))} <span class="rel">{ago(r, today) if r < today else days_words(r, today)}</span>'))
@@ -420,15 +428,26 @@ class Pages:
         """Faces first, then names and hours."""
         per = " per occurrence" if t.recurrence else ""
 
-        def people(ids: list[str], hours: float | None) -> str:
-            return "<br>".join(f'{self.avatar(p)} {link(f"person:{p}", self.m.person_name(p))}'
-                               + (f' <span class="rel">{num(hours)} h{per}</span>' if hours else "") for p in ids)
+        def people(ids: list[str], hours: float | None, rate: float | None, role: str) -> str:
+            # Release 5.46: hours a day show beside the total worked out from them, or ask for a length. Release 5.47: each
+            # person's own hours, by their Involvement, which says so.
+            def text(p: str) -> str:
+                share = t.share(role, p)
+                tail = f"{share}%" if share != 100 else f"{num(rate)} h a day" if rate is not None else ""
+                if hours:
+                    return f"{num(round(hours * share / 100, 2))} h{per}" + (f" · {tail}" if tail else "")
+                if rate is not None:
+                    return f"{num(rate)} h a day, needs a length"
+                return tail
+
+            return "<br>".join(f'{self.avatar(p)} {link(f"person:{p}", self.m.person_name(p))}' + (f' <span class="rel">{esc(text(p))}</span>' if text(p) else "")
+                               for p in ids)
 
         rows = []
         if t.leads:
-            rows.append(("Leads" if len(t.leads) > 1 else "Lead", people(t.leads, t.lead_hours)))
+            rows.append(("Leads" if len(t.leads) > 1 else "Lead", people(t.leads, t.lead_hours, t.lead_per_day, "lead")))
         if t.assignees:
-            rows.append(("Assignees" if len(t.assignees) > 1 else "Assignee", people(t.assignees, t.assignee_hours)))
+            rows.append(("Assignees" if len(t.assignees) > 1 else "Assignee", people(t.assignees, t.assignee_hours, t.assignee_per_day, "assignee")))
         return rows or [("People", '<span class="sub">No one yet</span>')]
 
     def mark(self, t: Task) -> str:

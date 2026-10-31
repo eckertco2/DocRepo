@@ -30,7 +30,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 
-from PySide6.QtCore import QEvent, QPoint, QRectF, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QPoint, QRectF, QSizeF, Qt, QTimer, Signal
 from PySide6.QtGui import (QBrush, QColor, QFont, QFontInfo, QFontMetrics, QKeySequence, QPainter, QPainterPath, QPen, QTextBlockFormat,
                            QTextCharFormat, QTextCursor, QTextDocument, QTextFormat, QTextListFormat)
 from PySide6.QtWidgets import QHBoxLayout, QMenu, QTextEdit, QToolButton, QWidget
@@ -210,6 +210,8 @@ class RichEdit(QTextEdit):
     takes_headings = False
     #: Whether this box draws and handles its headings' fold arrows itself (the capture window's; the notes page has its own).
     folds_here = False
+    #: Whether another box shows the same document (``show_text_of``).
+    _shares_text = False
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -252,6 +254,25 @@ class RichEdit(QTextEdit):
         if self.folds_here:  # the pinned window shows the capture window's own text
             document.contentsChange.connect(self._contents_changed)
             self.headings_changed()
+
+    def show_text_of(self, other: RichEdit) -> None:
+        """Show another box's own document, as the pinned window's box does the capture window's. A document has one
+        width, and any box showing it sets that width when its scroll bar comes or goes, hidden or not (item 75). So the
+        box on screen holds it: a hidden box keeps its scroll bar as it is, and a box coming back takes the width."""
+        self.setDocument(other.document())
+        self._shares_text = other._shares_text = True
+
+    def hideEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        super().hideEvent(event)
+        if self._shares_text:
+            on = self.verticalScrollBar().isVisibleTo(self)
+            self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn if on else Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+    def showEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        super().showEvent(event)
+        if self._shares_text:
+            self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            self.document().setPageSize(QSizeF(self.viewport().width(), -1))
 
     def _key_action(self, event) -> Callable[[], None] | None:
         return self._keys.get(QKeySequence(event.keyCombination()).toString())
@@ -364,23 +385,27 @@ class RichEdit(QTextEdit):
         fmt.setIndent(1)
         cursor.createList(fmt)
 
+    @staticmethod
+    def leave_list(block) -> None:
+        """Take a line out of its list with no indent of its own: QTextList.remove hands it the list's, and on screen
+        a line's indent and its list's add up, though the markup reads only the list's (item 74)."""
+        block.textList().remove(block)
+        bf = block.blockFormat()
+        bf.setIndent(0)
+        QTextCursor(block).setBlockFormat(bf)
+
     def _unlist(self, cursor: QTextCursor) -> None:
         start, end = sorted((cursor.selectionStart(), cursor.selectionEnd()))
         block = self.document().findBlock(start)
         while block.isValid() and block.position() <= end:
-            lst = block.textList()
-            if lst is not None:
-                lst.remove(block)
-                c = QTextCursor(block)
-                bf = c.blockFormat()
-                bf.setIndent(0)
-                c.setBlockFormat(bf)
+            if block.textList() is not None:
+                self.leave_list(block)
             if block.blockFormat().marker() != MARKER.NoMarker:
                 self._set_tick(block, None)
             block = block.next()
 
     def indent_item(self, delta: int) -> bool:
-        """Tab or Shift+Tab in a list item: a level in or out. Out of the first level ends the list there."""
+        """Tab or Shift+Tab in a list item: a level in or out, one step of undo. Out of the first level ends the list there."""
         cursor = self.textCursor()
         block = cursor.block()
         lst = block.textList()
@@ -388,20 +413,22 @@ class RichEdit(QTextEdit):
             return False
         fmt = QTextListFormat(lst.format())
         level = fmt.indent() + delta
+        cursor.beginEditBlock()
         if level < 1:
             self._unlist(cursor)
-            return True
-        # Rejoin a list at that level just above, so numbering carries on; else start one.
-        prev = block.previous()
-        while prev.isValid() and prev.textList() is not None and prev.textList().format().indent() > level:
-            prev = prev.previous()
-        target = prev.textList() if prev.isValid() else None
-        lst.remove(block)
-        if target is not None and target.format().indent() == level:
-            target.add(block)
         else:
-            fmt.setIndent(level)
-            QTextCursor(block).createList(fmt)
+            # Rejoin a list at that level just above, so numbering carries on; else start one.
+            prev = block.previous()
+            while prev.isValid() and prev.textList() is not None and prev.textList().format().indent() > level:
+                prev = prev.previous()
+            target = prev.textList() if prev.isValid() else None
+            self.leave_list(block)
+            if target is not None and target.format().indent() == level:
+                target.add(block)
+            else:
+                fmt.setIndent(level)
+                QTextCursor(block).createList(fmt)
+        cursor.endEditBlock()
         return True
 
     # ---- checklists (release 5.26, decisions 86 and 91) ----
@@ -480,10 +507,7 @@ class RichEdit(QTextEdit):
         if all(self.is_check(t) for t in targets):
             for t in targets:
                 self._set_tick(t, None)
-                t.textList().remove(t)
-                bf = t.blockFormat()
-                bf.setIndent(0)
-                QTextCursor(t).setBlockFormat(bf)
+                self.leave_list(t)
         else:
             for t in targets:
                 if not self.is_check(t):

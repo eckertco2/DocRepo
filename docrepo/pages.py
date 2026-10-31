@@ -79,10 +79,15 @@ class Pages:
             return f"[{ref}]({rel_link(from_dir, ['Documents', ref, 'extracted.txt'])})"
         return ref
 
-    def _names(self, person_ids: list[str], hours: float | None = None) -> str:
-        """Names, each with the role's hours when they're set: "Tom Becker (60 h), Mike Ortiz (60 h)"."""
-        text = ", ".join(self.m.person_name(p) + (f" ({num(hours)} h)" if hours else "") for p in person_ids)
-        return text or "None"
+    def _names(self, person_ids: list[str], hours: float | None = None, task: Task | None = None, role: str = "") -> str:
+        """Names, each with the role's hours when they're set: "Tom Becker (60 h), Mike Ortiz (15 h, 25%)". Hours are each
+        person's own, by their Involvement (release 5.47)."""
+        def own(p: str) -> str:
+            share = task.share(role, p) if task else 100
+            parts = ([f"{num(round(hours * share / 100, 2))} h"] if hours else []) + ([f"{share}%"] if share != 100 else [])
+            return f" ({', '.join(parts)})" if parts else ""
+
+        return ", ".join(self.m.person_name(p) + own(p) for p in person_ids) or "None"
 
     # ---- Task.md ----
     def task_page(self, t: Task) -> str:
@@ -105,15 +110,20 @@ class Pages:
             rows.append(("Plant event", "Yes"))
         if t.recurrence:
             rows.append(("Recurrence", t.recurrence + (f" until {t.repeat_until}" if t.repeat_until else ", no end date")))
+        origin = self.m.origins.get(t.id)
+        if origin:  # release 5.44: the template it came from
+            rows.append(("From template", origin.words()))
         rows += [
             ("Parents", ", ".join(link(p) for p in self.m.parents_of(t.id)) or "None (top-level task)"),
             ("Labels", ", ".join(name + (" (inherited)" if inherited else "") for name, inherited in self.m.labels_of(t.id)) or "None"),
-            ("Lead", self._names(t.leads, t.lead_hours)),
-            ("Assignees", self._names(t.assignees, t.assignee_hours)),
+            ("Lead", self._names(t.leads, t.lead_hours, t, "lead")),
+            ("Assignees", self._names(t.assignees, t.assignee_hours, t, "assignee")),
             ("Start", start_of(t).isoformat()),
             ("Due", f"{t.due} ({days_text(to_date(t.due), self.today)})" if t.due else "None"),
             ("Deadline", (f"{t.deadline}, {t.deadline_desc}" if t.deadline_desc else t.deadline) if t.deadline else "None"),
         ]
+        if t.duration:  # release 5.46
+            rows.append(("Duration", f"{t.duration} day{'' if t.duration == 1 else 's'}, through weekends" if t.calendar_days else f"{t.duration} workday{'' if t.duration == 1 else 's'}"))
         if t.reminder:
             rows.append(("Reminder", t.reminder))
         rows += list(t.references.items())  # its reference fields (release 5.9, M0034)

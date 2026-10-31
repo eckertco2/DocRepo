@@ -10,3 +10,4 @@ settings, with chevron-down and chevron-right on the groups' headings (docrepo/u
 The Task view (release 5.34) marks each file's type: type-doc (Word and text), type-sheet (Excel and CSV), type-slides
 (PowerPoint), type-pdf, type-picture, type-drawing (Visio and CAD), type-mail (emails), type-link and type-other, each
 painted in its type's colour from the tokens (type_doc and so on); the type is also in the file's name and the preview.
+Templates (release 5.44) adds templates, a small tree in dashed outlines, to the sidebar and to a task's More menu.

@@ -7,6 +7,7 @@ the day it was closed.
 """
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Protocol
@@ -54,10 +55,70 @@ def start_of(task: Dated) -> date:
     return to_date(task.start or task.created)
 
 
+def _counts(day: date, workdays: Collection[int], every_day: bool) -> bool:
+    return every_day or not workdays or day.weekday() in workdays
+
+
+def days_in(first: date, last: date, workdays: Collection[int], every_day: bool = False) -> int:
+    """How many days a task from ``first`` to ``last`` has: its workdays, or every day with Runs through weekends (decision
+    190). One that holds no workday counts its calendar days, as the capacity calendar spreads its hours over them."""
+    span = (last - first).days + 1
+    if span <= 0:
+        return 0
+    return sum(_counts(first + timedelta(days=i), workdays, every_day) for i in range(span)) or span
+
+
+def due_after(start: date, days: int, workdays: Collection[int], every_day: bool = False) -> date:
+    """The last of ``days`` days from ``start``. A Start that isn't a workday stays as typed, and counting starts on the first
+    workday after it (the design's Dates)."""
+    day, counted = start, 1 if _counts(start, workdays, every_day) else 0
+    while counted < days:
+        day += timedelta(days=1)
+        counted += _counts(day, workdays, every_day)
+    return day
+
+
+def start_before(due: date, days: int, workdays: Collection[int], every_day: bool = False) -> date:
+    """The first of ``days`` days up to ``due``."""
+    day, counted = due, 1 if _counts(due, workdays, every_day) else 0
+    while counted < days:
+        day -= timedelta(days=1)
+        counted += _counts(day, workdays, every_day)
+    return day
+
+
+def placed(start: str | None, due: str | None, days: int | None, edited: str, workdays: Collection[int], every_day: bool = False) -> tuple[str | None, str | None]:
+    """A block's dates once one thing about it was edited, ``edited`` being "start", "due" or "duration" (decision 191). With a
+    Duration, changing Start moves Due, changing Due moves Start, and changing the Duration moves Due, or Start if there's no
+    Start. Clearing either date clears both: it's off the calendar, keeping its size. With none, the dates are plain dates."""
+    if days is None:
+        return start, due
+    if edited == "start":
+        return (start, due_after(to_date(start), days, workdays, every_day).isoformat()) if start else (None, None)
+    if edited == "due":
+        return (start_before(to_date(due), days, workdays, every_day).isoformat(), due) if due else (None, None)
+    if start:
+        return start, due_after(to_date(start), days, workdays, every_day).isoformat()
+    return (start_before(to_date(due), days, workdays, every_day).isoformat(), due) if due else (None, None)
+
+
+def length_of(start: str | None, due: str | None, days: int | None, workdays: Collection[int], every_day: bool = False) -> int | None:
+    """A task's length in days: its Duration, or what its two dates hold, or None when it hasn't one."""
+    if days is not None:
+        return days
+    if start and due and to_date(due) >= to_date(start):
+        return days_in(to_date(start), to_date(due), workdays, every_day)
+    return None
+
+
 def windows(task: Dated, until: date) -> list[tuple[date, date]]:
-    """The task's working windows, first day and last day. A routine task's stop at ``until``."""
+    """The task's working windows, first day and last day. A routine task's stop at ``until``. A task with a Duration and no
+    Start or Due isn't placed, even with a Deadline, rather than spreading its hours from the day it was made (the design's
+    Dates)."""
     start = start_of(task)
     if not task.recurrence:
+        if getattr(task, "duration", None) and not task.start and not task.due:
+            return []
         end = task.due or task.deadline
         return [(start, to_date(end))] if end else []
     length = (to_date(task.due) - start).days if task.due else 0
