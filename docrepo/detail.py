@@ -428,16 +428,19 @@ class Pages:
         """Faces first, then names and hours."""
         per = " per occurrence" if t.recurrence else ""
 
-        def people(ids: list[str], hours: float | None, rate: float | None, role: str) -> str:
-            # Release 5.46: hours a day show beside the total worked out from them, or ask for a length. Release 5.47: each
-            # person's own hours, by their Involvement, which says so.
+        def people(ids: list[str], hours: float | None, role: str) -> str:
+            # Release 5.46: hours a day show beside the total worked out from them, or ask for a length, as hours a week do since
+            # release 5.49. Release 5.47: each person's own hours, by their Involvement, which says so.
+            stated_rate = t.rate_of(role)
+            rate = f"{num(stated_rate[0])} h a {stated_rate[1]}" if stated_rate else ""
+
             def text(p: str) -> str:
                 share = t.share(role, p)
-                tail = f"{share}%" if share != 100 else f"{num(rate)} h a day" if rate is not None else ""
+                tail = f"{share}%" if share != 100 else rate
                 if hours:
                     return f"{num(round(hours * share / 100, 2))} h{per}" + (f" · {tail}" if tail else "")
-                if rate is not None:
-                    return f"{num(rate)} h a day, needs a length"
+                if rate:
+                    return f"{rate}, needs a length"
                 return tail
 
             return "<br>".join(f'{self.avatar(p)} {link(f"person:{p}", self.m.person_name(p))}' + (f' <span class="rel">{esc(text(p))}</span>' if text(p) else "")
@@ -445,9 +448,9 @@ class Pages:
 
         rows = []
         if t.leads:
-            rows.append(("Leads" if len(t.leads) > 1 else "Lead", people(t.leads, t.lead_hours, t.lead_per_day, "lead")))
+            rows.append(("Leads" if len(t.leads) > 1 else "Lead", people(t.leads, t.lead_hours, "lead")))
         if t.assignees:
-            rows.append(("Assignees" if len(t.assignees) > 1 else "Assignee", people(t.assignees, t.assignee_hours, t.assignee_per_day, "assignee")))
+            rows.append(("Assignees" if len(t.assignees) > 1 else "Assignee", people(t.assignees, t.assignee_hours, "assignee")))
         return rows or [("People", '<span class="sub">No one yet</span>')]
 
     def mark(self, t: Task) -> str:

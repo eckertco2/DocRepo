@@ -29,7 +29,7 @@ ContentOf = Callable[[str], str]
 _DATE = re.compile(r"\d{4}-\d\d-\d\d\Z")
 #: The fields a template can change on a task, as the status log names them (release 5.45).
 TEMPLATE_FIELDS = ("Title", "Description", "Labels", "Inherit parent labels", "Lead", "Assignees", "Lead hours", "Assignee hours", "Urgent", "Meeting",
-                   "Plant event", "Recurrence", "Duration", "Runs through weekends", "Lead hours a day", "Assignee hours a day")
+                   "Plant event", "Recurrence", "Duration", "Runs through weekends", "Lead hours a day", "Assignee hours a day", "Lead hours a week", "Assignee hours a week")
 
 
 def is_none(value: str | None) -> bool:
@@ -195,13 +195,13 @@ class Stories:
             return "Duration cleared." if is_none(after) else f"Duration set to {days}." if is_none(before) else f"Duration {before} → {days}."
         if f == "Runs through weekends":
             return "Runs through weekends." if after == "Yes" else "Counts workdays only."
-        if f in ("Lead hours a day", "Assignee hours a day"):
+        if f in ("Lead hours a day", "Assignee hours a day", "Lead hours a week", "Assignee hours a week"):
             return f"{f} cleared." if is_none(after) else f"{f} set to {after}." if is_none(before) else f"{f} {before} → {after}."
         if f in ("Lead hours", "Assignee hours"):
             if is_none(after):
                 return f"{f} cleared."
             t = self.m.tasks.get(e.task)
-            if t is not None and not is_none(before) and (t.duration is not None or t.lead_per_day is not None or t.assignee_per_day is not None or e.task in self.m.origins):
+            if t is not None and not is_none(before) and (t.duration is not None or t.rate_of("lead") or t.rate_of("assignee") or e.task in self.m.origins):
                 return f"{f} {before} → {after}."  # the design's "Assignee hours 30 → 18", on tasks with a length to follow
             value = f"{after} h" if re.fullmatch(r"\d+(\.\d+)?", after or "") else after
             return f"{f} set to {value}."

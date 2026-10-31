@@ -6,9 +6,11 @@ turn, lighter for each level down, like the mockup's task tree.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QModelIndex, QSize, Qt, QTimer, Signal
+from collections.abc import Callable
+
+from PySide6.QtCore import QModelIndex, QPoint, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QAbstractTextDocumentLayout, QColor, QPalette, QTextDocument
-from PySide6.QtWidgets import QHeaderView, QStyle, QStyledItemDelegate, QStyleOptionViewItem, QTreeWidget, QTreeWidgetItem
+from PySide6.QtWidgets import QAbstractItemView, QHeaderView, QStyle, QStyledItemDelegate, QStyleOptionViewItem, QTreeWidget, QTreeWidgetItem
 
 from docrepo.ui import tokens
 from docrepo.ui.look import LOOK
@@ -130,6 +132,7 @@ class RowTree(QTreeWidget):
                                "QHeaderView::section { color: #87919c; font-size: 8pt; border: none; border-bottom: 1px solid #d6dce3;"
                                " padding: 3px 6px; background: #ffffff; }")
         self._building = False
+        self._moves: tuple[Callable, Callable, Callable] | None = None
         self._relayout = QTimer(self)
         self._relayout.setSingleShot(True)
         self._relayout.setInterval(60)
@@ -138,6 +141,66 @@ class RowTree(QTreeWidget):
         self.currentItemChanged.connect(self._current_changed)
         self.itemChanged.connect(self._item_changed)
         self.set_columns(["Title", "State", "Due"])
+
+    # ---- moving rows (release 5.49, decision 261): only where a view asks for it ----
+    def allow_row_moves(self, drop: Callable[[object, object, str], None], can: Callable[[object, object, str], bool], step: Callable[[object, int], None]) -> None:
+        """Rows can be dragged here, and Alt+Up and Alt+Down move the current one. ``drop`` gets a row's key, the row it was dropped
+        on, and "before", "after" or "in". ``can`` says whether that's allowed. The tree itself moves nothing: ``drop`` changes the
+        records, and the view draws them again."""
+        self._moves = (drop, can, step)
+        self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.setDropIndicatorShown(True)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+
+    def stop_row_moves(self) -> None:
+        self._moves = None
+        self.setDragEnabled(False)
+        self.setAcceptDrops(False)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.NoDragDrop)
+
+    def _drop_at(self, pos: QPoint) -> tuple[object, str] | None:
+        """The row under a point and which part of it, by the margins Qt draws its drop line from, or None where nothing can land."""
+        item = self.itemAt(pos)
+        if item is None:
+            return None
+        rect = self.visualItemRect(item)
+        margin = max(2, min(12, round(rect.height() / 5.5)))
+        where = "before" if pos.y() - rect.top() < margin else "after" if rect.bottom() - pos.y() < margin else "in"
+        return item.data(0, KEY_ROLE), where
+
+    def dragEnterEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        super().dragEnterEvent(event)
+        if self._moves:
+            event.acceptProposedAction()
+
+    def dragMoveEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        super().dragMoveEvent(event)
+        if not self._moves:
+            return
+        at, key = self._drop_at(event.position().toPoint()), self.currentItem().data(0, KEY_ROLE) if self.currentItem() else None
+        if at and self._moves[1](key, *at):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        if not self._moves:
+            super().dropEvent(event)
+            return
+        at, key = self._drop_at(event.position().toPoint()), self.currentItem().data(0, KEY_ROLE) if self.currentItem() else None
+        event.setDropAction(Qt.DropAction.IgnoreAction)  # the records move, and the list is drawn again: Qt moves nothing
+        event.accept()
+        if at and self._moves[1](key, *at):
+            drop = self._moves[0]
+            QTimer.singleShot(0, lambda: drop(key, *at))  # after the drag has finished with these rows
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        alt = event.modifiers() == Qt.KeyboardModifier.AltModifier
+        if self._moves and alt and event.key() in (Qt.Key.Key_Up, Qt.Key.Key_Down) and self.currentItem() is not None:
+            self._moves[2](self.currentItem().data(0, KEY_ROLE), -1 if event.key() == Qt.Key.Key_Up else 1)
+            return
+        super().keyPressEvent(event)
 
     def set_columns(self, labels: list[str], widths: list[int] | None = None) -> None:
         """The columns: the first stretches, the others keep their widths."""

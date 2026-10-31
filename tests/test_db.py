@@ -42,7 +42,7 @@ def test_a_version_1_database_is_brought_up_to_date(data_root, fs):
     old.close()
     conn = db.connect(fs, data_root)
     try:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 17
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 18
         assert conn.execute("SELECT name, sha256, text_status FROM documents").fetchone()[:] == ("a.pdf", None, None)
         assert conn.execute("SELECT count(*) FROM search_text").fetchone()[0] == 0
         assert conn.execute("SELECT count(*) FROM tasks WHERE discarded IS NOT NULL").fetchone()[0] == 0
@@ -64,6 +64,7 @@ def test_a_version_1_database_is_brought_up_to_date(data_root, fs):
         assert conn.execute("SELECT count(*) FROM template_log").fetchone()[0] == 0  # version 15
         assert conn.execute("SELECT count(*) FROM tasks WHERE duration IS NOT NULL OR calendar_days <> 0 OR lead_per_day IS NOT NULL").fetchone()[0] == 0  # version 16
         assert conn.execute("SELECT count(*) FROM task_people WHERE involvement <> 100").fetchone()[0] == 0  # version 17
+        assert conn.execute("SELECT count(*) FROM tasks WHERE lead_per_week IS NOT NULL OR assignee_per_week IS NOT NULL").fetchone()[0] == 0  # version 18
         conn.execute("INSERT INTO search_text (kind, id, body) VALUES ('page', 'T000001', 'x')")  # pages are searched
         # Version 4 made agenda_items again, keeping its rows and IDs, so an item can close as Done.
         assert [tuple(r) for r in conn.execute("SELECT id, target, note FROM agenda_items")] == [(7, "P001", "Ask about it")]

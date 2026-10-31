@@ -59,7 +59,7 @@ class DraftAside:
         c = self.capture
         return {
             "texts": {n: getattr(c, n).text() for n in TEXTS},
-            "units": {n: getattr(c, n).per_day() for n in UNITS},
+            "units": {n: getattr(c, n).unit_name() for n in UNITS},
             "plain": {n: getattr(c, n).toPlainText() for n in PLAIN},
             "dates": {n: getattr(c, n).value() for n in DATES},
             "chips": {n: [[x.value, x.label, x.new] for x in getattr(c, n).chips()] for n in CHIPS},
@@ -74,7 +74,7 @@ class DraftAside:
         for n, v in form.get("texts", {}).items():
             getattr(c, n).setText(str(v or ""))
         for n, v in form.get("units", {}).items():
-            getattr(c, n).set_per_day(bool(v))
+            getattr(c, n).set_unit_name(v if v in ("all", "day", "week") else "day" if v else "all")  # a draft set aside before h a week said True or False
         for n, v in form.get("plain", {}).items():
             getattr(c, n).setPlainText(str(v or ""))
         for n, v in form.get("dates", {}).items():

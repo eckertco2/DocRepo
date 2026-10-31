@@ -61,6 +61,7 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.45 | Linked fields and the preview (decisions 183 to 188, 192 and 198): chain marks and ↺ in Edit task, Detach, the preview in its three forms, what a change reaches, and a template's Changes, schema version 15 | Built 2026-10-30, with 5.44, and merged to `main` the same day, before the owner's hand test. Next: as 5.44 |
 | 5.46 | Duration and hours a day (decisions 189 to 191): one date and a Duration, Runs through weekends, and h a day, in Edit task, Quick edit, the capture window, template rows and Make tasks, schema version 16 | Built 2026-10-30, with 5.44 and 5.45, and merged to `main` the same day, before the owner's hand test. Next: as 5.44 |
 | 5.47 | Involvement (decision 196): each person's share of a role's hours, in Capacity, on the task page, in Edit task's and a row's chips, in links and the preview, schema version 17 | Built 2026-10-30, with 5.44 to 5.46, and merged to `main` the same day, before the owner's hand test. Next: as 5.44 |
+| 5.49 | Hours a week, reordering a template's rows by dragging or Alt+Up and Alt+Down, and Duplicate (decisions 260 to 262), schema version 18 | Built 2026-10-31 in the `round5-templates` worktree, on that branch, not merged to `main`. Next: the owner's hand test, then `handoff/docrepo/release-5-49-test.md` |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
 ## Decisions
@@ -495,6 +496,29 @@ The visual overhaul's O10, designed and mocked in the parent workspace (`docs/ui
   - **No button group:** the pane marks the open view itself, so that no row is marked while searching, and a click on the open view keeps it marked.
   - **The totals that left the sidebar** are beside their views' titles ("14 open", "7 active"), as `sidebar.md` said they'd be.
   - **The tooltip** shows only when a name is cut short. The headings' tooltips say Fold or Unfold.
+
+## Release 5.49: hours a week, reordering and Duplicate (2026-10-31)
+
+Round 5's thread A, three of the owner's asks of 2026-10-30, as the design has them (decisions 260 to 262). They're the first of the three releases in decision 263: ties and the anchor come in 5.50 and 5.51. Built on `main` with threads B to E merged, before the owner's hand test.
+
+- `docrepo/db.py`: schema version 18, `lead_per_week` and `assignee_per_week` on tasks and template rows. `docrepo/model.py`: the fields, and `Task.rate_of`. `docrepo/schedule.py`: `week_of`.
+- `docrepo/tasks.py`: `WEEK_RATES`, `RATE_FIELDS`, `hours_values`, `unit_span` and `rate_total`; `stated` gives `("a week", 3)`; `worked_out` keeps one rate to a role and works out the total. `docrepo/stories.py` and `docrepo/detail.py`: the words.
+- `docrepo/templates.py`: rows hold it; `place_row`, `can_place` and `duplicate`. `docrepo/template_pages.py`: "3 h a week = 18 h each", counted by Settings' workdays.
+- `docrepo/ui/task_forms.py`: `HoursRow` has three units, with `unit_name` and `set_unit_name`. `docrepo/ui/templates_view.py`: the row's form, Make tasks' line, `DuplicateDialog`, and the Move menu's message. `docrepo/planning.py` and `docrepo/ui/quick_edit.py`: `unit_of`, `number_of` and `set_hours`. `docrepo/ui/capture_window.py` and `docrepo/save.py`: New task's and Update's. `docrepo/ui/draft_aside.py`: a draft set aside keeps its unit, with a draft saved before h a week still read correctly (a small change to thread C's file, as otherwise h a week would come back as h in all).
+- `docrepo/ui/tree_view.py`: `RowTree.allow_row_moves` and `stop_row_moves`, for dragging rows and Alt+Up and Alt+Down in one view only. `docrepo/ui/browse_window.py`: every list view turns them off, and Templates turns them back on. `docrepo/ui/keymap.py`: the key.
+- `tests/test_hours_a_week.py` and `tests/test_template_moves.py` (new); `test_db.py`, `test_quick_edit.py` and `test_key_dates_ui.py` follow (1751 pass in all, 1 skipped). Edit task, a row's form, Make tasks, Quick edit, the Duplicate form and the Templates view were drawn over a sample data root with Windows' own fonts and checked by eye.
+- **Not tested here: the drag itself, with a real mouse.** The drop and the hover are tested through Qt's own events. A real drag on Windows needs a real mouse, and Qt's offscreen platform doesn't run one, so the first part of the hand test is that gesture.
+
+## Decisions (release 5.49)
+
+- Decisions 260 to 262, as the design has them.
+- **Judgement calls, for the owner's hand test:**
+  - **Quick edit is 10 px wider, at 362,** and its unit box and Edit task's are wider too, as "h a week" was cut off.
+  - **Clearing a rate in Quick edit now clears it.** Before, an emptied box with h a day chosen left the rate in place: a bug from 5.46, fixed in passing as the same line had to change.
+  - **The Move menu's two commands now say the same message as dragging,** about new trees and trees already made.
+  - **The Duplicate form's button says Duplicate.** It says what it copies, and that the copy stands alone.
+  - **Duration stays in days.** There's no weeks box for it, and the line says how many weeks it makes.
+  - **Quick edit's "3 hours a week" in its Type to fill box still makes a total** over the task's dates, as it did (decision 143). It could fill the new unit instead, but that box belongs to Parse and populate, and it wasn't asked for.
 
 ## Release 5.47: Involvement (2026-10-30)
 

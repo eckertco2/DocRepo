@@ -42,8 +42,8 @@ from docrepo.detail import esc
 from docrepo.model import Model
 from docrepo.pages import num
 from docrepo.parse import Who
-from docrepo.schedule import length_of, placed, start_of
-from docrepo.tasks import KeyDateRow
+from docrepo.schedule import length_of, placed, start_of, week_of
+from docrepo.tasks import KeyDateRow, hours_values
 from docrepo.ui.icons import icon
 from docrepo.ui.look import Help
 from docrepo.ui.style import page_css, style_sheet
@@ -286,21 +286,24 @@ class PeoplePicker(ChipPicker):
 
 
 class HoursRow(QWidget):
-    """A role's hours with their unit (release 5.46, decision 189): the box, h in all or h a day, and a line saying what a
-    rate comes to. Switching the unit keeps the total, when the task has a length; without one, it keeps the number, read as
-    the new unit. A routine task's hours are for each time, so it has no unit to choose. ``length`` gives the task's days,
-    and ``shares`` who has less than the whole, given the total."""
+    """A role's hours with their unit (release 5.46, decision 189; release 5.49, decision 260): the box, h in all, h a day or h a
+    week, and a line saying what a rate comes to. Switching the unit keeps the total, when the task has a length; without one, it
+    keeps the number, read as the new unit. A routine task's hours are for each time, so it has no unit to choose. ``length``
+    gives the task's days, ``shares`` who has less than the whole, given the total, and ``week`` how many days make a week."""
 
     changed = Signal()
 
+    UNITS = ("all", "day", "week")
+
     def __init__(self, hours: HoursField, length: Callable[[], int | None], people: Callable[[], int] = lambda: 1,
-                 shares: Callable[[float | None], str] = lambda _: "") -> None:
+                 shares: Callable[[float | None], str] = lambda _: "", week: Callable[[], int] = lambda: 5) -> None:
         super().__init__()
-        self.hours, self._length, self._people, self._shares = hours, length, people, shares
+        self.hours, self._length, self._people, self._shares, self._week = hours, length, people, shares, week
+        self._was = "all"
         self.unit = QComboBox()
-        self.unit.addItems(["h in all", "h a day"])
+        self.unit.addItems(["h in all", "h a day", "h a week"])
         self.unit.setAccessibleName("Hours unit")
-        self.unit.setFixedWidth(96)
+        self.unit.setFixedWidth(108)
         self.line = QLabel(objectName="hint")
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -317,22 +320,30 @@ class HoursRow(QWidget):
         hours.textEdited.connect(lambda _: self._edited())
         self.unit.activated.connect(self._switched)
 
+    def unit_name(self) -> str:
+        """"all", "day" or "week". A routine task's hours are a total, for each time."""
+        return "all" if self.routine else self.UNITS[self.unit.currentIndex()]
+
+    def set_unit_name(self, name: str) -> None:
+        self.unit.setCurrentIndex(self.UNITS.index(name))
+        self._was = name
+
     def per_day(self) -> bool:
-        return self.unit.currentIndex() == 1 and not self.routine
+        return self.unit_name() == "day"
 
     def set_per_day(self, on: bool) -> None:
-        self.unit.setCurrentIndex(1 if on else 0)
+        self.set_unit_name("day" if on else "all")
 
     def number(self) -> float | None:
         return self.hours.value() if self.hours.is_valid() else None
 
     def stated(self) -> Any:
-        """The hours as they're stated: a rate as ``("a day", n)``, as a template row's are compared; else the number."""
-        n = self.number()
-        return ("a day", n) if self.per_day() and n is not None else n
+        """The hours as they're stated: a rate as ``("a day", n)`` or ``("a week", n)``, as a template row's are compared; else the number."""
+        n, unit = self.number(), self.unit_name()
+        return (f"a {unit}", n) if unit != "all" and n is not None else n
 
     def set_stated(self, value: Any) -> None:
-        self.set_per_day(isinstance(value, tuple))
+        self.set_unit_name(value[0][2:] if isinstance(value, tuple) else "all")
         self.hours.set_value(value[1] if isinstance(value, tuple) else value)
         self._edited()
 
@@ -345,29 +356,35 @@ class HoursRow(QWidget):
         self.show_line()
         self.changed.emit()
 
+    def _span(self, unit: str, days: int) -> float:
+        return days if unit == "day" else days / self._week() if unit == "week" else 1
+
     def _switched(self, _index: int) -> None:
-        n, days = self.number(), self._length()
+        n, days, unit = self.number(), self._length(), self.unit_name()
         if n is not None and days:
-            self.hours.set_value(round(n / days, 2) if self.per_day() else round(n * days, 2))
+            self.hours.set_value(round(n * self._span(self._was, days) / self._span(unit, days), 2))
+        self._was = unit
         self._edited()
 
     def total(self) -> float | None:
-        """The role's total: as typed, or the rate times the task's days, or None until it has a length."""
-        n, days = self.number(), self._length()
-        if n is None or not self.per_day():
+        """The role's total: as typed, or the rate times the task's days or weeks, or None until it has a length."""
+        n, days, unit = self.number(), self._length(), self.unit_name()
+        if n is None or unit == "all":
             return n
-        return round(n * days, 2) if days else None
+        return round(n * self._span(unit, days), 2) if days else None
 
     def show_line(self) -> None:
-        n, days = self.number(), self._length()
+        n, days, unit = self.number(), self._length(), self.unit_name()
         if self.routine:
             text = "each time"
-        elif not self.per_day() or n is None:
+        elif unit == "all" or n is None:
             text = ""
         elif days:
-            text = f"= {num(round(n * days, 2))} h{' each' if self._people() > 1 else ''} over {days} day{'' if days == 1 else 's'}"
+            weeks = self._span("week", days)
+            weeks_text = f" ({num(round(weeks, 2))} week{'' if weeks == 1 else 's'})" if unit == "week" else ""
+            text = f"= {num(self.total())} h{' each' if self._people() > 1 else ''} over {days} day{'' if days == 1 else 's'}{weeks_text}"
         else:
-            text = f"{num(n)} h a day, needs a length"
+            text = f"{num(n)} h a {unit}, needs a length"
         shares = self._shares(self.total())
         text = " · ".join(x for x in (text, shares) if x)
         self.line.setText(text)
@@ -724,14 +741,15 @@ class TaskEditDialog(FormDialog):
         self.assignees.shares = {p: s for (r, p), s in t.involvement.items() if r == "assignee"}
         self.assignees.set_chips(people_chips(m, t.assignees))
         self.lead_hours, self.asg_hours = HoursField(), HoursField()
-        self.lead_hours.set_value(t.lead_per_day if t.lead_per_day is not None else t.lead_hours)
-        self.asg_hours.set_value(t.assignee_per_day if t.assignee_per_day is not None else t.assignee_hours)
+        self.lead_hours.set_value(t.rate_of("lead")[0] if t.rate_of("lead") else t.lead_hours)
+        self.asg_hours.set_value(t.rate_of("assignee")[0] if t.rate_of("assignee") else t.assignee_hours)
         for w in (self.lead_hours, self.asg_hours):
             w.setFixedWidth(72)
-        self.lead_unit = HoursRow(self.lead_hours, self._length_now, lambda: len(self.leads.chips()), self.leads.shares_text)
-        self.asg_unit = HoursRow(self.asg_hours, self._length_now, lambda: len(self.assignees.chips()), self.assignees.shares_text)
-        self.lead_unit.set_per_day(t.lead_per_day is not None)
-        self.asg_unit.set_per_day(t.assignee_per_day is not None)
+        week = lambda: week_of(self.workdays, self.calendar.isChecked())  # noqa: E731
+        self.lead_unit = HoursRow(self.lead_hours, self._length_now, lambda: len(self.leads.chips()), self.leads.shares_text, week)
+        self.asg_unit = HoursRow(self.asg_hours, self._length_now, lambda: len(self.assignees.chips()), self.assignees.shares_text, week)
+        self.lead_unit.set_unit_name(t.rate_of("lead")[1] if t.rate_of("lead") else "all")
+        self.asg_unit.set_unit_name(t.rate_of("assignee")[1] if t.rate_of("assignee") else "all")
         leads_field, assignees_field = field("Lead", self.leads, "leads"), field("Assignees", self.assignees, "assignees")
         lead_hours_field, asg_hours_field = field("Lead hours", self.lead_unit, "hours"), field("Assignee hours", self.asg_unit)
         top_edge = Qt.AlignmentFlag.AlignTop  # the labels stay level, however many chips or lines one of them holds
@@ -1147,9 +1165,8 @@ class TaskEditDialog(FormDialog):
     def _hours_values(self) -> dict[str, Any]:
         """Each role's hours: a rate, whose total is worked out, or a total, with no rate (decision 189)."""
         out: dict[str, Any] = {}
-        for unit, hours, rate in ((self.lead_unit, "lead_hours", "lead_per_day"), (self.asg_unit, "assignee_hours", "assignee_per_day")):
-            n = unit.number()
-            out.update({rate: n} if unit.per_day() and n is not None else {hours: n, rate: None})
+        for unit, hours in ((self.lead_unit, "lead_hours"), (self.asg_unit, "assignee_hours")):
+            out.update(hours_values(hours, unit.unit_name(), unit.number()))
         return out
 
     def _following(self) -> list[str]:

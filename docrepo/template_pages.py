@@ -5,23 +5,25 @@ it. Nothing here touches Qt, so the pages are tested as text. A ``tplrow:12`` li
 """
 from __future__ import annotations
 
+from collections.abc import Collection
+
 from docrepo import markup
 from docrepo.detail import PROGRESS_WIDTH, box, chip, esc, group, label_href, link, multiline, none_text, section, state_chip
 from docrepo.dates import long_date, to_date
 from docrepo.model import Model
 from docrepo.pages import num
-from docrepo.tasks import FIELD_NAMES, stated
+from docrepo.tasks import FIELD_NAMES, rate_total, stated
 from docrepo.templates import Library, Row, days_text, field_text, own_fields, plural, summary
 
 
-def _hours_text(row: Row, key: str) -> str:
+def _hours_text(row: Row, key: str, workdays: Collection[int]) -> str:
     """A row's hours as it states them, with what a rate comes to over its Duration: "6 h a day = 30 h each"."""
     value = stated(row, key)
     if value is None:
         return ""
     text = field_text(None, key, value)
     if isinstance(value, tuple) and row.duration:
-        text += f" = {num(value[1] * row.duration)} h each"
+        text += f" = {num(rate_total(value, row.duration, workdays, row.calendar_days))} h each"
     return text
 
 
@@ -31,11 +33,11 @@ def _people(m: Model, ids: list[str], hours: str, row: Row, role: str) -> str:
     return names + (f' <span class="rel">{esc(hours)}</span>' if hours else "")
 
 
-def _who(m: Model, row: Row) -> list[tuple[str, str]]:
+def _who(m: Model, row: Row, workdays: Collection[int]) -> list[tuple[str, str]]:
     rows = []
     for ids, key, role, one, many, word in ((row.leads, "lead_hours", "lead", "Lead", "Leads", "Lead hours"),
                                             (row.assignees, "assignee_hours", "assignee", "Assignee", "Assignees", "Assignee hours")):
-        hours = _hours_text(row, key)
+        hours = _hours_text(row, key, workdays)
         if ids:
             rows.append((many if len(ids) > 1 else one, _people(m, ids, hours, row, role)))
         elif hours:
@@ -128,7 +130,7 @@ def _changes(lib: Library, template: int, today) -> str:
     return section("Changes") + f'<table width="100%" cellspacing="0" cellpadding="3">{cells}</table>'
 
 
-def row_page(lib: Library, m: Model, row_id: int, today) -> str:
+def row_page(lib: Library, m: Model, row_id: int, today, workdays: Collection[int] = range(5)) -> str:
     """A template's page (its top row's) or a row's."""
     row = lib.rows[row_id]
     template = lib.templates[row.template]
@@ -146,5 +148,5 @@ def row_page(lib: Library, m: Model, row_id: int, today) -> str:
         gone = box(f"<b>Discarded</b> {esc(long_date(to_date(template.discarded[:10]), today))}{why}. It's hidden from Templates, and its tasks keep "
                    "their values. Nothing is deleted: Bring back restores it.", "warn")
     head = f'{gone}{crumbs}<h2>{esc(row.title)}</h2><p class="tags">{tags}</p>{desc}'
-    return (head + group("When", _when(row)) + group("Who", _who(m, row)) + _subtasks(lib, row) + _notes(row)
+    return (head + group("When", _when(row)) + group("Who", _who(m, row, workdays)) + _subtasks(lib, row) + _notes(row)
             + (_trees(lib, m, template.id) + _changes(lib, template.id, today) if top else _follow(lib, m, row)))

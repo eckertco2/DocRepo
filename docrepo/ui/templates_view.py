@@ -36,8 +36,8 @@ from docrepo.edits import Outcome
 from docrepo.model import Model
 from docrepo.dates import long_date, to_date
 from docrepo.pages import num
-from docrepo.schedule import due_after
-from docrepo.tasks import TaskError
+from docrepo.schedule import due_after, week_of
+from docrepo.tasks import TaskError, hours_values, rate_total, stated
 from docrepo.templates import Choice, Library, Row, plural
 from docrepo.ui import tokens
 from docrepo.ui.dialogs import _Form
@@ -67,7 +67,8 @@ class RowDialog(FormDialog):
     """A template row: Edit task's form with a task's own fields taken out, and Starting notes added (decision 182). State,
     current status, priority, dates and reference fields are each task's own."""
 
-    def __init__(self, parent: QWidget | None, m: Model, row: Row | None, labels: Options, people: Options, heading: str, top: bool = False) -> None:
+    def __init__(self, parent: QWidget | None, m: Model, row: Row | None, labels: Options, people: Options, heading: str, top: bool = False,
+                 workdays: Collection[int] = MON_TO_FRI) -> None:
         super().__init__(parent)
         self.setWindowTitle(heading)
         self.setObjectName("capture")
@@ -126,8 +127,9 @@ class RowDialog(FormDialog):
         self.leads = PeoplePicker(people, "Search names and aliases", "Add “{}” to people", "lead", lambda: self.lead_unit.total())
         self.assignees = PeoplePicker(people, "Search names and aliases", "Add “{}” to people", "assignee", lambda: self.asg_unit.total())
         self.lead_hours, self.asg_hours = HoursField(), HoursField()
-        self.lead_unit = HoursRow(self.lead_hours, lambda: typed_days(self.duration), lambda: len(self.leads.chips()), self.leads.shares_text)
-        self.asg_unit = HoursRow(self.asg_hours, lambda: typed_days(self.duration), lambda: len(self.assignees.chips()), self.assignees.shares_text)
+        week = lambda: week_of(workdays, self.calendar.isChecked())  # noqa: E731
+        self.lead_unit = HoursRow(self.lead_hours, lambda: typed_days(self.duration), lambda: len(self.leads.chips()), self.leads.shares_text, week)
+        self.asg_unit = HoursRow(self.asg_hours, lambda: typed_days(self.duration), lambda: len(self.assignees.chips()), self.assignees.shares_text, week)
         if row:
             self.leads.shares = {p: s for (r, p), s in row.involvement.items() if r == "lead"}
             self.assignees.shares = {p: s for (r, p), s in row.involvement.items() if r == "assignee"}
@@ -243,9 +245,8 @@ class RowDialog(FormDialog):
         """The form's values, as ``templates`` takes them. Its starting notes are always markup."""
         text, formatted = self.notes.value()
         hours = {}
-        for unit, total, rate in ((self.lead_unit, "lead_hours", "lead_per_day"), (self.asg_unit, "assignee_hours", "assignee_per_day")):
-            n = unit.number()
-            hours.update({rate: n, total: None} if unit.per_day() and n is not None else {total: n, rate: None})
+        for unit, total in ((self.lead_unit, "lead_hours"), (self.asg_unit, "assignee_hours")):
+            hours.update({total: None, **hours_values(total, unit.unit_name(), unit.number())})  # a row with a rate has no total of its own
         return {"title": self.title_box.text(), "description": self.description.toPlainText(), "labels": self.labels.values(),
                 "inherit_labels": self.inherit.isChecked(), "leads": chips_people(self.leads), "assignees": chips_people(self.assignees),
                 "involvement": {**self.leads.involvement(), **self.assignees.involvement()},
@@ -290,13 +291,13 @@ class MakeRow:
             day = to_date(self.start.value())
             due = long_date(due_after(day, days, self.workdays, row.calendar_days), day)
         self.due.setText(due)
-        rate = row.assignee_per_day if row.assignee_per_day is not None else row.lead_per_day
+        rate = next((v for v in (stated(row, "assignee_hours"), stated(row, "lead_hours")) if isinstance(v, tuple)), None)
         if rate is None:
             self.hours.setText(templates.summary(replace(row, duration=None)))
         elif days:
-            self.hours.setText(f"{num(rate)} h a day = {num(round(rate * days, 2))} h")
+            self.hours.setText(f"{num(rate[1])} h {rate[0]} = {num(rate_total(rate, days, self.workdays, row.calendar_days))} h")
         else:
-            self.hours.setText(f"{num(rate)} h a day")
+            self.hours.setText(f"{num(rate[1])} h {rate[0]}")
 
     def choice(self) -> Choice:
         chosen = self.people.values()
@@ -434,6 +435,21 @@ class NewTemplateDialog(_Form):
         self.form.addRow("Name", self.name)
         self.form.addRow(_hint("Then add its subtasks. Or use Save as template on a task you've already built, from its More menu."))
         self.check = lambda: None if self.name.text().strip() else "A template needs a name."
+        self.mark_clean()
+
+
+class DuplicateDialog(_Form):
+    """A new template with the same rows (decision 262): its name, and what comes with it."""
+
+    def __init__(self, parent: QWidget | None, name: str, rows: int) -> None:
+        super().__init__(parent, f"Duplicate {name}")
+        self.name = QLineEdit(f"{name} copy")
+        self.name.selectAll()
+        self.form.addRow("Name", self.name)
+        self.form.addRow(_hint(f"Copies all {plural(rows, 'row')}, in this order, with their fields, people, hours and starting notes."))
+        self.form.addRow(_hint("The copy is a template of its own. It starts with no trees and an empty Changes list, and a change to one doesn't reach the other."))
+        self.check = lambda: None if self.name.text().strip() else "A template needs a name."
+        self.commit_button.setText("Duplicate")
         self.mark_clean()
 
 
@@ -611,10 +627,12 @@ class TemplatesPane:
         w._set_head("Templates", TEMPLATES_NOTE, f"{len(live)} template{'s' if len(live) != 1 else ''}" if live else "")
         w._button("New template", self.new_template, tip="A new template, with its name. Then add its subtasks.")
         w.tree.set_columns(["Template", ""], [0, 130])
+        w.tree.allow_row_moves(self.dropped, self.can_drop, self.key_move)
         for t in live:
             n = len([c for c in lib.trees(t.id) if c.task in w.model().tasks and not w.model().task(c.task).discarded])
             used = f"{n} tree{'s' if n != 1 else ''}" if n else "Not used yet"
             item = w.tree.add_row(None, ("tplrow", str(t.top)), [f"<b>{esc(lib.name(t.id))}</b>", f'<p align="right" class="sub">{esc(used)}</p>'])
+            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsDragEnabled)  # a template's top row has nowhere to go
             self._add_rows(lib, t.top, item)
             item.setExpanded(True)
         if not live:
@@ -623,7 +641,8 @@ class TemplatesPane:
 
     def _add_rows(self, lib: Library, row_id: int, parent) -> None:
         for child in lib.children(row_id):
-            item = self.w.tree.add_row(parent, ("tplrow", str(child.id)), [esc(child.title), f'<p align="right" class="sub">{esc(templates.summary(child))}</p>'])
+            item = self.w.tree.add_row(parent, ("tplrow", str(child.id)), [esc(child.title), f'<p align="right" class="sub">{esc(templates.summary(child))}</p>'],
+                                       tip="Drag to reorder, or put it under another row. Alt+Up and Alt+Down move it too.")
             self._add_rows(lib, child.id, item)
             item.setExpanded(True)
 
@@ -635,7 +654,7 @@ class TemplatesPane:
 
     # ---- the detail pane ----
     def page(self, item: str) -> str:
-        return template_pages.row_page(self.library(), self.w.model(), int(item), self.w.today())
+        return template_pages.row_page(self.library(), self.w.model(), int(item), self.w.today(), self.w._workdays())
 
     def actions(self, item: str) -> None:
         w, lib, row_id = self.w, self.library(), int(item)
@@ -652,6 +671,7 @@ class TemplatesPane:
         w._action("Add subtask", lambda: self.add_subtask(row_id), "A new row under this one", icon_name="task")
         w._action("Edit", lambda: self.edit_row(row_id), "Change what this row fills", icon_name="edit")
         if top:
+            w._action("Duplicate…", lambda: self.duplicate(template.id), "A new template with the same rows, on its own")
             w._action("Discard…", lambda: self.discard(template.id), "Hide this template. Its tasks keep their values, and nothing is deleted.")
             return
         menu = QMenu(w)
@@ -665,7 +685,7 @@ class TemplatesPane:
             if x.id not in below and x.id != row.parent:
                 under.addAction("    " * depth + x.title, lambda p=x.id: self.reparent(row_id, p))
         under.setEnabled(bool(under.actions()))
-        w._action("Move", tip="Only trees made afterwards see a move", menu=menu)
+        w._action("Move", tip="Only trees made afterwards see a move. You can also drag a row in the list, or press Alt+Up and Alt+Down.", menu=menu)
         w._action("Take out…", lambda: self.take_out(row_id), "Take this row out of the template. Tasks made from it stay.")
 
     def open_row(self, item: str) -> None:
@@ -678,7 +698,7 @@ class TemplatesPane:
 
     # ---- forms ----
     def _dialog(self, row: Row | None, heading: str, top: bool = False) -> RowDialog:
-        dialog = RowDialog(self.w, self.w.model(), row, self.w._label_options, self.w._people_options, heading, top)
+        dialog = RowDialog(self.w, self.w.model(), row, self.w._label_options, self.w._people_options, heading, top, self.w._workdays())
         self.w._row_dialog = dialog  # kept, so tests can reach it
         return dialog
 
@@ -832,11 +852,47 @@ class TemplatesPane:
         if name and w.confirm("Detach from template", f"Detach {w.model().task(task_id).title} from {name}? Its values stay, and it won't follow {name} any more."):
             w._do(lambda: templates.detach(w.conn, w.ctx.data_root, w.ctx.fs, task_id, w._now()))
 
+    def _moved(self, row_id: int, change: Callable[[], object]) -> None:
+        """A row moved, by the Move menu, a drag or a key. Trees already made keep their order (decision 188)."""
+        title = self.library().rows[row_id].title
+
+        def run():
+            return Outcome(f"Moved {title}. New trees use this order, and trees already made keep theirs.") if change() is not False else None
+        self.w._do(run, ("tplrow", str(row_id)))
+
     def shift(self, row_id: int, step: int) -> None:
-        self.w._do(lambda: templates.shift_row(self.w.conn, row_id, step), ("tplrow", str(row_id)))
+        self._moved(row_id, lambda: templates.shift_row(self.w.conn, row_id, step))
 
     def reparent(self, row_id: int, parent: int) -> None:
-        self.w._do(lambda: templates.reparent_row(self.w.conn, row_id, parent) or True, ("tplrow", str(row_id)))
+        self._moved(row_id, lambda: templates.reparent_row(self.w.conn, row_id, parent))
+
+    def can_drop(self, key: object, target: object, where: str) -> bool:
+        return (isinstance(key, tuple) and isinstance(target, tuple) and key[0] == target[0] == "tplrow"
+                and templates.can_place(self.library(), int(key[1]), int(target[1]), where))
+
+    def dropped(self, key: tuple[str, str], target: tuple[str, str], where: str) -> None:
+        row_id = int(key[1])
+        self._moved(row_id, lambda: templates.place_row(self.w.conn, row_id, int(target[1]), where))
+
+    def key_move(self, key: object, step: int) -> None:
+        """Alt+Up and Alt+Down in the list, as on the Priorities board."""
+        if isinstance(key, tuple) and key[0] == "tplrow" and self.library().rows[int(key[1])].parent is not None:
+            self.shift(int(key[1]), step)
+
+    def duplicate(self, template_id: int) -> None:
+        w, lib = self.w, self.library()
+        name = lib.name(template_id)
+        dialog = DuplicateDialog(w, name, len(lib.walk(lib.templates[template_id].top)))
+        w._duplicate_dialog = dialog
+        if not w.run_dialog(dialog):
+            return
+        made: list[int] = []
+
+        def change():
+            made.append(templates.duplicate(w.conn, template_id, dialog.name.text(), w._now()))
+            return Outcome(f"Duplicated {name}. No tasks follow the copy yet.")
+        if w._do(change):
+            self.open_row(str(made[0]))
 
     def discard(self, template_id: int) -> None:
         w, lib = self.w, self.library()

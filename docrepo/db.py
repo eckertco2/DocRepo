@@ -15,7 +15,7 @@ from pathlib import Path
 from docrepo.safe_fs import SafeFS
 
 DB_FILE = Path("System") / "docs.db"
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 18
 
 #: Each kind of ID: its letter and how many digits follow it.
 ID_FORMATS = {"T": 6, "C": 6, "D": 6, "P": 3}
@@ -444,6 +444,14 @@ ALTER TABLE template_rows ADD COLUMN assignee_per_day REAL CHECK (assignee_per_d
 -- one person on one task, 100 by default. It isn't a split: on a 12-hour task, 25 is 3 hours and 100 is still 12.
 ALTER TABLE task_people ADD COLUMN involvement INTEGER NOT NULL DEFAULT 100 CHECK (involvement BETWEEN 0 AND 100);
 ALTER TABLE template_row_people ADD COLUMN involvement INTEGER NOT NULL DEFAULT 100 CHECK (involvement BETWEEN 0 AND 100);
+""",
+    18: """
+-- Hours a week (release 5.49, the task templates design's decision 260): a third way to state a role's hours, beside hours in all
+-- and hours a day. A role has one rate at most. The total stays in lead_hours and assignee_hours, worked out from it.
+ALTER TABLE tasks ADD COLUMN lead_per_week REAL CHECK (lead_per_week IS NULL OR lead_per_week >= 0);
+ALTER TABLE tasks ADD COLUMN assignee_per_week REAL CHECK (assignee_per_week IS NULL OR assignee_per_week >= 0);
+ALTER TABLE template_rows ADD COLUMN lead_per_week REAL CHECK (lead_per_week IS NULL OR lead_per_week >= 0);
+ALTER TABLE template_rows ADD COLUMN assignee_per_week REAL CHECK (assignee_per_week IS NULL OR assignee_per_week >= 0);
 """,
 }
 

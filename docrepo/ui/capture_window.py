@@ -91,8 +91,8 @@ from docrepo.save import (
     save_capture,
     split_parts,
 )
-from docrepo.schedule import is_open, length_of, start_of
-from docrepo.tasks import KeyDateRow, stated
+from docrepo.schedule import is_open, length_of, start_of, week_of
+from docrepo.tasks import KeyDateRow, hours_values, stated
 from docrepo.ui import tokens
 from docrepo.ui.context import AppContext
 from docrepo.ui.draft_aside import ASIDE_NOTE, DraftAside
@@ -978,8 +978,9 @@ class CaptureWindow(QWidget):
             more.addWidget(field(label, w, key), i // 2, i % 2)
         more.addWidget(self.n_repeat_field, 2, 0)
         # Release 5.46: hours with their unit, and a Duration. What they come to is worked out when it's saved.
-        self.n_lead_row = HoursRow(self.n_lead_hours, self._new_length, lambda: len(self.n_leads.chips()))
-        self.n_asg_row = HoursRow(self.n_asg_hours, self._new_length, lambda: len(self.n_assignees.chips()))
+        n_week = lambda: self._week(self.n_calendar)  # noqa: E731
+        self.n_lead_row = HoursRow(self.n_lead_hours, self._new_length, lambda: len(self.n_leads.chips()), week=n_week)
+        self.n_asg_row = HoursRow(self.n_asg_hours, self._new_length, lambda: len(self.n_assignees.chips()), week=n_week)
         more.addWidget(field("Lead hours", self.n_lead_row, "hours"), 3, 0)
         more.addWidget(field("Assignee hours", self.n_asg_row), 3, 1)
         self.n_duration, self.n_calendar, self.n_length = self._length_fields()
@@ -1029,8 +1030,9 @@ class CaptureWindow(QWidget):
         self.u_leads = ChipPicker(self._people_options, "Search names and aliases", "Add “{}” to people")
         self.u_assignees = ChipPicker(self._people_options, "Search names and aliases", "Add “{}” to people")
         self.u_lead_hours, self.u_asg_hours = HoursField(), HoursField()
-        self.u_lead_row = HoursRow(self.u_lead_hours, self._upd_length, lambda: len(self.u_leads.chips()))
-        self.u_asg_row = HoursRow(self.u_asg_hours, self._upd_length, lambda: len(self.u_assignees.chips()))
+        u_week = lambda: self._week(self.u_calendar)  # noqa: E731
+        self.u_lead_row = HoursRow(self.u_lead_hours, self._upd_length, lambda: len(self.u_leads.chips()), week=u_week)
+        self.u_asg_row = HoursRow(self.u_asg_hours, self._upd_length, lambda: len(self.u_assignees.chips()), week=u_week)
         self.u_duration, self.u_calendar, self.u_length = self._length_fields()
         self.u_start, self.u_reminder, self.u_repeat = DateField(), DateField(), DateField()
         self.u_recurrence = QComboBox()
@@ -1096,6 +1098,10 @@ class CaptureWindow(QWidget):
 
     def _workdays(self) -> frozenset[int]:
         return workday_numbers(self.ctx.settings.workdays)
+
+    def _week(self, tick: QCheckBox) -> int:
+        """How many days make a week for h a week: the workdays in Settings, or 7 with Runs through weekends."""
+        return week_of(workday_numbers(self.ctx.settings.workdays), tick.isChecked())
 
     def _new_length(self) -> int | None:
         """The new task's days. Start left at today is no Start, as saving has it."""
@@ -2791,11 +2797,10 @@ class CaptureWindow(QWidget):
 
     @staticmethod
     def _hours_values(lead: HoursRow, assignee: HoursRow) -> dict[str, Any]:
-        """Each role's hours: a rate, whose total is worked out, or a total, with no rate (decision 189)."""
+        """Each role's hours: a rate, whose total is worked out, or a total, with no rate (decisions 189, 260)."""
         out: dict[str, Any] = {}
-        for row, hours, rate in ((lead, "lead_hours", "lead_per_day"), (assignee, "assignee_hours", "assignee_per_day")):
-            n = row.number()
-            out.update({rate: n} if row.per_day() and n is not None else {hours: n, rate: None})
+        for row, hours in ((lead, "lead_hours"), (assignee, "assignee_hours")):
+            out.update(hours_values(hours, row.unit_name(), row.number()))
         return out
 
     def _chips_people(self, chips: ChipPicker) -> list[Who]:
@@ -2824,6 +2829,7 @@ class CaptureWindow(QWidget):
             "assignee_hours": t.assignee_hours, "start": start_of(t).isoformat(), "reminder": t.reminder, "recurrence": t.recurrence,
             "repeat_until": t.repeat_until, "urgent": t.urgent, "meeting": t.meeting, "plant_event": t.plant_event, "duration": t.duration,
             "calendar_days": t.calendar_days, "lead_per_day": t.lead_per_day, "assignee_per_day": t.assignee_per_day,
+            "lead_per_week": t.lead_per_week, "assignee_per_week": t.assignee_per_week,
         }
         values = self.update_values()
         out = {k: v for k, v in values.items() if k != "references" and v != current[k]}
