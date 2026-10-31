@@ -63,6 +63,18 @@ def plan(r: Record, email_file: Callable[[Record], str] = lambda r: "") -> Plan:
     return Plan("open", path)
 
 
+def start_own_file(path: Path, starter: Callable[[str], None] | None = None) -> str | None:
+    """Open wheels config (release 5.41): DocRepo's own settings file for the wheels, ``Config\\wheels.jsonc`` in the data
+    root, in the program Windows has for it. Only that file: returns what went wrong, in words, or None when it started."""
+    if path.name != "wheels.jsonc" or path.parent.name != "Config":
+        return f"{path.name} isn't the wheels' config."
+    try:
+        (starter or os.startfile)(str(path))  # noqa: S606 - Windows' "open", for this one file of DocRepo's own
+    except OSError as e:
+        return f"Windows has no program for it ({type(e).__name__})."
+    return None
+
+
 def start(path: str, starter: Callable[[str], None] | None = None, exists: Callable[[Path], bool] = Path.exists) -> str | None:
     """Start a file in its own program. Returns None when it started, else what went wrong, in words. Run it off the UI
     thread: on a LAN drive, finding the file can take seconds."""

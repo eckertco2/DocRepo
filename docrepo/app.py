@@ -18,6 +18,7 @@ from collections.abc import Callable
 from ctypes import wintypes
 from datetime import datetime, time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QAbstractNativeEventFilter, QLockFile, QObject, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QFont, QIcon, QPainter, QPixmap
@@ -28,12 +29,17 @@ from docrepo.config import Settings
 from docrepo.dates import long_date
 from docrepo.model import Model
 from docrepo.pages import write_pages
+from docrepo.panel_rules import OPEN_KEY
 from docrepo.safe_fs import SafeFS
 from docrepo.schedule import due_of, is_open
 from docrepo.ui.browse_window import BrowseWindow
 from docrepo.ui.capture_window import CaptureWindow
 from docrepo.ui.context import AppContext
 from docrepo.ui.style import apply_look
+from docrepo.ui.wheels import Wheels
+
+if TYPE_CHECKING:
+    from docrepo.ui.today_panel import TodayPanel
 
 log = logging.getLogger(__name__)
 
@@ -123,6 +129,9 @@ class CaptureApp(QObject):
         self.window = CaptureWindow(ctx)
         self.hwnd = int(self.window.winId())
         self.browse = BrowseWindow(ctx, self.window)
+        self.wheels = Wheels(self)  # the navigation wheels (release 5.41)
+        ctx.wheel_palette = self.wheels.palette_commands
+        self.panel: TodayPanel | None = None  # the Today side panel, made the first time it opens (release 5.43)
         menu = QMenu()
         menu.addAction("New capture", lambda: self.window.show_capture())
         menu.addAction("Open browse tool", lambda: self.show_browse())
@@ -131,12 +140,17 @@ class CaptureApp(QObject):
         self.pause_action.triggered.connect(self.toggle_pause)
         menu.addAction(self.pause_action)
         menu.addSeparator()
+        menu.addAction("Today side panel", lambda: self.today_panel_action("toggle"))
+        menu.addAction("Reload wheels", lambda: self.wheels.reload())
+        menu.addAction("Open wheels config", lambda: self.wheels.open_config())
+        menu.addSeparator()
         menu.addAction("Quit", self.quit)
         self._menu = menu
         self.tray.setContextMenu(menu)
         self.tray.activated.connect(self._tray_clicked)
         self.tray.messageClicked.connect(self._message_clicked)
         self.tray.show()
+        self.wheels.say_problem()  # a config file that can't be used, found as the wheels were made
         self.filter = _MessageFilter(self)
         qt.installNativeEventFilter(self.filter)
         self.registered: list[int] = []
@@ -151,8 +165,11 @@ class CaptureApp(QObject):
             hotkey.HOTKEY_IDS["today_hotkey"]: lambda: self.window.open_with_hotkey("today"),
             hotkey.HOTKEY_IDS["pin_hotkey"]: self.window.toggle_pin,
             hotkey.HOTKEY_IDS["outlook_hotkey"]: self.window.add_selected_email,
+            hotkey.HOTKEY_IDS["today_panel_hotkey"]: lambda: self.today_panel_action("hotkey"),
         }
         self.register_hotkey()
+        if db.get_state(ctx.conn, OPEN_KEY) == "1":  # open or closed is remembered across restarts (release 5.43)
+            QTimer.singleShot(0, lambda: self.today_panel_action("open"))
         self.timer = QTimer(self)
         self.timer.setInterval(60_000)
         self.timer.timeout.connect(self.tick)
@@ -178,6 +195,19 @@ class CaptureApp(QObject):
             else:
                 log.warning("hotkey %s (%s) is taken by another program", keys, setting)
                 taken.append(f"{keys} ({label.lower()})")
+        for hotkey_id, keys, label, action in self.wheels.hotkeys():  # the wheels' (release 5.41), from Config\wheels.jsonc
+            try:
+                ok = hotkey.register(self.hwnd, hotkey_id, keys)
+            except ValueError as e:
+                self.notify("Hotkey", f"{keys} isn't a hotkey DocRepo can use: {e} Choose another in Settings.")
+                continue
+            if ok:
+                self.registered.append(hotkey_id)
+                self.hotkey_actions[hotkey_id] = action
+                log.info("hotkey %s registered (%s)", keys, label)
+            else:
+                log.warning("hotkey %s (%s) is taken by another program", keys, label)
+                taken.append(f"{keys} ({label})")
         if taken:
             self.notify("Hotkey taken", f"Another program uses {', '.join(taken)}. Choose another in Settings, or for the capture window "
                         "with: python -m docrepo set-hotkey \"Ctrl+Alt+Space\". The tray icon still opens the capture window.")
@@ -202,12 +232,28 @@ class CaptureApp(QObject):
 
     def settings_changed(self, keys: list[str]) -> None:
         """Apply what the Settings view changed: a new hotkey works at once."""
-        if any(k in hotkey.HOTKEY_IDS for k in keys):
+        if any(k in hotkey.HOTKEY_IDS or k == "wheel_hotkeys" for k in keys):
             self.unregister_hotkeys()
             self.paused = False
             self.pause_action.setText("Pause hotkeys")
             self.register_hotkey()
             self.window.hotkey_label.setText(self.ctx.settings.hotkey)
+
+    def wheels_changed(self) -> None:
+        """The config file's wheels changed: their hotkeys follow, and Settings' boxes."""
+        if not self.paused:
+            self.unregister_hotkeys()
+            self.register_hotkey()
+        self.browse.settings_view.load()
+
+    def today_panel_action(self, do: str) -> None:
+        """The Today side panel (release 5.43): "toggle", "open" or "close" from a wheel, the tray or the palette; "hotkey"
+        from its own hotkey, which also brings the keyboard to it when it's open but not active."""
+        from docrepo.ui.today_panel import TodayPanel
+
+        if self.panel is None:
+            self.panel = TodayPanel(self.ctx, self.browse, self.wheels)
+        self.panel.action(do)
 
     def toggle_window(self) -> None:
         if self.window.pinned:  # the main hotkey brings a pinned capture back in full (mods log round 3, M0054)

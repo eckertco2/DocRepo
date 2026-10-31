@@ -47,6 +47,7 @@ class Row:
     pinned: bool = False
     missing: bool = False
     depth: int = 0
+    where: str = ""                 # file search: the task it's on, at the start of its second line (release 5.42)
 
     @property
     def choosable(self) -> bool:
@@ -249,6 +250,10 @@ class ResultDelegate(QStyledItemDelegate):
         return right
 
     def second_line(self, row: Row) -> str:
+        line = self._second_line(row)
+        return f"{row.where} · {line}" if row.where and line else row.where or line
+
+    def _second_line(self, row: Row) -> str:
         r = row.record
         if row.snippet:
             return ("in its text: " if r.kind == "file" else "") + row.snippet

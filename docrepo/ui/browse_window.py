@@ -104,7 +104,7 @@ from docrepo.views import (
     discarded_rows,
     documents_tree,
     due_cell,
-    due_this_week,
+    today_due_entries,
     key_date_cell,
     find_text,
     expand_level,
@@ -224,6 +224,7 @@ class BrowseWindow(QWidget):
         self._placed = False
         #: The open Task views (releases 5.34 and 5.35): one window per task.
         self.task_views: dict = {}
+        self.last_task_view: str | None = None
         self._build()
         # One letter per topic (mods log round 2, M0036): N note, T new task, U update, A agenda, E edit, D Today, and
         # M meeting notes (release 5.8).
@@ -605,6 +606,7 @@ class BrowseWindow(QWidget):
             self.render_all()
         for view in list(self.task_views.values()):  # the open Task views read the data again too
             view.reload()
+        self.ctx.today_changed()  # and the Today side panel (release 5.43)
 
     def _exists(self, key: tuple[str, str]) -> bool:
         kind, item = key
@@ -682,7 +684,8 @@ class BrowseWindow(QWidget):
                 Command("", "Show or hide the views", lambda: self.show_views_pane(not self.views_button.isChecked()), "Ctrl+B"),
                 Command("", "Read docs.db again", self.refresh, "F5"),
                 Command("", "Keys", self.show_keys, "F1"),
-                Command("", "Hide hints" if LOOK.hints else "Show hints", lambda: self._set_hints(not LOOK.hints))]
+                Command("", "Hide hints" if LOOK.hints else "Show hints", lambda: self._set_hints(not LOOK.hints)),
+                *self.ctx.wheel_palette()]  # the wheels' slots (release 5.41)
         return out
 
     def open_palette(self) -> None:
@@ -1349,14 +1352,10 @@ class BrowseWindow(QWidget):
         box.setChecked(mine)
         box.toggled.connect(self.set_today_mine)
         self._filter_widget(box)
-        tasks = due_this_week(m, today, self.ctx.settings.me, mine)
-        dues = key_dates_due(m, today, self.ctx.settings.me, mine)  # each key date a row of its own (release 5.31, decision 150)
         head = self.tree.add_row(None, None, ["<b>Due in the next 7 days</b>" + (" <span class=\"sub\">· yours</span>" if mine else "")],
                                  grey, selectable=False, span=True)
-        # Tasks and key dates together, soonest first; on the same day, a key date before a task.
-        entries = sorted([*((d.date if (d := due_of(t, today)) else date.max, 1, i, t) for i, t in enumerate(tasks)),
-                          *((d.day, 0, i, d) for i, d in enumerate(dues))], key=lambda e: e[:3])
-        for _, _, _, t in entries:
+        entries = today_due_entries(m, today, self.ctx.settings.me, mine)  # shared with the Today side panel (release 5.43)
+        for t in entries:
             if isinstance(t, key_dates.Due):
                 item = self.tree.add_row(head, ("task", t.task.id), self._key_date_cells(t),
                                          tip=f"A key date of {t.task.title}: {key_dates.label(t.key_date, today)}")
@@ -2671,6 +2670,7 @@ class BrowseWindow(QWidget):
     def capture_saved(self, result: SaveResult) -> None:
         """After the capture window saves: show what it did, as the mockup does."""
         self._model = None
+        self.ctx.today_changed()  # the Today side panel reads it again (release 5.43)
         if not self.isVisible():
             self.dirty = True
             return
@@ -2803,6 +2803,12 @@ class BrowseWindow(QWidget):
         if self._save_quick(lambda: add_quick_task(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, text, self._now())):
             self.today_note.setFocus()
 
+    def add_today_text(self, kind: str, text: str) -> bool:
+        """The Today side panel's box (release 5.43): a quick task, or a note, from text. True if it was added."""
+        if kind == "note":
+            return bool(self._do(lambda: edits.add_to_today(self.conn, self.ctx.data_root, self.ctx.fs, None, text, self._now()), self.sel))
+        return self._save_quick(lambda: add_quick_task(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, text, self._now())) is not None
+
     def make_today_task(self, item_id: int) -> None:
         """Make it a task, on a note on Today (mods log round 2, M0040): a quick task in the note's place."""
         self._save_quick(lambda: note_to_task(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, item_id, self._now()))
@@ -2908,10 +2914,17 @@ class BrowseWindow(QWidget):
         view = self.task_views.get(task_id)
         if view is None:
             view = self.task_views[task_id] = TaskView(self, task_id)
+        self.last_task_view = task_id
         view.show()
         view.raise_()
         view.activateWindow()
         view.focus_box()
+
+    def current_task_for_view(self) -> str | None:
+        """The Execution wheel's Task view (release 5.41): the task selected here, or else the last Task view opened."""
+        if self.sel and self.sel[0] == "task" and self.sel[1] in self.model().tasks:
+            return self.sel[1]
+        return self.last_task_view if self.last_task_view in self.model().tasks else None
 
     def task_view_closed(self, task_id: str) -> None:
         view = self.task_views.pop(task_id, None)

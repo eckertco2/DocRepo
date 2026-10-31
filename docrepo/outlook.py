@@ -37,7 +37,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from docrepo.save import Attachment, EmailItem
+from docrepo.layer0 import Part
+from docrepo.save import Attachment, EmailItem, FileRow
 
 if TYPE_CHECKING:
     from docrepo.model import Model
@@ -309,6 +310,8 @@ def selected_emails(scratch: Path | None = None) -> list[EmailItem]:
         raise OutlookError(f"Outlook didn't say which email is selected ({detail}). Click the email in Outlook and try again; "
                            "if it keeps failing, Settings → Troubleshooting report collects the details.", step, detail) from e
     if not mails:
+        mails = _conversation_mails(selection)  # a conversation's header selected, rather than an email
+    if not mails:
         raise OutlookError("No email is selected in Outlook." if not items else "The selected item in Outlook isn't an email.",
                            "reading Outlook's selection", f"{len(items)} selected, none an email")
     emails = []
@@ -327,6 +330,63 @@ def selected_emails(scratch: Path | None = None) -> list[EmailItem]:
     log.info("Outlook: read %d selected email(s)%s", len(emails),
              "; refused " + ", ".join(sorted({f for e in emails for f in e.refused})) if any(e.refused for e in emails) else "")
     return emails
+
+
+OL_INSPECTOR = 35  # olInspector: an email open in its own window
+OL_CONVERSATION_HEADERS = 1  # olConversationHeaders: what Selection.GetSelection is asked for
+
+
+def _conversation_mails(selection: object) -> list[object]:
+    """The newest email of each conversation whose header is selected (release 5.42). None when there's none, or an older
+    Outlook that can't say."""
+    mails = []
+    try:
+        headers = selection.GetSelection(OL_CONVERSATION_HEADERS)  # type: ignore[attr-defined]
+        for n in range(1, headers.Count + 1):
+            items = headers.Item(n).GetItems()
+            found = [items.Item(i) for i in range(1, items.Count + 1)]
+            found = [item for item in found if getattr(item, "Class", None) == OL_MAIL]
+            if found:
+                mails.append(max(found, key=lambda item: str(getattr(item, "ReceivedTime", ""))))
+    except Exception as e:  # noqa: BLE001 - the selection has no conversation headers to give
+        log.info("Outlook: no conversation headers: %s", type(e).__name__)
+    return mails
+
+
+def front_emails(scratch: Path | None = None) -> list[EmailItem]:
+    """The Capture wheel's "Email or file" (release 5.42): the email open in Outlook's window in front, or else what's
+    selected in its main window."""
+    outlook, _how = connect()
+    try:
+        window = outlook.ActiveWindow()  # type: ignore[attr-defined]
+        item = window.CurrentItem if getattr(window, "Class", None) == OL_INSPECTOR else None
+    except Exception as e:  # noqa: BLE001 - then read the main window's selection
+        record_problem("asking Outlook which window is in front", e)
+        item = None
+    if item is None or getattr(item, "Class", None) != OL_MAIL:
+        return selected_emails(scratch)
+    if scratch is not None:
+        try:
+            return [copy_whole(outlook, item, scratch)]
+        except Exception as e:  # noqa: BLE001 - the guard, or a damaged copy: read it field by field instead
+            record_problem("copying the open email whole", e)
+    return [email_from_item(item)]
+
+
+def selected_attachment_row() -> FileRow | None:
+    """The attachment selected in Outlook's reading pane, as a file row of its own (release 5.42): it arrives alone, as a
+    dropped file does. None when no attachment is selected, or the window in front isn't the main one."""
+    outlook, _how = connect()
+    window = outlook.ActiveWindow()  # type: ignore[attr-defined]
+    if getattr(window, "Class", None) == OL_INSPECTOR:
+        return None
+    selected = window.AttachmentSelection
+    if not selected.Count:
+        return None
+    a = selected.Item(1)
+    name = str(a.FileName)
+    attachment = Attachment(name, lambda path, a=a: a.SaveAsFile(str(path)), size=attachment_size(a))
+    return FileRow(name, None, part=Part("attachment", name, attachment=attachment, size=attachment.size))
 
 
 def open_msg_file(path: Path) -> EmailItem:

@@ -71,6 +71,36 @@ EDITOR_KEYS = (
 )
 
 
+#: A navigation wheel's keys (release 5.41), while it's open.
+WHEEL_KEYS = (
+    ("An arrow; two held", "Lights that direction; let go to run it. Two at right angles are a diagonal, on a wheel with diagonals"),
+    ("The numpad's 1 to 9", "The same directions, spatially; 5 cancels"),
+    ("Enter", "Runs what's lit, and confirms a slot that asks"),
+    ("Esc, or the hotkey again", "Cancels. So does a click somewhere else"),
+    ("Ctrl+K", "Closes the wheel and opens the command palette"),
+)
+
+
+#: The Today side panel (release 5.43), once its hotkey has brought the keyboard to it.
+PANEL_KEYS = (
+    ("Up, Down", "Moves between Today's items"),
+    ("Enter", "Shows the item's detail"),
+    ("Space", "Done, asking whether to update the task too"),
+    ("Delete", "Removes it from Today"),
+    ("Esc", "Back from the detail; then it contracts and the keyboard goes back to the window you were in"),
+)
+#: The wheels' task search and file search (release 5.42).
+SEARCH_KEYS = (
+    ("Enter (task search)", "Opens the task's page in the browse tool"),
+    ("Ctrl+Enter (task search)", "Opens its Task view"),
+    ("Enter (file search)", "Opens the file in its own program (an attachment is shown in File Explorer; a link is copied)"),
+    ("Ctrl+Enter (file search)", "Shows it in File Explorer"),
+    ("Ctrl+Shift+C (file search)", "Copies its path"),
+    ("Tab (file search)", "Goes to its task's page"),
+    ("Esc", "Clears what's typed; again, closes it"),
+)
+
+
 def key_map_html(main_hotkey: str = "Ctrl+Shift+Space") -> str:
     """The key map as HTML: the letters, then the other keys."""
     def cell(text: str) -> str:
@@ -80,6 +110,8 @@ def key_map_html(main_hotkey: str = "Ctrl+Shift+Space") -> str:
     other = "".join(f"<tr><td><b>{esc(main_hotkey if k == 'Ctrl+Shift+Space' else k)}</b></td><td>{esc(w)}</td></tr>" for k, w in OTHER_KEYS)
     editor = "".join(f"<tr><td><b>{esc(k)}</b></td><td>{esc(w)}</td></tr>" for k, w in EDITOR_KEYS)
     task_view = "".join(f"<tr><td><b>{esc(k)}</b></td><td>{esc(w)}</td></tr>" for k, w in TASK_VIEW_KEYS)
+    wheels = "".join(f"<tr><td><b>{esc(k)}</b></td><td>{esc(w)}</td></tr>" for k, w in (*WHEEL_KEYS, *SEARCH_KEYS))
+    panel = "".join(f"<tr><td><b>{esc(k)}</b></td><td>{esc(w)}</td></tr>" for k, w in PANEL_KEYS)
     return ("<p class='note'>One letter per topic. In the browse tool the letter alone acts on the selected task (not while you type in "
             "a box); in the capture window it's Alt and the letter; anywhere in Windows it's Ctrl+Shift and the letter, once you set "
             "it in Settings. While DocRepo runs, a global hotkey is taken from other programs, such as Outlook's Ctrl+Shift+N for a new note.</p>"
@@ -87,7 +119,9 @@ def key_map_html(main_hotkey: str = "Ctrl+Shift+Space") -> str:
             "<th align='left'>Global hotkey</th><th align='left'>Browse tool</th><th align='left'>Capture window</th></tr>"
             f"{rows}</table><p></p><table cellspacing='0' cellpadding='4'>{other}</table>"
             f"<p><b>In the content text</b>, as in OneNote</p><table cellspacing='0' cellpadding='4'>{editor}</table>"
-            f"<p><b>In the Task view</b> (O)</p><table cellspacing='0' cellpadding='4'>{task_view}</table>")
+            f"<p><b>In the Task view</b> (O)</p><table cellspacing='0' cellpadding='4'>{task_view}</table>"
+            f"<p><b>In a navigation wheel</b></p><table cellspacing='0' cellpadding='4'>{wheels}</table>"
+            f"<p><b>In the Today side panel</b></p><table cellspacing='0' cellpadding='4'>{panel}</table>")
 
 
 class KeyMapDialog(QDialog):

@@ -27,8 +27,8 @@ from typing import NoReturn
 
 log = logging.getLogger(__name__)
 
-#: The only kinds of file ``write_text`` produces.
-TEXT_SUFFIXES = frozenset({".md", ".json", ".txt", ".log"})
+#: The only kinds of file ``write_text`` produces. .jsonc is the wheels' config (JSON with comments); .csv their usage log.
+TEXT_SUFFIXES = frozenset({".md", ".json", ".jsonc", ".txt", ".log", ".csv"})
 
 _RESERVED_NAMES = frozenset(
     {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"}
@@ -141,6 +141,16 @@ class SafeFS:
             with contextlib.suppress(OSError):
                 os.unlink(tmp)
             raise
+        return target
+
+    def append_text(self, path: PathLike, text: str) -> Path:
+        """Add a line to one of DocRepo's own text files, such as a log, making it if it's new (release 5.41)."""
+        target = self.checked_path(path)
+        if target.suffix.lower() not in TEXT_SUFFIXES:
+            self._refuse(os.fspath(path), f"DocRepo doesn't write {target.suffix or 'extensionless'} files")
+        self.makedirs(target.parent)
+        with open(target, "a", encoding="utf-8", newline="") as f:
+            f.write(text)
         return target
 
     def write_picture(self, path: PathLike, data: bytes) -> Path:

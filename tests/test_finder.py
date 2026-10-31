@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from docrepo import db, finder, overview, search
+from docrepo import db, file_search, finder, overview, search
 from docrepo.model import Model
 from docrepo.safe_fs import SafeFS
 from docrepo.sample import load_sample, read_sample, write_sample_files
@@ -217,6 +217,27 @@ def test_the_first_tier_keeps_up_with_typing_on_the_large_project(large):
             times.append(time.perf_counter() - start)
     times.sort()
     assert times[int(len(times) * 0.95)] < 0.025, f"95th percentile {times[int(len(times) * 0.95)] * 1000:.1f} ms"
+
+
+def test_file_search_is_quick_on_the_large_project(large):
+    """File search (release 5.42, decision 214): every task's files once, built as it opens, and keeping up with typing."""
+    conn, root = large
+    m = Model(conn)
+    start = time.perf_counter()
+    recs = file_search.records(conn, m, root)
+    built = time.perf_counter() - start
+    assert built < 1.0, f"built in {built * 1000:.0f} ms"
+    assert sum(r.kind == "file" for r in recs) >= 500
+    assert len({(r.kind, r.id) for r in recs}) == len(recs)
+    times = []
+    for query in ("pump curve", "seal flush", "tie in list", "isometric", "vendor bid"):
+        for i in range(1, len(query) + 1):
+            words, neg = finder.terms(query[:i])
+            start = time.perf_counter()
+            finder.find(recs, words, neg)
+            times.append(time.perf_counter() - start)
+    times.sort()
+    assert times[int(len(times) * 0.95)] < 0.05, f"95th percentile {times[int(len(times) * 0.95)] * 1000:.1f} ms"
 
 
 def test_the_records_of_the_large_project_are_quick_to_build(large):

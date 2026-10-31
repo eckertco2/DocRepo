@@ -26,6 +26,10 @@ class AppContext:
     settings_changed: Callable[[list[str]], None] = lambda keys: None
     #: Starts a backup on the app's own thread. Without the app (in tests), the Settings view backs up there and then.
     start_backup: Callable[[], bool] | None = None
+    #: The wheels' slots, for the Ctrl+K palettes (release 5.41). Without the app (in tests), there are none.
+    wheel_palette: Callable[[], list] = lambda: []
+    #: Told when Today may have changed, so the Today side panel draws it again (release 5.43).
+    today_changed: Callable[[], None] = lambda: None
 
     def model(self) -> Model:
         return Model(self.conn)

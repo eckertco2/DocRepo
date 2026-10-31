@@ -34,7 +34,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo import backup, capacity, db, diagnose, hotkey, outlook, prompts, search, startup
+from docrepo import backup, capacity, db, diagnose, hotkey, outlook, prompts, search, startup, wheels_config
 from docrepo.config import Settings, data_root_problem, init_data_root, make_safe_fs, resolve_data_root, save_location
 from docrepo.dates import WEEKDAYS, long_date
 from docrepo.model import Model
@@ -42,6 +42,7 @@ from docrepo.pages import write_pages
 from docrepo.safe_fs import WriteRefused
 from docrepo.ui.context import AppContext
 from docrepo.ui.look import Help, set_hints
+from docrepo.ui.wheel_commands import SPECS, icon_names
 
 log = logging.getLogger(__name__)
 
@@ -84,6 +85,21 @@ def check_values(ctx: AppContext, values: dict[str, Any]) -> dict[str, Any]:
         if combo in taken:
             raise SettingsProblem(f"{keys} is already the hotkey for {taken[combo]}. Give each hotkey its own keys.")
         taken[combo] = label.lower()
+    if "wheel_hotkeys" in out:  # the wheels' hotkeys (release 5.41): off when empty too
+        wheels = {}
+        for wheel_id, keys in out["wheel_hotkeys"].items():
+            keys = (keys or "").strip()
+            if not keys:
+                continue
+            try:
+                combo = hotkey.parse_hotkey(keys)
+            except ValueError as e:
+                raise SettingsProblem(f"The hotkey for the {wheel_id} wheel, {keys}, can't be used: {e}") from e
+            if combo in taken:
+                raise SettingsProblem(f"{keys} is already the hotkey for {taken[combo]}. Give each hotkey its own keys.")
+            taken[combo] = f"the {wheel_id} wheel"
+            wheels[wheel_id] = keys
+        out["wheel_hotkeys"] = wheels
     backup = (out.get("backup_dir") or "").strip()
     if backup:
         path = Path(backup)
@@ -276,10 +292,18 @@ class SettingsView(QWidget):
         self.more_hotkeys: dict[str, QLineEdit] = {}
         for setting, label in hotkey.HOTKEYS[1:]:
             box = QLineEdit()
-            box.setPlaceholderText("Off")
+            box.setPlaceholderText("Off, such as Ctrl+Shift+4" if setting == "today_panel_hotkey" else "Off")
             box.setFixedWidth(200)
             self.more_hotkeys[setting] = box
             more_form.addRow(label, box)
+        # A box per wheel in Config\wheels.jsonc (release 5.41, decision 216), filled by load(), so a new wheel gets its box.
+        self.wheel_rows = QWidget()
+        self.wheel_form = QFormLayout(self.wheel_rows)
+        self.wheel_form.setContentsMargins(0, 0, 0, 0)
+        self.wheel_form.setHorizontalSpacing(12)
+        self.wheel_form.setVerticalSpacing(8)
+        self.wheel_hotkeys: dict[str, QLineEdit] = {}
+        more_form.addRow(self.wheel_rows)
         suggest = QPushButton("Use the suggested keys")
         suggest.setToolTip("Fills each empty box with Ctrl+Shift and its letter: " + ", ".join(hotkey.SUGGESTED.values()))
         suggest.clicked.connect(self.suggest_hotkeys)
@@ -457,6 +481,22 @@ class SettingsView(QWidget):
         self.message(f"Filled {len(filled)} hotkey{'s' if len(filled) != 1 else ''}. Save settings to use them." if filled
                      else "Every hotkey box already has keys.")
 
+    def _load_wheel_hotkeys(self) -> None:
+        """A box per wheel, from the config file: its hotkey, or none until you set one (decision 216)."""
+        rows = wheels_config.hotkey_rows(self.ctx.data_root, SPECS, icon_names())
+        if [w for w, _ in rows] != list(self.wheel_hotkeys):
+            while self.wheel_form.rowCount():
+                self.wheel_form.removeRow(0)
+            self.wheel_hotkeys = {}
+            for n, (wheel_id, name) in enumerate(rows, 1):
+                box = QLineEdit()
+                box.setPlaceholderText(f"Off, such as Ctrl+Shift+{n}" if n < 10 else "Off")
+                box.setFixedWidth(200)
+                self.wheel_hotkeys[wheel_id] = box
+                self.wheel_form.addRow(f"The {name} wheel", box)
+        for wheel_id, box in self.wheel_hotkeys.items():
+            box.setText(self.ctx.settings.wheel_hotkeys.get(wheel_id, ""))
+
     # ---- filling and reading the form ----
     def load(self) -> None:
         s, m = self.ctx.settings, Model(self.ctx.conn)
@@ -473,6 +513,7 @@ class SettingsView(QWidget):
         self.hotkey.setText(s.hotkey)
         for setting, box in self.more_hotkeys.items():
             box.setText(getattr(s, setting))
+        self._load_wheel_hotkeys()
         self.backup.setText(s.backup_dir or "")
         self.reminder.setTime(QTime.fromString(s.reminder_time, "HH:mm") if QTime.fromString(s.reminder_time, "HH:mm").isValid() else QTime(8, 0))
         for d, box in self.workdays.items():
@@ -498,6 +539,7 @@ class SettingsView(QWidget):
     def values(self) -> dict[str, Any]:
         return {
             "me": self.me.currentData(), "hotkey": self.hotkey.text(), **{k: box.text() for k, box in self.more_hotkeys.items()},
+            "wheel_hotkeys": {**self.ctx.settings.wheel_hotkeys, **{k: box.text() for k, box in self.wheel_hotkeys.items()}},
             "backup_dir": self.backup.text(),
             "reminder_time": self.reminder.time().toString("HH:mm"), "workdays": [d for d, box in self.workdays.items() if box.isChecked()],
             "capacity_horizon_years": self.horizon.value(), "event_words": [w for w in self.events.text().split(",")],
@@ -520,7 +562,7 @@ class SettingsView(QWidget):
         if not changed:
             self.message("Nothing changed.")
         else:
-            n = sum(1 for k in changed if k in hotkey.HOTKEY_IDS)
+            n = sum(1 for k in changed if k in hotkey.HOTKEY_IDS or k == "wheel_hotkeys")
             later = f" The hotkey{'s work' if n > 1 else ' works'} from now on." if n else ""
             later += " The look changes the next time DocRepo starts." if "look" in changed else ""
             self.message(f"Saved {len(changed)} setting{'s' if len(changed) > 1 else ''} to settings.json.{later}")

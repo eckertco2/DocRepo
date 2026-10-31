@@ -24,6 +24,9 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Filing**: linking an unfiled capture to a task later. The capture's folder doesn't move.
 - **Unfiled**: the browse tool's view of unfiled captures, newest first, and the matching section of `Contents.md`.
 - **Parse and populate**: the window's rule-based filling of fields from the content text, with no LLM. It's the only feature called "parse".
+- **Navigation wheel**, or wheel: a small ring of actions on a hotkey, picked with the arrow keys (release 5.41). Each is in `Config\wheels.jsonc`.
+- **Slot**: one place on a wheel, under a direction from N round to NW, naming a command. A **held** slot keeps the place for later and does nothing.
+- **Set aside**: a draft moved out of the capture window so that it's truly blank (release 5.41). It comes back when the blank capture is saved, or closed with nothing typed.
 
 ## 2. Tasks
 
@@ -57,6 +60,7 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Today**: the built-in agenda target that is the owner's to-do list for the day. Its items carry over until they're marked Done.
 - **Quick task**: a task made from one line and put on Today, from Today's box, the Today hotkey, or a new task with no task picked that goes on Today. It's an ordinary task.
 - **Quick tasks**: the built-in top-level task that quick tasks wait under until Edit task puts them under their real task. DocRepo makes it the first time it's needed.
+- **Today side panel**: the Today view as a floating strip beside the other windows (release 5.43). It has the same items as the Today view, not a list of its own.
 - **Discard**: hiding a task or capture made by mistake, with a reason. Nothing is deleted, and Bring back restores it. It's how DocRepo "deletes" anything.
 - **Scope**: which tasks a view or prompt draws on: this task, with ancestors, with subtasks, or family. Family is all ancestors plus all descendants.
 - **Event**: a dated happening, such as an audit or a turnaround, entered as a task's Deadline. "Event" means nothing else, except in "plant event".

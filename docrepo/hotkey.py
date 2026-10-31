@@ -30,8 +30,11 @@ HOTKEYS: tuple[tuple[str, str], ...] = (
     ("today_hotkey", "A quick task on Today"),
     ("pin_hotkey", "Pin the capture window, or bring it back"),
     ("outlook_hotkey", "Add the email selected in Outlook"),
+    ("today_panel_hotkey", "Open or close the Today side panel"),  # release 5.43: decision 216, no keys until set
 )
 HOTKEY_IDS = {setting: n for n, (setting, _label) in enumerate(HOTKEYS, 1)}
+#: The wheels' hotkeys (release 5.41, decisions 173 and 216): a wheel's ID is this plus its place in Config/wheels.jsonc.
+WHEEL_ID_BASE = 100
 #: The keys Settings offers for the others (mods log round 2, M0036): Ctrl+Shift and the topic's letter, as the owner chose.
 #: While DocRepo runs, a global hotkey is taken from every other program, such as Outlook's Ctrl+Shift+N for a new note.
 SUGGESTED = {"browse_hotkey": "Ctrl+Shift+B", "note_hotkey": "Ctrl+Shift+N", "new_task_hotkey": "Ctrl+Shift+T", "update_hotkey": "Ctrl+Shift+U",
@@ -76,3 +79,16 @@ def register(hwnd: int, hotkey_id: int, text: str) -> bool:
 def unregister(hwnd: int, hotkey_id: int) -> None:
     if os.name == "nt":
         ctypes.windll.user32.UnregisterHotKey(ctypes.c_void_p(hwnd), hotkey_id)
+
+
+def is_held(modifiers: int, vk: int) -> bool:
+    """Whether a hotkey's own keys are all down: read for a wheel's tap or hold, only while it's open, and for no other key."""
+    if os.name != "nt":
+        return False
+    state = ctypes.windll.user32.GetAsyncKeyState
+
+    def down(*keys: int) -> bool:
+        return any(state(k) & 0x8000 for k in keys)
+
+    return (down(vk) and (not modifiers & MOD_CONTROL or down(0x11)) and (not modifiers & MOD_SHIFT or down(0x10))
+            and (not modifiers & MOD_ALT or down(0x12)) and (not modifiers & MOD_WIN or down(0x5B, 0x5C)))

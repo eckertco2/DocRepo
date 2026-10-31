@@ -53,7 +53,7 @@ class _Menu(QMenu):
     def add_task(self, task_id: str, with_path: bool = False) -> QAction:
         m = self.picker.model
         t = m.task(task_id)
-        text = t.title + (" ↻" if t.recurrence else "") + (" (parked)" if t.state == "Parked" else "")
+        text = t.title + (" ↻" if t.recurrence else "") + (" (parked)" if t.state == "Parked" else "") + (" (closed)" if t.state == "Closed" else "")
         if with_path:
             text += f"   ·   {path_text(m, task_id) or 'Top-level task'}"
         kids = [k for k in m.children_of(task_id) if is_open(m.task(k))] if not with_path else []
@@ -103,6 +103,11 @@ class TaskPicker(_Menu):
         super().__init__(self, parent)
         self._model_fn = model_fn
         self.none_entry = none_entry
+        # Task search (release 5.42, decision 213): it also finds closed tasks, says what Enter does, and offers Search
+        # everything when nothing matches.
+        self.closed_too = False
+        self.hint = ""
+        self.no_match: Callable[[str], None] | None = None
         self.model = model_fn()
         self.search = QLineEdit()
         self.search.setPlaceholderText("Search titles and IDs")
@@ -133,12 +138,16 @@ class TaskPicker(_Menu):
         m = self.model
         query = self.search.text().strip().lower()
         if query:
-            matches = [t for t in m.tasks.values() if t.state != "Closed" and not t.discarded and (query in t.title.lower() or query in t.id.lower())]
+            matches = [t for t in m.tasks.values() if (self.closed_too or t.state != "Closed") and not t.discarded and (query in t.title.lower() or query in t.id.lower())]
             for t in matches[:SEARCH_LIMIT]:
                 self.add_task(t.id, with_path=True)
-            if not matches:
+            if not matches and self.no_match is not None:
+                self.addAction(f"No task matches. Search everything for “{self.search.text().strip()}”", self._search_everything)
+            elif not matches:
                 self.addAction("No open or parked task matches.").setEnabled(False)
             return
+        if self.hint:
+            self.addAction(self.hint).setEnabled(False)
         recent = recent_tasks(m)
         if recent:
             self.addSection("Recent")
@@ -157,6 +166,13 @@ class TaskPicker(_Menu):
         first = next((a for a in self.actions() if a is not self._search_action and a.data()), None)
         if first is not None:
             self.pick(first.data())
+        elif self.no_match is not None and self.search.text().strip():
+            self._search_everything()
+
+    def _search_everything(self) -> None:
+        text = self.search.text().strip()
+        self.close()
+        self.no_match(text)
 
     def type_into_search(self, text: str) -> None:
         self.search.setFocus()

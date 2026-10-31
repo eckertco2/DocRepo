@@ -86,6 +86,14 @@ def test_settings_file_has_the_documented_fields(tmp_path):
     ]
 
 
+def test_the_wheels_hotkeys_are_kept_once_set(tmp_path):
+    root = tmp_path / "DocRepoData"
+    fs = make_safe_fs(root, Settings())
+    Settings(wheel_hotkeys={"capture": "Ctrl+Shift+1"}, today_panel_hotkey="Ctrl+Shift+4").save(fs, root)
+    loaded = Settings.load(root)
+    assert loaded.wheel_hotkeys == {"capture": "Ctrl+Shift+1"} and loaded.today_panel_hotkey == "Ctrl+Shift+4"
+
+
 def test_settings_match_the_example_apart_from_the_backup_folder(tmp_path):
     from conftest import example_block
 

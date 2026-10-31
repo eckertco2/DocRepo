@@ -75,6 +75,36 @@ In the browse tool, open **Settings** and click **Make the Startup shortcut**. D
 - **Keys and the look:** **Ctrl+K**, in either window, lists every action and view and narrows as you type. Hold **Alt** to see each button's letter key, or **Ctrl** for the Ctrl shortcuts; each button's tooltip names its key too. **Show hints** (More, or Settings) brings back the help text; **Settings → Look** switches to the Classic look, release 5.9's colours and hints.
 - **Changes to DocRepo itself:** note them in the mods log, the last button at the top right of the capture window. **Edit** on an open entry puts it back in the box, to add to it rather than start another.
 
+## Navigation wheels and the Today side panel
+
+A wheel is a small ring of actions on a hotkey: press the hotkey, press an arrow, and it's done. There's nothing to install. **No wheel has a hotkey until you set one,** in **Settings → More hotkeys**: one box per wheel, and one for the Today side panel. `Ctrl+Shift+1` to `4` are the suggestions, and while DocRepo runs a hotkey is taken from every other program.
+
+| Wheel | ↑ | → | ↓ | ← |
+|---|---|---|---|---|
+| **Capture** | Blank capture | Email or file | Today item | Meeting |
+| **Browse** | Task tree | Task search | File search | Search everything |
+| **Execution** | Today | Today panel | Agent window (later) | Task view |
+
+- **Tap or hold:** tap the hotkey and the wheel stays until you pick; hold it and the wheel lasts while you hold. Either way, press an arrow and let go. Two arrows at right angles are a diagonal, on a wheel that has diagonals. A pick made within a third of a second never draws the wheel, so with practice it's just keys. The numpad works too, with 5 to cancel. **Esc**, the hotkey again or a click elsewhere cancels, and **Ctrl+K** goes to the command palette.
+- **Blank capture:** a draft you have going is set aside, and comes back when you save or close the blank one.
+- **Email or file:** the pinned window, with what's selected in the window you were in: files in File Explorer or on the desktop, or the email in classic Outlook. With anything else it opens empty, ready for a drop.
+- **Task search:** Enter opens the task's page, Ctrl+Enter its Task view. **File search:** every task's files and saved emails, searched as you type. Enter opens one, Ctrl+Enter shows it in File Explorer, Tab goes to its task.
+- **The Today side panel** is the Today view as a strip that floats on top of other windows. Rest the pointer on it and it widens; click an item to read its task. Clicks there don't take the keyboard from what you're typing in, unless you click in its box. Its hotkey brings the keyboard to it (Up, Down, Enter, Space for Done, Delete, Esc). Drag its top line to move it to either side of any monitor.
+
+**Changing the wheels.** **Open wheels config**, in the tray menu, opens `Config\wheels.jsonc` in your data root, with a comment on every command; VS Code checks it as you type. Save it and DocRepo reloads it at once. If something's wrong, a notification names the field and your last good wheels stay in use. You can add wheels, and each gets a hotkey box in Settings.
+
+| In the file | What it is |
+|---|---|
+| `wheels[].id`, `name` | The wheel's key in Settings, and the name at its centre |
+| `wheels[].slots.N` to `NW` | Its slots. Only N, E, S and W keeps it a cross; a diagonal makes it 8-way, and nothing moves |
+| `label`, `icon` | What the slot shows; an icon is one of DocRepo's own |
+| `command`, `args` | What it does: `capture.new`, `capture.pin`, `capture.selection`, `capture.meeting`, `today.new_item`, `today.panel`, `browse.view`, `search.tasks`, `search.files`, `search.everything` or `task_view.current`. It can name nothing else, so a wheel can't start a program |
+| `confirm`, `held` | `confirm`: it only lights up, and asks for Enter. `held`: keeps the place, greyed |
+| `timing` | In ms: `tap_ms` 200, `release_grace_ms` 80, `draw_ms` 333 (0 draws it at once), `idle_ms` 10000, `animation_ms` 80 |
+| `today_panel` | `rest_width`, `hover_width`, `detail_width`, `hover`, `hover_ms`, `inner_edge_hover_ms`, `contract_ms`, `hide_on_full_screen`, `exclude_from_capture` |
+
+`System\logs\wheel-usage.csv` records each pick (which slot, how, and how quickly, with no content), so you can reorganize them from real use.
+
 ## Import your project list from Excel
 
 Do this once, when you start using DocRepo: each row of your project list becomes a top-level task.
@@ -127,6 +157,11 @@ Quit any other running copy first, since both would want the hotkey. You can als
 - **Nothing seems to happen when DocRepo starts.** `pythonw` has no console, so errors go to the log: the end of `System\logs\docrepo.log` in your data root. Or start it once with `python.exe` instead of `pythonw.exe` to see the message.
 - **"DocRepo is already running".** Another copy has the data root open; its tray icon may be under the ^ arrow. If none is running, the lock file named in the message is left from a crash: delete it and start again.
 - **The hotkey does nothing.** Another program may use it; DocRepo says so when it starts. Choose another in Settings. **Pause hotkeys** in the tray menu turns them all off for a while.
+- **A wheel's hotkey clashes with a shortcut inside another program.** Windows gives a hotkey to whoever registered it first and can't tell DocRepo about a program's own shortcuts, so DocRepo only reports keys another program has registered. While DocRepo runs it takes its keys from every program; choose others if you miss one.
+- **A wheel doesn't come to the front, or its arrows go to the other program.** Security software or a program running as administrator can stop a window taking the keyboard. DocRepo uses only Windows' own hotkey call and no keyboard hook, so there's nothing for it to allow; if it happens, say which program was in front. The log (`System\logs\docrepo.log`) has a line for how long each wheel took to reach the front.
+- **Wheels config says something's wrong.** The notification names the field, such as `wheels[0].slots.NE.command`. Your last good wheels stay in use until it's fixed. **Reload wheels** in the tray menu says it again.
+- **Open wheels config shows the file in File Explorer instead.** Windows has no program for `.jsonc` files. Open it in VS Code or Notepad from there.
+- **The Today side panel has gone.** It hides while something full screen covers its monitor. If its monitor was unplugged, it's on the main one. Its hotkey or the tray menu opens and closes it.
 - **The data root is refused.** It must be a full path on the local drive, outside OneDrive and outside DocRepo's own folder.
 - **A backup couldn't be made.** The notification says why: often the backup folder's drive isn't there. The next backup tries again; **Back up now** tries at once.
 - **A page in the data root looks out of date.** `Contents.md` and each `Task.md` are rebuilt from the database. **Rebuild pages, calendar and search** in Settings (or the `rebuild` command) rebuilds them all.

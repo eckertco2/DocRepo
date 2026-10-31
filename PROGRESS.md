@@ -50,6 +50,9 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.33.1 | Add selected Outlook email copies the email whole, past Outlook's guard; a hotkey for it; and the category's colour on Outlook's list (decision 26 as the owner changed it) | Built 2026-10-28; on GitHub 2026-10-28. Next: testing on the corporate computer |
 | 5.34 | The Task view (the design workspace's task overview design, decisions 156 to 167; round 2's item 34, M0043, with M0025 and M0026): a window of its own for one task, built for finding its documents, with Overview, a search-as-you-type box with the best match chosen, the kinds, filters and typed filters, the outline of subtasks, the preview, and its keys | Built 2026-10-29, after the owner approved the mockup; hand-tested by the owner and on GitHub 2026-10-29. Next: testing on the corporate computer with `release-5-34-and-5-35-test.md` |
 | 5.35 | The Task view's Open (decision 158), its files' text as a second tier, pins and what was opened (decisions 159 and 160), schema version 13 | Built 2026-10-29, with 5.34; hand-tested by the owner and on GitHub 2026-10-29. Next: as 5.34 |
+| 5.41 | The navigation wheels: a hotkey per wheel, picked with the arrow keys or the numpad, their config file with its checking and reload, the registry of commands, Settings' boxes, the tray and the palette, the usage log, and the blank capture with a draft set aside (decisions 168 to 176, 178, 210 to 212, 215 and 216) | Built 2026-10-30 in the `round5-wheels` worktree, from the approved mock. Next: the owner's hand test, then `handoff/docrepo/release-5-41-to-5-43-test.md` |
+| 5.42 | The wheels' selection and searches: the Capture wheel's Email or file (File Explorer's and Outlook's selection, Outlook kept off the window's thread), task search and file search (decisions 213 and 214) | Built 2026-10-30, with 5.41 and 5.43. Next: as 5.41 |
+| 5.43 | The Today side panel: the Today view as a floating strip that widens on hover, with a task's page on a click (decisions 217 to 223) | Built 2026-10-30, with 5.41 and 5.42. Next: as 5.41 |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
 ## Decisions
@@ -484,6 +487,55 @@ The visual overhaul's O10, designed and mocked in the parent workspace (`docs/ui
   - **No button group:** the pane marks the open view itself, so that no row is marked while searching, and a click on the open view keeps it marked.
   - **The totals that left the sidebar** are beside their views' titles ("14 open", "7 active"), as `sidebar.md` said they'd be.
   - **The tooltip** shows only when a name is cut short. The headings' tooltips say Fold or Unfold.
+
+## Releases 5.41 to 5.43: the navigation wheels and the Today side panel (2026-10-30)
+
+Round 5's thread C: stage 20, items 68 and 69. The research is `../docs/ui-design/wheel-research.md`, the design and its decisions `../docs/ui-design/wheel-design.md`, and the mock `../docs/browse-tool/mockup/wheels.js`. **No schema change, and no new package.** The panel's place and open state are in `app_state`; everything else is in files.
+
+**Release 5.41: the wheels.**
+
+- **Three wheels, each with its own hotkey and none until set.** Capture (blank capture, current email or file, new Today item, a meeting), Browse (task tree, task search, file search, Search everything), Execution (the Today list, the Today side panel, the current task's Task view, and a held place for the agent window). Settings has a box per wheel in the config file.
+- **The resolver,** `docrepo/wheel.py`: no Qt and no clock of its own. One arrow is N, E, S or W; two at right angles a diagonal; opposites, or three or more, nothing. It commits when all the arrows are up, with 80 ms for a diagonal's second key, and holding one past that re-aims. `Session` adds tap or hold.
+- **The window,** `docrepo/ui/wheel_window.py`: frameless, always on top, made once and hidden. Its centre shows at once, the full wheel at 333 ms, so a pick made by then never shows it. The numpad works spatially, 5 cancels, and Enter confirms. It draws in light, dark or Windows' high contrast colours.
+- **The config,** `docrepo/wheels_config.py`: `Config\wheels.jsonc` with a comment on every command, and `wheels.schema.json` beside it for VS Code. Checked on load and each save: a problem names the field, and the last good wheels stay in use. It's reloaded at once.
+- **The registry,** `docrepo/ui/wheel_commands.py`: the only things a slot can name. It also feeds the Ctrl+K palettes.
+- **The usage log,** `System\logs\wheel-usage.csv`: time, wheel, direction, command, how it was picked, whether the wheel had drawn, and the ms to appear and to pick. No content.
+- **The blank capture,** `docrepo/ui/draft_aside.py`: a draft holding anything goes to `System\capture-draft-aside.json`, with the whole form and, while DocRepo runs, its files. Saving the blank capture, or closing it empty, brings it back; if it was pinned, in the pinned window.
+- **The tray:** Today side panel, Reload wheels and Open wheels config.
+
+**Release 5.42: selection and search.**
+
+- **Email or file,** `docrepo/selection.py` and `docrepo/ui/selection_capture.py`: the snapshot at the hotkey asks the other program nothing. File Explorer's selection is read on a thread of its own, by the front tab on Windows 11; the desktop's too. In Outlook: the email open in its own window, or else the main window's selection, a conversation's newest email from its header, or a selected attachment alone. It all arrives as a drop does. Anything else opens the pinned window empty, saying "Drag it here".
+- **Task search,** `docrepo/ui/task_search.py`: the task picker itself, opened from a tiny window of DocRepo's own so that it can take the keyboard. Enter opens the task's page, Ctrl+Enter its Task view. It finds closed tasks, marked as closed, and with no match it offers Search everything.
+- **File search,** `docrepo/file_search.py` and `docrepo/ui/file_search.py`: a box, the Task view's list and a preview over every task's files and saved emails, each file once. Names and descriptions on the keystroke, their text on a worker thread as typing pauses. Each row says its task.
+
+**Release 5.43: the Today side panel,** `docrepo/ui/today_panel.py` and `docrepo/panel_rules.py` (hovering, snapping and finding a monitor, without Qt).
+
+- **At rest,** 180 px: the count and one line per item, grouped as the Today view does. **Widened,** 320 px after 0.4 s at rest on it, or 0.7 s on an edge between two monitors: a second line, the due date, Done and Remove on the row under the pointer, the box for a quick task or note, and folded Due in the next 7 days and Done today. It contracts 1.5 s after the pointer leaves, and never while the pointer is on it, its box has the cursor, a menu is open, or a detail is showing. **Detail,** 420 px: the task's page to read, with Done, Remove, Edit and Open in the browse tool. A note shows its text, with Edit and Make it a task.
+- **One list, not two:** its rows are `today_groups`, `today_due_entries` (the Today view's Due rows, moved to `views.py`) and `done_on`; its buttons are the browse tool's own methods.
+- **Never taking the keyboard:** the window has WS_EX_NOACTIVATE, so a click on anything but its box leaves the keyboard where it is. A click in the box, or its hotkey, lifts that and takes the keyboard; Up, Down, Enter, Space, Delete and Esc work there, and it's put back when the panel loses the keyboard.
+- **Moving:** drag the top line, and it snaps to the nearer side of the monitor it's over. Move to next screen is on the top line's right-click. It finds its monitor again by name, serial number and size; if the monitor goes, it moves to the main one and returns with it.
+- **Full screen:** hidden while a full-screen window or a slide show covers its monitor. `exclude_from_capture` is off until the owner has checked with IT.
+
+**Tests.** `tests/test_wheel.py`, `test_wheels_config.py`, `test_wheel_window.py`, `test_selection_search.py` and `test_today_panel.py` (new): every timed sequence in the design, each config error's words, the draft aside and back, fakes for Outlook and the Shell, both searches, the panel's rules and its behaviour offscreen. The wheel, the panel and file search were drawn with Windows' own fonts and checked by eye.
+
+**Checked with real keys** (2026-10-30, a script on this computer, with real hotkeys, key presses and clicks through Windows, against a throwaway data root, with one monitor and File Explorer in front). The wheel reached the front in 9 to 31 ms. An arrow pressed 5, 15 or 30 ms after the hotkey landed in the wheel; pressed in the same instant, with DocRepo not yet handling messages, it went to the other program, which no hand should manage. Esc gave the keyboard back. A tap stayed open, a hold cancelled, a diagonal ran, a save was reloaded, both searches took the keyboard, and File Explorer's selection arrived. On the panel: hovering widened and contracted it, clicking a row left the keyboard in File Explorer, and its box and its hotkey took the keyboard and gave it back. **That check found a real fault, now fixed:** answering WM_MOUSEACTIVATE alone left no window in front.
+
+**Not checked yet.** Real hands, in the hand test. Two monitors, an inner edge, full screen, dark mode and high contrast, here or at work. Only the corporate computer can check Windows 11's tab rule with several tabs, what `Path` gives for odd items, Outlook's selection in each window, and Outlook during a dialog.
+
+## Decisions (releases 5.41 to 5.43)
+
+- Decisions 168 to 176, 178 and 210 to 223 are in `../docs/ui-design/wheel-design.md`, the owner's answers of 2026-10-30, and the mock approved as built. Decision 224 wasn't needed.
+- **Changed on the way, from the design:**
+  - **A command runs before the wheel hides,** so Windows lets its window come to the front; the wheel then hides, even if the command waits on a dialog.
+  - **Outlook is asked a simple question on its own thread first, and the email is then read on the window's thread** with the mail button's own code, rather than all of the read on a COM thread: an email's attachments keep Outlook's objects, which can't cross threads. A dialog open in Outlook holds up the question, not the windows. A dialog that opens during the read itself would still hold the window, as the mail button can today.
+  - **Which Outlook window** comes from `ActiveWindow()`, Outlook's topmost, rather than matching the stored window among `Explorers`: Outlook gives its windows no handle to match by.
+  - **The panel uses WS_EX_NOACTIVATE after all,** lifted while its box or hotkey has the keyboard. The design's "no WS_EX_NOACTIVATE" relied on answering WM_MOUSEACTIVATE with MA_NOACTIVATE, but real clicks showed that leaves no window in front at all, so typing goes nowhere.
+  - **The panel moves by its own drag,** not `startSystemMove`, since a system move would activate it.
+  - **More modules than the design's table:** `docrepo/ui/wheels.py` (the config, opening and running), `docrepo/ui/draft_aside.py`, `docrepo/ui/selection_capture.py` and `docrepo/panel_rules.py`, so the shared windows take small additions only.
+  - **`settings.json` holds the wheels' hotkeys only once they're set,** so the documented example in `tests/fixtures/examples.md` (thread B's) doesn't change.
+  - **The hard rules' text** gained three small things, all DocRepo's own files: `SafeFS` writes `.jsonc` and `.csv`, it can add a line to a text file (`append_text`), and `opener.start_own_file` opens one file, `Config\wheels.jsonc`.
+- **At merge:** bring in `main`, run all the tests, and take thread E's reminders into the panel's rows, in `TodayPanel.refresh`. Thread A's new capture form fields, if any, join `draft_aside.py`'s lists, or they won't come back with a draft set aside.
 
 ## Releases 5.34 and 5.35: the Task view (2026-10-29)
 

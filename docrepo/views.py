@@ -530,6 +530,16 @@ def today_groups(m: Model, today: date) -> list[tuple[str, list[AgendaItem]]]:
     return [g for g in (("Carried over", carried), ("Added today" if carried else "Today", fresh)) if g[1]]
 
 
+def today_due_entries(m: Model, today: date, me: str | None, mine_only: bool = False) -> list:
+    """Today's Due in the next 7 days, for the Today view and the Today side panel (release 5.43): tasks and key dates
+    together, soonest first; on the same day, a key date before a task."""
+    tasks = due_this_week(m, today, me, mine_only)
+    dues = key_dates_due(m, today, me, mine_only)  # each key date a row of its own (release 5.31, decision 150)
+    entries = sorted([*((d.date if (d := due_of(t, today)) else date.max, 1, i, t) for i, t in enumerate(tasks)),
+                      *((d.day, 0, i, d) for i, d in enumerate(dues))], key=lambda e: e[:3])
+    return [e[3] for e in entries]
+
+
 def find_text(m: Model, task_id: str) -> str:
     """What Find in this view looks through for a task (mods log round 2, M0026): its ID, title, description, current
     status, labels (inherited ones too) and people, in lower case."""

@@ -51,6 +51,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMenu,
+    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
@@ -93,6 +94,7 @@ from docrepo.schedule import is_open, start_of
 from docrepo.tasks import KeyDateRow
 from docrepo.ui import tokens
 from docrepo.ui.context import AppContext
+from docrepo.ui.draft_aside import ASIDE_NOTE, DraftAside
 from docrepo.ui.drop_target import DropOverlay, DropRead
 from docrepo.ui.icons import icon, icon_size
 from docrepo.ui.items_panel import AgendaPanel, ItemCards, OperatorHighlighter, RefPopup, _drop, task_colour, where_text
@@ -487,6 +489,7 @@ class CaptureWindow(QWidget):
         self._build()
         self.reset_draft()
         self.restore_draft()
+        self.aside = DraftAside(self)  # the Capture wheel's blank capture (release 5.41, decision 215)
         self._draft_timer.start()
         for keys, handler in (("Ctrl+Return", self.save), ("Ctrl+Enter", self.save), ("Alt+P", self.parse),
                               # One letter per topic (mods log round 2, M0036)
@@ -891,7 +894,8 @@ class CaptureWindow(QWidget):
                 Command("", "Hide hints" if LOOK.hints else "Show hints", lambda: self._set_hints(not LOOK.hints)),
                 Command("", "Keys", self.show_keys, "F1"),
                 Command("", "Mods log", lambda: self.show_mods(True)),
-                Command("", "Hide the window", self.hide, "Esc")]
+                Command("", "Hide the window", self.hide, "Esc"),
+                *self.ctx.wheel_palette()]  # the wheels' slots (release 5.41)
         return out
 
     def open_palette(self) -> None:
@@ -1177,6 +1181,38 @@ class CaptureWindow(QWidget):
         self.show_capture()
         self._after_pick = kind
         QTimer.singleShot(0, self._open_picker)  # once the window is placed, so the picker opens under the task button
+
+    def open_blank(self, mode: str | None = None) -> None:
+        """The Capture wheel's blank capture window (release 5.41, decision 215): a draft holding anything is set aside
+        first, so the window is truly blank. Only one is held: with one aside already, it asks about this one."""
+        if self.pages.currentIndex() != 0:
+            self.show_mods(False)
+        if self.aside.holds_draft():
+            if self.aside.data is None:
+                self.aside.set_aside()
+            else:
+                ask = QMessageBox(QMessageBox.Icon.Question, "DocRepo", "A draft is already set aside, and this one holds something too. "
+                                  "Only one can be set aside.", parent=self)
+                keep = ask.addButton("Keep working on this one", QMessageBox.ButtonRole.AcceptRole)
+                ask.addButton("Clear this one", QMessageBox.ButtonRole.DestructiveRole)
+                ask.setDefaultButton(keep)
+                ask.exec()
+                if ask.clickedButton() is keep:
+                    self.show_capture(mode=mode)
+                    return
+                self.clear()
+        else:
+            self.reset_draft()
+        self.show_capture(mode=mode)
+        if self.aside.data is not None:
+            self.draft_label.setText(ASIDE_NOTE)
+
+    def capture_selection(self, snap: object | None) -> None:
+        """The Capture wheel's "Email or file" (release 5.42): the pinned window, with what's selected in the window you
+        were in."""
+        from docrepo.ui.selection_capture import capture_selection  # here, as it builds on this module
+
+        capture_selection(self, snap)
 
     def _place(self) -> None:
         screen = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
@@ -1706,6 +1742,7 @@ class CaptureWindow(QWidget):
         """Esc on the pinned window: it hides, and the capture stays as a draft; the main hotkey opens it in full."""
         self._close_pin()
         self.keep_draft()
+        self.aside.window_hidden()
 
     def show_mods(self, on: bool) -> None:
         self.pages.setCurrentIndex(1 if on else 0)
@@ -1718,6 +1755,10 @@ class CaptureWindow(QWidget):
     def closeEvent(self, event) -> None:  # noqa: N802 - the X hides it; the draft is kept
         event.ignore()
         self.hide()
+
+    def hideEvent(self, event) -> None:  # noqa: N802 - a draft set aside comes back when the blank capture is closed empty
+        super().hideEvent(event)
+        self.aside.window_hidden()
 
     def keyPressEvent(self, event) -> None:  # noqa: N802
         if event.key() == Qt.Key.Key_Escape:
@@ -2792,6 +2833,7 @@ class CaptureWindow(QWidget):
         self.forget_draft()
         self._close_pin()
         self.hide()
+        self.aside.window_hidden()  # the pinned window may have been the one saved, with this one hidden already
         self.saved.emit(result)
 
 

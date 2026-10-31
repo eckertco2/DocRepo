@@ -567,3 +567,59 @@ The visual overhaul made DocRepo's windows calmer and easier to read without mov
 - **The sidebar** (release 5.22, the overhaul's O10; `docrepo/ui/nav_pane.py`): its own widget, not the tree. Views are 32 px rows, painted from the tokens: a 16 px icon 12 px in (muted; the accent for the open view), the name in Body, ending in "…" with the full name as its tooltip when it doesn't fit, and the count at the right in Segoe UI, muted. The open view has an inset, rounded backplate in the selection colour, a 3 × 16 px accent pill at its left and its name in semibold. Group headings are 26 px, in Caption, semibold and muted, with 12 px above them and a chevron after the name (down while open); the whole heading is the button. Discarded and Settings sit below a hairline at the foot, and the rows above scroll on their own. It starts 248 px wide. Tab stops once in the sidebar, at the open view; the arrows, Home and End move between rows and headings, Enter or Space opens or folds, and Left and Right fold and unfold a heading. The focus ring shows only when the keyboard moved there.
 - **The task page** (release 5.21, the overhaul's O9): laid out as section 8.4 says, with one tinted block (the current status), sections made with space and headings, facts as a grey label beside its value, and three sizes of text. Titles that are links (the path, subtasks, agenda items, raw text log entries) read as text, so blue is left for what reads as an action or a reference; red is only for a date that's passed.
 
+## 12. The navigation wheels and the Today side panel (releases 5.41 to 5.43)
+
+### 12.1 The wheels
+
+A hotkey shows a small wheel of actions, picked with the arrow keys. **A wheel** has an ID, a name and up to eight slots keyed N, NE, E, SE, S, SW, W and NW. With only N, E, S and W it draws as a cross and a two-arrow chord selects nothing; a diagonal slot makes it 8-way, and nothing moves. Each wheel has its own hotkey (`wheel_hotkeys` in `settings.json`, keyed by wheel ID), and none until set. Pause hotkeys covers them.
+
+**Keys.** One arrow lights a cardinal direction; two at right angles a diagonal; opposites, or three or more, nothing. A pick commits when all the arrows are up, with `release_grace_ms` for a diagonal's second key; holding one key past that re-aims at it. If the hotkey comes up within `tap_ms` with no arrow down, the wheel stays until a pick or a cancel; held longer, it lasts only while held, and letting go with an arrow still down leaves the pick to that arrow's coming up. The numpad's digits are spatial and commit on key-up, and 5 cancels. Enter runs what's lit and confirms a slot marked `confirm`. Esc, the hotkey again, losing the focus, or `idle_ms` with no key cancel. Ctrl+K closes it and opens the command palette. Every other key is swallowed. Nothing watches the keyboard: there's no hook, and the hotkey's own keys are read only while a wheel is open.
+
+**Drawing.** The window is made once and hidden. Its centre shows at once, in the middle of the monitor holding the window you were in (or the cursor's); the full wheel draws at `draw_ms`, so a pick made by then never shows it.
+
+**The config** is `Config\wheels.jsonc` in the data root: JSON with comments, written once and never again, with `wheels.schema.json` beside it. A slot has a `label`, an optional `icon` (one of DocRepo's own), and a `command` with `args`, an optional `confirm`, or `held`. A problem names the field and what's allowed, shows in a notification and the log, and the last good wheels stay in use. It's reloaded when the file changes.
+
+**Commands** are one table (`docrepo/ui/wheel_commands.py`), and a slot can name nothing else, so a config can't start a program and captured content can never become a command:
+
+| Command | Arguments | Does |
+|---|---|---|
+| `capture.new` | `mode` (note, new_task or update); `blank` (true) | The capture window |
+| `capture.pin` | | The pinned window |
+| `capture.selection` | | The pinned window with the current email or file |
+| `capture.meeting` | | Meeting notes |
+| `today.new_item` | | A quick task on Today |
+| `today.panel` | `do` (toggle, open or close) | The Today side panel |
+| `browse.view` | `view` (any of the browse tool's views) | The browse tool on that view |
+| `search.tasks` | `then` (page or task_view) | Task search |
+| `search.files` | | File search |
+| `search.everything` | | The browse tool, with the cursor in Search everything |
+| `task_view.current` | | The selected task's Task view, or the last one opened; with neither, task search |
+
+**The usage log** is `System\logs\wheel-usage.csv`: time, wheel, direction, command, how, whether it had drawn, and the ms to appear and to pick. It holds no content.
+
+### 12.2 A blank capture, with a draft set aside
+
+`capture.new` with something in the draft writes it to `System\capture-draft-aside.json`, with the rest of the form, and clears the window. Saving the blank capture, or hiding it with nothing typed, brings the draft back, and into the pinned window if it was there. Only one is held: with one aside already, it asks whether to keep working on this one or clear it. A restart keeps it, but not its files, as a restart doesn't keep the draft's own; the window says which to add again.
+
+### 12.3 The current email or file
+
+At the hotkey DocRepo notes the window you were in, asking the program nothing: its window, class, process and program, and File Explorer's front tab. Only if `capture.selection` is picked does it read, after checking that the window is still there in the same process. File Explorer's and the desktop's selected files arrive through `add_paths`; Outlook's email through the mail button's read: the one open in its own window, or else the main window's selection, or the newest email of a selected conversation. An attachment selected in the reading pane arrives alone, as a file. They arrive in the pinned window, joining any draft. No keystrokes are ever sent to the other program. If Outlook hasn't answered after 3 s, the pinned window says a dialog may be open, and the email joins when it does.
+
+### 12.4 Task search and file search
+
+**Task search** is the task picker on its own: Enter opens the task's page, Ctrl+Enter its Task view. It also finds closed tasks, marked as closed, and with no match it offers Search everything, carrying what was typed. **File search** is a window with a box, the Task view's list and a preview, across every task's files and saved emails, each file once. It uses the Task view's search (`docrepo/finder.py`), filters included. Enter opens through `docrepo/opener.py`'s allow-list, Ctrl+Enter shows it in File Explorer, Ctrl+Shift+C copies the path, and Tab goes to its task's page.
+
+### 12.5 The Today side panel
+
+The Today view as a floating strip, always on top, opened by its hotkey (`today_panel_hotkey`, none until set), the Execution wheel, the tray or Ctrl+K. There's no second list: its rows are the Today view's, and its buttons call the browse tool's methods.
+
+| State | Width | Shows |
+|---|---|---|
+| Resting | `rest_width`, 180 px | The count, and one line per item, grouped, with a tick box |
+| Widened | `hover_width`, 320 px | A second line, its due date, Done and Remove on the row under the pointer, the box for a quick task or note, and folded Due in the next 7 days and Done today, which remember whether they're open |
+| Detail | `detail_width`, 420 px | The task's page to read, with Done, Remove, Edit and Open in the browse tool; or a note's text, with Edit and Make it a task |
+
+It widens after the pointer rests on it for Windows' hover time (or `hover_ms`), or `inner_edge_hover_ms` on an edge between two monitors, and contracts `contract_ms` after the pointer leaves, never while the pointer is on it, its box has the cursor, a menu is open or a detail is showing. `hover` turns that off, and a click on its top line or its hotkey widens it. A click on anything but the box leaves the keyboard where it is. Its hotkey brings the keyboard to it: Up and Down move, Enter opens the detail, Space ticks Done, Delete removes, and Esc goes back, then contracts it and returns to the window you were in. Done asks "Update the task too?", as the Today view does.
+
+Dragging its top line moves it, and on release it snaps to the nearer side of the monitor it's over. Its side, height and monitor (name, serial number and size) are kept in `app_state`, with whether it's open. If the monitor goes, it moves to the main one and returns with it. While a full-screen window or a slide show covers its monitor it hides (`hide_on_full_screen`), and `exclude_from_capture` keeps it out of screen capture, which also hides it from screenshots and compliance recordings.
+

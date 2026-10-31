@@ -125,6 +125,10 @@ class Settings:
     pin_hotkey: str = ""
     #: Adds the email selected in Outlook to the capture, on the pinned window, from Outlook itself (release 5.33.1).
     outlook_hotkey: str = ""
+    #: The navigation wheels' hotkeys, keyed by wheel ID (release 5.41, decision 216): none until set, like the others.
+    wheel_hotkeys: dict[str, str] = field(default_factory=dict)
+    #: Opens or closes the Today side panel (release 5.43).
+    today_panel_hotkey: str = ""
     backup_dir: str | None = None
     backup_every_days: int = 7
     backup_keep: int = 8
@@ -167,7 +171,11 @@ class Settings:
         return cls(**{k: v for k, v in data.items() if k in known})
 
     def save(self, fs: SafeFS, data_root: Path) -> Path:
-        return fs.write_text(data_root / SETTINGS_FILE, json.dumps(asdict(self), indent=2) + "\n")
+        data = asdict(self)
+        for key in ("wheel_hotkeys", "today_panel_hotkey"):  # written once they're set, as wheels are optional (release 5.41)
+            if not data[key]:
+                del data[key]
+        return fs.write_text(data_root / SETTINGS_FILE, json.dumps(data, indent=2) + "\n")
 
 
 def make_safe_fs(data_root: Path, settings: Settings) -> SafeFS:
