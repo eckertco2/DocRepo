@@ -107,6 +107,11 @@ QToolButton#info { min-width: 16px; max-width: 16px; min-height: 16px; max-heigh
 QToolButton#info:checked, QToolButton#info:hover { background: #1d5e98; border-color: #1d5e98; color: #ffffff; }
 QToolButton#chip { border: 1px solid #b8c1cb; border-radius: 9px; background: #e9edf1; padding: 1px 6px; }
 QToolButton#chip[filled="true"] { background: #fcefcf; border-color: #875700; color: #875700; }
+QFrame#personChip { border: 1px solid #b8c1cb; border-radius: 9px; background: #e9edf1; }
+QFrame#personChip:focus { border: 1px solid #1d5e98; }
+QFrame#personChip QToolButton { border: none; background: transparent; padding: 0 2px; }
+QFrame#personChip QLabel#personShare { color: #1d5e98; font-weight: 600; }
+QFrame#involvementBox { border: 1px solid #b8c1cb; background: #ffffff; }
 QWidget#chips { border: 1px solid #b8c1cb; border-radius: 4px; background: #ffffff; }
 QWidget#chips QLineEdit { background: transparent; border: none; }
 QLineEdit[filled="true"], QPlainTextEdit[filled="true"], QComboBox[filled="true"] { background: #fcefcf; border: 1px solid #875700; }

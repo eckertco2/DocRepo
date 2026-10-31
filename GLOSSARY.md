@@ -61,6 +61,20 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Scope**: which tasks a view or prompt draws on: this task, with ancestors, with subtasks, or family. Family is all ancestors plus all descendants.
 - **Event**: a dated happening, such as an audit or a turnaround, entered as a task's Deadline. "Event" means nothing else, except in "plant event".
 
+- **Template**: a small tree of tasks without dates, kept apart from tasks, that Make tasks copies into the task tree (release 5.44). Its name is its top row's title.
+- **Template row**: one task in a template.
+- **Make tasks**: copying a template, or a row and what's under it, into the task tree. The copies are ordinary tasks.
+- **Starting notes**: what a template row copies onto each new task's notes page, once. The page is the task's own from then on.
+- **Linked field**: a field on a task that follows its template row until it's changed on the task.
+- **Detach**: ending all of a task's links to its template, keeping its values.
+- **Duration**: a task's length in days, kept when its dates move once it's typed (release 5.46).
+- **Runs through weekends**: a tick saying a task's days are every day, not only workdays.
+- **Hours a day**: a role's hours stated as a rate (**h a day**), whose total (**h in all**) is the rate times the task's days. The total is what the lists, the timeline and Capacity read.
+- **Involvement**: the percentage of a role's hours that land on one person on one task. 100% by default, and not a split.
+- **Preview** (of a template change): the window saying which tasks or trees a change to a template would reach, each with a tick, before it's made. An unticked task keeps its value and stops following.
+- **Changes** (of a template): the list on a template's page of what was changed and what it did to its tasks.
+- **Tree** (of a template): the tasks one Make tasks made, or one Save as template linked.
+
 ## 3. People and hours
 
 - **People list**: everyone DocRepo knows, each with an ID such as P001, aliases and available hours per week.

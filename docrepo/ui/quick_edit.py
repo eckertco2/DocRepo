@@ -34,19 +34,23 @@ from PySide6.QtWidgets import (
 )
 
 from docrepo import edits, planning
+from docrepo.dates import workday_numbers
 from docrepo.db import RECURRENCES
 from docrepo.model import Model
+from docrepo.schedule import placed
+from docrepo.tasks import RATES
 from docrepo.ui import tokens
 from docrepo.ui.context import AppContext
 from docrepo.ui.icons import icon, icon_size
 from docrepo.ui.look import LOOK, tip
 from docrepo.ui.style import style_sheet
 from docrepo.ui.task_picker import path_text
-from docrepo.ui.task_forms import KeyDatesEditor, key_date_rows
+from docrepo.ui.task_forms import BAD_DURATION, KeyDatesEditor, days_valid, key_date_rows, typed_days
 from docrepo.ui.widgets import DateField, FlowLayout, HoursField, set_filled
 
 #: Its width (decision 145: about the pinned capture window's size, a little larger for the chips and the during line).
 WIDTH = 352
+CHIP_TEXT = 102  # what a person's chip has room for beside the hours and their unit: a longer name is shortened
 #: The top line's height: dragging it, outside its buttons, moves the window.
 HEAD = 32
 NO_REPEAT = "Doesn't repeat"
@@ -87,6 +91,7 @@ class PeopleRow(QWidget):
         self.model = model
         self.role = role
         self.ids: list[str] = []
+        self.shares: dict[str, int] = {}  # Involvement, which Edit task sets (release 5.47)
         self._flow = FlowLayout(self, spacing=3)
         self.add_button = QToolButton(objectName="chip")
         self.add_button.setText("+")
@@ -107,7 +112,11 @@ class PeopleRow(QWidget):
                 item.widget().deleteLater()
         for i, p in enumerate(self.ids):
             b = QToolButton(objectName="chip")
-            b.setText(f"{self.model.person_name(p)}  ×")
+            b.setStyleSheet("QToolButton#chip { padding: 1px 2px; }")
+            b.ensurePolished()
+            name, tail = self.model.person_name(p), f" {self.shares[p]}% ×" if p in self.shares else "  ×"
+            metrics = b.fontMetrics()
+            b.setText(metrics.elidedText(name, Qt.TextElideMode.ElideRight, CHIP_TEXT - metrics.horizontalAdvance(tail)) + tail)
             b.setProperty("filled", filled)
             b.setToolTip(f"Take {self.model.person_name(p)} off")
             b.clicked.connect(lambda _=False, p=p: self._removed(p))
@@ -223,11 +232,31 @@ class QuickEdit(QWidget):
         dates.setColumnStretch(0, 1)
         dates.setColumnStretch(1, 1)
         lay.addLayout(dates)
+        # Its Duration (release 5.46, decision 191): with one typed, a date moves the block.
+        self.workdays = workday_numbers(ctx.settings.workdays)
+        self.length_row = QWidget()
+        days = QHBoxLayout(self.length_row)
+        days.setContentsMargins(0, 0, 0, 0)
+        days.setSpacing(6)
+        days.addWidget(QLabel("Duration", objectName="qeField"))
+        self.duration = QLineEdit()
+        self.duration.setFixedWidth(48)
+        self.duration.setAccessibleName("Duration in days")
+        self.duration.textEdited.connect(lambda _: self._field_edited("duration"))
+        days.addWidget(self.duration)
+        days.addWidget(QLabel("days", objectName="qeField"))
+        days.addSpacing(8)
+        self.calendar = QCheckBox("Runs through weekends")
+        self.calendar.setToolTip("Count every day, for its Due and where its hours land, not only workdays")
+        self.calendar.clicked.connect(lambda _: self._field_edited("calendar_days"))
+        days.addWidget(self.calendar)
+        days.addStretch()
         self.desc = QLineEdit()
         self.desc.setPlaceholderText("Deadline description, such as Boiler restart")
         self.desc.setAccessibleName("Deadline description")
         self.desc.textEdited.connect(lambda _: self._field_edited("deadline_desc"))
         lay.addWidget(self.desc)
+        lay.addWidget(self.length_row)
         self.during = QLabel(objectName="hint")
         self.during.setWordWrap(True)
         lay.addWidget(self.during)
@@ -243,7 +272,8 @@ class QuickEdit(QWidget):
         who.setVerticalSpacing(4)
         self.rows: dict[str, PeopleRow] = {}
         self.hours: dict[str, HoursField] = {}
-        for r, (key, hkey, label, unit) in enumerate((("leads", "lead_hours", "Lead", "h"), ("assignees", "assignee_hours", "Assignees", "h each"))):
+        self.units: dict[str, QComboBox] = {}
+        for r, (key, hkey, label) in enumerate((("leads", "lead_hours", "Lead"), ("assignees", "assignee_hours", "Assignees"))):
             who.addWidget(QLabel(label, objectName="qeField"), r, 0, Qt.AlignmentFlag.AlignTop)
             people_row = PeopleRow(self.model, key)
             people_row.changed.connect(lambda key=key: self._field_edited(key))
@@ -254,8 +284,13 @@ class QuickEdit(QWidget):
             h.setAccessibleName(planning.NAMES[hkey])
             h.textEdited.connect(lambda _, hkey=hkey: self._field_edited(hkey))
             who.addWidget(h, r, 2, Qt.AlignmentFlag.AlignTop)
-            who.addWidget(QLabel(unit, objectName="qeField"), r, 3, Qt.AlignmentFlag.AlignTop)
-            self.rows[key], self.hours[hkey] = people_row, h
+            unit = QComboBox()
+            unit.addItems(["h in all", "h a day"])
+            unit.setFixedWidth(84)
+            unit.setAccessibleName(f"{planning.NAMES[hkey]} unit")
+            unit.activated.connect(lambda _, hkey=hkey: self._unit_changed(hkey))
+            who.addWidget(unit, r, 3, Qt.AlignmentFlag.AlignTop)
+            self.rows[key], self.hours[hkey], self.units[hkey] = people_row, h, unit
         who.setColumnStretch(1, 1)
         lay.addLayout(who)
         self.total = QLabel(objectName="hint")
@@ -313,18 +348,30 @@ class QuickEdit(QWidget):
         self.repeat.setCurrentIndex(self.repeat.findText(v.recurrence) if v.recurrence else 0)
         set_filled(self.repeat, "recurrence" in filled)
         for key, people_row in self.rows.items():
+            role = "lead" if key == "leads" else "assignee"
+            people_row.shares = {p: share for (r, p), share in v.involvement.items() if r == role}
             people_row.set_ids(getattr(v, key), key in filled)
+        routine = bool(v.recurrence)
         for key, h in self.hours.items():
+            rate = getattr(v, RATES[key])
             if key != skip:
-                h.set_value(getattr(v, key))
+                h.set_value(rate if rate is not None else getattr(v, key))
+            self.units[key].setCurrentIndex(0 if rate is None else 1)
+            self.units[key].setVisible(not routine)  # a routine task's hours are for each time
             set_filled(h, key in filled)
+        self.length_row.setVisible(not routine)
+        if skip != "duration" and typed_days(self.duration) != v.duration:
+            self.duration.setText("" if v.duration is None else str(v.duration))
+        self.calendar.setChecked(v.calendar_days)
+        grey = None if v.duration is not None else planning.length(v, self.workdays)
+        self.duration.setPlaceholderText(str(grey) if grey else "")
         self.plant_event.setChecked(v.plant_event)
         set_filled(self.plant_event, "plant_event" in filled)
         self._draw_chips()
         during = planning.during(self.model, v, self.ctx.now().date(), self.task_id)
         self.during.setText(f"⚑ {during}" if during else "")
         self.during.setVisible(bool(during))
-        self.total.setText(planning.total_text(v, self.task))
+        self.total.setText(planning.total_text(v, self.task, self.workdays))
         self._setting = False
         self._fit()
 
@@ -369,6 +416,14 @@ class QuickEdit(QWidget):
             return
         if key in self.dates:
             setattr(self.base, key, self.dates[key].value() or "")
+            if key != "deadline" and self.dates[key].is_valid():
+                self._place(key)
+        elif key == "duration":
+            self.base.duration = typed_days(self.duration)  # one that isn't a number: Save says so
+            self._place("duration")
+        elif key == "calendar_days":
+            self.base.calendar_days = self.calendar.isChecked()
+            self._place("duration")
         elif key == "deadline_desc":
             self.base.deadline_desc = self.desc.text()
         elif key == "recurrence":
@@ -380,11 +435,32 @@ class QuickEdit(QWidget):
             if not h.is_valid():
                 self.off.add(key)
                 return  # kept as typed; Save says what's wrong
-            setattr(self.base, key, h.value())
+            setattr(self.base, RATES[key] if self.units[key].currentIndex() == 1 and h.value() is not None else key, h.value())
         elif key == "plant_event":
             self.base.plant_event = self.plant_event.isChecked()
         self.off.add(key)
         self._changed_by_user(key if key not in self.rows else None)
+
+    def _place(self, edited: str) -> None:
+        """With a Duration, a date moves the block, and the Duration moves Due, or Start if there's no Start (decision 191)."""
+        b = self.base
+        start, due = placed(b.start or None, b.due or None, b.duration, edited, self.workdays, b.calendar_days)
+        b.start, b.due = start or "", due or ""
+
+    def _unit_changed(self, key: str) -> None:
+        """h in all or h a day: switching keeps the total, when the task has a length; without one, it keeps the number,
+        read as the new unit (decision 189)."""
+        if self._setting:
+            return
+        rate_key, per_day = RATES[key], self.units[key].currentIndex() == 1
+        v, days = self.values(), planning.length(self.values(), self.workdays)
+        number = getattr(v, rate_key) if getattr(v, rate_key) is not None else getattr(v, key)
+        if number is not None and days:
+            number = round(number / days, 2) if per_day else round(number * days, 2)
+        setattr(self.base, rate_key, number if per_day else None)
+        setattr(self.base, key, None if per_day else number)
+        self.off.add(key)
+        self._changed_by_user(None)
 
     def _key_dates_edited(self) -> None:
         """A key date added, changed, moved or taken off: kept as it stands; Save says what's wrong with one."""
@@ -408,6 +484,8 @@ class QuickEdit(QWidget):
         for key, h in self.hours.items():
             if not h.is_valid():
                 return self._say(f"{planning.NAMES[key]} isn't a number of hours.")
+        if not days_valid(self.duration):
+            return self._say(BAD_DURATION)
         v = self.values()
         problem = planning.problem(v) or self.key_dates.problem()
         if problem:

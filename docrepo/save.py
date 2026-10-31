@@ -151,6 +151,10 @@ class NewTaskFields:
     plant_event: bool = False  # release 5.9
     references: dict[str, str] = field(default_factory=dict)  # reference field values by name (release 5.9)
     key_dates: list[tasks.KeyDateRow] = field(default_factory=list)  # the new task's key dates (release 5.31)
+    duration: int | None = None  # release 5.46: its length, whether it runs through weekends, and each role's rate
+    calendar_days: bool = False
+    lead_per_day: float | None = None
+    assignee_per_day: float | None = None
 
 
 @dataclass
@@ -521,7 +525,8 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
                 deadline_desc=nt.deadline_desc, reminder=nt.reminder, recurrence=nt.recurrence, repeat_until=nt.repeat_until,
                 urgent=nt.urgent, meeting=nt.meeting, leads=leads, assignees=assignees,
                 lead_hours=nt.lead_hours, assignee_hours=nt.assignee_hours, labels=nt.labels, inherit_labels=nt.inherit_labels,
-                plant_event=nt.plant_event or bool(own and own.plant_event), references=nt.references,
+                plant_event=nt.plant_event or bool(own and own.plant_event), references=nt.references, duration=nt.duration,
+                calendar_days=nt.calendar_days, lead_per_day=nt.lead_per_day, assignee_per_day=nt.assignee_per_day,
             )
             if nt.key_dates:  # its key dates (release 5.31), logged as the capture's
                 tasks.add_key_dates(conn, created, nt.key_dates, at=at, via=via)

@@ -504,15 +504,20 @@ class ChipPicker(QWidget):
             if item and item.widget():
                 item.widget().deleteLater()
         for i, chip in enumerate(self._chips):
-            button = QToolButton()
-            button.setText(f"{chip.label}{'  new' if chip.new else ''}  ×")
-            button.setObjectName("chip")
-            button.setProperty("filled", chip.filled)
-            button.setToolTip(f"Remove {chip.label}")
-            button.clicked.connect(lambda _=False, i=i: self.remove(i))
+            button = self._chip_widget(i, chip)
             self._flow.insert_widget(i, button)  # before the search box, which stays last
             button.show()
         self.box.updateGeometry()
+
+    def _chip_widget(self, i: int, chip: Chip) -> QWidget:
+        """A chip: a click takes it off."""
+        button = QToolButton()
+        button.setText(f"{chip.label}{'  new' if chip.new else ''}  ×")
+        button.setObjectName("chip")
+        button.setProperty("filled", chip.filled)
+        button.setToolTip(f"Remove {chip.label}")
+        button.clicked.connect(lambda _=False, i=i: self.remove(i))
+        return button
 
     # ---- suggestions ----
     def _suggest(self) -> None:

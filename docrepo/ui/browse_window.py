@@ -55,7 +55,7 @@ from docrepo import activity, bulk, capacity, db, edits, items, key_dates, notes
 from docrepo.lists import key_dates_due
 from docrepo.agenda import AgendaError
 from docrepo.captures import capture_folder, capture_md_path
-from docrepo.dates import long_date, short, to_date
+from docrepo.dates import long_date, short, to_date, workday_numbers
 from docrepo.detail import SCOPE_NAMES, PageState, Pages, chip, esc, state_chip
 from docrepo.links import is_link
 from docrepo.model import TODAY, Model, is_person
@@ -75,6 +75,7 @@ from docrepo.ui.look import LOOK, Help, KeyTips, set_hints, tip, with_key
 from docrepo.ui.nav_pane import WIDTH as NAV_WIDTH, NavPane
 from docrepo.ui.page_view import PageView
 from docrepo.ui.task_pane import TaskPane
+from docrepo.ui.templates_view import TemplatesPane
 from docrepo.ui.priorities_view import PrioritiesView
 from docrepo.ui.palette import Command, CommandPalette
 from docrepo.ui.style import FORMAT_BAR_STYLE, NOTES_STYLE, page_css, style_sheet
@@ -158,7 +159,7 @@ QLabel#count { color: #5a6571; }
 #: The views with Select mode, where tasks can be ticked for Edit selected.
 SELECT_VIEWS = ("tasks", *LIST_IDS)
 #: The views but the task tree whose rows nest, so they have Collapse a level and Expand a level (release 5.24).
-NESTING_VIEWS = ("today", *LIST_IDS, "agenda", "activity", "docs", "labels")
+NESTING_VIEWS = ("today", *LIST_IDS, "agenda", "activity", "docs", "labels", "templates")
 #: Activity's line chips, by what happened (release 5.23): the pages' chip classes.
 ACT_CHIPS = {"task": "multi", "update": "st-ip", "note": "lbl", "email": "lbl", "change": "routine", "doc": "st-pk", "agenda": "new"}
 UNFILED_NOTE = ("Unfiled captures: saved without a task. Their folders are already in Captures. Filing one links it in docs.db and sets "
@@ -224,6 +225,8 @@ class BrowseWindow(QWidget):
         self._placed = False
         #: The open Task views (releases 5.34 and 5.35): one window per task.
         self.task_views: dict = {}
+        #: The Templates view (release 5.44): its list, pages and forms.
+        self.templates = TemplatesPane(self)
         self._build()
         # One letter per topic (mods log round 2, M0036): N note, T new task, U update, A agenda, E edit, D Today, and
         # M meeting notes (release 5.8).
@@ -611,6 +614,8 @@ class BrowseWindow(QWidget):
         m = self.model()
         if kind == "label":
             return any(lb.name == item for lb in m.labels)
+        if kind == "tplrow":
+            return self.templates.exists(item)
         return item in {"task": m.tasks, "capture": m.captures, "doc": m.documents, "person": m.people}.get(kind, {})
 
     def render_all(self) -> None:
@@ -674,6 +679,7 @@ class BrowseWindow(QWidget):
                 out.append(Command("Task", "Meeting notes", lambda: self.open_capture(task=tid, meeting=True), "M"))
             out += [Command("Task", "Open its Task view", lambda: self.open_task_view(tid), "O"),
                     Command("Task", "Copy prompt", lambda: self.copy_prompt(tid)),
+                    Command("Task", "Save as template", lambda: self.templates.save_as(tid)),
                     Command("Task", "Open folder", lambda: self.reveal(self.ctx.data_root / "Tasks" / tid))]
         out += [Command("View", v.label, lambda v=v.id: self.set_view(v)) for v in VIEWS]
         out += [Command("", "New capture", lambda: self.open_capture(), self.ctx.settings.hotkey),
@@ -779,7 +785,7 @@ class BrowseWindow(QWidget):
         self._clear_filters()
         self.filters.setVisible(True)
         builder = {"today": self._today_view, "tasks": self._tasks_view, "unfiled": self._unfiled_view, "agenda": self._agenda_view,
-                   "people": self._people_view,
+                   "people": self._people_view, "templates": self.templates.render_list,
                    "labels": self._labels_view, "docs": self._docs_view, "search": self._search_view,
                    "discarded": self._discarded_view, "activity": self._activity_view}.get(self.view)
         self.tree.begin()
@@ -811,7 +817,7 @@ class BrowseWindow(QWidget):
             return
         if self.view in ("timeline", "capacity", "settings"):
             self.say("The timeline and capacity have their own filters. Find in this view works on Today, the task tree, the lists, "
-                     "Unfiled, Agendas, Activity, Priorities, People, Labels, Documents and Discarded. Ctrl+Shift+F searches everything.")
+                     "Unfiled, Agendas, Activity, Priorities, People, Labels, Templates, Documents and Discarded. Ctrl+Shift+F searches everything.")
             return
         self.find_bar.show()
         self.find_box.setFocus()
@@ -1412,7 +1418,7 @@ class BrowseWindow(QWidget):
         """Tasks and captures discarded as made by mistake (mods log round 1, M0021), the latest first."""
         self._set_head("Discarded", VIEW_IDS["discarded"].note)
         self.tree.set_columns(["Item", "Why", "Discarded"], [0, 180, 80])
-        rows = discarded_rows(self.model(), self.today())
+        rows = discarded_rows(self.model(), self.today(), self.templates.discarded())
         for r in rows:
             self.tree.add_row(None, (r.kind, r.id), [f'{esc(r.title)}<br><span class="sub">{esc(r.sub)}</span>', esc(r.reason),
                                                       f'<p align="right">{esc(r.when)}</p>'])
@@ -1742,9 +1748,9 @@ class BrowseWindow(QWidget):
 
     def set_timeline_dates(self, task_id: str, start: str | None, due: str | None, said: str) -> None:
         """A Plan mode drop on the timeline, or Ctrl+Z (release 5.30, decision 136): the dates saved and logged, as Edit
-        task's are."""
+        task's are. A task with a Duration keeps its days when it's moved, and takes the new length when it's stretched."""
         out = self._do(lambda: edits.change_task(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, task_id, self._now(),
-                                                 start=start, due=due), ("task", task_id))
+                                                 start=start, due=due, dragged=True), ("task", task_id))
         if isinstance(out, edits.Outcome) and not out.problems:
             self.say(said if out.message != "Nothing changed." else out.message)
 
@@ -1931,6 +1937,9 @@ class BrowseWindow(QWidget):
         elif kind == "person":
             self._person_actions(item)
             html = pages.person_page(item)
+        elif kind == "tplrow":
+            self.templates.actions(item)
+            html = self.templates.page(item)
         else:
             self._label_actions(item)
             html = pages.label_page(item)
@@ -2028,8 +2037,11 @@ class BrowseWindow(QWidget):
         prompt = more.addMenu(icon("copy"), "Copy prompt")
         for i, st in enumerate(self._summary_types):
             prompt.addAction(st.name, lambda n=i: (self.summary_type.setCurrentIndex(n), self.copy_prompt(task_id)))
+        more.addAction(icon("templates"), "Save as template…", lambda: self.templates.save_as(task_id))
+        if task_id in m.origins:
+            more.addAction("Detach from template…", lambda: self.templates.detach(task_id))
         more.addAction(icon("folder"), "Open folder", lambda: self.reveal(self.ctx.data_root / "Tasks" / task_id))
-        b = self._action("More" if LOOK.classic else "", tip="More: New subtask, Open agenda, Copy, Copy prompt and Open folder", menu=more,
+        b = self._action("More" if LOOK.classic else "", tip="More: New subtask, Open agenda, Copy, Copy prompt, Save as template and Open folder", menu=more,
                          icon_name="more")
         b.setAccessibleName("More")
         b.setProperty("flowEnd", True)  # at the row's end
@@ -2106,6 +2118,8 @@ class BrowseWindow(QWidget):
             self.select("person", rest, update_list=True)
         elif kind == "label":
             self.select("label", unquote(rest), update_list=True)
+        elif kind == "tplrow":  # release 5.44
+            self.templates.open_row(rest)
         elif kind == "agenda":
             self.show_agenda(rest)
         elif kind == "show":
@@ -2429,6 +2443,8 @@ class BrowseWindow(QWidget):
             self.edit_person(ident)
         elif kind == "label":
             self.edit_label(ident)
+        elif kind == "tplrow":
+            self.templates.edit_row(int(ident))
         else:
             self.reveal_key(key)
 
@@ -2565,6 +2581,8 @@ class BrowseWindow(QWidget):
             new = ("person", me) if me in m.people else (("person", next(iter(m.people))) if m.people else None)
         elif v == "labels":
             new = ("label", m.labels[0].name) if m.labels else None
+        elif v == "templates":
+            new = self.templates.first()
         elif v == "discarded":
             first = next(iter(discarded_rows(m, self.today())), None)
             new = (first.kind, first.id) if first else None
@@ -2961,7 +2979,8 @@ class BrowseWindow(QWidget):
         checklist = ChecklistSummary(notes, foldable=False) if self.task_pane.task_id == task_id else None
         dialog = TaskEditDialog(self, self.model(), task_id, self._label_options, self._people_options,
                                 lambda anchor, picked: self._pick_task(anchor, picked, None),
-                                reference_fields=self.ctx.settings.reference_fields, today=self.today(), checklist=checklist)
+                                reference_fields=self.ctx.settings.reference_fields, today=self.today(), checklist=checklist,
+                                link=self.templates.link_of(task_id), workdays=self._workdays())
         self._edit_dialog = dialog  # kept, so tests can reach it
         try:
             accepted = self.run_dialog(dialog)
@@ -2969,6 +2988,11 @@ class BrowseWindow(QWidget):
             notes.save_now()
         if accepted:
             self.save_task_edit(task_id, dialog.values())
+        else:
+            self.templates.after_form(task_id, dialog)
+
+    def _workdays(self) -> frozenset[int]:
+        return workday_numbers(self.ctx.settings.workdays)
 
     def save_task_edit(self, task_id: str, values: dict) -> None:
         self._do(lambda: edits.edit_task(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, task_id, self._now(), **values))
