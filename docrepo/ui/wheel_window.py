@@ -1,15 +1,16 @@
 """A navigation wheel's window (release 5.41; ``docs/ui-design/wheel-design.md``, section 2): its drawing and its keys.
 
 Frameless, always on top, with no taskbar entry, translucent, made once at start-up and shown or hidden, so it opens at
-once. It takes keys straight away; its centre, with its name, shows first, and the full wheel draws at ``draw_ms``, so a
-pick made by then never shows it. The decisions about keys are ``docrepo/wheel.py``'s; this holds only what needs Qt.
+once. It takes keys straight away, and the whole wheel shows at once (decision 175 as the owner changed it, release 5.43.1),
+unless ``draw_ms`` in the config asks it to wait with only its centre showing, so that a pick made by then never shows it.
+The decisions about keys are ``docrepo/wheel.py``'s; this holds only what needs Qt.
 """
 from __future__ import annotations
 
 import ctypes
 import os
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
 from PySide6.QtCore import QEvent, QPointF, QRectF, Qt, QTimer, QVariantAnimation
@@ -104,7 +105,7 @@ class WheelWindow(QWidget):
         self.ring = 0.0
         self.opened_at = 0
         self._was_active = False
-        self._icons: dict[tuple[str, str], QPixmap] = {}
+        self._icons: dict[tuple[str, str, float], QPixmap] = {}
         self._draw_timer = QTimer(self, singleShot=True, timeout=self.draw_ring)
         self._idle_timer = QTimer(self, singleShot=True, timeout=lambda: self.cancel(True))
         self._grace_timer = QTimer(self, singleShot=True, timeout=self._grace_over)
@@ -114,6 +115,15 @@ class WheelWindow(QWidget):
         self.winId()  # the window exists from the start, so showing it is quick
 
     # ---- opening and closing ----
+    def prepare(self, wheels: Iterable[Wheel]) -> None:
+        """Paint each wheel once, unseen, so its fonts and icons are ready and the first opening is as quick as the rest."""
+        if self.session is not None:
+            return
+        for wheel in wheels:
+            self.wheel, self.ring = wheel, 1.0
+            self.grab()
+        self.wheel, self.ring = None, 0.0
+
     def open_wheel(self, wheel: Wheel, timing: Timing, centre: QPointF, hotkey_held: Callable[[], bool] | None) -> None:
         """Show ``wheel`` centred at ``centre``: do the least first, because a key pressed before it's in front goes to the
         other program."""
@@ -123,7 +133,10 @@ class WheelWindow(QWidget):
         if hotkey_held is None:
             self.session.hotkey_down = False  # opened with no hotkey (the palette): it stays until a pick or a cancel
             self.session.tapped = True
-        self.lit, self.numpad, self.waiting, self.note, self.ring = None, None, None, "", 0.0
+        self.lit, self.numpad, self.waiting, self.note = None, None, None, ""
+        self._draw_timer.stop()
+        self._fade.stop()
+        self.ring = 0.0 if timing.draw_ms > 0 else 1.0  # before it's shown, so its first paint has the whole wheel
         self._was_active = False
         self.move(round(centre.x() - SIZE / 2), round(centre.y() - SIZE / 2))
         self.show()
@@ -132,9 +145,7 @@ class WheelWindow(QWidget):
         self.setFocus()
         self.setAccessibleName(f"{wheel.name} wheel")
         self._idle_timer.start(timing.idle_ms)
-        if timing.draw_ms <= 0:
-            self.draw_ring()
-        else:
+        if timing.draw_ms > 0:
             self._draw_timer.start(timing.draw_ms)
         if hotkey_held is not None:
             self._poll.start()
@@ -142,7 +153,7 @@ class WheelWindow(QWidget):
         self.update()
 
     def draw_ring(self) -> None:
-        """The full wheel: at ``draw_ms``, fading in unless Windows' animation effects are off."""
+        """The ring, when ``draw_ms`` asked it to wait: fading in unless Windows' animation effects are off."""
         if self.timing.animation_ms > 0 and animations_on():
             self._fade.stop()
             self._fade.setDuration(self.timing.animation_ms)
@@ -316,9 +327,9 @@ class WheelWindow(QWidget):
 
     # ---- drawing ----
     def _icon(self, name: str, colour: str) -> QPixmap:
-        key = (name, colour)
+        key = (name, colour, self.devicePixelRatioF())  # prepare paints on one monitor, and it may open on another
         if key not in self._icons:
-            self._icons[key] = tinted(name, colour, 20, self.devicePixelRatioF())
+            self._icons[key] = tinted(name, colour, 20, key[2])
         return self._icons[key]
 
     def paintEvent(self, _event) -> None:  # noqa: N802

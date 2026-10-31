@@ -98,7 +98,7 @@ _ROWS = (
     Registered(CommandSpec("today.new_item", "A quick task on Today"), _today_new_item),
     Registered(CommandSpec("today.panel", "The Today side panel", (Arg("do", "toggle", ("toggle", "open", "close")),)), _today_panel, gives_back=True),
     Registered(CommandSpec("browse.view", "The browse tool on a view", (Arg("view", "tasks", tuple(v.id for v in VIEWS)),)), _browse_view),
-    Registered(CommandSpec("search.tasks", "Task search", (Arg("then", "page", ("page", "task_view")),)), _search_tasks),
+    Registered(CommandSpec("search.tasks", "Task search", (Arg("then", "task_view", ("task_view", "page")),)), _search_tasks),
     Registered(CommandSpec("search.files", "File search"), _search_files),
     Registered(CommandSpec("search.everything", "Search everything"), _search_everything),
     Registered(CommandSpec("task_view.current", "The current task's Task view"), _task_view_current),

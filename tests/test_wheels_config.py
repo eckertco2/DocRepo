@@ -62,9 +62,17 @@ def test_the_default_file_comments_every_command():
         assert command in wc.DEFAULT_TEXT, command
 
 
-def test_timing_defaults_match_the_research():
+def test_timing_defaults_match_the_research_and_the_wheel_draws_at_once():
     t = wc.parse(wc.DEFAULT_TEXT, SPECS, ICONS).timing
-    assert (t.tap_ms, t.release_grace_ms, t.draw_ms, t.idle_ms) == (200, 80, 333, 10000) and t.animation_ms <= 100
+    assert (t.tap_ms, t.release_grace_ms, t.draw_ms, t.idle_ms) == (200, 80, 0, 10000) and t.animation_ms <= 100
+    assert wc.Timing() == t
+
+
+def test_task_search_opens_the_task_view_unless_a_slot_says_otherwise():
+    """Decision 213 as the owner changed it (release 5.43.1)."""
+    assert wc.parse(wc.DEFAULT_TEXT, SPECS, ICONS).wheel("browse").slots["E"].args == {"then": "task_view"}
+    slot = wc.check(wheel({"E": {"label": "A", "command": "search.tasks", "args": {"then": "page"}}}), SPECS, ICONS).wheels[0].slots["E"]
+    assert slot.args == {"then": "page"}
 
 
 def test_a_diagonal_item_makes_a_wheel_eight_way():
@@ -167,6 +175,33 @@ def test_the_files_are_written_once_and_comments_stay(data_root, fs):
     path.write_text("// mine\n" + wc.DEFAULT_TEXT, encoding="utf-8")
     wc.write_defaults(fs, data_root, SPECS, ICONS)
     assert path.read_text(encoding="utf-8").startswith("// mine\n")
+
+
+OLD_TIMING = ('  // draw_ms: the full wheel draws then, so a pick made by then never shows it (0 draws it at once).\r\n'
+              '  "timing": { "tap_ms": 150, "draw_ms": 333 },\r\n')
+
+
+def test_a_file_from_before_draws_the_whole_wheel_at_once_and_keeps_the_rest(data_root, fs):
+    """Release 5.43.1: the default alone wouldn't reach a file that already says 333."""
+    wc.write_defaults(fs, data_root, SPECS, ICONS)
+    path = data_root / wc.CONFIG_FILE
+    text = wc.DEFAULT_TEXT.replace('  "timing": { "tap_ms": 200, "release_grace_ms": 80, "draw_ms": 0, "idle_ms": 10000, "animation_ms": 80 },\n', OLD_TIMING)
+    path.write_bytes(("// mine\r\n" + text).encode("utf-8"))
+    wc.write_defaults(fs, data_root, SPECS, ICONS)
+    now = path.read_bytes().decode("utf-8")
+    assert now.startswith("// mine\r\n") and '"tap_ms": 150, "draw_ms": 0 },\r\n' in now and "the full wheel draws then" not in now
+    assert wc.load(data_root, SPECS, ICONS).timing.draw_ms == 0
+
+
+def test_a_wait_you_set_yourself_stays(data_root, fs):
+    wc.write_defaults(fs, data_root, SPECS, ICONS)
+    path = data_root / wc.CONFIG_FILE
+    for mine in (OLD_TIMING.replace('"draw_ms": 333', '"draw_ms": 200'), OLD_TIMING.replace("the full wheel draws then", "my own words")):
+        path.write_bytes(mine.encode("utf-8"))
+        wc.write_defaults(fs, data_root, SPECS, ICONS)
+        assert path.read_bytes().decode("utf-8") == mine
+    upgraded = wc.draw_at_once(OLD_TIMING).replace('"draw_ms": 0', '"draw_ms": 333')  # back to 333 by hand, after the change
+    assert wc.draw_at_once(upgraded) == upgraded
 
 
 def test_a_config_with_a_byte_order_mark_loads(data_root, fs):
