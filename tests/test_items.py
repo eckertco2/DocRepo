@@ -19,11 +19,11 @@ Impeller is on site, alignment booked.
 - @Tom get the vendor's alignment report by Friday, 2 hours
   - include the shaft runout
 - @L.Priya @Mike review the lift study next week
-- **Decision. We go with the 50 t crane.
+- **decision, we go with the 50 t crane.
 
 #Q4 overtime budget
-- **Closed. #Rigging plan sling drawing approved
-- **u Waiting on the vendor quote
+- **closed, #Rigging plan sling drawing approved
+- **u, waiting on the vendor quote
 - Ask @Tom about the seal kit, and email tom@example.com
 - Pump #3 is noisy again
 - @__ check the coupling guard bolts
@@ -45,7 +45,7 @@ def names_of(model, prefer=None) -> items.Names:
 
 def test_reading_operators(model):
     names = names_of(model)
-    toks = items.scan("@Tom and @L.Priya Shah, @__, @Sam, tom@example.com #Rigging plan #T000008 Pump #3 ** t **t **Closed. **u **n **Decision.", names)
+    toks = items.scan("@Tom and @L.Priya Shah, @__, @Sam, tom@example.com #Rigging plan #T000008 Pump #3 ** t **t, **closed, **u, **n, **decision,", names)
     assert [(x.kind, x.id, x.name, x.lead, x.none) for x in toks if x.kind == "person"] == [
         ("person", "P003", "Tom Becker", False, False), ("person", "P002", "Priya Shah", True, False),
         ("person", None, "", False, True), ("person", None, "Sam", False, False)]
@@ -62,7 +62,7 @@ def test_reading_operators(model):
     ("Ask @Tom about the seal", "Ask Tom about the seal"),
     ("@Sam to book the scaffolding", "Book the scaffolding"),
     ("Book scaffolding for @Tom", "Book scaffolding for Tom"),
-    ("**Closed. #Rigging plan sling drawing approved", "Sling drawing approved"),
+    ("**closed, #Rigging plan sling drawing approved", "Sling drawing approved"),
     ("@L.Priya review it by Friday @Mike", "Review it by Friday"),
     ("Pump #3 noisy, see #T000012", "Pump #3 noisy, see Rigging plan"),
 ])
@@ -97,14 +97,14 @@ def test_the_meeting_notes_items(model):
 
 def test_blocks_headings_and_where_items_go(model):
     names = names_of(model)
-    text = "#Installation\nCrane booked.\n\nRigging is late.\n- @Tom draw the slings\n  - @Mike check them\n  - **n Old slings scrapped.\n#Rigging plan\n"
+    text = "#Installation\nCrane booked.\n\nRigging is late.\n- @Tom draw the slings\n  - @Mike check them\n  - **n, old slings scrapped.\n#Rigging plan\n"
     r = items.read(text, names, TODAY)
     note, tom, mike, scrapped = r.items
     assert note.kind == "note" and note.heading and note.text == "Crane booked.\nRigging is late."  # one note for the heading, past a blank line
     assert [(w.kind, w.ref) for w in tom.where] == [("task", "T000008")]  # nothing picked: only its # task
     assert mike.parent_item == tom.key and [(w.kind, w.ref) for w in mike.where] == [("item", tom.key), ("task", "T000008")]
     assert scrapped.kind == "note" and [(w.kind, w.ref) for w in scrapped.where] == [("task", "T000008")]
-    loose = items.read("@Tom pick up the seals\n**u Waiting on the vendor\n**n A note on nothing", names, TODAY)
+    loose = items.read("@Tom pick up the seals\n**u, waiting on the vendor\n**n, a note on nothing", names, TODAY)
     assert [(w.kind,) for w in loose.items[0].where] == [("quick",)]  # a task with nowhere else goes under Quick tasks
     assert not loose.items[1].on and loose.items[1].problem == "Needs a #task to update"
     assert not loose.items[2].on and "stays in the notes" in loose.items[2].problem
@@ -112,7 +112,7 @@ def test_blocks_headings_and_where_items_go(model):
 
 def test_a_new_tasks_own_first_line(model):
     names = names_of(model)
-    text = "@Tom check the coupling alignment #Rigging plan\n- @Mike paint the guard rails by Friday\n- **n The old coupling goes back to stores."
+    text = "@Tom check the coupling alignment #Rigging plan\n- @Mike paint the guard rails by Friday\n- **n, the old coupling goes back to stores."
     r = items.read(text, names, TODAY, home=True, new_task=True)
     own = items.self_fields(r, names)
     assert [x.id for x in own.assignees] == ["P003"] and own.tasks == ["T000012"] and own.text == "Check the coupling alignment"
@@ -158,9 +158,9 @@ def test_capture_md_keeps_ids(model):
 
 
 def test_an_event_line_is_a_plant_event(model):
-    """Release 5.9 (decision 22): **event. makes a task with Plant event ticked. The end date the event's own name
+    """Release 5.9 (decision 22): **event, makes a task with Plant event ticked. The end date the event's own name
     made a Deadline is its Due, so it runs from its Start to its Due."""
-    r = items.read("**event. Spring outage, 3 to 14 Nov\n**Event: Fall turnaround from 2 Nov to 6 Nov @Tom\n**events are fun",
+    r = items.read("**event, Spring outage, 3 to 14 Nov\n**Event, Fall turnaround from 2 Nov to 6 Nov @Tom\n**events are fun",
                    names_of(model), TODAY)
     assert [(it.kind, it.plant_event, it.title, it.start, it.due, it.deadline) for it in r.items] == [
         ("task", True, "Spring outage", "2026-11-03", "2026-11-14", None), ("task", True, "Fall turnaround", "2026-11-02", "2026-11-06", None)]
@@ -169,11 +169,11 @@ def test_an_event_line_is_a_plant_event(model):
 
 
 def test_the_words_plant_event_make_a_plant_event(model):
-    """Mods log round 3 (M0059, decision 58): a task item that says "plant event" or "major event" is one, and **event
+    """Mods log round 3 (M0059, decision 58): a task item that says "plant event" or "major event" is one, and **event,
     on a new task's own line ticks the new task's own Plant event."""
     r = items.read("Walkdown done.\n- @Tom plan the line 2 rebuild, a major event, 9 to 20 Nov", names_of(model), TODAY)
     assert [(it.plant_event, it.start, it.due) for it in r.items] == [(True, "2026-11-09", "2026-11-20")]
-    r = items.read("**event Spring outage, 3 to 14 Nov\nScope agreed.", names_of(model), TODAY, new_task=True)
+    r = items.read("**event, Spring outage, 3 to 14 Nov\nScope agreed.", names_of(model), TODAY, new_task=True)
     own = items.self_fields(r, names_of(model))
     assert own.plant_event and r.items == []
     assert not items.self_fields(items.read("Spring outage, 3 to 14 Nov", names_of(model), TODAY, new_task=True), names_of(model)).plant_event

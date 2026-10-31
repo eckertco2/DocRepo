@@ -92,6 +92,7 @@ QFrame#itemCard[kind="update"] { border-left-color: #c08419; }
 QFrame#itemCard[kind="decision"] { border-left-color: #8460c2; }
 QFrame#itemCard[kind="self"] { border-left-color: #1d5e98; }
 QFrame#itemCard[kind="date"] { border-left-color: #b07a12; }
+QFrame#itemCard[kind="param"] { border-left-color: #b07a12; }
 QFrame#itemCard QLabel { background: transparent; border: none; }
 QListWidget#refPopup { background: #ffffff; border: 1px solid #b8c1cb; border-radius: 4px; }
 QListWidget#refPopup::item:selected { background: #dbe8f5; color: #1a1f25; }
