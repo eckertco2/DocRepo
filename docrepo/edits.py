@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from collections.abc import Callable, Collection
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -44,6 +45,7 @@ class Outcome:
 
     message: str
     problems: list[str] = field(default_factory=list)
+    moved: str = ""  # release 5.50: what moved with it, in words
 
 
 def write_all_pages(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, at: datetime, problems: list[str]) -> None:
@@ -345,7 +347,8 @@ def edit_today_note(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, item_
 def change_task(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, task_id: str, at: datetime, **changes) -> Outcome:
     """Change a task's fields from the browse tool, such as its title, description or labels."""
     logged = tasks.update_task(conn, settings, task_id, at=at, via=BROWSE, **changes)
-    out = Outcome(f"{len(logged)} change{'s' if len(logged) != 1 else ''} in the status log." if logged else "Nothing changed.")
+    moved = tasks.moved_words(logged)
+    out = Outcome((f"{len(logged)} change{'s' if len(logged) != 1 else ''} in the status log." if logged else "Nothing changed.") + (f" {moved}" if moved else ""), moved=moved)
     write_all_pages(conn, data_root, fs, at, out.problems)
     return out
 
@@ -359,12 +362,30 @@ def edit_task(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: S
     ``priority`` (release 5.23) puts it in a bucket ("" for Not ranked), at the bucket's end, when that's a change.
     ``key_dates`` (release 5.31), a list of ``tasks.KeyDateRow``, makes its key dates those, each change logged.
     ``follow`` (release 5.45, decision 184), from the form's chain marks and ↺, says which fields follow its template now.
+    ``leave`` (release 5.50, decision 249) names the tasks tied to it that keep their dates.
     """
+    with transaction(conn):
+        logged, added = _edit(conn, settings, task_id, at, values)
+    message = f"{len(logged)} change{'s' if len(logged) != 1 else ''} in the status log." if logged else "Nothing changed."
+    moved = tasks.moved_words(logged)
+    if moved:
+        message += f" {moved}"
+    if added:
+        message += f" Added {', '.join(added)} to the people list."
+    out = Outcome(message, moved=moved)
+    write_all_pages(conn, data_root, fs, at, out.problems)
+    log.info("task %s edited in the browse tool: %d changes", task_id, len(logged))
+    return out
+
+
+def _edit(conn: sqlite3.Connection, settings: Settings, task_id: str, at: datetime, values: dict) -> tuple[tasks.Logged, list[str]]:
+    """The change ``edit_task`` makes, in the caller's transaction, with no file written, so it can be rolled back to ask first."""
     added: list[str] = []
     parents = values.pop("parents", None)
     key_dates = values.pop("key_dates", None)
     priority = values.pop("priority", None)
     follow = values.pop("follow", None)
+    leave = values.pop("leave", ())
     day_headings = values.pop("day_headings", "unset")  # decision 119: a setting of the page, not logged
     with transaction(conn):
         if day_headings != "unset":
@@ -392,7 +413,7 @@ def edit_task(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: S
                 values[key] = ids
         if values.get("involvement"):  # someone just added has their Involvement under their name until now
             values["involvement"] = {(role, named.get(p, p)): share for (role, p), share in values["involvement"].items()}
-        logged = tasks.update_task(conn, settings, task_id, at=at, via=BROWSE, keep_links=follow is not None, **values)
+        logged = tasks.update_task(conn, settings, task_id, at=at, via=BROWSE, keep_links=follow is not None, leave=leave, **values)
         if follow is not None:
             logged += tasks.set_links(conn, task_id, follow, at=at, via=BROWSE)
         moved = tasks.set_parents(conn, task_id, parents, at=at, via=BROWSE) if parents is not None else None
@@ -403,22 +424,50 @@ def edit_task(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: S
             if ranked:
                 logged.append(ranked)
         if key_dates is not None:
-            logged += tasks.set_key_dates(conn, task_id, key_dates, at=at, via=BROWSE)
-    message = f"{len(logged)} change{'s' if len(logged) != 1 else ''} in the status log." if logged else "Nothing changed."
-    if added:
-        message += f" Added {', '.join(added)} to the people list."
-    out = Outcome(message)
-    write_all_pages(conn, data_root, fs, at, out.problems)
-    log.info("task %s edited in the browse tool: %d changes", task_id, len(logged))
-    return out
+            logged += tasks.set_key_dates(conn, task_id, key_dates, at=at, via=BROWSE, settings=settings, leave=leave)
+    return logged, added
+
+
+class _Preview(Exception):
+    """Raised to roll a question's changes back."""
+
+
+def _what_moves(conn: sqlite3.Connection, change: Callable[[], tasks.Logged]) -> list[tasks.Followed]:
+    """What a change would move, made and then rolled back, so the owner can be asked first (decision 249)."""
+    if conn.in_transaction:
+        raise RuntimeError("A preview can't run inside another transaction: it couldn't be rolled back on its own.")
+    found: list[tasks.Followed] = []
+    try:
+        with transaction(conn):
+            found = list(change().followed)
+            raise _Preview
+    except _Preview:
+        pass
+    return found
+
+
+def edit_moves(conn: sqlite3.Connection, settings: Settings, task_id: str, at: datetime, **values) -> list[tasks.Followed]:
+    """What saving Edit task, or Quick edit, would move."""
+    return _what_moves(conn, lambda: _edit(conn, settings, task_id, at, dict(values))[0])
+
+
+def change_moves(conn: sqlite3.Connection, settings: Settings, task_id: str, at: datetime, **changes) -> list[tasks.Followed]:
+    """What ``change_task`` would move."""
+    return _what_moves(conn, lambda: tasks.update_task(conn, settings, task_id, at=at, via=BROWSE, **changes))
+
+
+def key_dates_move(conn: sqlite3.Connection, settings: Settings, task_id: str, rows: list[tasks.KeyDateRow], at: datetime) -> list[tasks.Followed]:
+    """What ``set_key_dates`` would move."""
+    return _what_moves(conn, lambda: tasks.set_key_dates(conn, task_id, rows, at=at, via=BROWSE, settings=settings))
 
 
 # ---- key dates (release 5.31, the key dates plan) ----
-def set_key_dates(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, task_id: str, rows: list[tasks.KeyDateRow],
-                  at: datetime) -> Outcome:
+def set_key_dates(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, task_id: str, rows: list[tasks.KeyDateRow],
+                  at: datetime, leave: Collection[str] = ()) -> Outcome:
     """Make a task's key dates these, in this order, from the browse tool: each change logged as "Browse tool"."""
-    logged = tasks.set_key_dates(conn, task_id, rows, at=at, via=BROWSE)
-    out = Outcome(f"{len(logged)} change{'s' if len(logged) != 1 else ''} in the status log." if logged else "Nothing changed.")
+    logged = tasks.set_key_dates(conn, task_id, rows, at=at, via=BROWSE, settings=settings, leave=leave)
+    moved = tasks.moved_words(logged)
+    out = Outcome((f"{len(logged)} change{'s' if len(logged) != 1 else ''} in the status log." if logged else "Nothing changed.") + (f" {moved}" if moved else ""), moved=moved)
     write_all_pages(conn, data_root, fs, at, out.problems)
     return out
 
@@ -446,7 +495,7 @@ def key_date_subtask(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, sett
                                   plant_event=bool(r["plant"]))
         if r["done"]:  # a done key date makes a closed subtask, with its day closed
             tasks.update_task(conn, settings, child, at=at, via=BROWSE, state="Closed")
-        tasks.set_key_dates(conn, parent.id, [x for x in tasks.key_date_rows(conn, parent.id) if x.id != key_id], at=at, via=BROWSE)
+        tasks.set_key_dates(conn, parent.id, [x for x in tasks.key_date_rows(conn, parent.id) if x.id != key_id], at=at, via=BROWSE, settings=settings)
     out = Outcome(f"{child} is a subtask of {parent.title} now, in place of its key date.")
     write_all_pages(conn, data_root, fs, at, out.problems)
     return out

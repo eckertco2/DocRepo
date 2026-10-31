@@ -10,6 +10,7 @@ first.
 from __future__ import annotations
 
 from collections.abc import Callable, Collection, Sequence
+from dataclasses import replace
 from datetime import date
 from typing import Any
 
@@ -34,12 +35,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo import priorities, quick, templates, timeline
+from docrepo import priorities, quick, templates, ties, timeline
 from docrepo.bulk import BulkEdit, LabelMatch, TaskOutcome, summary
 from docrepo.db import RECURRENCES, STATES
 from docrepo.dates import long_date, to_date
 from docrepo.detail import esc
-from docrepo.model import Model
+from docrepo.model import Model, Tie
 from docrepo.pages import num
 from docrepo.parse import Who
 from docrepo.schedule import length_of, placed, start_of, week_of
@@ -635,6 +636,190 @@ class FieldLink:
         return not self.differs() or (self.get() == self.saved and not reopening)
 
 
+class TiePanel(QWidget):
+    """Edit task's ties (release 5.50, decisions 245 and 254): a line in words for each tied date, with Edit and Remove, and an
+    editor that reads as the same sentence: [3] [workdays] [after] [Line 2 outage] [its dates] [ends]. A change counts at once, so
+    the date above it moves as you go. What can't be tied there says why, and changes nothing."""
+
+    changed = Signal(str)  # a date's tie was made, changed or taken off
+    opened = Signal()  # the editor opened or closed
+    SOURCE_WIDTH = 210
+
+    def __init__(self, m: Model, task_id: str, given: dict[str, Tie], pick_task: PickTask | None) -> None:
+        super().__init__()
+        self.m, self.task_id, self._pick_task = m, task_id, pick_task
+        self.ties = dict(given)
+        self.editing: str | None = None
+        self.draft: Tie | None = None
+        self._setting = False
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        self.lines: dict[str, QLabel] = {}
+        self.rows: dict[str, QWidget] = {}
+        self.edit_buttons: dict[str, QPushButton] = {}
+        self.remove_buttons: dict[str, QPushButton] = {}
+        for name in ties.FIELDS:
+            row = QWidget()
+            line = QHBoxLayout(row)
+            line.setContentsMargins(0, 0, 0, 0)
+            line.setSpacing(8)
+            words = QLabel()
+            words.setWordWrap(True)
+            line.addWidget(words, 1)
+            edit, remove = QPushButton("Edit", objectName="link"), QPushButton("Remove", objectName="link")
+            edit.clicked.connect(lambda _=False, name=name: self.open(name))
+            remove.clicked.connect(lambda _=False, name=name: self.remove(name))
+            line.addWidget(edit)
+            line.addWidget(remove)
+            self.lines[name], self.rows[name] = words, row
+            self.edit_buttons[name], self.remove_buttons[name] = edit, remove
+            layout.addWidget(row)
+        self.box = QFrame(objectName="tieBox")
+        inner = QVBoxLayout(self.box)
+        inner.setContentsMargins(10, 8, 10, 8)
+        inner.setSpacing(6)
+        holder = QWidget()
+        flow = FlowLayout(holder, spacing=6)
+        self.box_name = QLabel(objectName="fieldLabel")
+        self.amount = QSpinBox()
+        self.amount.setRange(0, 999)
+        self.amount.setFixedWidth(64)
+        self.amount.setAccessibleName("How many")
+        self.unit = QComboBox()
+        self.unit.addItems(ties.UNITS)
+        self.unit.setAccessibleName("Workdays or weeks")
+        self.amount.setFixedHeight(self.unit.sizeHint().height())
+        self.direction = QComboBox()
+        self.direction.addItems(ties.DIRECTIONS)
+        self.direction.setAccessibleName("Before or after")
+        self.source = QPushButton()
+        self.source.setEnabled(pick_task is not None)
+        self.source.setAccessibleName("The task it counts from")
+        self.key = QComboBox()
+        self.key.setAccessibleName("Its dates, or a key date")
+        self.key.setMaximumWidth(self.SOURCE_WIDTH)
+        self.point = QComboBox()
+        self.point.addItem("starts", "start")
+        self.point.addItem("ends", "end")
+        self.point.setAccessibleName("Starts or ends")
+        self.done = QPushButton("Done")
+        for w in (self.box_name, self.amount, self.unit, self.direction, self.source, self.key, self.point, self.done):
+            flow.addWidget(w)
+        inner.addWidget(holder)
+        self.refused = QLabel(objectName="linkLeaving")
+        self.refused.setWordWrap(True)
+        self.refused.hide()
+        inner.addWidget(self.refused)
+        layout.addWidget(self.box)
+        self.amount.valueChanged.connect(lambda _: self._edited())
+        for box in (self.unit, self.direction, self.key, self.point):
+            box.currentIndexChanged.connect(lambda _: self._edited())
+        self.source.clicked.connect(lambda: self._pick_task(self.source, self._picked) if self._pick_task else None)
+        self.done.clicked.connect(self.close_editor)
+        self._draw()
+
+    def values(self) -> dict[str, Tie]:
+        return dict(self.ties)
+
+    def sentence(self, tie: Tie) -> str:
+        """The tie in words, and why it isn't doing anything just now, when it isn't."""
+        words = ties.words(tie, ties.name_in(self.m, tie))
+        if not ties.counts_in(self.m, tie):
+            return f"{words} (discarded, so nothing moves until it's back)"
+        return words if ties.ref_in(self.m, tie) else f"{words} (waiting for that date)"
+
+    def open(self, name: str) -> None:
+        self.editing, self.draft = name, self.ties.get(name) or Tie("", amount=1)
+        self.refused.hide()
+        self._draw()
+        self.opened.emit()
+        (self.amount if self.draft.source else self.source).setFocus()
+
+    def close_editor(self) -> None:
+        """Done. One with no task chosen was never a tie."""
+        self.editing, self.draft = None, None
+        self.refused.hide()
+        self._draw()
+        self.opened.emit()
+
+    def remove(self, name: str) -> None:
+        """Remove: the tie ends and the date stays (decision 247)."""
+        self.ties.pop(name, None)
+        if self.editing == name:
+            self.close_editor()
+        self._draw()
+        self.changed.emit(name)
+
+    def regap(self, name: str, day: str, workdays: Collection[int]) -> None:
+        """A tied date changed by hand keeps its tie, with a new gap (decision 247)."""
+        tie = self.ties.get(name)
+        ref = ties.ref_in(self.m, tie) if tie and ties.counts_in(self.m, tie) else None
+        if ref and ties.landing(ref, tie, workdays).isoformat() != day:
+            self.ties[name] = ties.regapped(tie, ref, to_date(day), workdays)
+            if self.editing == name:
+                self.draft = self.ties[name]
+            self._draw()
+
+    def _picked(self, task_id: str | None) -> None:
+        if not task_id or self.draft is None:
+            return
+        keys = self.m.key_dates_of(task_id)
+        own_dates = task_id != self.task_id and not self.m.task(task_id).recurrence
+        self._try(replace(self.draft, source=task_id, key_date=keys[0].id if keys and not own_dates else None))
+
+    def _edited(self) -> None:
+        if self._setting or self.draft is None:
+            return
+        key = self.key.currentData()
+        self._try(replace(self.draft, amount=self.amount.value(), unit=self.unit.currentText(), direction=self.direction.currentText(),
+                          point=self.point.currentData(), key_date=None if key in (None, -1) else key))
+
+    def _try(self, tie: Tie) -> None:
+        said = ties.problem_in(self.m, self.task_id, tie) if tie.source else None
+        self.refused.setText(said or "")
+        self.refused.setVisible(bool(said))
+        if not said:
+            self.draft = tie
+            if tie.source:
+                self.ties[self.editing] = tie
+        self._draw()
+        if not said and tie.source:
+            self.changed.emit(self.editing)
+
+    def _draw(self) -> None:
+        for name, label in ties.FIELDS.items():
+            tie = self.ties.get(name)
+            self.rows[name].setVisible(tie is not None and self.editing != name)
+            if tie:
+                self.lines[name].setText(f"<b>{label} tied:</b> {esc(self.sentence(tie))}")
+        self.box.setVisible(self.editing is not None)
+        if self.draft is None:
+            return
+        self._setting = True
+        try:
+            d = self.draft
+            self.box_name.setText(ties.FIELDS[self.editing])
+            self.amount.setValue(d.amount)
+            self.unit.setCurrentText(d.unit)
+            self.direction.setCurrentText(d.direction)
+            source = self.m.tasks.get(d.source)
+            title = source.title if source else "Choose a task…"
+            shown = self.source.fontMetrics().elidedText(title, Qt.TextElideMode.ElideRight, self.SOURCE_WIDTH)
+            self.source.setText(f"{shown}  ▾".replace("&", "&&"))
+            self.source.setToolTip(title)
+            self.key.clear()
+            if source and d.source != self.task_id and not source.recurrence:
+                self.key.addItem("its dates", -1)
+            for k in self.m.key_dates_of(d.source) if source else ():
+                self.key.addItem(k.description or "Key date", k.id)
+            self.key.setCurrentIndex(max(0, self.key.findData(-1 if d.key_date is None else d.key_date)))
+            self.key.setVisible(self.key.count() > 1 or d.key_date is not None)
+            self.point.setCurrentIndex(0 if d.point == "start" else 1)
+        finally:
+            self._setting = False
+
+
 class TaskEditDialog(FormDialog):
     """Edit task: a task's title, description, state, current status, parents (mods log round 2, M0040), labels, people and
     hours, dates, recurrence and flags. For a task made from a template, ``link`` (release 5.45) adds its marks and the line
@@ -764,7 +949,7 @@ class TaskEditDialog(FormDialog):
         # ---- dates ----
         section(g, "Dates")
         self.start, self.due, self.deadline, self.reminder, self.repeat = DateField(), DateField(), DateField(), DateField(), DateField()
-        for w, value in ((self.start, t.start or (None if t.duration else start_of(t).isoformat())), (self.due, t.due), (self.deadline, t.deadline),
+        for w, value in ((self.start, t.start or (None if t.duration or "start" in t.ties else start_of(t).isoformat())), (self.due, t.due), (self.deadline, t.deadline),
                          (self.reminder, t.reminder), (self.repeat, t.repeat_until)):
             w.set_value(value)
         self.deadline_desc = QLineEdit(t.deadline_desc or "")
@@ -799,6 +984,20 @@ class TaskEditDialog(FormDialog):
             when.addWidget(w)
         when.addStretch()
         g.addLayout(when)
+        # Ties (release 5.50, decision 254): Tie… beside Start and Due, and a line for each tied date.
+        self.tie_panel = TiePanel(m, task_id, t.ties, pick_task)
+        self.tie_buttons: dict[str, QToolButton] = {}
+        for name, box in (("start", start_field), ("due", due_field)):
+            button = QToolButton(objectName="linkMark")
+            button.setText("Tie…")
+            button.setToolTip("Set this date from another task's or a key date's start or end")
+            button.clicked.connect(lambda _=False, name=name: self.tie_panel.open(name))
+            top = box.layout().itemAt(0).layout()
+            top.insertWidget(top.count() - 1, button)
+            self.tie_buttons[name] = button
+        g.addWidget(self.tie_panel)
+        self.tie_panel.changed.connect(self._tie_changed)
+        self.tie_panel.opened.connect(self._sync_ties)
         calendar_row = QHBoxLayout()
         calendar_row.addWidget(self.calendar)
         calendar_row.addStretch()
@@ -810,6 +1009,9 @@ class TaskEditDialog(FormDialog):
         self.date_warn = QLabel(objectName="linkLeaving")
         self.date_warn.setWordWrap(True)
         g.addWidget(self.date_warn)
+        self.tied_note = QLabel(objectName="hint")
+        self.tied_note.setWordWrap(True)
+        g.addWidget(self.tied_note)
         dates = QGridLayout()
         dates.setHorizontalSpacing(16)
         dates.setVerticalSpacing(16)
@@ -822,6 +1024,9 @@ class TaskEditDialog(FormDialog):
         g.addLayout(dates)
         self.start.edited.connect(lambda: self._date_edited("start"))
         self.due.edited.connect(lambda: self._date_edited("due"))
+        for name, box in (("start", self.start), ("due", self.due)):
+            box.line.editingFinished.connect(lambda name=name: self._put_back(name))
+            box.picked.connect(lambda name=name: self._put_back(name))
         self.deadline.edited.connect(self._sync_dates)
         self.duration.textEdited.connect(lambda _: self._date_edited("duration"))
         self.calendar.toggled.connect(lambda _: self._date_edited("duration"))
@@ -1034,9 +1239,83 @@ class TaskEditDialog(FormDialog):
                 start, due = placed(self._start_value(), self._due_value(), days, what, self.workdays, self.calendar.isChecked())
                 self._put_date(self.start, "start", start, what)
                 self._put_date(self.due, "due", due, what)
+            self._keep_ties(what)
         finally:
             self._moving = False
         self._sync_dates()
+
+    # ---- ties (release 5.50, decisions 247, 251 and 254) ----
+    def _date_box(self, name: str) -> DateField:
+        return self.start if name == "start" else self.due
+
+    def _keep_ties(self, what: str) -> None:
+        """A tied date changed takes a new gap, and one a Duration cleared goes back. The one being typed in is left until it's done."""
+        for name, tie in list(self.tie_panel.ties.items()):
+            box = self._date_box(name)
+            if not box.is_valid():
+                continue
+            if box.value():
+                self.tie_panel.regap(name, box.value(), self.workdays)
+            elif name != what:
+                back = ties.landing_in(self.m, tie, self.workdays)
+                if back:
+                    box.set_value(back)
+                    start, due = placed(self._start_value(), self._due_value(), typed_days(self.duration), name, self.workdays, self.calendar.isChecked())
+                    self._put_date(self.start, "start", start, name)
+                    self._put_date(self.due, "due", due, name)
+
+    def _put_back(self, name: str) -> None:
+        """A tied date cleared by hand goes back, once it's finished with (decision 247)."""
+        box, tie = self._date_box(name), self.tie_panel.ties.get(name)
+        if tie and box.is_valid() and not box.value():
+            back = ties.landing_in(self.m, tie, self.workdays)
+            if back:
+                box.set_value(back)
+                self._date_edited(name)
+
+    def _tie_changed(self, name: str) -> None:
+        """A tie made, changed or taken off. Its date goes where it lands and the other as Duration says (decision 251). Taken off, the
+        date stays."""
+        panel, tie = self.tie_panel, self.tie_panel.ties.get(name)
+        both = len(panel.ties) == 2
+        if both:
+            self.duration.clear()
+        if tie and ties.counts_in(self.m, tie):
+            day = ties.landing_in(self.m, tie, self.workdays)
+            self._moving = True
+            try:
+                if both:
+                    self._date_box(name).set_value(day)
+                else:
+                    now = replace(self.m.task(self.task_id), start=self._start_value(), due=self._due_value(), duration=typed_days(self.duration),
+                                  calendar_days=self.calendar.isChecked(), ties={name: tie})
+                    changes = ties.placement(now, {name: day}, self.workdays)
+                    for key in ties.FIELDS:
+                        if key in changes:
+                            self._date_box(key).set_value(changes[key])
+                            if key != name and changes[key]:
+                                self._worked.add(key)
+                    if "duration" in changes:
+                        self.duration.setText(str(changes["duration"]))
+                    if day is None:  # with no date to count from, it waits, with none showing
+                        self._date_box(name).set_value(None)
+            finally:
+                self._moving = False
+            if not both and typed_days(self.duration) is not None:
+                self._date_edited(name)
+        self._sync_ties()
+        self._sync_dates()
+
+    def _sync_ties(self) -> None:
+        routine, panel = self.recurrence.currentIndex() > 0, self.tie_panel
+        panel.setVisible(not routine)
+        for name, button in self.tie_buttons.items():
+            button.setVisible(not routine and name not in panel.ties and panel.editing != name)
+        self.duration.setEnabled(routine or len(panel.ties) < 2)
+        tied = ties.own_followers_in(self.m, self.task_id)
+        words = f"{len(tied)} task{'' if len(tied) == 1 else 's'} {'is' if len(tied) == 1 else 'are'} tied to this task's dates"
+        self.tied_note.setText(f"{words}. Making it repeat ends those ties, and their dates stay." if routine else f"{words}, and will move with them.")
+        self.tied_note.setVisible(bool(tied))
 
     def _put_date(self, box: DateField, name: str, value: str | None, what: str) -> None:
         if name != what and (box.value() or None) != value:
@@ -1051,12 +1330,14 @@ class TaskEditDialog(FormDialog):
         days = typed_days(self.duration)
         length = None if days is not None or not self.duration.text().strip() == "" else self._length_now()
         self.duration.setPlaceholderText(str(length) if length else "")
-        self.duration.setToolTip(f"{length} day{'' if length == 1 else 's'} from its dates. Type a number to keep it when the dates move." if length
+        self.duration.setToolTip("Both dates are tied, so the length comes from them." if len(self.tie_panel.ties) == 2 else
+                                 f"{length} day{'' if length == 1 else 's'} from its dates. Type a number to keep it when the dates move." if length
                                  else "How many days it takes. Typed, it's kept when the dates move.")
         for name, box, other in (("start", self.start, "Due"), ("due", self.due, "Start")):
-            worked = name in self._worked
-            set_filled(box.line, worked, name="worked")
-            box.line.setToolTip(f"Worked out from {other} and Duration" if worked else "")
+            worked, tie = name in self._worked, self.tie_panel.ties.get(name)
+            set_filled(box.line, worked or tie is not None, name="worked")
+            box.line.setToolTip(f"Tied: {self.tie_panel.sentence(tie)}. Change it, and the tie stays with a new gap." if tie
+                                else f"Worked out from {other} and Duration" if worked else "")
         self.date_hint.setVisible(days is not None and not self.recurrence.currentIndex())
         due, deadline = self._due_value(), self.deadline.value() if self.deadline.is_valid() else None
         late = bool(days is not None and due and deadline and due > deadline)
@@ -1073,6 +1354,7 @@ class TaskEditDialog(FormDialog):
         self.calendar.setVisible(not routine)
         self.lead_unit.set_routine(routine)
         self.asg_unit.set_routine(routine)
+        self._sync_ties()
         self._sync_dates()
 
     def _show_during(self) -> None:
@@ -1157,7 +1439,7 @@ class TaskEditDialog(FormDialog):
             "deadline_desc": self.deadline_desc.text(), "reminder": self.reminder.value(), "recurrence": recurrence,
             "repeat_until": self.repeat.value() if recurrence else None, "urgent": self.urgent.isChecked(), "meeting": self.meeting.isChecked(),
             "plant_event": self.plant_event.isChecked(), "parents": list(self.parents), "priority": self.priority.currentData(),
-            "key_dates": self.key_dates.rows(),
+            "key_dates": self.key_dates.rows(), "ties": {} if recurrence else self.tie_panel.values(),
             **({"references": {name: box.text() for name, box in self.references.items()}} if self.references else {}),
             **({"follow": self._following()} if self.link else {}),
         }

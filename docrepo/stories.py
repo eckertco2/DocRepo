@@ -155,6 +155,10 @@ class Stories:
         def many(xs: list[str]) -> bool:
             return len(xs) > 1 or self._is_me(xs[0])
 
+        if f in ("Start tie", "Due tie"):  # release 5.50
+            return f"{f} removed." if is_none(after) else f"{f}: {after}." if is_none(before) else f"{f}: {before} → {after}."
+        if f in ("Start", "Due") and e.via.startswith("Follows "):
+            return f"{f} {'None' if is_none(before) else self.as_date(before)} → {'None' if is_none(after) else self.as_date(after)} · {e.via}."
         if f in TEMPLATE_FIELDS and e.via.startswith("Template: "):  # release 5.45 (decision 187): a template's own change
             if f == "Description":
                 return f"Description reworded · {e.via}."

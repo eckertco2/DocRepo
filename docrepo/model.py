@@ -70,6 +70,8 @@ class Task:
     references: dict[str, str] = field(default_factory=dict)
     #: Release 5.47 (decision 196): each person's Involvement where it isn't 100: {(role, person): percent}, role being "lead" or "assignee".
     involvement: dict[tuple[str, str], int] = field(default_factory=dict)
+    #: Release 5.50 (decision 245): its Start or Due set from another date: {"start": Tie, "due": Tie}.
+    ties: dict[str, Tie] = field(default_factory=dict)
 
     def rate_of(self, role: str) -> tuple[float, str] | None:
         """A role's rate and what it's per, ``(6.0, "day")`` or ``(3.0, "week")``, or None when its hours are a total."""
@@ -79,6 +81,19 @@ class Task:
     def share(self, role: str, person: str) -> int:
         """How much of a role's hours land on one person: their Involvement, 100 by default."""
         return self.involvement.get((role, person), 100)
+
+
+@dataclass(frozen=True)
+class Tie:
+    """A date set from another date (release 5.50, decision 245): ``amount`` workdays or weeks, ``direction`` "before" or "after",
+    the ``point``, "start" or "end", of task ``source``, or of its key date ``key_date``."""
+
+    source: str
+    point: str = "end"
+    amount: int = 0
+    unit: str = "workdays"
+    direction: str = "after"
+    key_date: int | None = None
 
 
 @dataclass(frozen=True)
@@ -328,6 +343,9 @@ def load_tasks(conn: sqlite3.Connection, task_ids: Iterable[str] | None = None) 
         t.urgent, t.meeting, t.inherit_labels, t.plant_event = bool(t.urgent), bool(t.meeting), bool(t.inherit_labels), bool(t.plant_event)
         t.calendar_days = bool(t.calendar_days)
         t.day_headings = None if t.day_headings is None else bool(t.day_headings)
+    for r in conn.execute("SELECT * FROM task_ties"):
+        if r["task"] in tasks:
+            tasks[r["task"]].ties[r["field"]] = Tie(r["source"], r["point"], r["amount"], r["unit"], r["direction"], r["key_date"])
     for r in conn.execute("SELECT task, person, role, involvement FROM task_people ORDER BY id"):
         if r["task"] in tasks:
             (tasks[r["task"]].leads if r["role"] == "lead" else tasks[r["task"]].assignees).append(r["person"])
@@ -464,6 +482,10 @@ class Model:
         """A label as pickers show it: "Production line › Line 1"."""
         parent = self.parent_label(name)
         return f"{parent} › {name}" if parent else name
+
+    def tied_to(self, task_id: str) -> list[Task]:
+        """The tasks with a date tied to this one's dates or key dates (release 5.50), but not discarded ones."""
+        return [t for t in self.tasks.values() if not t.discarded and any(x.source == task_id for x in t.ties.values())]
 
     def key_dates_of(self, task_id: str) -> list[KeyDate]:
         """A task's key dates (release 5.31), in its own order."""

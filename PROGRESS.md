@@ -63,6 +63,7 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.46 | Duration and hours a day (decisions 189 to 191): one date and a Duration, Runs through weekends, and h a day, in Edit task, Quick edit, the capture window, template rows and Make tasks, schema version 16 | Built 2026-10-30, with 5.44 and 5.45, and merged to `main` the same day, before the owner's hand test. Tested on the corporate computer by 2026-10-31 |
 | 5.47 | Involvement (decision 196): each person's share of a role's hours, in Capacity, on the task page, in Edit task's and a row's chips, in links and the preview, schema version 17 | Built 2026-10-30, with 5.44 to 5.46, and merged to `main` the same day, before the owner's hand test. Tested on the corporate computer by 2026-10-31 |
 | 5.49 | Hours a week, reordering a template's rows by dragging or Alt+Up and Alt+Down, and Duplicate (decisions 260 to 262), schema version 18 | Built 2026-10-31 in the `round5-templates` worktree, and merged to `main` the same day, before the owner's hand test. Next: the owner's hand test, then `handoff/docrepo/release-5-49-test.md` |
+| 5.50 | Ties (decisions 245 to 258): a task's Start or Due set from another date, on tasks and key dates, moving what's tied on every path, asking first when a move leaves the tree, the task page and the log, schema version 19 | Built 2026-10-31 and on GitHub on the `round5-templates` branch, not merged to `main`, before the owner's hand test. Next: the hand test, then a merge, then `handoff/docrepo/release-5-50-test.md` |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
 ## Decisions
@@ -497,6 +498,34 @@ The visual overhaul's O10, designed and mocked in the parent workspace (`docs/ui
   - **No button group:** the pane marks the open view itself, so that no row is marked while searching, and a click on the open view keeps it marked.
   - **The totals that left the sidebar** are beside their views' titles ("14 open", "7 active"), as `sidebar.md` said they'd be.
   - **The tooltip** shows only when a name is cut short. The headings' tooltips say Fold or Unfold.
+
+## Release 5.50: ties (2026-10-31)
+
+Round 5's thread A, the owner's ask of 2026-10-30, as the design has it (decisions 245 to 258, without a template's ties, which are release 5.51's). Built before the owner's hand test.
+
+- `docrepo/db.py`: schema version 19, `task_ties`. `docrepo/model.py`: `Tie`, `Task.ties` and `Model.tied_to`.
+- `docrepo/ties.py` (new): the sum (`landing`, `regapped`, `words`), `placement`, `chain`, `tops`, and the same reads from docs.db and from a `Model`, with no imports from `tasks`.
+- `docrepo/tasks.py`: `update_task` takes `ties`, `following` and `leave`; `follow` moves what's tied, and `Logged` says what moved, with `moved_words` in words. `set_key_dates` takes `settings` and `leave`, follows what's tied to a key date that moved, and ends ties to one taken off. `set_discarded` catches up on the way back. `worked_out`: a Due-tied task's Duration moves its Start.
+- `docrepo/edits.py`: `edit_task` splits into `_edit`, which `edit_moves` can roll back; `change_moves` and `key_dates_move` do the same. `Outcome.moved`. `docrepo/save.py` and `docrepo/bulk.py` say what moved.
+- `docrepo/stories.py`, `docrepo/detail.py` and `docrepo/pages.py`: the log's lines and the page's rows.
+- `docrepo/ui/task_forms.py`: `TiePanel`, **Tie…** and the muted dates. `docrepo/ui/browse_window.py`: `ask_move`, with `PreviewDialog`, on Edit task, Quick edit and Plan mode's two drags. `docrepo/ui/quick_edit.py`: tied dates, and asking.
+- `tests/test_ties.py` (new, 110 tests); `test_db.py` follows (1869 pass in all, 1 skipped). Edit task, the tie box, its refusals, the asking window, Quick edit and the task page were drawn and looked at.
+- **Not tested here:** Plan mode's drag with a real mouse, which reaches these paths through `set_dates` and `set_key_date`. Those two are tested directly, and the gesture is in the hand test.
+
+## Decisions (release 5.50)
+
+- Decisions 245 to 247, 249 to 251, 253, 254 and 258, as the design has them. Decision 252 (a template's) and 255 to 257 are release 5.51's.
+- **Judgement calls, for the owner's hand test:**
+  - **A routine task's key dates can be a source,** though its own dates can't. Decision 250 has both "any key date on any task" and "a routine task can't be a source", and only a key date has one date to give.
+  - **A routine task has no ties.** Gaining a recurrence ends its own ties and those to its dates, each logged, and the dates stay. The form says so before it's saved.
+  - **Clearing a source turns two plain dates into a Duration,** so a task keeps its size off the calendar, as one with a Duration does. It stays a Duration once it's back.
+  - **A new tie on two plain dates keeps their length,** as a move does, rather than stretching the task. Typing a date alongside the new tie sets the gap.
+  - **A new tie to a source with no date takes the task off the calendar,** keeping its size, as the tied date is waiting.
+  - **Changing the Duration of a task whose Due alone is tied moves its Start,** so the tie's date stays put.
+  - **With a Duration, clearing a plain date beside a tied one brings it back,** as the tied date keeps the block on the calendar. With no Duration it stays cleared.
+  - **A task can tie to its own key date.**
+  - **The asking window's lines don't change for what's downstream of a task you untick.** What's tied to it stays too, and its hint says so.
+  - **`**` items and a template's own change move what's tied with no message,** as their own messages are about other things.
 
 ## Release 5.49: hours a week, reordering and Duplicate (2026-10-31)
 

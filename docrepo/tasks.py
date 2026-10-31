@@ -8,16 +8,16 @@ calendar are rebuilt in the same transaction, so the calendar always matches.
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Collection, Sequence
-from dataclasses import dataclass
+from collections.abc import Collection, Iterable, Sequence
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any
 
-from docrepo import capacity
+from docrepo import capacity, ties
 from docrepo.config import Settings
 from docrepo.dates import check_date, stamp, to_date, workday_numbers
 from docrepo.db import RECURRENCES, STATES, next_id, transaction
-from docrepo.model import Task, load_tasks
+from docrepo.model import Task, Tie, load_tasks
 from docrepo.pages import num
 from docrepo.schedule import days_in, due_after, length_of, placed, week_of
 
@@ -39,6 +39,8 @@ FLAG_FIELDS = ("urgent", "meeting", "inherit_labels", "plant_event", "calendar_d
 REFERENCES = "references"
 #: Each person's Involvement (release 5.47, decision 196): {(role, person): percent}. Logged under the person's name.
 INVOLVEMENT = "involvement"
+#: A task's ties (release 5.50, decision 245): {"start": Tie or None, "due": Tie or None}. Logged as "Start tie" and "Due tie".
+TIES = "ties"
 #: A link to a template ending or starting, in the status log (release 5.44): its value is the whole sentence.
 TEMPLATE_LINK = "Template link"
 HOUR_FIELDS = ("lead_hours", "assignee_hours", "lead_per_day", "assignee_per_day", "lead_per_week", "assignee_per_week")
@@ -62,6 +64,36 @@ class Change:
     field: str
     from_value: str | None
     to_value: str | None
+
+
+@dataclass
+class Followed:
+    """A task that moved with what it's tied to, and what its status log got (release 5.50)."""
+
+    task: str
+    changes: list[Change]
+
+
+class Logged(list):
+    """What a change logged, and what moved with it (release 5.50): the tasks tied to it that moved, and how many closed ones stayed."""
+
+    def __init__(self, *items) -> None:
+        super().__init__(*items)
+        self.followed: list[Followed] = []
+        self.closed = 0
+
+    def __iadd__(self, other):
+        self.extend(other)
+        self.followed += getattr(other, "followed", [])
+        self.closed += getattr(other, "closed", 0)
+        return self
+
+
+def moved_words(logged: list[Change]) -> str:
+    """What moved with a change, for its message: "Moved 3 tasks with it. 1 closed task stayed."."""
+    moved, closed = len(getattr(logged, "followed", ())), getattr(logged, "closed", 0)
+    parts = [f"Moved {moved} task{'' if moved == 1 else 's'} with it." if moved else "", f"{closed} closed task{'' if closed == 1 else 's'} stayed." if closed else ""]
+    return " ".join(x for x in parts if x)
 
 
 # ---- checking values ----
@@ -351,8 +383,8 @@ def worked_out(task: Task, changes: dict[str, Any], workdays: Collection[int], d
         start_changed, due_changed = start != task.start, due != task.due
         if (start_changed and not start) or (due_changed and not due):
             start, due = None, None
-        elif length_changed:
-            start, due = placed(start, due, days, "duration", workdays, every)
+        elif length_changed:  # a tied Due stays where its tie has it, and the Start moves
+            start, due = placed(start, due, days, "due" if "due" in task.ties and "start" not in task.ties else "duration", workdays, every)
         elif start_changed and due_changed:
             if dragged:
                 due = due_after(to_date(start), days, workdays, every).isoformat()
@@ -378,6 +410,55 @@ def worked_out(task: Task, changes: dict[str, Any], workdays: Collection[int], d
             new[hours] = rate_total(("a day", per_day) if per_day is not None else ("a week", per_week), length, workdays, every)
             calculated.add(hours)
     return new, calculated
+
+
+# ---- ties (release 5.50, decisions 245 to 259; the rules are in ties.py) ----
+def _store_ties(conn: sqlite3.Connection, task_id: str, before: dict[str, Tie], after: dict[str, Tie]) -> list[Change]:
+    """Make a task's ties these, each change logged in words, as "Start tie"."""
+    logged: list[Change] = []
+    for f, name in ties.FIELDS.items():
+        was, now = before.get(f), after.get(f)
+        if was == now:
+            continue
+        conn.execute("DELETE FROM task_ties WHERE task = ? AND field = ?", (task_id, f))
+        if now:
+            conn.execute("INSERT INTO task_ties (task, field, source, key_date, point, amount, unit, direction) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                         (task_id, f, now.source, now.key_date, now.point, now.amount, now.unit, now.direction))
+        logged.append(Change(f"{name} tie", ties.said(conn, was), ties.said(conn, now)))
+    return logged
+
+
+def _end_ties(conn: sqlite3.Connection, where: str, value: object, at: datetime, via: str) -> None:
+    """Take off the ties to something that can't be a source any more. The dates stay, and each status log says so (decision 258)."""
+    for r in conn.execute(f"SELECT task, field FROM task_ties WHERE {where} = ?", (value,)).fetchall():
+        tie = load_tasks(conn, [r["task"]])[r["task"]].ties[r["field"]]
+        change = Change(f"{ties.FIELDS[r['field']]} tie", ties.said(conn, tie), None)
+        conn.execute("DELETE FROM task_ties WHERE task = ? AND field = ?", (r["task"], r["field"]))
+        _log(conn, r["task"], at, via, [change])
+
+
+def follow(conn: sqlite3.Connection, settings: Settings, starts: Iterable[str], at: datetime, via: str, leave: Collection[str] = ()) -> Logged:
+    """Move the tasks in ``starts`` and what follows them, near or far, each after what it's tied to, keeping each gap (decision 246).
+    Closed and discarded tasks never change (decision 185). A task in ``leave``, unticked when asked, keeps its date and takes a new
+    gap (decision 249), so what's tied to it stays too."""
+    workdays = workday_numbers(settings.workdays)
+    out = Logged()
+    for task_id in ties.chain(lambda x: ties.own_followers(conn, x), starts):
+        t = get_task(conn, task_id)
+        if t.discarded:
+            continue
+        changes = ties.placement(t, ties.lands_of(conn, t, workdays), workdays)
+        if not changes:
+            continue
+        if t.state == "Closed":
+            out.closed += 1
+        elif task_id in leave:
+            update_task(conn, settings, task_id, at=at, via=via)
+        else:
+            tie = next(x for f, x in t.ties.items() if f in changes or len(t.ties) == 1)
+            logged = update_task(conn, settings, task_id, at=at, via=f"Follows {ties.source_name(conn, tie)}", following=True, **changes)
+            out.followed.append(Followed(task_id, list(logged)))
+    return out
 
 
 def _blank_task(state: str) -> Task:
@@ -443,27 +524,52 @@ def get_task(conn: sqlite3.Connection, task_id: str) -> Task:
 
 
 def update_task(conn: sqlite3.Connection, settings: Settings, task_id: str, *, at: datetime, via: str, keep_links: bool = False, dragged: bool = False,
-                **changes: Any) -> list[Change]:
+                following: bool = False, leave: Collection[str] = (), **changes: Any) -> Logged:
     """Change a task's fields. Fields not given stay as they are. Returns what changed, as logged.
 
     Closing a task records the day it closed; reopening clears it. Clearing the
     recurrence clears Repeat until too. Dates and totals follow by ``worked_out``, which has ``dragged``. A different value on a
     linked field ends its link, unless ``keep_links`` says the caller sees to them: a template's own change, or Edit task's
     marks. A total worked out from a rate is no different value: the rate is what's stated.
+
+    A date changed by hand keeps its tie with a new gap, unless ``following`` says the tie moved it (decision 247). What's tied to
+    a task moves with its dates, as ``follow`` says, but those in ``leave``. The result says what moved, as ``Logged.followed``.
     """
-    unknown = sorted(set(changes) - set(FIELD_NAMES) - {REFERENCES, INVOLVEMENT})
+    unknown = sorted(set(changes) - set(FIELD_NAMES) - {REFERENCES, INVOLVEMENT, TIES})
     if unknown:
         raise TaskError(f"Not task fields: {', '.join(unknown)}.")
     with transaction(conn):
         task = get_task(conn, task_id)
         refs = _references(changes.pop(REFERENCES, None))
         shares = changes.pop(INVOLVEMENT, None)
+        given_ties = changes.pop(TIES, None)
         new = {k: _normalize(conn, k, v) for k, v in changes.items()}
         if "recurrence" in new and not new["recurrence"]:
             new["repeat_until"] = None
         _check_repeat(new.get("recurrence", task.recurrence), new.get("repeat_until", task.repeat_until))
-        new, calculated = worked_out(task, new, workday_numbers(settings.workdays), dragged)
-        logged: list[Change] = []
+        workdays = workday_numbers(settings.workdays)
+        routine = new.get("recurrence", task.recurrence)  # a routine task has no one date to tie, as it has no Duration
+        tied = {} if routine else dict(task.ties) if given_ties is None else {f: x for f, x in given_ties.items() if x}
+        for f, tie in tied.items():
+            if tie != task.ties.get(f):
+                said = ties.problem(conn, task_id, tie)
+                if said:
+                    raise TaskError(said)
+            if ties.counts(conn, tie) and (not new.get(f, "kept") or (f not in new and tie != task.ties.get(f))):
+                ref = ties.ref_date(conn, tie)
+                day = ties.landing(ref, tie, workdays).isoformat() if ref else None
+                if f in new or len(tied) == 2:  # a tied date cleared by hand goes back (decision 247), and both tied have their own
+                    new[f] = day
+                else:  # a new tie puts its date where it lands, and the rest of the task goes with it (decision 251)
+                    new.update(ties.placement(replace(task, ties={f: tie}), {f: day}, workdays))
+        if len(tied) == 2:
+            new["duration"] = None  # with both tied, the length comes from them (decision 251)
+        elif new.get("duration", task.duration) is not None and any(new.get(f, getattr(task, f)) and ties.counts(conn, x) for f, x in tied.items()):
+            for f in ties.FIELDS:  # a tied date keeps a Duration's block on the calendar, so a plain date cleared comes back with it
+                if f not in tied and f in new and not new[f]:
+                    del new[f]
+        new, calculated = worked_out(task, new, workdays, dragged)
+        logged = Logged()
         columns: dict[str, Any] = {}
         changed: list[str] = []
         for key, name in FIELDS:
@@ -478,6 +584,15 @@ def update_task(conn: sqlite3.Connection, settings: Settings, task_id: str, *, a
         if "state" in columns:
             columns["closed"] = at.date().isoformat() if columns["state"] == "Closed" else None
         _apply_columns(conn, task_id, columns)
+        if not following and new.get("state", task.state) != "Closed":  # a date changed by hand keeps its tie, with a new gap (decision 247)
+            for f, tie in tied.items():
+                day, ref = new.get(f, getattr(task, f)), ties.ref_date(conn, tie)
+                if day and ref and ties.counts(conn, tie) and ties.landing(ref, tie, workdays).isoformat() != day:
+                    tied[f] = ties.regapped(tie, ref, to_date(day), workdays)
+        logged += _store_ties(conn, task_id, task.ties, tied)
+        if routine and not task.recurrence:  # it has no one date to give any more: ties to its key dates stay
+            for r in conn.execute("SELECT DISTINCT task FROM task_ties WHERE source = ? AND key_date IS NULL", (task_id,)).fetchall():
+                _end_own_ties(conn, r["task"], task_id, at, via)
         if shares is not None or any(k in ROLES for k in changed):  # someone kept on keeps their Involvement
             people = {k: new.get(k, getattr(task, k)) for k in ROLES}
             share_lines, share_roles = _apply_involvement(conn, task_id, people, task.involvement, task.involvement if shares is None else shares_of(shares))
@@ -490,7 +605,15 @@ def update_task(conn: sqlite3.Connection, settings: Settings, task_id: str, *, a
             logged += _fallen_behind(conn, task_id, "closed")
         _log(conn, task_id, at, via, logged)
         capacity.rebuild_task(conn, task_id, at.date(), settings)
+        if not following and not task.discarded and ("start" in columns or "due" in columns):
+            logged += follow(conn, settings, ties.own_followers(conn, task_id), at, via, leave)
     return logged
+
+
+def _end_own_ties(conn: sqlite3.Connection, task_id: str, source: str, at: datetime, via: str) -> None:
+    t = get_task(conn, task_id)
+    after = {f: x for f, x in t.ties.items() if not (x.source == source and x.key_date is None)}
+    _log(conn, task_id, at, via, _store_ties(conn, task_id, t.ties, after))
 
 
 def set_discarded(conn: sqlite3.Connection, settings: Settings, task_id: str, reason: str | None, *, at: datetime, via: str) -> Change:
@@ -505,6 +628,9 @@ def set_discarded(conn: sqlite3.Connection, settings: Settings, task_id: str, re
         behind = _fallen_behind(conn, task_id, "discarded") if t.discarded and t.state != "Closed" else []
         _log(conn, task_id, at, via, [change, *behind])
         capacity.rebuild_task(conn, task_id, at.date(), settings)
+        if t.discarded:  # back: it takes a new gap if it fell behind, and what's tied to it catches up with it (decision 258)
+            update_task(conn, settings, task_id, at=at, via=via)
+            follow(conn, settings, ties.every_follower(conn, task_id), at, via)
     return change
 
 
@@ -632,9 +758,11 @@ def _key_date(row: KeyDateRow, task_id: str, done: str | None, pos: int, key_id:
     return KeyDate(key_id, task_id, row.start or None, row.end or None, " ".join(row.description.split()), row.plant, row.deadline, done, pos)
 
 
-def set_key_dates(conn: sqlite3.Connection, task_id: str, rows: Sequence[KeyDateRow], *, at: datetime, via: str) -> list[Change]:
+def set_key_dates(conn: sqlite3.Connection, task_id: str, rows: Sequence[KeyDateRow], *, at: datetime, via: str, settings: Settings | None = None,
+                  leave: Collection[str] = ()) -> Logged:
     """Make a task's key dates these, in this order: new ones added, changed ones changed, those left out taken off, a
-    Done tick set or cleared. Each is logged ("Key date", or "Key date done"); a new order alone isn't. Returns what was."""
+    Done tick set or cleared. Each is logged ("Key date", or "Key date done"); a new order alone isn't. Returns what was.
+    With ``settings``, what's tied to a key date moves with it, and a key date taken off ends its ties (release 5.50)."""
     from docrepo import key_dates
 
     for row in rows:
@@ -645,8 +773,9 @@ def set_key_dates(conn: sqlite3.Connection, task_id: str, rows: Sequence[KeyDate
         if conn.execute("SELECT 1 FROM tasks WHERE id = ?", (task_id,)).fetchone() is None:
             raise TaskError(f"There's no task {task_id}.")
         old = {r["id"]: r for r in conn.execute("SELECT * FROM task_dates WHERE task = ?", (task_id,))}
-        logged: list[Change] = []
+        logged = Logged()
         kept: set[int] = set()
+        moved: list[int] = []
         day = at.date().isoformat()
         for pos, row in enumerate(rows):
             before = old.get(row.id) if row.id is not None else None
@@ -667,15 +796,20 @@ def set_key_dates(conn: sqlite3.Connection, task_id: str, rows: Sequence[KeyDate
                          (kd.start, kd.end, kd.description, int(kd.plant), int(kd.deadline), kd.done, pos, kd.id))
             if key_dates.log_text(was) != key_dates.log_text(kd):
                 logged.append(Change("Key date", key_dates.log_text(was), key_dates.log_text(kd)))
+            if (was.start, was.end) != (kd.start, kd.end):
+                moved.append(kd.id)
             if bool(was.done) != bool(kd.done):
                 logged.append(Change("Key date done", None if kd.done else key_dates.log_text(kd), key_dates.log_text(kd) if kd.done else None))
         for key_id, r in old.items():
             if key_id not in kept:
+                _end_ties(conn, "key_date", key_id, at, via)
                 conn.execute("DELETE FROM task_dates WHERE id = ?", (key_id,))
                 was = _key_date(KeyDateRow(r["start_day"], r["end_day"], r["description"], bool(r["plant"]), bool(r["deadline"])),
                                 task_id, r["done"], r["pos"], key_id)
                 logged.append(Change("Key date", key_dates.log_text(was), None))
         _log(conn, task_id, at, via, logged)
+        if settings is not None:
+            logged += follow(conn, settings, ties.key_followers(conn, moved), at, via, leave)
     return logged
 
 
@@ -686,7 +820,8 @@ def key_date_rows(conn: sqlite3.Connection, task_id: str) -> list[KeyDateRow]:
 
 
 def add_key_dates(conn: sqlite3.Connection, task_id: str, rows: Sequence[KeyDateRow], *, at: datetime, via: str) -> list[Change]:
-    """Add key dates at the end of a task's own, as a capture's ``**key date,`` lines do. Returns what was logged."""
+    """Add key dates at the end of a task's own, as a capture's ``**key date,`` lines do. Returns what was logged. A new one has
+    nothing tied to it yet, so nothing moves."""
     return set_key_dates(conn, task_id, [*key_date_rows(conn, task_id), *rows], at=at, via=via)
 
 

@@ -563,7 +563,7 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
                     update[key] = [person(w) if isinstance(w, Who) else w for w in update[key]]
             changes = tasks.update_task(conn, settings, t, at=at, via=via, **update)
             if draft.update_key_dates is not None:  # its key dates as changed in the window (release 5.31)
-                changes += tasks.set_key_dates(conn, t, draft.update_key_dates, at=at, via=via)
+                changes += tasks.set_key_dates(conn, t, draft.update_key_dates, at=at, via=via, settings=settings)
             if not is_new and not keep and not changes and not targets:
                 raise SaveError("There's nothing to save yet. Change a field, add an agenda, or type the update in the content text.", "content")
         if capture_id:
@@ -672,6 +672,9 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
     except OSError as e:
         result.problems.append(f"The generated pages weren't all updated ({type(e).__name__}).")
     result.message = _message(conn, draft, result, targets, bool(draft.new_task.title.strip()))
+    moved = tasks.moved_words(result.changes)  # no one to ask here, so it moves them and says so (decision 249)
+    if moved:
+        result.message += f" {moved}"
     log.info("capture %s saved: %s", capture_id or "(none kept)", _log_line(draft, result, targets, [d for d, _, _ in documents]))
     return result
 

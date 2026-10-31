@@ -15,7 +15,7 @@ from pathlib import Path
 from docrepo.safe_fs import SafeFS
 
 DB_FILE = Path("System") / "docs.db"
-SCHEMA_VERSION = 18
+SCHEMA_VERSION = 19
 
 #: Each kind of ID: its letter and how many digits follow it.
 ID_FORMATS = {"T": 6, "C": 6, "D": 6, "P": 3}
@@ -452,6 +452,23 @@ ALTER TABLE tasks ADD COLUMN lead_per_week REAL CHECK (lead_per_week IS NULL OR 
 ALTER TABLE tasks ADD COLUMN assignee_per_week REAL CHECK (assignee_per_week IS NULL OR assignee_per_week >= 0);
 ALTER TABLE template_rows ADD COLUMN lead_per_week REAL CHECK (lead_per_week IS NULL OR lead_per_week >= 0);
 ALTER TABLE template_rows ADD COLUMN assignee_per_week REAL CHECK (assignee_per_week IS NULL OR assignee_per_week >= 0);
+""",
+    19: """
+-- Ties (release 5.50, the task templates design's decisions 245 to 259): a task's Start or Due set from another date. Each date has
+-- one at most. The source is a task, and its key date when key_date is set. What a tie works out is kept in tasks.start and tasks.due.
+CREATE TABLE task_ties (
+    task      TEXT NOT NULL REFERENCES tasks(id),
+    field     TEXT NOT NULL CHECK (field IN ('start', 'due')),
+    source    TEXT NOT NULL REFERENCES tasks(id),
+    key_date  INTEGER REFERENCES task_dates(id),
+    point     TEXT NOT NULL CHECK (point IN ('start', 'end')),
+    amount    INTEGER NOT NULL CHECK (amount >= 0),
+    unit      TEXT NOT NULL CHECK (unit IN ('workdays', 'weeks')),
+    direction TEXT NOT NULL CHECK (direction IN ('before', 'after')),
+    PRIMARY KEY (task, field)
+);
+CREATE INDEX task_ties_source ON task_ties (source);
+CREATE INDEX task_ties_key_date ON task_ties (key_date);
 """,
 }
 

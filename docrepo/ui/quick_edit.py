@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo import edits, planning
+from docrepo import edits, planning, ties
 from docrepo.dates import workday_numbers
 from docrepo.db import RECURRENCES
 from docrepo.model import Model
@@ -158,6 +158,7 @@ class QuickEdit(QWidget):
         self.warned = False
         self._drag_from = None
         self._setting = False
+        self.ask_move = None  # the browse window's, for a move that reaches another tree (release 5.50, decision 249)
         self.setObjectName("quickEdit")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setWindowTitle(f"Quick edit: {self.task.title}")
@@ -343,6 +344,10 @@ class QuickEdit(QWidget):
             if key != skip and (f.value() or "") != getattr(v, key):
                 f.set_value(getattr(v, key) or None)
             set_filled(f.line, key in filled)
+            tie = self.task.ties.get(key)  # setting a tie is Edit task's, and typing here gives it a new gap (decision 254)
+            set_filled(f.line, tie is not None, name="worked")
+            if tie:
+                f.line.setToolTip(f"Tied: {ties.words(tie, ties.name_in(self.model, tie))}. Change it, and the tie stays with a new gap.")
         if skip != "deadline_desc" and self.desc.text() != v.deadline_desc:
             self.desc.setText(v.deadline_desc)
         set_filled(self.desc, "deadline_desc" in filled)
@@ -365,6 +370,9 @@ class QuickEdit(QWidget):
         self.calendar.setChecked(v.calendar_days)
         grey = None if v.duration is not None else planning.length(v, self.workdays)
         self.duration.setPlaceholderText(str(grey) if grey else "")
+        both = len(self.task.ties) == 2
+        self.duration.setEnabled(not both)
+        self.duration.setToolTip("Both dates are tied, so the length comes from them." if both else "")
         self.plant_event.setChecked(v.plant_event)
         set_filled(self.plant_event, "plant_event" in filled)
         self._draw_chips()
@@ -444,6 +452,8 @@ class QuickEdit(QWidget):
     def _place(self, edited: str) -> None:
         """With a Duration, a date moves the block, and the Duration moves Due, or Start if there's no Start (decision 191)."""
         b = self.base
+        if edited == "duration" and "due" in self.task.ties and "start" not in self.task.ties:
+            edited = "due"  # a tied Due stays where its tie has it, and the Start moves
         start, due = placed(b.start or None, b.due or None, b.duration, edited, self.workdays, b.calendar_days)
         b.start, b.due = start or "", due or ""
 
@@ -494,8 +504,15 @@ class QuickEdit(QWidget):
             self.hide()
             return None
         try:
+            leave: set[str] = set()
+            if self.ask_move is not None:
+                moves = edits.edit_moves(self.ctx.conn, self.ctx.settings, self.task_id, self.ctx.now(), **planning.edit_values(v))
+                asked = self.ask_move(self.task_id, moves, self)
+                if asked is None:  # Back: nothing saved, and the window stays as it is
+                    return None
+                leave = asked
             out = edits.edit_task(self.ctx.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, self.task_id, self.ctx.now(),
-                                  **planning.edit_values(v))
+                                  **planning.edit_values(v), leave=leave)
         except ValueError as e:
             return self._say(str(e))
         self.ctx.notify("Quick edit", f"{self.task.title}: {out.message}" + (" " + " ".join(out.problems) if out.problems else ""))

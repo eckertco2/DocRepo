@@ -325,6 +325,7 @@ QFrame#personChip QLabel { font-size: ${caption}pt; background: transparent; }
 QFrame#personChip QLabel#personShare { color: $accent; font-weight: 600; }
 QFrame#personChip QToolButton { border: none; background: transparent; padding: 0 2px; font-size: ${caption}pt; }
 QFrame#involvementBox { border: 1px solid $stroke_strong; background: $content; }
+QFrame#tieBox { border: 1px solid $stroke; border-radius: 4px; background: $content; }
 QWidget#chips { border: 1px solid $stroke; border-bottom: 1px solid $control; border-radius: 4px; background: $content; }
 QWidget#chips QLineEdit { background: transparent; border: none; padding: 4px 2px; min-height: 20px; }
 QWidget#chips QLineEdit:focus { border: none; }

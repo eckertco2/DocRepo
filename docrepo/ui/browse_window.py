@@ -51,7 +51,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo import activity, bulk, capacity, db, edits, items, key_dates, notes_page, people, pins, priorities, prompts, search
+from docrepo import activity, bulk, capacity, db, edits, items, key_dates, notes_page, people, pins, priorities, prompts, search, ties
 from docrepo.lists import key_dates_due, reminders_due
 from docrepo.agenda import AgendaError
 from docrepo.captures import capture_folder, capture_md_path
@@ -75,7 +75,7 @@ from docrepo.ui.look import LOOK, Help, KeyTips, set_hints, tip, with_key
 from docrepo.ui.nav_pane import WIDTH as NAV_WIDTH, NavPane
 from docrepo.ui.page_view import PageView
 from docrepo.ui.task_pane import TaskPane
-from docrepo.ui.templates_view import TemplatesPane
+from docrepo.ui.templates_view import PreviewDialog, PreviewEntry, TemplatesPane
 from docrepo.ui.priorities_view import PrioritiesView
 from docrepo.ui.palette import Command, CommandPalette
 from docrepo.ui.style import FORMAT_BAR_STYLE, NOTES_STYLE, page_css, style_sheet
@@ -1778,17 +1778,72 @@ class BrowseWindow(QWidget):
         for row in rows:
             if row.id == key_id:
                 row.start, row.end = start, end
-        out = self._do(lambda: edits.set_key_dates(self.conn, self.ctx.data_root, self.ctx.fs, task_id, rows, self._now()), ("task", task_id))
+        leave = set() if said.endswith("back as it was.") else self._left_by_move(lambda: edits.key_dates_move(self.conn, self.ctx.settings, task_id, rows, self._now()), task_id)
+        if leave is None:
+            return self._move_taken_back()
+        out = self._do(lambda: edits.set_key_dates(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, task_id, rows, self._now(), leave), ("task", task_id))
         if isinstance(out, edits.Outcome) and not out.problems and out.message != "Nothing changed.":
-            self.say(said)
+            self.say(f"{said} {out.moved}".strip())
+        return None
 
     def set_timeline_dates(self, task_id: str, start: str | None, due: str | None, said: str) -> None:
         """A Plan mode drop on the timeline, or Ctrl+Z (release 5.30, decision 136): the dates saved and logged, as Edit
         task's are. A task with a Duration keeps its days when it's moved, and takes the new length when it's stretched."""
+        leave = set() if said.endswith("back as they were.") else self._left_by_move(
+            lambda: edits.change_moves(self.conn, self.ctx.settings, task_id, self._now(), start=start, due=due, dragged=True), task_id)
+        if leave is None:
+            return self._move_taken_back()
         out = self._do(lambda: edits.change_task(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, task_id, self._now(),
-                                                 start=start, due=due, dragged=True), ("task", task_id))
+                                                 start=start, due=due, dragged=True, leave=leave), ("task", task_id))
         if isinstance(out, edits.Outcome) and not out.problems:
-            self.say(said if out.message != "Nothing changed." else out.message)
+            self.say(f"{said} {out.moved}".strip() if out.message != "Nothing changed." else out.message)
+        return None
+
+    # ---- a move that reaches another tree asks first (release 5.50, decision 249) ----
+    def ask_move(self, task_id: str, followed: list, parent: QWidget | None = None) -> set[str] | None:
+        """Every task a move would take with it, ticked, when any of them is outside the task's own tree. Returns those to leave, which
+        keep their dates, stay tied and take a new gap, or None for Back."""
+        m, today = self.model(), self.today()
+        mine = ties.tops(m.parents_of, task_id)
+        away = [f for f in followed if not ties.tops(m.parents_of, f.task) & mine]
+        if not away:
+            return set()
+
+        def shown(value: str | None) -> str:
+            return long_date(to_date(value), today) if value and value != "None" else "None"
+
+        def entry(f) -> PreviewEntry:
+            t, top = m.task(f.task), sorted(ties.tops(m.parents_of, f.task))[0]
+            return PreviewEntry(f.task, t.title if top == t.id else f"{t.title} · {m.task(top).title}",
+                                [f"{c.field}: {shown(c.from_value)} → {shown(c.to_value)}" for c in f.changes if c.field in ties.FIELDS.values()], state=t.state,
+                                off_lines=["Keeps its date, stays tied, and takes a new gap."])
+
+        n, far = len(followed), len(away)
+        dialog = PreviewDialog(parent or self, f"This move reaches {far} task{'' if far == 1 else 's'} in other trees",
+                               f"{m.task(task_id).title} moved. {n} task{' is' if n == 1 else 's are'} tied to it, near or far.", [entry(f) for f in followed],
+                               "An unticked task keeps its date, stays tied, and takes a new gap, and what's tied to it stays too. Each change goes in the "
+                               "task's status log. Back puts this move back.",
+                               lambda ticked: f"Move {len(ticked)} task{'' if len(ticked) == 1 else 's'}" if ticked else "Move only this one")
+        self._move_dialog = dialog  # kept, so tests can reach it
+        if not self.run_dialog(dialog):
+            return None
+        return {f.task for f in followed} - set(dialog.ticked())
+
+    def _left_by_move(self, moves: Callable[[], list], task_id: str) -> set[str] | None:
+        """What to leave behind, having asked if need be. A change that isn't allowed says why when it's made."""
+        try:
+            followed = moves()
+        except (TaskError, PeopleError, AgendaError, edits.EditError, ValueError):
+            return set()
+        return self.ask_move(task_id, followed)
+
+    def _move_taken_back(self) -> None:
+        """Back, from asking first after a drag on the timeline: as if it hadn't happened."""
+        if self.timeline.undo:
+            self.timeline.undo.pop()
+        self.refresh(render=False)
+        self.render_all()
+        self.say("Nothing moved.")
 
     def quick_edit(self, task_id: str, near) -> None:
         """Quick edit (release 5.30, item 55): the small window for one task's dates, people and hours, beside its bar."""
@@ -1798,6 +1853,7 @@ class BrowseWindow(QWidget):
             self.quick_window.close()
             self.quick_window.deleteLater()
         self.quick_window = QuickEdit(self.ctx, task_id, self)
+        self.quick_window.ask_move = self.ask_move
         self.quick_window.saved.connect(lambda x: (self.refresh(render=False), setattr(self, "sel", ("task", x)), self.render_all()))
         self.quick_window.open_task.connect(self.go_task)
         self.quick_window.show_near(near)
@@ -3074,20 +3130,27 @@ class BrowseWindow(QWidget):
                                 reference_fields=self.ctx.settings.reference_fields, today=self.today(), checklist=checklist,
                                 link=self.templates.link_of(task_id), workdays=self._workdays())
         self._edit_dialog = dialog  # kept, so tests can reach it
-        try:
-            accepted = self.run_dialog(dialog)
-        finally:
-            notes.save_now()
-        if accepted:
-            self.save_task_edit(task_id, dialog.values())
-        else:
-            self.templates.after_form(task_id, dialog)
+        while True:
+            try:
+                accepted = self.run_dialog(dialog)
+            finally:
+                notes.save_now()
+            if not accepted:
+                self.templates.after_form(task_id, dialog)
+                return
+            if self.save_task_edit(task_id, dialog.values()):
+                return  # otherwise it's Back from asking what the move would reach: the form again, as it was
 
     def _workdays(self) -> frozenset[int]:
         return workday_numbers(self.ctx.settings.workdays)
 
-    def save_task_edit(self, task_id: str, values: dict) -> None:
-        self._do(lambda: edits.edit_task(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, task_id, self._now(), **values))
+    def save_task_edit(self, task_id: str, values: dict) -> bool:
+        """Save Edit task. False when the move would reach another tree, and the owner went Back rather than saving."""
+        leave = self._left_by_move(lambda: edits.edit_moves(self.conn, self.ctx.settings, task_id, self._now(), **values), task_id)
+        if leave is None:
+            return False
+        self._do(lambda: edits.edit_task(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, task_id, self._now(), **values, leave=leave))
+        return True
 
     def _ask_text(self, title: str, label: str, text: str) -> str | None:
         value, ok = QInputDialog.getText(self, title, label, text=text)

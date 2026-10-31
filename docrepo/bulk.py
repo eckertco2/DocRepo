@@ -141,6 +141,9 @@ def summary(outcomes: list[TaskOutcome], done: bool = False) -> str:
         text = f"Changed {len(changed)} task{'' if one else 's'}: {logs}."
     else:
         text = f"{len(changed)} task{'' if one else 's'} change{'s' if one else ''}, {logs}."
+    tied = sum(len(getattr(o.changes, "followed", ())) for o in outcomes)  # release 5.50: what's tied to them moves too
+    if tied:
+        text += f" Moved {tied} tied task{'' if tied == 1 else 's'} with {'it' if one else 'them'}." if done else f" {tied} tied task{'' if tied == 1 else 's'} move{'s' if tied == 1 else ''} with {'it' if one else 'them'}."
     skipped = [o for o in outcomes if o.problem]
     if skipped:
         n = len(skipped)

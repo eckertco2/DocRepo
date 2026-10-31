@@ -13,6 +13,7 @@ from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import quote
 
+from docrepo import ties
 from docrepo.dates import day_diff, days_text, minutes, to_date
 from docrepo.model import PRIORITY_NAMES, TODAY, TYPE_NAMES, Capture, FileEntry, Model, StatusEntry, Task, is_person
 from docrepo.safe_fs import SafeFS
@@ -124,6 +125,11 @@ class Pages:
         ]
         if t.duration:  # release 5.46
             rows.append(("Duration", f"{t.duration} day{'' if t.duration == 1 else 's'}, through weekends" if t.calendar_days else f"{t.duration} workday{'' if t.duration == 1 else 's'}"))
+        for f, tie in t.ties.items():  # release 5.50
+            rows.append((f"{ties.FIELDS[f]} tied", ties.words(tie, ties.name_in(self.m, tie))))
+        tied = self.m.tied_to(t.id)
+        if tied:
+            rows.append(("Tied to this", ", ".join(link(x.id) for x in tied)))
         if t.reminder:
             rows.append(("Reminder", t.reminder))
         rows += list(t.references.items())  # its reference fields (release 5.9, M0034)

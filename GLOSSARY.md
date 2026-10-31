@@ -76,6 +76,9 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Runs through weekends**: a tick saying a task's days are every day, not only workdays.
 - **Hours a day**: a role's hours stated as a rate (**h a day**), whose total (**h in all**) is the rate times the task's days. The total is what the lists, the timeline and Capacity read.
 - **Hours a week**: the same with **h a week**, whose total is the rate times the weeks in the task's days, part weeks included. A week is the workdays in Settings, or 7 days with Runs through weekends.
+- **Tie**: a task's Start or Due set from another date: a number of workdays or weeks, before or after another task's start or end, or a key date's. When the source moves, the date moves and keeps its gap. Changing the date by hand keeps the tie, with a new gap.
+- **Source** (of a tie): the task or key date a tie counts from.
+- **Gap** (of a tie): the number of workdays or weeks between a tied date and its source.
 - **Involvement**: the percentage of a role's hours that land on one person on one task. 100% by default, and not a split.
 - **Preview** (of a template change): the window saying which tasks or trees a change to a template would reach, each with a tick, before it's made. An unticked task keeps its value and stops following.
 - **Changes** (of a template): the list on a template's page of what was changed and what it did to its tasks.

@@ -113,6 +113,7 @@ QFrame#personChip:focus { border: 1px solid #1d5e98; }
 QFrame#personChip QToolButton { border: none; background: transparent; padding: 0 2px; }
 QFrame#personChip QLabel#personShare { color: #1d5e98; font-weight: 600; }
 QFrame#involvementBox { border: 1px solid #b8c1cb; background: #ffffff; }
+QFrame#tieBox { border: 1px solid #b8c1cb; background: #ffffff; }
 QWidget#chips { border: 1px solid #b8c1cb; border-radius: 4px; background: #ffffff; }
 QWidget#chips QLineEdit { background: transparent; border: none; }
 QLineEdit[filled="true"], QPlainTextEdit[filled="true"], QComboBox[filled="true"] { background: #fcefcf; border: 1px solid #875700; }

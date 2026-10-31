@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from urllib.parse import quote
 
-from docrepo import capacity, items, markup, notes_page
+from docrepo import capacity, items, markup, notes_page, ties
 from docrepo.dates import ago, days_words, long_date, monday_of, short, to_date
 from docrepo.links import NO_TEXT, is_link
 from docrepo.model import PRIORITY_NAMES, TODAY, TYPE_NAMES, Capture, Model, Task, is_person
@@ -406,6 +406,22 @@ class Pages:
         if t.duration:  # release 5.46
             rows.append(("Duration", esc(f"{t.duration} day{'' if t.duration == 1 else 's'}, through weekends" if t.calendar_days
                                          else f"{t.duration} workday{'' if t.duration == 1 else 's'}")))
+        for f, tie in t.ties.items():  # release 5.50: "3 workdays after Line 2 outage ends", linked
+            source = self.m.tasks.get(tie.source)
+            name = link(f"task:{tie.source}", source.title) if source else "a task"
+            if tie.key_date is not None:
+                name += esc(ties.name_in(self.m, tie)[len(source.title):]) if source else ""
+            waits = "" if ties.ref_in(self.m, tie) else note("Waiting for that date")
+            rows.append((f"{ties.FIELDS[f]} tied", ties.words(tie, name) + (' <span class="rel">discarded</span>' if source and source.discarded else "") + waits))
+        tied = self.m.tied_to(t.id)
+        if tied:
+            mine = ties.tops(self.m.parents_of, t.id)
+
+            def named(x: Task) -> str:
+                top = next(iter(ties.tops(self.m.parents_of, x.id)))
+                other = "" if ties.tops(self.m.parents_of, x.id) & mine or top == x.id else f' <span class="rel">{esc(self.m.task(top).title)}</span>'
+                return link(f"task:{x.id}", x.title) + other
+            rows.append(("Tied to this", ", ".join(named(x) for x in tied[:5]) + (f' <span class="rel">and {len(tied) - 5} more</span>' if len(tied) > 5 else "")))
         if open_ and t.reminder:
             r = to_date(t.reminder)
             rows.append(("Reminder", f'{esc(long_date(r, today))} <span class="rel">{ago(r, today) if r < today else days_words(r, today)}</span>'))

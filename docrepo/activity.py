@@ -173,7 +173,7 @@ class Activity:
                 continue
             text = ("Status cleared." if is_none(e.to_value) else e.to_value or "") if e.field == "Current status" \
                 else self.change_text(e.field, e.from_value, e.to_value)
-            facts = [WHERE.get(e.via, f"By {e.via}")] if e.via and e.via != "Browse tool" and not re.match(r"C\d", e.via) else []
+            facts = [WHERE.get(e.via, e.via if e.via.startswith("Follows ") else f"By {e.via}")] if e.via and e.via != "Browse tool" and not re.match(r"C\d", e.via) else []
             out.append(Line(f"e:{i}", e.at[:16], e.task, e.task, ["change"], CHANGE_CHIPS.get(e.field, "Changed"), text, facts, ("task", e.task)))
         # The notes page (release 5.25, decision 111): a line for each day the owner edited a task's page. Nothing goes
         # into the status log for it (decision 90).
