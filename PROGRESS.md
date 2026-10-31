@@ -50,6 +50,8 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.33.1 | Add selected Outlook email copies the email whole, past Outlook's guard; a hotkey for it; and the category's colour on Outlook's list (decision 26 as the owner changed it) | Built 2026-10-28; on GitHub 2026-10-28. Next: testing on the corporate computer |
 | 5.34 | The Task view (the design workspace's task overview design, decisions 156 to 167; round 2's item 34, M0043, with M0025 and M0026): a window of its own for one task, built for finding its documents, with Overview, a search-as-you-type box with the best match chosen, the kinds, filters and typed filters, the outline of subtasks, the preview, and its keys | Built 2026-10-29, after the owner approved the mockup; hand-tested by the owner and on GitHub 2026-10-29. Next: testing on the corporate computer with `release-5-34-and-5-35-test.md` |
 | 5.35 | The Task view's Open (decision 158), its files' text as a second tier, pins and what was opened (decisions 159 and 160), schema version 13 | Built 2026-10-29, with 5.34; hand-tested by the owner and on GitHub 2026-10-29. Next: as 5.34 |
+| 5.36 | Small fixes from the voice memos of 2026-10-30 (round 5, thread E; decisions 235 to 238): Shift+Tab really moves a list item back, the content text stays as wide as its box after the window has been pinned, labels on the task tree's rows, and reminders on Today | Built 2026-10-30, without a mock. Next: the owner's hand test |
+| 5.37 | Notes in the Task view (round 5, thread E, item 78; decisions 239 to 244): a Notes page tab with the task's whole Notes frame, a preview beside it, and the same page live in the browse tool too. No schema change | Built 2026-10-30, without a mock. Next: the owner's hand test |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
 ## Decisions
@@ -484,6 +486,51 @@ The visual overhaul's O10, designed and mocked in the parent workspace (`docs/ui
   - **No button group:** the pane marks the open view itself, so that no row is marked while searching, and a click on the open view keeps it marked.
   - **The totals that left the sidebar** are beside their views' titles ("14 open", "7 active"), as `sidebar.md` said they'd be.
   - **The tooltip** shows only when a name is cut short. The headings' tooltips say Fold or Unfold.
+
+## Release 5.37: notes in the Task view (2026-10-30)
+
+From the owner's voice memos of 2026-10-30 (the design workspace's round 5 plan, thread E, item 78). The Task view's design left the notes page's editor off on purpose, for the task page to be where the story is read and written. This changes that one thing: Overview, with the cursor in the search box, is still what the window opens on.
+
+- **The tab (decisions 239 and 240).** Notes page, Ctrl+6, the sixth of the kinds' tabs, shows the page of the task picked in the outline in place of the list: Whole task is the top task's own page, and a subtask's is its own, its name in the frame's heading. `kind` holds it (`PAGE`), so anything that picks another kind leaves the page. The Type, Date and From row and the chips go while it shows, and the preview button moved up to the tabs' row, so it's in one place on every tab.
+- **The frame (decision 243).** `TaskPane` again, with its facts and history hidden (`notes_only`), made the first time the tab is opened, so the window opens as fast as it did. `BrowseWindow.wire_notes` connects a page's signals for either window, and the notes handlers (`load_notes`, `_save_notes`, `_picture_pasted`, `_files_dropped`, `_save_folds`, `_save_summary_folded`, `_notes_menu`, `page_history`) take the pane they're for, each saying its messages in that pane's window. `note_panes` and `save_open_notes` are for what has to save every open page first (Add again, Discard, Page history). Edit task takes its checklist from whichever open page has the task. A file dropped on the page goes on the page; an email or a link dropped there goes to the capture window, as anywhere else in the window, not in as text, which is what the task page's editor does with an email's drag.
+- **The preview (decision 241).** Hidden on the tab until a caption, file line or picture is clicked, then that thing's preview and buttons, in this window. It keeps its own on or off (`page_preview`), so the list's is as you left it. What isn't this task's opens in the browse tool, as it does from the task page.
+- **Search and jumps (decision 242).** What's typed in the box shows results in place of the page, and Esc, or emptying the box, comes back (`back_to_page`). Open on the notes page and Enter on a note or update open its block here, on its task's page (`open_note`); a note also has Open capture now. Esc in the page goes to the box, and Tab, Down or Enter from the box go into the page.
+- **Two windows (decision 244).** `_page_changed`: a save in one window puts the page in any other showing it at once, through `load_notes`, which merges if that one has unsaved typing, as it already does for a capture arriving. A Task view marks its records `stale` on any page's save and reads them when it next draws a list, so typing doesn't redraw it. That also ends a small gap: an open Task view didn't hear of a save on the task page until the next refresh.
+- **The header's height.** On opening, the Task view's header was fitted to the width it had before the layout ran, so it stood 66 px taller than its text until the first resize. It's fitted after the layout now, which gives that room to whatever's below it. It was like this from 5.34.
+- **Measured** at the window's usual 1280 px: the page is 999 px wide alone, and 582 px with the preview on. The frame stays usable at 1,000 px wide (the format bar needs 532 px). Tests: `tests/test_task_view_notes.py`, over the sample data; `tests/test_task_view.py` for the header.
+
+No schema change. 1103 pass in all, 1 skipped.
+
+## Decisions (release 5.37)
+
+Taken as recommended on 2026-10-30.
+
+- **Decision 239, where it sits:** a sixth tab, Notes page, Ctrl+6, after Subtasks, with the editor in the list's place and the Type, Date and From row gone while it shows. The window still opens on Overview with the cursor in the box. With the caret in the page, Ctrl+1 stays the checklist key and Alt+Shift+Up and Down move lines; `RichEdit` already claims them ahead of the window's shortcuts. Not an entry in the outline: the outline picks which task, and the tab picks what to show.
+- **Decision 240, which page:** the task picked in the outline, with no roll-up of subtasks' pages. Notes and updates still searches across the branch.
+- **Decision 241, the right pane:** hidden on the Notes page until something on it is clicked, which shows its preview here instead of jumping to the browse tool. Ctrl+Space shows or hides it.
+- **Decision 242, search and jumps:** the box keeps working as it does on every tab, and Esc comes back to the page. Open on the notes page and Enter on a note open it here. The Task page button stays, for the status log and Details. No Find within the page in this release.
+- **Decision 243, what comes with it:** the whole Notes frame: the format bar, Checklist summary, ⋯ menu, tables, pasted pictures and dropped files.
+- **Decision 244, the same page in two windows:** both can edit it. Each saves 0.8 seconds after typing stops and when the caret leaves, and the other updates at once. Ctrl+Z undoes only what was typed in that window since it last updated. Typing in both within the same 0.8 seconds isn't merged and the last save wins; with one keyboard that shouldn't come up, and each day's version is in Page history.
+- **Left as they are, for the owner's call:** folding a heading in one window doesn't fold it in the other until that one next loads the page, as folds are saved per task and read on loading. An email dragged onto the task page's editor still comes in as text.
+
+## Release 5.36: small fixes (2026-10-30)
+
+From the owner's voice memos of 2026-10-30 (the design workspace's round 5 plan, thread E, items 74 to 77). Both bugs were reproduced first, with real key presses and the widths measured, and each test failed before its fix.
+
+- **Shift+Tab (item 74).** On a list line, Tab and Shift+Tab changed the level in the markup, so saved text was always right, but on screen Shift+Tab moved the words further in, and Tab two levels' worth. Qt's `QTextList.remove` hands the list's indent to the line, and a line's indent and its list's add up. `RichEdit.leave_list` takes a line out with no indent of its own, and `_unlist`, `indent_item`, `toggle_checklist` and meeting notes' Add open items use it. A level in or out is now one step of undo. Alt+Shift+Left and Right share the code and the fix. Tests: `tests/test_markup.py`, measuring where the words are.
+- **The content text's width (item 75).** The pinned window's box shows the capture window's own document, and a document has one width, which any box showing it sets when its scroll bar comes or goes, even a hidden box. So once the window had been pinned, until DocRepo restarted, the full window's text could shrink to the pinned box's 290 px, about a third of the box: at once on coming back, or a few lines into typing, when the text outgrew the small box. It came back when the full box's own width changed (its scroll bar, or the window's width). The other way round, the hidden full box could make the pinned box's text run off its right edge. `RichEdit.show_text_of` marks both boxes: a hidden one holds its scroll bar as it is, and one coming back takes the width. A box that doesn't share its document is as it was, and a window that's never been pinned never showed this. Tests: `tests/test_pin_window.py`, typing line by line through a pin, Esc, a save and F11.
+- **Labels on the task tree's rows (item 76, decision 235).** `BrowseWindow._label_words`. Tests: `tests/test_browse_window.py`.
+- **Reminders on Today (item 77, decisions 236 to 238).** `lists.reminders_due`, `BrowseWindow._today_reminder_rows`, and `edits.clear_reminder`'s `via`, so a Clear from Today says so in the status log. Tests: `tests/test_browse_window.py`, `tests/test_today.py`.
+
+No schema change. 1057 pass in all, 1 skipped.
+
+## Decisions (release 5.36)
+
+- **Decision 235, labels on the rows:** the task's own labels, as quiet grey words after its title and chips. Not chips, which would compete with Urgent and the state. Not the ones it inherits, or every subtask would repeat its parent's. Not on a dimmed parent, nor the label its section is named for under Group by. On the task tree only, with no setting to turn them off.
+- **Decision 236, which reminders:** those whose day has come, today or before. One still to come stays on the Reminders list until its day, so it isn't on Today early.
+- **Decision 237, where:** under a heading of their own, Reminders, between Today's items and Due in the next 7 days, oldest first, and only while there are any. Mine only doesn't touch them, and they don't count in Today's number.
+- **Decision 238, what a row does:** like a key date's row, a chip, its date ("3 d ago", "Today") and links: Add to Today (not when it's on Today already) and Clear. Adding it doesn't clear it, and Clear is in the status log as "Today". A task can be on both Reminders and Due in the next 7 days, as they say different things.
+- **Left as they were, for the owner's call:** Tab on a line of text types a tab, as Shift+Tab does nothing there; with several lines selected, Tab and Shift+Tab move only the line the caret is on; and a list item moves without the items under it. OneNote does all three differently.
 
 ## Releases 5.34 and 5.35: the Task view (2026-10-29)
 

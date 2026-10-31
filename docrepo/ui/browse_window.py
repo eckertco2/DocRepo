@@ -52,7 +52,7 @@ from PySide6.QtWidgets import (
 )
 
 from docrepo import activity, bulk, capacity, db, edits, items, key_dates, notes_page, people, pins, priorities, prompts, search
-from docrepo.lists import key_dates_due
+from docrepo.lists import key_dates_due, reminders_due
 from docrepo.agenda import AgendaError
 from docrepo.captures import capture_folder, capture_md_path
 from docrepo.dates import long_date, short, to_date
@@ -408,17 +408,7 @@ class BrowseWindow(QWidget):
         for view in (self.task_pane.top, self.task_pane.bottom):
             view.anchorClicked.connect(self.on_link)
         self.task_pane.top.layout_changed.connect(self._page_width_changed)
-        notes = self.task_pane.notes
-        notes.changed.connect(self._save_notes)
-        notes.open_ref.connect(self._open_ref)
-        notes.message.connect(self.say)
-        notes.folds_changed.connect(self._save_folds)
-        # Pictures pasted and files dropped on the page (release 5.27, decisions 124 to 126), and where a picture's file is.
-        notes.picture_path = lambda doc: edits.source_of(self.ctx.data_root, self.model(), doc) if doc in self.model().documents else None
-        notes.image_pasted.connect(self._picture_pasted)
-        notes.files_dropped.connect(self._files_dropped)
-        self.task_pane.notes_menu.connect(self._notes_menu)
-        self.task_pane.summary.folded.connect(self._save_summary_folded)
+        self.wire_notes(self.task_pane, self.say, self.open_ref)
         self.detail_stack.addWidget(self.task_pane)
         dl.addWidget(self.detail_stack, 1)
         self.detail = detail
@@ -894,6 +884,12 @@ class BrowseWindow(QWidget):
         due = f'<p align="right" style="{colour}">{esc(cell.text)}{mark}</p>' if cell else ""
         return [title + chips + extra, state_chip(t.state), due]
 
+    def _label_words(self, task_id: str, skip: str = "") -> str:
+        """After a title in the task tree (item 76, decision 235): the task's own labels, as quiet words rather than chips.
+        Not the ones it inherits, or every subtask would repeat its parent's, nor ``skip``, which its section is named for."""
+        names = [name for name in self.model().task(task_id).labels if name != skip]
+        return f' <span class="sub">&nbsp;{esc(" · ".join(names))}</span>' if names else ""
+
     def _add_nodes(self, nodes: list[Node], parent=None, filtered: bool = False, expand_all: bool = True,
                    row: Callable[[Node], tuple[list[str], str]] | None = None) -> None:
         m = self.model()
@@ -953,16 +949,22 @@ class BrowseWindow(QWidget):
         self._button("+ Expand a level", lambda: self._level(nodes, "expand"), expand_level(nodes, self.open) != self.open,
                      "Open every branch one more level")
         self.tree.set_columns(["Title", "State", "Due"])
+
+        def row(n: Node, section: str = "") -> tuple[list[str], str]:
+            dimmed = bool(how or filtered) and not n.match
+            return self._task_cells(n.id, n.depth, dimmed, extra=self._label_words(n.id, section)), full_path(m, n.id)
+
         if how:  # a section per group, each with its tasks in tree shape (release 5.24)
             grey = QColor(GREY).lighter(135)
             for s in sections:
                 sub = f' <span class="sub">{esc(s.sub)}</span>' if s.sub else ""
                 head = self.tree.add_row(None, None, [f'<b>{esc(s.name)}</b>{sub} &nbsp;<span class="sub">{s.count}</span>'], grey,
                                          selectable=False, span=True)
-                self._add_nodes(s.nodes, head, filtered=True, expand_all=False)
+                named = s.name if how == "label" or how.startswith("pl:") else ""  # its section says it already
+                self._add_nodes(s.nodes, head, filtered=True, expand_all=False, row=lambda n, x=named: row(n, x))
                 head.setExpanded(True)
         else:
-            self._add_nodes(nodes, filtered=filtered, expand_all=False)
+            self._add_nodes(nodes, filtered=filtered, expand_all=False, row=row)
         if not nodes:
             self.tree.add_row(None, None, ['<span class="sub">No tasks match these filters.</span>'], selectable=False, span=True)
 
@@ -1328,6 +1330,7 @@ class BrowseWindow(QWidget):
         if not m.today_items():
             self.tree.add_row(None, None, ['<span class="sub">Nothing on Today. Select a task and press D, or type a quick task above.</span>'],
                               selectable=False, span=True)
+        self._today_reminder_rows(m, today, grey)
         self._today_due_rows(m, today, grey)
         done = m.done_on(today)
         if done:
@@ -1339,6 +1342,39 @@ class BrowseWindow(QWidget):
                                    f'<span class="sub">Done at {esc((a.closed or "")[11:16])}</span>',
                                    state_chip(t.state) if t else chip("Note", "st-ns"), ""])
             head.setExpanded(True)
+
+    def _today_reminder_rows(self, m: Model, today: date, grey: QColor) -> None:
+        """Reminders (item 77, decisions 236 to 238): each task whose reminder has come, under its own heading while there
+        are any, with Add to Today and Clear. Like key dates' rows, it stays until it's dealt with."""
+        due = reminders_due(m, today)
+        if not due:
+            return
+        on_today = {a.subject for a in m.today_items() if a.subject}
+        head = self.tree.add_row(None, None, ["<b>Reminders</b>"], grey, selectable=False, span=True)
+        for t in due:
+            cell = due_cell(t, today, DueDate(to_date(t.reminder), "Reminder"), use_due=False)
+            colour = {"over": "color:#b0261e; font-weight:600", "soon": "color:#875700; font-weight:600"}.get(cell.cls, "")
+            item = self.tree.add_row(head, ("task", t.id), [f'{esc(t.title)}<br><span class="sub">{esc(path_text(m, t.id) or "Top-level task")}</span>',
+                                                            chip("Reminder", "st-ns"), f'<p align="right" style="{colour}">{esc(cell.text)}</p>'],
+                                     tip=cell.tip)
+            self.tree.setItemWidget(item, 3, self._reminder_buttons(t.id, t.id in on_today))
+        head.setExpanded(True)
+
+    def _reminder_buttons(self, task_id: str, on_today: bool) -> QWidget:
+        box = QWidget()
+        lay = QHBoxLayout(box)
+        lay.setContentsMargins(0, 0, 0, 0)
+        if not on_today:
+            add = QPushButton("Add to Today", objectName="rowLink")
+            add.setToolTip("Put it on Today (D); the reminder stays until it's cleared")
+            add.clicked.connect(lambda _=False: self.add_to_today(task_id))
+            lay.addWidget(add)
+        clear = QPushButton("Clear", objectName="rowLink")
+        clear.setToolTip("Clear this reminder. Its status log records it.")
+        clear.clicked.connect(lambda _=False: self.clear_reminder(task_id, "Today"))
+        lay.addWidget(clear)
+        lay.addStretch()
+        return box
 
     def _today_due_rows(self, m: Model, today: date, grey: QColor) -> None:
         """Due in the next 7 days (mods log round 2, M0050): tasks overdue or due soon that aren't on Today, each with Add
@@ -2182,6 +2218,39 @@ class BrowseWindow(QWidget):
             self.render_detail(keep_scroll=True)
 
     # ---- the task page with its notes page (release 5.25) ----
+    def wire_notes(self, pane: TaskPane, say: Callable[..., None], open_ref: Callable[[str], None]) -> None:
+        """A notes page's signals: for the task page's pane, and a Task view's (release 5.37), which says things and opens
+        what's clicked in its own window."""
+        notes = pane.notes
+        pane.say = say
+        notes.changed.connect(lambda body: self._save_notes(body, pane))
+        notes.open_ref.connect(open_ref)
+        notes.message.connect(say)
+        notes.folds_changed.connect(lambda: self._save_folds(pane))
+        # Pictures pasted and files dropped on the page (release 5.27, decisions 124 to 126), and where a picture's file is.
+        notes.picture_path = lambda doc: edits.source_of(self.ctx.data_root, self.model(), doc) if doc in self.model().documents else None
+        notes.image_pasted.connect(lambda image: self._picture_pasted(image, pane))
+        notes.files_dropped.connect(lambda paths: self._files_dropped(paths, pane))
+        pane.notes_menu.connect(lambda which: self._notes_menu(which, pane))
+        pane.summary.folded.connect(lambda folded: self._save_summary_folded(folded, pane))
+
+    def note_panes(self) -> list[TaskPane]:
+        """Every notes page that's been opened: the task page's, and those of the open Task views."""
+        return [self.task_pane, *(v.pane for v in self.task_views.values() if v.pane is not None)]
+
+    def save_open_notes(self) -> None:
+        for pane in self.note_panes():
+            pane.notes.save_now()
+
+    def _page_changed(self, task_id: str, saved_in: TaskPane) -> None:
+        """A page was saved in one window: any other showing it takes it at once, and the Task views read their records
+        again when they next need them, so a page being typed doesn't redraw them (decision 244)."""
+        for pane in self.note_panes():
+            if pane is not saved_in and pane.task_id == task_id:
+                self.load_notes(task_id, pane)
+        for view in self.task_views.values():
+            view.stale = True
+
     def _show_task(self, task_id: str, keep_scroll: bool) -> None:
         """Draw a task's page: its facts and history as HTML, and its notes page in the editor between them."""
         pane = self.task_pane
@@ -2190,19 +2259,20 @@ class BrowseWindow(QWidget):
         width = pane.viewport().width() - 2 * round(pane.top.document().documentMargin())
         pane.top.setHtml(pages.task_page(task_id, self.state, width, "top"))
         pane.bottom.setHtml(pages.task_page(task_id, self.state, width, "bottom"))
-        self._load_notes(task_id)
+        self.load_notes(task_id)
         self.detail_stack.setCurrentIndex(2)
         pane.verticalScrollBar().setValue(scroll)
         if keep_scroll:
             QTimer.singleShot(0, lambda: pane.verticalScrollBar().setValue(scroll))
 
-    def _load_notes(self, task_id: str) -> None:
+    def load_notes(self, task_id: str, pane: TaskPane | None = None) -> None:
         """Put the task's notes page in the editor. The same task's page stays as it is unless docs.db holds another
         version (a capture added to it, say): then it's shown again, or, with unsaved typing, merged into it."""
-        notes, m = self.task_pane.notes, self.model()
+        pane = pane or self.task_pane
+        notes, m = pane.notes, self.model()
         body, day = m.pages.get(task_id, ""), m.uses_day_headings(task_id)
-        self.task_pane.day_action.setChecked(day)
-        if self.task_pane.task_id == task_id:
+        pane.day_action.setChecked(day)
+        if pane.task_id == task_id:
             notes.day_headings = day
             if body == notes.saved_body:
                 return
@@ -2220,32 +2290,33 @@ class BrowseWindow(QWidget):
             c.setPosition(min(caret, max(0, notes.document().characterCount() - 1)))
             notes.setTextCursor(c)
             return
-        if self.task_pane.task_id and notes.dirty:
+        if pane.task_id and notes.dirty:
             notes.save_now()  # the page being left keeps its last words
-        self.task_pane.task_id = task_id
-        self.task_pane.saved.setText("")
+        pane.task_id = task_id
+        pane.saved.setText("")
         notes.set_page(body, self._folds_of(task_id), day)
-        self.task_pane.summary.set_folded(db.get_state(self.conn, f"checklist_folded:{task_id}") == "1")
+        pane.summary.set_folded(db.get_state(self.conn, f"checklist_folded:{task_id}") == "1")
 
-    def _save_notes(self, body: str) -> None:
+    def _save_notes(self, body: str, pane: TaskPane | None = None) -> None:
         """The notes page saves as it's typed (decision 103): docs.db, the day's version, search and Task.md."""
-        task_id = self.task_pane.task_id
+        pane = pane or self.task_pane
+        task_id = pane.task_id
         before = self.model().pages.get(task_id, "") if task_id else ""
         if not task_id or task_id not in self.model().tasks:
             return
         try:
             out = edits.save_page(self.conn, self.ctx.data_root, self.ctx.fs, task_id, body, self._now())
         except (edits.EditError, sqlite3.Error, OSError) as e:
-            self.say(f"The notes weren't saved: {e}", error=True)
+            pane.say(f"The notes weren't saved: {e}", error=True)
             return
         self._model = None
-        self.task_pane.saved.setText(f"Saved {self._now():%H:%M}")
+        pane.saved.setText(f"Saved {self._now():%H:%M}")
         if out.problems:
-            self.say(" ".join(out.problems), error=True)
-        if notes_page.capture_ids(before) != notes_page.capture_ids(body) and self.sel == ("task", task_id):
+            pane.say(" ".join(out.problems), error=True)
+        if notes_page.capture_ids(before) != notes_page.capture_ids(body):
             # The Captures tab says what's on the page: its history is drawn again, the editor left as it is.
-            width = self.task_pane.viewport().width() - 2 * round(self.task_pane.top.document().documentMargin())
-            self.task_pane.bottom.setHtml(self.pages().task_page(task_id, self.state, width, "bottom"))
+            self._history_again(task_id)
+        self._page_changed(task_id, pane)
 
     def _history_again(self, task_id: str) -> None:
         """The task page's history drawn again (its Captures tab says what's on the page), the editor left as it is."""
@@ -2253,32 +2324,34 @@ class BrowseWindow(QWidget):
             width = self.task_pane.viewport().width() - 2 * round(self.task_pane.top.document().documentMargin())
             self.task_pane.bottom.setHtml(self.pages().task_page(task_id, self.state, width, "bottom"))
 
-    def _picture_pasted(self, image) -> None:
+    def _picture_pasted(self, image, pane: TaskPane | None = None) -> None:
         """A picture pasted on the notes page (decisions 124, 125 and 127): a PNG in the task's Files folder, kept as a
         capture of the page's, and shown at the caret with an empty line under it for what it shows."""
         from docrepo.ui.rich_edit import png_bytes
 
-        task_id = self.task_pane.task_id
+        pane = pane or self.task_pane
+        task_id = pane.task_id
         if not task_id:
             return
         try:
             capture_id, doc, name = edits.add_page_picture(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, task_id,
                                                            png_bytes(image), self._now())
         except (edits.EditError, SaveError, WriteRefused, OSError, sqlite3.Error) as e:
-            self.say(f"The picture wasn't kept: {e}", error=True)
+            pane.say(f"The picture wasn't kept: {e}", error=True)
             return
         self._model = None
-        self.task_pane.notes.insert_item("picture", name, doc)
-        self.task_pane.notes.save_now()
+        pane.notes.insert_item("picture", name, doc)
+        pane.notes.save_now()
         self._history_again(task_id)
-        self.say(f"Kept {name} with the task's files, as {capture_id}. Type what it shows on the line under it.")
+        pane.say(f"Kept {name} with the task's files, as {capture_id}. Type what it shows on the line under it.")
 
-    def _files_dropped(self, paths: list[str]) -> None:
+    def _files_dropped(self, paths: list[str], pane: TaskPane | None = None) -> None:
         """Files dropped on the notes page (decision 126): each kept as a capture of the page's, its original tracked where
         it is, and shown at the caret, a picture as a picture."""
         from docrepo import notes_page as np_
 
-        task_id = self.task_pane.task_id
+        pane = pane or self.task_pane
+        task_id = pane.task_id
         if not task_id:
             return
         kept = []
@@ -2287,16 +2360,16 @@ class BrowseWindow(QWidget):
                 capture_id, doc, name = edits.add_page_file(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, task_id, path,
                                                             self._now())
             except (edits.EditError, SaveError, WriteRefused, OSError, sqlite3.Error) as e:
-                self.say(f"{Path(path).name} wasn't kept: {e}", error=True)
+                pane.say(f"{Path(path).name} wasn't kept: {e}", error=True)
                 continue
             self._model = None
             picture = name.lower().endswith(np_.PICTURES)
-            self.task_pane.notes.insert_item("picture" if picture else "attachment", name if picture else f"File: {name}", doc)
+            pane.notes.insert_item("picture" if picture else "attachment", name if picture else f"File: {name}", doc)
             kept.append(name)
         if kept:
-            self.task_pane.notes.save_now()
+            pane.notes.save_now()
             self._history_again(task_id)
-            self.say(f"Added {', '.join(kept)} to the page, each a capture of its own. Type what each is on the line under it.")
+            pane.say(f"Added {', '.join(kept)} to the page, each a capture of its own. Type what each is on the line under it.")
 
     def _folds_of(self, task_id: str) -> list[str]:
         try:
@@ -2304,17 +2377,19 @@ class BrowseWindow(QWidget):
         except ValueError:
             return []
 
-    def _save_folds(self) -> None:
+    def _save_folds(self, pane: TaskPane | None = None) -> None:
         """Which headings are folded, kept for each task in docs.db (the data root), as the app writes nowhere else."""
-        if self.task_pane.task_id:
-            db.set_state(self.conn, f"notes_folds:{self.task_pane.task_id}", json.dumps(self.task_pane.notes.folds()))
+        pane = pane or self.task_pane
+        if pane.task_id:
+            db.set_state(self.conn, f"notes_folds:{pane.task_id}", json.dumps(pane.notes.folds()))
 
-    def _save_summary_folded(self, folded: bool) -> None:
+    def _save_summary_folded(self, folded: bool, pane: TaskPane | None = None) -> None:
         """Whether the Checklist summary is folded, kept for each task in docs.db (decision 121)."""
-        if self.task_pane.task_id:
-            db.set_state(self.conn, f"checklist_folded:{self.task_pane.task_id}", "1" if folded else "0")
+        pane = pane or self.task_pane
+        if pane.task_id:
+            db.set_state(self.conn, f"checklist_folded:{pane.task_id}", "1" if folded else "0")
 
-    def _open_ref(self, ref: str) -> None:
+    def open_ref(self, ref: str) -> None:
         if ref in self.model().captures:
             self.go_capture(ref)
         elif ref in self.model().documents:
@@ -2330,40 +2405,42 @@ class BrowseWindow(QWidget):
             self.say(f"{capture_id} isn't on the notes page.")
 
     def add_again(self, task_id: str, capture_id: str) -> None:
-        self.task_pane.notes.save_now()
+        self.save_open_notes()
         self._do(lambda: edits.add_again(self.conn, self.ctx.data_root, self.ctx.fs, capture_id, task_id, self._now()))
         if self.task_pane.task_id == task_id:
             self.task_pane.notes.go_to(capture_id)
             QTimer.singleShot(0, self.task_pane.scroll_to_caret)
 
-    def _notes_menu(self, which: str) -> None:
-        task_id, notes = self.task_pane.task_id, self.task_pane.notes
+    def _notes_menu(self, which: str, pane: TaskPane | None = None) -> None:
+        pane = pane or self.task_pane
+        task_id, notes = pane.task_id, pane.notes
         if not task_id:
             return
         if which in ("fold", "unfold"):
             notes.fold_all(which == "fold")
         elif which == "day_headings":
-            on = self.task_pane.day_action.isChecked()
+            on = pane.day_action.isChecked()
             notes.save_now()
             self._do(lambda: edits.edit_task(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, task_id, self._now(),
                                              day_headings=on))
-            self.say("New captures go under a heading for their day." if on else "New captures go at the end of the page.")
+            pane.say("New captures go under a heading for their day." if on else "New captures go at the end of the page.")
         elif which == "history":
-            self.page_history(task_id)
+            self.page_history(task_id, pane)
 
-    def page_history(self, task_id: str) -> None:
+    def page_history(self, task_id: str, pane: TaskPane | None = None) -> None:
         """Page history (decision 103): the page as it stood at the end of each day it changed, and Restore, which is an
         edit like any other, so the page as it stands now is kept too."""
         from PySide6.QtWidgets import QDialog, QDialogButtonBox, QListWidget, QListWidgetItem
 
         from docrepo.ui.notes_edit import NotesEdit
 
-        self.task_pane.notes.save_now()
+        pane = pane or self.task_pane
+        self.save_open_notes()
         days = notes_page.versions(self.conn, task_id)
         if not days:
-            self.say("This page has no earlier versions yet.")
+            pane.say("This page has no earlier versions yet.")
             return
-        dlg = QDialog(self)
+        dlg = QDialog(pane.window())
         dlg.setWindowTitle(f"Page history: {self.model().task(task_id).title}")
         dlg.resize(820, 560)
         lay = QHBoxLayout(dlg)
@@ -2402,7 +2479,7 @@ class BrowseWindow(QWidget):
         day = listing.currentItem().data(Qt.ItemDataRole.UserRole)
         body = notes_page.version(self.conn, task_id, day) or ""
         if self._do(lambda: edits.save_page(self.conn, self.ctx.data_root, self.ctx.fs, task_id, body, self._now())):
-            self.say(f"Restored the page as it stood on {long_date(to_date(day), self.today())}.")
+            pane.say(f"Restored the page as it stood on {long_date(to_date(day), self.today())}.")
 
     def double_click(self, item: QTreeWidgetItem) -> None:
         """Double-clicking a row opens its edit form (mods log round 3, M0056; decision 57): Edit task for a task, wherever
@@ -2763,8 +2840,8 @@ class BrowseWindow(QWidget):
         self.refresh()
         self.say(out.message + (" Problems: " + " ".join(out.problems) if out.problems else ""), bool(out.problems))
 
-    def clear_reminder(self, task_id: str) -> None:
-        self._do(lambda: edits.clear_reminder(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, task_id, self._now()))
+    def clear_reminder(self, task_id: str, via: str = "Reminders list") -> None:
+        self._do(lambda: edits.clear_reminder(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, task_id, self._now(), via))
 
     def close_agenda_item(self, item_id: int, how: str) -> None:
         item = next((a for a in self.model().agenda if a.id == item_id), None)
@@ -2957,8 +3034,9 @@ class BrowseWindow(QWidget):
 
         if self.task_pane.task_id != task_id and self.sel == ("task", task_id):
             self.render_detail()
-        notes = self.task_pane.notes
-        checklist = ChecklistSummary(notes, foldable=False) if self.task_pane.task_id == task_id else None
+        showing = next((p for p in self.note_panes() if p.task_id == task_id), None)  # the task page's, or a Task view's
+        notes = showing.notes if showing else self.task_pane.notes
+        checklist = ChecklistSummary(notes, foldable=False) if showing else None
         dialog = TaskEditDialog(self, self.model(), task_id, self._label_options, self._people_options,
                                 lambda anchor, picked: self._pick_task(anchor, picked, None),
                                 reference_fields=self.ctx.settings.reference_fields, today=self.today(), checklist=checklist)
@@ -3010,7 +3088,7 @@ class BrowseWindow(QWidget):
         if reason is None:
             return
         # Its block comes off its tasks' notes pages; one edited there stays unless you say (decision 106).
-        self.task_pane.notes.save_now()
+        self.save_open_notes()
         model, stories = edits.stories_for(self.conn, self.ctx.data_root, self._now())
         edited = notes_page.edited_blocks(model, stories, capture_id)
         off = False

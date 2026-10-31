@@ -46,7 +46,8 @@ LIST_NOTES = {
 
 TODAY_NOTE = ("Your list for today. Each item stays until you mark it Done, carrying over to the next day. Put a task on it with D "
               "while browsing, or Add to Today on its page. The box makes a quick task (under Quick tasks until you file it), or a "
-              "note; Ctrl+Shift+D does the same from anywhere. Below it, the tasks due in the next 7 days that aren't on it yet.")
+              "note; Ctrl+Shift+D does the same from anywhere. Below it, reminders whose day has come, and the tasks due in the next "
+              "7 days that aren't on it yet.")
 
 ACTIVITY_NOTE = ("What happened, under the tasks it happened to: captures, changes, document versions and agenda items. For meeting "
                  "prep, Select, tick tasks or lines, then Add to agenda: a ticked line goes on as its task, with the line as the "

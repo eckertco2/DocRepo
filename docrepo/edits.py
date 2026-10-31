@@ -288,9 +288,10 @@ def edit_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, capture_
 
 
 # ---- tasks and agendas ----
-def clear_reminder(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, task_id: str, at: datetime) -> Outcome:
-    """Clear a task's reminder from the Reminders list. Its status log records it."""
-    tasks.update_task(conn, settings, task_id, at=at, via="Reminders list", reminder=None)
+def clear_reminder(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, task_id: str, at: datetime,
+                   via: str = "Reminders list") -> Outcome:
+    """Clear a task's reminder from the Reminders list or Today. Its status log records it."""
+    tasks.update_task(conn, settings, task_id, at=at, via=via, reminder=None)
     out = Outcome(f"{Model(conn).task(task_id).title}: reminder cleared. The change is in its status log.")
     write_all_pages(conn, data_root, fs, at, out.problems)
     return out

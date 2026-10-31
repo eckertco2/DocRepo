@@ -53,6 +53,8 @@ class TaskPane(QScrollArea):
         self.setWidgetResizable(True)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.task_id: str | None = None
+        #: Where its messages go: the window it's in says them (``BrowseWindow.wire_notes``).
+        self.say = lambda text, error=False: None
         self.smooth = not LOOK.classic
         self._anim = QPropertyAnimation(self.verticalScrollBar(), b"value", self)
         self._anim.setDuration(180)
@@ -134,16 +136,23 @@ class TaskPane(QScrollArea):
             cl.addWidget(w)
         self.card.setMaximumWidth(NOTES_MAX)
         self.notes.focus_changed.connect(self._card_focus)
-        wrap = QWidget(objectName="notesWrap")
-        wl = QHBoxLayout(wrap)
+        self.wrap = QWidget(objectName="notesWrap")
+        wl = QHBoxLayout(self.wrap)
         wl.setContentsMargins(margin, 20, margin, 20)
         wl.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         wl.addWidget(self.card, 1)
         lay.addWidget(self.top)
-        lay.addWidget(wrap)
+        lay.addWidget(self.wrap)
         lay.addWidget(self.bottom)
         lay.addStretch(1)
         self.setWidget(inner)
+
+    def notes_only(self) -> None:
+        """Only the Notes frame, as the Task view's Notes page tab shows it (release 5.37, decision 243)."""
+        self.top.hide()
+        self.bottom.hide()
+        self.wrap.layout().setContentsMargins(0, 0, 0, 12)
+        self.setFrameShape(QFrame.Shape.NoFrame)
 
     def _card_focus(self, on: bool) -> None:
         self.card.setProperty("typing", on)  # not "focus": every widget has a read-only one

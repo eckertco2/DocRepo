@@ -148,7 +148,7 @@ class PinWindow(QWidget):
         # ---- the content text ----
         self.text = ContentEdit()
         self.text.take_links = True
-        self.text.setDocument(capture.content.document())  # the capture window's own text
+        self.text.show_text_of(capture.content)  # the capture window's own text
         self.text.setPlaceholderText("Type a note, or drop files, emails or links")
         self.text.dropped.connect(self._take)
         self.text.drag_entered = capture._drag_entered

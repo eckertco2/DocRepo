@@ -18,6 +18,19 @@ AT = datetime(2026, 10, 8, 15, 20)
 SETTINGS = Settings(me="P001")
 
 
+def test_reminders_due_are_those_whose_day_has_come(sample_conn):
+    """Item 77: today's and past ones, oldest first; open tasks only. The Reminders list also has the next 7 days'."""
+    from docrepo.lists import LISTS, list_tasks, reminders_due
+
+    m = Model(sample_conn)
+    assert [t.id for t in reminders_due(m, AT.date())] == ["T000016", "T000018"]
+    assert [t.id for t in reminders_due(m, date(2026, 10, 6))] == []
+    assert [t.id for t in reminders_due(m, date(2026, 10, 9))] == ["T000016", "T000018", "T000019"]
+    assert [t.id for t in list_tasks(m, next(x for x in LISTS if x.id == "reminders"), AT.date(), "P001")] == ["T000016", "T000018", "T000019"]
+    sample_conn.execute("UPDATE tasks SET state = 'Closed', closed = '2026-10-08' WHERE id = 'T000016'")
+    assert [t.id for t in reminders_due(Model(sample_conn), AT.date())] == ["T000018"]
+
+
 def test_today_items_carry_over_until_done(sample_conn):
     conn = sample_conn
     first = agenda.add_item(conn, subject="T000019", target=TODAY, note="", added="2026-10-05 08:05:00", added_by="Browse tool")

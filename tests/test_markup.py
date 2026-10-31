@@ -7,7 +7,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest  # noqa: E402
 from PySide6.QtCore import QMimeData, Qt  # noqa: E402
-from PySide6.QtGui import QKeyEvent  # noqa: E402
+from PySide6.QtGui import QKeyEvent, QTextCursor  # noqa: E402
+from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from docrepo import markup  # noqa: E402
@@ -115,6 +116,95 @@ def test_typing_a_list(edit):
     key(Qt.Key.Key_Return, "\r")  # and out of the list
     edit.insertPlainText("Done.")
     assert edit.value() == ("- Guard\n  - Rails\n- Bolts\nDone.", True)
+
+
+def _typed_list(cls, first: str = "- "):
+    """A box on screen, with two list items typed into it through real key presses, and the caret on the second."""
+    box = cls()
+    box.resize(600, 400)
+    box.show()
+    box.setFocus()
+    QTest.keyClicks(box, f"{first}Guard")
+    QTest.keyClick(box, Qt.Key.Key_Return)
+    QTest.keyClicks(box, "Rails")
+    return box
+
+
+def _left(box) -> int:
+    """How far in the caret's line sits on screen: what the owner sees, which the markup alone doesn't show."""
+    return box.cursorRect(QTextCursor(box.textCursor().block())).left()
+
+
+BACK = {"Backtab": (Qt.Key.Key_Backtab, Qt.KeyboardModifier.ShiftModifier), "Tab and Shift": (Qt.Key.Key_Tab, Qt.KeyboardModifier.ShiftModifier)}
+
+
+@pytest.mark.parametrize("back", BACK, ids=list(BACK))
+@pytest.mark.parametrize("cls_name", ["RichEdit", "ContentEdit"])
+def test_shift_tab_undoes_tab_on_screen_and_in_the_markup(qapp, cls_name, back):
+    """Item 74: Shift+Tab sends a list item back where it came from, and ends the list at the first level. It used to move
+    the words further in, since QTextList.remove hands the list's indent to the line and the two add up on screen."""
+    from docrepo.ui.capture_window import ContentEdit
+    from docrepo.ui.rich_edit import INDENT, RichEdit
+
+    box = _typed_list({"RichEdit": RichEdit, "ContentEdit": ContentEdit}[cls_name])
+    start = _left(box)
+    QTest.keyClick(box, Qt.Key.Key_Tab)
+    assert box.value()[0] == "- Guard\n  - Rails"
+    assert _left(box) == start + INDENT
+    QTest.keyClick(box, Qt.Key.Key_Tab)
+    assert box.value()[0] == "- Guard\n    - Rails"
+    assert _left(box) == start + 2 * INDENT
+    QTest.keyClick(box, *BACK[back])
+    assert box.value()[0] == "- Guard\n  - Rails"
+    assert _left(box) == start + INDENT
+    QTest.keyClick(box, *BACK[back])
+    assert box.value()[0] == "- Guard\n- Rails"
+    assert _left(box) == start
+    QTest.keyClick(box, *BACK[back])  # out of the first level: a line of text, at the box's edge
+    assert box.value()[0] == "- Guard\nRails"
+    assert _left(box) < start
+    box.deleteLater()
+
+
+def test_a_level_on_screen_is_where_the_saved_text_shows_it(qapp):
+    from docrepo.ui.rich_edit import RichEdit
+
+    box = _typed_list(RichEdit)
+    QTest.keyClick(box, Qt.Key.Key_Tab)
+    typed = _left(box)
+    box.set_value(box.value()[0], True)
+    assert _left(box) == typed
+    QTest.keyClick(box, Qt.Key.Key_Backtab, Qt.KeyboardModifier.ShiftModifier)  # and from saved text, back too
+    assert box.value()[0] == "- Guard\n- Rails"
+    assert _left(box) == typed - 20
+    box.deleteLater()
+
+
+def test_shift_tab_keeps_the_numbers_going_and_is_one_undo(qapp):
+    from docrepo.ui.rich_edit import RichEdit
+
+    box = _typed_list(RichEdit, "1. ")
+    start = _left(box)
+    QTest.keyClick(box, Qt.Key.Key_Tab)
+    assert box.value()[0] == "1. Guard\n  1. Rails"
+    QTest.keyClick(box, Qt.Key.Key_Backtab, Qt.KeyboardModifier.ShiftModifier)
+    assert box.value()[0] == "1. Guard\n2. Rails" and _left(box) == start
+    box.undo()  # one Ctrl+Z puts the level back
+    assert box.value()[0] == "1. Guard\n  1. Rails" and _left(box) == start + 20
+    box.deleteLater()
+
+
+def test_alt_shift_left_and_right_move_the_item_the_same_way(qapp):
+    from docrepo.ui.rich_edit import RichEdit
+
+    box = _typed_list(RichEdit)
+    start = _left(box)
+    keys = Qt.KeyboardModifier.AltModifier | Qt.KeyboardModifier.ShiftModifier
+    QTest.keyClick(box, Qt.Key.Key_Right, keys)
+    assert box.value()[0] == "- Guard\n  - Rails" and _left(box) == start + 20
+    QTest.keyClick(box, Qt.Key.Key_Left, keys)
+    assert box.value()[0] == "- Guard\n- Rails" and _left(box) == start
+    box.deleteLater()
 
 
 def test_pasting_keeps_what_docrepo_keeps(edit):

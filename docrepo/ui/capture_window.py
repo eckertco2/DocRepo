@@ -1318,7 +1318,7 @@ class CaptureWindow(QWidget):
             cursor.insertBlock(QTextBlockFormat(), QTextCharFormat())
             cursor.insertBlock(QTextBlockFormat(), QTextCharFormat())
         elif cursor.block().textList() is not None:
-            cursor.block().textList().remove(cursor.block())
+            self.content.leave_list(cursor.block())
         cursor.insertText("\n\n".join(add) + "\n")
         self.content.setTextCursor(cursor)
         self.content.setFocus()

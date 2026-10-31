@@ -8,7 +8,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from datetime import datetime  # noqa: E402
 
 import pytest  # noqa: E402
-from PySide6.QtCore import QMimeData, QUrl  # noqa: E402
+from PySide6.QtCore import QMimeData, Qt, QUrl  # noqa: E402
+from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from docrepo import capacity, db, hotkey, prompts  # noqa: E402
@@ -144,6 +145,94 @@ def test_the_pinned_window_picks_types_paths_and_descriptions(window, tmp_path, 
     monkeypatch.setattr(window, "add_outlook", lambda: opened.append("outlook"))
     pin.outlook_button.click()
     assert opened[-1] == "outlook"
+
+
+# ---- the text's width (item 75): the two boxes share one document, and a document has one width ----
+LONG = "Walkdown of the pump guards, with enough words in it to wrap across the box somewhere along the way"
+
+
+def _settle():
+    for _ in range(4):
+        QApplication.processEvents()
+
+
+def _fills(box) -> bool:
+    """The text is laid out at the width of the box it's shown in."""
+    _settle()
+    return box.document().pageSize().width() == box.viewport().width()
+
+
+def _type_and_check(box, lines: int, words: str) -> None:
+    box.setFocus()
+    for n in range(lines):
+        QTest.keyClicks(box, words)
+        QTest.keyClick(box, Qt.Key.Key_Return)
+        assert _fills(box), f"line {n + 1} of {words[:12]!r}: laid out at {box.document().pageSize().width()} in a box {box.viewport().width()} wide"
+
+
+def test_the_text_stays_as_wide_as_the_box_after_a_pin(window):
+    """Pinned once, the hidden small box used to set the text's width whenever its scroll bar came or went: a few lines in,
+    the full window's text shrank to about a third of its box, until the box's own width next changed."""
+    window.pin()
+    window.unpin()
+    assert _fills(window.content)  # at once
+    _type_and_check(window.content, 14, "A short line")
+    _type_and_check(window.content, 14, LONG)
+
+
+def test_the_text_stays_as_wide_as_a_tall_box_too(window):
+    window.pin()
+    window.unpin()
+    window.toggle_expand()  # room for lines before the box needs its own scroll bar, so nothing brings the width back
+    window.resize(window.width() + 40, window.height())
+    assert _fills(window.content)
+    _type_and_check(window.content, 14, "A short line")
+    window.toggle_expand()
+    assert _fills(window.content)
+
+
+def test_the_text_fits_the_pinned_box_with_lines_already_in_it(window):
+    """The other way round: the hidden full box used to set the width, so the text ran off the small box's right edge."""
+    _type_and_check(window.content, 3, LONG)
+    window.pin()
+    pin = window.pin_window
+    assert _fills(pin.text) and pin.text.horizontalScrollBar().maximum() == 0
+    _type_and_check(pin.text, 4, LONG)
+    assert pin.text.horizontalScrollBar().maximum() == 0
+    window.unpin()
+    assert _fills(window.content)
+    _type_and_check(window.content, 3, LONG)
+    window.toggle_pin()
+    assert _fills(pin.text) and pin.text.horizontalScrollBar().maximum() == 0
+
+
+def test_the_next_capture_after_a_save_or_esc_fills_the_box(window):
+    window.set_task("T000008")
+    window.content.setPlainText("Crane inspection passed.")
+    window.pin()
+    window.save()
+    window.show_capture()
+    assert _fills(window.content)
+    _type_and_check(window.content, 8, LONG)
+    window.pin()
+    window.hide_pinned()  # Esc
+    window.content.clear()  # an emptied document is a change while both boxes are hidden
+    window.show_capture()
+    assert _fills(window.content)
+    _type_and_check(window.content, 8, "A short line")
+
+
+def test_a_box_comes_back_with_its_scroll_bar_working(window):
+    """A hidden box's scroll bar is held as it is (never hidden for good), and a box shown again follows its text."""
+    window.pin()
+    window.unpin()
+    _type_and_check(window.content, 20, LONG)
+    assert window.content.verticalScrollBar().isVisible()
+    window.pin()
+    assert window.pin_window.text.verticalScrollBar().isVisible()
+    window.unpin()
+    window.content.clear()
+    assert _fills(window.content) and not window.content.verticalScrollBar().isVisible()
 
 
 def test_a_long_problem_takes_two_lines(window):

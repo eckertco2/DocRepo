@@ -111,6 +111,14 @@ def test_it_opens_on_overview_with_the_status_and_the_key_documents(view):
     assert view.box.hasFocus() or QGuiApplication.focusObject() is view.box or True  # offscreen windows may not take focus
 
 
+def test_the_header_is_as_tall_as_its_text_when_the_window_opens(view, qapp):
+    qapp.processEvents()
+    assert view.head.height() - view.head.document().size().height() < 10
+    view.resize(1500, 800)
+    qapp.processEvents()
+    assert view.head.height() - view.head.document().size().height() < 10
+
+
 def test_recent_says_what_was_opened_and_stays_put(view):
     recent = [r for r in view.list.rows if r.why]
     assert recent[0].record.title == "Pump curve rev C.pdf" and recent[0].why == "opened today"
