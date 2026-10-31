@@ -147,6 +147,9 @@ NARROW = 700
 DRAFT_FILE = Path("System") / "capture-draft.json"
 DRAFT_EVERY_MS = 30_000
 DRAFT_NOTE = "The draft saves itself every 30 seconds."
+#: How long after the last key the content text is read again. Longer than the gap between keys at an easy pace, about
+#: 300 ms, so that it isn't read in the middle of a word (release 5.52).
+ITEMS_WAIT_MS = 500
 #: The content text's placeholder: what to type, while the box is empty (decision 7).
 CONTENT_PLACEHOLDER = "Type a note. @name makes a task, #task files it on a task, ** says what a line is."
 MEETING_PLACEHOLDER = "Meeting notes. @name makes a task, #task files a line on a task, ** says what a line is."
@@ -476,7 +479,7 @@ class CaptureWindow(QWidget):
         self._highlighting = False
         self._items_timer = QTimer(self)
         self._items_timer.setSingleShot(True)
-        self._items_timer.setInterval(250)
+        self._items_timer.setInterval(ITEMS_WAIT_MS)
         self._items_timer.timeout.connect(self.read_items)
         # The draft keeps itself every 30 seconds, in the data root, and comes back after a crash or a restart.
         self.draft_dirty = False
@@ -2898,6 +2901,8 @@ class CaptureWindow(QWidget):
             return
         self._saving = True
         try:
+            if self._items_timer.isActive():  # keys just before Save: a # among them still fills the task picker
+                self.read_items()
             if not self._check_fields():
                 return
             draft = self.draft()

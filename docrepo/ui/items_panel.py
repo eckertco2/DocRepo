@@ -17,7 +17,7 @@ from datetime import date
 from html import escape as esc
 
 from PySide6.QtCore import QPoint, Qt, Signal
-from PySide6.QtGui import QColor, QSyntaxHighlighter, QTextCharFormat, QTextDocument
+from PySide6.QtGui import QColor, QSyntaxHighlighter, QTextBlock, QTextBlockUserData, QTextCharFormat, QTextDocument
 from PySide6.QtWidgets import (
     QCheckBox,
     QFrame,
@@ -45,6 +45,16 @@ TINTS = {"task": "#e3ecf7", "note": "#e0f1ee", "update": "#f6ecd8", "decision": 
 #: The operators' colours: (text, background).
 REF_COLOURS = {"person": ("#1d5e98", "#dbe8f5"), "new": ("#875700", "#fcefcf"), "none": ("#5a6571", "#e9edf1"),
                "task": ("#22706a", "#d6eeea"), "type": ("#875700", "#fcefcf")}
+#: A line's colours: (its tint, and each operator's (start, length, a key of ``REF_COLOURS``)).
+NO_COLOURS: tuple[str | None, tuple[tuple[int, int, str], ...]] = (None, ())
+
+
+class _Coloured(QTextBlockUserData):
+    """The colours a line was last given. It stays with its block as lines come and go above it."""
+
+    def __init__(self, colours: tuple) -> None:
+        super().__init__()
+        self.colours = colours
 
 
 class OperatorHighlighter(QSyntaxHighlighter):
@@ -56,25 +66,39 @@ class OperatorHighlighter(QSyntaxHighlighter):
         self.kinds: dict[int, str] = {}
 
     def set_reading(self, reading: items.Reading | None) -> None:
+        """Take a new reading. Only the lines whose colours change are coloured again, since that lays each one out again
+        (release 5.52)."""
         self.reading = reading
         self.kinds = items.line_kinds(reading) if reading else {}
-        self.rehighlight()
+        block = self.document().begin()
+        while block.isValid():
+            shown = block.userData()
+            if (shown.colours if shown else NO_COLOURS) != self._colours(block):
+                self.rehighlightBlock(block)
+            block = block.next()
+
+    def _colours(self, block: QTextBlock) -> tuple:
+        """What the last reading colours a block with."""
+        r = self.reading
+        n = block.blockNumber()
+        if not r or n >= len(r.lines):
+            return NO_COLOURS
+        line = r.lines[n]
+        # A list item made with the list buttons has no "- " in its text; one typed as text has.
+        base = 0 if block.textList() is not None else line.off
+        return (TINTS.get(self.kinds.get(n, "")),
+                tuple((base + x.start, x.end - x.start, "type" if x.kind in ("type", "param") else "task" if x.kind == "task"
+                       else "none" if x.none else "new" if x.is_new else "person") for x in line.toks))
 
     def highlightBlock(self, text: str) -> None:  # noqa: N802 - Qt's name
-        r = self.reading
-        n = self.currentBlock().blockNumber()
-        if not r or n >= len(r.lines):
-            return
-        line = r.lines[n]
-        tint = TINTS.get(self.kinds.get(n, ""))
+        colours = self._colours(self.currentBlock())
+        self.setCurrentBlockUserData(_Coloured(colours))
+        tint, spans = colours
         if tint:
             fmt = QTextCharFormat()
             fmt.setBackground(QColor(tint))
             self.setFormat(0, len(text), fmt)
-        # A list item made with the list buttons has no "- " in its text; one typed as text has.
-        base = 0 if self.currentBlock().textList() is not None else line.off
-        for x in line.toks:
-            key = "type" if x.kind in ("type", "param") else "task" if x.kind == "task" else "none" if x.none else "new" if x.is_new else "person"
+        for start, length, key in spans:
             fg, bg = REF_COLOURS[key]
             fmt = QTextCharFormat()
             fmt.setForeground(QColor(fg))
@@ -82,7 +106,15 @@ class OperatorHighlighter(QSyntaxHighlighter):
             if key == "new":
                 fmt.setUnderlineStyle(QTextCharFormat.UnderlineStyle.DashUnderline)
                 fmt.setUnderlineColor(QColor(fg))
-            self.setFormat(base + x.start, x.end - x.start, fmt)
+            self.setFormat(start, length, fmt)
+
+
+def _take_out(layout, w: QWidget) -> None:
+    """One widget leaves a layout and the window at once."""
+    layout.removeWidget(w)
+    w.hide()
+    w.setParent(None)
+    w.deleteLater()
 
 
 def _drop(layout) -> None:
@@ -178,10 +210,11 @@ class ItemCard(QFrame):
         if it.changed:
             top.addWidget(QLabel("changed here", objectName="hint"))  # state, not help
         top.addStretch()
-        line = QPushButton(f"line {it.line + 1}", objectName="link")
-        line.setToolTip("Show its line in the content text")
-        line.clicked.connect(lambda: self.go.emit(it.line))
-        top.addWidget(line)
+        self.line_at = it.line
+        self.line_button = QPushButton(f"line {it.line + 1}", objectName="link")
+        self.line_button.setToolTip("Show its line in the content text")
+        self.line_button.clicked.connect(lambda: self.go.emit(self.line_at))
+        top.addWidget(self.line_button)
         lay.addLayout(top)
         self.title = QLineEdit(_pretty(it.title) if it.kind == "param" else it.title)
         self.title.setAccessibleName(f"{name} title")
@@ -203,6 +236,17 @@ class ItemCard(QFrame):
             self.due.edited.connect(lambda: self.changed.emit(self.key, "due", self.due.value() or ""))
             row.addWidget(self.due, 1)
             lay.addLayout(row)
+
+    @staticmethod
+    def shows(it: items.Item, where: str, stripe: str | None = None) -> tuple:
+        """Everything ``__init__`` draws except the item's place, which ``moved`` can change: items alike in this need one
+        card, kept. Anything new a card draws goes here too."""
+        return (it.kind, it.on, it.plant_event, it.label, it.state, it.changed, it.title, it.problem, it.due, _facts(it, where), stripe)
+
+    def moved(self, it: items.Item) -> None:
+        """The same item in another place: a line was added or taken away above it."""
+        self.key, self.line_at = it.key, it.line
+        self.line_button.setText(f"line {it.line + 1}")
 
 
 class ItemCards(QFrame):
@@ -230,6 +274,9 @@ class ItemCards(QFrame):
         self.hint.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         lay.addWidget(self.hint)
         self.cards: list[ItemCard] = []
+        self._rows: list[tuple] = []  # what each card shows (``ItemCard.shows``)
+        self._own_box: QFrame | None = None
+        self._own_said: str | None = None
 
     def editing(self) -> bool:
         """Whether a card's title or due date has the keyboard: the cards aren't rebuilt under you."""
@@ -238,41 +285,77 @@ class ItemCards(QFrame):
 
     def show_items(self, r: items.Reading | None, own: items.SelfFields | None, where_text: Callable[[items.Item], str], names: items.Names,
                    stripe: Callable[[items.Item], str] | None = None) -> None:
-        _drop(self.cards_box)
-        self.cards = []
+        """Show a reading's items. A card takes some milliseconds to make and this runs whenever typing pauses, so one is made
+        only for what no card shows yet. The rest stay, even when a line added above moves them (release 5.52)."""
         its = r.items if r else []
+        said = None
         if own and own.any:
-            box = QFrame(objectName="itemCard")
-            box.setProperty("kind", "self")
-            bl = QVBoxLayout(box)
-            bl.setContentsMargins(8, 5, 6, 6)
-            bl.addWidget(QLabel("<b>The new task</b>  <span style='color:#5a6571'>its first line</span>"))
-            said = [f"Assignees: {', '.join(x.name for x in own.assignees)}" * bool(own.assignees),
-                    f"Lead: {', '.join(x.name for x in own.leads)}" * bool(own.leads),
-                    f"Also under: {', '.join(names.task_title(t) for t in own.tasks)}" * bool(own.tasks)]
-            facts = QLabel(" · ".join(s for s in said if s), objectName="hint")
-            facts.setWordWrap(True)
-            bl.addWidget(facts)
-            self.cards_box.addWidget(box)
+            parts = [f"Assignees: {', '.join(x.name for x in own.assignees)}" * bool(own.assignees),
+                     f"Lead: {', '.join(x.name for x in own.leads)}" * bool(own.leads),
+                     f"Also under: {', '.join(names.task_title(t) for t in own.tasks)}" * bool(own.tasks)]
+            said = " · ".join(s for s in parts if s)
+        if said != self._own_said:
+            self._show_own(said)
+        spare: dict[tuple, list[ItemCard]] = {}
+        for row, card in zip(self._rows, self.cards):
+            spare.setdefault(row, []).append(card)
+        cards, rows = [], []
         for it in its:
-            card = ItemCard(it, where_text(it), stripe(it) if stripe else None)
-            card.changed.connect(self.changed)
-            card.go.connect(self.go)
-            self.cards_box.addWidget(card)
-            self.cards.append(card)
+            where, edge = where_text(it), stripe(it) if stripe else None
+            row = ItemCard.shows(it, where, edge)
+            if spare.get(row):
+                card = spare[row].pop(0)
+                card.moved(it)
+            else:
+                card = ItemCard(it, where, edge)
+                card.changed.connect(self.changed)
+                card.go.connect(self.go)
+            cards.append(card)
+            rows.append(row)
+        for left in spare.values():
+            for card in left:
+                _take_out(self.cards_box, card)
+        first = 0 if self._own_box is None else 1
+        for i, card in enumerate(cards):
+            held = self.cards_box.itemAt(first + i)
+            if held is None or held.widget() is not card:
+                self.cards_box.removeWidget(card)
+                self.cards_box.insertWidget(first + i, card)
+        self.cards, self._rows = cards, rows
         on = [it for it in its if it.on]
         counts = [f"{n} {name.lower()}{'s' if n > 1 else ''}" for k, name in items.KIND_NAMES.items() if (n := sum(it.kind == k for it in on))]
         self.count.setText("Save makes " + _and(counts) if counts else "Nothing to make" if its else "")
         self.hint.setText(
             "Each line with an operator is a card. Untick one to skip it, or change its title or due date here: your change stays "
-            "even when you edit the line." if its or (own and own.any) else
+            "even when you edit the line." if its or said is not None else
             "In any capture, <b>@Tom</b> makes a task for Tom, <b>@L.Tom</b> makes him its lead, <b>@__</b> a task for no one yet, "
             "<b>#Rigging plan</b> files a note to that task, and <b>**closed,</b>, <b>**u,</b>, <b>**n,</b>, <b>**t,</b>, <b>**decision,</b> "
             "or <b>**event,</b> say what a line is. <b>**due, 5 Nov.</b> or <b>**key date, trial run 1 to 5 Dec, plant activity.</b> fills in "
             "a field: any field, by its name. Type @ or # for a list.")
-        self.setProperty("empty", not its and not (own and own.any))
-        self.style().unpolish(self)
-        self.style().polish(self)
+        empty = not its and said is None
+        if self.property("empty") != empty:
+            self.setProperty("empty", empty)
+            self.style().unpolish(self)
+            self.style().polish(self)
+
+    def _show_own(self, said: str | None) -> None:
+        """The new task's own card, above the items, while its first line says anything."""
+        if self._own_box is not None:
+            _take_out(self.cards_box, self._own_box)
+            self._own_box = None
+        self._own_said = said
+        if said is None:
+            return
+        box = QFrame(objectName="itemCard")
+        box.setProperty("kind", "self")
+        bl = QVBoxLayout(box)
+        bl.setContentsMargins(8, 5, 6, 6)
+        bl.addWidget(QLabel("<b>The new task</b>  <span style='color:#5a6571'>its first line</span>"))
+        facts = QLabel(said, objectName="hint")
+        facts.setWordWrap(True)
+        bl.addWidget(facts)
+        self.cards_box.insertWidget(0, box)
+        self._own_box = box
 
 
 def _and(xs: list[str]) -> str:

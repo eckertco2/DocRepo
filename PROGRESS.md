@@ -497,6 +497,38 @@ The visual overhaul's O10, designed and mocked in the parent workspace (`docs/ui
   - **The totals that left the sidebar** are beside their views' titles ("14 open", "7 active"), as `sidebar.md` said they'd be.
   - **The tooltip** shows only when a name is cut short. The headings' tooltips say Fold or Unfold.
 
+## Release 5.52: typing in the capture window without lag (2026-10-31)
+
+The owner noticed lag while typing in the content text and asked for it to go. It was measured first, on the large sample (34 tasks, 475 captures). Reading the text was never the slow part, at about 3.5 ms on a 30-line note. The time went on what's around it. No schema change, and no new package.
+
+- **One Model until the database changes** (`ui/context.py`). `AppContext.model` read every table each time it was asked, 17 ms on that sample, and it was asked 2 to 6 times on each key and 5 to 28 times on each read. It now keeps the Model until `total_changes` (this connection's writes) or `PRAGMA data_version` (another's) moves. It keeps nothing inside a transaction, since that could still be rolled back. All who ask share it, so **a Model is read-only**.
+- **A card is made only for what no card shows yet** (`ItemCards.show_items`, `ItemCard.shows`, `ItemCard.moved`). Every read remade every card, about 7 ms each. Cards are now matched by what they show, so typing on a line remakes one card, and a line added above leaves the cards below in place, with their keys and line numbers brought up to date. They can move in the layout, too, when lines swap. `shows` lists all that a card draws, so anything new it draws must go there as well.
+- **Only the lines whose colours change are coloured again** (`OperatorHighlighter`). Colouring a line lays it out again. Each block remembers its colours in a `QTextBlockUserData`, which moves with the block, so a line added above can't leave wrong colours on a line number that looks unchanged.
+- **The wait before a read is 500 ms, not 250** (`ITEMS_WAIT_MS`). At an easy pace keys are about 280 ms apart, so the read fired between letters, and slower typing lagged more than fast typing. Colours, cards, Save's count and the `#` that fills the task picker now come a quarter-second later. The `@` and `#` list doesn't wait, and Save reads what's waiting first, so a `#` typed just before Ctrl+Enter still counts.
+
+**Measured** with a scripted typist: real key events at 280 ms a key, with the event loop and timers running, each key's lag running from its due time until it's handled and painted. Median / worst, in ms, on this computer. "Before" is the code before this release.
+
+| Note | Before, offscreen | After, offscreen | After, a real window |
+|---|---|---|---|
+| 5 lines, no task | 59 / 224 | 7 / 15 | 6 / 10 |
+| 30 lines, task picked, no operators | 155 / 269 | 9 / 12 | 13 / 16 |
+| 30 lines, task picked, typing on an operator's line | 277 / 522 | 10 / 15 | 12 / 21 |
+| 100 lines, the same | 916 / 10,286 | 10 / 28 | 18 / 22 |
+| 30 lines, split by two `#` tasks | 97 / 323 | 10 / 14 | 18 / 27 |
+| The pinned window, 30 lines | not measured | 7 / 11 | 9 / 11 |
+
+No key took over 100 ms after the change, at 120, 280 or 550 ms a key (the last, offscreen, slow enough for a read between every two keys). The longest single read, a new item at the top of 200 lines with 40 cards, went from 515 ms to 44 ms during the build, once moved cards were kept.
+
+**Tests.** `tests/test_typing_lag.py` (new): the Model kept, and seen again after this connection's write, another's, and a rollback; no Model loaded while typing; the wait, the list that doesn't wait, and Save reading what's waiting; cards kept, remade, added, taken away, moved, swapped and alike, with a moved card's line link and changes going by its new place; colours given, lost, kept with their lines when lines are added, removed and swapped, and no change to the text or to Ctrl+Z. The full suite passes (1707, 1 skipped). One run also compared each shared Model with a copy from when it was loaded, 16,724 times, and nothing had changed one.
+
+**Hand-tested by the owner** (2026-10-31). **Not checked yet:** the corporate computer, which may be slower. Also not measured: a path line's check for its file (`existing_file`), still on the window's thread, which could stall on a slow LAN drive. It's left as it is, and the corporate test asks about it.
+
+## Decisions (release 5.52)
+
+- The owner chose all three fixes (2026-10-31): the kept Model, remaking only what changed, and the longer wait. They aren't numbered with the plans' decisions, since thread A is still taking numbers.
+- Keeping moved cards came out of the measuring. Remaking only the card at each position still took 250 ms at 100 lines whenever a line was added above.
+- **Left alone, as too small to matter:** the window's `refresh` on each key (about 1 ms once the Model is kept, and Save's line would otherwise lag), the format bar, the walk over the headings, and `items.read` itself.
+
 ## Release 5.43.1: the whole wheel at once, and Task search to the Task view (2026-10-31)
 
 Two changes the owner asked for after using the wheels. No schema change, and no new package.
