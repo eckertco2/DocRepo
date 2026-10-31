@@ -15,6 +15,9 @@ the bar's place when the task has none in view), a start alone an opening bracke
 end a red diamond, a plant activity amber, a done one grey. In Plan mode a key date that isn't done drags too (decision
 152): a window moves or its ends stretch, a start or an end alone moves. Each drop is sent as ``set_key_date``, and Ctrl+Z
 sends it back, in the same order as the bars' drops.
+
+The range can be typed (release 5.39, item 70, decision 225): From and To beside Show always say what's in view, and a day
+typed in either, or picked from its calendar, shows exactly those days until a Show choice replaces them.
 """
 from __future__ import annotations
 
@@ -38,14 +41,14 @@ from PySide6.QtWidgets import (
 )
 
 from docrepo import key_dates, timeline
-from docrepo.dates import days_text, long_date, short, to_date
+from docrepo.dates import days_text, long_date, monday_of, short, to_date
 from docrepo.detail import esc
 from docrepo.model import KeyDate, Model, Task
 from docrepo.schedule import due_of, start_of
 from docrepo.timeline import Band, KeyMark, Row, Timeline
 from docrepo.ui.look import LOOK, Help
 from docrepo.ui.tree_view import GROUP_COLOURS
-from docrepo.ui.widgets import CheckMenuButton, FlowLayout, label_filter, people_filter
+from docrepo.ui.widgets import CheckMenuButton, DateField, FlowLayout, label_filter, people_filter
 from docrepo.views import markers
 
 FG, MUTED, FAINT, LINE, LINE_STRONG = "#1a1f25", "#5a6571", "#87919c", "#d6dce3", "#b8c1cb"
@@ -248,9 +251,13 @@ class TimelineHead(QWidget):
         # The months, then the weeks (or the years, over 12 months), and Today.
         p.setFont(bold)
         p.setPen(QColor(FG))
+        free = 0.0  # where the last name ended: over a long typed range, a name that wouldn't fit is left out
         for d in tl.months():
             name = d.strftime("%b") if long else f"{d.strftime('%B')} {d.year}"
-            p.drawText(QPointF(self.scale.x(self, d) + 3, 15), name)
+            x = self.scale.x(self, d) + 3
+            if x >= free:
+                p.drawText(QPointF(x, 15), name)
+                free = x + p.fontMetrics().horizontalAdvance(name) + 8
         p.setFont(small)
         if long:
             for d in [tl.start, *(m for m in tl.months() if m.month == 1 and m != tl.start)]:
@@ -944,6 +951,7 @@ class TimelineView(QWidget):
         self.today = date.today()
         self.start: date | None = None
         self.weeks = 9
+        self.typed_days: int | None = None  # a typed range's length (decision 225), in place of ``weeks``
         self.order = "top"
         self.bars = "project"
         self.a_week = False
@@ -971,9 +979,28 @@ class TimelineView(QWidget):
         time_row, show_row = QWidget(), QWidget()
         self.time_layout = FlowLayout(time_row, spacing=8)
         self.show_layout = FlowLayout(show_row, spacing=8)
+        self.range_note = QLabel(objectName="error")  # what's wrong with a typed day, on its own line so the boxes stay put
+        self.range_note.hide()
         rows.addWidget(time_row)
+        rows.addWidget(self.range_note)
         rows.addWidget(show_row)
         lay.addWidget(self.controls)
+        # From and To (decision 225) outlive the redraws that rebuild the other controls, so the caret stays in them.
+        self.range_box = QWidget(time_row)
+        rb = QHBoxLayout(self.range_box)
+        rb.setContentsMargins(0, 0, 0, 0)
+        rb.setSpacing(6)
+        self.range_from, self.range_to = DateField(), DateField()
+        rb.addWidget(QLabel("From", objectName="hint"))
+        rb.addWidget(self.range_from)
+        rb.addWidget(QLabel("to", objectName="hint"))
+        rb.addWidget(self.range_to)
+        for field, name, which, what in ((self.range_from, "First day shown", "from", "first"), (self.range_to, "Last day shown", "to", "last")):
+            field.setFixedWidth(162)
+            field.line.setAccessibleName(name)
+            field.line.setToolTip(f"The {what} day to show. Type a date such as 2027-01-31, 31 Jan 2027 or Jan 2027, then press Enter")
+            field.line.editingFinished.connect(lambda which=which: self._range_typed(which))
+            field.picked.connect(lambda which=which: self._range_typed(which))
         self.plan_strip = QFrame(objectName="fileRow")
         ps = QHBoxLayout(self.plan_strip)
         ps.setContentsMargins(10, 4, 6, 4)
@@ -1063,8 +1090,9 @@ class TimelineView(QWidget):
             self.order = "top"
         self._controls()
         tl = timeline.build(model, today, self.start, self.weeks, self.order, tuple(self.labels), tuple(self.people), self.routine,
-                            self.open_ids, self.plan, self.focus)
+                            self.open_ids, self.plan, self.focus, self.typed_days)
         self.scale.tl = tl
+        self._show_range(tl)
         self.scale.set_order(self.order)
         self._sync_inset()
         self.head.set_timeline(model, today, model.task(self.focus).title if self.focus else "", self.sel, field_names(self.order)[0])
@@ -1099,7 +1127,7 @@ class TimelineView(QWidget):
         for lay in (self.time_layout, self.show_layout):
             while lay.count():
                 w = lay.takeAt(0).widget()
-                if w is not None:  # hidden now, deleted once the signal that redraws the view has returned
+                if w is not None and w is not self.range_box:  # hidden now, deleted once the signal that redraws the view has returned
                     w.hide()
                     w.deleteLater()
         m = self.model
@@ -1123,13 +1151,17 @@ class TimelineView(QWidget):
             lay.addWidget(line)
 
         lay = self.time_layout
-        for text, s, tip in (("◀ Earlier", -1, "Back four weeks (13 over six months, 26 over a year)"), ("This week", 0, "From last week"),
-                             ("Later ▶", 1, "On four weeks (13 over six months, 26 over a year)")):
+        for text, s, tip in (("◀ Earlier", -1, "Back four weeks (13 over six months, 26 over a year), never more than the range shown"),
+                             ("This week", 0, "From last week"),
+                             ("Later ▶", 1, "On four weeks (13 over six months, 26 over a year), never more than the range shown")):
             b = QPushButton(text)
             b.setToolTip(tip)
             b.clicked.connect(lambda _=False, s=s: self.shift(s))
             lay.addWidget(b)
-        combo(lay, "Show", [(n, f"Show {label}") for n, label in timeline.RANGES], self.weeks, "weeks")
+        shows = [(n, f"Show {label}") for n, label in timeline.RANGES]
+        combo(lay, "Show", [*shows, (0, "Show these dates")] if self.typed_days else shows, 0 if self.typed_days else self.weeks, "weeks")
+        lay.addWidget(self.range_box)
+        self.range_box.show()
         divider(lay)
         focus = combo(lay, "Focus on", [("", "Focus on all projects"), *((x, "Focus on " + name) for x, name in self._focus_choices())],
                       self.focus or "", "focus")
@@ -1219,7 +1251,10 @@ class TimelineView(QWidget):
         return " &nbsp;·&nbsp; ".join(parts)
 
     def settings(self) -> dict:
-        return {k: getattr(self, k) for k in self.REMEMBERED}
+        kept = {k: getattr(self, k) for k in self.REMEMBERED}
+        if self.typed_days and self.start is not None:  # a typed range: its days, until a Show choice replaces them
+            kept["range"] = [self.start.isoformat(), (self.start + timedelta(days=self.typed_days - 1)).isoformat()]
+        return kept
 
     def restore(self, saved: dict) -> None:
         """The choices kept from last time, each only when it's still one the view offers."""
@@ -1233,6 +1268,56 @@ class TimelineView(QWidget):
             elif key == "order" and not isinstance(value, str):
                 continue
             setattr(self, key, value)
+        try:
+            first, last = (date.fromisoformat(x) for x in saved["range"])
+        except (KeyError, TypeError, ValueError):
+            return
+        if 0 <= (last - first).days < timeline.MAX_RANGE_DAYS:
+            self.start, self.typed_days = first, (last - first).days + 1
+
+    def _show_range(self, tl: Timeline) -> None:
+        """From and To say what's in view, except a box that's being typed in."""
+        for field, day in ((self.range_from, tl.start), (self.range_to, tl.end - timedelta(days=1))):
+            if not field.line.isModified():
+                field.set_value(day.isoformat())
+
+    def _range_typed(self, which: str) -> None:
+        """A day typed in From or To, or picked from its calendar: show exactly those days. A From past To, or a To before
+        From, takes the other along, so the range keeps its length and retyping both dates never stops at a wrong one."""
+        tl = self.scale.tl
+        if tl is None or self.model is None:
+            return
+        first, last = timeline.read_range_day(self.range_from.line.text()), timeline.read_range_day(self.range_to.line.text(), last=True)
+        if first is None or last is None:
+            bad = "From" if first is None else "To"
+            self._range_says(f"{bad}: type a date such as 2027-01-31, 31 Jan 2027 or Jan 2027")
+            return
+        if first > last:
+            length = (tl.end - tl.start).days - 1
+            if which == "from":
+                last = first + timedelta(days=length)
+            else:
+                first = last - timedelta(days=length)
+        if (last - first).days >= timeline.MAX_RANGE_DAYS:
+            self._range_says("The range can be up to five years")
+            return
+        self._range_settled()
+        if (first, last) == (tl.start, tl.end - timedelta(days=1)):  # nothing new: a Show choice stays one
+            self._show_range(tl)
+            return
+        self.start, self.typed_days = first, (last - first).days + 1
+        self.settings_changed.emit(self.settings())
+        self.render(self.model, self.today)
+
+    def _range_says(self, text: str) -> None:
+        self.range_note.setText(text)
+        self.range_note.setVisible(bool(text))
+
+    def _range_settled(self) -> None:
+        """Nothing left to fix: the note goes, and what's in the boxes gives way to the next redraw."""
+        self._range_says("")
+        for field in (self.range_from, self.range_to):
+            field.line.setModified(False)
 
     def _set(self, key: str, value) -> None:
         if key == "focus":
@@ -1242,6 +1327,11 @@ class TimelineView(QWidget):
                     if self.model.children_of(x):
                         self.open_ids.add(x)
                 self.folds_changed.emit(sorted(self.open_ids))
+        elif key == "weeks":  # a Show choice replaces a typed range, from the Monday of its first week
+            self.typed_days = None
+            self._range_settled()
+            if self.start is not None:
+                self.start = monday_of(self.start)
         setattr(self, key, value)
         if key in self.REMEMBERED:
             self.settings_changed.emit(self.settings())
@@ -1275,10 +1365,15 @@ class TimelineView(QWidget):
             self.render(self.model, self.today)
 
     def shift(self, direction: int) -> None:
-        """Earlier, This week or Later: by four weeks, 13 over six months, or 26 over a year."""
+        """Earlier, This week or Later: by four weeks, 13 over six months, or 26 over a year, and a typed range likewise, by
+        no more than its own length. Its length stays, and a box's unfinished typing gives way."""
         if self.start is None:
             return
-        self.start = timeline.default_start(self.today) if direction == 0 else self.start + timedelta(weeks=direction * timeline.step(self.weeks))
+        self.start = (timeline.default_start(self.today) if direction == 0
+                      else self.start + timedelta(days=direction * timeline.step_days(self.weeks, self.typed_days)))
+        self._range_settled()
+        if self.typed_days:
+            self.settings_changed.emit(self.settings())
         if self.model is not None:
             self.render(self.model, self.today)
 

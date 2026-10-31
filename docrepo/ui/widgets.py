@@ -257,6 +257,7 @@ class DateField(QWidget):
     """
 
     edited = Signal()
+    picked = Signal()  # chosen from its menu, a day on the calendar or No date, rather than typed
     WIDTH = 176  # the new look's width: a date in words, and the calendar button
 
     def __init__(self) -> None:
@@ -332,6 +333,7 @@ class DateField(QWidget):
     def _set_by_user(self, value: str | None) -> None:
         self.set_value(value)
         self._typed()
+        self.picked.emit()
 
     def _picked(self, day: QDate) -> None:
         self._menu.close()

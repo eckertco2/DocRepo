@@ -53,6 +53,7 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.36 | Small fixes from the voice memos of 2026-10-30 (round 5, thread E; decisions 235 to 238): Shift+Tab really moves a list item back, the content text stays as wide as its box after the window has been pinned, labels on the task tree's rows, and reminders on Today | Built 2026-10-30, without a mock. Next: the owner's hand test |
 | 5.37 | Notes in the Task view (round 5, thread E, item 78; decisions 239 to 244): a Notes page tab with the task's whole Notes frame, a preview beside it, and the same page live in the browse tool too. No schema change | Built 2026-10-30, without a mock. Next: the owner's hand test |
 | 5.38 | Quick input from round 5 (item 67): `**name,` then a sentence fills any field, in place of `**date`; `**decision,`, `**closed,` and the other kinds move to the same form | Built 2026-10-30, hand-tested by the owner and merged to `main` the same day. Next: testing on the corporate computer with `release-5-38-test.md` |
+| 5.39 | A time range typed by hand on the Timeline (round 5, thread D, item 70; decision 225): From and To beside Show, kept across restarts until a Show choice replaces them. No schema change | Built 2026-10-30, and merged to `main` the same day, before the owner's hand test. Next: `handoff/docrepo/release-5-39-test.md` |
 | 5.41 | The navigation wheels: a hotkey per wheel, picked with the arrow keys or the numpad, their config file with its checking and reload, the registry of commands, Settings' boxes, the tray and the palette, the usage log, and the blank capture with a draft set aside (decisions 168 to 176, 178, 210 to 212, 215 and 216) | Built 2026-10-30 in the `round5-wheels` worktree, from the approved mock. Next: the owner's hand test, then `handoff/docrepo/release-5-41-to-5-43-test.md` |
 | 5.42 | The wheels' selection and searches: the Capture wheel's Email or file (File Explorer's and Outlook's selection, Outlook kept off the window's thread), task search and file search (decisions 213 and 214) | Built 2026-10-30, with 5.41 and 5.43. Next: as 5.41 |
 | 5.43 | The Today side panel: the Today view as a floating strip that widens on hover, with a task's page on a click (decisions 217 to 223) | Built 2026-10-30, with 5.41 and 5.42. Next: as 5.41 |
@@ -641,6 +642,22 @@ Round 5's thread C: stage 20, items 68 and 69. The research is `../docs/ui-desig
 - **At the merge (2026-10-30):**
   - **Decision 224, reminders in the panel:** a folded heading of their own, Reminders · N, between the day's items and Due in the next 7 days, like its neighbours, only while one's day has come. Each row has its date, Add (unless it's on Today) and Clear, which the status log records as "Today". For the owner's hand test.
   - **`draft_aside.py`** keeps release 5.46's capture fields too (Duration, Runs through weekends and the hours' units), so they come back with a draft set aside.
+
+## Release 5.39: a time range typed by hand (2026-10-30)
+
+The mods log round 5's item 70 (the parent workspace's `docs/mods/round-5-plan.md`, stage 21, thread D). No schema change, no new package.
+
+- `docrepo/timeline.py`: `Timeline.typed_days`, with `days` and `end` following it, and `build`'s `typed_days`; `week_starts` marks the Mondays from any first day, and every thirteenth over two years; `months` names a month when a short range would otherwise name none. `step_days` (Earlier and Later, by no more than a typed range's length), `read_range_day` (what can be typed) and `MAX_RANGE_DAYS`.
+- `docrepo/ui/timeline_view.py`: `range_box` with From and To, kept across the redraws that rebuild the other controls, so the caret stays in them; `_range_typed`, `_show_range` and `range_note`; Show's "Show these dates"; the two dates in `settings` and `restore`; `shift` for a typed range. `TimelineHead` leaves out a month's name that wouldn't fit.
+- `docrepo/ui/widgets.py`: `DateField.picked`, for a day chosen from its menu rather than typed.
+- `tests/test_timeline.py`: the range's days and scale, `read_range_day`, what falls in a typed range, and the view (typing, kept and read back, Earlier and Later and This week, a From past To, a Show choice, what can't be read, what's kept that makes no sense, the boxes across a redraw, the calendar).
+
+1060 pass in all, 1 skipped. The view was checked by eye offscreen with Windows' fonts at 1400 × 900, over a short range, a wrong date and three years.
+
+## Decisions (release 5.39)
+
+- **Decision 225,** built straight away at the owner's word, so its details are for the hand test: From and To always say what's in view; a typed range is those exact days, from any day of the week, kept for next time until a Show choice replaces it; a From past To takes To along, keeping the length; up to five years.
+- **A typed range is kept across restarts,** unlike Show's ranges, which start again from last week. Typing dates says you want those dates.
 
 ## Release 5.38: quick input (2026-10-30)
 

@@ -10,9 +10,9 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from datetime import date, datetime  # noqa: E402
 
 import pytest  # noqa: E402
-from PySide6.QtCore import QPoint, Qt  # noqa: E402
+from PySide6.QtCore import QDate, QPoint, Qt  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication, QComboBox  # noqa: E402
 
 from docrepo import people, tasks, timeline  # noqa: E402
 from docrepo.config import Settings  # noqa: E402
@@ -48,6 +48,49 @@ def test_the_range_and_its_scale():
     assert long.months()[0] == date(2026, 9, 7) and len(long.week_starts()) == 7  # every fourth week
     assert [n for n, _ in timeline.RANGES] == [9, 13, 26, 52]  # 3 and 12 months (decision 133)
     assert [timeline.step(n) for n in (9, 13, 26, 52)] == [4, 4, 13, 26]
+
+
+def test_a_typed_range_is_its_exact_days():
+    """Decision 225: from any day of the week; the scale still marks Mondays, and a short range still names its month."""
+    tl = timeline.Timeline(date(2027, 1, 13), 2, (), (), typed_days=10)  # a Wednesday, ten days
+    assert (tl.end, tl.days) == (date(2027, 1, 23), 10)
+    assert tl.week_starts() == [date(2027, 1, 18)]
+    assert tl.months() == [date(2027, 1, 13)]
+    assert timeline.Timeline(date(2027, 1, 29), 1, (), (), typed_days=2).months() == [date(2027, 1, 29)]  # under a week, no new month
+    assert timeline.Timeline(date(2027, 1, 29), 1, (), (), typed_days=6).months() == [date(2027, 2, 1)]
+    assert len(timeline.Timeline(date(2027, 1, 1), 157, (), (), typed_days=1095).week_starts()) == 12  # every thirteenth over two years
+    # Earlier and Later: as Show's ranges, but never further than the range, so no days are skipped.
+    assert [timeline.step_days(9), timeline.step_days(52)] == [28, 182]
+    assert [timeline.step_days(9, 3), timeline.step_days(9, 10), timeline.step_days(9, 63), timeline.step_days(9, 365)] == [3, 10, 28, 182]
+
+
+@pytest.mark.parametrize("text, first, last", [
+    ("2027-01-31", date(2027, 1, 31), date(2027, 1, 31)),
+    ("31 Jan 2027", date(2027, 1, 31), date(2027, 1, 31)),
+    ("1 Jan 2027", date(2027, 1, 1), date(2027, 1, 1)),  # ten characters, as a YYYY-MM-DD is
+    ("Sun 31 Jan 2027", date(2027, 1, 31), date(2027, 1, 31)),
+    ("31 January 2027", date(2027, 1, 31), date(2027, 1, 31)),
+    ("Jan 31, 2027", date(2027, 1, 31), date(2027, 1, 31)),
+    ("  feb 2028 ", date(2028, 2, 1), date(2028, 2, 29)),  # a month: its first day, or its last for To
+    ("February 2027", date(2027, 2, 1), date(2027, 2, 28)),
+])
+def test_read_range_day(text, first, last):
+    assert timeline.read_range_day(text) == first
+    assert timeline.read_range_day(text, last=True) == last
+
+
+@pytest.mark.parametrize("text", ["", "soon", "2027-13-01", "31 Feb 2027", "Jan", "0207-01-01", "1 Jan 1066"])
+def test_read_range_day_leaves_what_it_cant_read(text):
+    assert timeline.read_range_day(text) is None
+
+
+def test_a_typed_range_finds_what_falls_in_it(sample_conn):
+    m = Model(sample_conn)
+    tl = timeline.build(m, TODAY, date(2026, 10, 19), 9, typed_days=3, open_ids={"T000001", "T000008"})
+    assert (tl.weeks, tl.days, tl.end) == (1, 3, date(2026, 10, 22))
+    by_id = {r.task: r for r in tl.rows}
+    assert by_id["T000008"].windows == ((date(2026, 10, 19), date(2026, 10, 30)),)  # it reaches into view
+    assert by_id["T000008"].deadline is None  # its deadline, 30 Oct, is past the range's last day
 
 
 def test_one_row_per_project_folded_to_start_with(sample_conn):
@@ -209,6 +252,103 @@ def test_the_view_folds_selects_and_opens(browse):
     view._pick("T000002")
     QTest.keyClick(chart, Qt.Key.Key_Return)
     assert (w.view, w.sel) == ("tasks", ("task", "T000002"))
+
+
+def _type_range(field, text: str) -> None:
+    field.line.setFocus()
+    field.line.selectAll()
+    QTest.keyClicks(field.line, text)
+    QTest.keyClick(field.line, Qt.Key.Key_Return)
+
+
+def _kept(browse) -> dict:
+    return json.loads(browse.ctx.conn.execute("SELECT value FROM app_state WHERE key = 'timeline_view'").fetchone()[0])
+
+
+def _show_box(view):
+    return next(view.time_layout.itemAt(i).widget() for i in range(view.time_layout.count())
+                if isinstance(view.time_layout.itemAt(i).widget(), QComboBox) and view.time_layout.itemAt(i).widget().accessibleName() == "Show")
+
+
+def test_a_range_typed_by_hand(browse):
+    """Item 70, decision 225: From and To say what's in view; a typed day shows exactly those days, kept until a Show choice
+    replaces them, and Earlier, Later and This week keep its length."""
+    view, chart = browse.timeline, browse.timeline.chart
+    from docrepo.ui.widgets import parse_day
+
+    def boxes() -> tuple[date | None, date | None]:
+        return parse_day(view.range_from.line.text()), parse_day(view.range_to.line.text())
+
+    assert boxes() == (date(2026, 9, 28), date(2026, 11, 29))  # a Show choice's range, in the boxes
+    assert view.typed_days is None and _show_box(view).currentData() == 9
+    # To alone: the range ends there, from the same first day; From alone next: exactly those days.
+    _type_range(view.range_to, "2026-12-16")
+    assert (view.start, view.typed_days) == (date(2026, 9, 28), 80)
+    _type_range(view.range_from, "14 Oct 2026")  # a Wednesday
+    assert (view.start, view.typed_days, chart.tl.end) == (date(2026, 10, 14), 64, date(2026, 12, 17))
+    assert _show_box(view).currentData() == 0 and _show_box(view).currentText() == "Show these dates"
+    chart.grab()
+    view.head.grab()
+    # It's kept for next time, and read back.
+    assert _kept(browse)["range"] == ["2026-10-14", "2026-12-16"]
+    fresh = TimelineView()
+    fresh.restore(_kept(browse))
+    assert (fresh.start, fresh.typed_days) == (date(2026, 10, 14), 64)
+    # Later, Earlier and This week keep its length.
+    view.shift(1)
+    assert (view.start, view.typed_days) == (date(2026, 11, 11), 64)
+    assert boxes() == (date(2026, 11, 11), date(2027, 1, 13))
+    assert _kept(browse)["range"] == ["2026-11-11", "2027-01-13"]
+    view.shift(-1)
+    assert view.start == date(2026, 10, 14)
+    view.shift(0)
+    assert (view.start, view.typed_days) == (date(2026, 9, 28), 64)
+    # A From past To takes To along, and a To before From takes From back, so retyping both never stops at a wrong range.
+    _type_range(view.range_from, "2027-01-01")
+    assert (view.start, view.typed_days) == (date(2027, 1, 1), 64)
+    _type_range(view.range_to, "Dec 2027")
+    assert (view.start, view.typed_days) == (date(2027, 1, 1), 365)
+    _type_range(view.range_to, "2026-11-30")
+    assert (view.start, view.typed_days) == (date(2025, 12, 1), 365)
+    # A Show choice replaces it, from the Monday of its first week, and it's no longer kept.
+    _type_range(view.range_from, "2026-10-14")
+    view._set("weeks", 13)
+    assert (view.start, view.typed_days, view.weeks) == (date(2026, 10, 12), None, 13)
+    assert "range" not in _kept(browse)
+    assert _show_box(view).currentData() == 13 and _show_box(view).findData(0) == -1
+
+
+def test_a_range_typed_wrongly_says_so_and_changes_nothing(browse):
+    view, chart = browse.timeline, browse.timeline.chart
+    before = chart.tl
+    _type_range(view.range_from, "soon")
+    assert chart.tl is before and view.typed_days is None
+    assert not view.range_note.isHidden() and view.range_note.text().startswith("From:")
+    assert view.range_from.line.text() == "soon"  # left as typed, to fix
+    # A redraw doesn't lose it.
+    view.render(view.model, view.today)
+    assert view.range_from.line.text() == "soon" and view.range_from.line.isModified()
+    _type_range(view.range_from, "1 Jan 2020")
+    assert "five years" in view.range_note.text() and view.typed_days is None
+    _type_range(view.range_from, "2026-09-28")  # the first day it already shows: nothing new, and a Show choice stays one
+    assert view.range_note.isHidden() and view.typed_days is None and _show_box(view).currentData() == 9
+    # A range kept that makes no sense is left out.
+    fresh = TimelineView()
+    for nonsense in (["2027-01-02", "2027-01-01"], ["2027-01-01"], ["soon", "later"], None, ["2020-01-01", "2029-01-01"]):
+        fresh.restore({"range": nonsense})
+        assert fresh.typed_days is None and fresh.start is None
+
+
+def test_the_boxes_survive_a_redraw_and_the_calendar_picks(browse):
+    view = browse.timeline
+    box = view.range_box
+    view._set("bars", "hours")
+    QApplication.processEvents()
+    assert view.range_box is box and not box.isHidden()
+    assert view.time_layout.indexOf(box) > 0
+    view.range_to.calendar.setSelectedDate(QDate(2026, 12, 31))
+    view.range_to.calendar.clicked.emit(QDate(2026, 12, 31))
+    assert (view.start, view.typed_days) == (date(2026, 9, 28), 95)
 
 
 def test_double_click_asks_for_quick_edit(browse):
