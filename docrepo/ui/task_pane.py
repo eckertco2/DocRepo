@@ -73,7 +73,7 @@ class TaskPane(QScrollArea):
         head.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         hl = QHBoxLayout(head)
         hl.setContentsMargins(14, 8, 8, 8)
-        self.title = QLabel("Notes", font=tokens.ui_font(tokens.BODY + 1.5, semibold=True))
+        self.title = QLabel("Notes", font=tokens.ui_font(tokens.BODY, semibold=True))
         self.saved = QLabel("", objectName="notesSaved")
         self.saved.setFont(tokens.ui_font(tokens.CAPTION))
         self.menu_button = QToolButton(objectName="notesMenu")

@@ -83,11 +83,11 @@ QFrame#tpRow {{ background: transparent; border-radius: 4px; }}
 QFrame#tpRow:hover {{ background: {hover}; }}
 QFrame#tpRow[current="true"] {{ background: {selected}; }}
 QLabel#tpTitle {{ color: {text}; }}
-QLabel#tpSub {{ color: {text2}; font-size: 8.5pt; }}
-QLabel#tpGroup {{ color: {text2}; font-size: 8.5pt; font-weight: 600; }}
+QLabel#tpSub {{ color: {text2}; font-size: {caption}pt; }}
+QLabel#tpGroup {{ color: {text2}; font-size: {caption}pt; font-weight: 600; }}
 QLabel#tpDone {{ color: {disabled}; text-decoration: line-through; }}
-QToolButton#tpFold {{ border: 0; color: {text2}; font-size: 8.5pt; font-weight: 600; text-align: left; padding: 2px; }}
-QPushButton#tpLink {{ border: 0; background: transparent; color: {accent}; padding: 0 3px; min-height: 0; font-size: 8.5pt; }}
+QToolButton#tpFold {{ border: 0; color: {text2}; font-size: {caption}pt; font-weight: 600; text-align: left; padding: 2px; }}
+QPushButton#tpLink {{ border: 0; background: transparent; color: {accent}; padding: 0 3px; min-height: 0; font-size: {caption}pt; }}
 QPushButton#tpLink:hover {{ text-decoration: underline; }}
 """
 
@@ -179,7 +179,7 @@ class TodayPanel(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
         self.setObjectName("todayPanel")
-        self.setStyleSheet(style_sheet() + QSS.format(**tokens.LIGHT))
+        self.setStyleSheet(style_sheet() + QSS.format(caption=tokens.CAPTION, **tokens.LIGHT))
         self.setWindowTitle("Today")
         self.setAccessibleName("Today side panel")
         self.setMouseTracking(True)

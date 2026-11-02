@@ -69,6 +69,7 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.54 | Export, and edit files on a template | Built 2026-11-01, with 5.53, before the owner's hand test |
 | 5.55 | Edit files on a task tree | Built 2026-11-01, with 5.53, before the owner's hand test |
 | 5.56 | Copilot's folder, `tree-prompt`, `tree-export`, and the handoff with Copilot's prompt file | Built 2026-11-01, with 5.53, before the owner's hand test |
+| 5.57 | The look as decided (the visual review's stage V1): the Body font in rows, tables and menus, a focus ring for the keyboard, rows of controls that line up at one height, DocRepo's own icon, and the Timeline's list of tasks with no dates kept to one line | Built 2026-11-01, hand-tested by the owner, merged to `main` and on GitHub 2026-11-02 |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
 ## Decisions
@@ -560,6 +561,33 @@ Round 5's thread A, the owner's ask of 2026-10-30, as the design has it (decisio
   - **Tie… on the anchor is its Start only,** and a tied row's Start is what's typed over, as the mock has them. Its Due is a line beside it.
   - **Typing the anchor's Due with Days moves its Start, and new Days count from its Start,** or back from its Due if that's all it has, as decision 191 has it on a task.
   - **In a pane under 420 px, each lane goes under its name.** The page doesn't redraw on crossing that width, only when it next draws.
+
+## Release 5.57: the look as decided (2026-11-01)
+
+A review of every window against the design workspace's UI playbook (its `docs/ui-design/visual-review.md`) found that several things decided for the visual overhaul never reached the screen. This release is that review's stage V1, changing what shows without changing what anything does. No schema change and no new package. Windows and buttons stay where they were.
+
+- **The Body font everywhere** (`style.apply_look`, `tokens.BODY_FONT_CLASSES`). Every tree, list, table and menu was Segoe UI 9 pt, though decisions 1 and 2 say Segoe UI Variable 10.5 pt, so the data was smaller than the buttons around it. Windows' Qt theme gives those classes fonts of their own, `QApplication.setFont(font)` doesn't replace them, and setting the style sheet puts them back, so they're set for each class after it. A line of a list stays 28 px (`HtmlDelegate.sizeHint`).
+- **A focus ring for the keyboard** (`look.FocusRing`, `look.watch_focus`, `RowTree.paintEvent`). Fusion's own frame reached only 1.3 to 1.7:1 on these colours, and icon buttons had none. A real Tab now puts a 2 px accent ring with a 1 px white line inside it on every button and tick box, and round the current row of a list, at 6.76:1 or better. A click shows none: Qt never takes off its mark that focus moved by keyboard, so `watch_focus` takes it off on a mouse press. It's a small widget that lies over the control, made only when focus moves, so it costs nothing when painting or typing. `tokens.qss` turns off Fusion's frame with `outline: none`.
+- **Controls line up** (`FlowLayout._place`). It ignored its own margins, so a command bar sat on the pane's edge, and it put each item at the top of its line, so tick boxes rode above combo boxes on every filter bar. It now keeps its margins and centres each item on its line. Subtle buttons are tighter (8 px at the sides), so the command bar still fits on a row.
+- **One height for controls in a row** (`tokens.qss`). Inputs and combo boxes were 33 px and spin boxes 36, against 32 for buttons, and they grew a pixel when focused. They're all 32 px now, focused or not, and so are a chip field (Agenda) and the capture types' strip. Icon buttons are the token's 28 px: a style sheet's sizes beat `setFixedSize`, so the sheet now says 28.
+- **Titles are Semibold** (`QLabel#paneTitle`, `QLabel#subtitle`, the pages' `h2`). Under Segoe UI Variable's "Text" style, a weight in a style sheet comes out light at 15 pt, so view and page titles looked Regular. They name Segoe UI, whose Semibold matches `ui_font`'s. Capacity's over-100% cell and group headings take `ui_font(semibold=True)`, since `setBold` on an item's font is lost under the Body font.
+- **Off the ramp:** "deadline" under a due date was 8 pt, the Today panel 8.5 pt and Notes' heading 12 pt; they're Caption, Caption and Body Strong. Avatars' initials go from 8 px to 10 px, as large as two letters fit in the circle.
+- **DocRepo's own icon** (`app.make_icon`, `app.set_identity`). Windows had no icon set, so the title bars showed a generic one. The tray's icon is now drawn at each size and set on every window, and an AppUserModelID gives the taskbar DocRepo's own name instead of Python's.
+- **The yellow goes with Clear** (`CaptureWindow.reset_draft`). After Parse and populate then Clear, an empty Title stayed marked as filled, and was still marked at the next New task.
+- **"Content text"**, not "CONTENT TEXT", on capture pages.
+- **The Timeline's tasks with no dates** (`TimelineView._draw_undated`), the owner's own find. The words under the chart wrapped without limit, so with many tasks the chart was a sliver. They stay as they were when they fit on one line. Otherwise it's a count, with a fold that opens a list of at most four lines scrolling inside itself. Whether it's open is remembered with the view's other choices. The chart keeps its room.
+- **The Task view's outline** measures its rows again as it shows (`TaskView.showEvent`). It's filled before its style sheet's row height applies, which the old font's change had been hiding.
+
+**Tests:** `tests/test_real_look.py` is new, and runs each check in a process of its own, since `apply_look` changes the whole application. Its fonts and sizes run on Windows' real platform, because the offscreen one has no per-class fonts and can't see that fault; it caught the style sheet putting them back while this was being built. Its focus test presses a real Tab, since `setFocus(Qt.TabFocusReason)` in code doesn't set what Qt checks. Others are in `test_look.py`, `test_timeline.py` and `test_task_view.py`. All tests pass: 2003, with 1 skipped. One real start through `app.run` showed the icon and the fold at work, and caught the AppUserModelID showing as the name on notifications, so it's plain `DocRepo`.
+
+**Hand-tested by the owner, merged to `main` and on GitHub** (2026-11-02). **Not checked yet:** the corporate computer, whose display scaling may change how rows fit.
+
+**Left for later stages,** in the review's order: clipped words, the Timeline's controls and legend, hover row actions, one arrow family, colours into tokens, and Capacity.
+
+## Decisions (release 5.57)
+
+- **The review's V1, row text:** Body, as decisions 1 and 2 say. The owner chose to build the stage that makes it so.
+- **The focus ring is a widget, not a `QProxyStyle`,** though the playbook suggested one: a proxy adds a Python call to every primitive drawn, and release 5.52 had just taken that kind of cost out of typing.
 
 ## Release 5.52: typing in the capture window without lag (2026-10-31)
 

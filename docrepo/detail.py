@@ -779,8 +779,8 @@ class Pages:
                           "and sets the task in its capture.md; the folder stays where it is.", "info")
         content = items.unstore(content) if content else content  # each @ and # by its name (release 5.8)
         shown = markup.to_html(content) if content and c.formatted else f'<span class="text">{multiline(content or "")}</span>'
-        text = (box(f'<span class="sub">CONTENT TEXT</span><br>{shown}') if content
-                else box('<span class="sub">CONTENT TEXT</span><br><span class="sub">None</span>') if content == ""
+        text = (box(f'<span class="sub">Content text</span><br>{shown}') if content
+                else box('<span class="sub">Content text</span><br><span class="sub">None</span>') if content == ""
                 else box("This capture's capture.md couldn't be read, so its content text can't be shown.", "warn"))
         return f'<p class="crumbs">Capture {c.id}</p><h2>{esc(c.title)}</h2>{unfiled}{fields_table(rows)}<p></p>{text}'
 

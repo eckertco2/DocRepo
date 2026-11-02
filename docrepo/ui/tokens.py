@@ -52,6 +52,8 @@ GROUP_KEYS = ("g1", "g2", "g3", "g4")
 
 # ---- type (decisions 1 and 2): Windows 11's ramp, in points for Qt (1 pt is 1.333 px at 100%) ----
 CAPTION, BODY, SUBTITLE, TITLE = 9.0, 10.5, 15.0, 21.0
+#: The classes Windows' theme gives their own font, so the application's font doesn't reach them (release 5.57).
+BODY_FONT_CLASSES = ("QAbstractItemView", "QMenu", "QMenuBar", "QMessageBox", "QDockWidgetTitle")
 
 # ---- sizes and spacing (decision 3): a 4 px grid, and WinUI's standard heights ----
 SPACE = {"xs": 2, "s": 4, "m": 8, "l": 12, "xl": 16, "xxl": 24, "xxxl": 32}
@@ -128,10 +130,14 @@ QToolTip { background: $content; color: $text; border: 1px solid $stroke_strong;
 QLineEdit, QPlainTextEdit, QTextEdit, QComboBox, QSpinBox, QDoubleSpinBox, QTimeEdit, QDateEdit {
   background: $content; color: $text; border: 1px solid $stroke; border-bottom: 1px solid $control; border-radius: 4px;
   selection-background-color: $selected; selection-color: $text; }
-QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QTimeEdit, QDateEdit { padding: 5px 8px; min-height: 20px; }
+QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QTimeEdit, QDateEdit { padding: 5px 8px; min-height: 20px; max-height: 20px; }
 QPlainTextEdit, QTextEdit { padding: 4px; }
-QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus, QTimeEdit:focus {
-  border-bottom: 2px solid $accent; }
+/* one pixel off the padding for the focus edge's second one, so a field keeps its height */
+QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus, QTimeEdit:focus { border-bottom: 2px solid $accent; padding-bottom: 4px; }
+QPlainTextEdit:focus, QTextEdit:focus { border-bottom: 2px solid $accent; padding-bottom: 3px; }
+/* the text box inside a combo box or a spin box: its parent has the outline and the height */
+QComboBox QLineEdit, QComboBox QLineEdit:focus, QAbstractSpinBox QLineEdit, QAbstractSpinBox QLineEdit:focus {
+  background: transparent; border: none; padding: 0; min-height: 0; }
 QLineEdit:disabled, QPlainTextEdit:disabled, QComboBox:disabled, QSpinBox:disabled { background: $base; color: $disabled; }
 QLineEdit[readOnly="true"] { background: $base; }
 QComboBox::drop-down { border: none; width: 26px; }
@@ -147,6 +153,9 @@ QLineEdit[filled="true"] { background-image: url("$marker"); background-repeat: 
   padding-right: 24px; }
 QCheckBox[filled="true"] { background: $caution_bg; border-radius: 4px; }
 
+/* keyboard focus is look.FocusRing's, over these: no focus frame of Fusion's under it */
+QPushButton, QToolButton, QCheckBox, QRadioButton { outline: none; }
+
 /* buttons: neutral by default, one accent button per window (the objectName "primary"), 32 px high */
 QPushButton { background: $content; color: $text; border: 1px solid $stroke_strong; border-radius: 4px; padding: 5px 12px;
   min-height: 20px; }
@@ -159,6 +168,8 @@ QPushButton#primary:hover { background: $accent_hover; border-color: $accent_hov
 QPushButton#primary:pressed { background: $accent_pressed; }
 QPushButton#primary:disabled { color: $disabled; background: $base; border-color: $stroke; }
 QPushButton#subtle, QToolButton#subtle { background: transparent; border: 1px solid transparent; }
+QPushButton#subtle { padding: 5px 8px; }  /* a command bar's: tighter, so the bar keeps to one row */
+QPushButton#subtle[menu="true"] { padding-right: 24px; }
 QPushButton#subtle:hover, QToolButton#subtle:hover { background: $hover; }
 QPushButton#subtle:checked, QToolButton#subtle:checked { background: $selected; color: $accent; }
 QPushButton#link, QPushButton#moreLink, QPushButton#rowLink { background: transparent; border: none; color: $accent; padding: 0 2px;
@@ -168,8 +179,8 @@ QPushButton::menu-indicator { image: url("$arrow"); width: 12px; height: 12px; s
   right: 6px; }
 QPushButton[menu="true"] { padding-right: 24px; }
 /* an icon-only button at the end of a command bar, such as the task page's More (release 5.21) */
-QPushButton#iconOnly { background: transparent; border: 1px solid transparent; padding: 0; min-width: 28px; max-width: 28px;
-  min-height: 28px; max-height: 28px; }
+QPushButton#iconOnly { background: transparent; border: 1px solid transparent; padding: 0; min-width: 26px; max-width: 26px;
+  min-height: 26px; max-height: 26px; }
 QPushButton#iconOnly:hover { background: $hover; }
 QPushButton#iconOnly::menu-indicator { image: none; width: 0; }
 QToolButton { background: transparent; border: 1px solid transparent; border-radius: 4px; padding: 4px; color: $text; }
@@ -180,11 +191,12 @@ QToolButton::menu-indicator { image: none; width: 0; }
 QToolButton[popupMode="1"] { padding-right: 14px; }
 QToolButton::menu-button { border: none; background: transparent; width: 12px; }
 QToolButton::menu-arrow { image: url("$arrow"); width: 10px; height: 10px; }
-QToolButton#iconButton { min-width: 20px; min-height: 20px; }
+/* 18 + 8 of padding + 2 of border: the token's 28 px, since a style sheet's sizes beat setFixedSize */
+QToolButton#iconButton { min-width: 18px; max-width: 18px; min-height: 18px; max-height: 18px; }
 
-/* the capture types: toggles that combine, in one segmented strip */
-QWidget#typeStrip { background: $base; border: 1px solid $stroke; border-radius: 6px; }
-QCheckBox#typeToggle { color: $text2; padding: 5px 12px; border-radius: 4px; spacing: 0; }
+/* the capture types: toggles that combine, in one segmented strip, the height of the controls beside it */
+QWidget#typeStrip { background: $base; border: 1px solid $stroke; border-radius: 6px; min-height: 30px; max-height: 30px; }
+QCheckBox#typeToggle { color: $text2; padding: 2px 12px; border-radius: 4px; spacing: 0; border: 1px solid transparent; border-bottom: 2px solid transparent; }
 QCheckBox#typeToggle::indicator { width: 0; height: 0; border: none; }
 QCheckBox#typeToggle:hover { color: $text; background: $hover; }
 QCheckBox#typeToggle:checked { background: $content; color: $text; font-weight: 600; border: 1px solid $stroke; border-bottom: 2px solid $accent; }
@@ -244,7 +256,9 @@ QGroupBox { border: none; margin-top: 0; padding: 0; background: transparent; }
 QGroupBox[title=""] { margin-top: 0; }
 QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; left: 0; padding: 0; color: $text; }
 QLabel#heading { font-weight: 600; color: $text; }
-QLabel#subtitle { font-size: ${subtitle}pt; font-weight: 600; color: $text; }
+/* Subtitles name Segoe UI: under Segoe UI Variable's "Text" style a weight in a style sheet comes out light at this size. Its
+   Semibold matches ui_font's. */
+QLabel#subtitle { font-family: "Segoe UI"; font-size: ${subtitle}pt; font-weight: 600; color: $text; }
 
 /* text roles */
 QLabel#fieldLabel { color: $text2; font-size: ${caption}pt; }
@@ -253,10 +267,10 @@ QLabel#does { color: $text2; font-size: ${caption}pt; }
 QLabel#error { color: $critical; font-size: ${caption}pt; font-weight: 600; background: transparent; padding: 0; }
 QLabel#tip { color: $text; background: $selected; border-radius: 4px; padding: 6px 9px; font-size: ${caption}pt; }
 QLabel#hotkey { color: $text2; font-family: Consolas; font-size: ${caption}pt; border: 1px solid $stroke; border-radius: 3px; padding: 1px 4px; }
-QLabel#paneTitle { font-size: ${subtitle}pt; font-weight: 600; color: $text; }
+QLabel#paneTitle { font-family: "Segoe UI"; font-size: ${subtitle}pt; font-weight: 600; color: $text; }
 QLabel#count { color: $text2; font-size: ${caption}pt; }
 QToolButton#info { min-width: 16px; max-width: 16px; min-height: 16px; max-height: 16px; border: 1px solid $control; border-radius: 8px;
-  color: $text2; font-size: 8pt; font-weight: 600; padding: 0; }
+  color: $text2; font-size: ${caption}pt; font-weight: 600; padding: 0; }
 QToolButton#info:checked, QToolButton#info:hover { background: $accent; border-color: $accent; color: $on_accent; }
 QLabel#keyTip { background: $text; color: $content; border-radius: 3px; padding: 0 5px; font-size: ${caption}pt; font-weight: 600; }
 
@@ -332,8 +346,8 @@ QFrame#timingRow { border-bottom: 1px solid $stroke; }
 QFrame#timingRow[anchor="true"] { background: $selected; }
 QLabel#anchorPill { color: $accent; background: $selected; border: 1px solid $accent; border-radius: 8px; padding: 0 6px; font-size: ${caption}pt; }
 QWidget#chips { border: 1px solid $stroke; border-bottom: 1px solid $control; border-radius: 4px; background: $content; }
-QWidget#chips QLineEdit { background: transparent; border: none; padding: 4px 2px; min-height: 20px; }
-QWidget#chips QLineEdit:focus { border: none; }
+/* with the chip field's margins, 32 px high, and its text where a text box's starts */
+QWidget#chips QLineEdit, QWidget#chips QLineEdit:focus { background: transparent; border: none; padding: 4px 5px; min-height: 22px; max-height: 22px; }
 
 /* the browse tool */
 QWidget#toolbar { background: $base; border-bottom: 1px solid $stroke; }
@@ -370,7 +384,7 @@ def qss() -> str:
 CSS = Template("""
 body { color: $text; }
 a { color: $accent; text-decoration: none; }
-h2 { font-size: ${subtitle}pt; font-weight: 600; margin-top: 2px; margin-bottom: 4px; }
+h2 { font-family: 'Segoe UI'; font-size: ${subtitle}pt; font-weight: 600; margin-top: 2px; margin-bottom: 4px; }
 .crumbs { color: $text2; font-size: ${caption}pt; margin: 0; }
 .sub { color: $text2; font-size: ${caption}pt; }
 .faint { color: $text2; }

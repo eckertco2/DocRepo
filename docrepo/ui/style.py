@@ -15,7 +15,7 @@ from PySide6.QtGui import QColor, QFont, QGuiApplication, QPalette
 from PySide6.QtWidgets import QApplication
 
 from docrepo.ui import tokens
-from docrepo.ui.look import LOOK, configure
+from docrepo.ui.look import LOOK, configure, watch_focus
 
 #: The light palette, from the mockup's light colours.
 LIGHT = {
@@ -183,3 +183,9 @@ def apply_look(app: QGuiApplication, look: str = "new", hints: bool = False) -> 
     app.setFont(tokens.ui_font())
     LOOK.app_sheet = False
     style_sheet()  # sets the new look's style sheet on the application, once
+    # Windows' theme gives these classes fonts of their own (Segoe UI 9 pt), which setFont above leaves in place (release 5.57).
+    # After the style sheet, which puts them back.
+    for name in tokens.BODY_FONT_CLASSES:
+        QApplication.setFont(tokens.ui_font(), name)
+    QApplication.setFont(tokens.ui_font(tokens.CAPTION), "QTipLabel")
+    watch_focus(app)

@@ -151,7 +151,7 @@ def test_an_unfiled_capture_page(pages, sample_root):
     words = text(html)
     assert words.startswith("Capture C000021 Steam trap survey quote Unfiled.")
     assert "What Save did Kept as an unfiled capture, to file later" in words and "Source Email" in words
-    assert "Quote 4471.pdf D000003" in words and "CONTENT TEXT From:" in words
+    assert "Quote 4471.pdf D000003" in words and "Content text From:" in words
 
 
 def test_a_filed_capture_page_says_what_save_did(pages, sample_root):

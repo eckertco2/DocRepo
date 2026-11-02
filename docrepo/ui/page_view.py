@@ -58,7 +58,7 @@ def avatar(key: str, scale: float) -> QImage:
         p.drawPixmap(QPointF(3, 3), tinted("person", tokens.LIGHT["accent"], AVATAR - 6, scale))
     else:
         font = QFont("Segoe UI")
-        font.setPixelSize(8 if len(key) > 1 else 9)
+        font.setPixelSize(10)  # as large as two letters fit in the circle; it's a mark, with the name beside it
         font.setWeight(QFont.Weight.DemiBold)
         p.setFont(font)
         p.setPen(_colour("text"))

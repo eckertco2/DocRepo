@@ -455,7 +455,7 @@ def test_ordered_by_a_field_the_lane_column_names_it(browse):
     view._set("weeks", 13)
     view._set("bars", "hours")
     kept = json.loads(browse.ctx.conn.execute("SELECT value FROM app_state WHERE key = 'timeline_view'").fetchone()[0])
-    assert kept == {"weeks": 13, "order": "person", "bars": "hours", "a_week": False, "routine": True}
+    assert kept == {"weeks": 13, "order": "person", "bars": "hours", "a_week": False, "routine": True, "undated_open": False}
     fresh = TimelineView()
     fresh.restore(kept | {"weeks": 7, "bars": "nonsense"})  # a value it no longer offers is left at its default
     assert (fresh.weeks, fresh.order, fresh.bars) == (9, "person", "project")
@@ -577,3 +577,32 @@ def test_plan_mode_drags_a_key_date_and_undoes_it(browse):
     assert "Key dates:" in view.card_text.text() and "Crane booked" in view.card_text.text()
     chart.grab()
     view.head.grab()
+
+
+def test_tasks_with_no_dates_never_squeeze_the_chart(browse):
+    """The owner's comment (release 5.57): the list under the chart is one line when it fits, or else a count, with a fold that opens
+    a short list scrolling inside itself. The chart keeps its room however many there are."""
+    view = browse.timeline
+    view.undated_ids = view.undated_ids[:1]
+    view._draw_undated()
+    QApplication.processEvents()
+    assert view.undated_ids and not view.undated_fold.isVisibleTo(view) and not view.undated_box.isVisibleTo(view)
+    assert view.model.task(view.undated_ids[0]).title in view.undated.text()  # few: their names, on the one line
+    few = view.scroll.height()
+    many = tuple(view.model.tasks) * 6
+    view.undated_ids = many
+    view._draw_undated()
+    QApplication.processEvents()
+    assert f"{len(many)} tasks" in view.undated.text() and view.undated_fold.isVisibleTo(view) and not view.undated_box.isVisibleTo(view)
+    assert view.model.task(many[0]).title not in view.undated.text()
+    assert view.scroll.height() >= few - 2  # folded, it costs the chart nothing
+    view.undated_fold.click()
+    QApplication.processEvents()
+    assert view.undated_box.isVisibleTo(view) and view.undated_box.height() <= 68 and view.undated_names.height() > 68  # it scrolls
+    assert view.scroll.height() >= few - 68 - 8  # the list, and the gap above it
+    assert view.settings()["undated_open"] is True
+    fresh = TimelineView()
+    fresh.restore(view.settings())
+    assert fresh.undated_open
+    view.undated_fold.click()
+    assert not view.undated_box.isVisibleTo(view)

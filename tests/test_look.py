@@ -3,13 +3,14 @@ Show hints, the date field, the command palette, and the new look's capture wind
 from __future__ import annotations
 
 import os
+import re
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from datetime import date, datetime  # noqa: E402
 
 import pytest  # noqa: E402
-from PySide6.QtCore import qInstallMessageHandler  # noqa: E402
+from PySide6.QtCore import QRect, qInstallMessageHandler  # noqa: E402
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
 from docrepo import db  # noqa: E402
@@ -18,7 +19,7 @@ from docrepo.sample import load_sample  # noqa: E402
 from docrepo.ui import palette, tokens  # noqa: E402
 from docrepo.ui.look import LOOK, Help, KeyBadge, KeyTips, set_hints  # noqa: E402
 from docrepo.ui.palette import Command, rank  # noqa: E402
-from docrepo.ui.widgets import DateField, InfoButton, parse_day  # noqa: E402
+from docrepo.ui.widgets import DateField, FlowLayout, InfoButton, parse_day  # noqa: E402
 
 NOW = datetime(2026, 10, 8, 14, 10)
 
@@ -189,6 +190,48 @@ def test_the_browse_tool_in_the_new_look(ctx):
     w.hide()
     cap.deleteLater()
     w.deleteLater()
+
+
+def test_clear_takes_parse_and_populates_marks_with_it(ctx):
+    """The filled look on a field goes with what filled it: an empty Title isn't left yellow for the next capture (release 5.57)."""
+    from docrepo.ui.capture_window import CaptureWindow
+
+    w = CaptureWindow(ctx)
+    w.show_capture(mode="new_task", content="Replace the Line 2 pump seal by Fri 16 Oct. @Mike leads, 6 h")
+    w.parse()
+    assert w.title.text() and w.title.property("filled")
+    w.clear()
+    assert w.title.text() == "" and not w.title.property("filled")
+    w.hide()
+    w.deleteLater()
+
+
+def test_the_flow_layout_keeps_its_margins_and_centres_each_line(qapp):
+    """Release 5.57: a command bar stands off the pane's edge, and a tick box sits level with the taller boxes beside it."""
+    box = QWidget()
+    flow = FlowLayout(box, spacing=8)
+    flow.setContentsMargins(16, 10, 16, 2)
+    tall, short, wrapped = QWidget(box), QWidget(box), QWidget(box)
+    tall.setFixedSize(100, 32)
+    short.setFixedSize(60, 20)
+    wrapped.setFixedSize(100, 32)
+    for w in (tall, short, wrapped):
+        flow.addWidget(w)
+    flow.setGeometry(QRect(0, 0, 230, 200))
+    assert (tall.x(), tall.y()) == (16, 10)
+    assert short.geometry().center().y() == tall.geometry().center().y() and short.x() == 124
+    assert (wrapped.x(), wrapped.y()) == (16, 50)  # it would end past the right margin, so it starts the next line
+    assert flow.heightForWidth(230) == 10 + 32 + 8 + 32 + 2
+    assert flow.minimumSize().width() == 100 + 32 and flow.minimumSize().height() == 32 + 12
+    box.deleteLater()
+
+
+def test_no_text_is_styled_below_the_floor():
+    """Decision 2: captions are 9 pt, and nothing is smaller, in the new look's style sheets."""
+    from docrepo.ui.today_panel import QSS
+
+    sizes = re.findall(r"font-size:\s*([\d.]+)pt", tokens.qss() + tokens.CSS + QSS.format(caption=tokens.CAPTION, **tokens.LIGHT))
+    assert sizes and min(float(s) for s in sizes) >= tokens.CAPTION
 
 
 def test_settings_keep_the_look_and_show_hints(ctx):
