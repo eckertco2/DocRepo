@@ -13,8 +13,8 @@ Each change to a template works out what it would do first, with nothing changed
 ``preview_remove`` and ``preview_timing``), and the browse tool shows that before it's made. The status log of each task says what reached it, and
 the template keeps a Changes list (decision 187).
 
-Only the Templates view, Make tasks, Save as template and the previews read these tables, through a ``Library``. The Model
-knows only where each task came from (``model.TemplateOrigin``).
+Only the Templates view, Make tasks, Save as template, the previews and tree files (``docrepo/tree_files.py``) read these tables, through a
+``Library``. The Model knows only where each task came from (``model.TemplateOrigin``).
 
 Since release 5.51 a template has a timing: an anchor, and ties on its rows, whose sums are in ``timing``. A task made from a row
 carries that tie as an ordinary tie, pointing at its own tree's copy of the source, and ``start_tie`` and ``due_tie`` in ``task_links``

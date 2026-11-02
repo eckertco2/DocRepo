@@ -157,6 +157,7 @@ QPushButton:disabled { color: $disabled; background: $base; border-color: $strok
 QPushButton#primary { background: $accent; color: $on_accent; border-color: $accent; font-weight: 600; padding: 5px 16px; }
 QPushButton#primary:hover { background: $accent_hover; border-color: $accent_hover; }
 QPushButton#primary:pressed { background: $accent_pressed; }
+QPushButton#primary:disabled { color: $disabled; background: $base; border-color: $stroke; }
 QPushButton#subtle, QToolButton#subtle { background: transparent; border: 1px solid transparent; }
 QPushButton#subtle:hover, QToolButton#subtle:hover { background: $hover; }
 QPushButton#subtle:checked, QToolButton#subtle:checked { background: $selected; color: $accent; }

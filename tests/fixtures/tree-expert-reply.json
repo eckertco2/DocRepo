@@ -1,0 +1,224 @@
+{
+  "format": "docrepo-tree-1",
+  "rows": [
+    {
+      "key": "top",
+      "title": "Product trial",
+      "description": "How a product trial runs on the line, from the change record through the lab results and report to the management review."
+    },
+    {
+      "key": "cr",
+      "parent": "top",
+      "title": "Change record",
+      "description": "Always the first thing in a product trial. Nothing goes on the line until the change record is through.",
+      "quote": "Nothing goes on the line until the change record is through.",
+      "assumed": [
+        "Priya's write-up and Tom Baker's sign-off grouped as one stage, since the notes treat the change record as one thing",
+        "'Through', 'done' and 'complete' all read as meaning signed off by Tom Baker"
+      ]
+    },
+    {
+      "key": "cr_write",
+      "parent": "cr",
+      "title": "Write the change record",
+      "description": "Priya writes it up. She uses last year's form and attaches the supplier's safety sheet.",
+      "assignees": [
+        "Priya Shah"
+      ],
+      "assignee_hours": 30,
+      "duration": 10,
+      "quote": "she spends about thirty hours on it over two weeks",
+      "assumed": [
+        "'two weeks' read as 10 workdays",
+        "'about thirty hours' read as 30 hours in all, for Priya",
+        "'Priya' read as Priya Shah, the only Priya on the list"
+      ]
+    },
+    {
+      "key": "cr_approval",
+      "parent": "cr",
+      "title": "Approval: Change record",
+      "description": "Tom Baker signs off the change record. Give it a week, more if he is travelling.",
+      "assignees": [
+        "Tom Baker"
+      ],
+      "duration": 5,
+      "start_tie": {
+        "source": "cr_write",
+        "point": "end",
+        "amount": 0,
+        "unit": "workdays",
+        "direction": "after"
+      },
+      "quote": "Then Tom Baker signs it off, give that a week, more if he's travelling.",
+      "assumed": [
+        "'a week' read as 5 workdays",
+        "'Then' with no gap said read as starting the day Priya's write-up ends (0 workdays after)",
+        "'Tom Baker' written as heard; the people list has Tom Becker (Planner), and I did not assume they are the same person"
+      ]
+    },
+    {
+      "key": "supplier",
+      "parent": "top",
+      "title": "Tell the supplier the trial dates",
+      "description": "Tyler tells the supplier the dates so the material shows up in time.",
+      "assignees": [
+        "Tyler Nguyen"
+      ],
+      "start_tie": {
+        "source": "cr_approval",
+        "point": "end",
+        "amount": 2,
+        "unit": "workdays",
+        "direction": "after"
+      },
+      "quote": "Two days after the change record's done, Tyler tells the supplier the dates",
+      "assumed": [
+        "'Two days' is a bare 'days', read as 2 workdays",
+        "The change record has subtasks, so the tie is to its last one, the approval",
+        "'Tyler' read as Tyler Nguyen, the only Tyler on the list"
+      ]
+    },
+    {
+      "key": "training",
+      "parent": "top",
+      "title": "Train each shift on the new work instruction",
+      "description": "Mike trains each shift on the new work instruction, a couple of hours a day for three days, finishing the day before the trial window starts.",
+      "assignees": [
+        "Mike Ortiz"
+      ],
+      "assignee_per_day": 2,
+      "duration": 3,
+      "due_tie": {
+        "source": "trial",
+        "point": "start",
+        "amount": 1,
+        "unit": "workdays",
+        "direction": "before"
+      },
+      "notes": "- [ ] Book the break room\n- [ ] Print the work instruction\n- [ ] Get each shift's sign-off",
+      "quote": "a couple of hours a day for three days, finishing the day before the trial window starts",
+      "assumed": [
+        "'a couple of hours' read as 2 hours a day",
+        "'three days' read as 3 workdays",
+        "'the day before' read as 1 workday before the start of the trial window",
+        "'Mike' read as Mike Ortiz, the only Mike on the list"
+      ]
+    },
+    {
+      "key": "trial",
+      "parent": "top",
+      "title": "Trial window",
+      "description": "Day shift only. Priya and Mike are both on it. Operations leads each day's start-up.",
+      "assignees": [
+        "Priya Shah",
+        "Mike Ortiz"
+      ],
+      "assignee_per_day": 6,
+      "duration": 5,
+      "plant_event": true,
+      "start_tie": {
+        "source": "cr_approval",
+        "point": "end",
+        "amount": 5,
+        "unit": "workdays",
+        "direction": "after"
+      },
+      "notes": "- [ ] Confirm operators are trained\n- [ ] Confirm the lab is booked for samples",
+      "quote": "has to run five days after the change record is complete",
+      "assumed": [
+        "'five days after' is a bare 'days', read as 5 workdays",
+        "'five days long' read as 5 workdays",
+        "The change record has subtasks, so the tie is to its last one, the approval",
+        "'about six hours a day' read as 6 hours a day for each of Priya and Mike",
+        "plant_event set because a trial is a run on the line that others plan around; this was inferred, not said"
+      ]
+    },
+    {
+      "key": "lab",
+      "parent": "top",
+      "title": "Lab tests the samples",
+      "description": "The lab lead gets to the samples the day after the run is over and the samples have shipped. Test adhesion and gloss on every batch. If gloss is out of range a second run might be needed; nobody has decided who calls that.",
+      "start_tie": {
+        "source": "trial",
+        "point": "end",
+        "amount": 1,
+        "unit": "workdays",
+        "direction": "after"
+      },
+      "quote": "the lab lead gets to them the next day",
+      "assumed": [
+        "'the next day' read as 1 workday after the end of the trial window",
+        "The step also waits on the samples having shipped, which is not a row, so the tie is to the end of the trial window only",
+        "'the lab lead' is a job title with no name, so it stays in the description"
+      ]
+    },
+    {
+      "key": "report",
+      "parent": "top",
+      "title": "Write the report",
+      "assignees": [
+        "Me"
+      ],
+      "duration": 5,
+      "start_tie": {
+        "source": "lab",
+        "point": "end",
+        "amount": 2,
+        "unit": "workdays",
+        "direction": "after"
+      },
+      "quote": "it takes about a week, starting a couple of days after the lab's done",
+      "assumed": [
+        "'You write the report' read as me, the person asking, so the assignee is Me",
+        "'about a week' read as 5 workdays",
+        "'a couple of days' read as 2 workdays"
+      ]
+    },
+    {
+      "key": "review",
+      "parent": "top",
+      "title": "Management review",
+      "description": "A management review of the trial, held a week after the report. No attendees were named.",
+      "meeting": true,
+      "start_tie": {
+        "source": "report",
+        "point": "end",
+        "amount": 1,
+        "unit": "weeks",
+        "direction": "after"
+      },
+      "quote": "a management review a week after the report",
+      "assumed": [
+        "'a week after the report' read as 1 week after the end of the report",
+        "Treated as a meeting, not an approval, because nobody said it has to approve anything before work goes on"
+      ]
+    },
+    {
+      "key": "safety",
+      "parent": "top",
+      "title": "Safety team review",
+      "description": "Somebody from the safety team has to look at it. When, how long and who are not known yet.",
+      "labels": [
+        "Safety"
+      ],
+      "quote": "Somebody from the safety team has to look at it at some point too",
+      "assumed": [
+        "Placed last because no point in the sequence was given",
+        "'it' is not clear (the change record, the trial or the report)",
+        "Safety label applied because the review is by the safety team",
+        "'the safety team' has no named person, so it stays in the description"
+      ]
+    }
+  ],
+  "unplaced": [
+    "The outage is on the third of March, and all of this has to fit around it. Rows have no dates, so it is not placed. Questions: does the trial window have to finish before the outage or start after it? Which step is the fixed one that the dates should be counted back from or forward from?",
+    "Tom Baker's sign-off: how much longer than a week does it take when he is travelling?",
+    "Who calls a second run if gloss is out of range, and who does the call go to?",
+    "Safety team review: what does it look at, when does it happen, how long does it take and who does it? Is it an approval that has to be given before the work goes on?",
+    "Shipping the samples: who ships them and when? It is not a row because no timing, people or hours were given.",
+    "Which line does the trial run on, Line 1 or Line 2? No line label was applied.",
+    "Is 'Tom Baker' the Tom Becker on the people list, or a different person?",
+    "No hours or duration were given for telling the supplier, the lab tests, the report's hours or the management review. Are there any?"
+  ]
+}

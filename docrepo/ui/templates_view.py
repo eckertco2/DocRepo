@@ -846,6 +846,7 @@ class TemplatesPane:
         live = lib.live()
         w._set_head("Templates", TEMPLATES_NOTE, f"{len(live)} template{'s' if len(live) != 1 else ''}" if live else "")
         w._button("New template", self.new_template, tip="A new template, with its name. Then add its subtasks.")
+        w._button("Import…", w.tree_files.import_tree, tip="A template from a tree file an LLM wrote from your notes, or an edit file's changes to a tree")
         w.tree.set_columns(["Template", ""], [0, 240])
         w.tree.allow_row_moves(self.dropped, self.can_drop, self.key_move)
         for t in live:
@@ -856,8 +857,8 @@ class TemplatesPane:
             self._add_rows(lib, t.top, item)
             item.setExpanded(True)
         if not live:
-            w.tree.add_row(None, None, ['<span class="sub">No templates yet. New template starts one, or use Save as template on a task, from '
-                                        'its More menu.</span>'], selectable=False, span=True)
+            w.tree.add_row(None, None, ['<span class="sub">No templates yet. New template starts one, Import… makes one from a tree file, or use Save as template on a '
+                                        'task, from its More menu.</span>'], selectable=False, span=True)
 
     def _pill(self, lib: Library, row_id: int) -> str:
         return " " + chip("Anchor", "anchor") if lib.template_of(row_id).anchor == row_id else ""
@@ -896,6 +897,7 @@ class TemplatesPane:
         w._action("Edit", lambda: self.edit_row(row_id), "Change what this row fills", icon_name="edit")
         if top:
             w._action("Timing", lambda: self.timing(template.id), "The anchor, and where every task starts relative to it", icon_name="timing")
+            w._action("Export", lambda: w.tree_files.export_template(template.id), "This template as a tree file, for an LLM to change")
             w._action("Duplicate…", lambda: self.duplicate(template.id), "A new template with the same rows, on its own")
             w._action("Discard…", lambda: self.discard(template.id), "Hide this template. Its tasks keep their values, and nothing is deleted.")
             return

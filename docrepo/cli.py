@@ -10,7 +10,7 @@ from contextlib import closing
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from docrepo import __version__, backup, capacity, db, diagnose, hotkey, outlook, prompts, search
+from docrepo import __version__, backup, capacity, db, diagnose, hotkey, outlook, prompts, search, tree_files
 from docrepo.config import (
     SETTINGS_FILE,
     Settings,
@@ -83,6 +83,12 @@ def build_parser() -> argparse.ArgumentParser:
                                 help="check each step of reading the email selected in Outlook, and save a troubleshooting report to bring to the personal computer")
     check.add_argument("--try-category", action="store_true",
                        help="also add the category DocRepo test to the selected email, then put its categories back (release 5.33)")
+    tree_check = commands.add_parser("tree-check", help="check a tree file or an edit file and print what's wrong with it. It changes nothing")
+    tree_check.add_argument("file")
+    tree_prompt = commands.add_parser("tree-prompt", help="print the prompt for an LLM to write a tree file, or with --edit, to change an exported tree. It changes nothing")
+    tree_prompt.add_argument("--edit", metavar="ID", help="a task's ID, or a template's number: print the edit prompt for it, holding the tree as it stands")
+    tree_export = commands.add_parser("tree-export", help="print a task tree or a template as a tree file. It changes nothing")
+    tree_export.add_argument("id", metavar="ID", help="a task's ID, or a template's number")
     return parser
 
 
@@ -252,6 +258,70 @@ def _utf8_stdout() -> None:
             sys.stdout.reconfigure(encoding="utf-8")
 
 
+def _tree_of(conn: sqlite3.Connection, ident: str, when: datetime) -> dict:
+    """A task's or a template's tree file, by its ID or number."""
+    return tree_files.export_template(conn, int(ident), when) if ident.isdigit() else tree_files.export_task(conn, ident, when)
+
+
+def cmd_tree_check(args: argparse.Namespace) -> int:
+    opened = _open(args)
+    if opened is None:
+        return 1
+    _root, settings, _fs, conn = opened
+    with closing(conn):
+        try:
+            text = tree_files.read_file(Path(args.file))
+        except (OSError, ValueError) as e:
+            print(f"Can't read {args.file}: {e}", file=sys.stderr)
+            return 1
+        problems, warnings, said = tree_files.check_text(conn, settings, text, datetime.now())
+    _utf8_stdout()
+    if said:
+        print(said)
+    for line in problems:
+        print(f"Problem: {line}")
+    for line in warnings:
+        print(f"Warning: {line}")
+    print(f"{len(problems)} problems, {len(warnings)} warnings." if problems or warnings else "No problems.")
+    return 1 if problems else 0
+
+
+def cmd_tree_prompt(args: argparse.Namespace) -> int:
+    opened = _open(args)
+    if opened is None:
+        return 1
+    root, settings, _fs, conn = opened
+    with closing(conn):
+        m = Model(conn)
+        try:
+            if args.edit:
+                text = tree_files.edit_prompt(m, settings.me, tree_files.rules(None, root, tree_files.EDIT_RULES_FILE, tree_files.EDIT_RULES), _tree_of(conn, args.edit, datetime.now()))
+            else:
+                text = tree_files.tree_prompt(m, settings.me, tree_files.rules(None, root, tree_files.TREE_RULES_FILE, tree_files.TREE_RULES))
+        except ValueError as e:
+            print(e, file=sys.stderr)
+            return 1
+    _utf8_stdout()
+    print(text)
+    return 0
+
+
+def cmd_tree_export(args: argparse.Namespace) -> int:
+    opened = _open(args)
+    if opened is None:
+        return 1
+    _root, _settings, _fs, conn = opened
+    with closing(conn):
+        try:
+            text = tree_files.export_text(_tree_of(conn, args.id, datetime.now()))
+        except ValueError as e:
+            print(e, file=sys.stderr)
+            return 1
+    _utf8_stdout()
+    print(text, end="")
+    return 0
+
+
 def cmd_outlook_check(args: argparse.Namespace) -> int:
     opened = _open(args)
     if opened is None:
@@ -354,4 +424,7 @@ COMMANDS: dict[str, Callable[[argparse.Namespace], int]] = {
     "report": cmd_report,
     "outlook-check": cmd_outlook_check,
     "troubleshoot": cmd_outlook_check,
+    "tree-check": cmd_tree_check,
+    "tree-prompt": cmd_tree_prompt,
+    "tree-export": cmd_tree_export,
 }

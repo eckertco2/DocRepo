@@ -90,6 +90,9 @@ A missing file gives the defaults. An unreadable file stops DocRepo with an erro
 | `make-shortcut` | Makes `DocRepo.lnk`, the Startup shortcut, in `%LOCALAPPDATA%\DocRepo\`, and says where to move it (9.2). |
 | `set-hotkey KEYS` | Sets the capture window's hotkey, such as `"Ctrl+Alt+Space"`. It needs Ctrl, Alt or Win. Takes effect when the app next starts. The browse tool's Settings view does the same, at once. |
 | `outlook-check` (or `troubleshoot`) | Makes the troubleshooting report (9.4), without the capture window's drags and pastes, prints it and saves it in `System\diagnostics`. |
+| `tree-check FILE` | Checks a tree file or an edit file (6.17) and prints its problems and warnings. Exits 1 if it has problems. It changes nothing. |
+| `tree-prompt [--edit ID]` | Prints the prompt for an LLM to write a tree file, or with `--edit`, to change a task's or a template's tree. It changes nothing. |
+| `tree-export ID` | Prints a task's tree, or a template's by its number, as a tree file. It changes nothing. |
 
 `--as-of` takes `YYYY-MM-DD` or `"YYYY-MM-DD HH:MM"` and makes the command work as if it were then. It's for testing.
 
@@ -382,6 +385,50 @@ A template's rows can be tied as tasks are, so a tree gets its dates from one (d
 - **A change to a timing,** from the window or a row's form, is made and rolled back to preview it (decisions 186 and 257). Each task whose dates move is listed by its tree, ticked, with what moves with them by their ties. An unticked task keeps its date, stays tied and takes a new gap, and what's tied to it stays too. Closed and discarded tasks never change, and they and tasks with their own gap are folded under Not changing. A row that starts having a tie reaches only tasks with no date there, and one that drops a tie leaves its tasks tied, as their own. A tie reworded with its date unchanged goes in the status log, not the preview. A task moved by the change logs "Template: Product trial", one elsewhere "Follows …", and the template's Changes list has "Timing around Trial execution window".
 - **A new subtask** offered to trees arrives tied, placed from each tree's own rows, and the preview says so. **Taking out** a row, or the anchor, places those tied to it by hand from then on, and tasks made stay tied. **Duplicate** keeps the ties and anchor, pointing inside the copy. **Save as template** carries ties inside the tree as rows tied to rows, leaves out those reaching outside, and has no anchor.
 - **Not yet:** the timeline's lines (decision 259) and `**` input for ties.
+
+### 6.17 Tree files (releases 5.53 to 5.56)
+
+A **tree file** is a JSON file describing a small tree of tasks. An LLM writes it, DocRepo checks it, the owner reviews it, and it becomes a template, so nothing reaches the lists, Today or Capacity until Make tasks (decision 264). Export writes the same format, and an **edit file** lists changes, matched by ID. DocRepo never calls an LLM (decision 265). `docrepo/tree_files.py` does the work, with no GUI, and `docrepo/ui/tree_import.py` is its window.
+
+**The format.** `format` is `docrepo-tree-1`, with `rows`, and optionally `anchor` (a row's key) and `unplaced` (sentences). Rows are a flat list, so an edit file can hold only what changes (decision 266). A file or a paste is read for its one JSON object, with a code fence or a sentence around it allowed (decision 267).
+
+| Field | What it holds |
+|---|---|
+| `key`, `parent` | The row's name inside this file, and its parent's. Exactly one row has no parent: the top row, whose title is the template's name. List order is the order among siblings. An export has `id` for `key` |
+| `title`, `description` | Short and plain; everything else said about the step |
+| `leads`, `assignees`, `involvement` | Names as on the people list, matched by name or alias in any case, with "Me" the owner; a percentage for each person by role, `{"assignees": {"Name": 50}}`, only where it isn't 100 |
+| `lead_hours`, `assignee_hours` | Hours in all. Or a rate: `lead_per_day`, `assignee_per_day`, `lead_per_week`, `assignee_per_week`. One form at most for a role |
+| `duration`, `calendar_days` | Whole days; Runs through weekends |
+| `labels`, `meeting`, `plant_event`, `inherit_labels` | Existing label names; ticks |
+| `notes` | Starting notes, as markup: text, lists, headings and checklist lines |
+| `start_tie`, `due_tie` | `source` (a row's key), `point` (`start` or `end`), `amount`, `unit` (`workdays` or `weeks`), `direction` (`before` or `after`) |
+| `quote`, `assumed` | Shown in the review, never stored (decisions 269 and 271) |
+
+A null is a field left out. `recurrence` and `urgent` are read only from a file with `exported`, so an LLM can't set them and a round trip keeps them (decision 268). Dates and state aren't a row's.
+
+**The checks.** Problems stop Import: not JSON, or cut off; an unknown `format` or field; no top row or two; a repeated key; a `parent`, `source` or `anchor` naming no row; an anchor that's tied, or that spans its subtasks; a row under itself; ties in a circle; a value of the wrong kind; two forms of hours for a role; more than 500 rows; text past 20,000 characters, or a title past 500; a task's export, which Save as template handles. Warnings don't: a tie to a row with subtasks and no dates of its own, a name or label not found, a row with no `quote`, a title over 60 characters, and a template of that name already existing, as Import never merges.
+
+**The Import window,** from **Import…** in the Templates view, has **Copy prompt**, **Choose file…** and **Paste**. A good file shows a line of counts, the warnings (each a link to its row), the rows, what the picked row holds with the words it rests on and what was assumed, and what Make tasks will ask for. The review only shows, and fixing happens in the Templates view after Import (decision 270), but three things are settled there:
+
+- **Ties to settle** (decision 284): a tie to a row that spans its subtasks would wait, so it counts from the parent's last subtask by default, another subtask, or none, with the words kept in the description. Subtasks that would make a circle aren't offered.
+- **Names to settle** (decision 272): a close match, anyone on the list, a new person, or by default the row's people left blank with the name kept in its description. Nobody is added silently.
+- **Labels that don't exist yet:** left out by default, or added.
+
+**Import as template** runs in one transaction, then keeps a copy of the file as `Imports\YYYY-MM-DD HHMM name.json` in the data root, never over an earlier one (decision 271). **Copy questions** puts what was assumed or fit nowhere on the clipboard. The log has counts, never content. Text goes through `templates._checked` as a form's values do, and starting notes through `templates.page_body`, which keeps any line that reads as a file, picture, capture link or table row as text.
+
+**Copy prompt** shows the prompt, which can be selected by hand, with a Copy button. The rules are `Config\tree-prompt.md`, written the first time and never replaced, so the owner can edit them. DocRepo adds the format and the people and label names, so they can't go stale, then `prompts.PREAMBLE` and room for the notes.
+
+**Export,** on a template's page or as **Export tree…** in a task's More menu, writes `Exports\YYYY-MM-DD HHMM name.json` in the data root, puts it on the clipboard and shows it, with **Copy edit prompt** (rules in `Config\edit-prompt.md`). The file has `of` (`template 12` or `task T000012`) and `exported`, and each row's `id`. A task's export adds `state`, `start`, `due`, `deadline`, its ties, and `also_under`, for information, when it has another parent. What's discarded is left out, and a task with several parents appears once. Export then Import gives the same template.
+
+**An edit file** has `format` `docrepo-edit-1`, `of`, and only what changes. A row left out changes nothing, a field left out changes nothing, and `null` clears a field. New rows have a `key` and a `parent`, which can be another new row. Removal must be stated, `"remove": true`, so a cut-off reply can't take anything away (decision 279). Import reads `format`, so one window takes both kinds (decision 285), and **Bring back an edit file…** in a task's More menu opens it.
+
+**The edit review** lists each change that differs from the database, so a whole tree sent back shows only what differs, and equal after tidying is equal: another case, another order, 30 and 30.0, spaces at the ends. Each has its old value, its new one and its `quote`. A change with no quote starts unticked, "Nothing in what you said asked for this" (decision 286). Anything unticked stays as it is. All that's ticked is made in one transaction, or none of it, and a copy goes in `Imports`.
+
+- **On a template** (decision 280): each change's preview is made and rolled back with `preview_row`, `preview_new_row` or `preview_remove`, and folds out under it with a tick for each task or tree, as a template's previews do (decisions 186 and 188). An unticked task keeps its value and stops following. The template's Changes list says "Edit file: 3 changes", beside each change's own line. The anchor is changed only in Timing.
+- **On a task tree:** title, description, labels, people, hours, Duration, Start, Due, Deadline and state, through `tasks.update_task`, so links end, ties move, Capacity rebuilds and the status log says "Edit file". The review says when a linked field will stop following, when a tied date keeps its tie with a new gap, and what a date's move would reach, including other trees. State changes go first, so a task the file closes doesn't move (decision 287). Removing means Discard, with the reason "Taken out by an edit file", from those under it up, and one with other subtasks or open agenda items can't be ticked. New rows are made under their parents. Notes pages, captures, files, ties and moves stay in the app.
+- **A stale file** says "Exported 2 Nov; 3 tasks in this tree have changed since", from the status log. Old values are always read from the database.
+
+**Copilot's folder** (item 84), named in Settings under Files and prompts, is where Copilot leaves files. It's outside the data root and DocRepo only reads it. The Import window lists its `.json` files, with **Review it**, leaving out any whose text is already in `Imports`. A prompt file brought over by a handoff has Copilot run `tree-prompt`, write the file, run `tree-check`, and fix what it reports. For edits, `tree-prompt --edit ID` and `tree-export ID` fetch the tree.
 
 ## 7. Capture app (phase 3, built)
 

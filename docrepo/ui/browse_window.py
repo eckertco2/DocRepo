@@ -76,6 +76,7 @@ from docrepo.ui.nav_pane import WIDTH as NAV_WIDTH, NavPane
 from docrepo.ui.page_view import PageView
 from docrepo.ui.task_pane import TaskPane
 from docrepo.ui.templates_view import PreviewDialog, PreviewEntry, TemplatesPane
+from docrepo.ui.tree_import import TreeFilesPane
 from docrepo.ui.priorities_view import PrioritiesView
 from docrepo.ui.palette import Command, CommandPalette
 from docrepo.ui.style import FORMAT_BAR_STYLE, NOTES_STYLE, page_css, style_sheet
@@ -228,6 +229,7 @@ class BrowseWindow(QWidget):
         self.last_task_view: str | None = None
         #: The Templates view (release 5.44): its list, pages and forms.
         self.templates = TemplatesPane(self)
+        self.tree_files = TreeFilesPane(self)
         self._build()
         # One letter per topic (mods log round 2, M0036): N note, T new task, U update, A agenda, E edit, D Today, and
         # M meeting notes (release 5.8).
@@ -672,9 +674,11 @@ class BrowseWindow(QWidget):
             out += [Command("Task", "Open its Task view", lambda: self.open_task_view(tid), "O"),
                     Command("Task", "Copy prompt", lambda: self.copy_prompt(tid)),
                     Command("Task", "Save as template", lambda: self.templates.save_as(tid)),
+                    Command("Task", "Export tree", lambda: self.tree_files.export_task(tid)),
                     Command("Task", "Open folder", lambda: self.reveal(self.ctx.data_root / "Tasks" / tid))]
         out += [Command("View", v.label, lambda v=v.id: self.set_view(v)) for v in VIEWS]
         out += [Command("", "New capture", lambda: self.open_capture(), self.ctx.settings.hotkey),
+                Command("", "Import a tree file", self.tree_files.import_tree),
                 Command("", "Search everything", self.search_box.setFocus, "Ctrl+Shift+F"),
                 Command("", "Find in this view", self.open_find, "Ctrl+F"),
                 Command("", "Show or hide the views", lambda: self.show_views_pane(not self.views_button.isChecked()), "Ctrl+B"),
@@ -2130,10 +2134,12 @@ class BrowseWindow(QWidget):
         for i, st in enumerate(self._summary_types):
             prompt.addAction(st.name, lambda n=i: (self.summary_type.setCurrentIndex(n), self.copy_prompt(task_id)))
         more.addAction(icon("templates"), "Save as template…", lambda: self.templates.save_as(task_id))
+        more.addAction("Export tree…", lambda: self.tree_files.export_task(task_id))
+        more.addAction("Bring back an edit file…", self.tree_files.import_tree)
         if task_id in m.origins:
             more.addAction("Detach from template…", lambda: self.templates.detach(task_id))
         more.addAction(icon("folder"), "Open folder", lambda: self.reveal(self.ctx.data_root / "Tasks" / task_id))
-        b = self._action("More" if LOOK.classic else "", tip="More: New subtask, Open agenda, Copy, Copy prompt, Save as template and Open folder", menu=more,
+        b = self._action("More" if LOOK.classic else "", tip="More: New subtask, Open agenda, Copy, Copy prompt, Save as template, Export tree and Open folder", menu=more,
                          icon_name="more")
         b.setAccessibleName("More")
         b.setProperty("flowEnd", True)  # at the row's end

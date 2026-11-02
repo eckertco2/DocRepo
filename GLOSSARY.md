@@ -85,6 +85,10 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Preview** (of a template change): the window saying which tasks or trees a change to a template would reach, each with a tick, before it's made. An unticked task keeps its value and stops following.
 - **Changes** (of a template): the list on a template's page of what was changed and what it did to its tasks.
 - **Tree** (of a template): the tasks one Make tasks made, or one Save as template linked.
+- **Tree file**: a JSON file describing a small tree of tasks, which Import makes into a template and Export writes.
+- **Edit file**: a JSON file listing changes to a template or a task tree, matched by ID and reviewed before they're made.
+- **Tree prompt**: the instructions, format and names Copy prompt gives an LLM to write a tree file.
+- **Copilot's folder**: the folder, named in Settings, where Copilot leaves files for DocRepo to read.
 
 ## 3. People and hours
 

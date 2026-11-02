@@ -65,6 +65,10 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.49 | Hours a week, reordering a template's rows by dragging or Alt+Up and Alt+Down, and Duplicate (decisions 260 to 262), schema version 18 | Built 2026-10-31 in the `round5-templates` worktree, and merged to `main` the same day, before the owner's hand test. Next: the owner's hand test, then `handoff/docrepo/release-5-49-test.md` |
 | 5.50 | Ties (decisions 245 to 258): a task's Start or Due set from another date, on tasks and key dates, moving what's tied on every path, asking first when a move leaves the tree, the task page and the log, schema version 19 | Built 2026-10-31 in the `round5-templates` worktree and merged to `main`, before the owner's hand test. Next: the hand test, then `handoff/docrepo/release-5-50-test.md` |
 | 5.51 | A template's timing (decisions 248, 252 and 255 to 257): the anchor, ties on rows, the Timing window and its chart, Make tasks giving a tree its date, and what a change reaches, schema version 20 | Built 2026-11-01 in the `round5-templates` worktree and merged to `main`, before the owner's hand test. Next: the hand test, then `handoff/docrepo/release-5-51-test.md` |
+| 5.53 | Tree files (the tree files plan, decisions 264 to 287): the Import window, the checks, Copy prompt for trees, `Imports`, `tree-check` | Built 2026-11-01, from the approved mock, before the owner's hand test |
+| 5.54 | Export, and edit files on a template | Built 2026-11-01, with 5.53, before the owner's hand test |
+| 5.55 | Edit files on a task tree | Built 2026-11-01, with 5.53, before the owner's hand test |
+| 5.56 | Copilot's folder, `tree-prompt`, `tree-export`, and the handoff with Copilot's prompt file | Built 2026-11-01, with 5.53, before the owner's hand test |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
 ## Decisions
@@ -499,6 +503,34 @@ The visual overhaul's O10, designed and mocked in the parent workspace (`docs/ui
   - **No button group:** the pane marks the open view itself, so that no row is marked while searching, and a click on the open view keeps it marked.
   - **The totals that left the sidebar** are beside their views' titles ("14 open", "7 active"), as `sidebar.md` said they'd be.
   - **The tooltip** shows only when a name is cut short. The headings' tooltips say Fold or Unfold.
+
+## Releases 5.53 to 5.56: tree files (2026-11-01)
+
+From the owner's voice memo of 2026-11-01, planned in the parent workspace's `docs/mods/tree-files-plan.md` (items 79 to 84, decisions 264 to 287), mocked and approved. Built together, before the owner's hand test. No schema change and no new package.
+
+- `docrepo/tree_files.py` (new): `read_text`, `check_tree` (`TreePlan`, `Said`, `ParentTie`, `NameToSettle`, `LabelToSettle`), `import_tree` and `import_file` (`Settled`), `tree_prompt`, `edit_prompt` and `rules`, `export_template`, `export_task` and `save_export`, `plan_edit` (`EditPlan`, `EditChange`, `Moved`) and `apply_edit`, `check_text` and `waiting_files`.
+- `docrepo/ui/tree_import.py` (new): `TreeImportDialog`, `EditReviewDialog`, `TextWindow`, and `TreeFilesPane`, which the browse window holds.
+- `docrepo/ui/templates_view.py`: **Import…** and **Export**. `docrepo/ui/browse_window.py`: **Export tree…** and **Bring back an edit file…** in a task's More menu, and the palette's commands. `docrepo/cli.py`: `tree-check`, `tree-prompt`, `tree-export`. `docrepo/config.py` and `docrepo/ui/settings_view.py`: `copilot_folder`, written once it's set. `docrepo/ui/tokens.py`: a disabled accent button now looks disabled, as it didn't anywhere.
+- `tests/test_tree_files.py` and `tests/test_tree_files_ui.py` (new); 2183 pass in all, 1 skipped. The windows were drawn over the sample data and looked at, in the app's look. Import, Copy prompt, Export and both edit reviews were also driven with real clicks and their real modal loops, over a data root on disk (41 checks, as a script not kept in the repo), which found Enter pressing Copy prompt when it had the focus.
+- **The prompt, here:** `tests/fixtures/tree-expert-talk.md` is a made-up talk with the plan's traps in it. A fresh agent that had seen nothing else ran the prompt on it twice. Both replies passed the checks and made tasks with the right dates. The first run's report tightened the rules (a sign-off inside a step, "me" and "you", first names, what "a week" means beside "never estimate"), and found a gap in the checks: a tie to the end of a row with no Duration waits, so there's now a warning. The second reply is kept as `tests/fixtures/tree-expert-reply.json`, a regression test.
+- **Not tested here:** Copilot itself, a real transcript, Choose file's Windows dialog (`load_file` is tested below it), and whether Copilot's terminal can run `python -m docrepo`. The corporate test has them.
+
+## Decisions (releases 5.53 to 5.56)
+
+- Decisions 264 to 287, as the plan has them and the mock draws them.
+- **Judgement calls, for the owner's hand test:**
+  - **A null in a tree file is a field left out,** not a problem, as LLMs often write `"lead_hours": null` for "not said". The mock made it a problem.
+  - **`recurrence` and `urgent` are read only from a file with `exported`,** so an export of a template with a repeating row round-trips, while an LLM's file can't set them, as decision 268 has it. An edit file can't change them.
+  - **`inherit_labels` is in the format,** as a template row holds it and decision 268 says a file fills what a row holds. The plan's table left it out.
+  - **An anchor that spans its subtasks is a problem,** as the Timing window doesn't offer one. The mock let it through.
+  - **Export also puts the file on the clipboard,** as decision 278 says, and the window keeps its Copy button.
+  - **`Config\edit-prompt.md` is the owner's to edit too,** as the plan says of the tree prompt, so the edit prompt can be fixed on the corporate computer, where the code can't.
+  - **A discard an edit file can't make can't be ticked,** saying why: other subtasks, or open agenda items. The mock didn't reach this.
+  - **New rows are made before the fields change,** so a field can tie to a new row, and each new row after its parent and what it's tied to. New rows waiting on each other are a problem. A new row under an unticked new row says so and holds Apply.
+  - **On a task tree, an edit file can't set ties,** as decision 280's list leaves them out, so a new row can't have one either.
+  - **A close match is from `difflib`,** in the standard library, rather than the mock's edit distance.
+  - **A stage that stands on its own is a row even with nothing known yet,** a little wider than decision 274, as the first prompt run left the safety review in `unplaced`, where Make tasks would never see it.
+  - **The Timing chart draws a row with no Duration as one day, but Make tasks gives what's tied to its end no date.** That's as release 5.51 has it, so the new warning names it rather than changing it.
 
 ## Release 5.51: a template's timing (2026-11-01)
 

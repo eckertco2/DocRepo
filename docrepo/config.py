@@ -152,6 +152,8 @@ class Settings:
     #: The colour a category gets on Outlook's list of categories when DocRepo puts it there (release 5.33.1, decision 26 as
     #: the owner changed it): one of ``outlook.COLOURS``; "None" leaves the list alone, so the category shows uncoloured.
     outlook_category_colour: str = "Teal"
+    #: Where Copilot leaves files for DocRepo to read (release 5.56, the tree files plan's item 84). DocRepo only reads it, and it's outside the data root.
+    copilot_folder: str | None = None
 
     @classmethod
     def load(cls, data_root: Path) -> Settings:
@@ -172,7 +174,7 @@ class Settings:
 
     def save(self, fs: SafeFS, data_root: Path) -> Path:
         data = asdict(self)
-        for key in ("wheel_hotkeys", "today_panel_hotkey"):  # written once they're set, as wheels are optional (release 5.41)
+        for key in ("wheel_hotkeys", "today_panel_hotkey", "copilot_folder"):  # written once they're set, as they're optional (releases 5.41 and 5.56)
             if not data[key]:
                 del data[key]
         return fs.write_text(data_root / SETTINGS_FILE, json.dumps(data, indent=2) + "\n")

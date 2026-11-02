@@ -108,6 +108,14 @@ def check_values(ctx: AppContext, values: dict[str, Any]) -> dict[str, Any]:
         if _inside(path, ctx.data_root):
             raise SettingsProblem("The backup folder can't be inside the data root. Pick a folder outside it, such as on another drive.")
     out["backup_dir"] = backup or None
+    copilot = (out.get("copilot_folder") or "").strip()
+    if copilot:
+        path = Path(copilot)
+        if not path.is_absolute():
+            raise SettingsProblem("Copilot's folder needs a full path, starting with a drive letter or \\\\server\\share.")
+        if _inside(path, ctx.data_root):
+            raise SettingsProblem("Copilot's folder can't be inside the data root. DocRepo only reads it, and Copilot writes nothing there.")
+    out["copilot_folder"] = copilot or None
     if not out.get("workdays"):
         raise SettingsProblem("Pick at least one workday, or the capacity calendar has no days to spread hours over.")
     out["event_words"] = [w.strip().lower() for w in out.get("event_words", []) if w.strip()]
@@ -388,10 +396,23 @@ class SettingsView(QWidget):
         self.check.setSuffix(" minutes")
         for w in (self.cap, self.warn, self.check):
             w.setFixedWidth(180)
+        self.copilot = QLineEdit()
+        self.copilot.setPlaceholderText("Not set")
+        self.copilot.setAccessibleName("Copilot's folder")
+        pick_copilot = QPushButton("Browse…")
+        pick_copilot.clicked.connect(self._pick_copilot)
+        copilot_row = QWidget()
+        cl = QHBoxLayout(copilot_row)
+        cl.setContentsMargins(0, 0, 0, 0)
+        cl.setSpacing(8)
+        cl.addWidget(self.copilot, 1)
+        cl.addWidget(pick_copilot)
+        copilot_row.setMinimumWidth(380)
         self._card(lay, "Files and prompts", [
             ("Extracted text", "The most text kept from each file.", self.cap),
             ("Copy prompt warns", "Copy prompt warns when a prompt is longer than this.", self.warn),
             ("Document checks", "How often tracked documents are checked for changes (a later version).", self.check),
+            ("Copilot's folder", "Where Copilot leaves tree files and edit files for the Import window to offer. DocRepo only reads it. Outside the data root.", copilot_row),
         ])
 
         # ---- Outlook (release 5.33) ----
@@ -515,6 +536,7 @@ class SettingsView(QWidget):
             box.setText(getattr(s, setting))
         self._load_wheel_hotkeys()
         self.backup.setText(s.backup_dir or "")
+        self.copilot.setText(s.copilot_folder or "")
         self.reminder.setTime(QTime.fromString(s.reminder_time, "HH:mm") if QTime.fromString(s.reminder_time, "HH:mm").isValid() else QTime(8, 0))
         for d, box in self.workdays.items():
             box.setChecked(d in s.workdays)
@@ -541,6 +563,7 @@ class SettingsView(QWidget):
             "me": self.me.currentData(), "hotkey": self.hotkey.text(), **{k: box.text() for k, box in self.more_hotkeys.items()},
             "wheel_hotkeys": {**self.ctx.settings.wheel_hotkeys, **{k: box.text() for k, box in self.wheel_hotkeys.items()}},
             "backup_dir": self.backup.text(),
+            "copilot_folder": self.copilot.text(),
             "reminder_time": self.reminder.time().toString("HH:mm"), "workdays": [d for d, box in self.workdays.items() if box.isChecked()],
             "capacity_horizon_years": self.horizon.value(), "event_words": [w for w in self.events.text().split(",")],
             "reference_fields": [w for w in self.references.text().split(",")],
@@ -635,6 +658,11 @@ class SettingsView(QWidget):
         self.message(f"Saved the troubleshooting report as {path.name} in System\\diagnostics." if path
                      else "Made the troubleshooting report, but couldn't save it. Copy it from the window.")
         ReportDialog(self, text, path, self.reveal).exec()
+
+    def _pick_copilot(self) -> None:
+        folder = QFileDialog.getExistingDirectory(self, "Copilot's folder", self.copilot.text())
+        if folder:
+            self.copilot.setText(str(Path(folder)))
 
     def _pick_backup(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Backup folder", self.backup.text())
