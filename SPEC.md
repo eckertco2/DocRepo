@@ -62,7 +62,7 @@ A missing file gives the defaults. An unreadable file stops DocRepo with an erro
 
 - **Allowed places:** the data root, the backup folder (if set) and `%LOCALAPPDATA%\DocRepo\`.
 - **Checks on every path:** it must be a full path with a drive or a `\\server\share`. Device paths (`\\?\`, `\\.\`), alternate data streams, names ending in a dot or space, characters Windows forbids and reserved device names (CON, NUL, COM1 and so on) are refused. The path is then resolved through `..`, symlinks and junctions, and must land inside an allowed place.
-- **Writing:** `write_text` writes only `.md`, `.json`, `.txt` and `.log` files, as UTF-8, atomically (a temporary file in the same folder replaces the target).
+- **Writing:** `write_text` writes only `.md`, `.json`, `.txt` and `.log` files, as UTF-8, atomically (a temporary file in the same folder replaces the target). Windows refuses a replace while anything has the file open, even for an instant, so every replace waits and tries again for up to a second before it says so (release 5.40.1).
 - **Pictures:** `write_picture` (release 5.27, decision 127) writes a picture the owner pasted, as a `.png` file only, atomically, and never over a file that's there.
 - **Copying:** `copy_file` copies a file the owner asked to keep. It only reads the source, and never overwrites.
 - **Moving:** `move` moves only from one allowed place to another, and never overwrites.

@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from docrepo import safe_fs
 from docrepo.safe_fs import SafeFS, WriteRefused, path_problem
 
 
@@ -170,3 +171,82 @@ def test_rejects_unusable_roots():
         SafeFS(["relative"])
     with pytest.raises(ValueError):
         SafeFS([])
+
+
+# ---- a replace waits out a brief refusal (release 5.40.1) ----
+def _refused(monkeypatch, times: int, error: type[OSError] = PermissionError) -> list:
+    """``os.replace`` refusing the next ``times`` calls, with the waits not really taken. Returns the waits asked for."""
+    real, waits = os.replace, []
+    left = [times]
+
+    def fake(src, dst):
+        if left[0]:
+            left[0] -= 1
+            raise error(5, "Access is denied")
+        real(src, dst)
+
+    monkeypatch.setattr(safe_fs.os, "replace", fake)
+    monkeypatch.setattr(safe_fs.time, "sleep", waits.append)
+    return waits
+
+
+def _leftovers(folder: Path) -> list[str]:
+    return [x.name for x in folder.iterdir() if x.suffix == ".tmp"]
+
+
+def test_a_save_waits_out_a_brief_refusal(tmp_path, monkeypatch):
+    fs = SafeFS([tmp_path])
+    target = fs.write_text(tmp_path / "a.md", "before")
+    waits = _refused(monkeypatch, 3)
+    fs.write_text(target, "after")
+    assert target.read_text(encoding="utf-8") == "after" and not _leftovers(tmp_path)
+    assert waits == [safe_fs.REPLACE_FIRST_WAIT, safe_fs.REPLACE_FIRST_WAIT * 2, safe_fs.REPLACE_FIRST_WAIT * 4]
+
+
+def test_a_refusal_that_doesnt_clear_says_so_and_leaves_the_file_as_it_was(tmp_path, monkeypatch):
+    fs = SafeFS([tmp_path])
+    target = fs.write_text(tmp_path / "a.md", "before")
+    monkeypatch.setattr(safe_fs, "REPLACE_PATIENCE", 0.05)
+    real_sleep = safe_fs.time.sleep
+    _refused(monkeypatch, 10_000)
+    monkeypatch.setattr(safe_fs.time, "sleep", real_sleep)
+    with pytest.raises(PermissionError):
+        fs.write_text(target, "after")
+    assert target.read_text(encoding="utf-8") == "before" and not _leftovers(tmp_path)
+
+
+def test_only_a_refusal_is_waited_out(tmp_path, monkeypatch):
+    fs = SafeFS([tmp_path])
+    target = fs.write_text(tmp_path / "a.md", "before")
+    waits = _refused(monkeypatch, 1, FileNotFoundError)
+    with pytest.raises(FileNotFoundError):
+        fs.write_text(target, "after")
+    assert not waits
+
+
+def test_a_new_file_and_a_backup_wait_too(tmp_path, monkeypatch):
+    fs = SafeFS([tmp_path], replace_roots=[tmp_path])
+    source = fs.write_text(tmp_path / "source.md", "words")
+    waits = _refused(monkeypatch, 1)
+    assert fs.write_picture(tmp_path / "a.png", b"png").read_bytes() == b"png" and len(waits) == 1
+    _refused(monkeypatch, 1)
+    assert fs.write_copy(tmp_path / "a.msg", b"mail").read_bytes() == b"mail"
+    _refused(monkeypatch, 1)
+    assert fs.replace_file(source, tmp_path / "copy.md").read_text(encoding="utf-8") == "words"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows refuses to replace a file that's open")
+def test_saving_a_file_qt_is_watching_never_fails(tmp_path):
+    """The real thing: Qt's watcher looks at the file as it changes, and without the wait about one save in twenty was refused."""
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtCore import QCoreApplication, QFileSystemWatcher
+    from PySide6.QtWidgets import QApplication
+
+    assert QCoreApplication.instance() or QApplication([])
+    fs = SafeFS([tmp_path])
+    target = fs.write_text(tmp_path / "wheels.jsonc", "{}")
+    watcher = QFileSystemWatcher([str(target), str(tmp_path)])
+    for i in range(400):
+        fs.write_text(target, "x" * 20000 + str(i))
+    assert target.read_text(encoding="utf-8").endswith("399") and not _leftovers(tmp_path)
+    del watcher
