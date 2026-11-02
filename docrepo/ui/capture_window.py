@@ -1953,6 +1953,7 @@ class CaptureWindow(QWidget):
         self.same_all.setChecked(False)
         for w in self.__dict__.get("_fields", {}).values():
             set_filled(w.line if isinstance(w, DateField) else w, False)
+        set_filled(self.title, False)  # the one field Parse and populate fills that isn't in _fields
         # Items and meeting notes (release 5.8)
         self.ref_ids: dict[str, str] = {}  # names picked from the @ and # lists, with their IDs
         self.item_ov: dict[str, dict[str, Any]] = {}  # the cards' changes, by item key

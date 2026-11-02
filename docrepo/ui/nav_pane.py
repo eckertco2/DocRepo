@@ -53,6 +53,7 @@ class _Row(QAbstractButton):
         self.setFixedHeight(height)
         self.setAttribute(Qt.WidgetAttribute.WA_Hover)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setProperty("paintsFocus", True)
 
     def sizeHint(self) -> QSize:  # noqa: N802 - Qt's name
         return QSize(160, self.height())

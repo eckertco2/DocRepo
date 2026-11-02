@@ -20,7 +20,7 @@ from datetime import datetime, time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QAbstractNativeEventFilter, QLockFile, QObject, QTimer, Signal
+from PySide6.QtCore import QAbstractNativeEventFilter, QLockFile, QObject, QRectF, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QFont, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QInputDialog, QMenu, QSystemTrayIcon
 
@@ -49,22 +49,40 @@ SHOW_MESSAGE = "DocRepo.ShowCapture"
 SHOW_BROWSE_MESSAGE = "DocRepo.ShowBrowse"
 HOTKEY_ID = hotkey.HOTKEY_IDS["hotkey"]
 MAX_SINGLE_REMINDERS = 3
+APP_ID = "DocRepo"  # Windows shows this as the name on notifications
+ICON_SIZES = (16, 20, 24, 32, 40, 48, 64)
 
 
 def make_icon() -> QIcon:
-    """DocRepo's tray icon, drawn here so no image file is needed: a blue square with a white D."""
-    pixmap = QPixmap(64, 64)
-    pixmap.fill(QColor(0, 0, 0, 0))
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    painter.setBrush(QColor("#1d5e98"))
-    painter.setPen(QColor("#1d5e98"))
-    painter.drawRoundedRect(4, 4, 56, 56, 12, 12)
-    painter.setPen(QColor("#ffffff"))
-    painter.setFont(QFont("Segoe UI", 30, QFont.Weight.Bold))
-    painter.drawText(pixmap.rect(), 0x84, "D")  # centred
-    painter.end()
-    return QIcon(pixmap)
+    """DocRepo's icon, for the tray, the title bars and the taskbar, drawn here so no image file is needed: a blue square with a
+    white D, at each size Windows asks for, so it stays sharp."""
+    icon = QIcon()
+    for size in ICON_SIZES:
+        pixmap = QPixmap(size, size)
+        pixmap.fill(QColor(0, 0, 0, 0))
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setBrush(QColor("#1d5e98"))
+        painter.setPen(QColor("#1d5e98"))
+        inset, radius = size / 16, size * 3 / 16
+        painter.drawRoundedRect(QRectF(inset, inset, size - 2 * inset, size - 2 * inset), radius, radius)
+        painter.setPen(QColor("#ffffff"))
+        font = QFont("Segoe UI")
+        font.setPixelSize(round(size * 0.62))
+        font.setWeight(QFont.Weight.Bold)
+        painter.setFont(font)
+        painter.drawText(pixmap.rect(), 0x84, "D")  # centred
+        painter.end()
+        icon.addPixmap(pixmap)
+    return icon
+
+
+def set_identity(qt: QApplication) -> None:
+    """DocRepo's icon on every window, and its own name to the taskbar, which would otherwise group it under Python (release
+    5.57). Before any window is made."""
+    if os.name == "nt":
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
+    qt.setWindowIcon(make_icon())
 
 
 def show_message_id(name: str = SHOW_MESSAGE) -> int:
@@ -412,6 +430,7 @@ def run(data_root: Path, settings: Settings, fs: SafeFS, browse: bool = False) -
     qt.setQuitOnLastWindowClosed(False)
     qt.setApplicationName("DocRepo")
     apply_look(qt, settings.look, settings.show_hints)  # the new look or the Classic one; light, whatever Windows is set to
+    set_identity(qt)
     lock = QLockFile(str(fs.checked_path(data_root / LOCK_FILE)))
     lock.setStaleLockTime(0)
     if not lock.tryLock(200):

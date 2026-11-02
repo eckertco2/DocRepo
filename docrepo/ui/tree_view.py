@@ -8,12 +8,12 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import QModelIndex, QPoint, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QAbstractTextDocumentLayout, QColor, QPalette, QTextDocument
+from PySide6.QtCore import QModelIndex, QPoint, QRect, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QAbstractTextDocumentLayout, QColor, QPainter, QPalette, QTextDocument
 from PySide6.QtWidgets import QAbstractItemView, QHeaderView, QStyle, QStyledItemDelegate, QStyleOptionViewItem, QTreeWidget, QTreeWidgetItem
 
 from docrepo.ui import tokens
-from docrepo.ui.look import LOOK
+from docrepo.ui.look import LOOK, paint_focus_ring
 from docrepo.ui.style import page_css
 
 KEY_ROLE = Qt.ItemDataRole.UserRole
@@ -105,8 +105,9 @@ class HtmlDelegate(QStyledItemDelegate):
         if html is None:
             return super().sizeHint(option, index)
         doc = self._doc(html, self._width(index), option)
-        least = ROW_MIN_HEIGHT if LOOK.classic else NEW_ROW_MIN_HEIGHT
-        return QSize(int(doc.idealWidth()), max(least, int(doc.size().height()) + 6))
+        if LOOK.classic:
+            return QSize(int(doc.idealWidth()), max(ROW_MIN_HEIGHT, int(doc.size().height()) + 6))
+        return QSize(int(doc.idealWidth()), max(NEW_ROW_MIN_HEIGHT, int(doc.size().height()) + 4))  # one line of Body text: the token's 28 px
 
 
 class RowTree(QTreeWidget):
@@ -306,9 +307,42 @@ class RowTree(QTreeWidget):
         if key is not None:
             self.ticked.emit(key, item.checkState(0) == Qt.CheckState.Checked)
 
-    def _current_changed(self, current: QTreeWidgetItem | None, _previous) -> None:
+    # ---- the keyboard's focus ring (release 5.57): round the whole current row, once Tab has brought the keyboard here ----
+    def _row_rect(self, item: QTreeWidgetItem) -> QRect:
+        rect = self.visualItemRect(item)
+        rect.setLeft(0)
+        rect.setRight(self.viewport().width() - 1)
+        return rect
+
+    def paintEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        super().paintEvent(event)
+        item = self.currentItem()
+        if (not LOOK.classic and item is not None and self.hasFocus()
+                and self.window().testAttribute(Qt.WidgetAttribute.WA_KeyboardFocusChange)):
+            p = QPainter(self.viewport())
+            paint_focus_ring(p, self._row_rect(item))
+            p.end()
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        self.window().setAttribute(Qt.WidgetAttribute.WA_KeyboardFocusChange, False)  # the mouse has taken over: no ring
+        self.viewport().update()
+        super().mousePressEvent(event)
+
+    def focusInEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        super().focusInEvent(event)
+        self.viewport().update()
+
+    def focusOutEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        super().focusOutEvent(event)
+        self.viewport().update()
+
+    def _current_changed(self, current: QTreeWidgetItem | None, previous: QTreeWidgetItem | None) -> None:
         if self._building or current is None:
             return
+        if not LOOK.classic and self.hasFocus():  # Qt redraws only a row's cell here: the ring goes round the whole row
+            self.viewport().update(self._row_rect(current))
+            if previous is not None:
+                self.viewport().update(self._row_rect(previous))
         key = current.data(0, KEY_ROLE)
         if key is not None:
             self.picked.emit(key)

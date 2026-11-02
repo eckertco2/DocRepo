@@ -804,7 +804,7 @@ def test_the_task_page_bar_and_its_links(browse, monkeypatch):
     buttons = browse.actions.findChildren(QPushButton)
     more = buttons[-1]
     assert more.accessibleName() == "More" and more.property("flowEnd") and more.menu().actions()[0].text() == "New subtask\tT"
-    assert len({b.y() for b in buttons}) == 1 and more.geometry().right() == 899  # one row, More at its end
+    assert len({b.geometry().center().y() for b in buttons}) == 1 and more.geometry().right() == 899 - 16  # one row, centred, More at its end
     add_to = next(b for b in buttons if b.text() == "Add to").menu().actions()
     assert add_to[0].text().startswith("Today") and add_to[-1].text() == "Someone else or another task…"
     opened = []

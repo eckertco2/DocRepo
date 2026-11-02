@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QScrollArea,
+    QToolButton,
     QToolTip,
     QVBoxLayout,
     QWidget,
@@ -46,11 +47,14 @@ from docrepo.detail import esc
 from docrepo.model import KeyDate, Model, Task
 from docrepo.schedule import due_of, start_of
 from docrepo.timeline import Band, KeyMark, Row, Timeline
+from docrepo.ui.icons import icon
 from docrepo.ui.look import LOOK, Help
 from docrepo.ui.tree_view import GROUP_COLOURS
 from docrepo.ui.widgets import CheckMenuButton, DateField, FlowLayout, label_filter, people_filter
 from docrepo.views import markers
 
+#: The most room the open list of tasks with no dates takes under the chart: four lines of Caption text, then it scrolls.
+UNDATED_MAX_HEIGHT = 68
 FG, MUTED, FAINT, LINE, LINE_STRONG = "#1a1f25", "#5a6571", "#87919c", "#d6dce3", "#b8c1cb"
 ACCENT, BAD, SEL, SURFACE_2, HOVER = "#1d5e98", "#b0261e", "#dbe8f5", "#f4f6f8", "#eef1f4"
 #: Plant events (release 5.29): their bars, lane and band.
@@ -943,7 +947,7 @@ class TimelineView(QWidget):
     #: The view's choices that are remembered (the playbook: the zoom kept): the range, Order by, the bars' colour,
     #: Total or A week, and Show routine.
     settings_changed = Signal(dict)
-    REMEMBERED = ("weeks", "order", "bars", "a_week", "routine")
+    REMEMBERED = ("weeks", "order", "bars", "a_week", "routine", "undated_open")
 
     def __init__(self) -> None:
         super().__init__()
@@ -1061,10 +1065,40 @@ class TimelineView(QWidget):
             lay.addWidget(self.legend)
         else:
             lay.insertWidget(self.legend_slot, self.legend)
+        # The tasks with no dates, under the chart (the owner's comment, release 5.57): all on one line when they fit on one, or
+        # else a count, with a fold that opens a short list scrolling inside itself, so they never take the chart's room.
+        self.undated_ids: tuple[str, ...] = ()
+        self.undated_open = False
+        self.undated_bar = QWidget()
+        ub = QHBoxLayout(self.undated_bar)
+        ub.setContentsMargins(0, 0, 0, 0)
+        ub.setSpacing(4)
+        self.undated_fold = QToolButton(objectName="checkFold")
+        self.undated_fold.setToolTip("Show or hide the tasks with no dates")
+        self.undated_fold.setAccessibleName("Tasks with no dates")
+        self.undated_fold.clicked.connect(self._toggle_undated)
+        ub.addWidget(self.undated_fold)
         self.undated = QLabel(objectName="hint")
         self.undated.setWordWrap(True)
         self.undated.linkActivated.connect(self._undated_link)
-        lay.addWidget(self.undated)
+        ub.addWidget(self.undated, 1)
+        lay.addWidget(self.undated_bar)
+        self.undated_names = QLabel(objectName="hint")
+        self.undated_names.setWordWrap(True)
+        self.undated_names.setTextFormat(Qt.TextFormat.RichText)
+        self.undated_names.linkActivated.connect(self._undated_link)
+        self.undated_box = QScrollArea()
+        self.undated_box.setWidgetResizable(True)
+        self.undated_box.setFrameShape(QFrame.Shape.NoFrame)
+        self.undated_box.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.undated_box.setWidget(self.undated_names)
+        self.undated_box.hide()
+        lay.addWidget(self.undated_box)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        super().resizeEvent(event)
+        if self.undated_ids:
+            self._draw_undated()
 
     def keyPressEvent(self, event) -> None:  # noqa: N802 - Qt's name
         """P for Plan mode, and Ctrl+Z for the last drop (decisions 136 and 144), wherever the caret is in the view but a
@@ -1099,11 +1133,39 @@ class TimelineView(QWidget):
         self.chart.set_timeline(model, today, self.sel, self.plan, self.bars, self.a_week, self.order)
         self.plan_strip.setVisible(self.plan)
         self._card()
-        if tl.undated:
-            self.undated.setText("Not on the timeline, with no dates: " + ", ".join(
-                f'<a href="task:{esc(x)}">{esc(model.task(x).title)}</a>' for x in tl.undated) + '. <a href="plan:">Plan mode</a> puts them on it, '
-                "to drag onto the chart.")
-        self.undated.setVisible(bool(tl.undated))
+        self.undated_ids = tl.undated
+        self._draw_undated()
+
+    def _draw_undated(self) -> None:
+        """The tasks with no dates: their names if they fit on one line, or else how many, with the names behind the fold."""
+        ids = self.undated_ids
+        self.undated_bar.setVisible(bool(ids))
+        if not ids or self.model is None:
+            self.undated_box.hide()
+            return
+        ask = "Plan mode puts them on it, to drag onto the chart."
+        link = '<a href="plan:">Plan mode</a> puts them on it, to drag onto the chart.'
+        titles = [self.model.task(x).title for x in ids]
+        names = ", ".join(f'<a href="task:{esc(x)}">{esc(t)}</a>' for x, t in zip(ids, titles))
+        words = f"Not on the timeline, with no dates: {', '.join(titles)}. {ask}"
+        fits = QFontMetrics(self.undated.font()).horizontalAdvance(words) <= self.undated_bar.width()
+        self.undated_fold.setVisible(not fits)
+        if fits:
+            self.undated.setText(f"Not on the timeline, with no dates: {names}. {link}")
+            self.undated_box.hide()
+            return
+        count = f"{len(ids)} task" if len(ids) == 1 else f"{len(ids)} tasks"
+        self.undated.setText(f"Not on the timeline, with no dates: {count}. {link}")
+        self.undated_fold.setIcon(icon("chevron-down" if self.undated_open else "chevron-right"))
+        self.undated_names.setText(names)
+        self.undated_box.setVisible(self.undated_open)
+        if self.undated_open:
+            self.undated_box.setFixedHeight(min(UNDATED_MAX_HEIGHT, self.undated_names.heightForWidth(self.undated_bar.width())))
+
+    def _toggle_undated(self) -> None:
+        self.undated_open = not self.undated_open
+        self._draw_undated()
+        self.settings_changed.emit(self.settings())
 
     def _sync_inset(self) -> None:
         bar = self.scroll.verticalScrollBar()
@@ -1263,7 +1325,7 @@ class TimelineView(QWidget):
             value = saved.get(key)
             if value is None or (key in valid and value not in valid[key]):
                 continue
-            if key in ("a_week", "routine"):
+            if key in ("a_week", "routine", "undated_open"):
                 value = bool(value)
             elif key == "order" and not isinstance(value, str):
                 continue

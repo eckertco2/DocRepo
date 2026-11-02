@@ -144,22 +144,34 @@ class FlowLayout(QLayout):
         size = QSize()
         for item in self._items:
             size = size.expandedTo(item.minimumSize())
-        return size
+        m = self.contentsMargins()
+        return size + QSize(m.left() + m.right(), m.top() + m.bottom())
 
     def _place(self, rect: QRect, move: bool) -> int:
-        x, y, line = rect.x(), rect.y(), 0
+        """Set the items out inside the margins, each centred on its line, so a tick box sits level with a combo box beside it.
+        Returns the height they take."""
+        m = self.contentsMargins()
+        left, right = rect.x() + m.left(), rect.right() - m.right()
+        x, y, line = left, rect.y() + m.top(), 0
+        lines: list[tuple[int, int, list[tuple[QLayoutItem, int, QSize]]]] = []
+        current: list[tuple[QLayoutItem, int, QSize]] = []
         for item in self._items:
             hint = item.sizeHint()
-            if x + hint.width() > rect.right() and line > 0:
-                x, y, line = rect.x(), y + line + self.spacing(), 0
+            if x + hint.width() > right and line > 0:
+                lines.append((y, line, current))
+                current = []
+                x, y, line = left, y + line + self.spacing(), 0
             widget = item.widget()
             if widget is not None and widget.property("flowEnd"):  # kept at the line's end, as the task page's More is
-                x = max(x, rect.right() + 1 - hint.width())
-            if move:
-                item.setGeometry(QRect(QPoint(x, y), hint))
+                x = max(x, right + 1 - hint.width())
+            current.append((item, x, hint))
             x += hint.width() + self.spacing()
             line = max(line, hint.height())
-        return y + line - rect.y()
+        if move:
+            for top, height, items in (*lines, (y, line, current)):
+                for item, at, hint in items:
+                    item.setGeometry(QRect(QPoint(at, top + (height - hint.height()) // 2), hint))
+        return y + line + m.bottom() - rect.y()
 
 
 class InfoButton(_Gate, QToolButton):
@@ -457,6 +469,8 @@ class ChipPicker(QWidget):
         self.box = QWidget()
         self.box.setObjectName("chips")
         self._flow = FlowLayout(self.box)
+        if not LOOK.classic:
+            self._flow.setContentsMargins(4, 1, 4, 1)
         self.edit = QLineEdit()
         self.edit.setPlaceholderText(placeholder)
         self.edit.setFrame(False)

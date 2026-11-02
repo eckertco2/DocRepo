@@ -1472,6 +1472,10 @@ class TaskView(QWidget):
         if not (saved and self.restoreGeometry(QByteArray.fromHex(saved.encode("ascii")))):
             self.resize(1280, 820)
 
+    def showEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        super().showEvent(event)
+        self.outline.doItemsLayout()  # it was filled before its style sheet's row height applied, and nothing else measures it again
+
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt's name
         if self.pane is not None:
             self.pane.notes.save_now()

@@ -300,3 +300,10 @@ def test_it_remembers_its_size(view, browse):
     view.close()
     assert db.get_state(browse.conn, "task_view_geometry")
     assert Path  # noqa: B018
+
+
+def test_the_outline_measures_its_rows_once_it_is_styled(view):
+    """It's filled before its style sheet's row height applies, so it measures them again as it shows (release 5.57)."""
+    QApplication.processEvents()
+    outline = view.outline
+    assert outline.visualItemRect(outline.topLevelItem(0)).height() == outline.sizeHintForRow(0)

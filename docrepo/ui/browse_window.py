@@ -890,7 +890,10 @@ class BrowseWindow(QWidget):
         chips = "".join(" " + chip(text, cls) for text, cls in markers(m, t))
         cell = due_cell(t, self.today(), when, use_due)
         colour = {"over": "color:#b0261e; font-weight:600", "soon": "color:#875700; font-weight:600"}.get(cell.cls if cell else "", "")
-        mark = '<br><span style="color:#87919c; font-weight:400; font-size:8pt">deadline</span>' if cell and cell.deadline else ""
+        mark = ""
+        if cell and cell.deadline:
+            mark = ('<br><span style="color:#87919c; font-weight:400; font-size:8pt">deadline</span>' if LOOK.classic else
+                    '<br><span class="note" style="font-weight:400">deadline</span>')
         due = f'<p align="right" style="{colour}">{esc(cell.text)}{mark}</p>' if cell else ""
         return [title + chips + extra, state_chip(t.state), due]
 
@@ -1923,9 +1926,12 @@ class BrowseWindow(QWidget):
         for r, row in enumerate(lines):
             if isinstance(row, str):  # a group's heading
                 head = QTableWidgetItem(row)
-                f = head.font()
-                f.setBold(True)
-                head.setFont(f)
+                if LOOK.classic:
+                    f = head.font()
+                    f.setBold(True)
+                    head.setFont(f)
+                else:
+                    head.setFont(tokens.ui_font(semibold=True))  # from the helper: setBold on an item's font is lost under its style name
                 head.setBackground(QColor(GREY).lighter(135))
                 head.setFlags(Qt.ItemFlag.ItemIsEnabled)
                 t.setItem(r, 0, head)
@@ -1942,9 +1948,7 @@ class BrowseWindow(QWidget):
                     item.setBackground(QColor(colours[c.cls]))
                 if c.cls == "u3" and not LOOK.classic:  # over 100%: red and bold, so it never needs colour alone
                     item.setForeground(QColor(tokens.colour("critical")))
-                    f = item.font()
-                    f.setBold(True)
-                    item.setFont(f)
+                    item.setFont(tokens.ui_font(semibold=True))
                 item.setToolTip(f"{row.name}, week of {long_date(weeks[i], today)}: {c.hours:.1f} h")
                 t.setItem(r, i + 1, item)
         t.resizeRowsToContents()

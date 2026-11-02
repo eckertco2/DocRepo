@@ -10,8 +10,11 @@ from __future__ import annotations
 import weakref
 from dataclasses import dataclass
 
-from PySide6.QtCore import QEvent, QObject, QPoint, Qt, QTimer
-from PySide6.QtWidgets import QApplication, QLabel, QWidget
+from PySide6.QtCore import QEvent, QObject, QPoint, QRect, QRectF, Qt, QTimer
+from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtWidgets import QAbstractButton, QApplication, QLabel, QWidget
+
+from docrepo.ui import tokens
 
 
 @dataclass
@@ -89,6 +92,80 @@ def with_key(label: str, key: str) -> str:
 def tip(widget: QWidget, text: str, key: str = "") -> None:
     """A control's tooltip: what it does, then its key, such as "Save (Ctrl+Enter)"."""
     widget.setToolTip(f"{text} ({key})" if key else text)
+
+
+def paint_focus_ring(p: QPainter, rect: QRect) -> None:
+    """The keyboard's focus ring (decision 11, release 5.57): a 2 px accent ring with a 1 px white line inside it, as Windows
+    draws its own, so it also shows on a button filled with the accent."""
+    p.save()
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.setBrush(Qt.BrushStyle.NoBrush)
+    box = QRectF(rect)
+    p.setPen(QPen(QColor(tokens.colour("accent")), 2))
+    p.drawRoundedRect(box.adjusted(1, 1, -1, -1), tokens.RADIUS, tokens.RADIUS)
+    p.setPen(QPen(QColor(tokens.colour("content")), 1))
+    p.drawRoundedRect(box.adjusted(2.5, 2.5, -2.5, -2.5), tokens.RADIUS - 2, tokens.RADIUS - 2)
+    p.restore()
+
+
+class FocusRing(QWidget):
+    """The ring on one control: a child that lies over it and lets the mouse through. Its own small widget, not a style's, so
+    painting everything else costs nothing extra."""
+
+    def __init__(self, target: QWidget) -> None:
+        super().__init__(target)
+        self.setObjectName("focusRing")
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        target.installEventFilter(self)
+        self.setGeometry(target.rect())
+        self.show()
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802 - Qt's name
+        if event.type() == QEvent.Type.Resize:
+            self.setGeometry(watched.rect())  # type: ignore[attr-defined]
+        elif event.type() == QEvent.Type.MouseButtonPress:  # the mouse has taken over
+            self.hide()
+        return False
+
+    def paintEvent(self, _event) -> None:  # noqa: N802 - Qt's name
+        p = QPainter(self)
+        paint_focus_ring(p, self.rect())
+        p.end()
+
+
+class _FocusWatcher(QObject):
+    """Puts the ring on a button or tick box that the keyboard gave focus to. Qt marks a window when its focus moves by Tab or a
+    shortcut, but never takes that mark off, so a click takes it off here and shows no ring. A control that paints its own (the
+    property ``paintsFocus``) is left alone, and text boxes have their accent edge."""
+
+    def __init__(self, app: QApplication) -> None:
+        super().__init__(app)
+        self.ring: FocusRing | None = None
+        app.focusChanged.connect(self.changed)
+
+    def changed(self, _old: QWidget | None, now: QWidget | None) -> None:
+        if self.ring is not None:
+            try:
+                self.ring.hide()
+                self.ring.deleteLater()
+            except RuntimeError:  # its control has gone, and took it along
+                pass
+            self.ring = None
+        if now is not None and QApplication.mouseButtons() != Qt.MouseButton.NoButton:
+            now.window().setAttribute(Qt.WidgetAttribute.WA_KeyboardFocusChange, False)
+        if (isinstance(now, QAbstractButton) and not now.property("paintsFocus")
+                and now.window().testAttribute(Qt.WidgetAttribute.WA_KeyboardFocusChange)):
+            self.ring = FocusRing(now)
+
+
+_watcher: list[_FocusWatcher] = []
+
+
+def watch_focus(app: QApplication) -> None:
+    """Show the keyboard's focus ring in every window, from now on."""
+    if not _watcher:
+        _watcher.append(_FocusWatcher(app))
 
 
 _KEYS = (QEvent.Type.KeyPress, QEvent.Type.KeyRelease, QEvent.Type.WindowDeactivate, QEvent.Type.ApplicationDeactivate)
