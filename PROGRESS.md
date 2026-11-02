@@ -65,7 +65,7 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.49 | Hours a week, reordering a template's rows by dragging or Alt+Up and Alt+Down, and Duplicate (decisions 260 to 262), schema version 18 | Built 2026-10-31 in the `round5-templates` worktree, and merged to `main` the same day, before the owner's hand test. Next: the owner's hand test, then `handoff/docrepo/release-5-49-test.md` |
 | 5.50 | Ties (decisions 245 to 258): a task's Start or Due set from another date, on tasks and key dates, moving what's tied on every path, asking first when a move leaves the tree, the task page and the log, schema version 19 | Built 2026-10-31 in the `round5-templates` worktree and merged to `main`, before the owner's hand test. Next: the hand test, then `handoff/docrepo/release-5-50-test.md` |
 | 5.51 | A template's timing (decisions 248, 252 and 255 to 257): the anchor, ties on rows, the Timing window and its chart, Make tasks giving a tree its date, and what a change reaches, schema version 20 | Built 2026-11-01 in the `round5-templates` worktree and merged to `main`, before the owner's hand test. Next: the hand test, then `handoff/docrepo/release-5-51-test.md` |
-| 5.57 | The look as decided (the visual review's stage V1): the Body font in rows, tables and menus, a focus ring for the keyboard, rows of controls that line up at one height, DocRepo's own icon, and the Timeline's list of tasks with no dates kept to one line | Built 2026-11-01, hand-tested by the owner and merged to `main` 2026-11-02 |
+| 5.57 | The look as decided (the visual review's stage V1): the Body font in rows, tables and menus, a focus ring for the keyboard, rows of controls that line up at one height, DocRepo's own icon, and the Timeline's list of tasks with no dates kept to one line | Built 2026-11-01, hand-tested by the owner, merged to `main` and on GitHub 2026-11-02 |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
 ## Decisions
@@ -548,7 +548,7 @@ A review of every window against the design workspace's UI playbook (its `docs/u
 
 **Tests:** `tests/test_real_look.py` is new, and runs each check in a process of its own, since `apply_look` changes the whole application. Its fonts and sizes run on Windows' real platform, because the offscreen one has no per-class fonts and can't see that fault; it caught the style sheet putting them back while this was being built. Its focus test presses a real Tab, since `setFocus(Qt.TabFocusReason)` in code doesn't set what Qt checks. Others are in `test_look.py`, `test_timeline.py` and `test_task_view.py`. All tests pass: 2003, with 1 skipped. One real start through `app.run` showed the icon and the fold at work, and caught the AppUserModelID showing as the name on notifications, so it's plain `DocRepo`.
 
-**Hand-tested by the owner and merged to `main`** (2026-11-02). **Not checked yet:** the corporate computer, whose display scaling may change how rows fit.
+**Hand-tested by the owner, merged to `main` and on GitHub** (2026-11-02). **Not checked yet:** the corporate computer, whose display scaling may change how rows fit.
 
 **Left for later stages,** in the review's order: clipped words, the Timeline's controls and legend, hover row actions, one arrow family, colours into tokens, and Capacity.
 
