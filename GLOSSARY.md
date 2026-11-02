@@ -80,6 +80,7 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Source** (of a tie): the task or key date a tie counts from.
 - **Gap** (of a tie): the number of workdays or weeks between a tied date and its source.
 - **Anchor**: the one row in a template that other rows tie to by default, whose date is typed at Make tasks. A template has one at most.
+- **Apply template**: putting a template into tasks that already exist. Each keeps all it has and becomes the top of a tree, with the template's subtasks under it. **Make tasks** makes new tasks instead.
 - **Timing window**: where a template's anchor and every row's ties are set, with a chart that redraws as you type.
 - **Involvement**: the percentage of a role's hours that land on one person on one task. 100% by default, and not a split.
 - **Preview** (of a template change): the window saying which tasks or trees a change to a template would reach, each with a tick, before it's made. An unticked task keeps its value and stops following.

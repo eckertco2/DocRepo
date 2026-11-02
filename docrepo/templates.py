@@ -31,7 +31,7 @@ from pathlib import Path
 
 from docrepo import agenda, edits, markup, notes_page, search, tasks, ties, timing
 from docrepo.config import Settings
-from docrepo.dates import short, stamp, to_date, workday_numbers
+from docrepo.dates import long_date, short, stamp, to_date, workday_numbers
 from docrepo.db import transaction
 from docrepo.model import Model, Tie
 from docrepo.pages import num
@@ -1053,21 +1053,250 @@ def make_tasks(conn: sqlite3.Connection, settings: Settings, row_id: int, name: 
             c = choices.get(row.id, Choice())
             made[row.id] = _copy_row(conn, settings, row, title if top else row.title, ([under] if under else []) if top else [made[row.parent]],
                                      created_by, None if top else made[row_id], replace(c, start=None, due=None) if tied[row.id] or c.tie else c, top, at)
-        order = ties.chain(timing.followers([timing.Line(x.id, x.title, ties=tied[x.id]) for x in walked], anchor), [x.id for x in walked])  # sources first
-        for rid in order:
-            c = choices.get(rid, Choice())
-            if tied[rid]:
-                tasks.update_task(conn, settings, made[rid], at=at, via=created_by, keep_links=True,
-                                  ties={f: Tie(made[timing.source_of(t, anchor)], t.point, t.amount, t.unit, t.direction) for f, t in tied[rid].items()})
-                conn.executemany("INSERT INTO task_links (task, field) VALUES (?, ?)", [(made[rid], TIE_LINKS[f]) for f in tied[rid]])
-            elif c.tie:
-                tasks.update_task(conn, settings, made[rid], at=at, via=created_by, keep_links=True, ties={"start": c.tie})
-        for rid in order:  # a date typed over one worked out keeps its tie, with a new gap (decision 256)
-            c = choices.get(rid, Choice())
-            typed = {k: v for k, v in (("start", c.start), ("due", c.due)) if v}
-            if tied[rid] and typed:
-                tasks.update_task(conn, settings, made[rid], at=at, via=created_by, **typed)
+        _place_tree(conn, settings, walked, made, tied, anchor, choices, created_by, at)
     return list(made.values())
+
+
+def _place_tree(conn: sqlite3.Connection, settings: Settings, walked: Sequence[Row], made: Mapping[int, str], tied: Mapping[int, Mapping[str, RowTie]],
+                anchor: int | None, choices: Mapping[int, Choice], via: str, at: datetime) -> None:
+    """A tree's ties, sources first, each following its row's number, and then any date typed over one worked out, which keeps its tie
+    with a new gap (decision 256)."""
+    order = ties.chain(timing.followers([timing.Line(x.id, x.title, ties=tied[x.id]) for x in walked], anchor), [x.id for x in walked])  # sources first
+    for rid in order:
+        c = choices.get(rid, Choice())
+        if tied[rid]:
+            tasks.update_task(conn, settings, made[rid], at=at, via=via, keep_links=True,
+                              ties={f: Tie(made[timing.source_of(t, anchor)], t.point, t.amount, t.unit, t.direction) for f, t in tied[rid].items()})
+            conn.executemany("INSERT INTO task_links (task, field) VALUES (?, ?)", [(made[rid], TIE_LINKS[f]) for f in tied[rid]])
+        elif c.tie:
+            tasks.update_task(conn, settings, made[rid], at=at, via=via, keep_links=True, ties={"start": c.tie})
+    for rid in order:
+        c = choices.get(rid, Choice())
+        typed = {k: v for k, v in (("start", c.start), ("due", c.due)) if v}
+        if (tied[rid] or c.tie) and typed:
+            tasks.update_task(conn, settings, made[rid], at=at, via=via, **typed)
+
+
+# ---- Apply template: a template into tasks that already exist (release 5.63, decisions 301 to 309) ----
+def has_dates(t) -> bool:
+    """Whether a task has a date of its own to keep, or a tie that will give it one."""
+    return bool(t.start or t.due or t.ties)
+
+
+def _landing(row: Row, t, top: bool) -> tuple[list[str], list[str], dict[str, object]]:
+    """What a row does to a task that keeps all it has (decision 303): the fields that follow the row from now on, those it fills, and the
+    changes. An empty field fills and follows, and one that already says the same follows. One with its own value stays, and doesn't
+    follow. Labels add. A task with a date takes no Duration, so its dates never change, and Inherit parent labels stays as it is."""
+    links, filled = [], []
+    for k in FIELDS:
+        if not fills(row, k) or (k == "title" and top) or (k in NOT_ROUTINE and has_dates(t)):
+            continue
+        now = stated(t, k)
+        if now == stated(row, k):
+            links.append(k)
+        elif now is None or now is False or now == "" or now == []:
+            links.append(k)
+            filled.append(k)
+    changes = _as_changes(row, filled, t)
+    if "labels" not in filled and (more := [x for x in row.labels if x not in t.labels]):
+        changes["labels"] = [*t.labels, *more]
+        filled.append("labels")
+    return links, filled, changes
+
+
+@dataclass
+class ApplyPlan:
+    """What applying a template to one task comes to. ``kept`` says which rows land on a task that's already there: the task itself for the
+    top row, and a subtask of the same name for any other (decision 304). ``refused`` says why it can't be applied."""
+
+    task: str
+    refused: str = ""
+    kept: dict[int, str] = field(default_factory=dict)
+    fills: list[str] = field(default_factory=list)  # what the task takes from the top row, by name
+    adds: int = 0
+    uses: list[str] = field(default_factory=list)  # the subtasks of its own that rows land on, by title
+
+    def words(self) -> str:
+        """In a line: "Adds 6 subtasks. Uses your Trial report. Fills Lead and Labels. Keeps all it has."."""
+        said = [f"Adds {plural(self.adds, 'subtask')}."] if self.adds else []
+        if self.uses:
+            said.append(f"Uses your {_joined(self.uses)}.")
+        if self.fills:
+            said.append(f"Fills {_joined(self.fills)}.")
+        return " ".join([*said, "Keeps all it has."])
+
+
+def _joined(words: Sequence[str]) -> str:
+    return words[0] if len(words) == 1 else f"{', '.join(words[:-1])} and {words[-1]}"
+
+
+def template_refusal(lib: Library, row_id: int) -> str:
+    """Why a template can't be applied to any task (decision 306)."""
+    template = lib.template_of(row_id)
+    if template.discarded:
+        return f"{lib.name(template.id)} is discarded. Bring it back to apply it."
+    if lib.rows[row_id].recurrence:
+        return f"{lib.name(template.id)} repeats, so it would turn each task into a routine one."
+    return ""
+
+
+def plan_apply(lib: Library, m: Model, row_id: int, task_id: str) -> ApplyPlan:
+    """What applying the template at ``row_id`` to a task comes to, or why it can't be applied to that one (decision 306). A row lands on a
+    subtask with the same name under where its parent landed, and nothing else matches. A row that repeats is always a new task, as is
+    one whose match repeats or follows a template already."""
+    t = m.tasks.get(task_id)
+    if t is None:
+        return ApplyPlan(task_id, f"There's no task {task_id}.")
+    why = ("It's discarded." if t.discarded else "It's closed." if t.state == "Closed" else "It's a routine task." if t.recurrence
+           else f"It already follows {lib.name(lib.rows[lib.copies[task_id].row].template)}." if task_id in lib.copies else "")
+    if why:
+        return ApplyPlan(task_id, why)
+    kept, taken = {row_id: task_id}, {task_id}
+    walked = lib.walk(row_id)
+    for row, _ in walked[1:]:
+        under = kept.get(row.parent)
+        if under is None or row.recurrence:
+            continue
+        name = row.title.strip().casefold()
+        hit = next((x for x in m.children_of(under) if x not in taken and x not in lib.copies and not m.tasks[x].discarded and not m.tasks[x].recurrence
+                    and m.tasks[x].title.strip().casefold() == name), None)
+        if hit:
+            kept[row.id] = hit
+            taken.add(hit)
+    _, filled, _ = _landing(lib.rows[row_id], t, True)
+    return ApplyPlan(task_id, "", kept, [LINK_NAMES[k] for k in filled], len(walked) - len(kept), [m.tasks[x].title for r, x in kept.items() if r != row_id])
+
+
+def anchor_tie(lib: Library, m: Model, row_id: int, plan: ApplyPlan) -> Tie | None:
+    """The tie an anchor among the subtasks starts with: "The day Trial 1 starts", so moving the task moves its tree (decision 302). There's
+    none when the task has no Start, or when the anchor landed on a subtask with dates of its own."""
+    anchor = lib.template_of(row_id).anchor
+    if anchor is None or anchor == row_id or anchor not in {x.id for x, _ in lib.walk(row_id)} or not m.tasks[plan.task].start:
+        return None
+    here = plan.kept.get(anchor)
+    return None if here and has_dates(m.tasks[here]) else Tie(plan.task, "start", 0, "workdays", "after")
+
+
+def _row_ties(lib: Library, row: Row, inside: Collection[int]) -> dict[str, RowTie]:
+    anchor = lib.template_of(row.id).anchor
+    return {f: t for f, t in row.ties.items() if timing.source_of(t, anchor) in set(inside) - {row.id}}
+
+
+def plan_typed(lib: Library, m: Model, row_id: int, plan: ApplyPlan) -> dict[int, timing.Typed]:
+    """What each row has for the sum of where it lands, before anything's typed: a task that's kept has its own dates, and a row its ties
+    and days, with the anchor tied to the task when it has a Start (``RowTie`` naming the top row, which the task stands in for)."""
+    walked = lib.walk(row_id)
+    inside = {x.id for x, _ in walked}
+    anchor, tie = lib.template_of(row_id).anchor, anchor_tie(lib, m, row_id, plan)
+    out: dict[int, timing.Typed] = {}
+    for row, _ in walked:
+        t = m.tasks[plan.kept[row.id]] if row.id in plan.kept else None
+        if t is not None and has_dates(t):
+            out[row.id] = timing.Typed({}, None, t.calendar_days, t.start, t.due)
+            continue
+        tied = _row_ties(lib, row, inside)
+        if tie and row.id == anchor:
+            tied = {"start": RowTie(row_id, "start", 0, "workdays", "after")}
+        days = None if len(tied) == 2 else (t.duration if t is not None and t.duration else None) or row.duration
+        out[row.id] = timing.Typed(tied, days, bool(row.calendar_days or (t is not None and t.calendar_days)))
+    return out
+
+
+def tree_words(t, row_id: int, dates: Mapping[int, tuple[str | None, str | None]], today: date) -> tuple[str, str]:
+    """Where a task's subtasks come to, in words, and a warning when that's outside its own dates, which stay as they are (decision 307)."""
+    below = [(a or b, b or a) for r, (a, b) in dates.items() if r != row_id and (a or b)]
+    if not below:
+        return "Its subtasks have no dates yet.", ""
+    first, last = min(x for x, _ in below), max(x for _, x in below)
+    words = f"Its subtasks run {long_date(to_date(first), today)} to {long_date(to_date(last), today)}."
+    if (t.start and first < t.start) or (t.due and last > t.due):
+        return words, "That's outside its own dates, which stay as they are."
+    return words, ""
+
+
+@dataclass
+class Applied:
+    """What applying a template did to one task: the subtasks made, and those of its own that now follow the template."""
+
+    task: str
+    made: list[str] = field(default_factory=list)
+    kept: list[str] = field(default_factory=list)
+
+
+def apply_template(conn: sqlite3.Connection, settings: Settings, row_id: int, targets: Mapping[str, Mapping[int, Choice] | None], at: datetime) -> list[Applied]:
+    """Put a template into tasks that already exist, all or none (decisions 301 to 309). Each task becomes its tree's top and keeps all it
+    has: its title, description, notes, captures, dates and people. Its empty fields fill and follow the template, starting notes go at the
+    end of its notes page, and each subtask is made, or found by name, as ``plan_apply`` says. ``targets`` gives each task its rows'
+    choices as Make tasks' dialog has them, or None for what it starts with."""
+    lib = Library(conn)
+    if row_id not in lib.rows:
+        raise TaskError("That row isn't in a template any more.")
+    if refused := template_refusal(lib, row_id):
+        raise TaskError(refused)
+    if not targets:
+        raise TaskError("Tick a task to apply it to.")
+    template = lib.template_of(row_id)
+    name = lib.name(template.id)
+    via = f"Template: {name}"
+    done: list[Applied] = []
+    with transaction(conn):
+        for task_id, given in targets.items():
+            lib, m = Library(conn), Model(conn)  # a subtask can sit under two of them, and only one can have it
+            plan = plan_apply(lib, m, row_id, task_id)
+            if plan.refused:
+                raise TaskError(f"{m.task(task_id).title if task_id in m.tasks else task_id}: {plan.refused}")
+            choices = dict(given) if given is not None else {}
+            if given is None and template.anchor is not None and (tie := anchor_tie(lib, m, row_id, plan)):
+                choices[template.anchor] = Choice(tie=tie)
+            walked = [x for x, _ in lib.walk(row_id)]
+            inside = {x.id for x in walked}
+            tied = {x.id: {} if x.id in plan.kept and has_dates(m.tasks[plan.kept[x.id]]) else _row_ties(lib, x, inside) for x in walked}
+            made: dict[int, str] = {}
+            result = Applied(task_id)
+            for row in walked:
+                here = plan.kept.get(row.id)
+                if here is None:
+                    c = choices.get(row.id, Choice())
+                    made[row.id] = _copy_row(conn, settings, row, row.title, [made[row.parent]], via, task_id,
+                                             replace(c, start=None, due=None) if tied[row.id] or c.tie else c, False, at)
+                    result.made.append(made[row.id])
+                    continue
+                made[row.id] = here
+                links, _, changes = _landing(row, m.tasks[here], row.id == row_id)
+                conn.execute("INSERT INTO task_template (task, row_id, tree) VALUES (?, ?, ?)", (here, row.id, task_id))
+                if changes:
+                    tasks.update_task(conn, settings, here, at=at, via=via, keep_links=True, **changes)
+                conn.executemany("INSERT INTO task_links (task, field) VALUES (?, ?)", [(here, k) for k in links])
+                tasks.record(conn, here, at, via, [Change(TEMPLATE_LINK, None, f"Follows {name}")])
+                if row.notes.strip():
+                    notes_page.put(conn, here, notes_page.add_block(notes_page.get(conn, here), page_body(row.notes).split("\n"), at.date(), False), at)
+                if here != task_id:
+                    result.kept.append(here)
+            _place_tree(conn, settings, walked, made, tied, template.anchor, choices, via, at)
+            done.append(result)
+        titles = [Model(conn).task(x.task).title for x in done]
+        _log_change(conn, template.id, at, "added", f"Applied to {clip(', '.join(titles), 160)}", reached=len(done))
+    return done
+
+
+def apply_to_tasks(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, row_id: int, targets: Mapping[str, Mapping[int, Choice] | None],
+                   at: datetime) -> tuple[list[Applied], edits.Outcome]:
+    """Apply template from the browse tool: the change, the search text and the pages. Returns what it did, and what to say."""
+    done = apply_template(conn, settings, row_id, targets, at)
+    made = [x for a in done for x in a.made]
+    kept = [x for a in done for x in a.kept]
+    new = Model(conn).tasks
+    undated = [x for x in made if not new[x].start and not new[x].due and not new[x].deadline]
+    said = f"Applied {Library(conn).name(Library(conn).template_of(row_id).id)} to {plural(len(done), 'task')}: {plural(len(made), 'subtask')} added."
+    if kept:
+        said += f" {plural(len(kept), 'subtask')} of your own now follow{'s' if len(kept) == 1 else ''} it."
+    if undated:
+        said += f" {len(undated)} undated, waiting for dates."
+    out = edits.Outcome(said)
+    search.index_pages(conn, [*(a.task for a in done), *made, *kept])
+    edits.write_all_pages(conn, data_root, fs, at, out.problems)
+    log.info("applied template row %d to %d tasks", row_id, len(done))
+    return done, out
 
 
 # ---- Save as template (decision 195) ----

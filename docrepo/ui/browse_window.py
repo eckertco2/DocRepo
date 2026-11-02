@@ -705,6 +705,7 @@ class BrowseWindow(QWidget):
             out += [Command("Task", "Open its Task view", lambda: self.open_task_view(tid), "O"),
                     Command("Task", "Copy prompt", lambda: self.copy_prompt(tid)),
                     Command("Task", "Save as template", lambda: self.templates.save_as(tid)),
+                    Command("Task", "Apply template", lambda: self.templates.apply([tid])),
                     Command("Task", "Export tree", lambda: self.tree_files.export_task(tid)),
                     Command("Task", "Open folder", lambda: self.reveal(self.ctx.data_root / "Tasks" / tid))]
         out += [Command("View", v.label, lambda v=v.id: self.set_view(v)) for v in VIEWS]
@@ -1076,6 +1077,7 @@ class BrowseWindow(QWidget):
         self._button("Select all shown", lambda: self.tick_shown(True), tip="Tick every task you can see in the list")
         self.clear_ticks_button = self._button("Clear", lambda: self.tick_shown(False), tip="Untick them all")
         self.edit_selected_button = self._button("", self.edit_selected, tip="Change the ticked tasks, after a preview")
+        self.apply_template_button = self._button("", self.apply_template_to_ticked, tip="Put a template into the ticked tasks, which keep all they have")
         self._sync_edit_selected()
 
     def set_selecting(self, on: bool) -> None:
@@ -1101,6 +1103,10 @@ class BrowseWindow(QWidget):
         if b is not None and b.parent() is not None:
             b.setText(f"Edit selected ({n})…" if n else "Edit selected…")
             b.setEnabled(n > 0)
+        a = getattr(self, "apply_template_button", None)
+        if a is not None and a.parent() is not None:
+            a.setText(f"Apply template ({n})…" if n else "Apply template…")
+            a.setEnabled(n > 0)
         clear = getattr(self, "clear_ticks_button", None)
         if clear is not None and clear.parent() is not None:
             clear.setEnabled(n > 0)
@@ -1118,6 +1124,9 @@ class BrowseWindow(QWidget):
         """The ticked tasks, as the list shows them."""
         shown = [k[1] for k in self.tree.keys() if k and k[0] == "task" and k[1] in self.ticked]
         return list(dict.fromkeys(shown + sorted(self.ticked - set(shown))))
+
+    def apply_template_to_ticked(self) -> None:
+        self.templates.apply(self.ticked_in_order())
 
     def edit_selected(self) -> None:
         ids = self.ticked_in_order()
@@ -2156,6 +2165,7 @@ class BrowseWindow(QWidget):
         for i, st in enumerate(self._summary_types):
             prompt.addAction(st.name, lambda n=i: (self.summary_type.setCurrentIndex(n), self.copy_prompt(task_id)))
         more.addAction(icon("templates"), "Save as template…", lambda: self.templates.save_as(task_id))
+        more.addAction(icon("templates"), "Apply template…", lambda: self.templates.apply([task_id]))
         more.addAction("Export tree…", lambda: self.tree_files.export_task(task_id))
         more.addAction("Bring back an edit file…", self.tree_files.import_tree)
         if task_id in m.origins:

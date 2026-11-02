@@ -376,6 +376,8 @@ QFrame#items, QFrame#agendaPanel { background: $base; border: none; border-radiu
 QFrame#items[empty="true"] { background: transparent; }
 QFrame#itemCard { background: $content; border: 1px solid $stroke; border-left: 3px solid $stroke_strong; border-radius: 0; }
 QFrame#itemCard QLabel { background: transparent; border: none; }
+QFrame#itemCard QLabel#itemValue { background: $base; border: 1px solid $stroke; border-bottom: 1px solid $control; border-radius: 4px; padding: 5px 8px; }
+QFrame#itemCard QLabel#itemValue:disabled { color: $disabled; }
 QListWidget#refPopup, QListWidget#suggestions { background: $content; border: 1px solid $stroke_strong; border-radius: 4px; padding: 2px; }
 QListWidget#refPopup::item:selected, QListWidget#suggestions::item:selected { background: $hover; color: $text; }
 QFrame#divider { color: $stroke; }

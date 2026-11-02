@@ -74,6 +74,8 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.59 | Quieter windows (stage V3): row actions on hover and the right-click menu, level buttons as icons, hints behind Show hints, one arrow family, one accent button, and popups' corners and the title bar's colour | Built 2026-11-02, hand-tested by the owner, merged to `main` and on GitHub the same day |
 | 5.60 | One meaning per colour (stage V4): every colour a token, state in rows as words, plain names and neutral lanes on the Timeline, a load tint apart from selection, and dots when Parse fills much | Built 2026-11-02, hand-tested by the owner, merged to `main` and on GitHub the same day |
 | 5.61 | Forms and small things (stage V6): Edit task and New task without scrolling, questions that name their answers, one label role, Settings' More hotkeys, Quick edit's heights, chips in one shape and empty states | Built 2026-11-02, hand-tested by the owner, merged to `main` and on GitHub the same day |
+| 5.62 | Thread A's fields and ties in a capture (decisions 293 to 300): `**duration`, `**weekends`, `**involvement`, a rate in `**hours` and `**lead hours`, and a tie in `**start` and `**due` | Built 2026-11-02 on the `round5-templates` branch, not yet merged to `main`, before the owner's hand test. Next: the hand test, then `handoff/docrepo/release-5-62-test.md` |
+| 5.63 | Apply template (decisions 301 to 309): a template put into tasks that already exist, which keep all they have, from Select mode, a template's page or a task's menu | Built 2026-11-02 on the `round5-templates` branch, without a mock at the owner's word, not yet merged to `main`, before the owner's hand test. Next: the hand test, then `handoff/docrepo/release-5-63-test.md` |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
 ## Decisions
@@ -536,6 +538,55 @@ From the owner's voice memo of 2026-11-01, planned in the parent workspace's `do
   - **A close match is from `difflib`,** in the standard library, rather than the mock's edit distance.
   - **A stage that stands on its own is a row even with nothing known yet,** a little wider than decision 274, as the first prompt run left the safety review in `unplaced`, where Make tasks would never see it.
   - **The Timing chart draws a row with no Duration as one day, but Make tasks gives what's tied to its end no date.** That's as release 5.51 has it, so the new warning names it rather than changing it.
+
+## Release 5.63: Apply template (2026-11-02)
+
+Round 5's thread A, the owner's ask of 2026-11-02: six trials already planned at the parent level, and a template of subtasks to put under each (decisions 301 to 309). No schema change. The owner took the recommendations and said to build it, so there's no mock. Built before the owner's hand test.
+
+- `docrepo/templates.py`: `plan_apply`, what applying comes to or why it can't; `_landing`, what a row does to a task that keeps all it has; `anchor_tie` and `plan_typed`, what the window works out before anything's typed; `tree_words`; `apply_template`, one transaction; and `apply_to_tasks`, with the search text, pages and message. `_place_tree` is split out of `make_tasks`, and a date typed over the anchor's own tie now keeps it with a new gap.
+- `docrepo/ui/templates_view.py`: `TreeRows`, Make tasks' rows and their sums, split out of `MakeTasksDialog`, which is otherwise unchanged; `MakeRow` takes a task that's `kept` and an anchor's `own_tie`; `ApplySection`, `ApplyTemplateDialog` and `TemplatesPane.apply`.
+- `docrepo/ui/browse_window.py`: **Apply template (n)…** in Select mode, **Apply template…** under More, and the palette's command.
+- `tests/test_apply_template.py` (new, 60 tests). 2411 pass in all, 1 skipped.
+- **Checked:** the window drawn with the real fonts and look, on six trials, folded and unfolded, which found the dates wrapping, the chevron not turning in a window already showing, and closing after only unfolding asking to discard. Each is fixed, and the last two have tests. **Not tested here:** a real mouse on the window, and the Select mode buttons on screen, which are the owner's hand test.
+
+## Decisions (release 5.63)
+
+- Decisions 301 to 309, as `../docs/mods/task-templates-design.md` has them.
+- **Judgement calls, beyond what was approved:**
+  - **The match ignores case and spaces at the ends,** as "Trial report" and "trial REPORT" are the same subtask to anyone reading them. It's otherwise whole-name only, and only under where the row's parent landed.
+  - **A kept subtask with a date or tie of its own takes no tie and no Duration,** by the same rule as the task. One with neither takes the row's tie and Duration, so an empty placeholder lands with the rest.
+  - **A kept subtask's title follows the row only if it's exactly the same,** so a later rename of the row leaves "trial REPORT" alone.
+  - **The anchor's tie to the task is the task's own, not the template's,** so the template's Timing doesn't own it, and a new anchor leaves the tree driven from the task, as decision 256's outage does.
+  - **It's only from a template's top row.** Make tasks has "from here" for a row, but a task taking part of a template has no clear top. It can be added later.
+  - **"Keeps all it has" includes a task's Inherit parent labels,** even where the row turns it off.
+  - **A task with a tie counts as having a date,** as its tie will give it one.
+  - **Filling a task's fields moves nothing outside its tree,** since no date changes, so it never needs the asking-first of a move that leaves the tree.
+  - **The window's amber line appears whenever subtasks fall outside the task's dates,** which a template with lead time will do on every task. It's kept short for that reason, and the corporate test asks whether it helps.
+  - **Apply to tasks… on a template's page starts with what's ticked when Select mode is on,** and is empty otherwise.
+
+## Release 5.62: thread A's fields and ties in a capture (2026-11-02)
+
+Round 5's thread A, the owner's approval of the wording on 2026-11-02 (decisions 293 to 300). No schema change. Built before the owner's hand test.
+
+- `docrepo/items.py`: `**duration`, `**weekends` and `**involvement` in `OPERATORS`; `_read_hours` takes a rate; `_read_start` and `_read_due` take a tie through `_read_tie`, in `ties.words`' words; `is_tie`, so a tie's `#` isn't where the value goes; `value_now` counts a tie and a rate as filled; `Known`, `known_of` and `stopped`, what stops a line, and `_settle`, what the cards on one task come to together. `_one_word`: a period in a `#` task's title ends no sentence, on any `**` line. `Names` has the model and the workdays in a week.
+- `docrepo/save.py`: `_fill_param` checks `stopped` too, turns weeks into days by the task's calendar, adds a tie to the task's others and puts a share on each role. A Duration and a share go after the capture's other items.
+- `docrepo/ui/items_panel.py`, `docrepo/ui/tokens.py`: a value over 30 characters wraps on its card, in the look of a read-only field, as a tie's last word says which end it counts from. It applies to any `**` value. `docrepo/ui/help_text.py` lists the forms.
+- `tests/test_quick_timing.py` (new, 125 tests). `tests/fixtures/test-vectors.md`'s row for `**hours, 2 hours a week.` now reads a rate, by hand in both copies. 2351 pass in all, 1 skipped.
+- The mockup's `items.js` reads the same forms, checked in the browser, with no key dates to check as it has none.
+- **Checked:** the capture window's cards drawn with the real fonts and look. **Not tested here:** the keyboard on the `#` list inside a tie's sentence, which is the owner's hand test.
+
+## Decisions (release 5.62)
+
+- Decisions 293 to 300, as `../docs/mods/task-templates-design.md` has them.
+- **Judgement calls, beyond what was approved:**
+  - **Runs through weekends is refused on a task whose Duration holds its dates,** with "That would move its dates". Decision 200 counts an unticked tick as empty, but this tick would move a Due with nobody asked.
+  - **A share names someone on the people list.** A new `@Sam` on the same line gets a red card for the share, and the task is still made with Sam at 100%. Adding the share in Edit task takes a moment, and a mistyped name would otherwise add a person.
+  - **One person's different share stops the whole Involvement card,** rather than filling the others, so the card never says less than it did. The same share again is fine.
+  - **A card with several tasks is refused only when all of them refuse it,** as a filled field already is, and Save skips those that can't take it.
+  - **`6 a day` is accepted** beside `6 h a day`, as the owner's proposal had it, and "each" and "every" with it.
+  - **A long value wraps on any `**` card,** not only a tie's: `**description` and `**status` lost their ends the same way.
+  - **The period rule applies to every `**` sentence,** so `**parent, #Ver. Two outage.` reads too.
+  - **`test-vectors.md` wasn't regenerated.** Its export needs the browser, and other sessions have changes in the mockup, so the one row that changed was edited by hand in both copies, and new forms are in `tests/test_quick_timing.py` rather than the vectors.
 
 ## Release 5.51: a template's timing (2026-11-01)
 

@@ -184,7 +184,7 @@ The `**` names in a capture, read by `read` and `itemText` in `docs/browse-tool/
 | **assignee hours, 12 hours. | Assignee hours: 12. [home] |
 | **hours, 2.5. | Assignee hours: 2.5. [home] |
 | **hours, 2 days. | Assignee hours: No hours: add a number, such as 12. [home] |
-| **hours, 2 hours a week. | Assignee hours: Give a total, such as 12 hours. [home] |
+| **hours, 2 hours a week. | Assignee hours: 2 h a week. [home] |
 | **hours, plenty. | Assignee hours: No hours: add a number, such as 12. [home] |
 | **title, Line 2 rework. | Title: Line 2 rework. [home] |
 | **description, rebuild the gearbox. | Description: Rebuild the gearbox. [home] |
