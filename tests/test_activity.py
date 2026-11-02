@@ -191,6 +191,6 @@ def test_select_and_add_to_agenda(browse):
 
 
 def test_the_sidebar_has_both(browse):
-    assert [r for r in browse.nav.members["Plan"]] == ["agenda", "activity", "priorities", "timeline", "capacity"]
+    assert [r for r in browse.nav.members["Plan"]] == ["agenda", "activity", "priorities", "timeline"]
     browse.nav.rows["priorities"].click()
     assert browse.view == "priorities" and browse.middle.currentWidget() is browse.priorities

@@ -266,8 +266,7 @@ def _kept(browse) -> dict:
 
 
 def _show_box(view):
-    return next(view.time_layout.itemAt(i).widget() for i in range(view.time_layout.count())
-                if isinstance(view.time_layout.itemAt(i).widget(), QComboBox) and view.time_layout.itemAt(i).widget().accessibleName() == "Show")
+    return view.show_box
 
 
 def test_a_range_typed_by_hand(browse):
@@ -366,6 +365,8 @@ def test_plan_mode_drags_save_log_and_undo(browse):
     QTest.keyClick(chart, Qt.Key.Key_P)
     assert view.plan and view.plan_strip.isVisible()
     view.set_open("T000003", True)
+    assert "T000015" not in [r.task for r in chart.rows]  # with no dates, it joins the chart only while their fold is open (decision 291)
+    view.undated_fold.click()
     assert "T000015" in [r.task for r in chart.rows if r.undated]
     # Drag the undated subtask's name onto the chart: a working week from where it's let go.
     grip = _row_point(chart, "T000015", chart._grip_rect(next(r for r in chart.rows if r.task == "T000015"), 0).center().x())
@@ -455,10 +456,11 @@ def test_ordered_by_a_field_the_lane_column_names_it(browse):
     view._set("weeks", 13)
     view._set("bars", "hours")
     kept = json.loads(browse.ctx.conn.execute("SELECT value FROM app_state WHERE key = 'timeline_view'").fetchone()[0])
-    assert kept == {"weeks": 13, "order": "person", "bars": "hours", "a_week": False, "routine": True, "undated_open": False}
+    assert kept == {"weeks": 13, "order": "person", "bars": "hours", "a_week": False, "routine": True, "undated_open": False,
+                    "cap_open": True, "cap_unit": "pct", "cap_by_group": False, "cap_h": None, "bars_v": 2}
     fresh = TimelineView()
     fresh.restore(kept | {"weeks": 7, "bars": "nonsense"})  # a value it no longer offers is left at its default
-    assert (fresh.weeks, fresh.order, fresh.bars) == (9, "person", "project")
+    assert (fresh.weeks, fresh.order, fresh.bars) == (9, "person", "one")
 
 
 # ---- key dates on the timeline (release 5.31, the key dates plan, item 58 and decision 152) ----
@@ -588,16 +590,14 @@ def test_tasks_with_no_dates_never_squeeze_the_chart(browse):
     view.undated_ids = view.undated_ids[:1]
     view._draw_undated()
     QApplication.processEvents()
-    assert view.undated_ids and not view.undated_fold.isVisibleTo(view) and not view.undated_box.isVisibleTo(view)
-    assert view.model.task(view.undated_ids[0]).title in view.undated.text()  # few: their names, on the one line
+    assert view.undated_fold.text() == "1 with no dates" and view.undated_fold.isVisibleTo(view) and not view.undated_box.isVisibleTo(view)
     few = view.scroll.height()
     many = tuple(view.model.tasks) * 6
     view.undated_ids = many
     view._draw_undated()
     QApplication.processEvents()
-    assert f"{len(many)} tasks" in view.undated.text() and view.undated_fold.isVisibleTo(view) and not view.undated_box.isVisibleTo(view)
-    assert view.model.task(many[0]).title not in view.undated.text()
-    assert view.scroll.height() >= few - 8  # folded, it costs the chart no more than its arrow's few pixels
+    assert view.undated_fold.text() == f"{len(many)} with no dates" and not view.undated_box.isVisibleTo(view)
+    assert view.scroll.height() == few  # folded, it costs the chart nothing: it's on the line under it
     view.undated_fold.click()
     QApplication.processEvents()
     assert view.undated_box.isVisibleTo(view) and view.undated_box.height() <= 68 and view.undated_names.height() > 68  # it scrolls
