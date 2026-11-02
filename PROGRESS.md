@@ -64,6 +64,7 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.47 | Involvement (decision 196): each person's share of a role's hours, in Capacity, on the task page, in Edit task's and a row's chips, in links and the preview, schema version 17 | Built 2026-10-30, with 5.44 to 5.46, and merged to `main` the same day, before the owner's hand test. Tested on the corporate computer by 2026-10-31 |
 | 5.49 | Hours a week, reordering a template's rows by dragging or Alt+Up and Alt+Down, and Duplicate (decisions 260 to 262), schema version 18 | Built 2026-10-31 in the `round5-templates` worktree, and merged to `main` the same day, before the owner's hand test. Next: the owner's hand test, then `handoff/docrepo/release-5-49-test.md` |
 | 5.50 | Ties (decisions 245 to 258): a task's Start or Due set from another date, on tasks and key dates, moving what's tied on every path, asking first when a move leaves the tree, the task page and the log, schema version 19 | Built 2026-10-31 in the `round5-templates` worktree and merged to `main`, before the owner's hand test. Next: the hand test, then `handoff/docrepo/release-5-50-test.md` |
+| 5.51 | A template's timing (decisions 248, 252 and 255 to 257): the anchor, ties on rows, the Timing window and its chart, Make tasks giving a tree its date, and what a change reaches, schema version 20 | Built 2026-11-01 on the `round5-templates` branch, not yet merged to `main`, before the owner's hand test. Next: the hand test, then `handoff/docrepo/release-5-51-test.md` |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
 ## Decisions
@@ -498,6 +499,35 @@ The visual overhaul's O10, designed and mocked in the parent workspace (`docs/ui
   - **No button group:** the pane marks the open view itself, so that no row is marked while searching, and a click on the open view keeps it marked.
   - **The totals that left the sidebar** are beside their views' titles ("14 open", "7 active"), as `sidebar.md` said they'd be.
   - **The tooltip** shows only when a name is cut short. The headings' tooltips say Fold or Unfold.
+
+## Release 5.51: a template's timing (2026-11-01)
+
+Round 5's thread A, the owner's ask of 2026-10-30, as the design has it (decisions 248, 252 and 255 to 257). Built before the owner's hand test.
+
+- `docrepo/db.py`: schema version 20, `anchor_row` on `templates` and `template_row_ties`.
+- `docrepo/timing.py` (new): `RowTie`, a row's tie in words, what can be tied to what (`problem`, `moves_with`), the chart's sums (`positions`, `span_of`, `scale_of`, `rebased`, `without_anchor`) and `make_dates`, with nothing that reads docs.db or touches Qt.
+- `docrepo/tasks.py`: `TIE_LINKS`, so a tie's gap follows its row beside the linked fields, and a different gap ends that; `put_ties`; `follow` takes `by_template`.
+- `docrepo/templates.py`: `Row.ties`, `Template.anchor`, `tie_on`; a row's form takes ties, and `preview_row` makes the change and rolls it back to list what moves with its copies; `add_row` places a new copy from its tree's rows; `remove_row`, `duplicate` and `save_as_template` keep to the rules; `make_tasks` places a tree, sources first; `preview_timing`, `apply_timing` and `save_timing` are the Timing window's.
+- `docrepo/template_pages.py`: the row's When, the Timing section, and a task's own gap under Who follows. `docrepo/ui/timing_chart.py` (new) paints a lane and the ruler, for the window and, as pictures, `docrepo/ui/page_view.py`.
+- `docrepo/ui/timing_view.py` (new): `TieLine`, `TimingDialog`. `docrepo/ui/templates_view.py`: a row's Tied to lines, Make tasks' worked-out dates, the anchor's Due box and Tie…, ↺, the list's pill and summaries, and `TemplatesPane.timing`. `docrepo/ui/task_forms.py`: `TiePanel`'s marks.
+- `tests/test_template_timing.py` and `tests/test_template_timing_ui.py` (new, 92 tests); `test_db.py` follows (1993 pass in all, 1 skipped). The Timing window, a new anchor in it, the template's page, Make tasks, a row's form and Edit task's mark were drawn and looked at, and the first drawing found the controls too tight and the page's chart squeezed in a narrow pane, now fixed.
+- **Not tested here:** a real mouse on Plan mode's drag of an anchor, which reaches these paths through `set_dates`. The owner's hand test has it.
+
+## Decisions (release 5.51)
+
+- Decisions 248, 252 and 255 to 257, as the design has them. Decision 259, the timeline's lines, waits for thread D, and the `**` forms come after that.
+- **Judgement calls, for the owner's hand test:**
+  - **Only what moves is listed in a timing change's preview.** A tie reworded with its date unchanged, as every tie is when the anchor changes, goes straight in the status log, as listing them would hide the dates that do move.
+  - **A row form's preview lists what moves with its copies by their ties, ticked,** as well as the copies. The mock listed only the copies, but decision 257 asks for each task's date change, and 5.50 moved them with no message.
+  - **Moved by a template's timing, the log says "Template: Product trial".** A task elsewhere tied to one of them says "Follows …", as that's why it moved.
+  - **A row others count from can't start repeating.** Its form says so and changes nothing, rather than ending other rows' ties quietly, as a repeating row has no one date to give. On a task, 5.50 ends them, but a task's form warns as you choose it, and the template's lines are in another window.
+  - **A row's tie doesn't take if it would make a circle with a task's own tie.** It stays as it was, and stops following. Rows alone can't make one.
+  - **A row with subtasks spans them only if it has no Days, no tie and isn't the anchor,** so giving it Days makes it a row like any other. One already tied stays editable.
+  - **A tree tied to something outside stays driven from it when the anchor changes.** If the old anchor's task has a tie of its own, such as to an outage, that tie stays, and the new anchor's task stays tied to the old one, as its own, so moving the outage still moves the whole tree. The mock replaced that tie, which would have cut the tree off with nothing in the preview to say so. In any other tree the old anchor's task takes its new tie, and the new anchor's loses only ties that followed its row.
+  - **Taking out a row, or the anchor, places those tied to it by hand from then on.** Its preview says who. Tasks already made stay tied, as their own.
+  - **Tie… on the anchor is its Start only,** and a tied row's Start is what's typed over, as the mock has them. Its Due is a line beside it.
+  - **Typing the anchor's Due with Days moves its Start, and new Days count from its Start,** or back from its Due if that's all it has, as decision 191 has it on a task.
+  - **In a pane under 420 px, each lane goes under its name.** The page doesn't redraw on crossing that width, only when it next draws.
 
 ## Release 5.52: typing in the capture window without lag (2026-10-31)
 

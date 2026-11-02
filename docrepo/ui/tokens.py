@@ -326,6 +326,10 @@ QFrame#personChip QLabel#personShare { color: $accent; font-weight: 600; }
 QFrame#personChip QToolButton { border: none; background: transparent; padding: 0 2px; font-size: ${caption}pt; }
 QFrame#involvementBox { border: 1px solid $stroke_strong; background: $content; }
 QFrame#tieBox { border: 1px solid $stroke; border-radius: 4px; background: $content; }
+QFrame#timingHead { border-bottom: 1px solid $stroke_strong; }
+QFrame#timingRow { border-bottom: 1px solid $stroke; }
+QFrame#timingRow[anchor="true"] { background: $selected; }
+QLabel#anchorPill { color: $accent; background: $selected; border: 1px solid $accent; border-radius: 8px; padding: 0 6px; font-size: ${caption}pt; }
 QWidget#chips { border: 1px solid $stroke; border-bottom: 1px solid $control; border-radius: 4px; background: $content; }
 QWidget#chips QLineEdit { background: transparent; border: none; padding: 4px 2px; min-height: 20px; }
 QWidget#chips QLineEdit:focus { border: none; }
@@ -397,6 +401,7 @@ h2 { font-size: ${subtitle}pt; font-weight: 600; margin-top: 2px; margin-bottom:
 .routine { color: $text; background-color: $hover; }
 .multi { color: $accent; background-color: $selected; }
 .lbl { color: $text; background-color: $hover; }
+.anchor { color: $accent; background-color: $selected; }
 .inh { color: $text2; font-style: italic; }
 .sec { font-weight: 600; margin-top: 18px; margin-bottom: 4px; }
 .dt { color: $text2; font-size: ${caption}pt; padding-right: 14px; }

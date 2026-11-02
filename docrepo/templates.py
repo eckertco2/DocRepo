@@ -9,12 +9,16 @@ still following it, and an open task's linked field holds its row's value, alway
 - saving a row writes the new value to the tasks following it, or ends the links of those unticked in the preview (decisions
   186 and 198). Closed and discarded tasks never change, and fall behind until they come back (decision 185).
 
-Each change to a template works out what it would do first, with nothing changed (``preview_row``, ``preview_new_row`` and
-``preview_remove``), and the browse tool shows that before it's made. The status log of each task says what reached it, and
+Each change to a template works out what it would do first, with nothing changed (``preview_row``, ``preview_new_row``,
+``preview_remove`` and ``preview_timing``), and the browse tool shows that before it's made. The status log of each task says what reached it, and
 the template keeps a Changes list (decision 187).
 
 Only the Templates view, Make tasks, Save as template and the previews read these tables, through a ``Library``. The Model
 knows only where each task came from (``model.TemplateOrigin``).
+
+Since release 5.51 a template has a timing: an anchor, and ties on its rows, whose sums are in ``timing``. A task made from a row
+carries that tie as an ordinary tie, pointing at its own tree's copy of the source, and ``start_tie`` and ``due_tie`` in ``task_links``
+say its gap still follows the row's number (decisions 247 and 248).
 """
 from __future__ import annotations
 
@@ -25,17 +29,18 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 
-from docrepo import agenda, edits, markup, notes_page, search, tasks
+from docrepo import agenda, edits, markup, notes_page, search, tasks, ties, timing
 from docrepo.config import Settings
 from docrepo.dates import short, stamp, to_date, workday_numbers
 from docrepo.db import transaction
-from docrepo.model import Model
+from docrepo.model import Model, Tie
 from docrepo.pages import num
 from docrepo.parse import Who
 from docrepo.safe_fs import SafeFS
 from docrepo.schedule import length_of
 from docrepo.stories import clip
-from docrepo.tasks import FIELD_NAMES, RATE_FIELDS, RATES, TEMPLATE_LINK, WEEK_RATES, Change, TaskError, _normalize, hours_values, stated, worked_out
+from docrepo.tasks import FIELD_NAMES, LINK_NAMES, RATE_FIELDS, RATES, TEMPLATE_LINK, TIE_LINKS, WEEK_RATES, Change, TaskError, _normalize, hours_values, stated, worked_out
+from docrepo.timing import RowTie
 
 log = logging.getLogger(__name__)
 
@@ -80,6 +85,7 @@ class Row:
     assignees: list[str] = field(default_factory=list)
     labels: list[str] = field(default_factory=list)
     involvement: dict[tuple[str, str], int] = field(default_factory=dict)  # as on a task: only where it isn't 100
+    ties: dict[str, RowTie] = field(default_factory=dict)
 
 
 @dataclass
@@ -89,6 +95,7 @@ class Template:
     discarded: str | None = None
     discard_reason: str | None = None
     top: int = 0  # its top row
+    anchor: int | None = None  # the row other rows tie to by default (decision 248)
 
 
 @dataclass(frozen=True)
@@ -139,7 +146,7 @@ class Library:
 
     def __init__(self, conn: sqlite3.Connection) -> None:
         q = conn.execute
-        self.templates: dict[int, Template] = {r["id"]: Template(r["id"], r["created"], r["discarded"], r["discard_reason"])
+        self.templates: dict[int, Template] = {r["id"]: Template(r["id"], r["created"], r["discarded"], r["discard_reason"], anchor=r["anchor_row"])
                                                 for r in q("SELECT * FROM templates ORDER BY id")}
         self.rows: dict[int, Row] = {}
         self._children: dict[int, list[int]] = {}
@@ -158,6 +165,8 @@ class Library:
                 self.rows[r["row_id"]].involvement[(r["role"], r["person"])] = r["involvement"]
         for r in q("SELECT x.row_id, l.name FROM template_row_labels x JOIN labels l ON l.id = x.label ORDER BY x.id"):
             self.rows[r["row_id"]].labels.append(r["name"])
+        for r in q("SELECT * FROM template_row_ties"):
+            self.rows[r["row_id"]].ties[r["field"]] = RowTie(r["source_row"], r["point"], r["amount"], r["unit"], r["direction"])
         self.copies: dict[str, Copy] = {r["task"]: Copy(r["task"], r["row_id"], r["tree"])
                                         for r in q("SELECT task, row_id, tree FROM task_template ORDER BY task")}
         self.links: dict[str, set[str]] = {}
@@ -204,9 +213,45 @@ class Library:
     def in_tree(self, top: str) -> list[str]:
         return [c.task for c in self.copies.values() if c.tree == top]
 
+    def copy_in(self, row_id: int, tree: str) -> str | None:
+        """A tree's copy of a row."""
+        return next((c.task for c in self.copies.values() if c.row == row_id and c.tree == tree), None)
+
+    def spans(self, row: Row) -> bool:
+        """A row with subtasks and no dates of its own spans them, so it gives nothing to tie to and can't be the anchor (decision 250)."""
+        return row.id in self._children and row.duration is None and not row.ties and self.templates[row.template].anchor != row.id
+
+    def lines(self, template_id: int) -> list[timing.Line]:
+        """Its rows, in order, as the chart and the Timing window see them."""
+        return [timing.Line(x.id, x.title, d, x.parent, self.spans(x), x.duration, dict(x.ties), bool(x.recurrence))
+                for x, d in self.walk(self.templates[template_id].top)]
+
+    def titles(self, template_id: int) -> dict[int, str]:
+        return {x.id: x.title for x, _ in self.walk(self.templates[template_id].top)}
+
+    def tie_words(self, row: Row, f: str) -> str:
+        """A row's tie as a sentence: "30 workdays before the anchor starts"."""
+        return timing.words(row.ties[f], self.titles(row.template))
+
 
 def days_text(days: int) -> str:
     return plural(days, "day")
+
+
+def tie_on(lib: Library, row: Row, f: str, tree: str) -> Tie | None:
+    """A row's tie as it stands on its copy in a tree, counting from that tree's copy of its source (decision 248). None if it has no
+    tie there, or that source isn't in the tree, as with Make tasks from a row (decision 256)."""
+    tie = row.ties.get(f)
+    src = timing.source_of(tie, lib.templates[row.template].anchor) if tie else None
+    task = lib.copy_in(src, tree) if src is not None and src != row.id else None
+    return Tie(task, tie.point, tie.amount, tie.unit, tie.direction) if task else None
+
+
+def list_summary(row: Row, titles: dict[int, str]) -> str:
+    """A row in the Templates list: what it's tied to and how long it is, when it's tied, or its calm summary."""
+    if not row.ties:
+        return summary(row)
+    return " · ".join(x for x in (timing.timing_words(row.ties, titles), days_text(row.duration) if row.duration else "") if x)
 
 
 def summary(row: Row) -> str:
@@ -224,6 +269,11 @@ def summary(row: Row) -> str:
 def own_fields(row: Row, task, links: set[str], top: bool) -> list[str]:
     """The fields a row fills where a task has gone its own way: no longer linked, and with a different value."""
     return [k for k in FIELDS if fills(row, k) and k not in links and stated(task, k) != stated(row, k) and not (k == "title" and top)]
+
+
+def own_ties(lib: Library, row: Row, task, tree: str, links: set[str]) -> list[str]:
+    """The ties a row has where a task has gone its own way: no longer following, with a different gap or none (decision 247)."""
+    return [TIE_LINKS[f] for f in timing.FIELDS if (tie := tie_on(lib, row, f, tree)) and TIE_LINKS[f] not in links and task.ties.get(f) != tie]
 
 
 def field_text(m: Model | None, key: str, value) -> str:
@@ -277,7 +327,26 @@ def _checked(conn: sqlite3.Connection, values: Mapping) -> dict:
             out[hours] = None
     out["involvement"] = {(role, p): share for (role, p), share in tasks.shares_of(values.get("involvement")).items()
                           if p in out["leads" if role == "lead" else "assignees"]}
+    given = values.get("ties")  # none given leaves a row's as they are
+    out["ties"] = {} if out["recurrence"] else None if given is None else {f: x for f, x in given.items() if x}
     return out
+
+
+def _settled_ties(lib: Library, template_id: int, row_id: int, title: str, v: dict) -> None:
+    """A form's ties for a row, in place: one counting from an anchor there isn't goes, and with both tied the length comes from them
+    (decision 251). What can't stand says why (decisions 250 and 253)."""
+    if v["ties"] is None:
+        return
+    anchor = lib.templates[template_id].anchor
+    v["ties"] = {} if row_id == anchor else {f: x for f, x in v["ties"].items() if x.source is not None or anchor is not None}
+    lines = lib.lines(template_id)
+    if row_id not in [x.id for x in lines]:
+        lines.append(timing.Line(row_id, title))
+    said = timing.problem([replace(x, ties=v["ties"]) if x.id == row_id else x for x in lines], anchor)
+    if said:
+        raise TaskError(said)
+    if len(v["ties"]) == 2:
+        v["duration"] = None
 
 
 _COLUMNS = ("title", "description", "inherit_labels", "lead_hours", "assignee_hours", "urgent", "meeting", "plant_event", "recurrence", "notes", "duration",
@@ -293,11 +362,18 @@ def _store_lists(conn: sqlite3.Connection, row_id: int, v: Mapping) -> None:
     conn.executemany("INSERT INTO template_row_labels (row_id, label) SELECT ?, id FROM labels WHERE name = ?", [(row_id, n) for n in v["labels"]])
 
 
+def _store_row_ties(conn: sqlite3.Connection, row_id: int, given: Mapping[str, RowTie]) -> None:
+    conn.execute("DELETE FROM template_row_ties WHERE row_id = ?", (row_id,))
+    conn.executemany("INSERT INTO template_row_ties (row_id, field, source_row, point, amount, unit, direction) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                     [(row_id, f, x.source, x.point, x.amount, x.unit, x.direction) for f, x in given.items()])
+
+
 def _insert_row(conn: sqlite3.Connection, template: int, parent: int | None, v: Mapping) -> int:
     place = conn.execute("SELECT coalesce(max(place), 0) + 1 FROM template_rows WHERE template = ? AND parent IS ?", (template, parent)).fetchone()[0]
     columns = {"template": template, "parent": parent, "place": place, **{k: v[k] for k in _COLUMNS}}
     cur = conn.execute(f"INSERT INTO template_rows ({', '.join(columns)}) VALUES ({', '.join('?' * len(columns))})", tuple(columns.values()))
     _store_lists(conn, cur.lastrowid, v)
+    _store_row_ties(conn, cur.lastrowid, v.get("ties") or {})
     return cur.lastrowid
 
 
@@ -321,7 +397,8 @@ def _ended(conn: sqlite3.Connection, task_id: str, keys: Collection[str], name: 
     """These fields stop following the template, each with a line in the task's status log."""
     if keys:
         conn.executemany("DELETE FROM task_links WHERE task = ? AND field = ?", [(task_id, k) for k in keys])
-        tasks.record(conn, task_id, at, f"Template: {name}", [Change(TEMPLATE_LINK, f"{FIELD_NAMES[k]}: no longer follows {name}", None) for k in FIELDS if k in keys])
+        tasks.record(conn, task_id, at, f"Template: {name}", [Change(TEMPLATE_LINK, f"{LINK_NAMES[k]}: no longer follows {name}", None)
+                                                              for k in (*FIELDS, *TIE_LINKS.values()) if k in keys])
 
 
 # ---- a row changed: who it reaches (decisions 185, 186 and 198) ----
@@ -364,6 +441,9 @@ class RowPlan:
     not_changing: list[NotChanging] = field(default_factory=list)
     #: Links that end because the row stops filling the field (decision 198), though no value changes.
     ending: dict[str, list[str]] = field(default_factory=dict)
+    #: Tasks that aren't its copies but move with them, by their ties, each listed so it can be unticked (decision 257).
+    moved: list[Reached] = field(default_factory=list)
+    followed: int = 0  # how many moved that way when it was saved
 
 
 #: What a preview says changed on a task, in order: a Duration's change shows the dates it moves, and a rate's the total it comes to.
@@ -390,6 +470,8 @@ def _as_changes(row: Row, keys: Sequence[str], t) -> dict[str, object]:
     their Involvement, the other role's left as the task has it."""
     out: dict[str, object] = {}
     for k in keys:
+        if k in TIE_LINKS.values():
+            continue
         if k in RATES:
             value = stated(row, k)
             out.update(hours_values(k, value[0][2:], value[1]) if isinstance(value, tuple) else hours_values(k, "all", value))
@@ -401,16 +483,45 @@ def _as_changes(row: Row, keys: Sequence[str], t) -> dict[str, object]:
     return out
 
 
-def _plan_row(conn: sqlite3.Connection, settings: Settings, row_id: int, v: Mapping) -> RowPlan:
+def _own_words(m: Model, t, key: str) -> str:
+    """What a task has of its own that a row's change leaves alone: "assignee hours 20 h", "start tie, 8 workdays before Line 2 outage ends"."""
+    for f, tie_key in TIE_LINKS.items():
+        if key == tie_key:
+            tie = t.ties.get(f)
+            return f"{f} tie, {ties.words(tie, ties.name_in(m, tie))}" if tie else f"{f} date"
+    return f"{FIELD_NAMES[key].lower()} {field_text(m, key, stated(t, key))}"
+
+
+def _can_repeat(lib: Library, row: Row, title: str) -> None:
+    """A row that repeats has no one date to give (decision 250), so it can't be the anchor, or what another row counts from."""
+    anchor = lib.templates[row.template].anchor
+    if anchor == row.id:
+        raise TaskError(f"{title} is the template's anchor, so it can't repeat. Choose another anchor in Timing first.")
+    tied = [x.title for x in lib.lines(row.template) if any(timing.source_of(t, anchor) == row.id for t in x.ties.values())]
+    if tied:
+        raise TaskError(f"{', '.join(tied)} {'is' if len(tied) == 1 else 'are'} tied to {title}, so it can't repeat. Change that in Timing first.")
+
+
+def _tie_line(f: str, was: RowTie | None, now: RowTie | None, titles: Mapping[int, str]) -> str:
+    return f"{timing.FIELDS[f]} tie {timing.words(was, titles) if was else 'None'} → {timing.words(now, titles) if now else 'None'}"
+
+
+def _plan_row(conn: sqlite3.Connection, settings: Settings, row_id: int, v: dict) -> RowPlan:
     lib, m = Library(conn), Model(conn)
     workdays = workday_numbers(settings.workdays)
     before = lib.rows.get(row_id)
     if before is None:
         raise TaskError("That row isn't in a template any more.")
-    after = replace(before, **{k: v[k] for k in (*FIELDS, "notes", *RATE_FIELDS, "involvement")})
+    _settled_ties(lib, before.template, row_id, v["title"], v)
+    if v["recurrence"]:
+        _can_repeat(lib, before, v["title"])
+    after = replace(before, ties=before.ties if v["ties"] is None else v["ties"], **{k: v[k] for k in (*FIELDS, "notes", *RATE_FIELDS, "involvement")})
     changed = [k for k in FIELDS if stated(before, k) != stated(after, k)]
     name = after.title if before.parent is None else lib.name(before.template)
-    plan = RowPlan(row_id, after.title, before.template, name, changed, [_change_line(m, k, stated(before, k), stated(after, k)) for k in changed],
+    tied = [f for f in timing.FIELDS if before.ties.get(f) != after.ties.get(f)]
+    titles = lib.titles(before.template)
+    plan = RowPlan(row_id, after.title, before.template, name, [*changed, *(TIE_LINKS[f] for f in tied)],
+                   [*(_change_line(m, k, stated(before, k), stated(after, k)) for k in changed), *(_tie_line(f, before.ties.get(f), after.ties.get(f), titles) for f in tied)],
                    before.notes != after.notes)
     for c in lib.copies_of(row_id):
         t = m.tasks.get(c.task)
@@ -432,6 +543,17 @@ def _plan_row(conn: sqlite3.Connection, settings: Settings, row_id: int, v: Mapp
                 will.append(k)
             elif now and stated(t, k) != stated(after, k):
                 own.append(k)
+        new_ties: dict[str, Tie] = {}
+        for f in () if t.recurrence else tied:  # decision 198, as for any field: a row that starts having one reaches a task with no date there
+            key, tie = TIE_LINKS[f], tie_on(lib, after, f, c.tree)
+            if tie is None:
+                if key in linked:
+                    plan.ending.setdefault(c.task, []).append(key)
+            elif key in linked or (f not in t.ties and not getattr(t, f)):
+                will.append(key)
+                new_ties[f] = tie
+            elif t.ties.get(f) != tie:
+                own.append(key)
         if t.discarded or t.state == "Closed":  # decision 185: they never change
             if will:
                 why = "discarded" if t.discarded else "closed"
@@ -439,11 +561,42 @@ def _plan_row(conn: sqlite3.Connection, settings: Settings, row_id: int, v: Mapp
             continue
         if will:
             values = _as_changes(after, will, t)
+            if new_ties:
+                values["ties"] = {**t.ties, **new_ties}
             sim = replace(t, **worked_out(t, values, workdays)[0])
             plan.items.append(Reached(c.task, tree, t.state, will, values, _task_lines(m, t, sim), work_of(t), work_of(sim)))
         elif own:
-            plan.not_changing.append(NotChanging(c.task, tree, "own", "its own " + ", ".join(f"{FIELD_NAMES[k].lower()} {field_text(m, k, stated(t, k))}" for k in own)))
+            plan.not_changing.append(NotChanging(c.task, tree, "own", "its own " + ", ".join(_own_words(m, t, k) for k in own)))
     return plan
+
+
+def _dates_of(t) -> tuple:
+    return t.start, t.due, t.duration
+
+
+def _named(m: Model, task_id: str) -> str:
+    """A task in a list of what moved: "Trial 3 › Change record prep", as several trees have the same titles."""
+    t = m.task(task_id)
+    top = sorted(ties.tops(m.parents_of, task_id))[0]
+    return t.title if top == task_id else f"{m.task(top).title} › {t.title}"
+
+
+def _moved_items(before: Model, after: Model, order: Sequence[str] = ()) -> list[Reached]:
+    """Each task whose dates a change moved, those in ``order`` first, in that order."""
+    ids = [*(x for x in order if x in after.tasks), *(x for x in after.tasks if x not in order)]
+    return [Reached(x, _named(after, x), before.task(x).state, [], {}, _task_lines(before, before.task(x), after.task(x)), work_of(before.task(x)), work_of(after.task(x)))
+            for x in ids if x in before.tasks and _dates_of(before.task(x)) != _dates_of(after.task(x))]
+
+
+def _read_moves(plan: RowPlan, before: Model, after: Model) -> None:
+    """What a row's change really did, for its preview: each copy's lines, and what moved with them."""
+    mine = {i.task: i for i in plan.items}
+    for x in plan.items:
+        was, now = before.task(x.task), after.task(x.task)
+        x.lines = _task_lines(before, was, now) + [f"{timing.FIELDS[f]} tie {ties.words(a, ties.name_in(before, a)) if a else 'None'} → {ties.words(b, ties.name_in(after, b)) if b else 'None'}"
+                                                   for f in timing.FIELDS if (a := was.ties.get(f)) != (b := now.ties.get(f))]
+        x.work_after = work_of(now)
+    plan.moved = [x for x in _moved_items(before, after) if x.task not in mine]
 
 
 class _Preview(Exception):
@@ -456,12 +609,40 @@ def preview_row(conn: sqlite3.Connection, settings: Settings, row_id: int, value
     plan: RowPlan | None = None
     try:
         with transaction(conn):
-            plan = _plan_row(conn, settings, row_id, _checked(conn, _form_values(conn, values, at, [])))
+            v = _checked(conn, _form_values(conn, values, at, []))
+            plan = _plan_row(conn, settings, row_id, v)
+            if plan.items:  # it's made and rolled back, so what moves with its copies can be listed too
+                before = Model(conn)
+                _write_row(conn, settings, plan, row_id, v, at, ())
+                _read_moves(plan, before, Model(conn))
             raise _Preview
     except _Preview:
         pass
     assert plan is not None
     return plan
+
+
+def _write_row(conn: sqlite3.Connection, settings: Settings, plan: RowPlan, row_id: int, v: Mapping, at: datetime, left: Collection[str]) -> None:
+    """A row's change, as planned, in the caller's transaction."""
+    conn.execute(f"UPDATE template_rows SET {', '.join(f'{k} = ?' for k in _COLUMNS)} WHERE id = ?", (*(v[k] for k in _COLUMNS), row_id))
+    _store_lists(conn, row_id, v)
+    if v["ties"] is not None:
+        _store_row_ties(conn, row_id, v["ties"])
+    via, name = f"Template: {plan.name}", plan.name
+    reached = 0
+    for item in plan.items:
+        if item.task in left:
+            _ended(conn, item.task, item.keys, name, at)
+            continue
+        logged = tasks.update_task(conn, settings, item.task, at=at, via=via, keep_links=True, leave=left, **item.fields)
+        plan.followed += len(logged.followed)
+        conn.executemany("INSERT OR IGNORE INTO task_links (task, field) VALUES (?, ?)", [(item.task, k) for k in item.keys])
+        reached += 1
+    for task_id, keys in plan.ending.items():
+        _ended(conn, task_id, keys, name, at)
+    words = [*plan.lines, *(["Starting notes changed"] if plan.notes_changed else [])]
+    if words:
+        _log_change(conn, plan.template, at, "changed", f"{plan.title} · {', '.join(words)}", reached, len(plan.items) - reached)
 
 
 def apply_row(conn: sqlite3.Connection, settings: Settings, row_id: int, values: Mapping, at: datetime, left: Collection[str] = (),
@@ -473,22 +654,7 @@ def apply_row(conn: sqlite3.Connection, settings: Settings, row_id: int, values:
     with transaction(conn):
         v = _checked(conn, _form_values(conn, values, at, added if added is not None else []))
         plan = _plan_row(conn, settings, row_id, v)
-        conn.execute(f"UPDATE template_rows SET {', '.join(f'{k} = ?' for k in _COLUMNS)} WHERE id = ?", (*(v[k] for k in _COLUMNS), row_id))
-        _store_lists(conn, row_id, v)
-        via, name = f"Template: {plan.name}", plan.name
-        reached = 0
-        for item in plan.items:
-            if item.task in left:
-                _ended(conn, item.task, item.keys, name, at)
-                continue
-            tasks.update_task(conn, settings, item.task, at=at, via=via, keep_links=True, **item.fields)
-            conn.executemany("INSERT OR IGNORE INTO task_links (task, field) VALUES (?, ?)", [(item.task, k) for k in item.keys])
-            reached += 1
-        for task_id, keys in plan.ending.items():
-            _ended(conn, task_id, keys, name, at)
-        words = [*plan.lines, *(["Starting notes changed"] if plan.notes_changed else [])]
-        if words:
-            _log_change(conn, plan.template, at, "changed", f"{plan.title} · {', '.join(words)}", reached, len(plan.items) - reached)
+        _write_row(conn, settings, plan, row_id, v, at, left)
     return plan
 
 
@@ -514,15 +680,19 @@ class AddPlan:
     summary: str
     trees: list[TreeOffer] = field(default_factory=list)
     closed_trees: list[str] = field(default_factory=list)
+    tied: str = ""  # what it's tied to, in words, when it arrives tied (decision 257)
 
 
-def _plan_add(conn: sqlite3.Connection, parent: int, v: Mapping) -> AddPlan:
+def _plan_add(conn: sqlite3.Connection, parent: int, v: dict) -> AddPlan:
     lib, m = Library(conn), Model(conn)
     p = lib.rows.get(parent)
     if p is None:
         raise TaskError("That row isn't in a template any more.")
-    row = Row(0, p.template, parent, 0, **{k: v[k] for k in (*FIELDS, "notes", *RATE_FIELDS, "involvement")})
-    plan = AddPlan(row.title, parent, p.title, p.template, lib.name(p.template), summary(row))
+    _settled_ties(lib, p.template, 0, v["title"], v)
+    row = Row(0, p.template, parent, 0, ties=v["ties"] or {}, **{k: v[k] for k in (*FIELDS, "notes", *RATE_FIELDS, "involvement")})
+    titles = lib.titles(p.template)
+    plan = AddPlan(row.title, parent, p.title, p.template, lib.name(p.template), summary(row),
+                   tied=", ".join(("" if f == "start" else "Due ") + timing.words(row.ties[f], titles).replace("The day", "the day") for f in timing.FIELDS if f in row.ties))
     for c in lib.trees(p.template):
         t = m.tasks.get(c.task)
         if t is None or t.discarded or parent not in [x.id for x, _ in lib.walk(c.row)]:
@@ -552,7 +722,8 @@ def add_row(conn: sqlite3.Connection, settings: Settings, parent: int, values: M
             added: list[str] | None = None) -> tuple[int, AddPlan, list[str]]:
     """A new row, at the end of those under ``parent``, and a copy of it in each open tree that has its parent, but those in
     ``left``, unticked in the preview (decision 188). A copy arrives undated, with its fields linked, under the copy of its
-    parent, or under the tree's top task if that's gone. New trees always have it. Returns the row, the plan, and the tasks made."""
+    parent, or under the tree's top task if that's gone. A row with a tie arrives tied, placed from that tree's own rows. New trees
+    always have it. Returns the row, the plan, and the tasks made."""
     with transaction(conn):
         v = _checked(conn, _form_values(conn, values, at, added if added is not None else []))
         plan = _plan_add(conn, parent, v)
@@ -566,6 +737,7 @@ def add_row(conn: sqlite3.Connection, settings: Settings, parent: int, values: M
                 continue
             under = next((x for x in lib.in_tree(tree.task) if lib.copies[x].row == parent and x in m.tasks and not m.task(x).discarded), tree.task)
             made.append(_copy_row(conn, settings, row, row.title, [under], via, tree.task, Choice(), False, at))
+            _tie_copy(conn, settings, lib, row, made[-1], tree.task, via, at)
             tasks.record(conn, under, at, via, [Change(TEMPLATE_LINK, None, f"{row.title} added to this tree from {plan.name}")])
         _log_change(conn, plan.template, at, "added", f"Added {row.title}", len(made), len(plan.trees) - len(made))
     return row_id, plan, made
@@ -588,6 +760,13 @@ class RemovePlan:
     name: str
     rows: int
     copies: list[CopyOffer] = field(default_factory=list)
+    untied: list[str] = field(default_factory=list)  # the rows left that were tied to it, which are placed by hand from then on
+
+
+def _tied_to(lib: Library, going: Collection[int], template_id: int) -> list[tuple[Row, str]]:
+    """The ties of rows that stay, whose source is going: each row, and which of its dates."""
+    anchor = lib.templates[template_id].anchor
+    return [(x, f) for x, _ in lib.walk(lib.templates[template_id].top) if x.id not in going for f, tie in x.ties.items() if timing.source_of(tie, anchor) in going]
 
 
 def preview_remove(conn: sqlite3.Connection, row_id: int) -> RemovePlan:
@@ -600,7 +779,7 @@ def preview_remove(conn: sqlite3.Connection, row_id: int) -> RemovePlan:
         raise TaskError("A template's top row can't be taken out. Discard the template instead.")
     walked = lib.walk(row_id)
     going = {c.task for x, _ in walked for c in lib.copies_of(x.id)}
-    plan = RemovePlan(row.title, lib.name(row.template), len(walked))
+    plan = RemovePlan(row.title, lib.name(row.template), len(walked), untied=list(dict.fromkeys(x.title for x, _ in _tied_to(lib, [x.id for x, _ in walked], row.template))))
     for x, _ in walked:
         for c in lib.copies_of(x.id):
             t = m.tasks.get(c.task)
@@ -626,6 +805,14 @@ def remove_row(conn: sqlite3.Connection, settings: Settings, row_id: int, at: da
     can = {c.task for c in plan.copies if c.can}
     wanted = [c.task for x, _ in reversed(walked) for c in lib.copies_of(x.id) if c.task in discard and c.task in can]  # those under them first
     with transaction(conn):
+        going = [x.id for x, _ in walked]
+        for x, f in _tied_to(lib, going, row.template):  # the rows left are placed by hand from now on, and their tasks stay tied, as their own
+            conn.execute("DELETE FROM template_row_ties WHERE row_id = ? AND field = ?", (x.id, f))
+            for c in lib.copies_of(x.id):
+                if TIE_LINKS[f] in lib.links.get(c.task, ()):
+                    _ended(conn, c.task, [TIE_LINKS[f]], name, at)
+        if lib.templates[row.template].anchor in going:
+            conn.execute("UPDATE templates SET anchor_row = NULL WHERE id = ?", (row.template,))
         for x, _ in walked:
             for c in lib.copies_of(x.id):
                 conn.execute("DELETE FROM task_links WHERE task = ?", (c.task,))
@@ -645,6 +832,7 @@ def remove_row(conn: sqlite3.Connection, settings: Settings, row_id: int, at: da
         for x, _ in reversed(walked):  # those under it first
             conn.execute("DELETE FROM template_row_people WHERE row_id = ?", (x.id,))
             conn.execute("DELETE FROM template_row_labels WHERE row_id = ?", (x.id,))
+            conn.execute("DELETE FROM template_row_ties WHERE row_id = ?", (x.id,))
             conn.execute("DELETE FROM template_rows WHERE id = ?", (x.id,))
         kept = [c.task for c in plan.copies if c.task not in gone]
         _log_change(conn, row.template, at, "removed", f"Took out {row.title}", len(gone), len(kept))
@@ -729,6 +917,10 @@ def duplicate(conn: sqlite3.Connection, template_id: int, name: str, at: datetim
             if row.parent is None:
                 values["title"] = name
             made[row.id] = _insert_row(conn, copy, made.get(row.parent), values)
+        for row, _ in lib.walk(lib.templates[template_id].top):  # its ties and anchor point inside the copy
+            _store_row_ties(conn, made[row.id], {f: replace(x, source=None if x.source is None else made[x.source]) for f, x in row.ties.items()})
+        if lib.templates[template_id].anchor is not None:
+            conn.execute("UPDATE templates SET anchor_row = ? WHERE id = ?", (made[lib.templates[template_id].anchor], copy))
     return made[lib.templates[template_id].top]
 
 
@@ -749,6 +941,8 @@ class TaskLink:
     path: str
     links: set[str]
     top: bool
+    ties: dict[str, Tie] = field(default_factory=dict)  # the row's ties, as they'd stand on this task
+    tie_words: dict[str, str] = field(default_factory=dict)  # the same, in words
 
 
 def task_link(conn: sqlite3.Connection, task_id: str) -> TaskLink | None:
@@ -757,7 +951,10 @@ def task_link(conn: sqlite3.Connection, task_id: str) -> TaskLink | None:
     c = lib.copies.get(task_id)
     if c is None or lib.template_of(c.row).discarded:
         return None
-    return TaskLink(lib.rows[c.row], lib.name(lib.rows[c.row].template), " › ".join(x.title for x in lib.path(c.row)), lib.links.get(task_id, set()), c.task == c.tree)
+    row = lib.rows[c.row]
+    row_ties = {f: x for f in timing.FIELDS if (x := tie_on(lib, row, f, c.tree))}
+    return TaskLink(row, lib.name(row.template), " › ".join(x.title for x in lib.path(c.row)), lib.links.get(task_id, set()), c.task == c.tree, row_ties,
+                    {f: lib.tie_words(row, f) for f in row_ties})
 
 
 def detach(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, task_id: str, at: datetime) -> edits.Outcome:
@@ -788,12 +985,24 @@ def page_body(notes: str) -> str:
 
 @dataclass
 class Choice:
-    """What Make tasks' dialog says for one row: its Start, and its people, when they aren't the row's."""
+    """What Make tasks' dialog says for one row: its Start, and its people, when they aren't the row's. On a tied row, a Start or Due
+    is a date typed over the one worked out, which gives it a new gap. ``tie`` is a tie of the task's own, as the anchor can have
+    from Tie… (decision 256), and ``due`` is the Due typed there."""
 
     start: str | None = None
     leads: Sequence[str] | None = None
     assignees: Sequence[str] | None = None
     duration: int | None | object = ...  # ... is the row's own
+    due: str | None = None
+    tie: Tie | None = None
+
+
+def _tie_copy(conn: sqlite3.Connection, settings: Settings, lib: Library, row: Row, task_id: str, tree: str, via: str, at: datetime) -> None:
+    """A new copy in a tree already made takes its row's ties, each following the row's number, and lands where they put it (decision 257)."""
+    tied = {f: x for f in timing.FIELDS if (x := tie_on(lib, row, f, tree))}
+    if tied:
+        tasks.update_task(conn, settings, task_id, at=at, via=via, keep_links=True, ties=tied)
+        conn.executemany("INSERT OR IGNORE INTO task_links (task, field) VALUES (?, ?)", [(task_id, TIE_LINKS[f]) for f in tied])
 
 
 def _copy_row(conn: sqlite3.Connection, settings: Settings, row: Row, title: str, parents: Sequence[str], created_by: str, tree: str | None,
@@ -802,7 +1011,7 @@ def _copy_row(conn: sqlite3.Connection, settings: Settings, row: Row, title: str
     copy = replace(row, leads=list(row.leads if c.leads is None else c.leads), assignees=list(row.assignees if c.assignees is None else c.assignees),
                    duration=row.duration if c.duration is ... else c.duration)
     task_id = tasks.create_task(
-        conn, settings, title=title, at=at, created_by=created_by, parents=parents, description=row.description, start=c.start or None,
+        conn, settings, title=title, at=at, created_by=created_by, parents=parents, description=row.description, start=c.start or None, due=c.due or None,
         recurrence=row.recurrence, urgent=row.urgent, meeting=row.meeting, plant_event=row.plant_event, leads=copy.leads, assignees=copy.assignees,
         lead_hours=row.lead_hours, assignee_hours=row.assignee_hours, labels=row.labels, inherit_labels=row.inherit_labels, duration=copy.duration,
         calendar_days=row.calendar_days, **{k: getattr(row, k) for k in RATE_FIELDS}, involvement=row.involvement)
@@ -818,7 +1027,10 @@ def make_tasks(conn: sqlite3.Connection, settings: Settings, row_id: int, name: 
                at: datetime) -> list[str]:
     """Copy a row and what's under it into the task tree, under ``under`` if it's given. Returns the new tasks, the top one
     first. Each field the row fills starts linked, unless ``choices`` gives it a value of its own; the top task's title is
-    its own, as it's typed here (the design's table). Nothing goes on Today, and starting notes are copied once (decision 194)."""
+    its own, as it's typed here (the design's table). Nothing goes on Today, and starting notes are copied once (decision 194).
+
+    A row's ties come too, each following the row's number, and the tasks land where they put them, or wait until the anchor has a date.
+    A tie whose source isn't among what's being made is dropped (decision 256)."""
     lib = Library(conn)
     root = lib.rows.get(row_id)
     if root is None:
@@ -831,11 +1043,30 @@ def make_tasks(conn: sqlite3.Connection, settings: Settings, row_id: int, name: 
         raise TaskError("Give the new task a name, such as Trial 5: gloss finish.")
     created_by = f"Template: {lib.name(template.id)}"
     made: dict[int, str] = {}
+    walked = [x for x, _ in lib.walk(row_id)]
+    inside = {x.id for x in walked}
+    anchor = template.anchor
+    tied = {x.id: {f: t for f, t in x.ties.items() if timing.source_of(t, anchor) in inside - {x.id}} for x in walked}
     with transaction(conn):
-        for row, _ in lib.walk(row_id):
+        for row in walked:
             top = row.id == row_id
+            c = choices.get(row.id, Choice())
             made[row.id] = _copy_row(conn, settings, row, title if top else row.title, ([under] if under else []) if top else [made[row.parent]],
-                                     created_by, None if top else made[row_id], choices.get(row.id, Choice()), top, at)
+                                     created_by, None if top else made[row_id], replace(c, start=None, due=None) if tied[row.id] or c.tie else c, top, at)
+        order = ties.chain(timing.followers([timing.Line(x.id, x.title, ties=tied[x.id]) for x in walked], anchor), [x.id for x in walked])  # sources first
+        for rid in order:
+            c = choices.get(rid, Choice())
+            if tied[rid]:
+                tasks.update_task(conn, settings, made[rid], at=at, via=created_by, keep_links=True,
+                                  ties={f: Tie(made[timing.source_of(t, anchor)], t.point, t.amount, t.unit, t.direction) for f, t in tied[rid].items()})
+                conn.executemany("INSERT INTO task_links (task, field) VALUES (?, ?)", [(made[rid], TIE_LINKS[f]) for f in tied[rid]])
+            elif c.tie:
+                tasks.update_task(conn, settings, made[rid], at=at, via=created_by, keep_links=True, ties={"start": c.tie})
+        for rid in order:  # a date typed over one worked out keeps its tie, with a new gap (decision 256)
+            c = choices.get(rid, Choice())
+            typed = {k: v for k, v in (("start", c.start), ("due", c.due)) if v}
+            if tied[rid] and typed:
+                tasks.update_task(conn, settings, made[rid], at=at, via=created_by, **typed)
     return list(made.values())
 
 
@@ -843,7 +1074,8 @@ def make_tasks(conn: sqlite3.Connection, settings: Settings, row_id: int, name: 
 def save_as_template(conn: sqlite3.Connection, settings: Settings, task_id: str, name: str, link: bool, at: datetime, via: str = edits.BROWSE) -> int:
     """A new template from a task and what's under it: their fields, without dates, state, status, notes or captures. A
     discarded subtask is left out. A task's length becomes its row's Duration, whether it's typed or what its two dates hold.
-    With ``link``, these tasks then follow it, as a tree made from it does, and each takes that Duration. Returns its top row."""
+    With ``link``, these tasks then follow it, as a tree made from it does, and each takes that Duration. Ties inside the tree come
+    along, as rows tied to rows, and those reaching outside it don't (decision 258). There's no anchor yet. Returns its top row."""
     workdays = workday_numbers(settings.workdays)
     m = Model(conn)
     if task_id not in m.tasks:
@@ -851,10 +1083,16 @@ def save_as_template(conn: sqlite3.Connection, settings: Settings, task_id: str,
     title = " ".join(name.split())
     if not title:
         raise TaskError("A template needs a name.")
+    tree = {task_id, *m.descendants_of(task_id)}
+
+    def inside(t) -> dict[str, Tie]:
+        return {f: x for f, x in t.ties.items() if x.key_date is None and x.source in tree and not m.task(x.source).discarded}
+
     with transaction(conn):
         template = conn.execute("INSERT INTO templates (created) VALUES (?)", (stamp(at),)).lastrowid
         seen: set[str] = set()
         top = 0
+        rows_of: dict[str, int] = {}
 
         def walk(tid: str, parent: int | None) -> None:
             nonlocal top
@@ -862,10 +1100,11 @@ def save_as_template(conn: sqlite3.Connection, settings: Settings, task_id: str,
                 return
             seen.add(tid)
             t = m.task(tid)
-            days = t.duration if t.recurrence else length_of(t.start, t.due, t.duration, workdays, t.calendar_days)
+            days = t.duration if t.recurrence else None if len(inside(t)) == 2 else length_of(t.start, t.due, t.duration, workdays, t.calendar_days)
             v = _checked(conn, {k: getattr(t, k) for k in FIELDS} | {"title": title if parent is None else t.title, "duration": days,
                                                                       **{k: getattr(t, k) for k in RATE_FIELDS}, "involvement": t.involvement})
             row_id = _insert_row(conn, template, parent, v)
+            rows_of[tid] = row_id
             top = top or row_id
             if link:
                 conn.execute("DELETE FROM task_links WHERE task = ?", (tid,))
@@ -881,7 +1120,192 @@ def save_as_template(conn: sqlite3.Connection, settings: Settings, task_id: str,
                 walk(child, row_id)
 
         walk(task_id, None)
+        for tid, row_id in rows_of.items():
+            tied = inside(m.task(tid))
+            _store_row_ties(conn, row_id, {f: RowTie(rows_of[x.source], x.point, x.amount, x.unit, x.direction) for f, x in tied.items()})
+            if link:
+                conn.executemany("INSERT INTO task_links (task, field) VALUES (?, ?)", [(tid, TIE_LINKS[f]) for f in tied])
     return top
+
+
+# ---- a template's timing: the Timing window (decisions 248, 255 and 257) ----
+@dataclass
+class RowTiming:
+    """What the Timing window says for a row: its ties, and its Days."""
+
+    ties: dict[str, RowTie] = field(default_factory=dict)
+    days: int | None = None
+
+
+@dataclass
+class TimingPlan:
+    """What saving the Timing window would do. ``items`` are the tasks whose dates move, and it's ``changed`` if anything differs at all."""
+
+    template: int
+    name: str
+    what: str
+    changed: bool
+    items: list[Reached] = field(default_factory=list)
+    not_changing: list[NotChanging] = field(default_factory=list)
+
+
+def _checked_timing(lib: Library, template_id: int, anchor: int | None, rows: Mapping[int, RowTiming]) -> dict[int, RowTiming]:
+    """The window's rows, settled as a row's form is, or why they can't stand. A row left out stays as it is, and a row that repeats has no ties."""
+    template = lib.templates.get(template_id)
+    if template is None:
+        raise TaskError("That template isn't there any more.")
+    out: dict[int, RowTiming] = {}
+    for x, _ in lib.walk(template.top):
+        r = rows.get(x.id)
+        if r is not None and not x.recurrence:
+            now = {} if x.id == anchor else {f: t for f, t in r.ties.items() if t and (t.source is not None or anchor is not None)}
+            out[x.id] = RowTiming(now, None if len(now) == 2 else r.days)
+    lines = [replace(x, ties=out[x.id].ties, days=out[x.id].days) if x.id in out else x for x in lib.lines(template_id)]
+    said = timing.problem(lines, anchor)
+    if said:
+        raise TaskError(said)
+    return out
+
+
+def _timing_changes(lib: Library, template_id: int, anchor: int | None, rows: Mapping[int, RowTiming]) -> bool:
+    return anchor != lib.templates[template_id].anchor or any(r.ties != lib.rows[x].ties or r.days != lib.rows[x].duration for x, r in rows.items())
+
+
+def _write_timing(conn: sqlite3.Connection, settings: Settings, template_id: int, anchor: int | None, rows: Mapping[int, RowTiming], at: datetime,
+                  left: Collection[str] = ()) -> None:
+    """Save the window, and put it on the trees already made, by the rules of any change to a template (decisions 185, 186, 198 and 257):
+    a task following its row takes the new tie and Duration, and one with no date there starts following. Each task's ties are set first,
+    so that ``follow`` then moves each task once, sources first. One in ``left`` keeps its date, stays tied, and stops following. A tree
+    whose old anchor has a tie of its own, such as to an outage, stays driven from there: that tie stays, and the new anchor stays tied
+    to the old one, as its own, so moving the outage still moves the whole tree."""
+    was = Library(conn)
+    old_anchor = was.templates[template_id].anchor
+    conn.execute("UPDATE templates SET anchor_row = ? WHERE id = ?", (anchor, template_id))
+    for row_id, x in rows.items():
+        conn.execute("UPDATE template_rows SET duration = ? WHERE id = ?", (x.days, row_id))
+        _store_row_ties(conn, row_id, x.ties)
+    lib = Library(conn)
+    name = lib.name(template_id)
+    via = f"Template: {name}"
+    live: list[str] = []
+    retied: list[tuple[str, str, Tie | None]] = []
+    driven = {c.tree for c in lib.copies_of(old_anchor) if tasks.get_task(conn, c.task).ties} if old_anchor is not None and old_anchor != anchor else set()
+    for row, _ in lib.walk(lib.templates[template_id].top):
+        old = was.rows[row.id]
+        for c in lib.copies_of(row.id):
+            t = tasks.get_task(conn, c.task)
+            if t.discarded or t.state == "Closed":
+                continue
+            live.append(c.task)
+            links, own = lib.links.get(c.task, set()), c.task in left
+            now, ending, starting = dict(t.ties), [], []
+            for f, key in TIE_LINKS.items():
+                tie = tie_on(lib, row, f, c.tree)
+                if row.id == anchor:  # the anchor has no tie of its template's, and any it gave its copies goes. One of the task's own stays.
+                    if key in links and c.tree in driven:
+                        ending.append(key)
+                    elif key in links:
+                        now.pop(f, None)
+                        conn.execute("DELETE FROM task_links WHERE task = ? AND field = ?", (c.task, key))
+                elif tie is None:  # decision 198: it stays tied, as its own
+                    if key in links:
+                        ending.append(key)
+                elif own or tasks.get_task(conn, tie.source).recurrence:
+                    if key in links and t.ties.get(f) != tie:
+                        ending.append(key)
+                elif key in links or (f not in now and (not getattr(t, f) or row.id == old_anchor)):
+                    if now.get(f) != tie:
+                        retied.append((c.task, f, now.get(f)))
+                    now[f] = tie
+                    if key not in links:
+                        starting.append(key)
+            changes = {}
+            if old.duration != row.duration and not t.recurrence:
+                if row.duration is None or own:
+                    if "duration" in links:
+                        ending.append("duration")
+                elif "duration" in links or (old.duration is None and t.duration is None):
+                    changes["duration"] = row.duration
+                    if "duration" not in links:
+                        starting.append("duration")
+            if now != t.ties:
+                tasks.put_ties(conn, c.task, now, at, via)
+            if changes or (len(now) == 2 and t.duration is not None):
+                tasks.update_task(conn, settings, c.task, at=at, via=via, keep_links=True, following=True, **changes)
+            _ended(conn, c.task, ending, name, at)
+            conn.executemany("INSERT OR IGNORE INTO task_links (task, field) VALUES (?, ?)", [(c.task, k) for k in starting])
+    for task_id, f, was_tied in retied:  # a row's ties can't make a circle, but with a task's own they can, and then the row's doesn't take
+        if task_id in ties.chain(lambda x: ties.own_followers(conn, x), ties.own_followers(conn, task_id)):
+            t = tasks.get_task(conn, task_id)
+            tasks.put_ties(conn, task_id, {k: x for k, x in {**t.ties, f: was_tied}.items() if x}, at, via)
+            _ended(conn, task_id, [TIE_LINKS[f]], name, at)
+    tasks.follow(conn, settings, live, at, via, left, by_template=live)
+
+
+def _timing_order(lib: Library, template_id: int) -> list[str]:
+    """A template's tasks, tree by tree, each in its rows' order."""
+    return [x for c in lib.trees(template_id) for r, _ in lib.walk(c.row) if (x := lib.copy_in(r.id, c.task))]
+
+
+def _timing_left_alone(was: Library, lib: Library, before: Model, after: Model, template_id: int, anchor: int | None) -> list[NotChanging]:
+    """What a change to the timing leaves as it is, of the rows it changed: closed and discarded tasks, and those with their own dates or gap."""
+    out: list[NotChanging] = []
+    moved_anchor = anchor != was.templates[template_id].anchor
+    for row, _ in lib.walk(lib.templates[template_id].top):
+        old = was.rows[row.id]
+        if not moved_anchor and old.ties == row.ties and old.duration == row.duration:
+            continue
+        for c in lib.copies_of(row.id):
+            t = before.tasks.get(c.task)
+            if t is None:
+                continue
+            title = _named(before, c.task)
+            if t.discarded or t.state == "Closed":
+                why = "discarded" if t.discarded else "closed"
+                out.append(NotChanging(c.task, title, why, f"{why}, so it keeps what it ended with"))
+                continue
+            links = lib.links.get(c.task, set())
+            own = [TIE_LINKS[f] for f in timing.FIELDS if row.id != anchor and (x := tie_on(lib, row, f, c.tree)) and TIE_LINKS[f] not in links and after.task(c.task).ties.get(f) != x]
+            if own:
+                out.append(NotChanging(c.task, title, "own", "its own " + ", ".join(_own_words(after, after.task(c.task), k) for k in own)))
+    return out
+
+
+def preview_timing(conn: sqlite3.Connection, settings: Settings, template_id: int, anchor: int | None, rows: Mapping[int, RowTiming], at: datetime) -> TimingPlan:
+    """What saving the Timing window would do, made and rolled back."""
+    plan: TimingPlan | None = None
+    try:
+        with transaction(conn):
+            was, before = Library(conn), Model(conn)
+            settled = _checked_timing(was, template_id, anchor, rows)
+            plan = TimingPlan(template_id, was.name(template_id), f"Timing around {was.rows[anchor].title}" if anchor else "No anchor",
+                              _timing_changes(was, template_id, anchor, settled))
+            if plan.changed:
+                _write_timing(conn, settings, template_id, anchor, settled, at)
+                lib, after = Library(conn), Model(conn)
+                plan.items = _moved_items(before, after, _timing_order(lib, template_id))
+                plan.not_changing = _timing_left_alone(was, lib, before, after, template_id, anchor)
+            raise _Preview
+    except _Preview:
+        pass
+    assert plan is not None
+    return plan
+
+
+def apply_timing(conn: sqlite3.Connection, settings: Settings, template_id: int, anchor: int | None, rows: Mapping[int, RowTiming], at: datetime,
+                 left: Collection[str] = ()) -> TimingPlan:
+    """Save the Timing window, each task's change in its status log and the template's Changes list. Returns what it did."""
+    with transaction(conn):
+        was, before = Library(conn), Model(conn)
+        settled = _checked_timing(was, template_id, anchor, rows)
+        what = f"Timing around {was.rows[anchor].title}" if anchor else "No anchor"
+        plan = TimingPlan(template_id, was.name(template_id), what, _timing_changes(was, template_id, anchor, settled))
+        if plan.changed:
+            _write_timing(conn, settings, template_id, anchor, settled, at, left)
+            lib, after = Library(conn), Model(conn)
+            plan.items = _moved_items(before, after, _timing_order(lib, template_id))
+            _log_change(conn, template_id, at, "changed", what, len(plan.items), len(left))
+    return plan
 
 
 # ---- from the browse tool: the change, then its files ----
@@ -935,7 +1359,8 @@ def save_row(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Se
     reached = len(plan.items) - sum(1 for i in plan.items if i.task in left)
     stayed = len(plan.items) - reached
     if plan.items:
-        message = f"{plural(reached, 'task')} changed" + (f", {stayed} left as {'it was' if stayed == 1 else 'they were'}" if stayed else "") + ". Each status log says so."
+        moved = f" {plural(plan.followed, 'more task')} moved with {'it' if reached == 1 else 'them'}." if plan.followed else ""
+        message = f"{plural(reached, 'task')} changed" + (f", {stayed} left as {'it was' if stayed == 1 else 'they were'}" if stayed else "") + f".{moved} Each status log says so."
     elif not plan.changed and plan.notes_changed:
         message = "Saved. Starting notes reach only new tasks."
     elif not plan.changed:
@@ -956,7 +1381,11 @@ def new_row(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Set
     added: list[str] = []
     row_id, plan, made = add_row(conn, settings, parent, values, at, left, added)
     n = len(made)
-    message = f"Added to {plural(n, 'tree')}, undated, so it shows in Plan mode's undated rows." if n else "Added. New trees will have it."
+    dated = [t for t in Model(conn).tasks.values() if t.id in made and (t.start or t.due)]
+    if n and plan.tied:
+        message = f"Added to {plural(n, 'tree')}, tied." + (f" {len(dated)} placed by {'its' if len(dated) == 1 else 'their'} tie." if dated else " It waits for what it's tied to.")
+    else:
+        message = f"Added to {plural(n, 'tree')}, undated, so it shows in Plan mode's undated rows." if n else "Added. New trees will have it."
     out = edits.Outcome(_said_added(message, added))
     if made:
         search.index_pages(conn, made)
@@ -980,12 +1409,35 @@ def take_out(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Se
     return out
 
 
+def save_timing(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, template_id: int, anchor: int | None, rows: Mapping[int, RowTiming],
+                at: datetime, left: Collection[str] = ()) -> edits.Outcome:
+    """Save the Timing window, after its preview."""
+    plan = apply_timing(conn, settings, template_id, anchor, rows, at, left)
+    n, kept = len(plan.items), len(left)
+    if not plan.changed:
+        return edits.Outcome("Nothing changed.")
+    if n or kept:
+        message = f"{plural(n, 'task')} changed" + (f", {kept} kept {'its date' if kept == 1 else 'their dates'} with a new gap" if kept else "") + ". Each status log says so."
+    else:
+        message = "Saved. No task's date changes."
+    out = edits.Outcome(message)
+    if _timing_order(Library(conn), template_id):
+        edits.write_all_pages(conn, data_root, fs, at, out.problems)
+    return out
+
+
 def make(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, row_id: int, name: str, under: str | None,
          choices: Mapping[int, Choice], at: datetime) -> tuple[list[str], edits.Outcome]:
     """Make tasks from the browse tool: the tasks, their search text and their pages. Returns the new tasks, and what to say."""
     made = make_tasks(conn, settings, row_id, name, under, choices, at)
-    n, undated = len(made), [t for t in Model(conn).tasks.values() if t.id in made and not t.start and not t.due and not t.deadline]
-    out = edits.Outcome(f"Made {n} task{'s' if n != 1 else ''}." + (f" {len(undated)} undated, waiting for dates." if undated else ""))
+    n, new = len(made), [t for t in Model(conn).tasks.values() if t.id in made]
+    undated = [t for t in new if not t.start and not t.due and not t.deadline]
+    placed = [t for t in new if t.ties and (t.start or t.due)]
+    by_ties = ""
+    if placed:
+        by_ties = (" 1 placed by its tie, and it'll move with what it's tied to." if len(placed) == 1
+                   else f" {len(placed)} placed by their ties, and they'll move with what they're tied to.")
+    out = edits.Outcome(f"Made {n} task{'s' if n != 1 else ''}.{by_ties}" + (f" {len(undated)} undated, waiting for dates." if undated else ""))
     search.index_pages(conn, made)
     edits.write_all_pages(conn, data_root, fs, at, out.problems)
     log.info("made %d tasks from template row %d", n, row_id)

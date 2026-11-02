@@ -6,7 +6,8 @@ page names its pictures and this view draws them:
 
 - ``avatar:TB``, a person's initials in a circle; ``avatar:me``, the owner, as a figure;
 - ``mark:ip``, a task's state (``ns``, ``ip``, ``pk`` or ``cl``), from the state icons;
-- ``progress:1:4``, a thin bar, 1 of 4 filled.
+- ``progress:1:4``, a thin bar, 1 of 4 filled;
+- ``timing:...``, a lane of a template's chart, or its ruler (release 5.51).
 """
 from __future__ import annotations
 
@@ -19,6 +20,7 @@ from PySide6.QtWidgets import QTextBrowser
 from docrepo.detail import PROGRESS_WIDTH, SIDE_BY_SIDE, WIDE_PAGE
 from docrepo.ui import tokens
 from docrepo.ui.icons import tinted
+from docrepo.ui.timing_chart import picture as timing_picture
 
 AVATAR = 20
 MARK = 14
@@ -99,6 +101,8 @@ def picture(url: QUrl, scale: float) -> QImage | None:
         except ValueError:
             return None
         return progress(done, total, PROGRESS_WIDTH, scale)
+    if kind == "timing":
+        return timing_picture(key, scale)
     return None
 
 

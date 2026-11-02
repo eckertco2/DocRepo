@@ -64,6 +64,7 @@ h2 { font-size: 15pt; font-weight: 600; margin-top: 2px; margin-bottom: 4px; }
 .routine { color: #1a1f25; background-color: #e9edf1; }
 .multi { color: #1d5e98; background-color: #e4eefa; }
 .lbl { color: #1a1f25; background-color: #e9edf1; }
+.anchor { color: #1d5e98; background-color: #dbe8f5; }
 .inh { color: #5a6571; font-style: italic; }
 .new { color: #875700; background-color: #fcefcf; }
 .u1 { background-color: #e2f2e6; }

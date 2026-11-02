@@ -43,6 +43,9 @@ INVOLVEMENT = "involvement"
 TIES = "ties"
 #: A link to a template ending or starting, in the status log (release 5.44): its value is the whole sentence.
 TEMPLATE_LINK = "Template link"
+#: A tie's gap following its template row (release 5.51, decision 247), named in task_links beside the linked fields.
+TIE_LINKS = {"start": "start_tie", "due": "due_tie"}
+LINK_NAMES = {**FIELD_NAMES, "start_tie": "Start tie", "due_tie": "Due tie"}
 HOUR_FIELDS = ("lead_hours", "assignee_hours", "lead_per_day", "assignee_per_day", "lead_per_week", "assignee_per_week")
 #: Each role's total and its rates (release 5.46, decision 189; release 5.49, decision 260). A role has one rate at most, and with
 #: one the total is worked out from it and the task's days.
@@ -280,7 +283,7 @@ def _end_links(conn: sqlite3.Connection, task_id: str, changed: Sequence[str]) -
         return []
     name = template_name(conn, task_id)
     conn.executemany("DELETE FROM task_links WHERE task = ? AND field = ?", [(task_id, k) for k in linked])
-    return [Change(TEMPLATE_LINK, f"{FIELD_NAMES[k]}: no longer follows {name}", None) for k, _ in FIELDS if k in linked]
+    return [Change(TEMPLATE_LINK, f"{field_name}: no longer follows {name}", None) for k, field_name in LINK_NAMES.items() if k in linked]
 
 
 def _row_values(conn: sqlite3.Connection, task_id: str) -> dict[str, Any]:
@@ -322,7 +325,7 @@ def set_links(conn: sqlite3.Connection, task_id: str, fields: Collection[str], *
         return []
     had = _linked_fields(conn, task_id)
     logged = []
-    for key, field_name in FIELDS:
+    for key, field_name in LINK_NAMES.items():
         if key in had and key not in fields:
             conn.execute("DELETE FROM task_links WHERE task = ? AND field = ?", (task_id, key))
             logged.append(Change(TEMPLATE_LINK, f"{field_name}: no longer follows {name}", None))
@@ -437,10 +440,17 @@ def _end_ties(conn: sqlite3.Connection, where: str, value: object, at: datetime,
         _log(conn, r["task"], at, via, [change])
 
 
-def follow(conn: sqlite3.Connection, settings: Settings, starts: Iterable[str], at: datetime, via: str, leave: Collection[str] = ()) -> Logged:
+def put_ties(conn: sqlite3.Connection, task_id: str, after: dict[str, Tie], at: datetime, via: str) -> None:
+    """Make a task's ties these and move nothing yet, as a template's change does for all its tasks before ``follow`` moves them once."""
+    _log(conn, task_id, at, via, _store_ties(conn, task_id, get_task(conn, task_id).ties, after))
+
+
+def follow(conn: sqlite3.Connection, settings: Settings, starts: Iterable[str], at: datetime, via: str, leave: Collection[str] = (),
+           by_template: Collection[str] = ()) -> Logged:
     """Move the tasks in ``starts`` and what follows them, near or far, each after what it's tied to, keeping each gap (decision 246).
     Closed and discarded tasks never change (decision 185). A task in ``leave``, unticked when asked, keeps its date and takes a new
-    gap (decision 249), so what's tied to it stays too."""
+    gap (decision 249), so what's tied to it stays too. A task in ``by_template`` was moved by its template's change, so its status
+    log says ``via`` rather than what it follows."""
     workdays = workday_numbers(settings.workdays)
     out = Logged()
     for task_id in ties.chain(lambda x: ties.own_followers(conn, x), starts):
@@ -456,7 +466,8 @@ def follow(conn: sqlite3.Connection, settings: Settings, starts: Iterable[str], 
             update_task(conn, settings, task_id, at=at, via=via)
         else:
             tie = next(x for f, x in t.ties.items() if f in changes or len(t.ties) == 1)
-            logged = update_task(conn, settings, task_id, at=at, via=f"Follows {ties.source_name(conn, tie)}", following=True, **changes)
+            logged = update_task(conn, settings, task_id, at=at, via=via if task_id in by_template else f"Follows {ties.source_name(conn, tie)}",
+                                 following=True, **changes)
             out.followed.append(Followed(task_id, list(logged)))
     return out
 
@@ -599,8 +610,9 @@ def update_task(conn: sqlite3.Connection, settings: Settings, task_id: str, *, a
             logged += share_lines
             changed += share_roles
         logged += _apply_references(conn, task_id, task.references, refs)
-        if not keep_links:
-            logged += _end_links(conn, task_id, list(dict.fromkeys(_RATE_FIELD.get(k, k) for k in changed if k not in calculated)))
+        if not keep_links:  # a different gap on a tie stops following the template's number, and it stays tied (decision 247)
+            logged += _end_links(conn, task_id, [*dict.fromkeys(_RATE_FIELD.get(k, k) for k in changed if k not in calculated),
+                                                 *(TIE_LINKS[f] for f in ties.FIELDS if tied.get(f) != task.ties.get(f))])
         if task.state == "Closed" and columns.get("state", "Closed") != "Closed":
             logged += _fallen_behind(conn, task_id, "closed")
         _log(conn, task_id, at, via, logged)

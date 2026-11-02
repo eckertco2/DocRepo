@@ -44,7 +44,7 @@ from docrepo.model import Model, Tie
 from docrepo.pages import num
 from docrepo.parse import Who
 from docrepo.schedule import length_of, placed, start_of, week_of
-from docrepo.tasks import KeyDateRow, hours_values
+from docrepo.tasks import TIE_LINKS, KeyDateRow, hours_values
 from docrepo.ui.icons import icon
 from docrepo.ui.look import Help
 from docrepo.ui.style import page_css, style_sheet
@@ -639,16 +639,22 @@ class FieldLink:
 class TiePanel(QWidget):
     """Edit task's ties (release 5.50, decisions 245 and 254): a line in words for each tied date, with Edit and Remove, and an
     editor that reads as the same sentence: [3] [workdays] [after] [Line 2 outage] [its dates] [ends]. A change counts at once, so
-    the date above it moves as you go. What can't be tied there says why, and changes nothing."""
+    the date above it moves as you go. What can't be tied there says why, and changes nothing.
+
+    On a task made from a template (release 5.51, decision 247), a tie its row has gets a mark: quiet while its gap follows the row,
+    and "Template: 30 workdays before the anchor starts ↺" when it doesn't, which takes the row's number back."""
 
     changed = Signal(str)  # a date's tie was made, changed or taken off
     opened = Signal()  # the editor opened or closed
     SOURCE_WIDTH = 210
 
-    def __init__(self, m: Model, task_id: str, given: dict[str, Tie], pick_task: PickTask | None) -> None:
+    def __init__(self, m: Model, task_id: str, given: dict[str, Tie], pick_task: PickTask | None, link: templates.TaskLink | None = None) -> None:
         super().__init__()
-        self.m, self.task_id, self._pick_task = m, task_id, pick_task
+        self.m, self.task_id, self._pick_task, self.link = m, task_id, pick_task, link
         self.ties = dict(given)
+        self.saved = dict(given)
+        self.following = {f: bool(link and TIE_LINKS[f] in link.links) for f in ties.FIELDS}
+        self.marks: dict[str, QToolButton] = {}
         self.editing: str | None = None
         self.draft: Tie | None = None
         self._setting = False
@@ -667,6 +673,11 @@ class TiePanel(QWidget):
             words = QLabel()
             words.setWordWrap(True)
             line.addWidget(words, 1)
+            mark = QToolButton(objectName="linkMark")
+            mark.setIconSize(QSize(14, 14))
+            mark.clicked.connect(lambda _=False, name=name: self._mark_clicked(name))
+            line.addWidget(mark)
+            self.marks[name] = mark
             edit, remove = QPushButton("Edit", objectName="link"), QPushButton("Remove", objectName="link")
             edit.clicked.connect(lambda _=False, name=name: self.open(name))
             remove.clicked.connect(lambda _=False, name=name: self.remove(name))
@@ -712,6 +723,9 @@ class TiePanel(QWidget):
         self.refused.hide()
         inner.addWidget(self.refused)
         layout.addWidget(self.box)
+        self.leaving = QLabel("This task's gap will stop following the template.", objectName="linkLeaving")
+        self.leaving.hide()
+        layout.addWidget(self.leaving)
         self.amount.valueChanged.connect(lambda _: self._edited())
         for box in (self.unit, self.direction, self.key, self.point):
             box.currentIndexChanged.connect(lambda _: self._edited())
@@ -721,6 +735,29 @@ class TiePanel(QWidget):
 
     def values(self) -> dict[str, Tie]:
         return dict(self.ties)
+
+    def following_keys(self, reopening: bool) -> list[str]:
+        """The ties whose gap follows the template once this is saved. One given a different gap stops. One that fell behind while the task
+        was closed still follows while it stays closed; reopening makes it its own (decision 185)."""
+        out = []
+        for f, on in self.following.items():
+            now = self.ties.get(f)
+            if on and (now == (self.link.ties.get(f) if self.link else None) or (now == self.saved.get(f) and not reopening)):
+                out.append(TIE_LINKS[f])
+        return out
+
+    def _mark_clicked(self, name: str) -> None:
+        """Following with the row's number: stop following, keeping the tie. Otherwise, take the row's number and follow it again."""
+        row_tie = self.link.ties[name]
+        if self.following[name] and self.ties.get(name) == row_tie:
+            self.following[name] = False
+            self._draw()
+            return
+        self.ties[name], self.following[name] = row_tie, True
+        if self.editing == name:
+            self.close_editor()
+        self._draw()
+        self.changed.emit(name)
 
     def sentence(self, tie: Tie) -> str:
         """The tie in words, and why it isn't doing anything just now, when it isn't."""
@@ -787,12 +824,35 @@ class TiePanel(QWidget):
         if not said and tie.source:
             self.changed.emit(self.editing)
 
+    def _draw_mark(self, name: str, tie: Tie | None, row_tie: Tie | None) -> None:
+        mark = self.marks[name]
+        mark.setVisible(row_tie is not None)
+        if row_tie is None:
+            return
+        words = self.link.tie_words[name]
+        if self.following[name] and tie == row_tie:
+            mark.setIcon(icon("link"))
+            mark.setText("")
+            mark.setAccessibleName(f"Linked to {self.link.name}. Click to stop following.")
+            mark.setToolTip(f"Linked to {self.link.name}: {words}. Click to keep this task's own gap.")
+        else:
+            mark.setIcon(QIcon())
+            mark.setText(f"Template: {words} ↺" if tie != row_tie else "Follow template ↺")
+            mark.setAccessibleName(mark.text())
+            mark.setToolTip("Take the template's number and follow it again")
+
     def _draw(self) -> None:
+        leaving = False
         for name, label in ties.FIELDS.items():
             tie = self.ties.get(name)
-            self.rows[name].setVisible(tie is not None and self.editing != name)
-            if tie:
-                self.lines[name].setText(f"<b>{label} tied:</b> {esc(self.sentence(tie))}")
+            row_tie = self.link.ties.get(name) if self.link else None
+            self.rows[name].setVisible((tie is not None or row_tie is not None) and self.editing != name)
+            self.edit_buttons[name].setVisible(tie is not None)
+            self.remove_buttons[name].setVisible(tie is not None)
+            self.lines[name].setText(f"<b>{label} tied:</b> {esc(self.sentence(tie))}" if tie else f"<b>{label}:</b> not tied")
+            self._draw_mark(name, tie, row_tie)
+            leaving = leaving or bool(row_tie and self.following[name] and tie != row_tie and tie != self.saved.get(name))
+        self.leaving.setVisible(leaving)
         self.box.setVisible(self.editing is not None)
         if self.draft is None:
             return
@@ -985,7 +1045,7 @@ class TaskEditDialog(FormDialog):
         when.addStretch()
         g.addLayout(when)
         # Ties (release 5.50, decision 254): Tie… beside Start and Due, and a line for each tied date.
-        self.tie_panel = TiePanel(m, task_id, t.ties, pick_task)
+        self.tie_panel = TiePanel(m, task_id, t.ties, pick_task, link)
         self.tie_buttons: dict[str, QToolButton] = {}
         for name, box in (("start", start_field), ("due", due_field)):
             button = QToolButton(objectName="linkMark")
@@ -1454,7 +1514,7 @@ class TaskEditDialog(FormDialog):
     def _following(self) -> list[str]:
         """The fields that follow its template once this is saved (decision 184)."""
         reopening = self._was_closed and self.state.currentText() != "Closed"
-        return [k for k, mark in self.marks.items() if mark.follows_after_save(reopening)]
+        return [*(k for k, mark in self.marks.items() if mark.follows_after_save(reopening)), *self.tie_panel.following_keys(reopening)]
 
 
 def _preview_html(m: Model, outcomes: list[TaskOutcome]) -> str:

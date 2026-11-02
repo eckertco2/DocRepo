@@ -7,13 +7,17 @@ from __future__ import annotations
 
 from collections.abc import Collection
 
-from docrepo import markup
+from docrepo import markup, ties, timing
 from docrepo.detail import PROGRESS_WIDTH, box, chip, esc, group, label_href, link, multiline, none_text, section, state_chip
 from docrepo.dates import long_date, to_date
 from docrepo.model import Model
 from docrepo.pages import num
-from docrepo.tasks import FIELD_NAMES, rate_total, stated
-from docrepo.templates import Library, Row, days_text, field_text, own_fields, plural, summary
+from docrepo.tasks import FIELD_NAMES, LINK_NAMES, TIE_LINKS, rate_total, stated
+from docrepo.templates import Library, Row, days_text, field_text, own_fields, own_ties, plural, summary
+
+
+#: Under this width a chart's names and lanes don't both fit side by side.
+NARROW_PANE = 420
 
 
 def _hours_text(row: Row, key: str, workdays: Collection[int]) -> str:
@@ -45,8 +49,13 @@ def _who(m: Model, row: Row, workdays: Collection[int]) -> list[tuple[str, str]]
     return rows or [("People", none_text("Left blank"))]
 
 
-def _when(row: Row) -> list[tuple[str, str]]:
-    rows = [("Dates", none_text("Each task's own"))]
+def _when(lib: Library, row: Row) -> list[tuple[str, str]]:
+    titles = lib.titles(row.template)
+    tied = [(timing.FIELDS[f], esc(timing.words(row.ties[f], titles))) for f in timing.FIELDS if f in row.ties]
+    if lib.templates[row.template].anchor == row.id:
+        rows = [("Start", 'The anchor <span class="rel">its date is typed when you make tasks</span>')]
+    else:
+        rows = tied or [("Dates", none_text("Each task's own"))]
     if row.recurrence:
         rows.append(("Repeats", esc(row.recurrence)))
     else:
@@ -71,9 +80,13 @@ def _notes(row: Row) -> str:
     return section("Starting notes", ' <span class="rel">Copied to each new task, never linked</span>') + markup.to_html(row.notes)
 
 
-def _own_text(key: str, task) -> str:
-    """A field a task has gone its own way on: "assignee hours 20 h", "duration 3 days", or just its name when its value won't
-    fit a line."""
+def _own_text(m: Model, key: str, task) -> str:
+    """A field a task has gone its own way on: "assignee hours 20 h", "duration 3 days", "start tie 3 workdays after Trial report
+    ends", or just its name when its value won't fit a line."""
+    for f, tie_key in TIE_LINKS.items():
+        if key == tie_key:
+            tie = task.ties.get(f)
+            return f"{LINK_NAMES[key].lower()} {ties.words(tie, ties.name_in(m, tie))}" if tie else f"no {LINK_NAMES[key].lower()}"
     name = FIELD_NAMES[key].lower()
     return f"{name} {field_text(None, key, stated(task, key))}" if key in ("lead_hours", "assignee_hours", "duration") and stated(task, key) is not None else name
 
@@ -88,7 +101,8 @@ def _follow(lib: Library, m: Model, row: Row) -> str:
     still = [c for c in copies if m.task(c.task).state != "Closed"]
 
     def own(c) -> list[str]:
-        return own_fields(row, m.task(c.task), lib.links.get(c.task, set()), c.task == c.tree)
+        links = lib.links.get(c.task, set())
+        return [*own_fields(row, m.task(c.task), links, c.task == c.tree), *own_ties(lib, row, m.task(c.task), c.tree, links)]
 
     withown = [c for c in still if own(c)]
     follow = len(still) - len(withown)
@@ -100,7 +114,7 @@ def _follow(lib: Library, m: Model, row: Row) -> str:
     lines = []
     for c in copies:
         t, gone = m.task(c.task), own(c)
-        sub = f'<br><span class="rel">own: {esc(", ".join(_own_text(k, t) for k in gone))}</span>' if gone else ""
+        sub = f'<br><span class="rel">own: {esc(", ".join(_own_text(m, k, t) for k in gone))}</span>' if gone else ""
         tree = m.tasks.get(c.tree, t)  # each is named by its tree, as they all have the row's title
         lines.append(f'<tr><td>{link(f"task:{t.id}", tree.title, t.title, quiet="tl")}{sub}</td><td align="right">{state_chip(t.state)}</td></tr>')
     return head + f'<p class="note">{" · ".join(parts)}</p><table width="100%" cellspacing="0" cellpadding="3">{"".join(lines)}</table>'
@@ -130,8 +144,49 @@ def _changes(lib: Library, template: int, today) -> str:
     return section("Changes") + f'<table width="100%" cellspacing="0" cellpadding="3">{cells}</table>'
 
 
-def row_page(lib: Library, m: Model, row_id: int, today, workdays: Collection[int] = range(5)) -> str:
-    """A template's page (its top row's) or a row's."""
+def _says(line: timing.Line, anchor: int | None, titles: dict[int, str]) -> str:
+    """What a row of the chart says under its name."""
+    if line.spans:
+        return ""
+    if line.id == anchor:
+        return "The anchor"
+    return timing.timing_words(line.ties, titles) or ("Repeats" if line.routine else "Placed by hand")
+
+
+def _timing(lib: Library, template_id: int, workdays: Collection[int], page_width: int = 0) -> str:
+    """The chart of a template's timing (decision 255), read-only, in workdays around its anchor, with a link to the Timing window. In a
+    narrow pane each lane goes under its row's name."""
+    edit = " " + link(f"tpltiming:{template_id}", "Edit timing")
+    anchor = lib.templates[template_id].anchor
+    if anchor is None:
+        return (section("Timing", edit) + '<p class="note">No anchor yet. Every task with no tie is placed by hand. Choose the task whose date you\'ll know first, '
+                "and the others can be tied to it.</p>")
+    week = len(workdays) or 5
+    lines = lib.lines(template_id)
+    pos = timing.positions(lines, anchor, week)
+    scale = timing.scale_of(pos, week, 3)
+    titles = lib.titles(template_id)
+    h = timing.LANE_HEIGHT
+
+    def lane(address: str) -> str:
+        return f'<img src="{address}" width="{timing.LANE_WIDTH}" height="{h}">'
+
+    narrow = 0 < page_width < NARROW_PANE
+    between = "</td></tr><tr><td>" if narrow else f'</td><td align="right" valign="middle" width="{timing.LANE_WIDTH}">'
+    cells = [f'<tr><td class="rel">Task{between}{lane(timing.lane_address(scale, None, "r"))}</td></tr>']
+    for x in lines:
+        bar = timing.span_of(lines, x.id, pos) if x.spans else pos.get(x.id)
+        kind = "g" if x.spans else "a" if x.id == anchor else "b"
+        says = _says(x, anchor, titles)
+        pad = "&nbsp;" * 3 * x.depth
+        under = f'<br>{pad}<span class="rel">{esc(says)}</span>' if says else ""
+        cells.append(f'<tr><td valign="middle">{pad}{link(f"tplrow:{x.id}", x.title, quiet="tl")}{under}{between}{lane(timing.lane_address(scale, bar, kind))}</td></tr>')
+    return (section("Timing", f' <span class="rel">In workdays around the anchor</span>{edit}')
+            + f'<table width="100%" cellspacing="0" cellpadding="2">{"".join(cells)}</table>')
+
+
+def row_page(lib: Library, m: Model, row_id: int, today, workdays: Collection[int] = range(5), page_width: int = 0) -> str:
+    """A template's page (its top row's) or a row's. ``page_width`` is how wide the pane is, if it's known."""
     row = lib.rows[row_id]
     template = lib.templates[row.template]
     top = template.top == row_id
@@ -140,7 +195,8 @@ def row_page(lib: Library, m: Model, row_id: int, today, workdays: Collection[in
     flags = "".join(" " + chip(name, cls) for name, cls, on in (("Urgent", "urgent", row.urgent), ("Meeting", "routine", row.meeting),
                                                                 ("Plant event", "new", row.plant_event)) if on)
     labels = "".join(f' <a href="{esc(label_href(name))}">{chip(name, "lbl")}</a>' for name in row.labels)
-    tags = chip("Template" if top else "Template row", "routine") + flags + labels
+    pill = " " + chip("Anchor", "anchor") if template.anchor == row_id else ""
+    tags = chip("Template" if top else "Template row", "routine") + pill + flags + labels
     desc = f'<p class="desc">{multiline(row.description)}</p>' if row.description else ""
     gone = ""
     if template.discarded:
@@ -148,5 +204,5 @@ def row_page(lib: Library, m: Model, row_id: int, today, workdays: Collection[in
         gone = box(f"<b>Discarded</b> {esc(long_date(to_date(template.discarded[:10]), today))}{why}. It's hidden from Templates, and its tasks keep "
                    "their values. Nothing is deleted: Bring back restores it.", "warn")
     head = f'{gone}{crumbs}<h2>{esc(row.title)}</h2><p class="tags">{tags}</p>{desc}'
-    return (head + group("When", _when(row)) + group("Who", _who(m, row, workdays)) + _subtasks(lib, row) + _notes(row)
+    return (head + group("When", _when(lib, row)) + group("Who", _who(m, row, workdays)) + (_timing(lib, template.id, workdays, page_width) if top and not template.discarded else "") + _subtasks(lib, row) + _notes(row)
             + (_trees(lib, m, template.id) + _changes(lib, template.id, today) if top else _follow(lib, m, row)))

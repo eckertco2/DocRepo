@@ -2212,6 +2212,8 @@ class BrowseWindow(QWidget):
             self.select("label", unquote(rest), update_list=True)
         elif kind == "tplrow":  # release 5.44
             self.templates.open_row(rest)
+        elif kind == "tpltiming":  # release 5.51
+            self.templates.timing(int(rest))
         elif kind == "agenda":
             self.show_agenda(rest)
         elif kind == "show":

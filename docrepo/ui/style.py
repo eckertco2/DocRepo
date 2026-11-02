@@ -114,6 +114,10 @@ QFrame#personChip QToolButton { border: none; background: transparent; padding: 
 QFrame#personChip QLabel#personShare { color: #1d5e98; font-weight: 600; }
 QFrame#involvementBox { border: 1px solid #b8c1cb; background: #ffffff; }
 QFrame#tieBox { border: 1px solid #b8c1cb; background: #ffffff; }
+QFrame#timingHead { border-bottom: 1px solid #b8c1cb; }
+QFrame#timingRow { border-bottom: 1px solid #d6dce3; }
+QFrame#timingRow[anchor="true"] { background: #dbe8f5; }
+QLabel#anchorPill { color: #1d5e98; background: #dbe8f5; border: 1px solid #1d5e98; border-radius: 8px; padding: 0 6px; font-size: 8.5pt; }
 QWidget#chips { border: 1px solid #b8c1cb; border-radius: 4px; background: #ffffff; }
 QWidget#chips QLineEdit { background: transparent; border: none; }
 QLineEdit[filled="true"], QPlainTextEdit[filled="true"], QComboBox[filled="true"] { background: #fcefcf; border: 1px solid #875700; }

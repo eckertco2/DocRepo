@@ -15,7 +15,7 @@ from pathlib import Path
 from docrepo.safe_fs import SafeFS
 
 DB_FILE = Path("System") / "docs.db"
-SCHEMA_VERSION = 19
+SCHEMA_VERSION = 20
 
 #: Each kind of ID: its letter and how many digits follow it.
 ID_FORMATS = {"T": 6, "C": 6, "D": 6, "P": 3}
@@ -469,6 +469,22 @@ CREATE TABLE task_ties (
 );
 CREATE INDEX task_ties_source ON task_ties (source);
 CREATE INDEX task_ties_key_date ON task_ties (key_date);
+""",
+    20: """
+-- A template's timing (release 5.51, the task templates design's decisions 248 and 255): its anchor, and a tie for each row's Start or
+-- Due, whose source is another row, or the anchor when source_row is empty. A tie's gap following its row is start_tie or due_tie in task_links.
+ALTER TABLE templates ADD COLUMN anchor_row INTEGER REFERENCES template_rows(id);
+CREATE TABLE template_row_ties (
+    row_id     INTEGER NOT NULL REFERENCES template_rows(id),
+    field      TEXT NOT NULL CHECK (field IN ('start', 'due')),
+    source_row INTEGER REFERENCES template_rows(id),
+    point      TEXT NOT NULL CHECK (point IN ('start', 'end')),
+    amount     INTEGER NOT NULL CHECK (amount >= 0),
+    unit       TEXT NOT NULL CHECK (unit IN ('workdays', 'weeks')),
+    direction  TEXT NOT NULL CHECK (direction IN ('before', 'after')),
+    PRIMARY KEY (row_id, field)
+);
+CREATE INDEX template_row_ties_source ON template_row_ties (source_row);
 """,
 }
 
