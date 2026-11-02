@@ -344,7 +344,8 @@ class TreeImportDialog(_Window):
         self.tree.setColumnCount(3)
         self.tree.setHeaderHidden(True)
         self.tree.setAccessibleName("Rows")
-        self.tree.setStyleSheet("QTreeView::item:selected { padding: 2px 4px; }")  # a picked row stays where it is
+        # A picked row or one under the mouse stays where it is: Qt pads only those unless every state says the same
+        self.tree.setStyleSheet("QTreeView::item, QTreeView::item:selected, QTreeView::item:hover { padding: 2px 0; }")
         warned = {x.key for x in p.warnings}
         items: dict[str, QTreeWidgetItem] = {}
         for key, _depth in p.walk():

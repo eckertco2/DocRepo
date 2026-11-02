@@ -19,6 +19,7 @@ from docrepo.lists import reminders_due  # noqa: E402
 from docrepo.model import Model  # noqa: E402
 from docrepo.panel_rules import Hover, Monitor, Place, Rect  # noqa: E402
 from docrepo.sample import load_sample  # noqa: E402
+from docrepo.ui import today_panel  # noqa: E402
 from docrepo.ui.context import AppContext  # noqa: E402
 from docrepo.views import today_due_entries, today_groups  # noqa: E402
 
@@ -206,6 +207,12 @@ def app(qapp, data_root, fs, monkeypatch):
     a.tray.hide()
     qapp.removeNativeEventFilter(a.filter)
     conn.close()
+
+
+@pytest.fixture(autouse=True)
+def nothing_full_screen(monkeypatch):
+    """The window in front on this computer's own desktop is no part of these tests."""
+    monkeypatch.setattr(today_panel, "_full_screen_candidates", lambda own: [])
 
 
 @pytest.fixture

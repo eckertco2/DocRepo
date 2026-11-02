@@ -83,6 +83,31 @@ def test_enter_goes_to_import_not_the_toolbar(browse):
     assert not any(b.autoDefault() for b in (d.prompt_button, d.paste_button, d.questions_button))
 
 
+def test_a_picked_row_stays_where_it_is(browse):
+    d = importing(browse, lambda x: x.load(json.dumps(TALK), "t.json"))
+    d.show()
+    rows = []
+
+    def add(item, depth):
+        rows.append((item, depth))
+        for i in range(item.childCount()):
+            add(item.child(i), depth + 1)
+
+    def start(picture, item, depth):
+        rect = d.tree.visualItemRect(item)
+        for x in range(rect.left(), picture.width()):
+            if any(picture.pixelColor(x, y).lightness() < 110 for y in range(rect.top() + 2, rect.bottom() - 1)):
+                return x - depth * d.tree.indentation()
+
+    add(d.tree.topLevelItem(0), 0)
+    for item, _depth in rows:
+        d.tree.setCurrentItem(item)
+        QApplication.processEvents()
+        picture = d.tree.viewport().grab().toImage()
+        assert len({start(picture, *row) for row in rows}) == 1, item.text(0)
+    d.close()
+
+
 def test_a_good_file_is_reviewed(browse):
     d = importing(browse, lambda x: x.load(json.dumps(TALK), "talk.json"))
     assert d.commit_button.isEnabled()
