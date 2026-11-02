@@ -51,6 +51,12 @@ def icon(name: str, colour: str | None = None, on: str | None = None, size: int 
     return result
 
 
+def set_fold(button, text: str, is_open: bool) -> None:
+    """A button that folds something: its words after a chevron, right while folded and down while open (release 5.59)."""
+    button.setText(text)
+    button.setIcon(icon("chevron-down" if is_open else "chevron-right"))
+
+
 def icon_size(size: int = 16) -> QSize:
     return QSize(size, size)
 

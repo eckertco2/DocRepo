@@ -49,6 +49,15 @@ class _Form(FormDialog):
         self.layout_.addLayout(dialog_buttons(self, "Save", self._accept, self.reject))
         self.check: Callable[[], str | None] = lambda: None
 
+    def showEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        super().showEvent(event)
+        if not LOOK.classic:  # the labels QFormLayout makes, in the role every form's labels have (release 5.61)
+            for row in range(self.form.rowCount()):
+                item = self.form.itemAt(row, QFormLayout.ItemRole.LabelRole)
+                if item is not None and item.widget() is not None and item.widget().objectName() != "fieldLabel":
+                    item.widget().setObjectName("fieldLabel")
+                    item.widget().style().polish(item.widget())
+
     def save(self) -> None:
         self._accept()
 

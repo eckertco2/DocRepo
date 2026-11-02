@@ -36,15 +36,18 @@ from docrepo import items
 from docrepo.dates import long_date, short
 from docrepo.model import AgendaItem, Model
 from docrepo.ui import tokens
+from docrepo.ui.tokens import C
 from docrepo.ui.icons import icon
 from docrepo.ui.look import LOOK, Help
-from docrepo.ui.widgets import DateField
+from docrepo.ui.widgets import DateField, ElidedCheck, ElidedLabel
 
 #: Each line's tint, by the part it plays: the item it makes, the new task's own line, or a heading.
-TINTS = {"task": "#e3ecf7", "note": "#e0f1ee", "update": "#f6ecd8", "decision": "#ece6f6", "date": "#e8f0dc", "param": "#e8f0dc", "heading": "#e9edf1"}
+TINTS = {"task": tokens.colour("item_task"), "note": tokens.colour("item_note"), "update": tokens.colour("item_update"), "decision": tokens.colour("item_decision"),
+         "date": tokens.colour("item_date"), "param": tokens.colour("item_date"), "heading": tokens.colour("item_heading")}
 #: The operators' colours: (text, background).
-REF_COLOURS = {"person": ("#1d5e98", "#dbe8f5"), "new": ("#875700", "#fcefcf"), "none": ("#5a6571", "#e9edf1"),
-               "task": ("#22706a", "#d6eeea"), "type": ("#875700", "#fcefcf")}
+REF_COLOURS = {"person": (tokens.colour("accent"), tokens.colour("info_bg")), "new": (tokens.colour("caution"), tokens.colour("caution_bg")),
+               "none": (tokens.colour("text2"), tokens.colour("hover")), "task": (tokens.colour("ref_task"), tokens.colour("ref_task_bg")),
+               "type": (tokens.colour("caution"), tokens.colour("caution_bg"))}
 #: A line's colours: (its tint, and each operator's (start, length, a key of ``REF_COLOURS``)).
 NO_COLOURS: tuple[str | None, tuple[tuple[int, int, str], ...]] = (None, ())
 
@@ -222,7 +225,7 @@ class ItemCard(QFrame):
         self.title.setReadOnly(it.kind == "param")  # a field's value is read from its line, and changed there
         self.title.textEdited.connect(lambda text: self.changed.emit(self.key, "title", text))
         lay.addWidget(self.title)
-        facts = QLabel(_facts(it, where) + (f"  <b style='color:#b0261e'>{esc(_pretty(it.problem))}</b>" if it.problem else ""), objectName="hint")
+        facts = QLabel(_facts(it, where) + (f"  <b style='color:{C.critical}'>{esc(_pretty(it.problem))}</b>" if it.problem else ""), objectName="hint")
         facts.setWordWrap(True)
         facts.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         lay.addWidget(facts)
@@ -350,7 +353,7 @@ class ItemCards(QFrame):
         box.setProperty("kind", "self")
         bl = QVBoxLayout(box)
         bl.setContentsMargins(8, 5, 6, 6)
-        bl.addWidget(QLabel("<b>The new task</b>  <span style='color:#5a6571'>its first line</span>"))
+        bl.addWidget(QLabel(f"<b>The new task</b>  <span style='color:{C.text2}'>its first line</span>"))
         facts = QLabel(said, objectName="hint")
         facts.setWordWrap(True)
         bl.addWidget(facts)
@@ -374,10 +377,10 @@ class AgendaPanel(QFrame):
         lay.setContentsMargins(10, 8, 10, 8)
         lay.setSpacing(5)
         head = QHBoxLayout()
-        self.title = QLabel()
-        head.addWidget(self.title)
+        self.title = ElidedLabel()  # a meeting's name can be long: it ends in "…", and the count keeps its room
+        self.title.setFont(tokens.ui_font(semibold=True))
+        head.addWidget(self.title, 1)
         self.info_slot = head
-        head.addStretch()
         self.count = QLabel(objectName="hint")
         head.addWidget(self.count)
         lay.addLayout(head)
@@ -400,17 +403,17 @@ class AgendaPanel(QFrame):
         _drop(self.rows)
         self.boxes = {}
         if not meeting:
-            self.title.setText("<b>Agenda</b>")
+            self.title.setText("Agenda")
             self.count.setText("")
             self.hint.setText("A new meeting has no agenda yet. Pick a meeting at the top to work through its agenda here.")
             self.start_button.hide()
             return
-        self.title.setText(f"<b>Agenda of {m.task(meeting).title}</b>")
+        self.title.setText(f"Agenda of {m.task(meeting).title}")
         n = 0
         for a in open_items:
             text = (m.task(a.subject).title + (f"  ·  {a.note}" if a.note else "")) if a.subject else a.note
-            box = QCheckBox(text)
-            box.setToolTip("Ticked items close as Discussed when you save")
+            box = ElidedCheck(text)
+            box.setToolTip(f"{text}\n\nTicked items close as Discussed when you save")
             box.setChecked(done(a))
             n += box.isChecked()
             box.toggled.connect(lambda on, i=a.id: self.ticked.emit(i, on))

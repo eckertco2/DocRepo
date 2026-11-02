@@ -46,14 +46,14 @@ from docrepo.tasks import TaskError, hours_values, rate_total, stated
 from docrepo.templates import Choice, Library, Row, plural
 from docrepo.ui import tokens
 from docrepo.ui.dialogs import _Form
-from docrepo.ui.icons import icon
+from docrepo.ui.icons import icon, set_fold
 from docrepo.ui.look import LOOK, Help
 from docrepo.ui.rich_edit import FormatBar, RichEdit
 from docrepo.ui.style import style_sheet
 from docrepo.ui.task_forms import BAD_DURATION, MON_TO_FRI, HoursRow, PeoplePicker, PickTask, TiePanel, chips_people, days_valid, people_chips, typed_days
 from docrepo.ui.task_picker import full_path
 from docrepo.ui.timing_view import TieLine, TimingDialog, source_options
-from docrepo.ui.widgets import Chip, ChipPicker, DateField, FormDialog, HoursField, Option, dialog_buttons, field, fit_dialog, section, set_filled
+from docrepo.ui.widgets import Chip, ChipPicker, DateField, DropButton, FormDialog, HoursField, Option, dialog_buttons, field, fit_dialog, section, set_filled
 from docrepo.views import TEMPLATES_NOTE
 
 if TYPE_CHECKING:
@@ -183,7 +183,7 @@ class RowDialog(FormDialog):
         g.addWidget(editor)
         g.addWidget(_hint("Copied onto each new task's notes page. The page is the task's own from then on, so changes here reach only new tasks."))
 
-        self.more_button = QPushButton("More options ▸", objectName="moreLink")
+        self.more_button = QPushButton("More options", objectName="moreLink")
         g.addWidget(self.more_button)
         self.more = QWidget()
         ml = QHBoxLayout(self.more)
@@ -206,7 +206,7 @@ class RowDialog(FormDialog):
         g.addWidget(self.more)
         open_more = bool(row and (row.urgent or row.meeting or row.plant_event or row.recurrence))
         self.more.setVisible(open_more)
-        self.more_button.setText("More options ▾" if open_more else "More options ▸")
+        set_fold(self.more_button, "More options", open_more)
         self.more_button.clicked.connect(self._toggle_more)
         g.addStretch()
 
@@ -273,7 +273,7 @@ class RowDialog(FormDialog):
     def _toggle_more(self) -> None:
         on = self.more.isHidden()
         self.more.setVisible(on)
-        self.more_button.setText("More options ▾" if on else "More options ▸")
+        set_fold(self.more_button, "More options", on)
 
     def save(self) -> None:
         self._accept()
@@ -436,7 +436,7 @@ class MakeTasksDialog(FormDialog):
         outer.setSpacing(12)
         self.name = QLineEdit("" if root.parent is None else root.title)
         self.name.setPlaceholderText("Trial 5: gloss finish")
-        self.under_button = QPushButton()
+        self.under_button = DropButton()
         self.under_button.clicked.connect(lambda: self._pick_task(self.under_button, self.set_under))
         head = QGridLayout()
         head.setHorizontalSpacing(16)
@@ -610,7 +610,7 @@ class MakeTasksDialog(FormDialog):
         self._draw_under()
 
     def _draw_under(self) -> None:
-        self.under_button.setText(f"{full_path(self.m, self.under)}  ▾" if self.under else "None: a top-level task  ▾")
+        self.under_button.setText(full_path(self.m, self.under) if self.under else "None: a top-level task")
 
     def save(self) -> None:
         self._accept()
@@ -749,7 +749,8 @@ class PreviewDialog(FormDialog):
         self.fold_button: QPushButton | None = None
         if folded:
             words, items = folded
-            self.fold_button = QPushButton(f"{words} ▸", objectName="moreLink")
+            self.fold_button = QPushButton(words, objectName="moreLink")
+            self.fold_button.setIcon(icon("chevron-right"))
             self.folded = _hint("\n".join(items))
             self.folded.setTextFormat(Qt.TextFormat.PlainText)
             self.folded.hide()
@@ -793,7 +794,7 @@ class PreviewDialog(FormDialog):
     def _toggle_folded(self, words: str) -> None:
         on = self.folded.isHidden()
         self.folded.setVisible(on)
-        self.fold_button.setText(f"{words} {'▾' if on else '▸'}")
+        set_fold(self.fold_button, words, on)
         room = self.folded.sizeHint().height() + 12  # the window grows to hold it, so the list keeps its room
         self.resize(self.width(), self.height() + (room if on else -room))
 

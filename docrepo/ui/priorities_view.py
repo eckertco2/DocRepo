@@ -34,14 +34,16 @@ from docrepo.detail import esc
 from docrepo.model import Model, Task
 from docrepo.stories import clip
 from docrepo.ui import tokens
-from docrepo.ui.look import Help
-from docrepo.ui.widgets import CheckMenuButton, FlowLayout, label_filter, people_filter
+from docrepo.ui.look import LOOK, Help, KeyBadge
+from docrepo.ui.widgets import CheckMenuButton, ElidedLabel, FlowLayout, label_filter, people_filter
 from docrepo.views import due_cell, find_text, path_text
 
+#: A column's least width: the board scrolls across in a narrower window, so it never sets the window's least width (release 5.58).
+COLUMN_MIN = 216
 #: A dragged card carries its task's ID.
 MIME = "application/x-docrepo-task"
 #: A state's chip colours, as the pages draw them.
-STATE_COLOURS = {"In progress": ("accent", "selected"), "Not started": ("text2", "hover"), "Parked": ("text2", "hover"), "Closed": ("text2", "hover")}
+STATE_COLOURS = {"In progress": ("accent", "info_bg"), "Not started": ("text2", "hover"), "Parked": ("parked", "parked_bg"), "Closed": ("text2", "hover")}
 
 
 def _chip(text: str, fg: str, bg: str, bold: bool = False) -> str:
@@ -76,9 +78,7 @@ class Card(QFrame):
         title.setWordWrap(True)
         lay.addWidget(title)
         if path:
-            p = QLabel(esc(path), objectName="fieldLabel")
-            p.setWordWrap(True)
-            lay.addWidget(p)
+            lay.addWidget(ElidedLabel(path, objectName="fieldLabel"))
         if facts:
             f = QLabel(facts)
             f.setWordWrap(True)
@@ -131,22 +131,24 @@ class Column(QFrame):
         super().__init__(objectName="prCol")
         self.view, self.key = view, col.key
         self.setAcceptDrops(True)
+        self.setMinimumWidth(COLUMN_MIN)
         self.setAccessibleName(col.name)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(8, 8, 8, 8)
         lay.setSpacing(6)
         head = QHBoxLayout()
-        key = QLabel(col.digit, objectName="hotkey")
-        key.setToolTip(f"Press {col.digit} to move the selected card {'out of its bucket' if not col.key else 'here'}")
+        moves = f"Press {col.digit} to move the selected card {'out of its bucket' if not col.key else 'here'}"
+        key = KeyBadge(col.digit)  # with Show hints; the Alt overlay and the tooltip have it otherwise (decision 7)
+        key.setToolTip(moves)
         head.addWidget(key)
-        head.addWidget(QLabel(f"<b>{esc(col.name)}</b>"))
+        name = QLabel(f"<b>{esc(col.name)}</b>")
+        name.setToolTip(moves)
+        head.addWidget(name)
         head.addStretch(1)
         head.addWidget(QLabel(str(len(col.ids)), objectName="count"))
         lay.addLayout(head)
         if not col.key:
-            note = QLabel("Sorted for you: urgent first, then the soonest due.", objectName="fieldLabel")
-            note.setWordWrap(True)
-            lay.addWidget(note)
+            lay.addWidget(Help("Sorted for you: urgent first, then the soonest due."))
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -294,7 +296,7 @@ class PrioritiesView(QWidget):
         self.bucket_group.setExclusive(True)
         self.bucket_buttons: dict[str, QPushButton] = {}
         for key, label, digit in priorities.COLUMNS:
-            b = QPushButton(f"{digit}  {label}", objectName="subtle")
+            b = QPushButton(f"{digit}  {label}" if LOOK.show_help else label, objectName="subtle")
             b.setCheckable(True)
             b.setToolTip(f"{label} ({digit})")
             b.clicked.connect(lambda _=False, k=key: self.sel and self.moved.emit(self.sel, k, None))
@@ -303,7 +305,7 @@ class PrioritiesView(QWidget):
             bl.addWidget(b)
         row.addWidget(self.buckets)
         row.addStretch(1)
-        self.open_button = QPushButton("Open task", objectName="primary")
+        self.open_button = QPushButton("Open task", objectName="primary" if LOOK.classic else "")
         self.open_button.clicked.connect(lambda: self.sel and self.open_task.emit(self.sel))
         self.edit_button = QPushButton("Edit")
         self.edit_button.setToolTip("Edit task (E)")
@@ -316,7 +318,12 @@ class PrioritiesView(QWidget):
         self.board_layout = QHBoxLayout(self.board)
         self.board_layout.setContentsMargins(0, 0, 0, 0)
         self.board_layout.setSpacing(8)
-        lay.addWidget(self.board, 1)
+        board_scroll = QScrollArea()
+        board_scroll.setWidgetResizable(True)
+        board_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        board_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        board_scroll.setWidget(self.board)
+        lay.addWidget(board_scroll, 1)
 
     # ---- drawing ----
     def render(self, model: Model, today: date, sel: str | None, me: str | None = None) -> None:
@@ -431,6 +438,7 @@ class PrioritiesView(QWidget):
         t = m.tasks.get(self.sel) if m and self.sel else None
         for w in (self.buckets, self.open_button, self.edit_button):
             w.setVisible(t is not None)
+        self.strip.setVisible(t is not None or LOOK.show_help)  # no card, and no sentence about it, until a card is picked
         muted = tokens.colour("text2")
         if t is None or m is None:
             self.strip_text.setText(f'<span style="color:{muted}">{esc(NOTE)}</span>')

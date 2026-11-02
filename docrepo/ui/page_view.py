@@ -7,7 +7,8 @@ page names its pictures and this view draws them:
 - ``avatar:TB``, a person's initials in a circle; ``avatar:me``, the owner, as a figure;
 - ``mark:ip``, a task's state (``ns``, ``ip``, ``pk`` or ``cl``), from the state icons;
 - ``progress:1:4``, a thin bar, 1 of 4 filled;
-- ``timing:...``, a lane of a template's chart, or its ruler (release 5.51).
+- ``timing:...``, a lane of a template's chart, or its ruler (release 5.51);
+- ``chev:right`` and ``chev:down``, the icons' chevrons for a fold or a menu (release 5.59).
 """
 from __future__ import annotations
 
@@ -26,7 +27,7 @@ AVATAR = 20
 MARK = 14
 PROGRESS_HEIGHT = 4
 #: The state marks' colours: secondary text, the accent, Parked's, and secondary text again.
-MARK_COLOURS = {"ns": "text2", "ip": "accent", "pk": "#585a70", "cl": "text2"}
+MARK_COLOURS = {"ns": "text2", "ip": "accent", "pk": "parked", "cl": "text2"}
 
 
 def layout_of(width: int) -> int:
@@ -75,6 +76,13 @@ def mark(state: str, scale: float) -> QImage:
     return image
 
 
+def chevron(direction: str, scale: float) -> QImage:
+    image, p = _canvas(MARK, MARK, scale)
+    p.drawPixmap(QPointF(0, 0), tinted(f"chevron-{direction}", tokens.LIGHT["text2"], MARK, scale))
+    p.end()
+    return image
+
+
 def progress(done: int, total: int, width: int, scale: float) -> QImage:
     """A thin bar on the hover grey, the closed share filled in the success green."""
     image, p = _canvas(width, PROGRESS_HEIGHT, scale)
@@ -103,6 +111,8 @@ def picture(url: QUrl, scale: float) -> QImage | None:
         return progress(done, total, PROGRESS_WIDTH, scale)
     if kind == "timing":
         return timing_picture(key, scale)
+    if kind == "chev" and key in ("right", "down"):
+        return chevron(key, scale)
     return None
 
 

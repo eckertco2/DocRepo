@@ -144,6 +144,43 @@ CLASSIC_STYLE = STYLE
 _QSS_CACHE: list[str] = []
 
 
+#: The Classic look's sheets for the browse window, its lists and Quick edit.
+CLASSIC_BROWSE = """
+QWidget#browse { background: #ffffff; color: #1a1f25; font-family: "Segoe UI"; font-size: 10pt; }
+QWidget#toolbar { background: #f4f6f8; border-bottom: 1px solid #d6dce3; }
+QWidget#paneHead { background: #ffffff; border-bottom: 1px solid #d6dce3; }
+QWidget#actions { background: #ffffff; }
+QLabel#paneTitle { font-size: 12pt; font-weight: 600; }
+QLabel#paneNote, QLabel#hint { color: #5a6571; font-size: 9pt; }
+QLabel#status { background: #f4f6f8; border-top: 1px solid #d6dce3; color: #1a1f25; padding: 4px 10px; }
+QLabel#status[error="true"] { background: #fbe3e1; color: #b0261e; }
+QTreeWidget#nav { background: #f4f6f8; border: none; border-right: 1px solid #d6dce3; }
+QTextBrowser { border: none; }
+QPushButton { padding: 3px 9px; }
+QPushButton#primary { background: #1d5e98; color: #ffffff; border: 1px solid #1d5e98; border-radius: 4px; padding: 4px 14px; }
+QPushButton#rowLink { border: none; color: #1d5e98; text-decoration: underline; padding: 0 4px; background: transparent; }
+QFrame#prCol { background: #f4f6f8; border: 1px solid #d6dce3; border-radius: 6px; }
+QFrame#prCol[over="true"] { background: #dbe8f5; border-color: #1d5e98; }
+QFrame#prCard { background: #ffffff; border: 1px solid #d6dce3; border-radius: 4px; }
+QFrame#prCard[sel="true"] { background: #dbe8f5; border-color: #1d5e98; }
+QFrame#prDrop { background: #1d5e98; border: none; }
+QLabel#prTitle { font-weight: 600; }
+QLabel#count { color: #5a6571; }
+""" + FORMAT_BAR_STYLE + NOTES_STYLE
+CLASSIC_TREE = ("QTreeWidget { border: none; font-family: 'Segoe UI'; font-size: 10pt; }"
+                "QTreeWidget::item:selected { background: #dbe8f5; color: #1a1f25; }"
+                "QHeaderView::section { color: #87919c; font-size: 8pt; border: none; border-bottom: 1px solid #d6dce3;"
+                " padding: 3px 6px; background: #ffffff; }")
+CLASSIC_QUICK_EDIT = """
+QWidget#quickEdit { background: #ffffff; border: 1px solid #b8c1cb; }
+QWidget#qeHead { background: #f4f6f8; border-bottom: 1px solid #d6dce3; }
+QLabel#qeTitle { font-weight: 600; color: #1a1f25; }
+QLabel#qeKind { color: #5a6571; }
+QToolButton#chip[off="true"] { color: #5a6571; background: #ffffff; text-decoration: line-through; }
+QToolButton#chip[why="true"] { color: #5a6571; background: #ffffff; border-style: dashed; }
+"""
+
+
 def style_sheet() -> str:
     """The style sheet a window sets on itself: the Classic look's, or the new look's from the tokens. When DocRepo runs,
     the new look's is set once on the application instead (``apply_look``), so this is empty: Qt parses it only once."""

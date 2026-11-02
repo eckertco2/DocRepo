@@ -457,7 +457,9 @@ class TodayPanel(QWidget):
         """A folded heading, which remembers whether it's open. Returns whether it's open."""
         is_open = db.get_state(self.ctx.conn, key) == "1"
         fold = QToolButton(objectName="tpFold")
-        fold.setText(("▾ " if is_open else "▸ ") + label)
+        fold.setText(label)
+        fold.setIcon(icon("chevron-down" if is_open else "chevron-right"))
+        fold.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         fold.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         fold.clicked.connect(lambda: (db.set_state(self.ctx.conn, key, "0" if is_open else "1"), self.refresh()))
         self.extras.append(fold)

@@ -498,8 +498,8 @@ def test_reminders_reach_the_panel_as_they_do_today(app, panel):
     due = reminders_due(Model(app.ctx.conn), NOW.date())
     assert len(due) == 2
     fold = _reminder_fold(panel)
-    assert fold.text() == "▸ Reminders · 2" and not _reminder_links(panel)  # folded to start with, like its neighbours
-    assert [w.text() for w in panel.extras if w.objectName() == "tpFold"][1].startswith("▸ Due in the next 7 days")  # above Due, as on Today
+    assert fold.text() == "Reminders · 2" and not _reminder_links(panel)  # folded to start with, like its neighbours
+    assert [w.text() for w in panel.extras if w.objectName() == "tpFold"][1].startswith("Due in the next 7 days")  # above Due, as on Today
     fold.click()
     assert db.get_state(app.ctx.conn, "today_panel_reminders_open") == "1"
     assert _reminder_links(panel) == [["Add", "Clear"], ["Add", "Clear"]]
@@ -516,7 +516,7 @@ def test_a_reminder_in_the_panel_can_be_added_and_cleared(app, panel):
     _click(panel, 0, "Clear")
     m = Model(conn)
     assert m.task(first.id).reminder is None and [e.via for e in m.status_log_of(first.id) if e.field == "Reminder"][-1] == "Today"
-    assert _reminder_fold(panel).text() == "▾ Reminders · 1" and _reminder_links(panel) == [["Add", "Clear"]]
+    assert _reminder_fold(panel).text() == "Reminders · 1" and _reminder_links(panel) == [["Add", "Clear"]]
     _click(panel, 0, "Clear")
     assert Model(conn).task(second.id).reminder is None
     assert _reminder_fold(panel) is None  # only while there are any

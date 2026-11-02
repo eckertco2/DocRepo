@@ -12,6 +12,8 @@ import pytest  # noqa: E402
 from PySide6.QtCore import QUrl  # noqa: E402
 from PySide6.QtWidgets import QApplication, QPushButton  # noqa: E402
 
+from docrepo.ui import tokens  # noqa: E402
+
 from docrepo import edits, tasks  # noqa: E402
 from docrepo.config import Settings  # noqa: E402
 from docrepo.detail import Pages, PageState  # noqa: E402
@@ -148,9 +150,9 @@ def test_the_overdue_list_has_a_row_for_each_key_date_with_done(browse, ctx):
     browse.set_view("due")
     rows = key_rows(browse)
     assert [it.data(0, KEY_ROLE) for it in rows] == [("task", "T000008")] * 2
-    assert "Order the seals, was due Tue 6 Oct" in rows[0].data(0, HTML_ROLE) and "#b0261e" in rows[0].data(2, HTML_ROLE)
+    assert "Order the seals, was due Tue 6 Oct" in rows[0].data(0, HTML_ROLE) and tokens.colour("critical") in rows[0].data(2, HTML_ROLE)
     assert "Target for trial preparations, by Mon 12 Oct" in rows[1].data(0, HTML_ROLE)
-    browse.tree.itemWidget(rows[0], 3).findChild(QPushButton).click()  # Done
+    browse.tree.action_strip(rows[0]).findChild(QPushButton).click()  # Done
     assert Model(ctx.conn).key_dates_of("T000008")[1].done == "2026-10-08"
     assert len(key_rows(browse)) == 1
 
@@ -167,5 +169,5 @@ def test_today_has_them_among_its_due_tasks_and_mine_only_filters_them(browse, c
     assert len(key_rows(browse)) == 2
     browse.set_today_mine(False)
     first = key_rows(browse)[0]
-    browse.tree.itemWidget(first, 3).findChild(QPushButton).click()
+    browse.tree.action_strip(first).findChild(QPushButton).click()
     assert len(key_rows(browse)) == 2

@@ -70,6 +70,10 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.55 | Edit files on a task tree | Built 2026-11-01, with 5.53, hand-tested by the owner, merged to `main` and on GitHub 2026-11-02 |
 | 5.56 | Copilot's folder, `tree-prompt`, `tree-export`, and the handoff with Copilot's prompt file | Built 2026-11-01, with 5.53, hand-tested by the owner, merged to `main` and on GitHub 2026-11-02 |
 | 5.57 | The look as decided (the visual review's stage V1): the Body font in rows, tables and menus, a focus ring for the keyboard, rows of controls that line up at one height, DocRepo's own icon, and the Timeline's list of tasks with no dates kept to one line | Built 2026-11-01, hand-tested by the owner, merged to `main` and on GitHub 2026-11-02 |
+| 5.58 | Nothing cut off (the visual review's stage V2): the window can be half of a 1920 px screen, narrow lists drop columns, the task page fits its pane, words end in "…", and the Timeline's axis and Capacity's table are tidied | Built 2026-11-02, hand-tested by the owner and merged to `main` the same day |
+| 5.59 | Quieter windows (stage V3): row actions on hover and the right-click menu, level buttons as icons, hints behind Show hints, one arrow family, one accent button, and popups' corners and the title bar's colour | Built 2026-11-02, hand-tested by the owner and merged to `main` the same day |
+| 5.60 | One meaning per colour (stage V4): every colour a token, state in rows as words, plain names and neutral lanes on the Timeline, a load tint apart from selection, and dots when Parse fills much | Built 2026-11-02, hand-tested by the owner and merged to `main` the same day |
+| 5.61 | Forms and small things (stage V6): Edit task and New task without scrolling, questions that name their answers, one label role, Settings' More hotkeys, Quick edit's heights, chips in one shape and empty states | Built 2026-11-02, hand-tested by the owner and merged to `main` the same day |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
 ## Decisions
@@ -561,6 +565,53 @@ Round 5's thread A, the owner's ask of 2026-10-30, as the design has it (decisio
   - **Tie… on the anchor is its Start only,** and a tied row's Start is what's typed over, as the mock has them. Its Due is a line beside it.
   - **Typing the anchor's Due with Days moves its Start, and new Days count from its Start,** or back from its Due if that's all it has, as decision 191 has it on a task.
   - **In a pane under 420 px, each lane goes under its name.** The page doesn't redraw on crossing that width, only when it next draws.
+
+## Releases 5.58 to 5.61: the rest of the visual review but its planning views (2026-11-02)
+
+The owner asked for the review's next stages, and took its decisions V2, V3, V4, V6 and V7 as recommended. Stage V5 (the Timeline's one-row bar and Capacity's cells) stays with thread D's shared axis, as the review says, and V8 (dark theme) is still open. They're four stages built together in one worktree, as releases 5.58 to 5.61. No schema change and no new package.
+
+**5.58, nothing cut off (stage V2):**
+- **The window can be half of a 1920 px screen.** It was at least 1157 px, because a `QStackedWidget` holds its largest page's minimum, so the Priorities board set every view's least width. `ViewStack` asks only for the page on show. The sidebar keeps 248 px, so its names aren't cut, and the pane on the right has at least 340 px. The widest view now needs 942 px. Priorities' board scrolls across, each column at least 216 px, so five columns show at 1440 px.
+- **A narrow list drops columns** (`RowTree._fit_columns`): the one after the title goes first, since a date at the row's end says more than a state, until the title has 160 px.
+- **The task page fits its pane.** Its Notes heading held it at 481 px in a 288 px pane, so words ran off the edge. The format bar takes a line of its own when it can't fit (`TaskPane._fit_head`).
+- **Words end in "…"** with all of them in the tooltip: the meeting's agenda heading and items, and a Priorities card's path (`ElidedLabel`, `ElidedCheck`, which paint the shorter text, so `text()` stays whole).
+- **The Timeline's axis:** a date the Today tag would cover is left out, the tag has room for its word, hours beside a bar move off the today line, and over a year the year goes with its first month and each January. Legend entries stay whole when it wraps.
+- **Capacity:** the weeks share the width, the table shows all its rows when there's room, and there's no stray square where two scroll bars meet. Timeline's and Capacity's margins match the lists'.
+
+**5.59, quieter windows (stage V3):**
+- **A row's actions** lie over the end of its first column, on hover and on the current row (`ActionStrip`), and they're on a new right-click menu. A permanent column of links took up to 220 px of the title's room. Titles at 1440 px have nearly twice the width.
+- **Collapse a level and Expand a level** are two icon buttons (two new icons), gone where nothing nests. A hidden control takes no room in a `FlowLayout` now.
+- **Instructions wait for Show hints:** Timeline's and Priorities' placeholder cards, Plan mode's sentence, Priorities' digits and "Sorted for you", the Task view's footer and "Press P" (decision V7), Unfiled's box (a chip otherwise), Capacity's "Click a cell" and the mods log's keys. Keys still work, and F1, tooltips and Alt still name them.
+- **One accent button** (decision V2): New capture. File to task, Save settings, Open task and the rest are neutral, where they were. What Enter does is unchanged.
+- **One arrow family:** `DropButton` (its words, then a chevron from the icon set), `icons.set_fold`, `chev:` pictures on pages and a stroked chevron on the Timeline's folds. Menu buttons' chevrons sit close after their words, and capture's More has no "…" as well.
+- **Windows' chrome:** `look.dress_window`, from the application's existing event filter, asks DWM for small round corners on popups and a base-colour title bar, so there's no seam. Windows 10 refuses, harmlessly. The palette has an edge, the sidebar button's state is in its icon, Select mode's ticks match the rest, and an error stays in the status line until the next message.
+
+**5.60, one meaning per colour (stage V4):**
+- **Every colour is a token.** `tests/test_visual_stages.py` fails on a raw colour in `docrepo/ui` outside `tokens.py` and `style.py`, or a line naming the Classic look, and Classic's sheets moved to `style.py`. `{C.text2}` names one in an f-string. The Timeline's retired greys and second red are gone, in both looks.
+- **Selection keeps its blue to itself.** Chips, a mention, the drop overlay and information boxes use `info_bg`, and Capacity's 80 to 100% cells use caution's tint, changing decision 18, since a selected cell couldn't be told from a busy one. The clicked cell stays marked after a redraw.
+- **State in a row** is words, with a chip only for Parked (decision V6). Note, Key date and Reminder in that column are words too. Activity's chips are all neutral, and its dates one line.
+- **The Timeline** (decisions V3 and V4): plain names beside the colour edge, and lanes as one neutral band with a small coloured dot and dark words, which also ends the two names that failed contrast. The plant events lane goes when there's nothing in view, and its words are text with the flag in colour.
+- **Parse and populate:** the marker is a small dot rather than a wand. With more than two fields filled each has only the dot (`CaptureWindow._settle_filled`), and a date's dot is at its left, clear of the calendar.
+
+**5.61, forms and small things (stage V6):**
+- **Edit task fits at 608 by 724 without scrolling.** It scrolled by 433 px on this computer. Hours, labels, Runs through weekends, reminder, recurrence, key dates and parents are under More options, which names them, and opens when something rarer is set, or for a task made from a template, whose hours and labels carry its marks. A checklist with lines stays in front. The window grows when it opens.
+- **New task and Update don't scroll:** Labels and two pairs, the rest under More fields. Parse leaves it shut, as the Understood line names what it filled, in the new look.
+- **Questions** (`widgets.ask`) name their answers, have no icon, and put Enter and Esc on the safe one.
+- **Also:** a form's labels have one role; Settings' More hotkeys is a fold with a row each; Quick edit's controls are 28 px; chips have one 4 px corner in widgets; the calendar's weekends are grey, with chevrons; Import opens small; a new data root's Task tree and Capacity say what to do; and a list with no rows to pick has no headings, nor has Search's one column.
+
+**Tests:** `tests/test_visual_stages.py` is new, and `tests/test_real_look.py` gains the window's least width on every view, the task page's width and the forms' scrolling, on Windows' real platform. Tests that clicked a row's link now go through `RowTree.action_strip`, as a person goes through the mouse. The last full run, on top of releases 5.53 to 5.56, had 2223 passed, 1 skipped and 3 failed. Two were expectations left from before these releases, now corrected, and their files pass. The third was a `PermissionError` from Windows on replacing a temporary file in `SafeFS.write_text`, in a Today panel test, which passed on three reruns of its file and doesn't touch this code. The full suite runs again before a merge.
+
+**Hand-tested by the owner and merged to `main`** (2026-11-02). **Not checked yet:** the corporate computer. DWM's corners and title bar colour show only on a real window of Windows 11, so the corporate test asks about them too.
+
+**Left for later,** beyond stage V5 and V8: command bars that overflow into More by width; the 41 px row where "deadline" adds a line; Documents' parent rows' cells; the empty status line's height; Settings' Data root row and a toggle for Show hints; the mods log's footer; a footer band on dialogs; date fields' placeholder and Update's State label; the palette's repeated words; the wheels' rings; the format bar on use; bars' default colour and hatching, which thread D's question 8 covers.
+
+## Decisions (releases 5.58 to 5.61)
+
+- **The review's V2, V3, V4, V6 and V7:** as recommended, by the owner (2026-11-02).
+- **Row actions stay words, not the review's 24 px icons.** Labels on frequent commands are what the playbook's evidence favours, and no icon says Discussed. They lie over the title's column rather than taking one, so a row's State and Due stay in view.
+- **Pages' chips stay square-cornered.** Qt's rich text can't round them, and painting them as pictures would lose copying and Find. Chips in widgets take a small 4 px corner, so the two are close, rather than pills beside squares.
+- **Decision 18 changed:** Capacity's middle band is caution's tint, not the accent's.
+- **Priorities' columns are at least 216 px,** not the review's 260 to 300, so all five show at 1440 px. They reach 258 px at the 82% window on a 1920 px screen.
 
 ## Release 5.57: the look as decided (2026-11-01)
 

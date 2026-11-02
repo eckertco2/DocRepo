@@ -31,16 +31,15 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QHBoxLayout,
+    QHeaderView,
     QInputDialog,
     QLabel,
     QLineEdit,
     QMenu,
-    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QSpinBox,
     QSplitter,
-    QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
     QTextBrowser,
@@ -56,7 +55,7 @@ from docrepo.lists import key_dates_due, reminders_due
 from docrepo.agenda import AgendaError
 from docrepo.captures import capture_folder, capture_md_path
 from docrepo.dates import long_date, short, to_date, workday_numbers
-from docrepo.detail import SCOPE_NAMES, PageState, Pages, chip, esc, state_chip
+from docrepo.detail import SCOPE_NAMES, PageState, Pages, chip, esc, row_state, state_chip
 from docrepo.links import is_link
 from docrepo.model import TODAY, Model, is_person
 from docrepo.people import PeopleError
@@ -79,14 +78,15 @@ from docrepo.ui.templates_view import PreviewDialog, PreviewEntry, TemplatesPane
 from docrepo.ui.tree_import import TreeFilesPane
 from docrepo.ui.priorities_view import PrioritiesView
 from docrepo.ui.palette import Command, CommandPalette
-from docrepo.ui.style import FORMAT_BAR_STYLE, NOTES_STYLE, page_css, style_sheet
+from docrepo.ui.style import CLASSIC_BROWSE, page_css, style_sheet
 from docrepo.ui.task_forms import BulkEditDialog, LabelMatchDialog, TaskEditDialog
 from docrepo.ui.task_picker import TaskPicker
 from docrepo.ui.timeline_view import TimelineView
 from docrepo.ui.keymap import KeyMapDialog
 from docrepo.timeline import bands as timeline_bands
-from docrepo.ui.tree_view import DIM_ROLE, GREY, HTML_ROLE, KEY_ROLE, RowTree, edge, tint
-from docrepo.ui.widgets import SAVE_KEYS, CheckMenuButton, DateField, FlowLayout, Option, label_filter, label_options, people_filter, people_options
+from docrepo.ui.tokens import C
+from docrepo.ui.tree_view import DIM_ROLE, HTML_ROLE, KEY_ROLE, RowTree, edge, group_ground, tint, with_actions
+from docrepo.ui.widgets import SAVE_KEYS, CheckMenuButton, DateField, DropButton, FlowLayout, Option, ViewStack, ask, label_filter, label_options, people_filter, people_options
 from docrepo.views import (
     LIST_IDS,
     SORTS,
@@ -135,28 +135,8 @@ TODAY_MINE_KEY = "today_due_mine"  # Mine only, on Today's Due in the next 7 day
 NAV_FOLDED_KEY = "browse_nav_folded"  # the sidebar's folded groups (the visual overhaul's decision 10)
 TIMELINE_OPEN_KEY = "timeline_open"  # the timeline's rows whose subtasks are shown (mods log round 4, decision 133)
 TIMELINE_VIEW_KEY = "timeline_view"  # the timeline's range, Order by, bar colours, Hours and Show routine (release 5.29)
-STYLE = """
-QWidget#browse { background: #ffffff; color: #1a1f25; font-family: "Segoe UI"; font-size: 10pt; }
-QWidget#toolbar { background: #f4f6f8; border-bottom: 1px solid #d6dce3; }
-QWidget#paneHead { background: #ffffff; border-bottom: 1px solid #d6dce3; }
-QWidget#actions { background: #ffffff; }
-QLabel#paneTitle { font-size: 12pt; font-weight: 600; }
-QLabel#paneNote, QLabel#hint { color: #5a6571; font-size: 9pt; }
-QLabel#status { background: #f4f6f8; border-top: 1px solid #d6dce3; color: #1a1f25; padding: 4px 10px; }
-QLabel#status[error="true"] { background: #fbe3e1; color: #b0261e; }
-QTreeWidget#nav { background: #f4f6f8; border: none; border-right: 1px solid #d6dce3; }
-QTextBrowser { border: none; }
-QPushButton { padding: 3px 9px; }
-QPushButton#primary { background: #1d5e98; color: #ffffff; border: 1px solid #1d5e98; border-radius: 4px; padding: 4px 14px; }
-QPushButton#rowLink { border: none; color: #1d5e98; text-decoration: underline; padding: 0 4px; background: transparent; }
-QFrame#prCol { background: #f4f6f8; border: 1px solid #d6dce3; border-radius: 6px; }
-QFrame#prCol[over="true"] { background: #dbe8f5; border-color: #1d5e98; }
-QFrame#prCard { background: #ffffff; border: 1px solid #d6dce3; border-radius: 4px; }
-QFrame#prCard[sel="true"] { background: #dbe8f5; border-color: #1d5e98; }
-QFrame#prDrop { background: #1d5e98; border: none; }
-QLabel#prTitle { font-weight: 600; }
-QLabel#count { color: #5a6571; }
-""" + FORMAT_BAR_STYLE + NOTES_STYLE
+#: The least width of the pane on the right: a task page's format bar on its own line, and its margins and scroll bar (release 5.58).
+DETAIL_MIN = 352
 #: The views with Select mode, where tasks can be ticked for Edit selected.
 SELECT_VIEWS = ("tasks", *LIST_IDS)
 #: The views but the task tree whose rows nest, so they have Collapse a level and Expand a level (release 5.24).
@@ -165,6 +145,30 @@ NESTING_VIEWS = ("today", *LIST_IDS, "agenda", "activity", "docs", "labels", "te
 ACT_CHIPS = {"task": "multi", "update": "st-ip", "note": "lbl", "email": "lbl", "change": "routine", "doc": "st-pk", "agenda": "new"}
 UNFILED_NOTE = ("Unfiled captures: saved without a task. Their folders are already in Captures. Filing one links it in docs.db and sets "
                 "the task in its capture.md; the folder doesn't move.")
+
+
+def _answers(title: str, text: str) -> tuple[str, str]:
+    """What a question's two buttons say: what each does, not Yes and No (release 5.61)."""
+    if "without saving" in text:
+        return "Close without saving", "Keep editing"
+    if "off the page" in text:
+        return "Take it off the page", "Leave it on the page"
+    return title, "Cancel"
+
+
+def _due_css(cls: str) -> str:
+    """A date's look in a list: red and bold when it's over, caution's colour and bold when it's soon."""
+    return {"over": f"color:{tokens.colour('critical')}; font-weight:600", "soon": f"color:{tokens.colour('caution')}; font-weight:600"}.get(cls, "")
+
+
+def _row_state(state: str) -> str:
+    """A task's state in a list's row: words for the usual ones, and a chip only for what's out of the ordinary (the review's decision V6)."""
+    return state_chip(state) if LOOK.classic else row_state(state)
+
+
+def _row_word(word: str) -> str:
+    """What stands in a row's State column in place of a task's state, such as Note."""
+    return chip(word, "st-ns") if LOOK.classic else f'<span class="faint">{esc(word)}</span>'
 
 
 class BrowseWindow(QWidget):
@@ -176,11 +180,11 @@ class BrowseWindow(QWidget):
         self.capture = capture
         self.setObjectName("browse")
         self.setWindowTitle(WINDOW_TITLE)
-        self.setStyleSheet(STYLE if LOOK.classic else style_sheet())
+        self.setStyleSheet(CLASSIC_BROWSE if LOOK.classic else style_sheet())
         #: Shows a file in File Explorer. Tests replace it.
         self.reveal: Callable[[Path], bool] = show_in_explorer
         #: Asks a yes-or-no question. Tests replace it.
-        self.confirm: Callable[[str, str], bool] = lambda title, text: QMessageBox.question(self, title, text) == QMessageBox.StandardButton.Yes
+        self.confirm: Callable[[str, str], bool] = lambda title, text: ask(self, title, text, *_answers(title, text))
         #: Shows a form and waits for it: true when it was saved. Tests replace it.
         self.run_dialog: Callable[[QDialog], bool] = lambda dialog: bool(dialog.exec())
         #: Asks why something is discarded: the reason, or None to cancel. Tests replace it.
@@ -322,9 +326,11 @@ class BrowseWindow(QWidget):
             self.nav = NavPane(VIEWS)
             self.nav.picked.connect(self.set_view)
             self.nav.folded.connect(self._nav_folded)
+        if not LOOK.classic:
+            self.nav.setMinimumWidth(NAV_WIDTH)  # the sidebar keeps its width, so its names aren't cut; the room comes from the list
         self.split.addWidget(self.nav)
 
-        self.middle = QStackedWidget()
+        self.middle = ViewStack()
         list_page = QWidget()
         lp = QVBoxLayout(list_page)
         lp.setContentsMargins(0, 0, 0, 0)
@@ -399,7 +405,9 @@ class BrowseWindow(QWidget):
         self.actions_layout = FlowLayout(self.actions, spacing=6 if LOOK.classic else 4)
         self.actions_layout.setContentsMargins(14, 8, 14, 4) if LOOK.classic else self.actions_layout.setContentsMargins(16, 10, 16, 2)
         dl.addWidget(self.actions)
-        self.detail_stack = QStackedWidget()
+        if not LOOK.classic:
+            detail.setMinimumWidth(DETAIL_MIN)
+        self.detail_stack = ViewStack()
         self.page = PageView()
         self.page.setOpenLinks(False)
         self.page.setOpenExternalLinks(False)
@@ -439,13 +447,17 @@ class BrowseWindow(QWidget):
     def _build_capacity(self) -> QWidget:
         page = QWidget()
         lay = QVBoxLayout(page)
-        lay.setContentsMargins(12, 8, 12, 8)
+        lay.setContentsMargins(12, 8, 12, 8) if LOOK.classic else lay.setContentsMargins(16, 12, 16, 10)
         title = QLabel("Capacity", objectName="paneTitle")
         note = Help("Scheduled hours per person and week, spread over each task's workdays. Parked tasks don't count. Click a cell "
                     "to see which tasks fill it.")
-        nav = QHBoxLayout()
-        for text, step in (("◀ Earlier", -1), ("This week", 0), ("Later ▶", 1)):
-            b = QPushButton(text)
+        self.cap_nav = QWidget()
+        nav = QHBoxLayout(self.cap_nav)
+        nav.setContentsMargins(0, 0, 0, 0)
+        for text, step in (("Earlier", -1), ("This week", 0), ("Later", 1)):
+            b = DropButton(text, arrow="chevron-right") if step > 0 else QPushButton(text)
+            if step < 0:
+                b.setIcon(icon("chevron-left"))
             b.clicked.connect(lambda _=False, s=step: self._move_capacity(s))
             nav.addWidget(b)
         nav.addStretch()
@@ -459,19 +471,35 @@ class BrowseWindow(QWidget):
         self.cap_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.cap_table.cellClicked.connect(self._capacity_clicked)
         self.cap_table.verticalHeader().setVisible(False)
+        if not LOOK.classic:  # the weeks share the width: it scrolls across only when a cell's number wouldn't fit
+            self.cap_table.setCornerButtonEnabled(False)
+            self.cap_table.horizontalHeader().setMinimumSectionSize(76)
         self.cap_detail = QTextBrowser()
         self.cap_detail.setOpenLinks(False)
         self.cap_detail.document().setDefaultStyleSheet(page_css())
         self.cap_detail.anchorClicked.connect(self.on_link)
         legend = QLabel(" ".join(f'<span style="background-color:{c}">&nbsp;{t}&nbsp;</span>' for t, c in (
             (("Under 80%", "#e2f2e6"), ("80 to 100%", "#fcefcf"), ("Over 100%", "#fbe3e1")) if LOOK.classic else
-            (("Under 80%", tokens.colour("content")), ("80 to 100%", tokens.colour("selected")), ("Over 100%", tokens.colour("critical_bg"))))))
+            (("Under 80%", tokens.colour("content")), ("80 to 100%", tokens.colour("caution_bg")), ("Over 100%", tokens.colour("critical_bg"))))))
         for w in (title, note):
             lay.addWidget(w)
-        lay.addLayout(nav)
-        lay.addWidget(self.cap_table)
+        lay.addWidget(self.cap_nav)
+        lay.addWidget(self.cap_table, 0 if LOOK.classic else 8)
         lay.addWidget(legend)
         lay.addWidget(self.cap_detail, 1)
+        self.cap_legend = legend
+        self.cap_empty = QWidget()
+        el = QHBoxLayout(self.cap_empty)
+        el.setContentsMargins(0, 4, 0, 4)
+        el.setSpacing(12)
+        el.addWidget(QLabel("Add people to see their load."))
+        add = QPushButton("Add person")
+        add.clicked.connect(lambda _=False: self.add_person())
+        el.addWidget(add)
+        el.addStretch()
+        self.cap_empty.hide()
+        lay.addWidget(self.cap_empty)
+        lay.addStretch(0)
         return page
 
     def _build_edit_form(self) -> QWidget:
@@ -503,7 +531,7 @@ class BrowseWindow(QWidget):
         note = Help("Its capture.md stays as it arrived: the title and summary are kept in docs.db. Ctrl+Enter saves; Esc cancels.")
         lay.addWidget(note)
         row = QHBoxLayout()
-        save = QPushButton("Save", objectName="primary")
+        save = QPushButton("Save", objectName="primary" if LOOK.classic else "")
         save.clicked.connect(self.save_capture_edit)
         cancel = QPushButton("Cancel")
         cancel.clicked.connect(self.cancel_capture_edit)
@@ -589,7 +617,7 @@ class BrowseWindow(QWidget):
         return text
 
     def pages(self) -> Pages:
-        return Pages(self.model(), self.today(), self.content_of, self.ctx.settings.me, self.conn)
+        return Pages(self.model(), self.today(), self.content_of, self.ctx.settings.me, self.conn, LOOK.show_help)
 
     def refresh(self, render: bool = True) -> None:
         """Read docs.db again and show what's there now."""
@@ -618,12 +646,15 @@ class BrowseWindow(QWidget):
         self.render_detail()
 
     def say(self, text: str, error: bool = False) -> None:
-        """A line in the status line at the bottom, for a few seconds."""
+        """A line in the status line at the bottom, for a few seconds. An error stays until the next thing it says (release 5.59)."""
         self.status.setText(text)
         self.status.setProperty("error", error)
         self.status.style().unpolish(self.status)
         self.status.style().polish(self.status)
-        self._status_timer.start()
+        if error and not LOOK.classic:
+            self._status_timer.stop()
+        else:
+            self._status_timer.start()
 
     # ================= the views pane =================
     def render_nav(self) -> None:
@@ -636,7 +667,7 @@ class BrowseWindow(QWidget):
         for v in VIEWS:
             if v.section != section:
                 section = v.section
-                self.nav.add_row(None, None, [f'<span style="color:#87919c; font-size:8pt; font-weight:600">{esc(section.upper())}</span>', ""],
+                self.nav.add_row(None, None, [f'<span style="color:#87919c; font-size:8pt; font-weight:600">{esc(section.upper())}</span>', ""],  # Classic's
                                  selectable=False)
             count = counts.get(v.id)
             label = f"<b>{esc(v.label)}</b>" if v.id == self.view else esc(v.label)
@@ -797,9 +828,11 @@ class BrowseWindow(QWidget):
                 self._level_buttons()
         finally:
             self.tree.end(self._row_to_select())
+        if not LOOK.classic:  # no column headings over nothing, or over Search's one column, whose heading says nothing the title doesn't
+            self.tree.setHeaderHidden(self.view == "search" or not any(k is not None for k in self.tree.keys()))
         if self.view in NESTING_VIEWS:
             self._sync_level_buttons()
-        self.filters.setVisible(self.filters_layout.count() > 0)
+        self.filters.setVisible(any(not self.filters_layout.itemAt(i).isEmpty() for i in range(self.filters_layout.count())))
         self._apply_find()
 
     def _row_to_select(self):
@@ -888,18 +921,18 @@ class BrowseWindow(QWidget):
         if depth == 0:
             title = f"<b>{title}</b>"
         if context:
-            return [f'<span style="color:#5a6571">{title}</span>', "", ""]
+            return [f'<span style="color:{C.text2}">{title}</span>', "", ""]
         if t.state == "Closed":
-            title = f'<s><span style="color:#87919c">{title}</span></s>'
+            title = f'<s><span style="color:{C.text2}">{title}</span></s>'
         chips = "".join(" " + chip(text, cls) for text, cls in markers(m, t))
         cell = due_cell(t, self.today(), when, use_due)
-        colour = {"over": "color:#b0261e; font-weight:600", "soon": "color:#875700; font-weight:600"}.get(cell.cls if cell else "", "")
+        colour = _due_css(cell.cls if cell else "")
         mark = ""
         if cell and cell.deadline:
             mark = ('<br><span style="color:#87919c; font-weight:400; font-size:8pt">deadline</span>' if LOOK.classic else
                     '<br><span class="note" style="font-weight:400">deadline</span>')
         due = f'<p align="right" style="{colour}">{esc(cell.text)}{mark}</p>' if cell else ""
-        return [title + chips + extra, state_chip(t.state), due]
+        return [title + chips + extra, _row_state(t.state), due]
 
     def _label_words(self, task_id: str, skip: str = "") -> str:
         """After a title in the task tree (item 76, decision 235): the task's own labels, as quiet words rather than chips.
@@ -912,7 +945,7 @@ class BrowseWindow(QWidget):
         m = self.model()
         for n in nodes:
             if n.kind == "group":
-                item = self.tree.add_row(parent, None, [f"<b>{esc(n.label)}</b>"], QColor(GREY).lighter(135), selectable=False, span=True)
+                item = self.tree.add_row(parent, None, [f"<b>{esc(n.label)}</b>"], group_ground(), selectable=False, span=True)
             elif n.kind == "doc":
                 d = m.documents[n.id]
                 link = is_link(d.original)
@@ -961,10 +994,11 @@ class BrowseWindow(QWidget):
         sections = [replace(s, nodes=sort_tree(m, s.nodes, self.sorts.get("tasks", "default"), self.today()))
                     for s in tree_sections(m, tf, how)] if how else []
         nodes = [n for s in sections for n in s.nodes] if how else sort_tree(m, task_tree(m, tf), self.sorts.get("tasks", "default"), self.today())
-        self._button("− Collapse a level", lambda: self._level(nodes, "collapse"), collapse_level(nodes, self.open) != self.open,
-                     "Fold every branch up one level")
-        self._button("+ Expand a level", lambda: self._level(nodes, "expand"), expand_level(nodes, self.open) != self.open,
-                     "Open every branch one more level")
+        can_fold, can_open = collapse_level(nodes, self.open) != self.open, expand_level(nodes, self.open) != self.open
+        collapse = self._level_button(False, lambda: self._level(nodes, "collapse"), can_fold)
+        expand = self._level_button(True, lambda: self._level(nodes, "expand"), can_open)
+        collapse.setVisible(can_fold or can_open or LOOK.classic)  # gone where nothing nests
+        expand.setVisible(can_fold or can_open or LOOK.classic)
         self.tree.set_columns(["Title", "State", "Due"])
 
         def row(n: Node, section: str = "") -> tuple[list[str], str]:
@@ -972,7 +1006,7 @@ class BrowseWindow(QWidget):
             return self._task_cells(n.id, n.depth, dimmed, extra=self._label_words(n.id, section)), full_path(m, n.id)
 
         if how:  # a section per group, each with its tasks in tree shape (release 5.24)
-            grey = QColor(GREY).lighter(135)
+            grey = group_ground()
             for s in sections:
                 sub = f' <span class="sub">{esc(s.sub)}</span>' if s.sub else ""
                 head = self.tree.add_row(None, None, [f'<b>{esc(s.name)}</b>{sub} &nbsp;<span class="sub">{s.count}</span>'], grey,
@@ -982,7 +1016,9 @@ class BrowseWindow(QWidget):
                 head.setExpanded(True)
         else:
             self._add_nodes(nodes, filtered=filtered, expand_all=False, row=row)
-        if not nodes:
+        if not nodes and not LOOK.classic and not any(not t.discarded for t in m.tasks.values()):  # first use, not a filter's doing
+            self.tree.show_empty("No tasks yet.", "New task", lambda: self.open_capture(mode="new_task"))
+        elif not nodes:
             self.tree.add_row(None, None, ['<span class="sub">No tasks match these filters.</span>'], selectable=False, span=True)
 
     def _tree_group_box(self, m) -> None:
@@ -1114,9 +1150,20 @@ class BrowseWindow(QWidget):
     def _row_id(item):
         return item.data(0, KEY_ROLE) or ("row", item.data(0, HTML_ROLE))
 
+    def _level_button(self, expand: bool, clicked: Callable[[], None], enabled: bool = True) -> QPushButton:
+        """Collapse a level or Expand a level. Two icon buttons in the new look, which often were the reason a bar wrapped (release 5.59)."""
+        name, sign, tip_text = ("Expand a level", "+", "Open every branch one more level") if expand else ("Collapse a level", "−", "Fold every branch up one level")
+        if LOOK.classic:
+            return self._button(f"{sign} {name}", clicked, enabled, tip_text)
+        b = self._button("", clicked, enabled, f"{name}: {tip_text.lower()}")
+        b.setObjectName("iconOnly")
+        b.setIcon(icon("level-open" if expand else "level-fold"))
+        b.setAccessibleName(name)
+        return b
+
     def _level_buttons(self) -> None:
-        self._lvl_collapse = self._button("− Collapse a level", lambda: self._tree_level(False), tip="Fold every branch up one level")
-        self._lvl_expand = self._button("+ Expand a level", lambda: self._tree_level(True), tip="Open every branch one more level")
+        self._lvl_collapse = self._level_button(False, lambda: self._tree_level(False))
+        self._lvl_expand = self._level_button(True, lambda: self._tree_level(True))
 
     def _branches(self) -> list:
         """The rows you can see that have rows under them."""
@@ -1143,6 +1190,9 @@ class BrowseWindow(QWidget):
         rows = self._branches()
         self._lvl_collapse.setEnabled(any(x.isExpanded() for x in rows))
         self._lvl_expand.setEnabled(any(not x.isExpanded() for x in rows))
+        if not LOOK.classic:  # gone where nothing nests
+            self._lvl_collapse.setVisible(bool(rows))
+            self._lvl_expand.setVisible(bool(rows))
 
     def _apply_shut(self) -> None:
         """Fold again the rows folded by hand in this view."""
@@ -1162,8 +1212,8 @@ class BrowseWindow(QWidget):
         self._set_head(v.label, v.note + " Dimmed rows are their parents, shown for context.")
         reminders = view_id == "reminders"
         with_keys = view_id == "due"  # key dates have a row each, with Done (release 5.31, decision 150)
-        self.tree.set_columns(["Title", "State", "Reminder" if reminders else "Due", ""] if reminders or with_keys else ["Title", "State", "Due"],
-                              [0, 96, 96, 56] if reminders or with_keys else None)
+        self.tree.set_columns(*with_actions(["Title", "State", "Reminder" if reminders else "Due"], [0, 96, 96], 56)
+                              if reminders or with_keys else (["Title", "State", "Due"], None))
         self._sort_box(view_id)
         grouped = self._group_box(view_id)
         self._select_controls()
@@ -1187,10 +1237,7 @@ class BrowseWindow(QWidget):
             for item in self.tree.items():
                 key = item.data(0, KEY_ROLE)
                 if key and key[0] == "task" and m.task(key[1]).reminder and key[1] in {t.id for t in self._matching(task_list)}:
-                    b = QPushButton("Clear", objectName="rowLink")
-                    b.setToolTip("Clear this reminder. Its status log records it.")
-                    b.clicked.connect(lambda _=False, tid=key[1]: self.clear_reminder(tid))
-                    self.tree.setItemWidget(item, 3, b)
+                    self.tree.set_actions(item, [("Clear", lambda tid=key[1]: self.clear_reminder(tid), "Clear this reminder. Its status log records it.")])
         keyed = self._key_date_rows(None) if with_keys else 0
         if not nodes and not keyed:
             self.tree.add_row(None, None, ['<span class="sub">Nothing here right now.</span>'], selectable=False, span=True)
@@ -1200,21 +1247,13 @@ class BrowseWindow(QWidget):
         chip, and its days until due, red when it's overdue."""
         today = self.today()
         cell = key_date_cell(d, today)
-        colour = {"over": "color:#b0261e; font-weight:600", "soon": "color:#875700; font-weight:600"}.get(cell.cls, "")
-        marks = (' <span style="color:#875700">⚑</span>' if d.key_date.plant else "") + (' <span style="color:#b0261e">◆</span>' if d.key_date.deadline else "")
-        return [f'{esc(d.task.title)}<br><span class="sub">{esc(d.text(today))}</span>{marks}', chip("Key date", "st-ns"),
+        colour = _due_css(cell.cls)
+        marks = (f' <span style="color:{C.caution}">⚑</span>' if d.key_date.plant else "") + (f' <span style="color:{C.critical}">◆</span>' if d.key_date.deadline else "")
+        return [f'{esc(d.task.title)}<br><span class="sub">{esc(d.text(today))}</span>{marks}', _row_word("Key date"),
                 f'<p align="right" style="{colour}">{esc(cell.text)}</p>']
 
-    def _key_date_done_button(self, key_id: int) -> QWidget:
-        done = QPushButton("Done", objectName="rowLink")
-        done.setToolTip("Mark this key date done: off Today and this list, and in its task's status log (decision 148)")
-        done.clicked.connect(lambda _=False, k=key_id: self.key_date_done(k, True))
-        holder = QWidget()
-        lay = QHBoxLayout(holder)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.addWidget(done)
-        lay.addStretch()
-        return holder
+    def _key_date_actions(self, key_id: int) -> list[tuple[str, Callable[[], None], str]]:
+        return [("Done", lambda: self.key_date_done(key_id, True), "Mark this key date done: off Today and this list, and in its task's status log (decision 148)")]
 
     def _key_date_rows(self, parent) -> int:
         """The Overdue and next 7 days list's key dates (release 5.31, decision 150): under a Key dates heading, a row each,
@@ -1222,12 +1261,12 @@ class BrowseWindow(QWidget):
         dues = key_dates_due(self.model(), self.today())
         if not dues:
             return 0
-        head = self.tree.add_row(parent, None, [f'<b>Key dates</b> &nbsp;<span class="sub">{len(dues)}</span>'], QColor(GREY).lighter(135),
+        head = self.tree.add_row(parent, None, [f'<b>Key dates</b> &nbsp;<span class="sub">{len(dues)}</span>'], group_ground(),
                                  selectable=False, span=True)
         for d in dues:
             item = self.tree.add_row(head, ("task", d.task.id), self._key_date_cells(d),
                                      tip=f"A key date of {d.task.title}: {key_dates.label(d.key_date, self.today())}")
-            self.tree.setItemWidget(item, 3, self._key_date_done_button(d.key_date.id))
+            self.tree.set_actions(item, self._key_date_actions(d.key_date.id))
         head.setExpanded(True)
         return len(dues)
 
@@ -1275,7 +1314,7 @@ class BrowseWindow(QWidget):
 
         walk(nodes)
         subs = m.sublabels(parent)
-        grey = QColor(GREY).lighter(135)
+        grey = group_ground()
         for name, ids in [*((s, [x for x in order if any(n == s for n, _ in m.labels_of(x))]) for s in subs),
                           (f"No {parent.lower()}", [x for x in order if not any(n in subs for n, _ in m.labels_of(x))])]:
             if not ids:
@@ -1326,8 +1365,8 @@ class BrowseWindow(QWidget):
             self._button("Update…", lambda: self.answer_today("update"))
             self._button("Close the task…", lambda: self.answer_today("close"))
             self._button("No", lambda: self.answer_today(None))
-        self.tree.set_columns(["Item", "State", "Due", ""], [0, 96, 96, 220])
-        grey = QColor(GREY).lighter(135)
+        self.tree.set_columns(*with_actions(["Item", "State", "Due"], [0, 96, 96], 220))
+        grey = group_ground()
         for name, items in today_groups(m, today):  # each group's items under its heading, which folds (release 5.24)
             head = self.tree.add_row(None, None, [f"<b>{esc(name)}</b>"], grey, selectable=False, span=True)
             for a in items:
@@ -1337,12 +1376,12 @@ class BrowseWindow(QWidget):
                 where = esc(path_text(m, t.id) or "Top-level task") if t else "A note"
                 note = f" · {esc(a.note)}" if t and a.note else ""
                 cell = due_cell(t, today) if t else None
-                colour = {"over": "color:#b0261e; font-weight:600", "soon": "color:#875700; font-weight:600"}.get(cell.cls if cell else "", "")
+                colour = _due_css(cell.cls if cell else "")
                 item = self.tree.add_row(head, key, [f'{esc(t.title if t else a.note)}<br><span class="sub">{since}{where}{note}</span>',
-                                                     state_chip(t.state) if t else chip("Note", "st-ns"),
+                                                     _row_state(t.state) if t else _row_word("Note"),
                                                      f'<p align="right" style="{colour}">{esc(cell.text)}</p>' if cell else ""],
                                          tip=f"Added {long_date(date.fromisoformat(a.added[:10]), today)}")
-                self.tree.setItemWidget(item, 3, self._today_buttons(a.id, t.id if t else None))
+                self.tree.set_actions(item, self._today_actions(a.id, t.id if t else None))
             head.setExpanded(True)
         if not m.today_items():
             self.tree.add_row(None, None, ['<span class="sub">Nothing on Today. Select a task and press D, or type a quick task above.</span>'],
@@ -1355,9 +1394,9 @@ class BrowseWindow(QWidget):
             for a in done:
                 t = m.tasks.get(a.subject) if a.subject else None
                 self.tree.add_row(head, ("task", t.id) if t else None,
-                                  [f'<s><span style="color:#87919c">{esc(t.title if t else a.note)}</span></s><br>'
+                                  [f'<s><span style="color:{C.text2}">{esc(t.title if t else a.note)}</span></s><br>'
                                    f'<span class="sub">Done at {esc((a.closed or "")[11:16])}</span>',
-                                   state_chip(t.state) if t else chip("Note", "st-ns"), ""])
+                                   _row_state(t.state) if t else _row_word("Note"), ""])
             head.setExpanded(True)
 
     def _today_reminder_rows(self, m: Model, today: date, grey: QColor) -> None:
@@ -1370,28 +1409,16 @@ class BrowseWindow(QWidget):
         head = self.tree.add_row(None, None, ["<b>Reminders</b>"], grey, selectable=False, span=True)
         for t in due:
             cell = due_cell(t, today, DueDate(to_date(t.reminder), "Reminder"), use_due=False)
-            colour = {"over": "color:#b0261e; font-weight:600", "soon": "color:#875700; font-weight:600"}.get(cell.cls, "")
+            colour = _due_css(cell.cls)
             item = self.tree.add_row(head, ("task", t.id), [f'{esc(t.title)}<br><span class="sub">{esc(path_text(m, t.id) or "Top-level task")}</span>',
-                                                            chip("Reminder", "st-ns"), f'<p align="right" style="{colour}">{esc(cell.text)}</p>'],
+                                                            _row_word("Reminder"), f'<p align="right" style="{colour}">{esc(cell.text)}</p>'],
                                      tip=cell.tip)
-            self.tree.setItemWidget(item, 3, self._reminder_buttons(t.id, t.id in on_today))
+            self.tree.set_actions(item, self._reminder_actions(t.id, t.id in on_today))
         head.setExpanded(True)
 
-    def _reminder_buttons(self, task_id: str, on_today: bool) -> QWidget:
-        box = QWidget()
-        lay = QHBoxLayout(box)
-        lay.setContentsMargins(0, 0, 0, 0)
-        if not on_today:
-            add = QPushButton("Add to Today", objectName="rowLink")
-            add.setToolTip("Put it on Today (D); the reminder stays until it's cleared")
-            add.clicked.connect(lambda _=False: self.add_to_today(task_id))
-            lay.addWidget(add)
-        clear = QPushButton("Clear", objectName="rowLink")
-        clear.setToolTip("Clear this reminder. Its status log records it.")
-        clear.clicked.connect(lambda _=False: self.clear_reminder(task_id, "Today"))
-        lay.addWidget(clear)
-        lay.addStretch()
-        return box
+    def _reminder_actions(self, task_id: str, on_today: bool) -> list[tuple[str, Callable[[], None], str]]:
+        add = [("Add to Today", lambda: self.add_to_today(task_id), "Put it on Today (D); the reminder stays until it's cleared")]
+        return [*(() if on_today else add), ("Clear", lambda: self.clear_reminder(task_id, "Today"), "Clear this reminder. Its status log records it.")]
 
     def _today_due_rows(self, m: Model, today: date, grey: QColor) -> None:
         """Due in the next 7 days (mods log round 2, M0050): tasks overdue or due soon that aren't on Today, each with Add
@@ -1409,21 +1436,13 @@ class BrowseWindow(QWidget):
             if isinstance(t, key_dates.Due):
                 item = self.tree.add_row(head, ("task", t.task.id), self._key_date_cells(t),
                                          tip=f"A key date of {t.task.title}: {key_dates.label(t.key_date, today)}")
-                self.tree.setItemWidget(item, 3, self._key_date_done_button(t.key_date.id))
+                self.tree.set_actions(item, self._key_date_actions(t.key_date.id))
                 continue
             cell = due_cell(t, today)
-            colour = {"over": "color:#b0261e; font-weight:600", "soon": "color:#875700; font-weight:600"}.get(cell.cls if cell else "", "")
+            colour = _due_css(cell.cls if cell else "")
             item = self.tree.add_row(head, ("task", t.id), [f'{esc(t.title)}<br><span class="sub">{esc(path_text(m, t.id) or "Top-level task")}</span>',
-                                                          state_chip(t.state), f'<p align="right" style="{colour}">{esc(cell.text)}</p>' if cell else ""])
-            add = QPushButton("Add to Today", objectName="rowLink")
-            add.setToolTip("Put it on Today (D)")
-            add.clicked.connect(lambda _=False, i=t.id: self.add_to_today(i))
-            holder = QWidget()
-            lay = QHBoxLayout(holder)
-            lay.setContentsMargins(0, 0, 0, 0)
-            lay.addWidget(add)
-            lay.addStretch()
-            self.tree.setItemWidget(item, 3, holder)
+                                                          _row_state(t.state), f'<p align="right" style="{colour}">{esc(cell.text)}</p>' if cell else ""])
+            self.tree.set_actions(item, [("Add to Today", lambda i=t.id: self.add_to_today(i), "Put it on Today (D)")])
         if not entries:
             self.tree.add_row(head, None, ['<span class="sub">Nothing else is due in the next 7 days' + (" for you." if mine else ".") + "</span>"],
                               selectable=False, span=True)
@@ -1434,28 +1453,15 @@ class BrowseWindow(QWidget):
         db.set_state(self.conn, TODAY_MINE_KEY, "1" if on else "0")
         self.render_list()
 
-    def _today_buttons(self, item_id: int, task_id: str | None) -> QWidget:
-        """A Today item's links. A task has Edit (Edit task, where Parents files a quick task) and Note; a note has Edit and
+    def _today_actions(self, item_id: int, task_id: str | None) -> list[tuple[str, Callable[[], None], str]]:
+        """A Today item's actions. A task has Edit (Edit task, where Parents files a quick task) and Note; a note has Edit and
         Make it a task (mods log round 2, M0040). Then Done and Remove."""
-        box = QWidget()
-        lay = QHBoxLayout(box)
-        lay.setContentsMargins(0, 0, 0, 0)
         links = ((("Edit", lambda: self.edit_task(task_id), "Edit task, such as putting it under its real task (E)"),
                   ("Note", lambda: self.open_capture(task=task_id, mode="note"), "Add a note, with files, to the task (N)")) if task_id else
                  (("Edit", lambda: self.edit_today_note(item_id), "Change the note's text"),
                   ("Make it a task", lambda: self.make_today_task(item_id), "Make it a quick task, under Quick tasks, in the note's place")))
-        for label, clicked, tip in links:
-            b = QPushButton(label, objectName="rowLink")
-            b.setToolTip(tip)
-            b.clicked.connect(lambda _=False, c=clicked: c())
-            lay.addWidget(b)
-        for label, how, tip in (("Done", "Done", "Take it off Today as done"), ("Remove", "Removed", "Take it off Today")):
-            b = QPushButton(label, objectName="rowLink")
-            b.setToolTip(tip)
-            b.clicked.connect(lambda _=False, h=how: self.close_today_item(item_id, h))
-            lay.addWidget(b)
-        lay.addStretch()
-        return box
+        return [*links, ("Done", lambda: self.close_today_item(item_id, "Done"), "Take it off Today as done"),
+                ("Remove", lambda: self.close_today_item(item_id, "Removed"), "Take it off Today")]
 
     def _discarded_view(self) -> None:
         """Tasks and captures discarded as made by mistake (mods log round 1, M0021), the latest first."""
@@ -1475,7 +1481,7 @@ class BrowseWindow(QWidget):
         if not target:
             self._set_head("Agendas", "No agendas yet. Check Meeting on a task to give it an agenda, or put something on an agenda with "
                                       "Add to agenda in the capture window.")
-            self.tree.set_columns(["Item", "State", "Added", ""], [0, 96, 70, 130])
+            self.tree.set_columns(*with_actions(["Item", "State", "Added"], [0, 96, 70], 130))
             return
         when = m.meeting_when(target, self.today())
         when_text = f" {'Next meeting' if m.task(target).recurrence else 'Date'}: {when}." if when and when != "no date set" else ""
@@ -1492,8 +1498,8 @@ class BrowseWindow(QWidget):
         meeting = m.tasks.get(target)
         if meeting and meeting.meeting and is_open(meeting):  # release 5.8
             self._button("Meeting notes", lambda: self.open_capture(task=target, meeting=True))
-        self.tree.set_columns(["Item", "State", "Added", ""], [0, 96, 70, 130])
-        grey = QColor(GREY).lighter(135)
+        self.tree.set_columns(*with_actions(["Item", "State", "Added"], [0, 96, 70], 130))
+        grey = group_ground()
         for name, items in agenda_groups(m, target):  # each topic's items under its heading, which folds (release 5.24)
             head = self.tree.add_row(None, None, [f"<b>{esc(name)}</b>"], grey, selectable=False, span=True)
             for a in items:
@@ -1502,10 +1508,10 @@ class BrowseWindow(QWidget):
                 main = esc(t.title if t else a.note)
                 note = f'<br><span class="sub">{esc(a.note)}</span>' if t and a.note else ""
                 where = f'<br><span class="sub">{esc(path_text(m, t.id) or "Top-level task") if t else "A note, with no task"}</span>'
-                item = self.tree.add_row(head, key, [main + note + where, state_chip(t.state) if t else chip("Note", "st-ns"),
+                item = self.tree.add_row(head, key, [main + note + where, _row_state(t.state) if t else _row_word("Note"),
                                                      f'<p align="right">{esc(short(date.fromisoformat(a.added[:10]), self.today()))}</p>'],
                                          tip=f"Added {long_date(date.fromisoformat(a.added[:10]), self.today())}")
-                self.tree.setItemWidget(item, 3, self._agenda_buttons(a.id))
+                self.tree.set_actions(item, self._agenda_actions(a.id))
             head.setExpanded(True)
         closed = closed_items(m, target)
         if closed:
@@ -1513,26 +1519,17 @@ class BrowseWindow(QWidget):
             for a in closed:
                 t = m.tasks.get(a.subject) if a.subject else None
                 self.tree.add_row(head, ("task", t.id) if t else None,
-                                  [f'<s><span style="color:#87919c">{esc(t.title if t else a.note)}</span></s><br>'
+                                  [f'<s><span style="color:{C.text2}">{esc(t.title if t else a.note)}</span></s><br>'
                                    f'<span class="sub">{esc(a.how)} {esc(long_date(date.fromisoformat(a.closed[:10]), self.today()))}</span>',
-                                   state_chip(t.state) if t else chip("Note", "st-ns"),
+                                   _row_state(t.state) if t else _row_word("Note"),
                                    f'<p align="right">{esc(short(date.fromisoformat(a.closed[:10]), self.today()))}</p>'])
             head.setExpanded(True)
         if not agenda_groups(m, target):
             self.tree.add_row(None, None, ['<span class="sub">No open agenda items.</span>'], selectable=False, span=True)
 
-    def _agenda_buttons(self, item_id: int) -> QWidget:
-        box = QWidget()
-        lay = QHBoxLayout(box)
-        lay.setContentsMargins(0, 0, 0, 0)
-        for label, how, tip in (("Discussed", "Discussed", "Close it as discussed, then note the outcome in an update"),
-                                ("Remove", "Removed", "Take it off the agenda")):
-            b = QPushButton(label, objectName="rowLink")
-            b.setToolTip(tip)
-            b.clicked.connect(lambda _=False, h=how: self.close_agenda_item(item_id, h))
-            lay.addWidget(b)
-        lay.addStretch()
-        return box
+    def _agenda_actions(self, item_id: int) -> list[tuple[str, Callable[[], None], str]]:
+        return [("Discussed", lambda: self.close_agenda_item(item_id, "Discussed"), "Close it as discussed, then note the outcome in an update"),
+                ("Remove", lambda: self.close_agenda_item(item_id, "Removed"), "Take it off the agenda")]
 
     def _people_view(self) -> None:
         m = self.model()
@@ -1584,7 +1581,7 @@ class BrowseWindow(QWidget):
         self._set_head("Documents", "Files DocRepo tracks, under the tasks they belong to. Originals stay where they are; their text is kept in Documents.",
                        str(sum(1 for d in m.documents if not m.only_in_discarded(d))))
         self._filter_widget(QLabel("Task"))
-        picker = QPushButton((full_path(m, self.doc_task) if self.doc_task in m.tasks else "Any task") + "  ▾")
+        picker = DropButton(full_path(m, self.doc_task) if self.doc_task in m.tasks else "Any task")
         picker.clicked.connect(lambda: self._pick_task(picker, self._set_doc_task, ("Any task", "Show every document")))
         self._filter_widget(picker)
         if self.doc_task:
@@ -1691,7 +1688,7 @@ class BrowseWindow(QWidget):
         target.setCurrentIndex(max(0, target.findData(a["target"])))
         target.currentIndexChanged.connect(lambda _: a.__setitem__("target", target.currentData()))
         self._filter_widget(target)
-        self._act_add = QPushButton("Add to agenda", objectName="primary")
+        self._act_add = QPushButton("Add to agenda", objectName="primary" if LOOK.classic else "")
         self._act_add.setToolTip("Each ticked task as an agenda item; a ticked line goes on as its task, with the line as the item's note")
         self._act_add.clicked.connect(self.add_activity_to_agenda)
         self._filter_widget(self._act_add)
@@ -1701,7 +1698,7 @@ class BrowseWindow(QWidget):
     def _activity_group(self, m, today, g) -> None:
         """A group's header row, then a row for each task under it and a row for each line."""
         select = self.act["select"]
-        head = f'<b>{esc(g.name)}</b>' + (f" {state_chip(m.task(g.task).state)}" if g.task else "") + \
+        head = f'<b>{esc(g.name)}</b>' + (f" {_row_state(m.task(g.task).state)}" if g.task else "") + \
             (f' <span class="sub">{esc(g.sub)}</span>' if g.sub else "") + f' <span class="sub">· {len(g.lines)}</span>'
         key = ("task", g.task) if g.task else ("person", g.person) if g.person else None
         top = self.tree.add_row(None, key, [head, ""], tip=f"{len(g.lines)} thing{'s' if len(g.lines) != 1 else ''} happened",
@@ -1714,15 +1711,16 @@ class BrowseWindow(QWidget):
                 t = m.task(h.task)
                 chain = m.chains_of(t.id)[0]
                 above = " › ".join(m.task(x).title for x in chain[(1 if g.task else 0):-1])
-                cells = [(f'<span class="sub">{esc(above)} ›</span> ' if above else "") + f"<b>{esc(t.title)}</b> {state_chip(t.state)}"
+                cells = [(f'<span class="sub">{esc(above)} ›</span> ' if above else "") + f"<b>{esc(t.title)}</b> {_row_state(t.state)}"
                          + "".join(" " + chip(text, cls) for text, cls in markers(m, t)), ""]
                 parent = self.tree.add_row(top, ("task", t.id), cells)
                 if select:
                     self.tree.add_tick(parent, f"t:{t.id}" in self.act["picked"])
             for line in h.lines:
                 facts = "".join(f'<br><span class="sub">{esc(x)}</span>' for x in line.facts)
-                when = f'<p align="right">{esc(short(line.day, today))}<br><span class="sub">{esc(long_date(line.day, today)[:3])} {esc(line.at[11:16])}</span></p>'
-                row = self.tree.add_row(parent, ("actline", line.key), [f"{chip(line.chip, ACT_CHIPS.get(line.kinds[0], 'lbl'))} {esc(line.text)}{facts}", when],
+                when = (f'<p align="right">{esc(short(line.day, today))}<br><span class="sub">{esc(long_date(line.day, today)[:3])} {esc(line.at[11:16])}</span></p>'
+                        if LOOK.classic else f'<p align="right">{esc(short(line.day, today))} <span class="sub">{esc(line.at[11:16])}</span></p>')  # one line
+                row = self.tree.add_row(parent, ("actline", line.key), [f"{chip(line.chip, ACT_CHIPS.get(line.kinds[0], 'lbl') if LOOK.classic else 'lbl')} {esc(line.text)}{facts}", when],
                                         tip=f"{long_date(line.day, today)}, {line.at[11:16]}")
                 if select:
                     self.tree.add_tick(row, f"l:{line.key}" in self.act["picked"])
@@ -1882,7 +1880,7 @@ class BrowseWindow(QWidget):
         results = search.search(self.conn, m, self.query)
         self._set_head(f"Search: {self.query}", f"{len(results)} result{'s' if len(results) != 1 else ''}. Every word you type must be in the item.")
         self.tree.set_columns(["Result"])
-        grey, group = QColor(GREY).lighter(135), ""
+        grey, group = group_ground(), ""
         for r in results:
             if r.group != group:
                 group = r.group
@@ -1897,6 +1895,10 @@ class BrowseWindow(QWidget):
         m, today = self.model(), self.today()
         weeks = capacity_weeks(today, self.cap_offset)
         rows = capacity_grid(self.conn, m, weeks)
+        nobody = not rows and not LOOK.classic
+        for w in (self.cap_nav, self.cap_table, self.cap_legend, self.cap_detail):
+            w.setVisible(not nobody)
+        self.cap_empty.setVisible(nobody)
         # Grouped (release 5.9): each group's people under its heading, then those with no group.
         lines: list[CapacityRow | str] = list(rows)
         if self.cap_by_group.isChecked():
@@ -1920,11 +1922,12 @@ class BrowseWindow(QWidget):
         t.setHorizontalHeaderLabels(["Person", *heads])
         for i, w in enumerate(weeks):
             if "\n" in heads[i]:
-                t.horizontalHeaderItem(i + 1).setBackground(QColor("#f3e6cc"))
+                t.horizontalHeaderItem(i + 1).setBackground(QColor(C.event_bg))
                 t.horizontalHeaderItem(i + 1).setToolTip("A plant event this week: " + heads[i].split("\n", 1)[1])
-        # Decision 18: neutral under 80%, the accent's tint from 80% to 100%, red over 100% (the Classic look: green, amber, red).
+        # Neutral under 80%, caution's tint from 80% to 100%, red over 100% (the Classic look: green, amber, red). Decision 18 had the
+        # accent's tint in the middle, which was selection's, so a selected cell couldn't be told from a busy one (release 5.60).
         colours = ({"u1": "#e2f2e6", "u2": "#fcefcf", "u3": "#fbe3e1"} if LOOK.classic else
-                   {"u2": tokens.colour("selected"), "u3": tokens.colour("critical_bg")})
+                   {"u2": tokens.colour("caution_bg"), "u3": tokens.colour("critical_bg")})
         t.setShowGrid(LOOK.classic)
         self._cap_line_rows = lines
         for r, row in enumerate(lines):
@@ -1936,7 +1939,7 @@ class BrowseWindow(QWidget):
                     head.setFont(f)
                 else:
                     head.setFont(tokens.ui_font(semibold=True))  # from the helper: setBold on an item's font is lost under its style name
-                head.setBackground(QColor(GREY).lighter(135))
+                head.setBackground(group_ground())
                 head.setFlags(Qt.ItemFlag.ItemIsEnabled)
                 t.setItem(r, 0, head)
                 t.setSpan(r, 0, 1, len(weeks) + 1)
@@ -1956,6 +1959,18 @@ class BrowseWindow(QWidget):
                 item.setToolTip(f"{row.name}, week of {long_date(weeks[i], today)}: {c.hours:.1f} h")
                 t.setItem(r, i + 1, item)
         t.resizeRowsToContents()
+        if not LOOK.classic:
+            header = t.horizontalHeader()
+            header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+            for i in range(1, t.columnCount()):
+                header.setSectionResizeMode(i, QHeaderView.ResizeMode.Stretch)
+            # All its rows when there's room, with none cut by a scroll bar across it, and no gap under its last row.
+            t.setMaximumHeight(header.sizeHint().height() + sum(t.rowHeight(r) for r in range(t.rowCount())) + t.horizontalScrollBar().sizeHint().height() + 4)
+            if self.cap_cell:  # the cell clicked stays marked when the table is drawn again
+                person, week = self.cap_cell
+                for r, line in enumerate(lines):
+                    if not isinstance(line, str) and line.person == person and week + 1 < t.columnCount():
+                        t.setCurrentCell(r, week + 1)
         t.resizeColumnToContents(0)
         height = t.horizontalHeader().height() + sum(t.rowHeight(r) for r in range(t.rowCount())) + 2 * t.frameWidth() + 2
         t.setFixedHeight(min(height, 420))
@@ -1981,12 +1996,15 @@ class BrowseWindow(QWidget):
         self.keytips.clear("actions")
 
     def _action(self, label: str, clicked: Callable[[], None] | None = None, tip: str = "", enabled: bool = True,
-                menu: QMenu | None = None, primary: bool = False, icon_name: str | None = None, key: str = "") -> QPushButton:
+                menu: QMenu | None = None, primary: bool = False, icon_name: str | None = None, key: str = "", drop: bool = False) -> QPushButton:
         """A command on the detail pane's bar. In the new look it's a subtle button with an icon and its key in the tooltip
-        (and under Alt); in the Classic look the key is in its label."""
+        (and under Alt); in the Classic look the key is in its label. ``primary`` is the page's main command: neutral, not
+        subtle, as New capture is the window's one accent button (the review's decision V2). ``drop`` gives it a chevron."""
         if LOOK.classic and key:
             label = f"{label}   {key}"
-        b = QPushButton(label, objectName="primary" if primary else "" if LOOK.classic else "subtle")
+        name = "primary" if primary and LOOK.classic else "" if primary or LOOK.classic else "subtle"
+        b = DropButton(label) if drop else QPushButton(label)
+        b.setObjectName(name)
         b.setToolTip(f"{tip} ({key})" if key and tip and not LOOK.classic else tip)
         if icon_name and not LOOK.classic:
             b.setIcon(icon(icon_name))
@@ -2167,7 +2185,7 @@ class BrowseWindow(QWidget):
         if m.is_unfiled(c):
             picked = self.file_to.get(capture_id)
             text = full_path(m, picked) if picked in m.tasks else "Pick a task"
-            pick = self._action(f"{text}  ▾", tip="Pick the task to file this capture to")
+            pick = self._action(text, tip="Pick the task to file this capture to", drop=True)
             pick.clicked.connect(lambda: self._pick_task(pick, lambda tid: self._set_file_to(capture_id, tid), None))
             self._action("File to task", lambda: self.file_capture(capture_id), "File this capture to the picked task", picked in m.tasks, primary=True)
             self._action("Make it a task", lambda: self.open_capture(from_capture=capture_id), "Create a task from this capture, and file it there")
@@ -3208,7 +3226,7 @@ class BrowseWindow(QWidget):
         if edited:
             names = ", ".join(model.task(t).title for t in edited)
             off = self.confirm("Discard capture", f"{capture_id}'s block on the notes page of {names} was edited there. "
-                                                  "Take it off the page too?\n\nNo leaves it on the page as you edited it.")
+                                                  "Take it off the page too?")
         self._do(lambda: edits.discard_capture(self.conn, self.ctx.data_root, self.ctx.fs, capture_id, reason, self._now(), off), ("capture", capture_id))
 
     def bring_back_capture(self, capture_id: str) -> None:

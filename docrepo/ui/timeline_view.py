@@ -47,28 +47,30 @@ from docrepo.detail import esc
 from docrepo.model import KeyDate, Model, Task
 from docrepo.schedule import due_of, start_of
 from docrepo.timeline import Band, KeyMark, Row, Timeline
+from docrepo.ui import tokens
 from docrepo.ui.icons import icon
 from docrepo.ui.look import LOOK, Help
+from docrepo.ui.tokens import C
 from docrepo.ui.tree_view import GROUP_COLOURS
-from docrepo.ui.widgets import CheckMenuButton, DateField, FlowLayout, label_filter, people_filter
+from docrepo.ui.widgets import CheckMenuButton, DateField, DropButton, FlowLayout, label_filter, people_filter
 from docrepo.views import markers
 
 #: The most room the open list of tasks with no dates takes under the chart: four lines of Caption text, then it scrolls.
 UNDATED_MAX_HEIGHT = 68
-FG, MUTED, FAINT, LINE, LINE_STRONG = "#1a1f25", "#5a6571", "#87919c", "#d6dce3", "#b8c1cb"
-ACCENT, BAD, SEL, SURFACE_2, HOVER = "#1d5e98", "#b0261e", "#dbe8f5", "#f4f6f8", "#eef1f4"
+FG, MUTED, FAINT, LINE, LINE_STRONG = C.text, C.text2, C.disabled, C.stroke, C.stroke_strong
+ACCENT, BAD, SEL, SURFACE_2, HOVER, CONTENT = C.accent, C.critical, C.selected, C.base, C.hover, C.content
 #: Plant events (release 5.29): their bars, lane and band.
-EV_BG, EV_LINE, EV_INK = "#f7e3b5", "#b07a12", "#6e4700"
-#: Order by's keys colour the titles, in this order; a ninth key and on are grey.
-KEY_COLOURS = ("#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948")
+EV_BG, EV_LINE, EV_INK = C.event_bg, C.event, C.event_ink
+#: Order by's keys, each a lane's dot, in this order; a ninth key and on are grey.
+KEY_COLOURS = tuple(tokens.colour(f"lane{i}") for i in range(1, 9))
 #: Hours a week, light to dark (``timeline.HOUR_BINS``), and the text on each.
-HOUR_COLOURS = ("#86b6ef", "#5598e7", "#256abf", "#184f95", "#0d366b")
-HOUR_INK = ("#0b1b2e", "#0b1b2e", "#ffffff", "#ffffff", "#ffffff")
+HOUR_COLOURS = tuple(tokens.colour(f"hour{i}") for i in range(1, 6))
+HOUR_INK = tuple(tokens.colour(f"hour_ink{i}") for i in range(1, 6))
 #: The Priorities board's buckets.
-PRIORITY_COLOURS = {"critical": "#b0261e", "high": "#d9622b", "medium": "#1d5e98", "parking": "#87919c"}
+PRIORITY_COLOURS = {"critical": C.critical, "high": C.pri_high, "medium": C.accent, "parking": C.disabled}
 #: The pages' chip colours, inline: a QLabel doesn't have the pages' stylesheet.
-CHIP_STYLE = {"st-ns": ("#5a6571", "#eef1f4"), "st-ip": ("#1d5e98", "#dbe8f5"), "urgent": ("#b0261e", "#fbe3e1"),
-              "routine": ("#1a1f25", "#e9edf1"), "multi": ("#1d5e98", "#e4eefa"), "pri-critical": ("#ffffff", "#c42b1c"),
+CHIP_STYLE = {"st-ns": (C.text2, C.hover), "st-ip": (C.accent, C.info_bg), "urgent": (C.critical, C.critical_bg),
+              "routine": (C.text, C.hover), "multi": (C.accent, C.info_bg), "pri-critical": (C.on_accent, C.critical),
               "event": (EV_INK, EV_BG)}
 FLAG = "⚑"
 
@@ -78,7 +80,13 @@ def _chip(text: str, cls: str) -> str:
     return f'<span style="color:{fg}; background-color:{bg}">&nbsp;{esc(text)}&nbsp;</span>'
 
 
-def _mix(colour: str, strength: float, into: str = "#ffffff") -> QColor:
+def _alpha(colour: str, alpha: int) -> QColor:
+    c = QColor(colour)
+    c.setAlpha(alpha)
+    return c
+
+
+def _mix(colour: str, strength: float, into: str = CONTENT) -> QColor:
     """``colour`` mixed into ``into`` (white): at 1 the colour itself, at 0 ``into``."""
     c, w = QColor(colour), QColor(into)
     return QColor(round(w.red() + (c.red() - w.red()) * strength), round(w.green() + (c.green() - w.green()) * strength),
@@ -92,6 +100,11 @@ def key_colour(row: Row, order: str) -> str | None:
     if row.key is None:
         return None
     return KEY_COLOURS[row.key] if row.key < len(KEY_COLOURS) else FAINT
+
+
+def _entry(mark: str, words: str) -> str:
+    """A legend's entry, kept whole when the legend wraps."""
+    return f"{mark}&nbsp;{words.replace(' ', '&nbsp;')}"
 
 
 def week_from(day: date) -> tuple[date, date]:
@@ -191,7 +204,7 @@ class TimelineHead(QWidget):
     def set_timeline(self, model: Model, today: date, focus_title: str, sel: str | None, field: str = "") -> None:
         self.model, self.today, self.focus_title, self.sel, self.field = model, today, focus_title, sel, field
         self._place()
-        self.setFixedHeight(self.SCALE_H + 8 + self.lanes * self.LANE_H)
+        self.setFixedHeight(self.SCALE_H + (8 + self.lanes * self.LANE_H if self.lanes else 1))
         self.update()
 
     def resizeEvent(self, event) -> None:  # noqa: N802 - Qt's name
@@ -224,7 +237,7 @@ class TimelineHead(QWidget):
                     lane_end.append(0.0)
             lane_end[lane] = reach
             placed.append((QRectF(x0, self.SCALE_H + 4 + lane * self.LANE_H, max(3.0, x1 - x0), self.LANE_H - 3), b, lane))
-        self.lanes = max(1, len(lane_end))
+        self.lanes = max(1 if LOOK.classic else 0, len(lane_end))  # no events in view: no lane saying so
         right = self.width() - 10 - self.scale.inset
         self.placed = []
         ends: dict[int, float] = {}  # where the last name in each lane ends
@@ -246,7 +259,7 @@ class TimelineHead(QWidget):
             return
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.fillRect(self.rect(), QColor("#ffffff"))
+        p.fillRect(self.rect(), QColor(CONTENT))
         right = self.width() - 10 - self.scale.inset
         bold, small = QFont(self.font()), QFont(self.font())
         bold.setBold(True)
@@ -256,37 +269,40 @@ class TimelineHead(QWidget):
         p.setFont(bold)
         p.setPen(QColor(FG))
         free = 0.0  # where the last name ended: over a long typed range, a name that wouldn't fit is left out
-        for d in tl.months():
-            name = d.strftime("%b") if long else f"{d.strftime('%B')} {d.year}"
+        for i, d in enumerate(tl.months()):
+            # Over a year the year goes with its first month and each January, so the row under it has only the Today tag.
+            name = (f"{d.strftime('%b')} {d.year}" if not i or d.month == 1 else d.strftime("%b")) if long else f"{d.strftime('%B')} {d.year}"
             x = self.scale.x(self, d) + 3
             if x >= free:
                 p.drawText(QPointF(x, 15), name)
                 free = x + p.fontMetrics().horizontalAdvance(name) + 8
+        tag = QFont(small)
+        tag.setWeight(QFont.Weight.DemiBold)
+        pill = None
+        if tl.start <= self.today < tl.end:  # beside the today line, or before it at the chart's right edge
+            x = (self.scale.x(self, self.today) + self.scale.x(self, self.today + timedelta(days=1))) / 2
+            w = QFontMetrics(tag).horizontalAdvance("Today") + 8
+            pill = QRectF(x + 3 if x + 3 + w <= right else x - 3 - w, 21, w, 17)
         p.setFont(small)
-        if long:
-            for d in [tl.start, *(m for m in tl.months() if m.month == 1 and m != tl.start)]:
-                p.setPen(QColor(MUTED))
-                p.drawText(QPointF(self.scale.x(self, d) + 3, 33), str(d.year))
         for i, w in enumerate(tl.week_starts()):
             x = self.scale.x(self, w)
             p.setPen(QColor(LINE_STRONG))
             p.drawLine(QPointF(x, 20), QPointF(x, self.SCALE_H))
             if not long and (i % 2 == 0 or right - self.scale.NAME_W > 760):
-                p.setPen(QColor(MUTED))
-                p.drawText(QPointF(x + 3, 33), short(w, self.today))
-        if tl.start <= self.today < tl.end:  # the today line, named in the axis
+                text = short(w, self.today)
+                # A date the Today tag would cover is left out: the tag says where you are.
+                if pill is None or not QRectF(x + 3, 21, p.fontMetrics().horizontalAdvance(text), 17).intersects(pill):
+                    p.setPen(QColor(MUTED))
+                    p.drawText(QPointF(x + 3, 33), text)
+        if pill is not None:  # the today line, named in the axis
             x = (self.scale.x(self, self.today) + self.scale.x(self, self.today + timedelta(days=1))) / 2
             p.setPen(QPen(QColor(ACCENT), 2))
             p.drawLine(QPointF(x, 18), QPointF(x, self.SCALE_H))
-            tag = QFont(small)
-            tag.setWeight(QFont.Weight.DemiBold)
             p.setFont(tag)
-            w = p.fontMetrics().horizontalAdvance("Today") + 8
-            pill = QRectF(x + 3, 22, w, 14)
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(QColor(ACCENT))
             p.drawRoundedRect(pill, 3, 3)
-            p.setPen(QColor("#ffffff"))
+            p.setPen(QColor(CONTENT))
             p.drawText(pill, Qt.AlignmentFlag.AlignCenter, "Today")
             p.setFont(small)
         p.setPen(QPen(QColor(LINE_STRONG), 1))
@@ -307,11 +323,18 @@ class TimelineHead(QWidget):
                        p.fontMetrics().elidedText(self.field, Qt.TextElideMode.ElideRight, self.scale.key_w - 14))
             p.drawText(QRectF(self.scale.key_w + 6, 20, NAME_W - 12, self.SCALE_H - 22), Qt.AlignmentFlag.AlignVCenter, "Task")
             p.setFont(small)
+        if not self.lanes:
+            p.end()
+            return
         lane_top = self.SCALE_H + 2
         p.fillRect(QRectF(0, lane_top, right, self.height() - lane_top - 1), QColor(SURFACE_2))
         p.setFont(bold)
         p.setPen(QColor(EV_LINE))
-        p.drawText(QRectF(8, lane_top, self.scale.NAME_W - 10, self.LANE_H + 2), Qt.AlignmentFlag.AlignVCenter, f"{FLAG} Plant events")
+        lane_name = QRectF(8, lane_top, self.scale.NAME_W - 10, self.LANE_H + 2)
+        p.drawText(lane_name, Qt.AlignmentFlag.AlignVCenter, FLAG if not LOOK.classic else f"{FLAG} Plant events")
+        if not LOOK.classic:  # the flag has the colour, and the words are text, at text's contrast
+            p.setPen(QColor(FG))
+            p.drawText(lane_name.adjusted(p.fontMetrics().horizontalAdvance(FLAG) + 4, 0, 0, 0), Qt.AlignmentFlag.AlignVCenter, "Plant events")
         if not self.placed:
             p.setFont(small)
             p.setPen(QColor(FAINT))
@@ -450,7 +473,7 @@ class TimelineChart(QWidget):
         tl = self.tl
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.fillRect(self.rect(), QColor("#ffffff"))
+        p.fillRect(self.rect(), QColor(CONTENT))
         right = self.width() - 10 - self.scale.inset
         base, bold, small = QFont(self.font()), QFont(self.font()), QFont(self.font())
         bold.setBold(True)
@@ -462,13 +485,13 @@ class TimelineChart(QWidget):
             for n in range(tl.days):
                 d = tl.start + timedelta(days=n)
                 if d.weekday() >= 5:
-                    p.fillRect(QRectF(self._x(d), 0, self._x(d + timedelta(days=1)) - self._x(d), bottom), QColor(26, 31, 37, 10))
+                    p.fillRect(QRectF(self._x(d), 0, self._x(d + timedelta(days=1)) - self._x(d), bottom), _alpha(FG, 10))
         for i, r in enumerate(self.rows):
             top = i * self.ROW_H
             if r.task == self.sel:
                 p.fillRect(QRectF(left, top, right - left, self.ROW_H), QColor(SEL))
             elif i == self.hover:
-                p.fillRect(QRectF(left, top, right - left, self.ROW_H), QColor(20, 32, 44, 12))
+                p.fillRect(QRectF(left, top, right - left, self.ROW_H), QColor(HOVER))
             p.setPen(QPen(QColor(LINE if r.depth else LINE_STRONG), 1))
             if not r.depth and i:
                 p.drawLine(QPointF(left, top + 0.5), QPointF(right, top + 0.5))
@@ -479,8 +502,8 @@ class TimelineChart(QWidget):
             p.drawLine(QPointF(x, 0), QPointF(x, bottom))
         for band in tl.events:
             x0, x1 = self._x(band.start), self._x(band.end + timedelta(days=1))
-            p.fillRect(QRectF(x0, 0, max(2.0, x1 - x0), bottom), QColor(176, 122, 18, 26))
-            p.setPen(QPen(QColor(176, 122, 18, 150), 1))
+            p.fillRect(QRectF(x0, 0, max(2.0, x1 - x0), bottom), _alpha(EV_LINE, 26))
+            p.setPen(QPen(_alpha(EV_LINE, 150), 1))
             p.drawLine(QPointF(x0, 0), QPointF(x0, bottom))
             p.drawLine(QPointF(x1, 0), QPointF(x1, bottom))
         for i, r in enumerate(self.rows):
@@ -521,12 +544,21 @@ class TimelineChart(QWidget):
             colour = (KEY_COLOURS[key] if key < len(KEY_COLOURS) else FAINT) if key is not None else LINE_STRONG
             rect = QRectF(4, first * self.ROW_H + 2, w - 10, (last - first + 1) * self.ROW_H - 4)
             p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(_mix(colour, 0.13) if key is not None else QColor(SURFACE_2))
-            p.drawRoundedRect(rect, 4, 4)
-            p.fillRect(QRectF(rect.left(), rect.top(), 3, rect.height()), QColor(colour))
-            p.setPen(_mix(colour, 0.75, FG) if key is not None else QColor(MUTED))
-            text = p.fontMetrics().elidedText(name, Qt.TextElideMode.ElideRight, int(rect.width() - 14))
-            p.drawText(QRectF(rect.left() + 9, rect.top(), rect.width() - 12, self.ROW_H - 4), Qt.AlignmentFlag.AlignVCenter, text)
+            if LOOK.classic:
+                p.setBrush(_mix(colour, 0.13) if key is not None else QColor(SURFACE_2))
+                p.drawRoundedRect(rect, 4, 4)
+                p.fillRect(QRectF(rect.left(), rect.top(), 3, rect.height()), QColor(colour))
+                p.setPen(_mix(colour, 0.75, FG) if key is not None else QColor(MUTED))
+                text_x = rect.left() + 9
+            else:  # one neutral band, a small dot in the key's colour and dark words, so no one looks overdue or healthy (the review's decision V4)
+                p.setBrush(QColor(SURFACE_2))
+                p.drawRoundedRect(rect, 4, 4)
+                p.setBrush(QColor(colour))
+                p.drawEllipse(QPointF(rect.left() + 10, rect.top() + (self.ROW_H - 4) / 2), 4, 4)
+                p.setPen(QColor(FG) if key is not None else QColor(MUTED))
+                text_x = rect.left() + 19
+            text = p.fontMetrics().elidedText(name, Qt.TextElideMode.ElideRight, int(rect.right() - text_x - 3))
+            p.drawText(QRectF(text_x, rect.top(), rect.right() - text_x - 3, self.ROW_H - 4), Qt.AlignmentFlag.AlignVCenter, text)
 
     def _paint_row(self, p: QPainter, top: int, r: Row, base: QFont, bold: QFont, small: QFont) -> None:
         assert self.model is not None and self.tl is not None
@@ -541,19 +573,18 @@ class TimelineChart(QWidget):
             p.fillRect(QRectF(0, top, 3, self.ROW_H), QColor(kc))
         x = self._indent(r)
         if r.kids:  # the fold arrow: right while folded, down while open
-            cx, cy, s = x + 9, top + self.ROW_H / 2, 4.0
+            cx, cy, s = x + 9, top + self.ROW_H / 2, 3.5  # a chevron, as the task tree's
             path = QPainterPath()
             if r.open:
                 path.moveTo(cx - s, cy - s / 2)
+                path.lineTo(cx, cy + s / 2)
                 path.lineTo(cx + s, cy - s / 2)
-                path.lineTo(cx, cy + s * 0.75)
             else:
                 path.moveTo(cx - s / 2, cy - s)
-                path.lineTo(cx + s * 0.75, cy)
+                path.lineTo(cx + s / 2, cy)
                 path.lineTo(cx - s / 2, cy + s)
-            path.closeSubpath()
-            p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(QColor(FG))
+            p.setPen(QPen(QColor(MUTED), 1.4, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+            p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawPath(path)
         x += 20
         if self.plan and r.undated:  # the grip, to drag the name onto the chart
@@ -574,7 +605,8 @@ class TimelineChart(QWidget):
         late_w = 30 if r.late else 0
         badge_w = (p.fontMetrics().horizontalAdvance(badge) + 12) if badge else 0
         p.setFont(bold if not r.depth else base)
-        colour = QColor(MUTED) if r.ctx else (_mix(kc, 0.6, FG) if kc else QColor(FG))
+        # Plain words beside the colour edge, as in the task tree (the review's decision V3).
+        colour = QColor(MUTED) if r.ctx else (_mix(kc, 0.6, FG) if kc and LOOK.classic else QColor(FG))
         p.setPen(colour)
         name_w = max(20.0, self.scale.NAME_W - x - 6 - late_w - badge_w)
         text = p.fontMetrics().elidedText(t.title, Qt.TextElideMode.ElideRight, int(name_w))
@@ -649,7 +681,7 @@ class TimelineChart(QWidget):
             p.drawRoundedRect(rect, 4, 4)
             if hatched:  # Not started, whatever the colour
                 p.setPen(Qt.PenStyle.NoPen)
-                p.setBrush(QBrush(QColor(255, 255, 255, 130) if edge is None else _mix(edge.name(), 0.55), Qt.BrushStyle.BDiagPattern))
+                p.setBrush(QBrush(_alpha(CONTENT, 130) if edge is None else _mix(edge.name(), 0.55), Qt.BrushStyle.BDiagPattern))
                 p.drawRoundedRect(rect, 4, 4)
             if stripe:
                 p.fillRect(QRectF(rect.left(), rect.top(), 3, rect.height()), QColor(EV_LINE))
@@ -665,13 +697,16 @@ class TimelineChart(QWidget):
                 # Too narrow for its hours: they go just after the bar, never cut off (the playbook's timeline labels).
                 p.setFont(small)
                 p.setPen(QColor(MUTED))
-                p.drawText(QRectF(rect.right() + 4, rect.top() - 2, 80, rect.height() + 4), Qt.AlignmentFlag.AlignVCenter, label)
+                at = rect.right() + 4
+                if self.tl.start <= self.today < self.tl.end and at - 3 <= self._mid(self.today) <= at + p.fontMetrics().horizontalAdvance(label) + 2:
+                    at = self._mid(self.today) + 4  # past the today line, so it doesn't run through the number
+                p.drawText(QRectF(at, rect.top() - 2, 80, rect.height() + 4), Qt.AlignmentFlag.AlignVCenter, label)
             if self.plan and not r.routine and rect.width() > 14:  # the ends that stretch
-                p.fillRect(QRectF(rect.left(), rect.top() + 4, 2, rect.height() - 8), QColor(0, 0, 0, 60))
-                p.fillRect(QRectF(rect.right() - 2, rect.top() + 4, 2, rect.height() - 8), QColor(0, 0, 0, 60))
+                p.fillRect(QRectF(rect.left(), rect.top() + 4, 2, rect.height() - 8), _alpha(FG, 60))
+                p.fillRect(QRectF(rect.right() - 2, rect.top() + 4, 2, rect.height() - 8), _alpha(FG, 60))
             p.setOpacity(1.0)
         if r.deadline:
-            self._diamond(p, self._mid(r.deadline), top + 14.0, 6.0, QColor(BAD if r.deadline < self.today else FG), QColor("#ffffff"))
+            self._diamond(p, self._mid(r.deadline), top + 14.0, 6.0, QColor(BAD if r.deadline < self.today else FG), QColor(CONTENT))
         if r.span:  # the summary bar: its subtasks' span, with their deadlines (item 51)
             only = not r.own or not r.windows
             a, b = r.span
@@ -683,7 +718,7 @@ class TimelineChart(QWidget):
             if b < self.tl.end:
                 p.fillRect(QRectF(x1 - 2, y + h - tick, 2, tick), QColor(MUTED))
             for d in r.sub_deadlines:
-                self._diamond(p, self._mid(d), y + h / 2, 4.0, QColor("#ffffff"), QColor(BAD if d < self.today else FG))
+                self._diamond(p, self._mid(d), y + h / 2, 4.0, QColor(CONTENT), QColor(BAD if d < self.today else FG))
         for k in r.key_dates:  # release 5.31
             self._paint_key(p, top, r, t, k)
         if self.plan and r.undated:
@@ -737,7 +772,7 @@ class TimelineChart(QWidget):
             p.drawLine(QPointF(x - 1, cy - 5), QPointF(x - 5, cy - 5))
             p.drawLine(QPointF(x - 1, cy + 5), QPointF(x - 5, cy + 5))
         if k.deadline and k.kind != "from" and self.tl.start <= k.last < self.tl.end:  # a hard date: a red diamond (decision 147)
-            self._diamond(p, self._mid(k.last), cy, 5.0, QColor(LINE_STRONG if k.done else BAD), QColor("#ffffff"))
+            self._diamond(p, self._mid(k.last), cy, 5.0, QColor(LINE_STRONG if k.done else BAD), QColor(CONTENT))
         p.setOpacity(1.0)
 
     def _key_at(self, r: Row, top: float, x: float, y: float) -> tuple[KeyMark, str] | None:
@@ -971,7 +1006,7 @@ class TimelineView(QWidget):
         self.undo: list[tuple] = []
         self.scale = _Scale()
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(12, 8, 12, 8)
+        lay.setContentsMargins(12, 8, 12, 8) if LOOK.classic else lay.setContentsMargins(16, 12, 16, 10)
         lay.addWidget(QLabel("Timeline", objectName="paneTitle"))
         lay.addWidget(Help("Open tasks over the coming weeks: a row per project, folded to start with, a bar from Start to Due, "
                            "a diamond for a deadline and a dot for each occurrence of a routine task. Parked and closed tasks are "
@@ -1008,14 +1043,15 @@ class TimelineView(QWidget):
         self.plan_strip = QFrame(objectName="fileRow")
         ps = QHBoxLayout(self.plan_strip)
         ps.setContentsMargins(10, 4, 6, 4)
-        strip = QLabel("<b>Plan mode:</b> drag a bar, or its ends, to change its dates; drag a ⋮⋮ name onto the chart for a working "
-                       "week. Saved and logged; Ctrl+Z undoes.")
-        strip.setWordWrap(True)
-        ps.addWidget(strip, 1)
+        # It says what mode you're in. How it works is behind Show hints (decision 7, release 5.59).
+        ps.addWidget(QLabel("<b>Plan mode</b>"))
+        ps.addWidget(Help("Drag a bar, or its ends, to change its dates; drag a ⋮⋮ name onto the chart for a working week. Saved and "
+                          "logged; Ctrl+Z undoes."), 1)
+        ps.addStretch()
         done = QPushButton("Done")
         done.clicked.connect(lambda: self.set_plan(False))
         ps.addWidget(done)
-        self.plan_strip.setStyleSheet(f"QFrame#fileRow {{ background-color: {SEL}; border: 1px solid #9dc0e3; border-radius: 4px; }}")
+        self.plan_strip.setStyleSheet(f"QFrame#fileRow {{ background-color: {SEL}; border: 1px solid {C.info_line}; border-radius: 4px; }}")
         lay.addWidget(self.plan_strip)
         self.card = QFrame(objectName="fileRow")
         cl = QHBoxLayout(self.card)
@@ -1024,7 +1060,7 @@ class TimelineView(QWidget):
         self.card_text.setWordWrap(True)
         self.card_text.setTextFormat(Qt.TextFormat.RichText)
         cl.addWidget(self.card_text, 1)
-        self.open_button = QPushButton("Open task", objectName="primary")
+        self.open_button = QPushButton("Open task", objectName="primary" if LOOK.classic else "")
         self.open_button.clicked.connect(lambda: self.sel and self.open_task.emit(self.sel))
         self.quick_button = QPushButton("Quick edit")
         self.quick_button.clicked.connect(self._quick_from_card)
@@ -1050,15 +1086,15 @@ class TimelineView(QWidget):
         self.scroll.setWidget(self.chart)
         self.scroll.verticalScrollBar().rangeChanged.connect(lambda *_: self._sync_inset())
         lay.addWidget(self.scroll, 1)
-        self.marks_legend = " &nbsp; ".join((
-            '<span style="background-color:#89aedb">&nbsp;&nbsp;&nbsp;&nbsp;</span> In progress',
-            '<span style="background-color:#ced9ee; border:1px solid #3b78c4">&nbsp;&nbsp;&nbsp;&nbsp;</span> Not started',
-            '<span style="color:#b0261e"><b>▌</b></span> Late', "◆ Deadline", '<span style="color:#5a6571"><b>⊢⊣</b></span> Its subtasks\' span',
-            '<span style="color:#3b78c4">●</span> Routine: each occurrence', '<span style="color:#1d5e98"><b>│</b></span> Today',
-            f'<span style="background-color:{EV_BG}; color:{EV_LINE}">&nbsp;{FLAG}&nbsp;</span> Plant event',
+        self.marks_legend = " &nbsp; ".join(_entry(mark, words) for mark, words in (
+            (f'<span style="background-color:{_mix(C.g1, 0.72).name()}">&nbsp;&nbsp;&nbsp;&nbsp;</span>', "In progress"),
+            (f'<span style="background-color:{_mix(C.g1, 0.3).name()}; border:1px solid {C.g1}">&nbsp;&nbsp;&nbsp;&nbsp;</span>', "Not started"),
+            (f'<span style="color:{BAD}"><b>▌</b></span>', "Late"), ("◆", "Deadline"), (f'<span style="color:{MUTED}"><b>⊢⊣</b></span>', "Its subtasks' span"),
+            (f'<span style="color:{C.g1}">●</span>', "Routine: each occurrence"), (f'<span style="color:{ACCENT}"><b>│</b></span>', "Today"),
+            (f'<span style="background-color:{EV_BG}; color:{EV_LINE}">&nbsp;{FLAG}&nbsp;</span>', "Plant event"),
             # Key dates (release 5.31): a window, a start or an end alone, a hard deadline
-            '<span style="color:#3b78c4"><b>▬</b></span> Key date', "<b>[ ]</b> Its start or end",
-            '<span style="color:#b0261e">◆</span> Its deadline'))
+            (f'<span style="color:{C.g1}"><b>▬</b></span>', "Key date"), ("<b>[ ]</b>", "Its start or end"),
+            (f'<span style="color:{BAD}">◆</span>', "Its deadline")))
         self.legend = QLabel(self.marks_legend, objectName="hint")  # one line: the marks, then what colours the bars
         self.legend.setWordWrap(True)
         if LOOK.classic:
@@ -1213,10 +1249,12 @@ class TimelineView(QWidget):
             lay.addWidget(line)
 
         lay = self.time_layout
-        for text, s, tip in (("◀ Earlier", -1, "Back four weeks (13 over six months, 26 over a year), never more than the range shown"),
+        for text, s, tip in (("Earlier", -1, "Back four weeks (13 over six months, 26 over a year), never more than the range shown"),
                              ("This week", 0, "From last week"),
-                             ("Later ▶", 1, "On four weeks (13 over six months, 26 over a year), never more than the range shown")):
-            b = QPushButton(text)
+                             ("Later", 1, "On four weeks (13 over six months, 26 over a year), never more than the range shown")):
+            b = DropButton(text, arrow="chevron-right") if s > 0 else QPushButton(text)
+            if s < 0:
+                b.setIcon(icon("chevron-left"))
             b.setToolTip(tip)
             b.clicked.connect(lambda _=False, s=s: self.shift(s))
             lay.addWidget(b)
@@ -1228,12 +1266,18 @@ class TimelineView(QWidget):
         focus = combo(lay, "Focus on", [("", "Focus on all projects"), *((x, "Focus on " + name) for x, name in self._focus_choices())],
                       self.focus or "", "focus")
         focus.setMaximumWidth(280)
-        for text, n in (("Collapse a level", -1), ("Expand a level", 1)):
-            b = QPushButton(text)
+        for text, n, name in (("Collapse a level", -1, "level-fold"), ("Expand a level", 1, "level-open")):
+            b = QPushButton(text if LOOK.classic else "", objectName="" if LOOK.classic else "iconOnly")
+            if not LOOK.classic:
+                b.setIcon(icon(name))
+                b.setAccessibleName(text)
+                b.setToolTip(text)
             b.clicked.connect(lambda _=False, n=n: self.level(n))
             lay.addWidget(b)
         divider(lay)
-        plan = QPushButton("✎ Plan")
+        plan = QPushButton("✎ Plan" if LOOK.classic else "Plan")
+        if not LOOK.classic:
+            plan.setIcon(icon("edit"))
         plan.setCheckable(True)
         plan.setChecked(self.plan)
         plan.setToolTip("Plan mode: drag bars and names to set dates (P)")
@@ -1517,6 +1561,7 @@ class TimelineView(QWidget):
         t = m.tasks.get(self.sel) if m and self.sel else None
         for b in (self.open_button, self.quick_button, self.update_button):
             b.setVisible(t is not None)
+        self.card.setVisible(t is not None or LOOK.show_help)  # no card, and no sentence about it, until a row is picked
         if t is None or m is None:
             self.card_text.setMinimumHeight(0)
             self.card.setMinimumHeight(0)

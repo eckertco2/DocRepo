@@ -94,10 +94,11 @@ from docrepo.save import (
 from docrepo.schedule import is_open, length_of, start_of, week_of
 from docrepo.tasks import KeyDateRow, hours_values, stated
 from docrepo.ui import tokens
+from docrepo.ui.tokens import C
 from docrepo.ui.context import AppContext
 from docrepo.ui.draft_aside import ASIDE_NOTE, DraftAside
 from docrepo.ui.drop_target import DropOverlay, DropRead
-from docrepo.ui.icons import icon, icon_size
+from docrepo.ui.icons import icon, icon_size, set_fold
 from docrepo.ui.items_panel import AgendaPanel, ItemCards, OperatorHighlighter, RefPopup, _drop, task_colour, where_text
 from docrepo.ui.keymap import KeyMapDialog
 from docrepo.ui.look import LOOK, Help, KeyBadge, KeyTips, set_hints, tip
@@ -158,7 +159,9 @@ SIDE_WIDTH = 300
 #: The new look's shortest window: it grows with the content, up to most of the screen.
 MIN_HEIGHT = 380
 #: The placeholder in the found list, before Parse and populate runs (shown with Show hints).
-FOUND_EMPTY = ("<span style='color:#5a6571'>Alt+P reads the content text and fills the fields. What it finds is listed here, beside "
+#: More fields than this filled by Parse and populate, and each shows only its dot.
+MOST_FILLED = 2
+FOUND_EMPTY = (f"<span style='color:{C.text2}'>Alt+P reads the content text and fills the fields. What it finds is listed here, beside "
                "the text, so you can check it without scrolling.</span>")
 
 
@@ -363,7 +366,8 @@ class KeyDatesEditor(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(4)
-        self.toggle = QPushButton("Key dates ▸", objectName="moreLink")
+        self.toggle = QPushButton("Key dates", objectName="moreLink")
+        self.toggle.setIcon(icon("chevron-right"))
         self.toggle.setToolTip("Dates on the task beside its own: a start, an end or both, with a description")
         self.toggle.clicked.connect(lambda: self._fold(not self.body.isHidden()))
         lay.addWidget(self.toggle, 0, Qt.AlignmentFlag.AlignLeft)
@@ -389,7 +393,7 @@ class KeyDatesEditor(QWidget):
 
     def _sync(self) -> None:
         n = sum(not x.blank() for x in self.lines)
-        self.toggle.setText(f"Key dates{f' ({n})' if n else ''} {'▸' if self.body.isHidden() else '▾'}")
+        set_fold(self.toggle, f"Key dates{f' ({n})' if n else ''}", not self.body.isHidden())
 
     def add_row(self, row: KeyDateRow | None = None, focus: bool = False) -> None:
         line = _KeyDateLine(row)
@@ -830,8 +834,7 @@ class CaptureWindow(QWidget):
         fl.addLayout(status, 1)
         footer_hint = Help("Ctrl+Enter saves. Esc hides the window and keeps the draft. F1 lists the keys.")
         fl.addWidget(footer_hint)
-        more = QPushButton("More", objectName="subtle")
-        more.setIcon(icon("more"))
+        more = QPushButton("More", objectName="subtle")  # its words and a chevron: the "…" icon said it twice
         more.setProperty("menu", True)
         tip(more, "Copy prompt, a summary, Clear, hints, keys and the mods log")
         self.more_menu = QMenu(more)
@@ -931,13 +934,13 @@ class CaptureWindow(QWidget):
         self.n_inherit.setChecked(True)
         self.n_inherit.toggled.connect(self.refresh)
         self.n_inherited = QLabel(objectName="hint")
+        # The compact block (the review's stage V6): Labels, then two pairs. The rest is under More fields, so the window doesn't scroll.
         g.addWidget(field("Labels", self.n_labels, "labels"))
         inh = QHBoxLayout()
         inh.addWidget(self.n_inherit)
         inh.addWidget(self.n_inherited, 1)
         self.n_inherit_row = QWidget()
         self.n_inherit_row.setLayout(inh)
-        g.addWidget(self.n_inherit_row)
         grid = QGridLayout()
         self.n_leads = ChipPicker(self._people_options, "Search names and aliases", "Add “{}” to people")
         self.n_assignees = ChipPicker(self._people_options, "Search names and aliases", "Add “{}” to people")
@@ -948,21 +951,20 @@ class CaptureWindow(QWidget):
         grid.addWidget(field("Deadline", self.n_deadline, "deadline"), 1, 1)
         g.addLayout(grid)
         self.n_deadline_desc = QLineEdit()
-        g.addWidget(field("Deadline description", self.n_deadline_desc, "deadlineDesc"))
         self.n_during = self._during_label(g)
         flags = QHBoxLayout()
+        flag_notes = []
         self.n_urgent, self.n_meeting, self.n_plant = QCheckBox("Urgent"), QCheckBox("Meeting"), QCheckBox("Plant event")
         for box, key in ((self.n_urgent, "urgent"), (self.n_meeting, "meeting"), (self.n_plant, "plantEvent")):
             flags.addWidget(box)
             note = QLabel()
             flags.addWidget(InfoButton(key, note))
-            g.addWidget(note)
+            flag_notes.append(note)
         flags.addStretch()
-        g.addLayout(flags)
         self.n_keydates = KeyDatesEditor()  # release 5.31: the new task's key dates
         self.n_keydates.changed.connect(self.refresh)
-        g.addWidget(self.n_keydates)
-        self.n_more_button = QPushButton("More fields ▸", objectName="moreLink")
+        self.n_more_button = QPushButton("More fields", objectName="moreLink")
+        self.n_more_button.setIcon(icon("chevron-right"))
         self.n_more_button.clicked.connect(lambda: self._toggle_more(self.n_more, self.n_more_button))
         g.addWidget(self.n_more_button)
         self.n_more = QWidget()
@@ -991,13 +993,19 @@ class CaptureWindow(QWidget):
         self.n_refs_grid = QGridLayout()  # the reference fields' boxes (release 5.9), built by _sync_refs
         more.addLayout(self.n_refs_grid, 5, 0, 1, 2)
         self.n_refs: dict[str, QLineEdit] = {}
+        more.addWidget(field("Deadline description", self.n_deadline_desc, "deadlineDesc"), 6, 0, 1, 2)
+        more.addLayout(flags, 7, 0, 1, 2)
+        for i, note in enumerate(flag_notes):
+            more.addWidget(note, 8 + i, 0, 1, 2)
+        more.addWidget(self.n_inherit_row, 11, 0, 1, 2)
+        more.addWidget(self.n_keydates, 12, 0, 1, 2)
         self.n_more.hide()
         g.addWidget(self.n_more)
         self.new_heading = QLabel(objectName="heading")
         g.insertWidget(0, self.new_heading)
         if not LOOK.classic:
             g.setContentsMargins(0, 12, 0, 0)
-        self.new_heading.setVisible(not LOOK.classic)
+        self.new_heading.hide()  # the task picker and the footer's line say where it goes, and the window keeps the room
         self.lower_layout.addWidget(self.new_group)
         self._watch("new", {"due": self.n_due, "deadline": self.n_deadline, "deadline_desc": self.n_deadline_desc, "urgent": self.n_urgent,
                             "meeting": self.n_meeting, "plant_event": self.n_plant, "state": self.n_state, "start": self.n_start,
@@ -1018,18 +1026,19 @@ class CaptureWindow(QWidget):
         grid.addWidget(field("Deadline", self.u_deadline, "deadline"), 0, 1)
         g.addLayout(grid)
         self.u_deadline_desc = QLineEdit()
-        g.addWidget(field("Deadline description", self.u_deadline_desc, "deadlineDesc"))
         self.u_during = self._during_label(g)
         self.u_keydates = KeyDatesEditor()  # release 5.31: the task's key dates, to change, add to or take off
         self.u_keydates.changed.connect(self.refresh)
         self._u_keydates_were: list[KeyDateRow] = []
-        g.addWidget(self.u_keydates)
-        self.u_more_button = QPushButton("More fields ▸", objectName="moreLink")
+        self.u_more_button = QPushButton("More fields", objectName="moreLink")
+        self.u_more_button.setIcon(icon("chevron-right"))
         self.u_more_button.clicked.connect(lambda: self._toggle_more(self.u_more, self.u_more_button))
         g.addWidget(self.u_more_button)
         self.u_more = QWidget()
         more = QGridLayout(self.u_more)
         more.setContentsMargins(0, 0, 0, 0)
+        more.addWidget(field("Deadline description", self.u_deadline_desc, "deadlineDesc"), 20, 0, 1, 2)
+        more.addWidget(self.u_keydates, 21, 0, 1, 2)
         self.u_leads = ChipPicker(self._people_options, "Search names and aliases", "Add “{}” to people")
         self.u_assignees = ChipPicker(self._people_options, "Search names and aliases", "Add “{}” to people")
         self.u_lead_hours, self.u_asg_hours = HoursField(), HoursField()
@@ -1146,10 +1155,10 @@ class CaptureWindow(QWidget):
                     boxes[name] = QLineEdit()
                     grid.addWidget(field(name, boxes[name], "references" if i == 0 else None), i // 2, i % 2)
                 self._watch(prefix, {f"ref:{name}": box for name, box in boxes.items()})
-        for button, words in ((self.n_more_button, ["state", "start", "reminder", "recurrence", "hours"]),
-                              (self.u_more_button, ["people", "hours", "start", "reminder", "recurrence", "urgent", "meeting", "plant event"])):
+        for button, words in ((self.n_more_button, ["urgent", "meeting", "key dates", "start", "reminder", "hours"]),
+                              (self.u_more_button, ["people", "hours", "key dates", "start", "reminder", "recurrence", "urgent", "meeting"])):
             words += names
-            button.setText(f"More fields: {', '.join(words[:-1])} and {words[-1]} {button.text()[-1]}")
+            button.setText(f"More fields: {', '.join(words[:-1])} and {words[-1]}")
 
     def _show_during(self, m: Model) -> None:
         """Under New task's and Update's dates: each that falls in a plant event (release 5.9, M0028)."""
@@ -1256,7 +1265,7 @@ class CaptureWindow(QWidget):
             if self.aside.data is None:
                 self.aside.set_aside()
             else:
-                ask = QMessageBox(QMessageBox.Icon.Question, "DocRepo", "A draft is already set aside, and this one holds something too. "
+                ask = QMessageBox(QMessageBox.Icon.NoIcon, "DocRepo", "A draft is already set aside, and this one holds something too. "
                                   "Only one can be set aside.", parent=self)
                 keep = ask.addButton("Keep working on this one", QMessageBox.ButtonRole.AcceptRole)
                 ask.addButton("Clear this one", QMessageBox.ButtonRole.DestructiveRole)
@@ -2097,7 +2106,7 @@ class CaptureWindow(QWidget):
                                   else "None: a capture per #task" if parts else "None: keep it unfiled"))
         self._show_goes(parts)
         self.title_field.setVisible(new)
-        self.content_field.property("label").setText("Content text" + ("  <span style='color:#87919c'>becomes the new task's description</span>" if new else ""))
+        self.content_field.property("label").setText("Content text" + (f"  <span style='color:{C.text2}'>becomes the new task's description</span>" if new else ""))
         self.parse_button.setEnabled(new or upd or bool(t))
         self.new_group.setVisible(new)
         if LOOK.classic:
@@ -2490,7 +2499,7 @@ class CaptureWindow(QWidget):
             top.addWidget(entry.keep)
         label = "Email" if row.email else {"attachment": "Attachment", "picture": "Picture"}.get(kind) or (
             "Link" if link else "Path" if src == "pasted" else "File")
-        name = QLabel(f"<span style='color:#5a6571'>{label}</span>  <b>{esc(row.name)}</b>")
+        name = QLabel(f"<span style='color:{C.text2}'>{label}</span>  <b>{esc(row.name)}</b>")
         name.setToolTip(row.path or "")
         top.addWidget(name)
         entry.note = QLabel(self._file_note(row, doc.id if doc else None, link), objectName="hint")
@@ -2651,8 +2660,9 @@ class CaptureWindow(QWidget):
                     value = w.id or w.name
                     if value not in chips.values():
                         chips.set_chips([*chips.chips(), Chip(value, m.person_name(w.id) if w.id else w.name, new=w.is_new, filled=True)])
-            if any(f.key in ("start", "recurrence", "reminder", "state", "lead_hours", "assignee_hours", "plant_event", "refs") and not f.why
-                   for f in r.found):
+            # What it fills under More fields is on the Understood line, so in the new look More stays shut and the window doesn't scroll.
+            if LOOK.classic and any(f.key in ("start", "recurrence", "reminder", "state", "lead_hours", "assignee_hours", "plant_event", "refs", "urgent", "meeting", "deadline_desc")
+                                    and not f.why for f in r.found):
                 self._set_more(self.n_more, self.n_more_button, True)
             found += [("", f) for f in r.found]
         if "update" in self.types and self.task:
@@ -2665,11 +2675,20 @@ class CaptureWindow(QWidget):
                 r.deadline_desc = ""
             self._fill("upd", r)
             self._hours_read(r, self.u_lead_row, self.u_asg_row)
-            if any(f.key in ("plant_event", "refs") and not f.why for f in r.found):
+            if LOOK.classic and any(f.key in ("plant_event", "refs", "deadline_desc") and not f.why for f in r.found):
                 self._set_more(self.u_more, self.u_more_button, True)
             found += [("Update: " if "new_task" in self.types else "", f) for f in r.found]
+        self._settle_filled()
         self._show_found(found)
         self.refresh()
+
+    def _settle_filled(self) -> None:
+        """A tint on the one or two fields Parse and populate filled. When it filled more, each has only its dot, since a tint on
+        most of a window marks nothing (the playbook's rule, release 5.60)."""
+        fields = [*self.__dict__.get("_fields", {}).values(), self.title]
+        filled = [t for t in (w.line if isinstance(w, DateField) else w for w in fields) if t.property("filled")]
+        for target in filled:
+            set_filled(target, True, value="dot" if len(filled) > MOST_FILLED else True)
 
     @staticmethod
     def _hours_read(r: Any, lead: HoursRow, assignee: HoursRow) -> None:
@@ -2724,16 +2743,16 @@ class CaptureWindow(QWidget):
 
     def _show_found(self, found: list[tuple[str, Found]]) -> None:
         if not found:
-            self.found_label.setText("<span style='color:#5a6571'>Nothing found. Fill in the fields by hand.</span>")
+            self.found_label.setText(f"<span style='color:{C.text2}'>Nothing found. Fill in the fields by hand.</span>")
         else:
             items = []
             for lead, f in found:
                 value = f.value if len(f.value) <= 80 else f.value[:80] + "…"
                 source = f.source if len(f.source) <= 80 else f.source[:80] + "…"
                 extra = (f": {esc(f.calc)}" if f.calc else "") + (f". {esc(f.why)}" if f.why else "")
-                items.append(f"<li><b>{esc(lead + f.field)}</b> {esc(value)} <span style='color:#5a6571'>from “{esc(source)}”{extra}</span></li>")
+                items.append(f"<li><b>{esc(lead + f.field)}</b> {esc(value)} <span style='color:{C.text2}'>from “{esc(source)}”{extra}</span></li>")
             if LOOK.classic:
-                self.found_label.setText(f"<ul style='margin:0'>{''.join(items)}</ul><span style='color:#5a6571'>Filled fields stay "
+                self.found_label.setText(f"<ul style='margin:0'>{''.join(items)}</ul><span style='color:{C.text2}'>Filled fields stay "
                                          "highlighted until you edit them. Nothing is saved until you press Save.</span>")
             else:  # one line of what it understood (the Title field shows the title); where each value came from is in the tooltip
                 self.found_label.setText(understood_html([(lead, f) for lead, f in found if f.field != "Title"] or found))
@@ -2784,7 +2803,7 @@ class CaptureWindow(QWidget):
     @staticmethod
     def _set_more(box: QWidget, button: QPushButton, on: bool) -> None:
         box.setVisible(on)
-        button.setText(button.text()[:-1] + ("▾" if on else "▸"))
+        set_fold(button, button.text(), on)
 
     # ================= Save =================
     def _fail(self, message: str, focus: QWidget | None = None) -> None:

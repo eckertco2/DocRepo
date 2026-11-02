@@ -39,7 +39,7 @@ from docrepo.overview import KIND_NAMES, KINDS, SOURCE_NAMES, SOURCES, TYPE_NAME
 from docrepo.search import extracted_text
 from docrepo.ui import tokens
 from docrepo.ui.icons import icon
-from docrepo.ui.look import LOOK
+from docrepo.ui.look import LOOK, Help
 from docrepo.ui.page_view import PageView
 from docrepo.ui.result_list import ResultList, Row
 from docrepo.ui.style import page_css
@@ -77,7 +77,7 @@ QTabBar#tvKinds::tab:selected {{ border-bottom: 2px solid {accent}; font-weight:
 QTabBar#tvKinds::tab:hover:!selected {{ background: {hover}; }}
 QLabel#tvCount, QLabel#tvFoot {{ color: {text2}; }}
 QWidget#tvFootBar {{ background: {base}; border-top: 1px solid {stroke}; }}
-QPushButton#tvChip {{ background: {selected}; border: none; border-radius: 10px; padding: 2px 10px; min-height: 18px; }}
+QPushButton#tvChip {{ background: {info_bg}; border: none; border-radius: 4px; padding: 2px 10px; min-height: 18px; }}
 QPushButton#tvChip:hover {{ background: {pressed}; }}
 QLineEdit#tvSearch {{ padding: 7px 10px; border-bottom: 2px solid {accent}; }}
 QListView#taskViewList {{ background: {content}; border: none; }}
@@ -305,9 +305,14 @@ class TaskView(QWidget):
         foot = QWidget(objectName="tvFootBar")
         fh = QHBoxLayout(foot)
         fh.setContentsMargins(16, 5, 16, 5)
-        self.foot = QLabel(FOOT, objectName="tvFoot")
+        self.foot = QLabel(self._rest_foot(), objectName="tvFoot")
         fh.addWidget(self.foot)
         outer.addWidget(foot)
+
+    def _rest_foot(self) -> str:
+        """The footer with nothing to say. Its keys show with Show hints; F1, the tooltips and Alt have them otherwise (the review's
+        decision V7). The count stays above the list."""
+        return (PAGE_FOOT if self.kind == PAGE else FOOT) if LOOK.show_help else ""
 
     def _menu_button(self, label: str, menu: QMenu, tip: str) -> QPushButton:
         b = QPushButton(label, objectName="" if LOOK.classic else "subtle")
@@ -613,7 +618,7 @@ class TaskView(QWidget):
         self._buttons()
         self._sync_preview()
         self.show_preview()
-        if not self._foot_timer.isActive() and self.foot.text() != (PAGE_FOOT if self.kind == PAGE else FOOT):
+        if not self._foot_timer.isActive() and self.foot.text() != self._rest_foot():
             self.say("")
 
     def chosen_record(self) -> Record | None:
@@ -662,7 +667,7 @@ class TaskView(QWidget):
         recent = self.recent_snap[1]
         if recent:
             out += [Row("head", label="Recent", hint="Opened from DocRepo, or added lately"), *(self._item(x.record, why=x.why) for x in recent)]
-        if files and not pinned:
+        if files and not pinned and LOOK.show_help:
             out.append(Row("tip", label="Press P on a file (Alt+P from the search box) to keep it at the top here."))
         latest = overview.latest(scoped)
         if latest:
@@ -1351,7 +1356,7 @@ class TaskView(QWidget):
         self.browse.activateWindow()
 
     def say(self, text: str, error: bool = False) -> None:
-        self.foot.setText(text or (PAGE_FOOT if self.kind == PAGE else FOOT))
+        self.foot.setText(text or self._rest_foot())
         self.foot.setStyleSheet(f"color: {tokens.LIGHT['critical' if error else 'text' if text else 'text2']};")
         if text:
             self._foot_timer.start()

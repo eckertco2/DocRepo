@@ -40,7 +40,7 @@ def test_a_task_page(pages):
     order = ["Current status Mon 5 Oct · 3 days ago Procedure rev 2 approved. Waiting on the rigging plan.",
              "When Due Fri 30 Oct in 22 days Deadline too · Turnaround ends Starts Mon 19 Oct in 11 days",
              "Who Lead Me 8 h Assignees Tom Becker 60 h Mike Ortiz 60 h", "Subtasks 3 of 3 open New subtask Rigging plan 14 Oct · 6 d",
-             "▸ Details T000008 · Created Tue 22 Sep from C000005", "Captures 6 Status log 14 Summaries 1 Files 3 With subtasks ▾ ⇅ Oldest first",
+             "Details T000008 · Created Tue 22 Sep from C000005", "Captures 6 Status log 14 Summaries 1 Files 3 With subtasks ⇅ Oldest first",
              "This task September 2026", "Subtasks · 3"]
     at = [words.find(part) for part in order]
     assert -1 not in at and at == sorted(at), dict(zip(order, at))
@@ -100,7 +100,7 @@ def test_tabs_scopes_and_chapters(pages):
     log = text(pages.task_page("T000008", PageState(tab="log")))
     assert "Work started" in log and "↳ New subtask: Rigging plan · Mike Ortiz, due 14 Oct" in log
     closed = text(pages.task_page("T000008", PageState(tab="log", scope="self")))
-    assert "Subtasks ·" not in closed and "This task ▾" in closed  # the scope's name is its menu's
+    assert "Subtasks ·" not in closed and "This task" in closed  # the scope's name is its menu's
     assert log.count("Status log") == closed.count("Status log") and log.split("Status log ")[1][:2] != closed.split("Status log ")[1][:2]
     opened = text(pages.task_page("T000008", PageState(tab="log", chapters={"T000012"})))
     assert "Rigging plan In progress Lift study done" in opened and "Mike to write the rigging plan" in opened

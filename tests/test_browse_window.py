@@ -217,7 +217,7 @@ def test_fixing_a_capture(browse, ctx):
 def test_clearing_a_reminder_from_the_list(browse):
     browse.set_view("reminders")
     item = next(i for i in browse.tree.items() if i.data(0, KEY_ROLE) == ("task", "T000018"))
-    button = browse.tree.itemWidget(item, 3)
+    button = browse.tree.action_strip(item).findChild(QPushButton)
     assert button.text() == "Clear"
     button.click()
     assert Model(browse.conn).task("T000018").reminder is None
@@ -265,7 +265,7 @@ def test_reminders_whose_day_has_come_are_on_today(browse):
     rows_under = [head.child(i) for i in range(head.childCount())]
     assert [r.data(0, KEY_ROLE) for r in rows_under] == [("task", "T000016"), ("task", "T000018")]  # not T000019, tomorrow's
     assert "1 d ago" in rows_under[0].data(2, HTML_ROLE) and "Today" in rows_under[1].data(2, HTML_ROLE) and "Reminder" in rows_under[0].data(1, HTML_ROLE)
-    links = [b.text() for b in browse.tree.itemWidget(rows_under[1], 3).findChildren(QPushButton)]
+    links = [b.text() for b in browse.tree.action_strip(rows_under[1]).findChildren(QPushButton)]
     assert links == ["Add to Today", "Clear"]
     today_rows = browse.tree.keys()
     assert today_rows.index(("task", "T000018")) < today_rows.index(("task", "T000012"))  # above what's due in the next 7 days
@@ -274,13 +274,13 @@ def test_reminders_whose_day_has_come_are_on_today(browse):
 def test_a_reminder_on_today_can_be_added_and_cleared(browse):
     browse.set_view("today")
     head = _today_heading(browse, "Reminders")
-    buttons = {b.text(): b for b in browse.tree.itemWidget(head.child(1), 3).findChildren(QPushButton)}
+    buttons = {b.text(): b for b in browse.tree.action_strip(head.child(1)).findChildren(QPushButton)}
     buttons["Add to Today"].click()
     m = Model(browse.conn)
     assert [a.subject for a in m.today_items()] == ["T000018"] and m.task("T000018").reminder == "2026-10-08"  # on Today, reminder kept
     head = _today_heading(browse, "Reminders")
     row = next(head.child(i) for i in range(head.childCount()) if head.child(i).data(0, KEY_ROLE) == ("task", "T000018"))
-    buttons = {b.text(): b for b in browse.tree.itemWidget(row, 3).findChildren(QPushButton)}
+    buttons = {b.text(): b for b in browse.tree.action_strip(row).findChildren(QPushButton)}
     assert list(buttons) == ["Clear"]  # already on Today
     buttons["Clear"].click()
     m = Model(browse.conn)
@@ -662,7 +662,7 @@ def test_today_shows_what_is_due_this_week(browse):
 
     browse.set_view("today")
     assert rows(browse).count(("task", "T000019")) == 1 and ("task", "T000012") in rows(browse)
-    add = browse.tree.itemWidget(_item(browse, ("task", "T000012")), 3).findChild(QPushButton)
+    add = browse.tree.action_strip(_item(browse, ("task", "T000012"))).findChild(QPushButton)
     assert add.text() == "Add to Today"
     add.click()
     m = Model(browse.conn)
@@ -818,7 +818,7 @@ def test_the_task_page_bar_and_its_links(browse, monkeypatch):
     browse.on_link(QUrl("menu:scope"))
     assert [a.text() for a in browse._menu.actions() if a.isChecked()] == ["With subtasks"]
     browse._menu.actions()[0].trigger()
-    assert browse.state.scope == "self" and "This task ▾" in shown(browse)
+    assert browse.state.scope == "self" and "This task" in shown(browse)
     browse._menu.close()
     browse.on_link(QUrl("menu:order"))
     browse._menu.actions()[1].trigger()

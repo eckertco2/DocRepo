@@ -43,7 +43,7 @@ from docrepo.ui import tokens
 from docrepo.ui.context import AppContext
 from docrepo.ui.icons import icon, icon_size
 from docrepo.ui.look import LOOK, tip
-from docrepo.ui.style import style_sheet
+from docrepo.ui.style import CLASSIC_QUICK_EDIT, style_sheet
 from docrepo.ui.task_picker import path_text
 from docrepo.ui.task_forms import BAD_DURATION, KeyDatesEditor, days_valid, key_date_rows, typed_days
 from docrepo.ui.widgets import DateField, FlowLayout, HoursField, set_filled
@@ -60,14 +60,7 @@ NO_REPEAT = "Doesn't repeat"
 def _extra_style() -> str:
     """Its own rules, beside the look's style sheet: the frame, the top line and the chips' states."""
     if LOOK.classic:
-        return """
-QWidget#quickEdit { background: #ffffff; border: 1px solid #b8c1cb; }
-QWidget#qeHead { background: #f4f6f8; border-bottom: 1px solid #d6dce3; }
-QLabel#qeTitle { font-weight: 600; color: #1a1f25; }
-QLabel#qeKind { color: #5a6571; }
-QToolButton#chip[off="true"] { color: #5a6571; background: #ffffff; text-decoration: line-through; }
-QToolButton#chip[why="true"] { color: #5a6571; background: #ffffff; border-style: dashed; }
-"""
+        return CLASSIC_QUICK_EDIT
     c = tokens.colour
     return f"""
 QWidget#quickEdit {{ background: {c("content")}; border: 1px solid {c("stroke_strong")}; }}
@@ -75,8 +68,10 @@ QWidget#qeHead {{ background: {c("base")}; border-bottom: 1px solid {c("stroke")
 QLabel#qeKind {{ color: {c("text2")}; font-size: {tokens.CAPTION}pt; }}
 QLabel#qeTitle {{ font-weight: 600; color: {c("text")}; }}
 QLabel#qeField {{ color: {c("text2")}; font-size: {tokens.CAPTION}pt; }}
-QWidget#quickEdit QLineEdit {{ min-height: 0; padding: 2px 6px; }}
-QWidget#quickEdit QComboBox {{ min-height: 0; padding: 1px 6px; }}
+QWidget#quickEdit QLineEdit, QWidget#quickEdit QComboBox, QWidget#quickEdit QAbstractSpinBox {{ min-height: 20px; max-height: 20px; padding: 3px 6px; }}
+QWidget#quickEdit QLineEdit:focus, QWidget#quickEdit QComboBox:focus, QWidget#quickEdit QAbstractSpinBox:focus {{ padding-bottom: 2px; }}
+QWidget#quickEdit QComboBox QLineEdit, QWidget#quickEdit QAbstractSpinBox QLineEdit {{ padding: 0; min-height: 0; }}
+QWidget#quickEdit QPushButton {{ min-height: 20px; max-height: 20px; padding: 3px 10px; }}
 QToolButton#chip[off="true"] {{ color: {c("text2")}; background: {c("content")}; text-decoration: line-through; }}
 QToolButton#chip[why="true"] {{ color: {c("text2")}; background: {c("content")}; border-style: dashed; }}
 """

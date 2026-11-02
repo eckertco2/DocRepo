@@ -156,7 +156,7 @@ def test_the_summary_is_the_page_s_lines(qapp):
     s.remove(s.row_for(next(b for b, _ in notes.checklist_blocks() if "Order slings" in b.text())))
     assert "Order slings" not in notes.page()
     s.set_folded(True)
-    assert s.body.isHidden() and s.arrow.text() == "▸"
+    assert s.body.isHidden() and s.arrow.toolTip() == "Show the checklist"
 
 
 @pytest.fixture

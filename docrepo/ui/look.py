@@ -7,12 +7,14 @@ second shows the Ctrl shortcuts (decision 5).
 """
 from __future__ import annotations
 
+import ctypes
+import sys
 import weakref
 from dataclasses import dataclass
 
 from PySide6.QtCore import QEvent, QObject, QPoint, QRect, QRectF, Qt, QTimer
-from PySide6.QtGui import QColor, QPainter, QPen
-from PySide6.QtWidgets import QAbstractButton, QApplication, QLabel, QWidget
+from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPen
+from PySide6.QtWidgets import QAbstractButton, QApplication, QLabel, QMenu, QWidget
 
 from docrepo.ui import tokens
 
@@ -166,9 +168,31 @@ def watch_focus(app: QApplication) -> None:
     """Show the keyboard's focus ring in every window, from now on."""
     if not _watcher:
         _watcher.append(_FocusWatcher(app))
+    _TipsHub.start(app)  # and it dresses each window as it shows
 
 
 _KEYS = (QEvent.Type.KeyPress, QEvent.Type.KeyRelease, QEvent.Type.WindowDeactivate, QEvent.Type.ApplicationDeactivate)
+#: Windows 11's desktop window manager: a window's corners, and its title bar's colour. Windows 10 refuses both, and nothing changes.
+DWMWA_WINDOW_CORNER_PREFERENCE, DWMWA_CAPTION_COLOR = 33, 35
+DWMWCP_ROUNDSMALL = 3
+
+
+def dwm_set(window: QWidget, attribute: int, value: int) -> bool:
+    """Ask Windows to set one of a window's attributes. Whether it did, which only the look depends on."""
+    if sys.platform != "win32" or QGuiApplication.platformName() != "windows" or window.testAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen):
+        return False
+    number = ctypes.c_int(value)
+    return ctypes.windll.dwmapi.DwmSetWindowAttribute(ctypes.c_void_p(int(window.winId())), attribute, ctypes.byref(number), ctypes.sizeof(number)) == 0
+
+
+def dress_window(window: QWidget) -> None:
+    """As a window shows (release 5.59): a popup gets Windows 11's small round corners, and any other window a title bar in the
+    base colour, so there's no seam between it and the toolbar under it."""
+    if window.windowType() in (Qt.WindowType.Popup, Qt.WindowType.ToolTip, Qt.WindowType.SplashScreen) or isinstance(window, QMenu):
+        dwm_set(window, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUNDSMALL)
+    elif not LOOK.classic:
+        c = QColor(tokens.colour("base"))
+        dwm_set(window, DWMWA_CAPTION_COLOR, c.red() | c.green() << 8 | c.blue() << 16)
 
 
 class _TipsHub(QObject):
@@ -186,13 +210,22 @@ class _TipsHub(QObject):
         app = QApplication.instance()
         if app is None:
             return
+        cls.start(app)
+        cls._instance.tips.add(tips)
+
+    @classmethod
+    def start(cls, app: QApplication) -> None:
         if cls._instance is None:
             cls._instance = _TipsHub()
             app.installEventFilter(cls._instance)
-        cls._instance.tips.add(tips)
 
     def eventFilter(self, watched, event) -> bool:  # noqa: N802 - Qt's name
-        if event.type() not in _KEYS:
+        kind = event.type()
+        if kind == QEvent.Type.Show:
+            if watched.isWidgetType() and watched.isWindow() and not LOOK.classic:
+                dress_window(watched)
+            return False
+        if kind not in _KEYS:
             return False
         active = QApplication.activeWindow()
         for tips in list(self.tips):

@@ -71,8 +71,13 @@ class TaskPane(QScrollArea):
             view.viewport().installEventFilter(self)
         head = QWidget(objectName="notesHead")
         head.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        hl = QHBoxLayout(head)
-        hl.setContentsMargins(14, 8, 8, 8)
+        hv = QVBoxLayout(head)
+        hv.setContentsMargins(14, 8, 8, 8)
+        hv.setSpacing(4)
+        hl = QHBoxLayout()
+        hl.setContentsMargins(0, 0, 0, 0)
+        hv.addLayout(hl)
+        self.head_lines = hv
         self.title = QLabel("Notes", font=tokens.ui_font(tokens.BODY, semibold=True))
         self.saved = QLabel("", objectName="notesSaved")
         self.saved.setFont(tokens.ui_font(tokens.CAPTION))
@@ -111,6 +116,8 @@ class TaskPane(QScrollArea):
         hl.addWidget(self.format_bar)
         hl.addWidget(self.table_button)
         hl.addWidget(self.menu_button)
+        # In a narrow pane the format bar has a line of its own, so the page can be as narrow as the pane (release 5.58).
+        self.head_row, self.bar_row, self.head_margin = hl, None, margin
         self.notes.viewport().installEventFilter(self)
         self.notes.on_page_key = self.page_key
         self.notes.cursorPositionChanged.connect(self.follow_caret)
@@ -146,6 +153,30 @@ class TaskPane(QScrollArea):
         lay.addWidget(self.bottom)
         lay.addStretch(1)
         self.setWidget(inner)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        super().resizeEvent(event)
+        self._fit_head()
+
+    def _fit_head(self) -> None:
+        """The format bar beside the Notes heading while it fits there, or else on a line of its own under it."""
+        spare = self.viewport().width() - 2 * self.head_margin - 22
+        need = sum(w.sizeHint().width() + 8 for w in (self.title, self.saved, self.format_bar, self.table_button, self.menu_button))
+        narrow = need > spare
+        if narrow == (self.bar_row is not None):
+            return
+        if narrow:
+            self.head_row.removeWidget(self.format_bar)
+            self.bar_row = QHBoxLayout()
+            self.bar_row.setContentsMargins(0, 0, 0, 0)
+            self.bar_row.addWidget(self.format_bar)
+            self.bar_row.addStretch()
+            self.head_lines.addLayout(self.bar_row)
+        else:
+            self.bar_row.removeWidget(self.format_bar)
+            self.head_lines.removeItem(self.bar_row)
+            self.bar_row = None
+            self.head_row.insertWidget(self.head_row.count() - 2, self.format_bar)
 
     def notes_only(self) -> None:
         """Only the Notes frame, as the Task view's Notes page tab shows it (release 5.37, decision 243)."""

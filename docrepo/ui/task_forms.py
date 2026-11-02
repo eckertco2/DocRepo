@@ -45,8 +45,9 @@ from docrepo.pages import num
 from docrepo.parse import Who
 from docrepo.schedule import length_of, placed, start_of, week_of
 from docrepo.tasks import TIE_LINKS, KeyDateRow, hours_values
-from docrepo.ui.icons import icon
-from docrepo.ui.look import Help
+from docrepo.ui.tokens import C
+from docrepo.ui.icons import icon, set_fold
+from docrepo.ui.look import LOOK, Help
 from docrepo.ui.style import page_css, style_sheet
 from docrepo.ui.task_picker import full_path, path_text
 from docrepo.ui.tree_view import RowTree
@@ -54,6 +55,7 @@ from docrepo.ui.widgets import (
     Chip,
     ChipPicker,
     DateField,
+    DropButton,
     FlowLayout,
     FormDialog,
     HoursField,
@@ -83,6 +85,10 @@ def typed_days(box: QLineEdit) -> int | None:
 
 def days_valid(box: QLineEdit) -> bool:
     return not box.text().strip() or typed_days(box) is not None
+
+
+#: Edit task's fold: what's under it, so nothing there is lost from sight (the review's stage V6).
+MORE_OPTIONS = "More options: hours, labels, key dates, reminder, recurrence and parents"
 
 
 class ShareSpin(QSpinBox):
@@ -473,7 +479,7 @@ class KeyDateLine(QFrame):
         self._grey(row.done)
 
     def _grey(self, done: bool) -> None:
-        self.desc.setStyleSheet("color: #87919c;" if done else "")
+        self.desc.setStyleSheet(f"color: {C.text2};" if done else "")
 
     def is_blank(self) -> bool:
         """A new line with nothing typed in it yet, which isn't saved."""
@@ -704,7 +710,7 @@ class TiePanel(QWidget):
         self.direction = QComboBox()
         self.direction.addItems(ties.DIRECTIONS)
         self.direction.setAccessibleName("Before or after")
-        self.source = QPushButton()
+        self.source = DropButton()
         self.source.setEnabled(pick_task is not None)
         self.source.setAccessibleName("The task it counts from")
         self.key = QComboBox()
@@ -866,7 +872,7 @@ class TiePanel(QWidget):
             source = self.m.tasks.get(d.source)
             title = source.title if source else "Choose a task…"
             shown = self.source.fontMetrics().elidedText(title, Qt.TextElideMode.ElideRight, self.SOURCE_WIDTH)
-            self.source.setText(f"{shown}  ▾".replace("&", "&&"))
+            self.source.setText(shown.replace("&", "&&"))
             self.source.setToolTip(title)
             self.key.clear()
             if source and d.source != self.task_id and not source.recurrence:
@@ -916,12 +922,18 @@ class TaskEditDialog(FormDialog):
         body = QWidget(objectName="capture")
         g = QVBoxLayout(body)
         g.setContentsMargins(0, 0, 8, 0)
-        g.setSpacing(16)
+        g.setSpacing(16 if LOOK.classic else 12)
         scroll.setWidget(body)
         outer.addWidget(scroll, 1)
         self._scroll = scroll
         if link:
             g.addLayout(self._origin_line(link))
+
+        # The rarer fields, under More options (the review's stage V6): essentials first, and the form fits without scrolling.
+        self.more = QWidget()
+        ml = QVBoxLayout(self.more)
+        ml.setContentsMargins(0, 0, 0, 0)
+        ml.setSpacing(16)
 
         # ---- the task itself ----
         self.title = QLineEdit(t.title)
@@ -961,21 +973,23 @@ class TaskEditDialog(FormDialog):
         for note in notes:
             g.addWidget(note)
         self.status = QPlainTextEdit(t.current_status)
-        self.status.setFixedHeight(64)
+        self.status.setFixedHeight(64 if LOOK.classic else 60)
         g.addWidget(field("Current status", self.status, "status"))
         self.description = QPlainTextEdit(t.description)
-        self.description.setFixedHeight(96)
+        self.description.setFixedHeight(96 if LOOK.classic else 80)
         description_field = field("Description", self.description)
         g.addWidget(description_field)
         # Its checklist (release 5.26, decision 88 as redone): the notes page's checklist lines, bound to them. A tick or
         # a rewording here changes the page at once, so Cancel leaves it; nothing goes into the status log.
         self.checklist = checklist
-        if checklist is not None:
-            section(g, "Checklist")
-            g.addWidget(checklist)
+        if checklist is not None:  # up front once it has lines, as it's part of the task's content
+            where = g if checklist.total or LOOK.classic else ml
+            section(where, "Checklist")
+            where.addWidget(checklist)
 
         # ---- people ----
-        section(g, "People")
+        if LOOK.classic:
+            section(g, "People")
         grid = QGridLayout()
         grid.setHorizontalSpacing(16)
         grid.setVerticalSpacing(16)
@@ -1000,14 +1014,20 @@ class TaskEditDialog(FormDialog):
         top_edge = Qt.AlignmentFlag.AlignTop  # the labels stay level, however many chips or lines one of them holds
         grid.addWidget(leads_field, 0, 0, top_edge)
         grid.addWidget(assignees_field, 0, 1, top_edge)
-        grid.addWidget(lead_hours_field, 1, 0, top_edge)
-        grid.addWidget(asg_hours_field, 1, 1, top_edge)
         grid.setColumnStretch(0, 1)
         grid.setColumnStretch(1, 1)
         g.addLayout(grid)
+        hours_grid = QGridLayout()
+        hours_grid.setHorizontalSpacing(16)
+        hours_grid.addWidget(lead_hours_field, 0, 0, top_edge)
+        hours_grid.addWidget(asg_hours_field, 0, 1, top_edge)
+        hours_grid.setColumnStretch(0, 1)
+        hours_grid.setColumnStretch(1, 1)
+        ml.addLayout(hours_grid)
 
         # ---- dates ----
-        section(g, "Dates")
+        if LOOK.classic:
+            section(g, "Dates")
         self.start, self.due, self.deadline, self.reminder, self.repeat = DateField(), DateField(), DateField(), DateField(), DateField()
         for w, value in ((self.start, t.start or (None if t.duration or "start" in t.ties else start_of(t).isoformat())), (self.due, t.due), (self.deadline, t.deadline),
                          (self.reminder, t.reminder), (self.repeat, t.repeat_until)):
@@ -1061,7 +1081,7 @@ class TaskEditDialog(FormDialog):
         calendar_row = QHBoxLayout()
         calendar_row.addWidget(self.calendar)
         calendar_row.addStretch()
-        g.addLayout(calendar_row)
+        ml.addLayout(calendar_row)
         self.date_hint = QLabel("With a Duration, changing Start or Due moves the block, and only the Duration changes its length. Clear a date to take "
                                 "it off the calendar, keeping its size.", objectName="hint")
         self.date_hint.setWordWrap(True)
@@ -1075,13 +1095,19 @@ class TaskEditDialog(FormDialog):
         dates = QGridLayout()
         dates.setHorizontalSpacing(16)
         dates.setVerticalSpacing(16)
-        for w, r, c in ((field("Deadline", self.deadline, "deadline"), 0, 0), (field("Deadline description", self.deadline_desc, "deadlineDesc"), 0, 1),
-                        (field("Reminder", self.reminder, "reminder"), 1, 0), (recurrence_field, 1, 1),
-                        (self.repeat_field, 2, 1)):
+        for w, r, c in ((field("Deadline", self.deadline, "deadline"), 0, 0), (field("Deadline description", self.deadline_desc, "deadlineDesc"), 0, 1)):
             dates.addWidget(w, r, c)
         dates.setColumnStretch(0, 1)
         dates.setColumnStretch(1, 1)
         g.addLayout(dates)
+        later_dates = QGridLayout()
+        later_dates.setHorizontalSpacing(16)
+        later_dates.setVerticalSpacing(16)
+        for w, r, c in ((field("Reminder", self.reminder, "reminder"), 0, 0), (recurrence_field, 0, 1), (self.repeat_field, 1, 1)):
+            later_dates.addWidget(w, r, c)
+        later_dates.setColumnStretch(0, 1)
+        later_dates.setColumnStretch(1, 1)
+        ml.addLayout(later_dates)
         self.start.edited.connect(lambda: self._date_edited("start"))
         self.due.edited.connect(lambda: self._date_edited("due"))
         for name, box in (("start", self.start), ("due", self.due)):
@@ -1101,12 +1127,12 @@ class TaskEditDialog(FormDialog):
         self._show_during()
 
         # ---- key dates (release 5.31, the key dates plan) ----
-        section(g, "Key dates")
+        section(ml, "Key dates")
         self.key_dates = KeyDatesEditor(key_date_rows(m, task_id))
-        g.addWidget(self.key_dates)
+        ml.addWidget(self.key_dates)
 
         # ---- where it sits: parents (mods log round 2, M0040) and labels ----
-        section(g, "Where it sits")
+        section(ml, "Where it sits")
         self.parents_box = QWidget()
         self.parents_layout = FlowLayout(self.parents_box, spacing=8)
         self.parents_hint = QLabel(objectName="hint")
@@ -1116,12 +1142,12 @@ class TaskEditDialog(FormDialog):
         bl.setContentsMargins(0, 0, 0, 0)
         bl.addWidget(self.parents_box)
         bl.addWidget(self.parents_hint)
-        g.addWidget(field("Parents", box, sub="none makes it a top-level task"))
+        ml.addWidget(field("Parents", box, sub="none makes it a top-level task"))
         self._draw_parents()
         self.labels = ChipPicker(labels, "Search or add", "Create label “{}”")
         self.labels.set_chips([Chip(name, name) for name in t.labels])
         labels_field = field("Labels", self.labels, "labels")
-        g.addWidget(labels_field)
+        ml.addWidget(labels_field)
         self.inherit = QCheckBox("Inherit parent labels")
         self.inherit.setChecked(t.inherit_labels)
         inherited = list(dict.fromkeys(n for p in m.parents_of(task_id) for n, _ in m.labels_of(p)))
@@ -1131,15 +1157,11 @@ class TaskEditDialog(FormDialog):
         if inherited:
             row.addWidget(QLabel("Its parents have: " + ", ".join(inherited), objectName="hint"), 1)
         row.addStretch()
-        g.addLayout(row)
+        ml.addLayout(row)
 
-        # ---- More options: the plant event and the reference fields (release 5.9) ----
-        self.more_button = QPushButton("More options ▸", objectName="moreLink")
+        # ---- More options: those, the plant event and the reference fields (release 5.9) ----
+        self.more_button = QPushButton(MORE_OPTIONS, objectName="moreLink")
         g.addWidget(self.more_button)
-        self.more = QWidget()
-        ml = QVBoxLayout(self.more)
-        ml.setContentsMargins(0, 0, 0, 0)
-        ml.setSpacing(16)
         plant = QHBoxLayout()
         plant.addWidget(self.plant_event)
         plant_note = QLabel()
@@ -1158,9 +1180,12 @@ class TaskEditDialog(FormDialog):
                 refs.addWidget(field(name, box, "references" if i == 0 else None), i // 2, i % 2)
             ml.addLayout(refs)
         g.addWidget(self.more)
-        open_more = t.plant_event or any(t.references.get(n) for n in reference_fields)
+        # Open when anything is set in it but a task's place, which nearly every task has and its page shows, and for a task made from a
+        # template, since its hours and labels carry marks saying whether they follow the template.
+        open_more = bool(link or t.plant_event or t.reminder or t.recurrence or t.calendar_days or m.key_dates_of(task_id)
+                         or any(t.references.get(n) for n in reference_fields))
         self.more.setVisible(open_more)
-        self.more_button.setText("More options ▾" if open_more else "More options ▸")
+        set_fold(self.more_button, MORE_OPTIONS, open_more)
         self.more_button.clicked.connect(self._toggle_more)
         g.addStretch()
 
@@ -1268,7 +1293,9 @@ class TaskEditDialog(FormDialog):
     def _toggle_more(self) -> None:
         on = self.more.isHidden()
         self.more.setVisible(on)
-        self.more_button.setText("More options ▾" if on else "More options ▸")
+        set_fold(self.more_button, MORE_OPTIONS, on)
+        self._scroll.widget().layout().activate()
+        fit_dialog(self, self._scroll.widget(), self.width())  # the window grows to hold them, as far as the screen lets it
 
     # ---- Duration and dates (release 5.46, decisions 190 and 191) ----
     def _start_value(self) -> str | None:
@@ -1527,7 +1554,7 @@ def _preview_html(m: Model, outcomes: list[TaskOutcome]) -> str:
         t = m.tasks.get(o.task)
         head = f"<b>{esc(t.title if t else o.task)}</b> <span class=\"sub\">{esc(o.task)}</span>"
         if o.problem:
-            lines = [f'<span style="color:#b0261e">Left as it is: {esc(o.problem)}</span>']
+            lines = [f'<span style="color:{C.critical}">Left as it is: {esc(o.problem)}</span>']
         elif o.changes:
             lines = [f"{esc(c.field)}: {value(c.from_value)} → {value(c.to_value)}" for c in o.changes]
         else:
@@ -1620,7 +1647,7 @@ class BulkEditDialog(FormDialog):
         self.priority.currentIndexChanged.connect(self._changed)
         grid.addWidget(field("Priority", self.priority), 4, 1)
         g.addLayout(grid)
-        self.parent_button = QPushButton("Leave them where they are  ▾")
+        self.parent_button = DropButton("Leave them where they are")
         self.parent_button.clicked.connect(lambda: self._pick_task(self.parent_button, self.set_parent))
         self.parent_how = QComboBox()
         self.parent_how.addItems(["Move there, out from under their parents", "Also put there, keeping their parents"])
@@ -1666,7 +1693,7 @@ class BulkEditDialog(FormDialog):
 
     def _sync_parent(self) -> None:
         picked = self.parent_task in self.m.tasks
-        self.parent_button.setText((full_path(self.m, self.parent_task) if picked else "Leave them where they are") + "  ▾")
+        self.parent_button.setText(full_path(self.m, self.parent_task) if picked else "Leave them where they are")
         self.parent_how.setEnabled(picked)
 
     def _changed(self) -> None:
@@ -1703,7 +1730,7 @@ class BulkEditDialog(FormDialog):
         edit = self.edit()
         if problem:
             self.outcomes = []
-            self.preview.setHtml(f'<p style="color:#b0261e">{esc(problem)}</p>')
+            self.preview.setHtml(f'<p style="color:{C.critical}">{esc(problem)}</p>')
         elif edit.empty:
             self.outcomes = []
             self.preview.setHtml('<p class="note">Set something above to change it on every ticked task. The preview shows what each '

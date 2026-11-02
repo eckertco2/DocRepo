@@ -89,7 +89,7 @@ def test_a_new_task_filled_by_parse_and_populate(window, ctx):
     assert window.n_deadline_desc.text() == "Turnaround start"  # typed fields are never overwritten
     assert "Not filled: you typed in this field." in window.found_label.text()
     assert window.n_leads.values() == ["P001"] and window.n_assignees.values() == ["P005"] and window.n_urgent.isChecked()
-    assert window.n_more.isVisible()  # the reminder is under More fields
+    assert window.n_more.isHidden()  # the reminder is under More fields, shut: the Understood line names it (release 5.61)
     window.agenda.add(Chip("T000010", "Business team meeting"))
     window.save()
     new = Model(ctx.conn).task("T000020")
@@ -604,11 +604,11 @@ def test_reference_fields_and_plant_events_in_the_capture_window(window, ctx):
     ctx.settings.reference_fields = ["Work order #"]
     window.show_capture()
     assert list(window.n_refs) == ["Work order #"] and list(window.u_refs) == ["Work order #"]
-    assert window.n_more_button.text() == "More fields: state, start, reminder, recurrence, hours and Work order # ▸"
+    assert window.n_more_button.text() == "More fields: urgent, meeting, key dates, start, reminder, hours and Work order #"
     window.set_type("new_task", True)
     window.content.setPlainText("Spring outage prep under work order 48213, due Oct 30.")
     window.parse()
-    assert window.n_refs["Work order #"].text() == "48213" and window.n_more.isVisible()
+    assert window.n_refs["Work order #"].text() == "48213" and window.n_more.isHidden()
     assert "<b>Work order #</b> 48213" in window.found_label.text()
     window.n_plant.setChecked(True)
     window.save()
@@ -629,7 +629,7 @@ def test_reference_fields_and_plant_events_in_the_capture_window(window, ctx):
     assert Model(ctx.conn).task("T000008").references == {"Work order #": "50001"}
     ctx.settings.reference_fields = []
     window.show_capture()
-    assert window.n_refs == {} and window.n_more_button.text()[:-2] == "More fields: state, start, reminder, recurrence and hours"
+    assert window.n_refs == {} and window.n_more_button.text() == "More fields: urgent, meeting, key dates, start, reminder and hours"
 
 
 def test_parse_ticks_plant_event(window, ctx):
@@ -639,7 +639,7 @@ def test_parse_ticks_plant_event(window, ctx):
     window.set_type("new_task", True)
     window.content.setPlainText("Plant event: Spring outage, 2 to 6 Nov.")
     window.parse()
-    assert window.n_plant.isChecked() and window.n_plant.property("filled") and window.n_more.isVisibleTo(window)
+    assert window.n_plant.isChecked() and window.n_plant.property("filled") and window.n_more.isHidden()
     assert window.title.text() == "Spring outage" and (window.n_start.value(), window.n_due.value()) == ("2026-11-02", "2026-11-06")
     window.clear()
     window.set_task("T000010")

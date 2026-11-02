@@ -9,12 +9,13 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from PySide6.QtCore import QModelIndex, QPoint, QRect, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QAbstractTextDocumentLayout, QColor, QPainter, QPalette, QTextDocument
-from PySide6.QtWidgets import QAbstractItemView, QHeaderView, QStyle, QStyledItemDelegate, QStyleOptionViewItem, QTreeWidget, QTreeWidgetItem
+from PySide6.QtGui import QAbstractTextDocumentLayout, QColor, QCursor, QPainter, QPalette, QTextDocument
+from PySide6.QtWidgets import (QAbstractItemView, QHBoxLayout, QHeaderView, QLabel, QMenu, QPushButton, QStyle, QStyledItemDelegate, QStyleOptionViewItem,
+                               QTreeWidget, QTreeWidgetItem, QWidget)
 
 from docrepo.ui import tokens
 from docrepo.ui.look import LOOK, paint_focus_ring
-from docrepo.ui.style import page_css
+from docrepo.ui.style import CLASSIC_TREE, page_css
 
 KEY_ROLE = Qt.ItemDataRole.UserRole
 HTML_ROLE = Qt.ItemDataRole.UserRole + 1
@@ -22,9 +23,11 @@ HTML_ROLE = Qt.ItemDataRole.UserRole + 1
 DIM_ROLE = Qt.ItemDataRole.UserRole + 2
 #: The new look's colour edge on a top-level task's row: its group's colour (decision 9), never a tint across its rows.
 EDGE_ROLE = Qt.ItemDataRole.UserRole + 3
+#: A row's actions, a ``RowActions`` (release 5.59).
+ACTIONS_ROLE = Qt.ItemDataRole.UserRole + 4
 
-GROUP_COLOURS = ("#3b78c4", "#2e9483", "#c08419", "#8460c2")
-GREY = "#b8c1cb"
+GROUP_COLOURS = tuple(tokens.LIGHT[k] for k in tokens.GROUP_KEYS)
+GREY = "#b8c1cb"  # Classic's, for a task with no group
 #: How strongly a group's colour shows, by depth: top-level tasks most, each level down less.
 TINTS = (0.15, 0.09, 0.05, 0.025)
 ROW_MIN_HEIGHT = 26
@@ -32,6 +35,8 @@ ROW_MIN_HEIGHT = 26
 NEW_ROW_MIN_HEIGHT = tokens.TREE_ROW
 #: The room a row's tick box takes, in Select mode.
 CHECK_WIDTH = 22
+#: The least room a list's first column keeps: in a narrower list its last columns go first (release 5.58).
+MIN_TITLE = 160
 
 
 def tint(group: int, depth: int) -> QColor | None:
@@ -44,9 +49,46 @@ def tint(group: int, depth: int) -> QColor | None:
     return QColor(round(255 + (base.red() - 255) * p), round(255 + (base.green() - 255) * p), round(255 + (base.blue() - 255) * p))
 
 
+def group_ground() -> QColor:
+    """Behind a group's heading in a list."""
+    return QColor(GREY).lighter(135) if LOOK.classic else QColor(tokens.colour("base"))
+
+
 def edge(group: int, depth: int) -> str | None:
     """The new look's colour edge for a row: its group's colour on a top-level row, nothing below it."""
     return None if LOOK.classic or depth or group < 0 else tokens.group_colour(group)
+
+
+def with_actions(labels: list[str], widths: list[int], width: int) -> tuple[list[str], list[int]]:
+    """A list's columns. The Classic look gives a row's actions a column of ``width`` px; the new look shows them over the row."""
+    return ([*labels, ""], [*widths, width]) if LOOK.classic else (labels, widths)
+
+
+class RowActions:
+    """What a row can do: (label, clicked, tooltip) for each. A plain object, so it comes back from the row as it went in."""
+
+    def __init__(self, actions: list[tuple[str, Callable[[], None], str]]) -> None:
+        self.actions = actions
+
+
+class ActionStrip(QWidget):
+    """A row's actions as links. In the new look it lies over the end of the row's first column, only while the row is under
+    the mouse or current, so a list isn't a column of links (release 5.59). In the Classic look it's a cell, always there."""
+
+    def __init__(self, row: RowActions, item: QTreeWidgetItem | None = None, parent: QWidget | None = None) -> None:
+        super().__init__(parent, objectName="rowActions")
+        self.item = item
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0) if LOOK.classic else lay.setContentsMargins(10, 0, 8, 0)
+        lay.setSpacing(4 if LOOK.classic else 10)
+        for label, clicked, tip in row.actions:
+            b = QPushButton(label, objectName="rowLink")
+            b.setToolTip(tip)
+            b.clicked.connect(lambda _=False, c=clicked: c())
+            lay.addWidget(b)
+        if LOOK.classic:
+            lay.addStretch()
 
 
 class HtmlDelegate(QStyledItemDelegate):
@@ -96,7 +138,7 @@ class HtmlDelegate(QStyledItemDelegate):
         top = opt.rect.top() + max(0, (opt.rect.height() - doc.size().height()) / 2)
         painter.translate(left + self.view.cell_pad, top)
         ctx = QAbstractTextDocumentLayout.PaintContext()
-        ctx.palette.setColor(QPalette.ColorRole.Text, QColor("#1a1f25"))
+        ctx.palette.setColor(QPalette.ColorRole.Text, QColor(tokens.colour("text")))
         doc.documentLayout().draw(painter, ctx)
         painter.restore()
 
@@ -128,17 +170,25 @@ class RowTree(QTreeWidget):
         self.setExpandsOnDoubleClick(False)
         self.setSelectionMode(QTreeWidget.SelectionMode.SingleSelection)
         if LOOK.classic:
-            self.setStyleSheet("QTreeWidget { border: none; font-family: 'Segoe UI'; font-size: 10pt; }"
-                               "QTreeWidget::item:selected { background: #dbe8f5; color: #1a1f25; }"
-                               "QHeaderView::section { color: #87919c; font-size: 8pt; border: none; border-bottom: 1px solid #d6dce3;"
-                               " padding: 3px 6px; background: #ffffff; }")
+            self.setStyleSheet(CLASSIC_TREE)
         self._building = False
         self._moves: tuple[Callable, Callable, Callable] | None = None
+        self._hover: QTreeWidgetItem | None = None
+        self._strips: list[ActionStrip] = []
+        self._widths: list[int] = []
+        self._empty: QWidget | None = None
         self._relayout = QTimer(self)
         self._relayout.setSingleShot(True)
         self._relayout.setInterval(60)
         self._relayout.timeout.connect(self.doItemsLayout)
+        self._relayout.timeout.connect(self._sync_strips)
         self.header().sectionResized.connect(lambda *_: self._relayout.start())
+        if not LOOK.classic:
+            self.setMouseTracking(True)
+            self.verticalScrollBar().valueChanged.connect(lambda _: self._hover_from_cursor())
+            self.horizontalScrollBar().valueChanged.connect(lambda _: self._sync_strips())
+            self.itemExpanded.connect(lambda _: self._sync_strips())
+            self.itemCollapsed.connect(lambda _: self._sync_strips())
         self.currentItemChanged.connect(self._current_changed)
         self.itemChanged.connect(self._item_changed)
         self.set_columns(["Title", "State", "Due"])
@@ -211,13 +261,42 @@ class RowTree(QTreeWidget):
         header.setStretchLastSection(False)
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         widths = widths or [0] + [96] * (len(labels) - 1)
+        self._widths = list(widths)
         for i in range(1, len(labels)):
+            self.setColumnHidden(i, False)
             header.setSectionResizeMode(i, QHeaderView.ResizeMode.Interactive)
             self.setColumnWidth(i, widths[i])
+        self._fit_columns()
+
+    def _fit_columns(self) -> None:
+        """In a narrow list its columns go, the one after the title first, as a date at the row's end says more than a state, so
+        the title keeps enough room to read. They come back with the room. What they say is on the row's page beside it (release 5.58)."""
+        if LOOK.classic or not self._widths:
+            return
+        shown = list(range(1, len(self._widths)))
+        while shown and self.viewport().width() - sum(self._widths[i] for i in shown) < MIN_TITLE:
+            shown.pop(0)
+        for i in range(1, len(self._widths)):
+            if self.isColumnHidden(i) == (i in shown):
+                self.setColumnHidden(i, i not in shown)
+                if i in shown:
+                    self.setColumnWidth(i, self._widths[i])
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        super().resizeEvent(event)
+        self._fit_columns()
+        self._sync_strips()
+        if self._empty is not None:
+            self._empty.setFixedWidth(self.viewport().width())
 
     def begin(self) -> None:
         """Start filling the list again. Changing the current row while filling doesn't count as picking."""
         self._building = True
+        self._forget_strips()
+        if self._empty is not None:
+            self._empty.hide()
+            self._empty.deleteLater()
+            self._empty = None
         self.clear()
 
     def end(self, select: object | None = None) -> None:
@@ -225,6 +304,7 @@ class RowTree(QTreeWidget):
             self.select_key(select)
         self._building = False
         self._relayout.start()
+        self._hover_from_cursor()
 
     def add_row(self, parent: QTreeWidgetItem | None, key: object, cells: list[str], background: QColor | None = None,
                 tip: str = "", selectable: bool = True, span: bool = False, edge: str | None = None) -> QTreeWidgetItem:
@@ -251,6 +331,125 @@ class RowTree(QTreeWidget):
             item.setCheckState(0, Qt.CheckState.Checked if on else Qt.CheckState.Unchecked)
         finally:
             self._building = building
+
+    # ---- a row's actions (release 5.59): over the row on hover and when current, and as its right-click menu ----
+    def set_actions(self, item: QTreeWidgetItem, actions: list[tuple[str, Callable[[], None], str]]) -> None:
+        """Give a row its actions: (label, clicked, tooltip). The Classic look has a column for them, its last."""
+        row = RowActions(actions)
+        item.setData(0, ACTIONS_ROLE, row)
+        if LOOK.classic:
+            self.setItemWidget(item, self.columnCount() - 1, ActionStrip(row))
+
+    def action_strip(self, item: QTreeWidgetItem) -> ActionStrip | None:
+        """The row's strip, showing it if it wasn't. What tests click, as a person would after moving the mouse there."""
+        if LOOK.classic:
+            return self.itemWidget(item, self.columnCount() - 1)
+        self._hover = item
+        self._sync_strips()
+        return next((s for s in self._strips if s.item is item), None)
+
+    def _forget_strips(self) -> None:
+        self._hover = None
+        for strip in self._strips:
+            strip.item = None
+            strip.hide()
+            strip.deleteLater()
+        self._strips = []
+
+    def _sync_strips(self) -> None:
+        """A strip on the row under the mouse and on the current row, each at the end of the first column."""
+        if LOOK.classic or self._building:
+            return
+        wanted: list[QTreeWidgetItem] = []
+        for item in (self._hover, self.currentItem()):
+            if item is not None and not any(item is x for x in wanted) and item.data(0, ACTIONS_ROLE) is not None:
+                wanted.append(item)
+        for strip in [s for s in self._strips if not any(s.item is x for x in wanted)]:
+            self._strips.remove(strip)
+            strip.hide()
+            strip.deleteLater()
+        end = self.header().sectionViewportPosition(0) + self.columnWidth(0)
+        for item in wanted:
+            strip = next((s for s in self._strips if s.item is item), None)
+            if strip is None:
+                strip = ActionStrip(item.data(0, ACTIONS_ROLE), item, self.viewport())
+                self._strips.append(strip)
+            if item is not self._hover and self._covers_words(item, end - strip.sizeHint().width()):  # the current row stays readable: hover shows them
+                strip.hide()
+                continue
+            selected = item.isSelected()
+            if strip.property("sel") != selected:
+                strip.setProperty("sel", selected)
+                strip.style().unpolish(strip)
+                strip.style().polish(strip)
+            rect = self.visualItemRect(item)
+            if not rect.isValid() or not self.is_shown(item) or item.isHidden():
+                strip.hide()
+                continue
+            width = min(strip.sizeHint().width(), end)
+            strip.setGeometry(end - width, rect.top(), width, rect.height())
+            strip.show()
+            strip.raise_()
+
+    def _covers_words(self, item: QTreeWidgetItem, at: int) -> bool:
+        """Whether a strip starting at ``at`` would lie over the words in the row's first column."""
+        doc = QTextDocument()
+        doc.setDefaultFont(self.font())
+        doc.setDefaultStyleSheet(page_css())
+        doc.setDocumentMargin(2)
+        doc.setHtml(item.data(0, HTML_ROLE) or "")
+        rect = self.visualRect(self.indexFromItem(item, 0))
+        doc.setTextWidth(max(20, rect.width() - self.cell_pad - 3))
+        return rect.left() + self.cell_pad + doc.idealWidth() > at
+
+    def show_empty(self, text: str, label: str, clicked: Callable[[], None]) -> None:
+        """An empty list's words and the one action that adds something (the playbook's empty states, release 5.61). Gone at the next ``begin``."""
+        self._empty = QWidget(self.viewport(), objectName="emptyState")
+        lay = QHBoxLayout(self._empty)
+        lay.setContentsMargins(16, 12, 16, 12)
+        lay.setSpacing(12)
+        lay.addWidget(QLabel(text))
+        button = QPushButton(label)
+        button.clicked.connect(lambda _=False: clicked())
+        lay.addWidget(button)
+        lay.addStretch()
+        self._empty.setGeometry(0, 0, self.viewport().width(), self._empty.sizeHint().height())
+        self._empty.show()
+
+    def _hover_from_cursor(self) -> None:
+        """The row under the mouse now: after the list is drawn again or scrolls, it's under a still mouse."""
+        if LOOK.classic or self._building:
+            return
+        at = self.viewport().mapFromGlobal(QCursor.pos())
+        self._hover = self.itemAt(at) if self.viewport().rect().contains(at) else None
+        self._sync_strips()
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        super().mouseMoveEvent(event)
+        if not LOOK.classic:
+            item = self.itemAt(event.position().toPoint())
+            if item is not self._hover:
+                self._hover = item
+                self._sync_strips()
+
+    def leaveEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        super().leaveEvent(event)
+        self._hover = None
+        self._sync_strips()
+
+    def contextMenuEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        at = self.viewport().mapFromGlobal(event.globalPos())
+        item = self.itemAt(at) if event.reason() == event.Reason.Mouse else self.currentItem()
+        row = item.data(0, ACTIONS_ROLE) if item is not None else None
+        if row is None:
+            super().contextMenuEvent(event)
+            return
+        menu = QMenu(self)
+        for label, clicked, tip in row.actions:
+            action = menu.addAction(label, clicked)
+            action.setToolTip(tip)
+        menu.setToolTipsVisible(True)
+        menu.exec(event.globalPos())
 
     def is_shown(self, item: QTreeWidgetItem) -> bool:
         """True when every parent of the row is expanded, so the row can be seen."""
@@ -337,6 +536,7 @@ class RowTree(QTreeWidget):
         self.viewport().update()
 
     def _current_changed(self, current: QTreeWidgetItem | None, previous: QTreeWidgetItem | None) -> None:
+        self._sync_strips()
         if self._building or current is None:
             return
         if not LOOK.classic and self.hasFocus():  # Qt redraws only a row's cell here: the ring goes round the whole row

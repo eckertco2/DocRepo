@@ -17,6 +17,8 @@ from PySide6.QtWidgets import (
 )
 
 from docrepo import mods
+from docrepo.ui.tokens import C
+from docrepo.ui.look import Help
 from docrepo.ui.context import AppContext
 
 
@@ -31,7 +33,7 @@ class ModsPanel(QWidget):
         layout.setContentsMargins(14, 12, 14, 12)
         layout.setSpacing(8)
         top = QHBoxLayout()
-        top.addWidget(QLabel("<b>Mods log</b>  <span style='color:#5a6571'>Changes you want in DocRepo itself</span>"))
+        top.addWidget(QLabel(f"<b>Mods log</b>  <span style='color:{C.text2}'>Changes you want in DocRepo itself</span>"))
         top.addStretch()
         back = QPushButton("Back to the capture")
         back.clicked.connect(self.back.emit)
@@ -63,9 +65,7 @@ class ModsPanel(QWidget):
         row.addWidget(copy_all)
         row.addStretch()
         layout.addLayout(row)
-        self.hint = QLabel()
-        self.hint.setObjectName("hint")
-        self.hint.setWordWrap(True)
+        self.hint = Help()  # its keys: with Show hints (decision 7, release 5.59)
         layout.addWidget(self.hint)
         self._sync()
         heading = QLabel("Open entries, newest first")
@@ -91,7 +91,7 @@ class ModsPanel(QWidget):
             box_layout.setContentsMargins(0, 4, 0, 4)
             meta = QHBoxLayout()
             edited = f" · edited {e.edited}" if e.edited else ""
-            meta.addWidget(QLabel(f"<span style='color:#5a6571'>{e.id} · {e.at} · {e.area}{edited}</span>"))
+            meta.addWidget(QLabel(f"<span style='color:{C.text2}'>{e.id} · {e.at} · {e.area}{edited}</span>"))
             edit = QPushButton("Edit")
             edit.setObjectName("link")
             edit.setToolTip("Put this entry back in the box above, to add to it or change it")
@@ -108,7 +108,7 @@ class ModsPanel(QWidget):
             box_layout.addWidget(note)
             self.entries_layout.addWidget(box)
         if not open_entries:
-            self.entries_layout.addWidget(QLabel("<span style='color:#5a6571'>No open entries.</span>"))
+            self.entries_layout.addWidget(QLabel(f"<span style='color:{C.text2}'>No open entries.</span>"))
         self.entries_layout.addStretch()
 
     def _sync(self) -> None:

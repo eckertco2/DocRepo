@@ -102,9 +102,9 @@ def test_the_page_takes_the_list_s_place_and_the_filters_row_goes(view):
     on_page(view)
     assert view.filter_bar.isHidden() and view.chips.isHidden() and view.pane.top.isHidden() and view.pane.bottom.isHidden()
     assert not view.preview_button.isHidden()  # it stays, in the tabs' row
-    assert view.foot.text() == PAGE_FOOT
+    assert view.foot.text() == view._rest_foot() == ""  # its keys are with Show hints, F1 and the tooltips (the review's decision V7)
     view.kinds.setCurrentIndex(1)
-    assert view.kind == "file" and not view.filter_bar.isHidden() and view.stack.currentWidget() is view.list and view.foot.text() == FOOT
+    assert view.kind == "file" and not view.filter_bar.isHidden() and view.stack.currentWidget() is view.list and view.foot.text() == ""
     view.kinds.setCurrentIndex(5)
     assert view.kind == PAGE
 

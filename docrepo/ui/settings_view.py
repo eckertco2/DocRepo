@@ -40,8 +40,10 @@ from docrepo.dates import WEEKDAYS, long_date
 from docrepo.model import Model
 from docrepo.pages import write_pages
 from docrepo.safe_fs import WriteRefused
+from docrepo.ui.tokens import C
 from docrepo.ui.context import AppContext
-from docrepo.ui.look import Help, set_hints
+from docrepo.ui.icons import icon, set_fold
+from docrepo.ui.look import LOOK, Help, set_hints
 from docrepo.ui.wheel_commands import SPECS, icon_names
 
 log = logging.getLogger(__name__)
@@ -297,6 +299,8 @@ class SettingsView(QWidget):
         more_form.setContentsMargins(0, 0, 0, 0)
         more_form.setHorizontalSpacing(12)
         more_form.setVerticalSpacing(8)
+        more_form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
+        more_form.setFormAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.more_hotkeys: dict[str, QLineEdit] = {}
         for setting, label in hotkey.HOTKEYS[1:]:
             box = QLineEdit()
@@ -310,18 +314,24 @@ class SettingsView(QWidget):
         self.wheel_form.setContentsMargins(0, 0, 0, 0)
         self.wheel_form.setHorizontalSpacing(12)
         self.wheel_form.setVerticalSpacing(8)
+        self.wheel_form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
         self.wheel_hotkeys: dict[str, QLineEdit] = {}
         more_form.addRow(self.wheel_rows)
         suggest = QPushButton("Use the suggested keys")
         suggest.setToolTip("Fills each empty box with Ctrl+Shift and its letter: " + ", ".join(hotkey.SUGGESTED.values()))
         suggest.clicked.connect(self.suggest_hotkeys)
         more_form.addRow("", suggest)
+        more.hide()
+        more_fold = QPushButton("Show", objectName="moreLink")  # release 5.61: each hotkey a row of its own, under a fold
+        more_fold.setIcon(icon("chevron-right"))
+        more_fold.clicked.connect(lambda: (more.setVisible(more.isHidden()), set_fold(more_fold, "Hide" if not more.isHidden() else "Show", not more.isHidden())))
         self._card(lay, "You and your hotkeys", [
             ("Me", "Who “I” and “me” are in captures.", self.me),
             ("Hotkey", "Opens the capture window. It needs Ctrl, Alt or Win.", self.hotkey),
             ("More hotkeys", "Each is off until you set it; Use the suggested keys fills the empty ones with Ctrl+Shift and the topic's "
                              "letter. While DocRepo runs, a hotkey is taken from other programs, such as Outlook's Ctrl+Shift+N. Pause "
-                             "hotkeys in the tray menu pauses them all.", more),
+                             "hotkeys in the tray menu pauses them all.", more_fold),
+            (None, None, more),
         ])
 
         # ---- backups ----
@@ -449,7 +459,7 @@ class SettingsView(QWidget):
         lay.addWidget(self.error)
         buttons = QHBoxLayout()
         buttons.setSpacing(8)
-        save = QPushButton("Save settings", objectName="primary")
+        save = QPushButton("Save settings", objectName="primary" if LOOK.classic else "")
         save.clicked.connect(self.save)
         undo = QPushButton("Undo changes")
         undo.clicked.connect(self.load)
@@ -471,6 +481,9 @@ class SettingsView(QWidget):
         grid.setVerticalSpacing(0)
         grid.setColumnStretch(0, 1)
         for i, (name, what, control) in enumerate(rows):
+            if name is None:  # all the row's width, under the row above
+                grid.addWidget(control, 2 * i, 0, 1, 2)
+                continue
             left = QWidget()
             ll = QVBoxLayout(left)
             ll.setContentsMargins(0, 12, 0, 12)
@@ -482,7 +495,7 @@ class SettingsView(QWidget):
                 ll.addWidget(note)
             grid.addWidget(left, 2 * i, 0)
             grid.addWidget(control, 2 * i, 1, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            if i < len(rows) - 1:
+            if i < len(rows) - 1 and rows[i + 1][0] is not None:
                 line = QFrame()
                 line.setFrameShape(QFrame.Shape.HLine)
                 line.setObjectName("divider")
@@ -523,7 +536,7 @@ class SettingsView(QWidget):
         s, m = self.ctx.settings, Model(self.ctx.conn)
         choice = resolve_data_root(None)
         override = "" if choice.path and choice.path.resolve() == self.ctx.data_root.resolve() else (
-            " <span style='color:#875700'>DocRepo was started with another data root (the command line or DOCREPO_DATA_ROOT), so the recorded "
+            f" <span style='color:{C.caution}'>DocRepo was started with another data root (the command line or DOCREPO_DATA_ROOT), so the recorded "
             f"one ({choice.path or 'none'}) isn't in use now.</span>")
         self.where.setText(f"<b>Data root:</b> {self.ctx.data_root}{override}")
         self.me.clear()

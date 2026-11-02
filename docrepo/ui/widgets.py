@@ -8,10 +8,11 @@ from datetime import date, datetime
 from typing import Any
 
 from PySide6.QtCore import QDate, QEvent, QPoint, QRect, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QKeyEvent, QKeySequence, QShortcut
+from PySide6.QtGui import QColor, QKeyEvent, QKeySequence, QPainter, QShortcut, QTextCharFormat
 from PySide6.QtWidgets import (
     QAbstractButton,
     QCalendarWidget,
+    QCheckBox,
     QComboBox,
     QDialog,
     QHBoxLayout,
@@ -26,6 +27,10 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QSizePolicy,
+    QStackedWidget,
+    QStyle,
+    QStyleOptionButton,
+    QStylePainter,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -34,11 +39,23 @@ from PySide6.QtWidgets import (
 )
 
 from docrepo.model import Model
+from docrepo.ui.tokens import C
 from docrepo.ui.help_text import HELP
 from docrepo.ui.look import LOOK, _Gate
 
 
 SAVE_KEYS = ("Ctrl+Return", "Ctrl+Enter")
+
+
+def ask(parent: QWidget | None, title: str, text: str, yes: str, no: str = "Cancel") -> bool:
+    """A question whose buttons say what they do, with no glossy icon, and Esc or Enter on the safe answer (release 5.61). True for ``yes``."""
+    box = QMessageBox(QMessageBox.Icon.NoIcon, title, text, QMessageBox.StandardButton.NoButton, parent)
+    go = box.addButton(yes, QMessageBox.ButtonRole.AcceptRole)
+    stay = box.addButton(no, QMessageBox.ButtonRole.RejectRole)
+    box.setDefaultButton(stay)
+    box.setEscapeButton(stay)
+    box.exec()
+    return box.clickedButton() is go
 
 
 class FormDialog(QDialog):
@@ -56,9 +73,7 @@ class FormDialog(QDialog):
         for keys in SAVE_KEYS:
             QShortcut(QKeySequence(keys), self, self.save)
         self._clean: Any = None
-        self.ask_discard: Callable[[], bool] = lambda: QMessageBox.question(
-            self, self.windowTitle(), "Close without saving your changes?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes
+        self.ask_discard: Callable[[], bool] = lambda: ask(self, self.windowTitle(), "Close without saving your changes?", "Close without saving", "Keep editing")
 
     def save(self) -> None:
         self.accept()
@@ -89,12 +104,114 @@ class FormDialog(QDialog):
         super().reject()
 
 
-def set_filled(widget: QWidget, filled: bool, name: str = "filled", value: bool | None = None) -> None:
+def set_filled(widget: QWidget, filled: bool, name: str = "filled", value: bool | str | None = None) -> None:
     """Mark a field Parse and populate filled; the style sheet highlights it until it's edited. ``name`` and ``value`` set
     another style property instead, such as the found list's "empty"."""
     widget.setProperty(name, filled if value is None else value)
     widget.style().unpolish(widget)
     widget.style().polish(widget)
+
+
+class DropButton(QPushButton):
+    """A button that opens a list, or moves on: its words, with a chevron 6 px after them, from the icon set, not a typed
+    glyph (release 5.59). ``text()`` is only its words."""
+
+    ROOM = 20
+
+    def __init__(self, text: str = "", parent: QWidget | None = None, arrow: str = "chevron-down") -> None:
+        super().__init__(text, parent)
+        self.arrow = arrow
+
+    def sizeHint(self) -> QSize:  # noqa: N802 - Qt's name
+        option = QStyleOptionButton()
+        self.initStyleOption(option)
+        edges = self.width() - self.style().subElementRect(QStyle.SubElement.SE_PushButtonContents, option, self).width()
+        return QSize(self.fontMetrics().horizontalAdvance(self.text().replace("&&", "&")) + self.ROOM + edges, super().sizeHint().height())
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802 - Qt's name
+        return self.sizeHint()
+
+    def paintEvent(self, _event) -> None:  # noqa: N802 - Qt's name
+        from docrepo.ui import tokens
+        from docrepo.ui.icons import tinted  # icons are drawn once there's an application, so not at import
+
+        p = QStylePainter(self)
+        option = QStyleOptionButton()
+        self.initStyleOption(option)
+        words, option.text = option.text, ""
+        p.drawControl(QStyle.ControlElement.CE_PushButton, option)
+        room = self.style().subElementRect(QStyle.SubElement.SE_PushButtonContents, option, self)
+        shown = self.fontMetrics().elidedText(words, Qt.TextElideMode.ElideRight, max(0, room.width() - self.ROOM))
+        wide = self.fontMetrics().horizontalAdvance(shown.replace("&&", "&"))
+        left = room.left()
+        self.style().drawItemText(p, QRect(left, room.top(), wide + 2, room.height()),
+                                  int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter | Qt.TextFlag.TextShowMnemonic),
+                                  option.palette, self.isEnabled(), shown, self.foregroundRole())
+        colour = tokens.LIGHT["disabled" if not self.isEnabled() else "text2"]
+        p.drawPixmap(left + wide + 6, (self.height() - 14) // 2, tinted(self.arrow, colour, 14, max(1.0, self.devicePixelRatioF())))
+
+
+class ViewStack(QStackedWidget):
+    """A stack that asks only for the room its page on show needs. Qt's holds the largest page's, so the widest view set the
+    least width of every view, and the window couldn't snap to half a screen (release 5.58)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.currentChanged.connect(lambda _: self.updateGeometry())
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802 - Qt's name
+        page = self.currentWidget()
+        return page.minimumSizeHint().expandedTo(page.minimumSize()) if page is not None else super().minimumSizeHint()
+
+
+class ElidedLabel(QLabel):
+    """One line of plain text that ends in "…" when it doesn't fit, with all of it in its tooltip. ``text()`` is always all of it
+    (release 5.58)."""
+
+    def __init__(self, text: str = "", parent: QWidget | None = None, objectName: str = "") -> None:  # noqa: N803 - Qt's name
+        super().__init__(text, parent)
+        if objectName:
+            self.setObjectName(objectName)
+        self.setTextFormat(Qt.TextFormat.PlainText)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802 - Qt's name
+        return QSize(0, super().minimumSizeHint().height())
+
+    def _shown(self) -> str:
+        return self.fontMetrics().elidedText(self.text(), Qt.TextElideMode.ElideRight, self.contentsRect().width())
+
+    def setText(self, text: str) -> None:  # noqa: N802 - Qt's name
+        super().setText(text)
+        self.setToolTip(text if self._shown() != text else "")
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        super().resizeEvent(event)
+        self.setToolTip(self.text() if self._shown() != self.text() else "")
+
+    def paintEvent(self, _event) -> None:  # noqa: N802 - Qt's name
+        p = QPainter(self)
+        self.style().drawItemText(p, self.contentsRect(), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, self.palette(), self.isEnabled(),
+                                  self._shown(), self.foregroundRole())
+
+
+class ElidedCheck(QCheckBox):
+    """A tick box whose words end in "…" when they don't fit. Its tooltip has all of them, and ``text()`` is always all of them
+    (release 5.58)."""
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802 - Qt's name
+        return QSize(48, super().minimumSizeHint().height())
+
+    def sizeHint(self) -> QSize:  # noqa: N802 - Qt's name
+        return QSize(48, super().sizeHint().height())
+
+    def paintEvent(self, _event) -> None:  # noqa: N802 - Qt's name
+        p = QStylePainter(self)
+        option = QStyleOptionButton()
+        self.initStyleOption(option)
+        room = self.style().subElementRect(QStyle.SubElement.SE_CheckBoxContents, option, self).width()
+        option.text = self.fontMetrics().elidedText(self.text(), Qt.TextElideMode.ElideRight, room)
+        p.drawControl(QStyle.ControlElement.CE_CheckBox, option)
 
 
 class FlowLayout(QLayout):
@@ -143,7 +260,8 @@ class FlowLayout(QLayout):
     def minimumSize(self) -> QSize:  # noqa: N802
         size = QSize()
         for item in self._items:
-            size = size.expandedTo(item.minimumSize())
+            if not item.isEmpty():
+                size = size.expandedTo(item.minimumSize())
         m = self.contentsMargins()
         return size + QSize(m.left() + m.right(), m.top() + m.bottom())
 
@@ -156,6 +274,8 @@ class FlowLayout(QLayout):
         lines: list[tuple[int, int, list[tuple[QLayoutItem, int, QSize]]]] = []
         current: list[tuple[QLayoutItem, int, QSize]] = []
         for item in self._items:
+            if item.isEmpty():  # a hidden control takes no room
+                continue
             hint = item.sizeHint()
             if x + hint.width() > right and line > 0:
                 lines.append((y, line, current))
@@ -204,7 +324,7 @@ def field(label: str, widget: QWidget | None, help_key: str | None = None, sub: 
     row = QHBoxLayout()
     row.setSpacing(6)
     sub = sub if LOOK.show_help else ""  # a label's own hint, such as "a description for each", only with Show hints
-    text = QLabel(f"{label} <span style='color:#87919c'>{sub}</span>" if sub else label)
+    text = QLabel(f"{label} <span style='color:{C.text2}'>{sub}</span>" if sub else label)
     text.setObjectName("fieldLabel")
     if widget is not None:
         text.setBuddy(widget)
@@ -278,11 +398,17 @@ class DateField(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(2)
         self.line = QLineEdit()
+        self.line.setObjectName("dateLine")
         self.line.setPlaceholderText("YYYY-MM-DD")
         self.line.textEdited.connect(self._typed)
         menu = QMenu(self)
         self.calendar = QCalendarWidget()
         self.calendar.setGridVisible(False)
+        if not LOOK.classic:  # Qt's weekends are red, and red means something's wrong
+            weekend = QTextCharFormat()
+            weekend.setForeground(QColor(C.text2))
+            self.calendar.setWeekdayTextFormat(Qt.DayOfWeek.Saturday, weekend)
+            self.calendar.setWeekdayTextFormat(Qt.DayOfWeek.Sunday, weekend)
         self.calendar.clicked.connect(self._picked)
         action = QWidgetAction(menu)
         action.setDefaultWidget(self.calendar)
@@ -293,7 +419,7 @@ class DateField(QWidget):
         layout.addWidget(self.line, 1)
         if LOOK.classic:
             button = QToolButton()
-            button.setText("▾")
+            button.setText("▾")  # Classic's
             button.setToolTip("Pick a date")
             button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
             button.setMenu(menu)

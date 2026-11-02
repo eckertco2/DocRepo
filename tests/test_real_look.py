@@ -169,6 +169,93 @@ print(json.dumps(out))
     assert seen["clicked"] == [True, False]
 
 
+SAMPLE = """
+import tempfile
+from datetime import datetime
+from pathlib import Path
+from PySide6.QtCore import Qt
+from docrepo import db
+from docrepo.config import Settings, make_safe_fs
+from docrepo.sample import load_sample
+from docrepo.ui.browse_window import BrowseWindow
+from docrepo.ui.capture_window import CaptureWindow
+from docrepo.ui.context import AppContext
+root = Path(tempfile.mkdtemp())
+settings = Settings(me="P001")
+fs = make_safe_fs(root, settings)
+conn = db.connect(fs, root)
+load_sample(conn)
+ctx = AppContext(conn, root, fs, settings, now=lambda: datetime(2026, 10, 8, 14, 10), settings_changed=lambda _: None)
+capture = CaptureWindow(ctx)
+capture.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen)
+browse = BrowseWindow(ctx, capture)
+browse.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen)
+browse.show_browse()
+def settle():
+    for _ in range(8):
+        app.processEvents()
+"""
+
+
+@windows_only
+def test_the_window_can_snap_to_half_a_1920_screen_on_every_view():
+    """The review's stage V2: 1157 px wide at least, because the middle pane held its widest page's minimum. Each view now asks for its own."""
+    widths = run_look(SAMPLE + """
+from docrepo.views import VIEWS
+out = {}
+for v in VIEWS:
+    browse.set_view(v.id)
+    settle()
+    out[v.id] = browse.minimumSizeHint().width()
+print(json.dumps(out))
+""", "windows")
+    assert max(widths.values()) <= 960, widths
+
+
+@windows_only
+def test_the_task_page_is_as_narrow_as_its_pane():
+    """It stayed 481 px wide in a 288 px pane, so its words ran off the edge with nothing to show it."""
+    got = run_look(SAMPLE + """
+browse.resize(960, 700)
+browse.set_view("tasks")
+browse.go_task("T000001")
+settle()
+browse.split.setSizes([248, 2000, 0])
+settle()
+pane = browse.task_pane
+print(json.dumps([pane.viewport().width(), pane.widget().width(), browse.detail.width()]))
+""", "windows")
+    assert got[1] <= got[0] + 1, got
+
+
+@windows_only
+def test_the_forms_fit_without_scrolling():
+    """Edit task scrolled at 608 by 724, and New task by 401 px at the capture window's largest."""
+    got = run_look(SAMPLE + """
+from PySide6.QtWidgets import QScrollArea
+dialogs = []
+def run_dialog(d):
+    dialogs.append(d)
+    d.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen)
+    d.resize(608, 724)
+    d.show()
+    return False
+browse.run_dialog = run_dialog
+browse.set_view("tasks")
+browse.go_task("T000001")
+browse.edit_task("T000001")
+settle()
+edit = dialogs[-1].findChild(QScrollArea).verticalScrollBar().maximum()
+capture.show_capture(mode="new_task", content="Replace the Line 2 pump seal by Fri 16 Oct. @Mike leads, 6 h. Deadline 30 Oct")
+capture.parse()
+settle()
+new = [a.verticalScrollBar().maximum() for a in capture.findChildren(QScrollArea) if a.isVisibleTo(capture)]
+print(json.dumps([edit, new]))
+""", "windows")
+    assert got[0] == 0, got
+    assert max(got[1]) <= 12, got  # a few pixels at most, which depend on the computer's scaling
+
+
 def test_every_window_gets_docrepos_icon():
     """A window icon and the taskbar's own name for DocRepo (release 5.57), at each size Windows asks for."""
     got = run_look("""

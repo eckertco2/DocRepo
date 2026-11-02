@@ -38,6 +38,7 @@ from docrepo.pages import num
 from docrepo.tasks import TaskError
 from docrepo.templates import plural
 from docrepo.ui import tokens
+from docrepo.ui.icons import set_fold
 from docrepo.ui.style import page_css, style_sheet
 from docrepo.ui.widgets import FormDialog
 
@@ -712,7 +713,7 @@ class EditReviewDialog(_Window):
         return box
 
     def _draw_fold(self, i: int, inner: QWidget) -> None:
-        self._reach_labels[i].setText(f"{self._reach_words[i]()} {'▸' if inner.isHidden() else '▾'}")
+        set_fold(self._reach_labels[i], self._reach_words[i](), not inner.isHidden())
         self._reach_labels[i].setProperty("inner", inner)
 
     def _sub_ticked(self, c: tf.EditChange, key: str, on: bool, i: int) -> None:

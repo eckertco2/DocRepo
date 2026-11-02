@@ -19,6 +19,7 @@ from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QLineEdit, QPushBu
 
 from docrepo.ui import tokens
 from docrepo.ui.icons import icon
+from docrepo.ui.widgets import ElidedLabel
 from docrepo.ui.notes_edit import NotesEdit
 from docrepo.ui.rich_edit import MARKER, RichEdit
 
@@ -167,7 +168,7 @@ class ChecklistSummary(QWidget):
         self.arrow.setVisible(foldable)
         self.title = QLabel("Checklist", font=tokens.ui_font(tokens.BODY, semibold=True))
         self.title.setVisible(foldable)  # in Edit task, its section's heading says it
-        self.count = QLabel(objectName="checkCount")
+        self.count = ElidedLabel(objectName="checkCount")  # it mustn't hold the page wider than its pane
         self.done_button = QPushButton(objectName="link")
         self.done_button.setFlat(True)
         self.done_button.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -200,7 +201,7 @@ class ChecklistSummary(QWidget):
 
     def set_folded(self, folded: bool, emit: bool = False) -> None:
         self.is_folded = folded
-        self.arrow.setText("▸" if folded else "▾")
+        self.arrow.setIcon(icon("chevron-right" if folded else "chevron-down"))
         self.arrow.setToolTip("Show the checklist" if folded else "Fold the checklist")
         self.body.setVisible(not folded)
         self.add.setVisible(not folded)
@@ -217,6 +218,7 @@ class ChecklistSummary(QWidget):
         items = self.notes.checklist_blocks()
         done = sum(1 for b, _ in items if b.blockFormat().marker() == MARKER.Checked)
         total = len(items)
+        self.total = total
         self.count.setText(f"{done} of {total} done" if total else "None yet: Ctrl+1 on the page, or Add item")
         self.done_button.setText(("Hide done" if self.show_done else f"Show {done} done") if done else "")
         self.done_button.setVisible(bool(done) and not self.is_folded)

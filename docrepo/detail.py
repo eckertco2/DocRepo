@@ -46,6 +46,8 @@ h2 { font-size: 15pt; font-weight: 600; margin-top: 2px; margin-bottom: 4px; }
 .tab { color: #1d5e98; }
 .tabon { background-color: #dbe8f5; font-weight: 600; }
 .day { color: #5a6571; font-size: 9pt; }
+.caution { color: #875700; }
+.critical { color: #b0261e; }
 .month { color: #87919c; font-size: 9pt; font-weight: 600; }
 .lead { color: #5a6571; font-size: 9pt; }
 .facts { color: #5a6571; font-size: 9pt; }
@@ -106,8 +108,26 @@ def multiline(text: str) -> str:
     return esc(text).replace("\n", "<br>")
 
 
+#: The arrows on a page: the icons' chevrons, which ``PageView`` draws, in place of typed glyphs (release 5.59).
+CHEVRON_RIGHT = '<img src="chev:right" width="14" height="14">'
+CHEVRON_DOWN = '<img src="chev:down" width="14" height="14">'
+
+
+def fold_link(href: str, text: str, is_open: bool) -> str:
+    """A heading that folds: its chevron, then its words in the text colour, as it isn't a link to anywhere."""
+    return f'<a href="{esc(href)}">{CHEVRON_DOWN if is_open else CHEVRON_RIGHT} <span class="foldword">{esc(text)}</span></a>'
+
+
 def chip(text: str, cls: str) -> str:
     return f'<span class="{cls}">&nbsp;{esc(text)}&nbsp;</span>'
+
+
+def row_state(state: str) -> str:
+    """A task's state in a list's row (the review's decision V6): In progress in words, Not started and Closed quieter, and a chip
+    only for Parked, so a chip says something needs a look."""
+    if state == "Parked":
+        return state_chip(state)
+    return esc(state) if state == "In progress" else f'<span class="faint">{esc(state)}</span>'
 
 
 def state_chip(state: str, text: str | None = None) -> str:
@@ -188,11 +208,13 @@ class PageState:
 
 
 class Pages:
-    """Builds the pages for one Model, as of ``today``. ``content_of`` reads a capture's content text."""
+    """Builds the pages for one Model, as of ``today``. ``content_of`` reads a capture's content text. ``hints`` adds the sentences
+    that say how a page works, which show only with Show hints on (decision 7, release 5.59)."""
 
     def __init__(self, model: Model, today: date, content_of: Callable[[str], str], me: str | None = None,
-                 conn: sqlite3.Connection | None = None) -> None:
+                 conn: sqlite3.Connection | None = None, hints: bool = True) -> None:
         self.m = model
+        self.hints = hints
         self.today = today
         self.content_of = content_of
         self.me = me
@@ -365,13 +387,13 @@ class Pages:
             if not done and is_open(t) and (kd.end or last >= today):
                 when += f' <span class="rel">{self.days(last)}</span>'
             what = esc(kd.description) if kd.description else '<span class="sub">Key date</span>'
-            marks = (' <span style="color:#875700">⚑ plant activity</span>' if kd.plant else "") + \
-                    (' <span style="color:#b0261e">◆</span> <span class="rel">deadline</span>' if kd.deadline else "")
+            marks = (' <span class="caution">⚑ plant activity</span>' if kd.plant else "") + \
+                    (' <span class="critical">◆</span> <span class="rel">deadline</span>' if kd.deadline else "")
             # Kept on one line (no-break spaces), so a narrow column doesn't split it.
             sub = link(f"kd:subtask:{kd.id}", "Make it a subtask".replace(" ", "\u00a0"), "A subtask of this task with these dates, in its place", quiet="tq")
             text = f"{when}<br>{what}{marks}"
             if done:
-                text = f'<span style="color:#87919c"><s>{key_dates.when_text(kd, today)}</s><br>{esc(kd.description or "Key date")}</span>' \
+                text = f'<span class="faint"><s>{key_dates.when_text(kd, today)}</s><br>{esc(kd.description or "Key date")}</span>' \
                        f' <span class="rel">done {esc(self.long(kd.done))}</span>'
             lines.append(f'<tr><td valign="top" width="18">{tick}</td><td valign="top">{text} <span class="rel">· {sub}</span></td></tr>')
         open_n = sum(1 for kd in kds if not kd.done)
@@ -528,8 +550,8 @@ class Pages:
         if not state.details:
             made = f"Created {self.long(t.created)}" + (f" from {t.created_by}" if t.created_by else "")
             line = " · ".join([t.id, *(f"{k} {v}" for k, v in t.references.items()), made])
-            return f'<p class="sec">{link("fold:details", "▸ Details")} &nbsp;<span class="rel">{esc(line)}</span></p>'
-        return f'<p class="sec">{link("fold:details", "▾ Details")}</p>{fact_rows(rows)}'
+            return f'<p class="sec">{fold_link("fold:details", "Details", False)} &nbsp;<span class="rel">{esc(line)}</span></p>'
+        return f'<p class="sec">{fold_link("fold:details", "Details", True)}</p>{fact_rows(rows)}'
 
     def history(self, t: Task, state: PageState) -> str:
         """The tabs with their counts for the scope, and the scope and order as two menus on the same line."""
@@ -541,7 +563,7 @@ class Pages:
         cells = "".join(f'<td class="tabon">{esc(label)} <span class="rel">{counts[key]}</span></td>' if key == tab
                         else f'<td><a href="tab:{key}"><span class="tab">{esc(label)}</span></a> <span class="rel">{counts[key]}</span></td>'
                         for key, label in TABS)
-        controls = link("menu:scope", f"{SCOPE_NAMES[state.scope]} ▾", "Which tasks' entries to show")
+        controls = f'<a href="menu:scope" title="Which tasks\' entries to show">{esc(SCOPE_NAMES[state.scope])} {CHEVRON_DOWN}</a>'
         if tab in ("notes", "log"):
             controls += " &nbsp; " + link("menu:order", f"⇅ {'Newest' if state.order == 'new' else 'Oldest'} first", "Oldest or newest first")
         # The tabs have a table of their own: the selected one's underline would make a full-width table a pixel too wide.
@@ -706,7 +728,7 @@ class Pages:
         empty = kind == "notes" and not notes
         dates = sorted(e.at for e in (self.stories.story(task_id) if kind == "log" else notes))
         summary = (k.current_status or "No status yet") if kind == "log" else "No entries" if empty else f"{len(notes)} entr{'ies' if len(notes) > 1 else 'y'}"
-        caret = "" if empty else link(f"chap:{task_id}", "▼" if is_open_ else "▶")
+        caret = "" if empty else f'<a href="chap:{esc(task_id)}">{CHEVRON_DOWN if is_open_ else CHEVRON_RIGHT}</a>'
         head = (f'<tr><td class="ch" width="{18 + 16 * depth}" align="right">{caret}</td><td class="ch"><b>{esc(k.title)}</b> {state_chip(k.state)} '
                 f'<span class="sub">{esc(clip(summary, 90))}{" · " + self.day(dates[-1]) if dates else ""}</span>'
                 f' &nbsp;<a href="task:{esc(task_id)}" title="Open {esc(k.title)}"><span class="sub">Open ↗</span></a></td></tr>')
@@ -775,8 +797,9 @@ class Pages:
         if c.discarded:
             unfiled = self.discarded_box(c.discarded, c.discard_reason, "its tasks' logs, the Unfiled view and search. Its folder stays")
         if self.m.is_unfiled(c):
-            unfiled = box("<b>Unfiled.</b> Pick a task and File to task, or Make it a task, with the buttons above. Filing links it to the task "
-                          "and sets the task in its capture.md; the folder stays where it is.", "info")
+            unfiled = (box("<b>Unfiled.</b> Pick a task and File to task, or Make it a task, with the buttons above. Filing links it to the task "
+                           "and sets the task in its capture.md; the folder stays where it is.", "info") if self.hints
+                       else f'<p>{chip("Unfiled", "st-ns")}</p>')
         content = items.unstore(content) if content else content  # each @ and # by its name (release 5.8)
         shown = markup.to_html(content) if content and c.formatted else f'<span class="text">{multiline(content or "")}</span>'
         text = (box(f'<span class="sub">Content text</span><br>{shown}') if content
@@ -832,7 +855,8 @@ class Pages:
                 ("Status", esc(p.status)), ("Scheduled", f"{this_week:.1f} h this week, {next_week:.1f} h next week"),
                 ("Leads", ", ".join(self.task_link(x) for x in leads) or "None"), ("Assigned", ", ".join(self.task_link(x) for x in assigned) or "None")]
         added = f'<p class="note">{esc(p.added_note)}</p>' if p.added_note else ""
-        return f'<p class="crumbs">Person {p.id}</p><h2>{esc(p.name)}{chips}</h2>{added}{fields_table(rows)}{self.agenda_block(person_id)}'
+        tags = f'<p class="tags">{chips.strip()}</p>' if chips else ""  # under the name, at the chips' own size
+        return f'<p class="crumbs">Person {p.id}</p><h2>{esc(p.name)}</h2>{tags}{added}{fields_table(rows)}{self.agenda_block(person_id)}'
 
     def label_page(self, name: str) -> str:
         label = next(lb for lb in self.m.labels if lb.name == name)
@@ -864,7 +888,7 @@ class Pages:
             lines = [f"{self.task_link(t)} <span class=sub>{h:.1f} h</span>" for t, h in c.tasks] or ['<span class="sub">No scheduled hours.</span>']
             out = box(f"<b>{esc(row.name)}, week of {esc(long_date(weeks[i], self.today))}</b><br>" + "<br>".join(lines))
         else:
-            out = '<p class="note">Click a cell to see which tasks fill it.</p>'
+            out = '<p class="note">Click a cell to see which tasks fill it.</p>' if self.hints else ""
         links = lambda ids: ", ".join(self.task_link(x) for x in ids) or "None"  # noqa: E731
         return (out + f'<p class="note"><b>Unestimated</b> (people, no hours): {links(unestimated)}</p>'
                 f'<p class="note"><b>Unscheduled</b> (hours, no dates): {links(unscheduled)}</p>')

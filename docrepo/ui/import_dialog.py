@@ -32,6 +32,8 @@ from PySide6.QtWidgets import (
 
 from docrepo import excel_import as xi
 from docrepo.db import STATES
+from docrepo.ui.look import LOOK
+from docrepo.ui.tokens import C
 from docrepo.ui.style import page_css
 from docrepo.model import Model
 from docrepo.ui.context import AppContext
@@ -50,11 +52,11 @@ class ImportDialog(QDialog):
         super().__init__(parent)
         self.ctx = ctx
         self.setWindowTitle("Import projects from Excel")
-        self.setStyleSheet("QDialog { background: #ffffff; } QLabel#hint { color: #5a6571; } "
-                           "QLabel#error { background: #fbe3e1; color: #b0261e; padding: 6px 10px; } "
-                           "QPushButton#primary { background: #1d5e98; color: #ffffff; border: 1px solid #1d5e98; padding: 4px 14px; }"
-                           "QPushButton#primary:disabled { background: #b8c1cb; border-color: #b8c1cb; }")
-        self.resize(1100, 820)
+        self.setStyleSheet(f"QDialog {{ background: {C.content}; }} QLabel#hint {{ color: {C.text2}; }} "
+                           f"QLabel#error {{ background: {C.critical_bg}; color: {C.critical}; padding: 6px 10px; }} "
+                           f"QPushButton#primary {{ background: {C.accent}; color: {C.content}; border: 1px solid {C.accent}; padding: 4px 14px; }}"
+                           f"QPushButton#primary:disabled {{ background: {C.stroke_strong}; border-color: {C.stroke_strong}; }}")
+        self.resize(1100, 820) if LOOK.classic else self.resize(760, 420)  # it grows when a workbook is chosen
         self.path: Path | None = None
         self.rows: list[list[object]] = []
         self.plan: xi.Plan | None = None
@@ -112,7 +114,7 @@ class ImportDialog(QDialog):
         h.setSectionResizeMode(3, QHeaderView.ResizeMode.Interactive)
         self.table.setColumnWidth(3, 160)
         lay.addWidget(self.table, 3)
-        self.states_label = QLabel("<b>State values</b> <span style='color:#5a6571'>what each value in the State column becomes</span>")
+        self.states_label = QLabel(f"<b>State values</b> <span style='color:{C.text2}'>what each value in the State column becomes</span>")
         lay.addWidget(self.states_label)
         self.states = QTableWidget(0, 3)
         self.states.setHorizontalHeaderLabels(["Value", "Rows", "Becomes"])
@@ -167,6 +169,7 @@ class ImportDialog(QDialog):
             self._fail(str(e))
             return
         self.path = path
+        self.resize(max(self.width(), 1100), max(self.height(), 820))
         self.file.setText(str(path))
         self._filling = True
         self.sheet.clear()

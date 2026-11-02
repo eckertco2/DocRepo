@@ -27,10 +27,23 @@ LIGHT = {
     "accent_hover": "#174d7d",
     "accent_pressed": "#123e66",
     "on_accent": "#ffffff",
+    "info_bg": "#e8f0f8", "info_line": "#9dc0e3",  # the accent's family where nothing is selected: chips, a mention, a drop's overlay; selection keeps "selected"
+    "parked": "#585a70", "parked_bg": "#eae8f2",
     "caution": "#9d5d00", "caution_bg": "#fff4ce", "caution_line": "#ead9a4",   # filled from the capture text, warnings
     "critical": "#c42b1c", "critical_bg": "#fde7e9",                           # overdue, over capacity, errors
     "success": "#0f7b0f", "success_bg": "#dff6dd",
     "scroll": "#c3cbd4", "scroll_hover": "#9aa4af",
+    # Plant events: their bars, lane and band.
+    "event": "#b07a12", "event_bg": "#f7e3b5", "event_ink": "#6e4700",
+    # The Timeline's lanes: a small dot beside dark words, never the words' colour or a band of it (the review's decision V4).
+    "lane1": "#2a78d6", "lane2": "#eb6834", "lane3": "#1baf7a", "lane4": "#eda100", "lane5": "#e87ba4", "lane6": "#008300", "lane7": "#6250d6", "lane8": "#e34948",
+    # Hours a week on the Timeline's bars, light to dark, and the text on each.
+    "hour1": "#86b6ef", "hour2": "#5598e7", "hour3": "#256abf", "hour4": "#184f95", "hour5": "#0d366b",
+    "hour_ink1": "#0b1b2e", "hour_ink2": "#0b1b2e", "hour_ink3": "#ffffff", "hour_ink4": "#ffffff", "hour_ink5": "#ffffff",
+    "pri_high": "#d9622b",
+    # The capture window's item cards, each kind's edge, and its references.
+    "item_task": "#e3ecf7", "item_note": "#e0f1ee", "item_update": "#f6ecd8", "item_decision": "#ece6f6", "item_date": "#e8f0dc", "item_heading": "#e9edf1",
+    "ref_task": "#22706a", "ref_task_bg": "#d6eeea",
     # Categories: the top-level tasks' colours (decision 9), as marks, never as text.
     "g1": "#3b78c4", "g2": "#2e9483", "g3": "#c08419", "g4": "#8460c2",
     # File types (the Task view, release 5.34): their icons' colours only, never text's, each 3:1 or more on white.
@@ -42,6 +55,14 @@ DARK = {
     "base": "#202020", "content": "#2b2b2b", "hover": "#333333", "pressed": "#3a3a3a", "selected": "#1f3447",
     "text": "#ffffff", "text2": "#c5c5c5", "disabled": "#7a7a7a", "stroke": "#3a3a3a", "stroke_strong": "#454545",
     "control": "#9a9a9a", "accent": "#7cb0e2", "accent_hover": "#93bfe8", "accent_pressed": "#6aa2d8", "on_accent": "#0c1622",
+    "info_bg": "#1b2a38", "info_line": "#3d5a75", "parked": "#b9b6d6", "parked_bg": "#2d2b3d",
+    "event": "#dca64a", "event_bg": "#3a2e13", "event_ink": "#f0d49a",
+    "lane1": "#6fa6e8", "lane2": "#f08a69", "lane3": "#56c2b0", "lane4": "#dca64a", "lane5": "#ee9fbd", "lane6": "#5cbf86", "lane7": "#ad8ee8", "lane8": "#f3968e",
+    "hour1": "#1c3a5e", "hour2": "#25507f", "hour3": "#3a70ad", "hour4": "#6699d4", "hour5": "#9cc0ea",
+    "hour_ink1": "#ffffff", "hour_ink2": "#ffffff", "hour_ink3": "#ffffff", "hour_ink4": "#0b1b2e", "hour_ink5": "#0b1b2e",
+    "pri_high": "#f08a69",
+    "item_task": "#1f3447", "item_note": "#1c3532", "item_update": "#3a2e13", "item_decision": "#2d2b3d", "item_date": "#26331c", "item_heading": "#333333",
+    "ref_task": "#56c2b0", "ref_task_bg": "#1c3532",
     "caution": "#e8b85c", "caution_bg": "#3a2e13", "caution_line": "#5a4720", "critical": "#f3968e", "critical_bg": "#3e1f1c",
     "success": "#82d098", "success_bg": "#1b3323", "scroll": "#555555", "scroll_hover": "#777777",
     "g1": "#6fa6e8", "g2": "#56c2b0", "g3": "#dca64a", "g4": "#ad8ee8",
@@ -66,6 +87,16 @@ RADIUS = 4        # controls; windows, menus and dialogs use 8
 
 def colour(name: str) -> str:
     return LIGHT[name]
+
+
+class _Named:
+    """The colours by name, for f-strings: ``{C.text2}``."""
+
+    def __getattr__(self, name: str) -> str:
+        return LIGHT[name]
+
+
+C = _Named()
 
 
 def group_colour(group: int) -> str:
@@ -152,6 +183,10 @@ QLineEdit[filled="true"], QPlainTextEdit[filled="true"], QComboBox[filled="true"
 QLineEdit[filled="true"] { background-image: url("$marker"); background-repeat: no-repeat; background-position: right center;
   padding-right: 24px; }
 QCheckBox[filled="true"] { background: $caution_bg; border-radius: 4px; }
+QLineEdit#dateLine[filled="true"], QLineEdit#dateLine[filled="dot"] { background-position: left center; padding-left: 22px; padding-right: 8px; }  /* its calendar button has the right */
+/* when Parse and populate filled most of a window, each field has only its dot: a tint on all of them says nothing */
+QLineEdit[filled="dot"] { background-image: url("$marker"); background-repeat: no-repeat; background-position: right center;
+  padding-right: 24px; }
 
 /* keyboard focus is look.FocusRing's, over these: no focus frame of Fusion's under it */
 QPushButton, QToolButton, QCheckBox, QRadioButton { outline: none; }
@@ -169,15 +204,18 @@ QPushButton#primary:pressed { background: $accent_pressed; }
 QPushButton#primary:disabled { color: $disabled; background: $base; border-color: $stroke; }
 QPushButton#subtle, QToolButton#subtle { background: transparent; border: 1px solid transparent; }
 QPushButton#subtle { padding: 5px 8px; }  /* a command bar's: tighter, so the bar keeps to one row */
-QPushButton#subtle[menu="true"] { padding-right: 24px; }
+QPushButton#subtle[menu="true"] { padding-right: 8px; text-align: left; }  /* its chevron close after its words */
 QPushButton#subtle:hover, QToolButton#subtle:hover { background: $hover; }
 QPushButton#subtle:checked, QToolButton#subtle:checked { background: $selected; color: $accent; }
 QPushButton#link, QPushButton#moreLink, QPushButton#rowLink { background: transparent; border: none; color: $accent; padding: 0 2px;
   min-height: 0; text-align: left; }
 QPushButton#link:hover, QPushButton#moreLink:hover, QPushButton#rowLink:hover { text-decoration: underline; }
+/* a row's actions, over the row: its colour, so what's under them doesn't show through */
+QWidget#rowActions { background: $hover; }
+QWidget#rowActions[sel="true"] { background: $selected; }
 QPushButton::menu-indicator { image: url("$arrow"); width: 12px; height: 12px; subcontrol-origin: padding; subcontrol-position: right center;
   right: 6px; }
-QPushButton[menu="true"] { padding-right: 24px; }
+QPushButton[menu="true"] { padding-right: 8px; text-align: left; }
 /* an icon-only button at the end of a command bar, such as the task page's More (release 5.21) */
 QPushButton#iconOnly { background: transparent; border: 1px solid transparent; padding: 0; min-width: 26px; max-width: 26px;
   min-height: 26px; max-height: 26px; }
@@ -193,6 +231,8 @@ QToolButton::menu-button { border: none; background: transparent; width: 12px; }
 QToolButton::menu-arrow { image: url("$arrow"); width: 10px; height: 10px; }
 /* 18 + 8 of padding + 2 of border: the token's 28 px, since a style sheet's sizes beat setFixedSize */
 QToolButton#iconButton { min-width: 18px; max-width: 18px; min-height: 18px; max-height: 18px; }
+QToolButton#iconButton:checked { background: transparent; }  /* the icon says it, in the accent: no tile */
+QToolButton#iconButton:checked:hover { background: $hover; }
 
 /* the capture types: toggles that combine, in one segmented strip, the height of the controls beside it */
 QWidget#typeStrip { background: $base; border: 1px solid $stroke; border-radius: 6px; min-height: 30px; max-height: 30px; }
@@ -229,6 +269,9 @@ QTreeView, QListView, QTableView { background: $content; border: none; outline: 
 QTreeView::item, QListView::item { padding: 2px 4px; }
 QTreeView::item:hover, QListView::item:hover { background: $hover; }
 QTreeView::item:selected, QListView::item:selected, QTableView::item:selected { background: $selected; color: $text; }
+QTreeView::indicator { width: 16px; height: 16px; border: 1px solid $control; border-radius: 3px; background: $content; }
+QTreeView::indicator:hover { border-color: $text2; }
+QTreeView::indicator:checked { background: $accent; border-color: $accent; image: url("$tick"); }
 QTreeView::branch { background: transparent; }
 QTreeView::branch:has-children:closed { image: url("$branch_closed"); }
 QTreeView::branch:has-children:open { image: url("$branch_open"); }
@@ -246,6 +289,14 @@ QScrollBar::handle:horizontal { background: $scroll; border-radius: 3px; min-wid
 QScrollBar::handle:hover { background: $scroll_hover; }
 QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; }
 QScrollBar::add-page, QScrollBar::sub-page { background: none; }
+QAbstractScrollArea::corner { background: transparent; }
+QWidget#emptyState { background: transparent; }
+/* the date fields' calendar: the icons' chevrons, and no blue bar across its top */
+QCalendarWidget QWidget#qt_calendar_navigationbar { background: $base; }
+QCalendarWidget QToolButton { color: $text; background: transparent; font-weight: 600; }
+QCalendarWidget QToolButton#qt_calendar_prevmonth { qproperty-icon: url("$chev_left"); }
+QCalendarWidget QToolButton#qt_calendar_nextmonth { qproperty-icon: url("$chev_right"); }
+QCalendarWidget QAbstractItemView { selection-background-color: $selected; selection-color: $text; outline: 0; }
 QScrollArea { border: none; background: transparent; }
 QSplitter::handle { background: $stroke; }
 QSplitter::handle:horizontal { width: 1px; }
@@ -332,9 +383,9 @@ QPushButton#today { background: transparent; border: 1px solid transparent; }
 QPushButton#today:hover { background: $hover; }
 QPushButton#today:checked { background: $selected; color: $accent; border-color: $selected; }
 QFrame#fileRow { border: 1px solid $stroke; border-radius: 6px; background: $content; }
-QToolButton#chip { border: 1px solid $stroke; border-radius: 10px; background: $hover; padding: 1px 8px; font-size: ${caption}pt; }
+QToolButton#chip { border: 1px solid $stroke; border-radius: 4px; background: $hover; padding: 1px 8px; font-size: ${caption}pt; }
 QToolButton#chip[filled="true"] { background: $caution_bg; border-color: $caution_line; color: $text; }
-QFrame#personChip { border: 1px solid $stroke; border-radius: 10px; background: $hover; }
+QFrame#personChip { border: 1px solid $stroke; border-radius: 4px; background: $hover; }
 QFrame#personChip:focus { border: 1px solid $accent; }
 QFrame#personChip QLabel { font-size: ${caption}pt; background: transparent; }
 QFrame#personChip QLabel#personShare { color: $accent; font-weight: 600; }
@@ -344,7 +395,7 @@ QFrame#tieBox { border: 1px solid $stroke; border-radius: 4px; background: $cont
 QFrame#timingHead { border-bottom: 1px solid $stroke_strong; }
 QFrame#timingRow { border-bottom: 1px solid $stroke; }
 QFrame#timingRow[anchor="true"] { background: $selected; }
-QLabel#anchorPill { color: $accent; background: $selected; border: 1px solid $accent; border-radius: 8px; padding: 0 6px; font-size: ${caption}pt; }
+QLabel#anchorPill { color: $accent; background: $info_bg; border: 1px solid $accent; border-radius: 4px; padding: 0 6px; font-size: ${caption}pt; }
 QWidget#chips { border: 1px solid $stroke; border-bottom: 1px solid $control; border-radius: 4px; background: $content; }
 /* with the chip field's margins, 32 px high, and its text where a text box's starts */
 QWidget#chips QLineEdit, QWidget#chips QLineEdit:focus { background: transparent; border: none; padding: 4px 5px; min-height: 22px; max-height: 22px; }
@@ -369,6 +420,7 @@ QFrame#prDrop { background: $accent; border: none; border-radius: 1px; }
 QLabel#prTitle { font-weight: 600; color: $text; }
 QTextBrowser { border: none; background: $content; }
 QWidget#settingsCard { background: $content; border: 1px solid $stroke; border-radius: 6px; }
+QDialog#palette { background: $content; border: 1px solid $stroke_strong; }
 """)
 
 
@@ -377,7 +429,8 @@ def qss() -> str:
     from docrepo.ui.icons import file_url  # the icons module reads the tokens too
 
     return _QSS.substitute(LIGHT, caption=CAPTION, subtitle=SUBTITLE, arrow=file_url("arrow-down-grey"), tick=file_url("tick-white"),
-                           marker=file_url("filled-marker"), branch_closed=file_url("chevron-right"), branch_open=file_url("chevron-down"))
+                           marker=file_url("filled-marker"), branch_closed=file_url("chevron-right"), branch_open=file_url("chevron-down"),
+                           chev_left=file_url("chevron-left"), chev_right=file_url("chevron-right"))
 
 
 #: The pages' and the list cells' HTML styles (Qt's rich text), from the same tokens. Numbers use Segoe UI so they line up.
@@ -392,7 +445,9 @@ h2 { font-family: 'Segoe UI'; font-size: ${subtitle}pt; font-weight: 600; margin
 .fk { color: $text2; font-size: ${caption}pt; }
 .note { color: $text2; font-size: ${caption}pt; }
 .box { background-color: $base; }
-.info { background-color: $selected; }
+.info { background-color: $info_bg; }
+.caution { color: $caution; }
+.critical { color: $critical; }
 .warn { background-color: $caution_bg; }
 .tab { color: $text2; }
 .tabon { color: $text; font-weight: 600; border-bottom: 2px solid $accent; }
@@ -405,20 +460,21 @@ h2 { font-family: 'Segoe UI'; font-size: ${subtitle}pt; font-weight: 600; margin
 .ch { background-color: $base; }
 .num { font-family: 'Segoe UI'; }
 .st-ns { color: $text2; background-color: $hover; }
-.st-ip { color: $accent; background-color: $selected; }
-.st-pk { color: #585a70; background-color: #eae8f2; }
+.st-ip { color: $accent; background-color: $info_bg; }
+.st-pk { color: $parked; background-color: $parked_bg; }
 .st-cl { color: $text2; background-color: $hover; }
 .urgent { color: $critical; background-color: $critical_bg; font-weight: 600; }
 .pri-critical { color: $on_accent; background-color: $critical; font-weight: 600; }
 .pri-high { color: $caution; background-color: $caution_bg; font-weight: 600; }
-.pri-medium { color: $accent; background-color: $selected; }
+.pri-medium { color: $accent; background-color: $info_bg; }
 .pri-parking { color: $text2; background-color: $hover; }
 .routine { color: $text; background-color: $hover; }
-.multi { color: $accent; background-color: $selected; }
+.multi { color: $accent; background-color: $info_bg; }
 .lbl { color: $text; background-color: $hover; }
-.anchor { color: $accent; background-color: $selected; }
+.anchor { color: $accent; background-color: $info_bg; }
 .inh { color: $text2; font-style: italic; }
 .sec { font-weight: 600; margin-top: 18px; margin-bottom: 4px; }
+.foldword { color: $text; }
 .dt { color: $text2; font-size: ${caption}pt; padding-right: 14px; }
 .rel { color: $text2; font-size: ${caption}pt; }
 .over { color: $critical; font-weight: 600; }
@@ -431,7 +487,7 @@ h2 { font-family: 'Segoe UI'; font-size: ${subtitle}pt; font-weight: 600; margin
 .tq { color: $text2; }
 .new { color: $caution; background-color: $caution_bg; }
 .u1 { }
-.u2 { background-color: $selected; }
+.u2 { background-color: $caution_bg; }
 .u3 { color: $critical; background-color: $critical_bg; font-weight: 600; }
 .away { color: $text2; background-color: $hover; }
 .mark { background-color: $caution_bg; font-weight: 600; }
