@@ -65,10 +65,10 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.49 | Hours a week, reordering a template's rows by dragging or Alt+Up and Alt+Down, and Duplicate (decisions 260 to 262), schema version 18 | Built 2026-10-31 in the `round5-templates` worktree, and merged to `main` the same day, before the owner's hand test. Next: the owner's hand test, then `handoff/docrepo/release-5-49-test.md` |
 | 5.50 | Ties (decisions 245 to 258): a task's Start or Due set from another date, on tasks and key dates, moving what's tied on every path, asking first when a move leaves the tree, the task page and the log, schema version 19 | Built 2026-10-31 in the `round5-templates` worktree and merged to `main`, before the owner's hand test. Next: the hand test, then `handoff/docrepo/release-5-50-test.md` |
 | 5.51 | A template's timing (decisions 248, 252 and 255 to 257): the anchor, ties on rows, the Timing window and its chart, Make tasks giving a tree its date, and what a change reaches, schema version 20 | Built 2026-11-01 in the `round5-templates` worktree and merged to `main`, before the owner's hand test. Next: the hand test, then `handoff/docrepo/release-5-51-test.md` |
-| 5.53 | Tree files (the tree files plan, decisions 264 to 287): the Import window, the checks, Copy prompt for trees, `Imports`, `tree-check` | Built 2026-11-01, from the approved mock, before the owner's hand test |
-| 5.54 | Export, and edit files on a template | Built 2026-11-01, with 5.53, before the owner's hand test |
-| 5.55 | Edit files on a task tree | Built 2026-11-01, with 5.53, before the owner's hand test |
-| 5.56 | Copilot's folder, `tree-prompt`, `tree-export`, and the handoff with Copilot's prompt file | Built 2026-11-01, with 5.53, before the owner's hand test |
+| 5.53 | Tree files (the tree files plan, decisions 264 to 287): the Import window, the checks, Copy prompt for trees, `Imports`, `tree-check` | Built 2026-11-01, from the approved mock, hand-tested by the owner, merged to `main` and on GitHub 2026-11-02 |
+| 5.54 | Export, and edit files on a template | Built 2026-11-01, with 5.53, hand-tested by the owner, merged to `main` and on GitHub 2026-11-02 |
+| 5.55 | Edit files on a task tree | Built 2026-11-01, with 5.53, hand-tested by the owner, merged to `main` and on GitHub 2026-11-02 |
+| 5.56 | Copilot's folder, `tree-prompt`, `tree-export`, and the handoff with Copilot's prompt file | Built 2026-11-01, with 5.53, hand-tested by the owner, merged to `main` and on GitHub 2026-11-02 |
 | 5.57 | The look as decided (the visual review's stage V1): the Body font in rows, tables and menus, a focus ring for the keyboard, rows of controls that line up at one height, DocRepo's own icon, and the Timeline's list of tasks with no dates kept to one line | Built 2026-11-01, hand-tested by the owner, merged to `main` and on GitHub 2026-11-02 |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
@@ -507,7 +507,7 @@ The visual overhaul's O10, designed and mocked in the parent workspace (`docs/ui
 
 ## Releases 5.53 to 5.56: tree files (2026-11-01)
 
-From the owner's voice memo of 2026-11-01, planned in the parent workspace's `docs/mods/tree-files-plan.md` (items 79 to 84, decisions 264 to 287), mocked and approved. Built together, before the owner's hand test. No schema change and no new package.
+From the owner's voice memo of 2026-11-01, planned in the parent workspace's `docs/mods/tree-files-plan.md` (items 79 to 84, decisions 264 to 287), mocked and approved. Built together, hand-tested by the owner, and merged to `main` and on GitHub 2026-11-02. No schema change and no new package.
 
 - `docrepo/tree_files.py` (new): `read_text`, `check_tree` (`TreePlan`, `Said`, `ParentTie`, `NameToSettle`, `LabelToSettle`), `import_tree` and `import_file` (`Settled`), `tree_prompt`, `edit_prompt` and `rules`, `export_template`, `export_task` and `save_export`, `plan_edit` (`EditPlan`, `EditChange`, `Moved`) and `apply_edit`, `check_text` and `waiting_files`.
 - `docrepo/ui/tree_import.py` (new): `TreeImportDialog`, `EditReviewDialog`, `TextWindow`, and `TreeFilesPane`, which the browse window holds.
