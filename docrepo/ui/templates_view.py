@@ -4,7 +4,8 @@ window's panes, and its forms: a row, Make tasks, New template and Save as templ
 ``TemplatesPane`` keeps it apart from the browse window, which only hands it the list, the detail pane's bar and the
 ``tplrow:`` links. Changes go through ``docrepo.templates``, and the browse window's ``_do`` says what they did. Since release
 5.45 a change that reaches tasks shows what it would do first, in ``PreviewDialog``. Since release 5.51 a template has a timing:
-the Timing window is in ``docrepo/ui/timing_view.py``, and a row's form and Make tasks show its ties here.
+the Timing window is in ``docrepo/ui/timing_view.py``, and a row's form and Make tasks show its ties here. Since release 5.63,
+``ApplyTemplateDialog`` puts a template into tasks that already exist, a task's rows drawn as Make tasks draws them (``TreeRows``).
 """
 from __future__ import annotations
 
@@ -13,7 +14,7 @@ from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -319,12 +320,17 @@ class MakeRow:
     stay linked to the template; days typed differently are the task's own.
 
     A tied row's dates are worked out, and show muted. Typing over its Start gives it a new gap, and ↺ takes the template's back. The
-    anchor has a Due box too, and Tie… (decision 256)."""
+    anchor has a Due box too, and Tie… (decision 256).
+
+    In Apply template (release 5.63), ``kept`` is a task the row lands on, which keeps all it has and just says its dates, and ``own_tie``
+    is the tie an anchor starts with, to the task it's applied to."""
 
     def __init__(self, row: Row, has_rows: bool, m: Model, people: Options, workdays: Collection[int], tied: Mapping[str, timing.RowTie] | None = None,
-                 titles: Mapping[int, str] | None = None, is_anchor: bool = False) -> None:
+                 titles: Mapping[int, str] | None = None, is_anchor: bool = False, kept: Any = None, own_tie: ties.Tie | None = None) -> None:
         self.row, self.workdays = row, workdays
         self.tied, self.is_anchor = dict(tied or {}), is_anchor
+        self.kept, self.own_tie = kept, own_tie
+        self.kept_text = _hint("")
         self.over: str | None = None
         self.worked: str | None = None  # the anchor's date worked out from the other: "start" or "due"
         self.start = DateField()
@@ -338,6 +344,8 @@ class MakeRow:
                                                  or templates.stated(row, "assignee_hours") is not None or bool(self.tied) or is_anchor)
         if row.recurrence:
             self.has_start = not has_rows
+        if kept is not None:
+            self.has_start = False
         self.both = len(self.tied) == 2
         self.due_box = DateField() if is_anchor else None
         if self.due_box:
@@ -346,7 +354,7 @@ class MakeRow:
         self.start.setMinimumWidth(DateField.WIDTH)
         self.back = QToolButton(objectName="linkMark")
         self.back.setText("↺")
-        self.back.setToolTip("Take the template's gap back")
+        self.back.setToolTip("Back to the day it starts" if own_tie else "Take the template's gap back")
         self.back.hide()
         self.tie_button = QToolButton(objectName="linkMark") if is_anchor else None
         if self.tie_button:
@@ -365,6 +373,11 @@ class MakeRow:
 
     def typed(self) -> timing.Typed:
         """What it has, for the sum of what each row comes to."""
+        if self.kept is not None:
+            t = self.kept
+            if templates.has_dates(t):
+                return timing.Typed({}, None, t.calendar_days, t.start, t.due)
+            return timing.Typed(self.tied, None if self.both else t.duration or self.row.duration, bool(self.row.calendar_days or t.calendar_days))
         days = None if self.both else typed_days(self.days)
         if self.tied:
             return timing.Typed(self.tied, days, self.row.calendar_days, over=self.over)
@@ -390,6 +403,11 @@ class MakeRow:
             self.due.setText(long_date(to_date(due), first) if due else "")
         self.sync()
 
+    def show_kept(self, start: str | None, due: str | None, today: date | None) -> None:
+        """A task that's kept says the dates it has, or those its tie gives it."""
+        days = list(dict.fromkeys(x for x in (start, due) if x))
+        self.kept_text.setText(" to ".join(long_date(to_date(x), today or to_date(x)) for x in days) or "No dates yet")
+
     def sync(self) -> None:
         """The hours a rate comes to over its days."""
         days, row = typed_days(self.days), self.row
@@ -402,6 +420,9 @@ class MakeRow:
             self.hours.setText(f"{num(rate[1])} h {rate[0]}")
 
     def choice(self, tie: ties.Tie | None = None) -> Choice:
+        tie = tie or self.own_tie
+        if self.kept is not None:
+            return Choice(tie=tie)
         chosen = self.people.values()
         leads = [p for p in self.row.leads if p in chosen]
         assignees = [p for p in self.row.assignees if p in chosen]
@@ -415,43 +436,21 @@ class MakeRow:
         return Choice(start, leads, assignees, days, due, tie)
 
 
-class MakeTasksDialog(FormDialog):
-    """Make tasks: the top task's name, where it goes, and a line a task with its Start and people. Anything left blank
-    stays blank. With a timing (release 5.51, decision 256) it's where a tree gets its date: the anchor's Start or Due, or Tie… to set it
-    from another task, and everything tied to it fills in."""
+class TreeRows(QWidget):
+    """A line a task with its Start, days and people, as Make tasks has them, and what each comes to. ``plan`` is Apply template's: its task
+    stands in for the top row, a row that lands on a task it has keeps that task's dates, and the anchor starts tied to the task."""
 
-    def __init__(self, parent: QWidget | None, m: Model, lib: Library, row_id: int, people: Options, pick_task: PickTask,
-                 workdays: Collection[int] = MON_TO_FRI, pick_source: PickTask | None = None, today: date | None = None) -> None:
-        super().__init__(parent)
-        self.m, self._pick_task, self.workdays, self.today = m, pick_task, workdays, today
-        self.under: str | None = None
-        root = lib.rows[row_id]
+    changed = Signal()
+
+    def __init__(self, m: Model, lib: Library, row_id: int, people: Options, workdays: Collection[int], pick_source: PickTask | None, today: date | None,
+                 plan: templates.ApplyPlan | None = None, scrolled: bool = True) -> None:
+        super().__init__()
+        self.m, self.workdays, self.today, self.plan = m, workdays, today, plan
         walked = lib.walk(row_id)
-        path = " › ".join(x.title for x in lib.path(row_id))
-        self.setWindowTitle(f"Make tasks from {path}")
-        self.setObjectName("capture")
-        self.setStyleSheet(style_sheet())
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(24, 20, 24, 20)
+        outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(12)
-        self.name = QLineEdit("" if root.parent is None else root.title)
-        self.name.setPlaceholderText("Trial 5: gloss finish")
-        self.under_button = DropButton()
-        self.under_button.clicked.connect(lambda: self._pick_task(self.under_button, self.set_under))
-        head = QGridLayout()
-        head.setHorizontalSpacing(16)
-        head.addWidget(field("Name", self.name), 0, 0)
-        head.addWidget(field("Under", self.under_button), 0, 1)
-        head.setColumnStretch(0, 1)
-        head.setColumnStretch(1, 1)
-        outer.addLayout(head)
-        self._draw_under()
-
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        body = QWidget(objectName="capture")
+        body = self.body = QWidget(objectName="capture")
         grid = QGridLayout(body)
         grid.setContentsMargins(0, 0, 8, 0)
         grid.setHorizontalSpacing(12)
@@ -463,11 +462,17 @@ class MakeTasksDialog(FormDialog):
         inside = {x.id for x, _ in walked}
         self.anchor = template.anchor if template.anchor in inside else None
         titles = lib.titles(template.id)
+        seeded = templates.plan_typed(lib, m, row_id, plan) if plan else {}
+        own_tie = templates.anchor_tie(lib, m, row_id, plan) if plan else None
+        if plan:
+            titles[row_id] = m.task(plan.task).title
         for i, (row, depth) in enumerate(walked, start=1):
-            tied = {f: t for f, t in row.ties.items() if timing.source_of(t, template.anchor) in inside - {row.id}}
-            line = MakeRow(row, bool(lib.children(row.id)), m, people, workdays, tied, titles, row.id == self.anchor)
+            tied = seeded[row.id].ties if plan else {f: t for f, t in row.ties.items() if timing.source_of(t, template.anchor) in inside - {row.id}}
+            kept = m.task(plan.kept[row.id]) if plan and row.id in plan.kept else None
+            mine = own_tie if row.id == self.anchor else None
+            line = MakeRow(row, bool(lib.children(row.id)), m, people, workdays, tied, titles, row.id == self.anchor and kept is None and mine is None, kept, mine)
             self.lines.append(line)
-            title = QLabel(row.title)
+            title = QLabel(kept.title if kept is not None else row.title)
             title.setTextFormat(Qt.TextFormat.PlainText)
             title.setContentsMargins(depth * 14, 0, 0, 0)
             title.setToolTip(row.title)
@@ -476,18 +481,23 @@ class MakeTasksDialog(FormDialog):
                 font = title.font()
                 font.setBold(True)
                 title.setFont(font)
-                self.name.textChanged.connect(lambda text, t=title, r=row: t.setText(text.strip() or r.title))
+                self.top_title = title
             named = QVBoxLayout()
             named.setSpacing(0)
             heading = QHBoxLayout()
             heading.setSpacing(6)
             heading.addWidget(title)
-            if line.is_anchor:
+            if row.id == self.anchor:
                 heading.addWidget(QLabel("Anchor", objectName="anchorPill"))
+            if kept is not None and i > 1:
+                heading.addWidget(QLabel("Yours", objectName="anchorPill"))
             heading.addStretch()
             named.addLayout(heading)
             named.addWidget(line.says)
             grid.addLayout(named, i, 0, Qt.AlignmentFlag.AlignTop)
+            if kept is not None:  # it keeps what it has: its people, hours and days aren't asked for
+                grid.addWidget(line.kept_text, i, 1, 1, 5, Qt.AlignmentFlag.AlignTop)
+                continue
             if line.has_start:
                 starts = QHBoxLayout()
                 starts.setSpacing(2)
@@ -508,10 +518,17 @@ class MakeTasksDialog(FormDialog):
         grid.setColumnStretch(0, 3)
         grid.setColumnStretch(5, 4)
         grid.setRowStretch(len(walked) + 1, 1)
-        scroll.setWidget(body)
-        outer.addWidget(scroll, 1)
+        if scrolled:
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(QFrame.Shape.NoFrame)
+            scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            scroll.setWidget(body)
+            outer.addWidget(scroll, 1)
+        else:
+            outer.addWidget(body)
         self.tie_panel: TiePanel | None = None
-        if self.anchor is not None:
+        if self._anchor_line() is not None:
             self.tie_panel = TiePanel(m, "", {}, pick_source)
             self.tie_panel.changed.connect(lambda _: self._redraw())
             self.tie_panel.opened.connect(self._redraw)
@@ -521,26 +538,7 @@ class MakeTasksDialog(FormDialog):
         self.early.setWordWrap(True)
         self.early.hide()
         outer.addWidget(self.early)
-        if self.anchor is not None:
-            outer.addWidget(_hint("Type the anchor's Start or Due, or press Tie… to set it from another task. What's tied to it fills in, and moves with it from then on. "
-                                  "Typing over a date keeps its tie with a new gap. Left blank, the tree waits undated until the anchor gets a date."))
-        elif any(x.tied for x in self.lines):
-            outer.addWidget(_hint("A row tied to another row fills in from it, and moves with it from then on. Typing over a date keeps its tie with a new gap. "
-                                  "Anything left blank stays blank."))
-        else:
-            outer.addWidget(_hint("Anything left blank stays blank. Undated tasks wait under No dates or hours, and in the timeline's Plan mode. Days kept as "
-                                  "offered stay linked to the template."))
-        self.error = QLabel(objectName="error")
-        self.error.setWordWrap(True)
-        self.error.hide()
-        outer.addWidget(self.error)
-        n = len(walked)
-        outer.addLayout(dialog_buttons(self, f"Make {n} task{'s' if n != 1 else ''}", self._accept, self.reject, Help("Ctrl+Enter makes them.")))
-        self.commit_button.setMinimumWidth(120)
         self._redraw()
-        self.mark_clean()
-        self.name.setFocus()
-        fit_dialog(self, body, 1120, 260)
 
     # ---- the dates it comes to (decision 256) ----
     def _anchor_line(self) -> MakeRow | None:
@@ -598,12 +596,92 @@ class MakeTasksDialog(FormDialog):
         if anchor and tie:
             anchor.start.set_value(dates[anchor.row.id][0])
             anchor.worked = "due"
+        self.dates = dates
         for x in self.lines:
             if x.has_start:
                 x.show_dates(*dates[x.row.id])
+            elif x.kept is not None:
+                x.show_kept(*dates[x.row.id], self.today)
         early = [x for x in self.lines if self.today and (x.tied or (x is anchor and tie)) and not x.over and dates[x.row.id][0] and to_date(dates[x.row.id][0]) < self.today]
         self.early.setText("Starts before today: " + ", ".join(f"{x.row.title} ({long_date(to_date(dates[x.row.id][0]), self.today)})" for x in early) + "." if early else "")
         self.early.setVisible(bool(early))
+        self.changed.emit()
+
+    def snapshot(self) -> Any:
+        tie = self.tie_panel.values() if self.tie_panel else {}
+        return [tie, [(x.start.line.text() if not x.tied else "", x.over, x.due_box.line.text() if x.due_box else "", x.days.text(), x.people.values()) for x in self.lines]]
+
+    def problem(self) -> str | None:
+        for x in self.lines:
+            if x.kept is not None:
+                continue
+            if x.has_start and not x.start.is_valid():
+                return f"The Start of {x.row.title} isn't a date. Use YYYY-MM-DD."
+            if x.due_box and not x.due_box.is_valid():
+                return f"The Due of {x.row.title} isn't a date. Use YYYY-MM-DD."
+            if not days_valid(x.days):
+                return f"{BAD_DURATION} ({x.row.title})"
+        return None
+
+    def choices(self) -> dict[int, Choice]:
+        tie = self.tie_panel.ties.get("start") if self.tie_panel else None
+        return {x.row.id: x.choice(tie if x.is_anchor else None) for x in self.lines}
+
+
+class MakeTasksDialog(FormDialog):
+    """Make tasks: the top task's name, where it goes, and a line a task with its Start and people. Anything left blank
+    stays blank. With a timing (release 5.51, decision 256) it's where a tree gets its date: the anchor's Start or Due, or Tie… to set it
+    from another task, and everything tied to it fills in."""
+
+    def __init__(self, parent: QWidget | None, m: Model, lib: Library, row_id: int, people: Options, pick_task: PickTask,
+                 workdays: Collection[int] = MON_TO_FRI, pick_source: PickTask | None = None, today: date | None = None) -> None:
+        super().__init__(parent)
+        self.m, self._pick_task, self.workdays, self.today = m, pick_task, workdays, today
+        self.under: str | None = None
+        root = lib.rows[row_id]
+        n = len(lib.walk(row_id))
+        path = " › ".join(x.title for x in lib.path(row_id))
+        self.setWindowTitle(f"Make tasks from {path}")
+        self.setObjectName("capture")
+        self.setStyleSheet(style_sheet())
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(24, 20, 24, 20)
+        outer.setSpacing(12)
+        self.name = QLineEdit("" if root.parent is None else root.title)
+        self.name.setPlaceholderText("Trial 5: gloss finish")
+        self.under_button = DropButton()
+        self.under_button.clicked.connect(lambda: self._pick_task(self.under_button, self.set_under))
+        head = QGridLayout()
+        head.setHorizontalSpacing(16)
+        head.addWidget(field("Name", self.name), 0, 0)
+        head.addWidget(field("Under", self.under_button), 0, 1)
+        head.setColumnStretch(0, 1)
+        head.setColumnStretch(1, 1)
+        outer.addLayout(head)
+        self._draw_under()
+
+        self.tree = TreeRows(m, lib, row_id, people, workdays, pick_source, today)
+        self.lines, self.anchor, self.tie_panel, self.early = self.tree.lines, self.tree.anchor, self.tree.tie_panel, self.tree.early
+        self.name.textChanged.connect(lambda text: self.tree.top_title.setText(text.strip() or root.title))
+        outer.addWidget(self.tree, 1)
+        if self.anchor is not None:
+            outer.addWidget(_hint("Type the anchor's Start or Due, or press Tie… to set it from another task. What's tied to it fills in, and moves with it from then on. "
+                                  "Typing over a date keeps its tie with a new gap. Left blank, the tree waits undated until the anchor gets a date."))
+        elif any(x.tied for x in self.lines):
+            outer.addWidget(_hint("A row tied to another row fills in from it, and moves with it from then on. Typing over a date keeps its tie with a new gap. "
+                                  "Anything left blank stays blank."))
+        else:
+            outer.addWidget(_hint("Anything left blank stays blank. Undated tasks wait under No dates or hours, and in the timeline's Plan mode. Days kept as "
+                                  "offered stay linked to the template."))
+        self.error = QLabel(objectName="error")
+        self.error.setWordWrap(True)
+        self.error.hide()
+        outer.addWidget(self.error)
+        outer.addLayout(dialog_buttons(self, f"Make {n} task{'s' if n != 1 else ''}", self._accept, self.reject, Help("Ctrl+Enter makes them.")))
+        self.commit_button.setMinimumWidth(120)
+        self.mark_clean()
+        self.name.setFocus()
+        fit_dialog(self, self.tree.body, 1120, 260)
 
     def set_under(self, task_id: str | None) -> None:
         self.under = task_id
@@ -616,21 +694,12 @@ class MakeTasksDialog(FormDialog):
         self._accept()
 
     def snapshot(self) -> Any:
-        tie = self.tie_panel.values() if self.tie_panel else {}
-        return [self.name.text(), self.under, tie, [(x.start.line.text() if not x.tied else "", x.over, x.due_box.line.text() if x.due_box else "", x.days.text(), x.people.values())
-                                                    for x in self.lines]]
+        return [self.name.text(), self.under, self.tree.snapshot()]
 
     def problem(self) -> str | None:
         if not self.name.text().strip() and self.lines[0].row.parent is None:
             return "Give the new task a name, such as Trial 5: gloss finish."
-        for x in self.lines:
-            if x.has_start and not x.start.is_valid():
-                return f"The Start of {x.row.title} isn't a date. Use YYYY-MM-DD."
-            if x.due_box and not x.due_box.is_valid():
-                return f"The Due of {x.row.title} isn't a date. Use YYYY-MM-DD."
-            if not days_valid(x.days):
-                return f"{BAD_DURATION} ({x.row.title})"
-        return None
+        return self.tree.problem()
 
     def _accept(self) -> None:
         problem = self.problem()
@@ -641,8 +710,218 @@ class MakeTasksDialog(FormDialog):
         self.accept()
 
     def choices(self) -> dict[int, Choice]:
-        tie = self.tie_panel.ties.get("start") if self.tie_panel else None
-        return {x.row.id: x.choice(tie if x.is_anchor else None) for x in self.lines}
+        return self.tree.choices()
+
+
+class ApplySection(QFrame):
+    """One task in Apply template's window: a tick, what applying it comes to, and where its subtasks land, with its rows folded under it.
+    They're made when first unfolded: until then it has what it starts with, so a long list opens quickly."""
+
+    changed = Signal()
+
+    def __init__(self, m: Model, lib: Library, row_id: int, plan: templates.ApplyPlan, people: Options, workdays: Collection[int],
+                 pick_source: PickTask | None, today: date | None, title: str) -> None:
+        super().__init__(objectName="fileRow")
+        self.m, self.lib, self.row_id, self.plan, self.people, self.workdays, self.pick_source, self.today = m, lib, row_id, plan, people, workdays, pick_source, today
+        self.rows: TreeRows | None = None
+        self.untouched: Any = None
+        grid = QGridLayout(self)
+        grid.setContentsMargins(10, 8, 10, 8)
+        grid.setHorizontalSpacing(8)
+        grid.setVerticalSpacing(2)
+        self.tick = QCheckBox(title.replace("&", "&&"))
+        self.tick.setChecked(not plan.refused)
+        self.tick.setEnabled(not plan.refused)
+        self.tick.toggled.connect(lambda _: self.changed.emit())
+        grid.addWidget(self.tick, 0, 0)
+        self.dates = _hint("")
+        self.dates.setWordWrap(False)
+        grid.addWidget(self.dates, 0, 1, Qt.AlignmentFlag.AlignRight)
+        self.says = _hint(plan.refused or plan.words())
+        self.says.setTextFormat(Qt.TextFormat.PlainText)
+        self.says.setContentsMargins(26, 0, 0, 0)
+        if plan.refused:
+            self.says.setObjectName("error")
+        grid.addWidget(self.says, 1, 0, 1, 2)
+        self.lands = _hint("")
+        self.lands.setTextFormat(Qt.TextFormat.PlainText)
+        self.lands.setContentsMargins(26, 0, 0, 0)
+        grid.addWidget(self.lands, 2, 0, 1, 2)
+        self.warning = QLabel(objectName="linkLeaving")
+        self.warning.setTextFormat(Qt.TextFormat.PlainText)
+        self.warning.setWordWrap(True)
+        self.warning.setContentsMargins(26, 0, 0, 0)
+        grid.addWidget(self.warning, 3, 0, 1, 2)
+        grid.setColumnStretch(0, 1)
+        self.fold_button: QPushButton | None = None
+        self.holder = QVBoxLayout()
+        self.holder.setContentsMargins(26, 6, 0, 0)
+        grid.addLayout(self.holder, 5, 0, 1, 2)
+        if plan.refused:
+            self.warning.hide()
+            self.lands.hide()
+            return
+        t = m.task(plan.task)
+        self.dates.setText(" to ".join(long_date(to_date(x), today or to_date(x)) for x in dict.fromkeys(y for y in (t.start, t.due) if y)) or "No dates")
+        self.fold_button = QPushButton(objectName="moreLink")
+        set_fold(self.fold_button, "Details", False)
+        self.fold_button.clicked.connect(self.toggle)
+        grid.addWidget(self.fold_button, 4, 0, Qt.AlignmentFlag.AlignLeft)
+        self._draw_lands(timing.make_dates(templates.plan_typed(lib, m, row_id, plan), lib.template_of(row_id).anchor, workdays))
+
+    def _draw_lands(self, dates: Mapping[int, tuple[str | None, str | None]]) -> None:
+        words, warning = templates.tree_words(self.m.task(self.plan.task), self.row_id, dates, self.today or date.today())
+        anchor = self.lib.template_of(self.row_id).anchor
+        lead = ""
+        if anchor in dates and anchor != self.row_id and (first := dates[anchor][0] or dates[anchor][1]):
+            lead = f"{self.lib.rows[anchor].title} starts {long_date(to_date(first), self.today or to_date(first))}. "
+        self.lands.setText(lead + words)
+        self.warning.setText(warning)
+        self.warning.setVisible(bool(warning))
+
+    def toggle(self) -> None:
+        if self.rows is None:
+            self.rows = TreeRows(self.m, self.lib, self.row_id, self.people, self.workdays, self.pick_source, self.today, self.plan, scrolled=False)
+            self.rows.changed.connect(self._rows_changed)
+            self.holder.addWidget(self.rows)
+            self.rows.show()  # in a window already showing, it'd otherwise wait for the next event, and the chevron with it
+            self.untouched = self.rows.snapshot()
+            self._rows_changed()
+        else:
+            self.rows.setVisible(not self.rows.isVisibleTo(self))
+        set_fold(self.fold_button, "Details", self.rows.isVisibleTo(self))
+
+    def _rows_changed(self) -> None:
+        self._draw_lands(self.rows.dates)
+        self.changed.emit()
+
+    def wanted(self) -> bool:
+        return self.tick.isChecked() and not self.plan.refused
+
+    def choices(self) -> dict[int, Choice] | None:
+        """What it has, or None when it was never unfolded: what it starts with."""
+        return self.rows.choices() if self.rows else None
+
+    def snapshot(self) -> Any:
+        """Unfolding it changes nothing, so closing the window after that doesn't ask."""
+        now = self.rows.snapshot() if self.rows else None
+        return [self.tick.isChecked(), None if now == self.untouched else now]
+
+
+class ApplyTemplateDialog(FormDialog):
+    """Apply template: a template, and the tasks it goes into, each keeping all it has (decisions 301 to 309). Nothing changes until Apply."""
+
+    def __init__(self, parent: QWidget | None, m: Model, lib: Library, people: Options, pick_task: PickTask, workdays: Collection[int] = MON_TO_FRI,
+                 today: date | None = None, tasks: Sequence[str] = (), row_id: int | None = None) -> None:
+        super().__init__(parent)
+        self.m, self.lib, self.people_options, self._pick_task, self.workdays, self.today = m, lib, people, pick_task, workdays, today
+        self.task_ids = list(dict.fromkeys(tasks))
+        self.sections: list[ApplySection] = []
+        self.setWindowTitle("Apply template")
+        self.setObjectName("capture")
+        self.setStyleSheet(style_sheet())
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(24, 20, 24, 20)
+        outer.setSpacing(12)
+        self.template_box = QComboBox()
+        self.template_box.setAccessibleName("Template")
+        for t in lib.templates.values():
+            if not t.discarded:
+                self.template_box.addItem(lib.name(t.id), t.top)
+        if row_id is not None:
+            self.template_box.setCurrentIndex(max(0, self.template_box.findData(row_id)))
+        outer.addWidget(field("Template", self.template_box))
+        self.refusal = QLabel(objectName="error")
+        self.refusal.setWordWrap(True)
+        self.refusal.hide()
+        outer.addWidget(self.refusal)
+        self.body = QWidget(objectName="capture")
+        self.list = QVBoxLayout(self.body)
+        self.list.setContentsMargins(0, 0, 8, 0)
+        self.list.setSpacing(6)
+        self.list.addStretch()
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setWidget(self.body)
+        scroll.setMinimumHeight(180)
+        outer.addWidget(scroll, 1)
+        self.add_button = QPushButton("Add a task…", objectName="link")
+        self.add_button.setToolTip("Another task to apply it to")
+        self.add_button.clicked.connect(lambda: self._pick_task(self.add_button, self.add_task))
+        outer.addWidget(self.add_button, 0, Qt.AlignmentFlag.AlignLeft)
+        outer.addWidget(_hint("Each task keeps its title, description, notes, captures, dates and people, and follows the template from now on. Its empty fields fill "
+                              "from the template, and its subtasks go under it. With a Start, the anchor starts that day, so moving the task moves its tree."))
+        self.error = QLabel(objectName="error")
+        self.error.setWordWrap(True)
+        self.error.hide()
+        outer.addWidget(self.error)
+        outer.addLayout(dialog_buttons(self, "", self._accept, self.reject, Help("Nothing changes until you apply it. Afterwards, you can discard a subtask you don't want.")))
+        self.commit_button.setMinimumWidth(150)
+        self.template_box.currentIndexChanged.connect(lambda _: self._draw())
+        self._draw()
+        self.mark_clean()
+        self.resize(1000, 640)
+
+    def row_id(self) -> int | None:
+        return self.template_box.currentData()
+
+    def add_task(self, task_id: str | None) -> None:
+        if task_id and task_id not in self.task_ids:
+            self.task_ids.append(task_id)
+            self._draw()
+
+    def _draw(self) -> None:
+        """A section a task. Another template means other rows, so what's typed starts again."""
+        for s in self.sections:
+            self.list.removeWidget(s)
+            s.setParent(None)
+            s.deleteLater()
+        self.sections = []
+        row = self.row_id()
+        refused = templates.template_refusal(self.lib, row) if row is not None else "There are no templates yet. Make one under Templates first."
+        self.refusal.setText(refused)
+        self.refusal.setVisible(bool(refused))
+        if not refused:
+            for task_id in self.task_ids:
+                plan = templates.plan_apply(self.lib, self.m, row, task_id)
+                s = ApplySection(self.m, self.lib, row, plan, self.people_options, self.workdays, lambda a, p: self._pick_task(a, p), self.today, self.m.task(task_id).title)
+                s.changed.connect(self._sync)
+                self.list.insertWidget(self.list.count() - 1, s)
+                self.sections.append(s)
+                # One task, or one with no date to start from, has its rows open: there's something to type there.
+                if not plan.refused and (len(self.task_ids) == 1 or not self.m.task(task_id).start):
+                    s.toggle()
+        self._sync()
+
+    def _sync(self) -> None:
+        n = sum(s.wanted() for s in self.sections)
+        self.commit_button.setText(f"Apply to {plural(n, 'task')}" if n else "Apply")
+        self.commit_button.setEnabled(n > 0 and not self.refusal.text())
+
+    def targets(self) -> dict[str, dict[int, Choice] | None]:
+        return {s.plan.task: s.choices() for s in self.sections if s.wanted()}
+
+    def save(self) -> None:
+        self._accept()
+
+    def snapshot(self) -> Any:
+        return [self.template_box.currentIndex(), self.task_ids, [s.snapshot() for s in self.sections]]
+
+    def problem(self) -> str | None:
+        for s in self.sections:
+            if s.wanted() and s.rows and (said := s.rows.problem()):
+                return f"{s.m.task(s.plan.task).title}: {said}"
+        return None
+
+    def _accept(self) -> None:
+        problem = self.problem()
+        if problem:
+            self.error.setText(problem)
+            self.error.show()
+            return
+        self.accept()
 
 
 class NewTemplateDialog(_Form):
@@ -897,6 +1176,7 @@ class TemplatesPane:
         w._action("Add subtask", lambda: self.add_subtask(row_id), "A new row under this one", icon_name="task")
         w._action("Edit", lambda: self.edit_row(row_id), "Change what this row fills", icon_name="edit")
         if top:
+            w._action("Apply to tasks…", lambda: self.apply(w.ticked_in_order() if w.selecting else (), row_id), "Put this template into tasks you already have, which keep all they have", icon_name="templates")
             w._action("Timing", lambda: self.timing(template.id), "The anchor, and where every task starts relative to it", icon_name="timing")
             w._action("Export", lambda: w.tree_files.export_template(template.id), "This template as a tree file, for an LLM to change")
             w._action("Duplicate…", lambda: self.duplicate(template.id), "A new template with the same rows, on its own")
@@ -1095,6 +1375,22 @@ class TemplatesPane:
         if w._do(change):
             w.open.update(made)
             w.go_task(made[0])
+
+    def apply(self, task_ids: Sequence[str] = (), row_id: int | None = None) -> None:
+        """Apply template (release 5.63): to the tasks given, ticked in Select mode or named from the task's menu, and any added in the window."""
+        w = self.w
+        dialog = ApplyTemplateDialog(w, w.model(), self.library(), w._people_options, lambda anchor, picked: w._pick_task(anchor, picked, None), w._workdays(), w.today(), task_ids, row_id)
+        w._apply_dialog = dialog
+        if not w.run_dialog(dialog):
+            return
+        row, targets = dialog.row_id(), dialog.targets()
+
+        def change():
+            return templates.apply_to_tasks(w.conn, w.ctx.data_root, w.ctx.fs, w.ctx.settings, row, targets, w._now())[1]
+        if w._do(change):
+            w.open.update(targets)
+            if len(targets) == 1:
+                w.go_task(next(iter(targets)))
 
     def take_out(self, row_id: int) -> None:
         """Take a row out (decision 188): its copies stay and stop following, and those not started with nothing on them are

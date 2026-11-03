@@ -22,7 +22,7 @@ from typing import Any
 
 from docrepo import agenda, captures, edits, items, layer0, markup, people, priorities, quick, search, tasks
 from docrepo.config import Settings
-from docrepo.dates import long_date, short, stamp
+from docrepo.dates import long_date, short, stamp, workday_numbers
 from docrepo.db import next_id, transaction
 from docrepo.extract import extract_text, file_info
 from docrepo.links import NO_TEXT, is_link
@@ -260,7 +260,7 @@ def meeting_name(model: Model, task_id: str | None, today: date) -> str:
 
 def item_names(model: Model, settings: Settings, refs: dict[str, str] | None = None) -> items.Names:
     """The people and tasks the content text's operators can name."""
-    return items.names_of(model, _parse_people(model, settings), refs, settings.reference_fields)
+    return items.names_of(model, _parse_people(model, settings), refs, settings.reference_fields, len(workday_numbers(settings.workdays)))
 
 
 def copy_name(day: str, name: str, taken: set[str]) -> str:
@@ -703,7 +703,8 @@ def _save_items(conn: sqlite3.Connection, settings: Settings, reading: items.Rea
     item_task: dict[str, str] = {}  # a task item's task, by its key, for the items listed under it
     day = at.date().isoformat()
     unused = sum(bool(x.problem) for x in reading.items)
-    for it in (x for x in reading.items if x.on):
+    # A Duration counts by the task's calendar, and a share needs its person on the task, wherever on the line they're written.
+    for it in sorted((x for x in reading.items if x.on), key=lambda x: _LAST.get(x.op.task_field, 0) if x.kind == "param" and x.op else 0):
         block = "\n".join(lines[n] for n in it.lines if n < len(lines))
         block_formatted = formatted and markup.is_formatted(block)
         text = block if block_formatted or not formatted else markup.to_plain(block)
@@ -758,6 +759,9 @@ def _save_items(conn: sqlite3.Connection, settings: Settings, reading: items.Rea
     return files, {k: made[k] for k in items.KIND_NAMES if k in made}, unused
 
 
+_LAST = {"duration": 1, "involvement": 2}
+
+
 def _fill_param(conn: sqlite3.Connection, settings: Settings, it: items.Item, task_id: str, made_here: bool, at: datetime, via: str,
                 person: Callable[[Who], str]) -> bool:
     """A parameter's value on a task (decisions 200 and 207). A filled field stays, unless the task is being made in this
@@ -767,9 +771,16 @@ def _fill_param(conn: sqlite3.Connection, settings: Settings, it: items.Item, ta
     if op is None or value is None:
         return False
     t = tasks.get_task(conn, task_id)
-    if not made_here and items.value_now(t, op):
+    if (not made_here and items.value_now(t, op)) or items.stopped(op, value, items.known_of(t, made_here)):
         return False
     changes = dict(value.changes)
+    if "weeks" in changes:
+        changes["duration"] = changes.pop("weeks") * (7 if t.calendar_days else len(workday_numbers(settings.workdays)))
+    if "ties" in changes:
+        changes["ties"] = {**t.ties, **changes["ties"]}
+    if "involvement" in changes:  # a person's share goes on each role they hold
+        changes["involvement"] = {**t.involvement, **{(role, p): n for p, n in changes["involvement"].items()
+                                                      for key, role in tasks.ROLES.items() if p in getattr(t, key)}}
     try:
         for parent in changes.pop("parents", []):
             if conn.execute("SELECT 1 FROM task_parents WHERE child = ? AND parent = ?", (task_id, parent)).fetchone() is None:

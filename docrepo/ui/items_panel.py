@@ -183,6 +183,9 @@ def task_colour(m: Model, task_id: str | None) -> str:
     return tokens.group_colour(order.index(top)) if top in order else tokens.colour("stroke_strong")
 
 
+LONG_VALUE = 30  # characters a field's box on a card shows whole at its narrowest
+
+
 class ItemCard(QFrame):
     """One item: tick, kind, its line, its title, what was read from it, and a task's due date. In the new look its edge is
     its top-level task's colour, and its kind is an icon and a word (decision 9)."""
@@ -225,6 +228,12 @@ class ItemCard(QFrame):
         self.title.setReadOnly(it.kind == "param")  # a field's value is read from its line, and changed there
         self.title.textEdited.connect(lambda text: self.changed.emit(self.key, "title", text))
         lay.addWidget(self.title)
+        if it.kind == "param" and len(self.title.text()) > LONG_VALUE:  # it wraps, so it keeps its end: a tie's last word says which end it counts from
+            self.title.hide()
+            said = QLabel(self.title.text(), objectName="itemValue", textFormat=Qt.TextFormat.PlainText, wordWrap=True)
+            said.setEnabled(it.on)
+            said.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+            lay.addWidget(said)
         facts = QLabel(_facts(it, where) + (f"  <b style='color:{C.critical}'>{esc(_pretty(it.problem))}</b>" if it.problem else ""), objectName="hint")
         facts.setWordWrap(True)
         facts.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)

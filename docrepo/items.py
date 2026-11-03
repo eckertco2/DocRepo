@@ -22,7 +22,9 @@ added email), and only after a space, a "(" or the start of a line, so an addres
   ``**lead, Tom.``, ``**key date, trial window from 1 Nov to 5 Nov 2027, plant activity.`` (``read_key_date``), or a
   reference field by the name Settings gives it. A filled field on an existing task stays, and a list adds (decision
   200). It goes on the nearest of: a ``#`` task in its sentence, the task item on its line, a ``#`` task on its line, the
-  task item it's listed under, the new task it's listed under, a ``#`` above, the capture's task (decision 208).
+  task item it's listed under, the new task it's listed under, a ``#`` above, the capture's task (decision 208). Release
+  5.62 adds Duration, Runs through weekends, hours a day or a week, Involvement and ties (decisions 293 to 300), the last
+  in the words of Edit task's tie line, ``**start, 3 workdays after #Line 2 outage ends.``, whose ``#`` names only its source.
 
 A ``**`` kind wins; else an ``@`` makes a task; else a ``#`` alone makes a note; a block with none stays in the notes.
 Parameters make their own cards beside whatever the rest of their line makes. ``**`` and a space is never an operator, and
@@ -42,9 +44,9 @@ from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Any
 
-from docrepo import markup
+from docrepo import markup, ties
 from docrepo.db import RECURRENCES
-from docrepo.model import PRIORITY_NAMES
+from docrepo.model import PRIORITY_NAMES, Tie
 from docrepo.parse import (
     EVENT_WORDS, REF_SUFFIX, DateHit, ParseLabel, ParsePerson, Who, find_dates, find_hours, ok_day, one_decimal, parse_capture, quick_update,
 )
@@ -92,12 +94,15 @@ class RefTask:
 
 class Names:
     """The people and tasks operators can name. ``prefer`` maps a name as written ("@tom becker", "#rigging plan", in
-    lower case) to the ID it was picked as, or kept as in capture.md, ahead of the lists."""
+    lower case) to the ID it was picked as, or kept as in capture.md, ahead of the lists. ``model``: the Model it came
+    from, for a tie's checks and key dates. ``week``: the workdays in a week, for a Duration given in weeks."""
 
     def __init__(self, people: Sequence[ParsePerson], tasks: Sequence[RefTask], prefer: Mapping[str, str] | None = None,
-                 fields: Sequence[str] = (), records: Mapping[str, Any] | None = None, labels: Sequence[str] = ()) -> None:
+                 fields: Sequence[str] = (), records: Mapping[str, Any] | None = None, labels: Sequence[str] = (), model: Any = None, week: int = 5) -> None:
         self.field_ops = {key: op for op in map(_field_op, fields) for key in op.names}  # the reference fields, named in Settings
         self.records = records or {}  # the tasks themselves, for what a field already holds
+        self.model = model
+        self.week = week
         self.labels = list(labels)
         self.people = list(people)
         self.active = [p for p in self.people if p.status == "active"]
@@ -118,11 +123,11 @@ class Names:
         return t.title if t else task_id
 
 
-def names_of(model, people: Sequence[ParsePerson], prefer: Mapping[str, str] | None = None, fields: Sequence[str] = ()) -> Names:
+def names_of(model, people: Sequence[ParsePerson], prefer: Mapping[str, str] | None = None, fields: Sequence[str] = (), week: int = 5) -> Names:
     """The Names for a Model: its people (as Parse and populate sees them) and its tasks, but discarded ones; ``fields``
-    are the reference fields Settings names."""
+    are the reference fields Settings names, and ``week`` the workdays in a week."""
     return Names(people, [RefTask(t.id, t.title, t.state != "Closed") for t in model.tasks.values() if not t.discarded], prefer, fields,
-                 model.tasks, [x.name for x in model.labels])
+                 model.tasks, [x.name for x in model.labels], model, week)
 
 
 # ---- reading operators ----
@@ -169,7 +174,21 @@ def _norm(name: str) -> str:
     return re.sub(r"\s+", " ", name.strip().lower())
 
 
-def _value_token(rest: str, head: int, *, op: Operator | None = None, label: str, problem: str = "", sentenced: bool = True) -> Token:
+def _one_word(held: str, names: Names | None) -> str:
+    """The text with the periods in a task's title out of the way: a # task is one word, so "Ver. Two" ends no sentence.
+    Every character keeps its place."""
+    if names is None or "#" not in held:
+        return held
+    out = list(held)
+    for m in re.finditer(r"(?:^|(?<=[\s(]))#", held):
+        tok = _task(held[m.start():], names)
+        if tok:
+            for i in range(m.start(), m.start() + tok.size):
+                out[i] = "_" if out[i] in ".!?" else out[i]
+    return "".join(out)
+
+
+def _value_token(rest: str, head: int, *, op: Operator | None = None, label: str, problem: str = "", sentenced: bool = True, names: Names | None = None) -> Token:
     """A parameter's token: what its value is read from runs up to the next ** word, and a value is one sentence, up to its
     end by ``text.sentences`` or the line's (decision 204). ``sentenced`` False takes all of it: an old form's words."""
     after = rest[head:]
@@ -177,10 +196,10 @@ def _value_token(rest: str, head: int, *, op: Operator | None = None, label: str
     held = after[:cut.start()] if cut else after
     if not sentenced:
         return Token("param", op=op, label=label, problem=problem, size=head, until=head + len(held), sentence=re.sub(r"^[.:]\s*", "", held).strip())
-    found = sentences(held)
+    found = sentences(_one_word(held, names))
     first = found[0] if found else None
     return Token("param", op=op, label=label, problem=problem, size=head, until=head + (first.end if first else 0),
-                 sentence=re.sub(r"[.!?]+\Z", "", first.text).strip() if first else "")
+                 sentence=re.sub(r"[.!?]+\Z", "", held[:first.end]).strip() if first else "")
 
 
 def _kind_token(op: Operator, size: int) -> Token:
@@ -206,7 +225,7 @@ def _star(rest: str, names: Names) -> Token | None:
         if op and op.gone:
             return _value_token(rest, m.end(), label=label, problem=op.gone)
         if op:
-            return _value_token(rest, m.end(), op=op, label=op.label)
+            return _value_token(rest, m.end(), op=op, label=op.label, names=names)
         if _UNKNOWN_NAME.fullmatch(name) and len(name.split(" ")) <= 4:
             return _value_token(rest, m.end(), label=label, problem=f"No field called {name}")
     bare = next((n for n in _names_longest(names) if rest[2:2 + len(n)].lower() == n and not _is_word(rest[2 + len(n):3 + len(n)])
@@ -428,7 +447,62 @@ def _read_date(x: str, c: ReadWith, op: Operator) -> Value:
     return Value({op.task_field: hits[0].date.isoformat()}, hits[0].date.isoformat()) if hits else _NO_DATE if x else _NOTHING
 
 
+_TIE_HEAD = re.compile(r"(?:the\s+day|(\d+)\s+(workdays?|days?|weeks?)\s+(before|after))\s+", re.I)
+_TIE_TAIL = re.compile(r"\s*(?::\s*(.*?))?(?:\s*\b(starts?|ends?))?\s*", re.I | re.S)
+_NO_SOURCE = Value(problem="Name the task with #, such as 3 workdays after #Rigging plan ends")
+
+
+def is_tie(sentence: str) -> bool:
+    """Whether a date's sentence is a tie: the shape of Edit task's tie line, its source named with # (decision 294)."""
+    head = _TIE_HEAD.match(sentence)
+    return bool(head and sentence[head.end():head.end() + 1] == "#")
+
+
+def _read_tie(x: str, c: ReadWith, op: Operator) -> Value | None:
+    """A date set from another date, in the words Edit task's tie line shows (decision 293), or None when the sentence is no
+    tie and is read as a date. "Days" are workdays, and with no "starts" or "ends", after is after it ends and before is
+    before it starts. A key date is named as the task page names it: ``#Line 2 outage: trial window``."""
+    head = _TIE_HEAD.match(x)
+    if not head:
+        return None
+    if not is_tie(x):
+        return None if find_dates(x, c.today) else _NO_SOURCE
+    after = x[head.end():]
+    tok = _task(after, c.names)
+    if not tok:
+        missing = re.sub(r"(?::.*)?(?:\s+(?:starts?|ends?))?\Z", "", after[1:], flags=re.I | re.S).strip()
+        return Value(problem=f"No task called {missing}")
+    tail = _TIE_TAIL.fullmatch(after[tok.size:])
+    if tail is None:
+        return Value(problem="Say whether it starts or ends")
+    said, verb = (tail.group(1) or "").strip(), (tail.group(2) or "").lower()
+    source, title = tok.id, c.names.task_title(tok.id)
+    key_date = name = None
+    if said:
+        kept = c.names.model.key_dates_of(source) if c.names.model is not None else []
+        kd = next((k for k in kept if k.description.lower() == said.lower()), None)
+        if kd is None and verb:  # "starts" or "ends" may be the end of its description
+            kd = next((k for k in kept if k.description.lower() == f"{said} {verb}".lower()), None)
+            verb = "" if kd else verb
+        if kd is None:
+            return Value(problem=f"No key date called {said} on {title}")
+        key_date, name = kd.id, f"{title}: {kd.description}"
+    amount, unit, direction = head.group(1), (head.group(2) or "").lower(), (head.group(3) or "after").lower()
+    if amount is None and not verb:
+        return Value(problem="Say whether it starts or ends")
+    point = "start" if (verb or ("ends" if direction == "after" else "starts")).startswith("start") else "end"
+    tie = Tie(source, point, int(amount or 0), "weeks" if unit.startswith("week") else "workdays", direction, key_date)
+    return Value({"ties": {op.task_field: tie}}, ties.words(tie, name or title))
+
+
+def _read_due(x: str, c: ReadWith, op: Operator) -> Value:
+    return _read_tie(x, c, op) or _read_date(x, c, op)
+
+
 def _read_start(x: str, c: ReadWith, op: Operator) -> Value:
+    tied = _read_tie(x, c, op)
+    if tied:
+        return tied
     hits = find_dates(x, c.today)
     if not hits:
         return _NO_DATE if x else _NOTHING
@@ -456,13 +530,18 @@ def _read_text(x: str, c: ReadWith, op: Operator) -> Value:
     return Value({op.task_field: t}, t) if t else _NOTHING
 
 
+def _person_id(name: str, c: ReadWith) -> str | None:
+    low = name.lower()
+    if low in ("me", "i"):
+        return next((p.id for p in c.names.active if p.me), None)
+    return next((v for n, v in (*c.names.prefer_people, *c.names.person_names) if n.lower() == low), None)
+
+
 def _read_people(x: str, c: ReadWith, op: Operator) -> Value:
     who, shown = [], []
-    known = [(n.lower(), v) for n, v in (*c.names.prefer_people, *c.names.person_names)]
     for chunk in _chunks(x):
         after = re.sub(r"^@(?:L\.)?", "", chunk, flags=re.I)
-        low = after.lower()
-        pid = next((p.id for p in c.names.active if p.me), None) if low in ("me", "i") else next((v for n, v in known if n == low), None)
+        pid = _person_id(after, c)
         if pid:
             who.append(Who(pid, c.names.person_name(pid)))
             shown.append(c.names.person_name(pid))
@@ -479,12 +558,53 @@ def _read_hours(x: str, c: ReadWith, op: Operator) -> Value:
         return Value({op.task_field: float(x)}, one_decimal(float(x)))
     if not x:
         return _NOTHING
-    hits = find_hours(x)
-    if not hits:
+    bare = _BARE_RATE.fullmatch(x)  # "6 a day" says hours by its name: a rate is one of a role's hours (decision 298)
+    hits = [] if bare else find_hours(x)
+    if not bare and not hits:
         return Value(problem="No hours: add a number, such as 12")
-    if hits[0].per:
-        return Value(problem="Give a total, such as 12 hours")
-    return Value({op.task_field: hits[0].hours}, one_decimal(hits[0].hours))
+    per = ("day" if bare.group(2).lower() == "day" else "week") if bare else hits[0].per
+    hours = float(bare.group(1)) if bare else hits[0].hours
+    if not per:
+        return Value({op.task_field: hours}, one_decimal(hours))
+    if per not in ("day", "week"):
+        return Value(problem="Give a total, or hours a day or a week, such as 6 h a day")
+    if not hours:
+        return Value(problem="Give a number above zero")
+    return Value({f"{op.task_field.removesuffix('_hours')}_per_{per}": hours}, f"{one_decimal(hours)} h a {per}")
+
+
+_BARE_RATE = re.compile(r"(\d+(?:\.\d+)?|\.\d+)\s+(?:a|per|each|every)\s+(day|week|wk)", re.I)
+_DURATION = re.compile(r"(\d+)(?:\s*(?:work\s*)?(days?|weeks?|wks?))?", re.I)
+_SHARE = re.compile(r"@?(?:L\.)?(.+?)\s+(\d+)\s*%", re.I)
+
+
+def _read_duration(x: str, c: ReadWith, op: Operator) -> Value:
+    """A number of days, or of weeks, which ``_settle`` turns into days once it knows the task's calendar (decision 297)."""
+    m = _DURATION.fullmatch(x)
+    n = int(m.group(1)) if m else 0
+    if not x:
+        return _NOTHING
+    if not n:
+        return Value(problem="Say how many days, such as 5")
+    if (m.group(2) or "").lower().startswith("w"):
+        return Value({"weeks": n}, f"{n} week{'' if n == 1 else 's'}")
+    return Value({op.task_field: n}, f"{n} day{'' if n == 1 else 's'}")
+
+
+def _read_involvement(x: str, c: ReadWith, op: Operator) -> Value:
+    """Each person's share, ``{person: percent}``: ``save`` gives it the roles they hold on the task (decision 299)."""
+    shares: dict[str, int] = {}
+    for chunk in _chunks(x):
+        m = _SHARE.fullmatch(chunk)
+        if not m:
+            return Value(problem="Say who and how much, such as Tom 25%")
+        pid = _person_id(m.group(1).strip(), c)
+        if not pid:
+            return Value(problem=f"{m.group(1).strip()} isn't on the people list")
+        if int(m.group(2)) > 100:
+            return Value(problem="Involvement is a whole number from 0 to 100")
+        shares[pid] = int(m.group(2))
+    return Value({op.task_field: shares}, ", ".join(f"{c.names.person_name(p)} {n}%" for p, n in shares.items())) if shares else _NOTHING
 
 
 def _read_state(x: str, c: ReadWith, op: Operator) -> Value:
@@ -578,7 +698,7 @@ OPERATORS: tuple[Operator, ...] = (
     Operator(("parked", "on hold"), item="update", state="Parked"),
     Operator(("not started",), item="update", state="Not started"),
     Operator(("start", "start date"), label="Start", task_field="start", read=_read_start),
-    Operator(("due", "due date"), label="Due", task_field="due", read=_read_date),
+    Operator(("due", "due date"), label="Due", task_field="due", read=_read_due),
     Operator(("deadline",), label="Deadline", task_field="deadline", read=_read_deadline),
     Operator(("deadline description",), label="Deadline description", task_field="deadline_desc", read=_read_text),
     Operator(("reminder", "remind"), label="Reminder", task_field="reminder", read=_read_date),
@@ -588,6 +708,9 @@ OPERATORS: tuple[Operator, ...] = (
     Operator(("assignee", "assignees"), label="Assignees", task_field="assignees", adds=True, read=_read_people),
     Operator(("lead hours",), label="Lead hours", task_field="lead_hours", read=_read_hours),
     Operator(("assignee hours", "hours"), label="Assignee hours", task_field="assignee_hours", read=_read_hours),
+    Operator(("duration",), label="Duration", task_field="duration", read=_read_duration),
+    Operator(("weekends", "runs through weekends"), label="Runs through weekends", task_field="calendar_days", read=_read_yes_no),
+    Operator(("involvement",), label="Involvement", task_field="involvement", adds=True, read=_read_involvement),
     Operator(("title",), label="Title", task_field="title", read=_read_text),
     Operator(("description",), label="Description", task_field="description", read=_read_text),
     Operator(("status", "current status"), label="Current status", task_field="current_status", read=_read_text),
@@ -619,15 +742,70 @@ def _names_longest(names: Names) -> list[str]:
 
 
 def value_now(task: Any, op: Operator) -> str:
-    """What a task already has in a parameter's field, in words, or "" when it's empty (decision 200)."""
+    """What a task already has in a parameter's field, in words, or "" when it's empty (decision 200). A date that's tied has
+    its tie, even while it waits for its source, and a role with a rate has its rate, even with no total yet (decision 295)."""
     v = task.references.get(op.label, "") if op.reference else getattr(task, op.task_field, None)
+    if op.task_field in ties.FIELDS and not v and op.task_field in task.ties:
+        return "tied"
+    if op.task_field in _ROLE_OF_HOURS and task.rate_of(_ROLE_OF_HOURS[op.task_field]):
+        hours, per = task.rate_of(_ROLE_OF_HOURS[op.task_field])
+        return f"{one_decimal(hours)} h a {per}"
     if op.adds or v is None or v is False or v == "" or (op.task_field == "state" and v == "Not started"):
         return ""
     if v is True:
         return "Yes"
     if op.task_field == "priority":
         return PRIORITY_NAMES.get(v, v)
+    if op.task_field == "duration":
+        return f"{v} day{'' if v == 1 else 's'}"
     return one_decimal(v) if isinstance(v, float) else str(v)
+
+
+_ROLE_OF_HOURS = {"lead_hours": "lead", "assignee_hours": "assignee"}
+
+
+@dataclass(frozen=True)
+class Known:
+    """What a parameter has to fit on a task: whether it has each date or a tie on it, whether it repeats, whether a Duration
+    holds its dates, who's on it (None when that can't be known, as with a new task's form), and any shares of its own."""
+
+    start: bool = False
+    due: bool = False
+    routine: bool = False
+    held: bool = False
+    people: frozenset[str] | None = None
+    shares: Mapping[tuple[str, str], int] = field(default_factory=dict)
+
+
+def known_of(task: Any, made_here: bool = False) -> Known:
+    """A task's Known. One being made in this capture has nothing to protect yet (decision 200): only what it is counts."""
+    who = frozenset((*task.leads, *task.assignees))
+    if made_here:
+        return Known(routine=bool(task.recurrence), people=who)
+    return Known(bool(task.start or "start" in task.ties), bool(task.due or "due" in task.ties), bool(task.recurrence),
+                 bool(task.duration and (task.start or task.due)), who, task.involvement)
+
+
+def stopped(op: Operator, value: Value, k: Known, name: Callable[[str], str] = str) -> str:
+    """Why a parameter can't go on a task with these facts, or "" (decisions 297 to 299). These would otherwise change or drop
+    something with nobody asked: a Duration moves a date, and a routine task keeps no Duration, rate or tie."""
+    changes = value.changes
+    if k.routine and "ties" in changes:
+        return "A routine task has no one date to tie"
+    if k.routine and (op.task_field in ("duration", "calendar_days") or any(x.endswith(("_per_day", "_per_week")) for x in changes)):
+        return "A routine task has no Duration or rate: its hours are for each time"
+    if op.task_field == "duration" and k.start and k.due:
+        return "Start and Due already set its length: change it in Edit task"
+    if op.task_field == "calendar_days" and changes.get(op.task_field) and k.held:
+        return "That would move its dates: change it in Edit task"
+    if op.task_field == "involvement":
+        for person, percent in changes[op.task_field].items():
+            if k.people is not None and person not in k.people:
+                return f"{name(person)} isn't on this task: add them first"
+            now = next((n for (_, p), n in k.shares.items() if p == person and n != percent), None)
+            if now is not None:
+                return f"{name(person)}'s involvement is already {now}%: change it in Edit task"
+    return ""
 
 
 # ---- blocks and items ----
@@ -818,7 +996,9 @@ def read(content: str, names: Names, today: date, *, labels: Sequence[ParseLabel
         line, the task item it's listed under, the new task it's listed under, a # above, the capture's task."""
         L = lines[b.owner]
         up_block = blocks[b.parent] if b.parent is not None else None
-        inner = _tasks_of([x for x in L.toks if x.inside and p.start <= x.start < p.until])
+        # A tie's # names its source: it isn't where the value goes, and it files nothing (decision 294).
+        tied_line = p.op is not None and p.op.task_field in ties.FIELDS and is_tie(p.sentence)
+        inner = [] if tied_line else _tasks_of([x for x in L.toks if x.inside and p.start <= x.start < p.until])
         on_line = _tasks_of([x for x in L.toks if not x.inside])
         above = ctx_tasks(b)
         if inner:
@@ -844,8 +1024,11 @@ def read(content: str, names: Names, today: date, *, labels: Sequence[ParseLabel
             it.title, it.changed = str(ov["title"]), True
         ids = [w.ref if w.kind == "task" else home_task if w.kind == "home" else None for w in where]
         filled = [value_now(names.records[i], op) if i in names.records else "" for i in ids] if op and not p.problem and not v.problem else []
+        tie = (v.changes.get("ties") or {}).get(op.task_field) if op else None
+        refused = [ties.problem_in(names.model, i or "", tie) for i in ids] if tie and names.model is not None else []
         it.problem = (p.problem or v.problem or ("" if where else "No task to put it on: it stays in the notes")
-                      or (f"{p.label} is already {filled[0]}: change it with Update or Edit task" if filled and all(filled) else ""))
+                      or (f"{p.label} is already {filled[0]}: {'tie it in Edit task' if tie else 'change it with Update or Edit task'}" if filled and all(filled) else "")
+                      or (refused[0] if refused and all(refused) else ""))
         if it.problem:
             it.on = False
         return it
@@ -913,7 +1096,37 @@ def read(content: str, names: Names, today: date, *, labels: Sequence[ParseLabel
                 mine = it
         for p in params:
             items.append(param_item(p, b, mine, parent_item))
+    _settle(items, names, home_task)
     return Reading(lines, blocks, items, headings, self_block)
+
+
+def _settle(found: list[Item], names: Names, own: str | None) -> None:
+    """What the cards on one task come to together, with what it already has (decisions 297 and 299): all three of Start, Due
+    and Duration, a routine task's Duration, someone with a share who isn't on it, and how many days a Duration's weeks are."""
+    live = [x for x in found if x.kind == "param" and x.op and x.value and x.on and not x.problem]
+
+    def known(it: Item, w: Where) -> tuple[Known, bool]:
+        record = names.records.get(own if w.kind == "home" else w.ref) if w.kind != "item" else None
+        mine = next((x for x in found if x.key == w.ref), None) if w.kind == "item" else None
+        base = known_of(record) if record else Known()
+        near = [x for x in live if x is not it and w in x.where]
+        fields = {x.op.task_field for x in near}
+        on_line = [p.id for p in (*mine.leads, *mine.assignees) if p.id] if mine else []
+        added = [who.id for x in near for key in ("leads", "assignees") for who in x.value.changes.get(key, ()) if who.id]
+        people = frozenset((*(base.people or ()), *on_line, *added)) if record or mine else None
+        every = bool(record and record.calendar_days) or any(x.value.changes.get("calendar_days") for x in near)
+        return replace(base, start=base.start or "start" in fields or bool(mine and mine.start), due=base.due or "due" in fields or bool(mine and mine.due),
+                       routine=base.routine or "recurrence" in fields or bool(mine and mine.recurrence), people=people), every
+
+    for it in live:
+        facts = [known(it, w) for w in it.where]
+        said = [stopped(it.op, it.value, k, names.person_name) for k, _ in facts]
+        if said and all(said):
+            it.problem, it.on = said[0], False
+        elif "weeks" in it.value.changes:
+            n = it.value.changes["weeks"]
+            it.value = replace(it.value, shown=f"{it.value.shown} ({n * (7 if facts and facts[0][1] else names.week)} days)")
+            it.title = it.value.shown
 
 
 def self_fields(r: Reading, names: Names) -> SelfFields | None:
