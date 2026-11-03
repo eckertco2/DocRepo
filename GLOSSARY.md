@@ -101,6 +101,7 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Me**: the person marked as DocRepo's owner. "I" and "me" in a capture mean them.
 - **Lead hours, Assignee hours**: estimated hours for each person in that role: a total for a one-time task, per occurrence for a routine one.
 - **Capacity calendar**: hours per person, workday and task, built from task fields. It's a cache that can be rebuilt at any time.
+- **What-if**: a named change to the plan, made on the Timeline page, that changes no task until it's applied (release 5.64). Its things done are taking a task off, moving a bar or a whole parent, and moving a key date. **Take off** in a what-if means Parked once it's applied. The **real plan** is the tasks as they are.
 
 ## 4. Files and documents
 

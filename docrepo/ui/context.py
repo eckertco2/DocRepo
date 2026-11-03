@@ -46,6 +46,16 @@ class AppContext:
             self._model, self._model_at = Model(self.conn), at
         return self._model
 
+    def rolled_back(self, work: Callable[[], object]) -> object:
+        """Run ``work``, which rolls back everything it writes (a what-if's picture, release 5.64), keeping the shared Model when
+        nothing else changed, since ``total_changes`` counts writes that were rolled back too."""
+        before = (self.conn.total_changes, self.conn.execute("PRAGMA data_version").fetchone()[0])
+        try:
+            return work()
+        finally:
+            if self._model_at == before and not self.conn.in_transaction:
+                self._model_at = (self.conn.total_changes, self.conn.execute("PRAGMA data_version").fetchone()[0])
+
     def parse_people(self, model: Model) -> list[ParsePerson]:
         return [ParsePerson(p.id, p.name, tuple(p.aliases), p.status, p.id == self.settings.me) for p in model.people.values()]
 

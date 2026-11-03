@@ -26,9 +26,18 @@ chart and a heat strip per person. Clicking a week puts the spotlight on it (dec
 behind that load strong and the rest faded, and a card listing their hours. One People control narrows the bars and the load
 together (decision 232). Bars are one colour unless Display says otherwise, with a lighter solid for Not started and a thin
 line under the bar for its subtasks' span (decision 234).
+
+What-ifs (release 5.64, decisions 226 to 228 and 290; ``docrepo/whatif.py``) are on the page only. One is a named list of things
+done that changes no task: Take off, from the line under the chart or the spotlight's card, and the drags, which need no Plan
+mode in one, including a whole parent's subtasks' line, in whole weeks. The browse window works out what it would do
+(``picture_of``), and the chart and Capacity draw that: a moved bar outlined where it was, a task taken off as a dashed row with
+Put back, the team chart's real columns outlined behind, and the sentence beside the real plan's. A strip says which what-if is
+showing and that no task has changed, with Undo, Review and apply, and the way back. Quick edit and Update aren't offered in one,
+as they'd change the real task.
 """
 from __future__ import annotations
 
+import copy
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -43,6 +52,7 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -53,11 +63,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo import key_dates, load, timeline
+from docrepo import key_dates, load, timeline, whatif
 from docrepo.dates import days_text, long_date, monday_of, short, to_date
 from docrepo.detail import esc
 from docrepo.model import KeyDate, Model, Task
-from docrepo.schedule import due_of, start_of
+from docrepo.schedule import due_of, is_open, start_of, windows
 from docrepo.timeline import Band, KeyMark, Row, Timeline
 from docrepo.ui import tokens
 from docrepo.ui.capacity_strip import CapacityRows, CapacityTeam, Spot, StripData
@@ -134,8 +144,8 @@ def week_from(day: date) -> tuple[date, date]:
 
 @dataclass
 class Drag:
-    """A drag in Plan mode: "new" (a name onto the chart), "move", "start" or "end", or a key date's "kd-move", "kd-start"
-    or "kd-end" (release 5.31), and where it's got to."""
+    """A drag in Plan mode: "new" (a name onto the chart), "move", "start" or "end", a key date's "kd-move", "kd-start"
+    or "kd-end" (release 5.31), or in a what-if a whole parent's "parent" (release 5.64), and where it's got to."""
 
     task: str
     mode: str
@@ -405,6 +415,8 @@ class TimelineChart(QWidget):
     dropped = Signal(str, object, object, str)
     #: A key date's drop in Plan mode (release 5.31): its task, its ID, its new first and last day, and its kind.
     dropped_key = Signal(str, int, object, object, str)
+    #: In a what-if (release 5.64), a whole parent dropped: its task, and how many weeks later (earlier when below 0).
+    dropped_parent = Signal(str, int)
 
     ROW_H, BAR_TOP, BAR_H, EDGE = 28, 6, 16, 6
 
@@ -429,6 +441,11 @@ class TimelineChart(QWidget):
         self.spot: tuple[date, date] | None = None  # its week
         self.hover_week: tuple[date, date] | None = None  # the week under the mouse in Capacity
         self._fade = 1.0  # how strongly the row being painted is drawn
+        # A what-if showing (release 5.64): the tasks it takes off, where its moved bars were, and those it pushes past a deadline.
+        self.whatif = False
+        self.off: set[str] = set()
+        self.was: dict[str, tuple[date, date]] = {}
+        self.past: set[str] = set()
 
     @property
     def tl(self) -> Timeline | None:
@@ -490,6 +507,16 @@ class TimelineChart(QWidget):
         a, b = r.windows[0]
         x0, x1 = self._x(a), self._x(b + timedelta(days=1))
         return QRectF(x0, top + self.BAR_TOP, max(3.0, x1 - x0), self.BAR_H)
+
+    def span_rect(self, r: Row, top: float) -> QRectF | None:
+        """In a what-if, where a parent's subtasks' line is grabbed to move it all: the whole row when it has no bar of its own,
+        else under its bar."""
+        if not self.whatif or not r.kids or r.span is None or self.tl is None:
+            return None
+        a, b = r.span
+        x0, x1 = self._x(max(a, self.tl.start)), self._x(min(b, self.tl.end - timedelta(days=1)) + timedelta(days=1))
+        y = top + 2 if self.bar_rect(r, top) is None else top + self.BAR_TOP + self.BAR_H
+        return QRectF(x0, y, max(6.0, x1 - x0), top + self.ROW_H - y)
 
     # ---- painting ----
     def paintEvent(self, _event) -> None:  # noqa: N802 - Qt's name
@@ -555,6 +582,13 @@ class TimelineChart(QWidget):
                 p.setPen(QPen(QColor(ACCENT), 1, Qt.PenStyle.DashLine))
                 p.setBrush(_mix(ACCENT, 0.45))
                 p.drawRoundedRect(QRectF(x0, cy - h / 2 - 1, max(4.0, x1 - x0), h + 2), 2, 2)
+        elif self.drag and self.drag.moved and self.drag.mode == "parent" and self.drag.start and self.drag.end:  # where it all goes
+            top = self.top_of(self.drag.task)
+            if top is not None:
+                x0, x1 = self._x(self.drag.start), self._x(self.drag.end + timedelta(days=1))
+                p.setPen(QPen(QColor(ACCENT), 1, Qt.PenStyle.DashLine))
+                p.setBrush(_alpha(ACCENT, 40))
+                p.drawRoundedRect(QRectF(x0, top + 3, max(6.0, x1 - x0), self.ROW_H - 6), 4, 4)
         elif self.drag and self.drag.moved and self.drag.start and self.drag.end:  # where the dragged bar goes
             top = self.top_of(self.drag.task)
             if top is not None:
@@ -600,7 +634,8 @@ class TimelineChart(QWidget):
         right = self.scale.right(self)
         faded = self.strong is not None and r.task not in self.strong and not r.plant_event
         lit = self.strong is not None and r.task in self.strong
-        self._fade = 0.22 if faded else 1.0
+        off = r.task in self.off  # taken off in the what-if showing: still a row, to put back
+        self._fade = 0.22 if faded else 0.55 if off else 1.0
         p.setPen(QPen(QColor(LINE), 1))
         p.drawLine(QPointF(0, top + self.ROW_H - 0.5), QPointF(right, top + self.ROW_H - 0.5))
         # Ordered by top-level task, its project's colour is an edge, as in the task tree; by a field, the lane column's band
@@ -639,11 +674,11 @@ class TimelineChart(QWidget):
             p.drawText(QRectF(x, top, 14, self.ROW_H), Qt.AlignmentFlag.AlignVCenter, FLAG)
             x += 15
         badge = f"{r.kids}" if r.kids and not r.open else ""
-        late_w = 30 if r.late else 0
+        late_w = 30 if r.late or off else 0
         badge_w = (p.fontMetrics().horizontalAdvance(badge) + 12) if badge else 0
         p.setFont(bold if not r.depth or lit else base)
         # Plain words beside the colour edge, as in the task tree (the review's decision V3).
-        colour = QColor(FAINT) if faded else QColor(MUTED) if r.ctx else (_mix(kc, 0.6, FG) if kc and LOOK.classic else QColor(FG))
+        colour = QColor(FAINT) if faded else QColor(MUTED) if r.ctx or off else (_mix(kc, 0.6, FG) if kc and LOOK.classic else QColor(FG))
         p.setPen(colour)
         name_w = max(20.0, self.scale.NAME_W - x - 6 - late_w - badge_w)
         text = p.fontMetrics().elidedText(t.title, Qt.TextElideMode.ElideRight, int(name_w))
@@ -657,7 +692,15 @@ class TimelineChart(QWidget):
             p.drawRoundedRect(rect, 7, 7)
             p.setPen(QColor(MUTED))
             p.drawText(rect, Qt.AlignmentFlag.AlignCenter, badge)
-        if r.late:
+        if off:  # a tag, as the mock's: taken off in this what-if
+            p.setFont(small)
+            tag = QRectF(self.scale.NAME_W - 30, top + 7, 26, 14)
+            p.setPen(QPen(QColor(LINE_STRONG), 1))
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawRoundedRect(tag, 3, 3)
+            p.setPen(QColor(MUTED))
+            p.drawText(tag, Qt.AlignmentFlag.AlignCenter, "off")
+        elif r.late:
             p.setFont(small)
             p.setPen(QColor(BAD))
             p.drawText(QRectF(self.scale.NAME_W - 32, top, 30, self.ROW_H), Qt.AlignmentFlag.AlignVCenter, "late")
@@ -667,6 +710,8 @@ class TimelineChart(QWidget):
 
     def _bar_look(self, t: Task, r: Row) -> tuple[QColor | None, QColor | None, QColor, bool, bool, bool]:
         """(fill, edge, text colour, hatched, dashed outline, event stripe) for a one-time task's bar (decision 133)."""
+        if t.id in self.off:  # taken off in a what-if: an outline where it was
+            return None, QColor(MUTED), QColor(MUTED), False, True, False
         if t.plant_event:
             return QColor(EV_BG), _mix(EV_LINE, 0.55, EV_BG), QColor(EV_INK), False, False, True
         if self.bars == "hours":
@@ -709,6 +754,13 @@ class TimelineChart(QWidget):
         label = timeline.hours_label(t, self.today, self.a_week)
         bar_font = QFont(small)
         bar_font.setWeight(QFont.Weight.DemiBold)
+        was = self.was.get(r.task)
+        if was is not None and r.own and not r.routine:  # a what-if moved it: where it is on the real plan
+            x0, x1 = self._x(max(was[0], self.tl.start)), self._x(min(was[1], self.tl.end - timedelta(days=1)) + timedelta(days=1))
+            if was[1] >= self.tl.start and was[0] < self.tl.end:
+                p.setPen(QPen(QColor(MUTED), 1, Qt.PenStyle.DashLine))
+                p.setBrush(Qt.BrushStyle.NoBrush)
+                p.drawRoundedRect(QRectF(x0, top + self.BAR_TOP, max(3.0, x1 - x0), self.BAR_H), 4, 4)
         for a, b in r.windows:
             x0, x1 = self._x(a), self._x(b + timedelta(days=1))
             if r.routine and a == b:  # a one-day occurrence: a dot
@@ -754,7 +806,18 @@ class TimelineChart(QWidget):
                 p.fillRect(QRectF(rect.right() - 2, rect.top() + 4, 2, rect.height() - 8), _alpha(FG, 60))
             p.setOpacity(self._fade)
         if r.deadline:
-            self._diamond(p, self._mid(r.deadline), top + 14.0, 6.0, QColor(BAD if r.deadline < self.today else FG), QColor(CONTENT))
+            past = r.task in self.past
+            self._diamond(p, self._mid(r.deadline), top + 14.0, 6.0, QColor(BAD if r.deadline < self.today or past else FG), QColor(CONTENT))
+            if past:  # a what-if moved it past its deadline, which stays put
+                p.setFont(bar_font)
+                words = "past its deadline"
+                w = p.fontMetrics().horizontalAdvance(words) + 6
+                at = self._mid(r.deadline) + 9
+                if at + w > self.scale.right(self):
+                    at = self._mid(r.deadline) - 9 - w
+                p.fillRect(QRectF(at, top + 1, w, 13), QColor(CONTENT))
+                p.setPen(QColor(BAD))
+                p.drawText(QRectF(at, top + 1, w, 13), Qt.AlignmentFlag.AlignCenter, words)
         if r.span:  # the summary bar: its subtasks' span, with their deadlines (item 51)
             only = not r.own or not r.windows
             a, b = r.span
@@ -859,7 +922,8 @@ class TimelineChart(QWidget):
     # ---- the mouse ----
     def _hit(self, x: float, y: float) -> tuple[Row | None, str]:
         """What's under the mouse: "fold", "grip", "start", "end", "move" (a bar, in Plan mode), a key date's "kd-start",
-        "kd-end" or "kd-move" (Plan mode, release 5.31; the key date is ``hit_key``), "row" or ""."""
+        "kd-end" or "kd-move" (Plan mode, release 5.31; the key date is ``hit_key``), a whole parent's "parent" (a what-if,
+        release 5.64), "row" or ""."""
         self.hit_key = None
         r = self.row_at(y)
         if r is None:
@@ -867,6 +931,8 @@ class TimelineChart(QWidget):
         top = int(y // self.ROW_H) * self.ROW_H
         if r.kids and self._fold_rect(r, top).contains(QPointF(x, y)):
             return r, "fold"
+        if r.task in self.off:  # taken off: put back before it moves
+            return r, "row"
         if self.plan and r.undated and self._grip_rect(r, top).adjusted(-2, -4, 2, 4).contains(QPointF(x, y)):
             return r, "grip"
         key = self._key_at(r, top, x, y) if self.plan and x >= self.scale.NAME_W else None
@@ -880,6 +946,9 @@ class TimelineChart(QWidget):
             if x >= bar.right() - self.EDGE:
                 return r, "end"
             return r, "move"
+        span = self.span_rect(r, top)
+        if span is not None and span.contains(QPointF(x, y)):
+            return r, "parent"
         return r, "row"
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
@@ -895,6 +964,8 @@ class TimelineChart(QWidget):
         if what.startswith("kd-") and self.hit_key is not None:
             k = self.hit_key
             self.drag = Drag(r.task, what, x, k.first, k.last, key_id=k.id, kind=k.kind)
+        elif what == "parent" and r.span is not None:
+            self.drag = Drag(r.task, "parent", x, r.span[0], r.span[1])
         elif what in ("grip", "start", "end", "move") and self.model is not None:
             t = self.model.task(r.task)
             end = to_date(t.due or t.deadline) if (t.due or t.deadline) else None
@@ -909,7 +980,11 @@ class TimelineChart(QWidget):
                 return
             d.moved = True
             self._drag_to(d, x)
-            if d.start and d.end:
+            if d.mode == "parent" and d.start and d.start0 and self.model is not None:
+                n = (d.start - d.start0).days // 7
+                words = f"{abs(n)} week{'' if abs(n) == 1 else 's'} {'later' if n > 0 else 'earlier'}, everything under it too" if n else "Where it is now"
+                QToolTip.showText(event.globalPosition().toPoint(), f"{self.model.task(d.task).title}: {words}", self)
+            elif d.start and d.end:
                 n = sum((d.start + timedelta(days=i)).weekday() < 5 for i in range((d.end - d.start).days + 1))
                 QToolTip.showText(event.globalPosition().toPoint(), f"{long_date(d.start, self.today)} → {long_date(d.end, self.today)} · "
                                                                     f"{n} workday{'s' if n != 1 else ''}", self)
@@ -922,7 +997,7 @@ class TimelineChart(QWidget):
         if hover != self.hover:
             self.hover = hover
             self.update()
-        shape = {"fold": Qt.CursorShape.PointingHandCursor, "grip": Qt.CursorShape.OpenHandCursor,
+        shape = {"fold": Qt.CursorShape.PointingHandCursor, "grip": Qt.CursorShape.OpenHandCursor, "parent": Qt.CursorShape.OpenHandCursor,
                  "move": Qt.CursorShape.OpenHandCursor, "start": Qt.CursorShape.SizeHorCursor,
                  "end": Qt.CursorShape.SizeHorCursor}.get(what.removeprefix("kd-"), Qt.CursorShape.ArrowCursor)
         self.setCursor(shape)
@@ -940,7 +1015,10 @@ class TimelineChart(QWidget):
         n = round((x - d.x0) / self.scale.px_per_day(self))
         s, e = d.start0, d.end0
         mode = d.mode.removeprefix("kd-")  # a key date moves and stretches as a bar does
-        if mode == "move":
+        if mode == "parent":  # in whole weeks, so weekdays stay as they are (decision 290)
+            n = 7 * round(n / 7)
+            s, e = s + timedelta(days=n), e + timedelta(days=n)
+        elif mode == "move":
             s, e = s + timedelta(days=n), e + timedelta(days=n)
         elif mode == "start":
             s = min(s + timedelta(days=n), e)
@@ -964,6 +1042,10 @@ class TimelineChart(QWidget):
             return
         if d.key_id is not None:
             self.dropped_key.emit(d.task, d.key_id, d.start, d.end, d.kind)
+            return
+        if d.mode == "parent":
+            if d.start0 is not None:
+                self.dropped_parent.emit(d.task, (d.start - d.start0).days // 7)
             return
         self.dropped.emit(d.task, d.start, d.end, d.mode)
 
@@ -1101,6 +1183,11 @@ class TimelineView(QWidget):
     REMEMBERED = ("weeks", "order", "bars", "a_week", "routine", "undated_open", "cap_open", "cap_unit", "cap_by_group", "cap_h")
     #: Add person, from Capacity with nobody to show.
     add_person = Signal()
+    #: What-ifs (release 5.64): the list changed, to be kept; one to apply, its ID and the places of the things done left out;
+    #: and a line for the status line.
+    whatifs_changed = Signal()
+    apply_whatif = Signal(str, list)
+    said = Signal(str)
     #: The most of the page Capacity's half takes to start with, and the least either part can be dragged to.
     CAP_SHARE, CAP_MIN, TOP_MIN = 0.62, 96, 150
 
@@ -1140,6 +1227,19 @@ class TimelineView(QWidget):
         # scrolling inside itself, so they never take the chart's room (the owner's comment, release 5.57).
         self.undated_ids: tuple[str, ...] = ()
         self.undated_open = False
+        # What-ifs (release 5.64): the list, which the browse window keeps; the one showing, None for the real plan, which is
+        # where DocRepo always starts (decision 228); each one's steps back; and what the one showing would do, from
+        # ``picture_of``, which the browse window sets. ``real`` is the model as it is, ``model`` the one drawn.
+        self.whatifs: list[whatif.WhatIf] = []
+        self.cur: str | None = None
+        self.wi_undo: dict[str, list[list[whatif.Action]]] = {}
+        self.picture_of: Callable[[whatif.WhatIf], whatif.Picture] | None = None
+        self.pic: whatif.Picture | None = None
+        self.real: Model | None = None
+        self.real_cells: load.Cells = {}
+        #: Asks before a what-if with changes in it is deleted; and runs Review and apply. The browse window sets both.
+        self.confirm: Callable[[str, str], bool] = lambda title, words: True
+        self.run_dialog: Callable[[QWidget], bool] = lambda dialog: bool(dialog.exec())
         lay = QVBoxLayout(self)
         lay.setContentsMargins(12, 8, 12, 8) if LOOK.classic else lay.setContentsMargins(16, 12, 16, 10)
         lay.addWidget(QLabel("Timeline", objectName="paneTitle"))
@@ -1154,9 +1254,10 @@ class TimelineView(QWidget):
         self.chart.picked.connect(self._pick)
         self.chart.opened.connect(self.open_task)
         self.chart.fold.connect(self.set_open)
-        self.chart.quick_edit.connect(self.quick_edit)
+        self.chart.quick_edit.connect(self._chart_quick_edit)
         self.chart.dropped.connect(self._dropped)
         self.chart.dropped_key.connect(self._dropped_key)
+        self.chart.dropped_parent.connect(self._dropped_parent)
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -1180,6 +1281,10 @@ class TimelineView(QWidget):
         self.quick_button.clicked.connect(self._quick_from_card)
         self.update_button = QPushButton("Update")
         self.update_button.clicked.connect(lambda: self.sel and self.update_task.emit(self.sel))
+        self.off_button = QPushButton("Take off")  # the page's: in a what-if, or starting one (release 5.64)
+        self.off_button.setToolTip("See the load without it and everything under it, in a what-if. Your tasks don't change.")
+        self.off_button.clicked.connect(lambda: self.sel and (self.put_back if self.sel in self.chart.off else self.take_off)(self.sel))
+        self.off_button.hide()
         self.undated_fold = QToolButton(objectName="checkFold")
         self.undated_fold.setToolTip("Show or hide the tasks with no dates")
         self.undated_fold.setAccessibleName("Tasks with no dates")
@@ -1302,6 +1407,8 @@ class TimelineView(QWidget):
         self.plan_button.setToolTip("Plan mode: drag bars and names to set dates (P)")
         self.plan_button.clicked.connect(lambda on: self.set_plan(on))
         self.time_layout.addWidget(self.plan_button)
+        self._build_whatifs()
+        self.time_layout.addWidget(self.whatif_button)
         self.people_button: CheckMenuButton | None = None  # made when there's a model, with its people
         self.labels_button: CheckMenuButton | None = None
         self.display_button = DropButton("Display")
@@ -1325,6 +1432,7 @@ class TimelineView(QWidget):
         self._chips_shown: tuple = ()
         lay.addWidget(self.chips)
         lay.addWidget(self.plan_strip)
+        lay.addWidget(self.whatif_strip)
         self._build_display()
         self.legend_box = Popover(self)
         self.legend = QLabel()
@@ -1352,7 +1460,7 @@ class TimelineView(QWidget):
         cl.setSpacing(6)
         self.card_text = FootLine()
         cl.addWidget(self.card_text, 1)
-        for b in (self.open_button, self.quick_button, self.update_button):
+        for b in (self.open_button, self.quick_button, self.update_button, self.off_button):
             cl.addWidget(b)
         self.undated_fold.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         cl.addWidget(self.undated_fold)
@@ -1409,6 +1517,43 @@ class TimelineView(QWidget):
         grid.addWidget(self.routine_box, 4, 1)
         grid.addWidget(QLabel("Labels", objectName="fieldLabel"), 5, 0)
         self.display_grid = grid
+
+    def _build_whatifs(self) -> None:
+        """The what-ifs' button and its list, and the strip that stays while one is showing, so it can't be taken for the real
+        plan (release 5.64)."""
+        self.whatif_button = DropButton("What-ifs")
+        self.whatif_button.setCheckable(True)  # pressed while one is showing
+        self.whatif_button.clicked.connect(lambda: (self.whatif_button.setChecked(self.cur is not None), self._open_whatifs()))
+        self.whatif_box = Popover(self)
+        self.whatif_list = QGridLayout(self.whatif_box)
+        self.whatif_list.setContentsMargins(8, 8, 8, 8)
+        self.whatif_list.setHorizontalSpacing(8)
+        self.whatif_list.setVerticalSpacing(2)
+        self.whatif_strip = QFrame(objectName="fileRow")
+        ws = QHBoxLayout(self.whatif_strip)
+        ws.setContentsMargins(10, 4, 6, 4)
+        ws.setSpacing(8)
+        ws.addWidget(QLabel("<b>What-if</b>"))
+        self.whatif_name = QLineEdit()
+        self.whatif_name.setAccessibleName("This what-if's name")
+        self.whatif_name.setFixedWidth(190)
+        self.whatif_name.editingFinished.connect(self._rename)
+        ws.addWidget(self.whatif_name)
+        ws.addWidget(QLabel("Your tasks haven't changed."))
+        self.whatif_facts = QLabel(objectName="hint")
+        ws.addWidget(self.whatif_facts, 1)
+        self.whatif_undo = QPushButton("Undo")
+        self.whatif_undo.setToolTip("The last change in this what-if (Ctrl+Z)")
+        self.whatif_undo.clicked.connect(self.undo_whatif)
+        self.whatif_review = QPushButton("Review and apply")
+        self.whatif_review.setToolTip("See each change, and apply those you want to your tasks")
+        self.whatif_review.clicked.connect(self.review)
+        back = QPushButton("Back to the real plan")
+        back.clicked.connect(lambda: self.show_whatif(None))
+        for b in (self.whatif_undo, self.whatif_review, back):
+            ws.addWidget(b)
+        self.whatif_strip.setStyleSheet(f"QFrame#fileRow {{ background-color: {SEL}; border: 1px solid {C.info_line}; border-radius: 4px; }}")
+        self.whatif_strip.hide()
 
     @staticmethod
     def _seg(items, picked: Callable, tip: str = "") -> tuple[QWidget, dict]:
@@ -1517,9 +1662,12 @@ class TimelineView(QWidget):
         text box. P is free in the browse tool."""
         mods = event.modifiers() & ~Qt.KeyboardModifier.KeypadModifier
         if event.key() == Qt.Key.Key_P and mods == Qt.KeyboardModifier.NoModifier:
-            self.set_plan(not self.plan)
+            if self.cur is not None:
+                self.said.emit("In a what-if, bars always drag. Nothing changes until you apply it.")
+            else:
+                self.set_plan(not self.plan)
         elif event.key() == Qt.Key.Key_Z and mods == Qt.KeyboardModifier.ControlModifier:
-            self.undo_last()
+            self.undo_whatif() if self.cur is not None else self.undo_last()
         elif event.key() == Qt.Key.Key_Escape and not LOOK.classic and self.spot is not None:
             self.clear_spot()
         elif event.key() == Qt.Key.Key_Escape and not LOOK.classic and self.sel:
@@ -1528,8 +1676,15 @@ class TimelineView(QWidget):
             super().keyPressEvent(event)
 
     def render(self, model: Model, today: date) -> None:
-        """Draw the view again from the model, keeping its controls' choices."""
-        self.model, self.today = model, today
+        """Draw the view again from the model, keeping its controls' choices. In a what-if, what it would do is drawn."""
+        self.real, self.today = model, today
+        if self.cur is not None and (LOOK.classic or self.showing() is None):
+            self.cur = None
+        w = self.showing()
+        self.pic = self.picture_of(w) if w is not None and self.picture_of is not None else None
+        if self.pic is not None:
+            model = whatif.drawn(self.pic, model)
+        self.model = model
         if self.start is None:
             self.start = timeline.default_start(today)
         if self.sel and self.sel not in model.tasks:
@@ -1542,8 +1697,10 @@ class TimelineView(QWidget):
             self._controls()
         else:
             self._sync_tools()
-        # With the page, tasks with no dates join the chart only while their fold is open, Plan mode or not (decision 291).
-        rows_undated = self.plan and (LOOK.classic or self.undated_open)
+        # With the page, tasks with no dates join the chart only while their fold is open, Plan mode or not (decision 291). In a
+        # what-if, bars always drag.
+        drags = self.plan or self.pic is not None
+        rows_undated = drags and (LOOK.classic or self.undated_open)
         tl = timeline.build(model, today, self.start, self.weeks, self.order, tuple(self.labels), tuple(self.people), self.routine,
                             self.open_ids, rows_undated, self.focus, self.typed_days, list_undated=not LOOK.classic)
         self.scale.tl = tl
@@ -1552,12 +1709,14 @@ class TimelineView(QWidget):
         self._fit_room()
         self._sync_inset()
         self.head.set_timeline(model, today, model.task(self.focus).title if self.focus else "", self.sel, field_names(self.order)[0])
-        self.chart.set_timeline(model, today, self.sel, self.plan, self.bars, self.a_week, self.order)
+        self._whatif_marks()
+        self.chart.set_timeline(model, today, self.sel, drags, self.bars, self.a_week, self.order)
         if not LOOK.classic:  # gone where nothing nests
             for i, b in enumerate(self.level_buttons):
                 b.move(self.scale.key_w + 40 + i * 24, 20)
                 b.setVisible(any(r.kids for r in tl.rows))
-        self.plan_strip.setVisible(self.plan)
+            self._sync_whatif()
+        self.plan_strip.setVisible(self.plan and self.pic is None)
         self._card()
         self.undated_ids = tl.undated
         self._draw_undated()
@@ -1575,7 +1734,7 @@ class TimelineView(QWidget):
             set_fold(self.undated_fold, f"{n} with no dates", self.undated_open)
             self.undated_box.setVisible(bool(n) and self.undated_open)
             if n and self.undated_open and self.model is not None:
-                if self.plan:
+                if self.plan or self.pic is not None:
                     self.undated_names.setText("They're on the chart now, each with a ⋮⋮ to drag onto the dates.")
                 else:
                     names = ", ".join(f'<a href="task:{esc(x)}">{esc(self.model.task(x).title)}</a>' for x in ids)
@@ -1608,8 +1767,8 @@ class TimelineView(QWidget):
     def _toggle_undated(self) -> None:
         self.undated_open = not self.undated_open
         self.settings_changed.emit(self.settings())
-        if not LOOK.classic and self.plan and self.model is not None:  # its rows join the chart or leave it
-            self.render(self.model, self.today)
+        if not LOOK.classic and (self.plan or self.pic is not None) and self.model is not None:  # its rows join the chart or leave it
+            self._redraw()
             return
         self._draw_undated()
 
@@ -1942,7 +2101,7 @@ class TimelineView(QWidget):
             return
         self.start, self.typed_days = first, (last - first).days + 1
         self.settings_changed.emit(self.settings())
-        self.render(self.model, self.today)
+        self._redraw()
 
     def _range_says(self, text: str) -> None:
         self.range_note.setText(text)
@@ -1971,20 +2130,20 @@ class TimelineView(QWidget):
         if key in self.REMEMBERED:
             self.settings_changed.emit(self.settings())
         if self.model is not None:
-            self.render(self.model, self.today)
+            self._redraw()
 
     def set_plan(self, on: bool) -> None:
         """Plan mode on or off (P, the Plan button, or Done)."""
         self.plan = bool(on)
         if self.model is not None:
-            self.render(self.model, self.today)
+            self._redraw()
 
     def set_open(self, task_id: str, open_: bool) -> None:
         """A row's subtasks shown or folded: its arrow, Right or Left."""
         (self.open_ids.add if open_ else self.open_ids.discard)(task_id)
         self.folds_changed.emit(sorted(self.open_ids))
         if self.model is not None:
-            self.render(self.model, self.today)
+            self._redraw()
 
     def level(self, step: int) -> None:
         """Expand a level opens every row shown that has subtasks; Collapse a level folds the deepest open ones."""
@@ -1997,7 +2156,7 @@ class TimelineView(QWidget):
             self.open_ids.difference_update(r.task for r in open_rows if r.depth == deepest)
         self.folds_changed.emit(sorted(self.open_ids))
         if self.model is not None:
-            self.render(self.model, self.today)
+            self._redraw()
 
     def shift(self, direction: int) -> None:
         """Earlier, This week or Later: by four weeks, 13 over six months, or 26 over a year, and a typed range likewise, by
@@ -2010,7 +2169,7 @@ class TimelineView(QWidget):
         if self.typed_days:
             self.settings_changed.emit(self.settings())
         if self.model is not None:
-            self.render(self.model, self.today)
+            self._redraw()
 
     def _pick(self, task_id: str | None) -> None:
         self.sel = task_id
@@ -2038,6 +2197,229 @@ class TimelineView(QWidget):
         r = self.card.rect()
         self.quick_edit.emit(self.sel, QRect(self.card.mapToGlobal(r.topLeft()), r.size()))
 
+    def _redraw(self) -> None:
+        """Draw the page again from the real model, as it is."""
+        if self.real is not None or self.model is not None:
+            self.render(self.real or self.model, self.today)
+
+    def _chart_quick_edit(self, task_id: str, near: QRect) -> None:
+        """A double-click asks for Quick edit, but not in a what-if, where it would change the real task (decision 292)."""
+        if self.cur is not None:
+            self.said.emit("Quick edit changes the task itself, so it isn't offered in a what-if. Drag its bar instead.")
+            return
+        self.quick_edit.emit(task_id, near)
+
+    # ---- what-ifs (release 5.64, decisions 226 to 228 and 290) ----
+    def showing(self) -> whatif.WhatIf | None:
+        """The what-if showing, or None for the real plan."""
+        return next((w for w in self.whatifs if w.id == self.cur), None)
+
+    def show_whatif(self, wid: str | None) -> None:
+        """Show a what-if, or the real plan for None."""
+        self.whatif_box.hide()
+        self.cur = wid if any(w.id == wid for w in self.whatifs) else None
+        self.spot = None
+        self._redraw()
+
+    def _whatif_marks(self) -> None:
+        """What the chart marks for the what-if showing: the tasks it takes off, where each bar it moves is on the real plan,
+        and those it pushes past their deadlines."""
+        c, pic, real = self.chart, self.pic, self.real
+        c.whatif = pic is not None
+        c.off = set(pic.off) if pic is not None else set()
+        c.past = set(whatif.past_deadline(real, pic)) if pic is not None and real is not None else set()
+        c.was = {}
+        if pic is None or real is None:
+            return
+        far = self.today + timedelta(days=3650)
+        for x in pic.touched - pic.off:
+            if x in real.tasks and x in pic.model.tasks and not real.task(x).recurrence:
+                before, after = windows(real.task(x), far)[:1], windows(pic.model.task(x), far)[:1]
+                if before and before != after:
+                    c.was[x] = before[0]
+
+    def _sync_whatif(self) -> None:
+        """The what-ifs' button is pressed while one is showing, and the strip, which names it, stays; the button's words never
+        change, so the row of controls doesn't move. Plan isn't offered in one, where bars always drag."""
+        w = self.showing()
+        self.whatif_button.setChecked(w is not None)
+        self.whatif_button.setToolTip(f"Showing {w.name}. The what-ifs, and the way back to the real plan" if w else
+                                      "What-ifs: change the plan without changing any task, to see what it does to the load")
+        self.plan_button.setVisible(w is None)
+        self.whatif_strip.setVisible(w is not None)
+        if w is None or self.real is None:
+            return
+        if not self.whatif_name.hasFocus():
+            self.whatif_name.setText(w.name)
+        n, past, stale = len(w.actions), len(self.chart.past), whatif.out_of_date(self.real, w)
+        facts = [f"{n} change{'' if n == 1 else 's'}", f"{past} past {'its deadline' if past == 1 else 'their deadlines'}" if past else "",
+                 f"{stale} out of date" if stale else ""]
+        self.whatif_facts.setText(" · ".join(x for x in facts if x))
+        self.whatif_undo.setEnabled(bool(self.wi_undo.get(w.id)))
+        self.whatif_review.setEnabled(bool(w.actions))
+
+    def _in_whatif(self, w: whatif.WhatIf, a: whatif.Action, said: str) -> None:
+        """A thing done in a what-if: kept, with its step back, and the page drawn again. No task changes."""
+        before = copy.deepcopy(w.actions)
+        if not whatif.add(w, a):
+            return
+        self.wi_undo.setdefault(w.id, []).append(before)
+        self.whatifs_changed.emit()
+        self.said.emit(said)
+        self._redraw()
+
+    def take_off(self, task_id: str) -> None:
+        """Take a task off, with everything open under it (decision 227): in the what-if showing, or a new one."""
+        real = self.real
+        if real is None or task_id not in real.tasks:
+            return
+        if not is_open(real.task(task_id)):
+            self.said.emit("Only an open task can be taken off.")
+            return
+        w = self.showing()
+        started = w is None
+        if w is None:
+            w = whatif.new(self.whatifs)
+            self.cur, self.spot = w.id, None
+        a = whatif.take_off(real, task_id)
+        n = len(a.off) - 1
+        words = real.task(task_id).title + (f" and {n} subtask{'' if n == 1 else 's'} under it" if n else "") + " taken off"
+        self._in_whatif(w, a, f"{words}, in a new what-if, {w.name}. Your tasks haven't changed." if started
+                        else f"{words}. Your tasks haven't changed. Ctrl+Z undoes it.")
+
+    def put_back(self, task_id: str) -> None:
+        """Put a task back in the what-if showing, with what was taken off with it."""
+        w = self.showing()
+        if w is None:
+            return
+        before = copy.deepcopy(w.actions)
+        if whatif.put_back(w, task_id):
+            self.wi_undo.setdefault(w.id, []).append(before)
+            self.whatifs_changed.emit()
+            title = self.real.task(task_id).title if self.real is not None and task_id in self.real.tasks else task_id
+            self.said.emit(f"{title} is back, in this what-if.")
+            self._redraw()
+
+    def undo_whatif(self) -> None:
+        """Ctrl+Z, or Undo, in a what-if: its last change taken back. Nothing on the real plan is touched."""
+        w = self.showing()
+        steps = self.wi_undo.get(w.id) if w is not None else None
+        if w is None or not steps:
+            self.said.emit("Nothing to undo in this what-if.")
+            return
+        w.actions = steps.pop()
+        self.whatifs_changed.emit()
+        self.said.emit("Undone, in this what-if only.")
+        self._redraw()
+
+    def _rename(self) -> None:
+        w = self.showing()
+        if w is None:
+            return
+        name = " ".join(self.whatif_name.text().split())
+        if name and name != w.name:
+            w.name = name
+            self.whatifs_changed.emit()
+            self._sync_whatif()
+        else:
+            self.whatif_name.setText(w.name)
+
+    def _new_whatif(self, name: str) -> None:
+        w = whatif.new(self.whatifs, name)
+        self.whatifs_changed.emit()
+        self.said.emit(f"{w.name}: drag bars, or take tasks off. Your tasks don't change until you apply it.")
+        self.show_whatif(w.id)
+
+    def _delete_whatif(self, wid: str) -> None:
+        """Delete a what-if, asking first when it has changes in it. No task ever changed."""
+        self.whatif_box.hide()
+        w = next((x for x in self.whatifs if x.id == wid), None)
+        if w is None:
+            return
+        n = len(w.actions)
+        if n and not self.confirm(f"Delete {w.name}", f"Its {n} change{'' if n == 1 else 's'} go with it. Your tasks never changed."):
+            return
+        self.whatifs.remove(w)
+        self.wi_undo.pop(wid, None)
+        if self.cur == wid:
+            self.cur = None
+        self.whatifs_changed.emit()
+        self.said.emit(f"{w.name} deleted. Your tasks never changed.")
+        self._redraw()
+
+    def _open_whatifs(self) -> None:
+        """The list (decision 228): the real plan, each what-if with how many changes it has and how many are out of date, and a
+        box to name a new one."""
+        lay = self.whatif_list
+        while lay.count():
+            item = lay.takeAt(0)
+            if item.widget() is not None:
+                item.widget().hide()
+                item.widget().deleteLater()
+
+        def row(n: int, words: str, wid: str | None, facts: str) -> None:
+            b = QPushButton(words, objectName="subtle")
+            b.setProperty("menu", True)
+            b.setCheckable(True)
+            b.setChecked(self.cur == wid)
+            b.clicked.connect(lambda _=False, wid=wid: self.show_whatif(wid))
+            lay.addWidget(b, n, 0)
+            if facts:
+                lay.addWidget(QLabel(facts, objectName="hint"), n, 1)
+
+        row(0, "Real plan", None, "Your tasks as they are")
+        for i, w in enumerate(self.whatifs, 1):
+            n, stale = len(w.actions), whatif.out_of_date(self.real, w) if self.real is not None else 0
+            row(i, w.name, w.id, f"{n} change{'' if n == 1 else 's'}" + (f", {stale} out of date" if stale else ""))
+            x = QToolButton(objectName="checkFold")
+            x.setText("×")
+            x.setAccessibleName(f"Delete {w.name}")
+            x.setToolTip(f"Delete {w.name}. Your tasks never changed.")
+            x.clicked.connect(lambda _=False, wid=w.id: self._delete_whatif(wid))
+            lay.addWidget(x, i, 2)
+        name = QLineEdit()
+        name.setPlaceholderText("Name a new what-if")
+        name.setAccessibleName("Name a new what-if")
+        new = QPushButton("New")
+        new.clicked.connect(lambda: self._new_whatif(name.text()))
+        name.returnPressed.connect(lambda: self._new_whatif(name.text()))
+        k = len(self.whatifs) + 1
+        lay.addWidget(name, k, 0, 1, 2)
+        lay.addWidget(new, k, 2)
+        self.whatif_new = name  # kept, so tests can reach it
+        self.whatif_box.open_under(self.whatif_button)
+
+    def review(self) -> None:
+        """Review and apply (decision 226): each thing done, ticked, with what it would do; one whose task has changed since,
+        or that can't be made, is left out. Apply sends the ticked ones to be made through the usual logged route."""
+        w, pic, real = self.showing(), self.pic, self.real
+        if w is None or pic is None or real is None or not w.actions:
+            return
+        from docrepo.stories import and_list
+        from docrepo.ui.templates_view import PreviewDialog, PreviewEntry
+
+        entries = []
+        for line in whatif.lines(real, w, pic, self.today):
+            key = str(line.index)
+            if line.problem:
+                entries.append(PreviewEntry(key, line.title, [f"Can't be made: {line.problem}"], ticked=False, enabled=False))
+            elif line.stale:
+                changed = f"{and_list(line.stale)} {'has' if len(line.stale) == 1 else 'have'} changed since, so this is left out."
+                entries.append(PreviewEntry(key, line.title, [*line.says, changed], ticked=False, enabled=False))
+            else:
+                entries.append(PreviewEntry(key, line.title, line.says, off_lines=["Left as it is: this change isn't applied."]))
+        dialog = PreviewDialog(self, f"Apply {w.name} to your tasks?",
+                               "Each change goes into its task's status log, as Plan mode's do. The what-if goes once it's applied.",
+                               entries, "", lambda ticked: f"Apply {len(ticked)} change{'' if len(ticked) == 1 else 's'}", back="Keep it as a what-if")
+        self.review_dialog = dialog  # kept, so tests can reach it
+        if not self.run_dialog(dialog):
+            return
+        ticked = set(dialog.ticked())
+        if not ticked:
+            self.said.emit("Nothing applied. It's still a what-if.")
+            return
+        self.apply_whatif.emit(w.id, [i for i in range(len(w.actions)) if str(i) not in ticked])
+
     # ---- Capacity's half ----
     def show_capacity(self) -> None:
         """Capacity's key and its other routes: this page, with Capacity showing (decision 229)."""
@@ -2058,7 +2440,8 @@ class TimelineView(QWidget):
             return
         self.cap_box.setVisible(self.load_cells is not None)
         weeks = load.mondays(tl.start, tl.end)
-        self.cells = self.load_cells(weeks) if self.load_cells else {}
+        self.real_cells = self.load_cells(weeks) if self.load_cells else {}
+        self.cells = whatif.cells(self.real_cells, self.pic, weeks) if self.pic is not None else self.real_cells
         self._draw_capacity()
 
     def _draw_capacity(self) -> None:
@@ -2074,13 +2457,14 @@ class TimelineView(QWidget):
         if self.spot is not None and self.spot.person and all(p.id != self.spot.person for p in people):
             self.spot = None
         weeks = [w for b in buckets for w in b.weeks]
-        lead, who = load.sentence(load.case(self.cells, people, weeks, self.today), m.person_name, self.today)
+        real = load.case(self.real_cells, people, weeks, self.today) if self.pic is not None else None  # a what-if says both
+        lead, who = load.sentence(load.case(self.cells, people, weeks, self.today), m.person_name, self.today, real)
         self.cap_say.setText(f"<b>{esc(lead)}</b> {esc(who)}" if people else "")
         self.cap_fold.setIcon(icon("chevron-down" if self.cap_open else "chevron-right"))
         self.cap_fold.setToolTip("Fold Capacity" if self.cap_open else "Open Capacity")
         chosen = {self.sel, *m.descendants_of(self.sel)} if self.sel and self.sel in m.tasks and self.spot is None else set()
         data = StripData(m, self.today, self.cells, people, buckets, self.cap_unit, self.cap_by_group, load.adds_to(self.cells, chosen), self.spot,
-                         self.chart.hover_week)
+                         self.chart.hover_week, self.real_cells if self.pic is not None else None)
         self.cap_team.set_data(data)
         self.cap_rows.set_data(data)
         for w in (self.cap_team, self.cap_scroll):
@@ -2102,7 +2486,7 @@ class TimelineView(QWidget):
         """What Capacity can't count: people but no hours, or hours but no dates. It's said, as it makes the load look lighter."""
         m = self.model
         assert m is not None
-        hours, dates = self.load_unplaced(m, self.today) if self.load_unplaced else ([], [])
+        hours, dates = self.load_unplaced(self.pic.model if self.pic is not None else m, self.today) if self.load_unplaced else ([], [])
         ids = {p.id for p in people}
 
         def mine(found: list[str]) -> list[str]:
@@ -2230,16 +2614,27 @@ class TimelineView(QWidget):
         close.setToolTip("Close (Esc)")
         close.clicked.connect(lambda: self.clear_spot())
         grid.addWidget(close, 0, 2, Qt.AlignmentFlag.AlignRight)
+        off = self.chart.off
         for i, (task, hours) in enumerate(behind[:7], 1):
-            path = " › ".join(m.task(x).title for x in m.chains_of(task)[0][:-1]) if task in m.tasks else ""
+            chain = m.chains_of(task)[0][:-1] if task in m.tasks else []
+            path = esc(" › ".join(m.task(x).title for x in chain))
+            if len(chain) >= 2 and chain[-1] not in off:  # its trial, say, under the project: take the whole of it off (the mock's)
+                parent = m.task(chain[-1]).title
+                path += f' · <a href="off:{esc(chain[-1])}">Take off {esc(parent if len(parent) <= 28 else parent[:27] + "…")}</a>'
             words = m.task(task).title if task in m.tasks else task
-            line = QLabel(f'<a href="task:{esc(task)}">{esc(words)}</a>' + (f'<br><span style="color:{MUTED}; font-size:{tokens.CAPTION}pt">{esc(path)}</span>' if path else ""))
+            line = QLabel(f'<a href="task:{esc(task)}">{esc(words)}</a>' + (f'<br><span style="color:{MUTED}; font-size:{tokens.CAPTION}pt">{path}</span>' if path else ""))
             line.setTextFormat(Qt.TextFormat.RichText)
-            line.linkActivated.connect(lambda href: self._card_task(href.partition(":")[2]))
+            line.linkActivated.connect(self._card_link)
             grid.addWidget(line, i, 0, 1, 1)
             amount = QLabel(f"{round(hours, 1):g} h")
             amount.setFont(tokens.numeric_font())
             grid.addWidget(amount, i, 1, Qt.AlignmentFlag.AlignRight)
+            if task in m.tasks and (task in off or is_open(m.task(task))):  # decision 233: the card can take a task off
+                act = QLabel(f'<a href="back:{esc(task)}">Put back</a>' if task in off else f'<a href="off:{esc(task)}">Take off</a>')
+                act.setTextFormat(Qt.TextFormat.RichText)
+                act.setToolTip("Put it back in this what-if" if task in off else "See the load without it and everything under it, in a what-if. Your tasks don't change.")
+                act.linkActivated.connect(self._card_link)
+                grid.addWidget(act, i, 2, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
         if not behind:
             grid.addWidget(QLabel("Nothing scheduled.", objectName="hint"), 1, 0, 1, 3)
         if len(behind) > 7:
@@ -2274,6 +2669,10 @@ class TimelineView(QWidget):
             y = min(self.height() - h - 8, at.bottom() + 8)
         self.cap_card.setGeometry(x, y, w, h)
 
+    def _card_link(self, href: str) -> None:
+        kind, _, task_id = href.partition(":")
+        {"off": self.take_off, "back": self.put_back}.get(kind, self._card_task)(task_id)
+
     def _card_task(self, task_id: str) -> None:
         """A task on the spotlight's card: selected on the chart, with its parents opened so its row is there."""
         m = self.model
@@ -2283,7 +2682,7 @@ class TimelineView(QWidget):
         if folded:
             self.open_ids.update(folded)
             self.folds_changed.emit(sorted(self.open_ids))
-            self.render(m, self.today)
+            self._redraw()
         self._pick(task_id)
 
     def _dropped(self, task_id: str, start: date, end: date, mode: str) -> None:
@@ -2292,14 +2691,31 @@ class TimelineView(QWidget):
         if m is None:
             return
         t = m.task(task_id)
-        self.undo.append(("task", task_id, t.start, t.due))
         # Stretching one end leaves the other as it was; moving a bar that ends at its deadline gives it a Due.
         new_start = t.start if mode == "end" else start.isoformat()
         new_due = t.due if mode == "start" else end.isoformat()
         said = {"new": f"Start and Due set: {long_date(start, self.today)} to {long_date(end, self.today)}",
                 "start": f"Start moved to {long_date(start, self.today)}", "end": f"Due moved to {long_date(end, self.today)}",
                 "move": f"now {long_date(start, self.today)} to {long_date(end, self.today)}"}[mode]
+        w = self.showing()
+        if w is not None and self.real is not None:  # a what-if keeps it, and no task changes
+            self._in_whatif(w, whatif.move(self.real, task_id, new_start, new_due), f"{t.title}: {said}, in this what-if. Your tasks haven't changed.")
+            return
+        self.undo.append(("task", task_id, t.start, t.due))
         self.set_dates.emit(task_id, new_start, new_due, f"{t.title}: {said}. Ctrl+Z undoes it.")
+
+    def _dropped_parent(self, task_id: str, weeks: int) -> None:
+        """In a what-if, a whole parent's drop: it and what's under it moved in whole weeks, from where the what-if has them."""
+        w, real = self.showing(), self.real
+        if w is None or real is None or self.model is None or not weeks or task_id not in real.tasks:
+            return
+        a = whatif.move_parent(self.pic.model if self.pic is not None else real, task_id, weeks, real)
+        if not a.dates and not a.keys:
+            self.said.emit(f"Nothing under {real.task(task_id).title} has dates to move.")
+            return
+        words = f"{abs(weeks)} week{'' if abs(weeks) == 1 else 's'} {'later' if weeks > 0 else 'earlier'}"
+        self._in_whatif(w, a, f"{real.task(task_id).title} and everything under it {words}, in this what-if. Deadlines and routine "
+                              "subtasks stay put. Your tasks haven't changed.")
 
     def _dropped_key(self, task_id: str, key_id: int, first: date, last: date, kind: str) -> None:
         """A key date's drop in Plan mode (decision 152): its new dates, by its kind (a start alone stays one), kept for
@@ -2308,10 +2724,16 @@ class TimelineView(QWidget):
         kd = next((k for k in m.key_dates_of(task_id) if k.id == key_id), None) if m is not None else None
         if m is None or kd is None:
             return
-        self.undo.append(("key", task_id, key_id, kd.start, kd.end))
         start = None if kind == "by" else first.isoformat()
         end = None if kind == "from" else last.isoformat()
         moved = KeyDate(kd.id, task_id, start, end, kd.description)
+        w = self.showing()
+        if w is not None and self.real is not None:
+            self._in_whatif(w, whatif.move_key(self.real, task_id, key_id, start, end),
+                            f"{m.task(task_id).title}: {kd.description or 'its key date'} now {key_dates.when_text(moved, self.today)}, in this "
+                            "what-if. Your tasks haven't changed.")
+            return
+        self.undo.append(("key", task_id, key_id, kd.start, kd.end))
         self.set_key_date.emit(task_id, key_id, start, end,
                                f"{m.task(task_id).title}: {kd.description or 'its key date'} now {key_dates.when_text(moved, self.today)}. "
                                "Ctrl+Z undoes it.")
@@ -2382,9 +2804,13 @@ class TimelineView(QWidget):
         Update."""
         m, today = self.model, self.today
         t = m.tasks.get(self.sel) if m and self.sel else None
-        for b in (self.open_button, self.quick_button, self.update_button):
-            b.setVisible(t is not None)
+        self.open_button.setVisible(t is not None)
+        for b in (self.quick_button, self.update_button):
+            b.setVisible(t is not None and self.cur is None)  # in a what-if they'd change the real task
         if not LOOK.classic:
+            off = t is not None and t.id in self.chart.off
+            self.off_button.setVisible(t is not None and (off or is_open(t)))
+            self.off_button.setText("Put back" if off else "Take off")
             self._foot(t)
             return
         self.card.setVisible(t is not None or LOOK.show_help)  # no card, and no sentence about it, until a row is picked

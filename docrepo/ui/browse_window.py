@@ -50,7 +50,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo import activity, bulk, capacity, db, edits, items, key_dates, notes_page, people, pins, priorities, prompts, search, ties
+from docrepo import activity, bulk, capacity, db, edits, items, key_dates, notes_page, people, pins, priorities, prompts, search, ties, whatif
 from docrepo.lists import key_dates_due, reminders_due
 from docrepo.agenda import AgendaError
 from docrepo.captures import capture_folder, capture_md_path
@@ -392,6 +392,15 @@ class BrowseWindow(QWidget):
         self.timeline.load_cells = lambda weeks: capacity.week_cells(self.ctx.conn, weeks)
         self.timeline.load_unplaced = lambda m, today: capacity.unplaced(m, today, self.ctx.settings)
         self.timeline.add_person.connect(self.add_person)
+        # What-ifs (release 5.64): kept in app_state; what one would do is worked out in a transaction always rolled back.
+        self.timeline.whatifs = whatif.load_all(self.ctx.conn)
+        self.timeline.whatifs_changed.connect(lambda: whatif.save_all(self.ctx.conn, self.timeline.whatifs))
+        self.timeline.picture_of = self.whatif_picture
+        self.timeline.apply_whatif.connect(self.apply_whatif)
+        self.timeline.said.connect(self.say)
+        self.timeline.confirm = lambda title, text: self.confirm(title, text)
+        self.timeline.run_dialog = lambda dialog: self.run_dialog(dialog)
+        self._whatif_held: tuple | None = None
         self.quick_window = None
         self.middle.addWidget(self.timeline)
         self.priorities = PrioritiesView()  # mods log round 2, M0029, M0030 (release 5.23)
@@ -1812,6 +1821,35 @@ class BrowseWindow(QWidget):
         if isinstance(out, edits.Outcome) and not out.problems:
             self.say(f"{said} {out.moved}".strip() if out.message != "Nothing changed." else out.message)
         return None
+
+    # ---- what-ifs (release 5.64) ----
+    def whatif_picture(self, w: whatif.WhatIf) -> whatif.Picture:
+        """What a what-if would do, worked out again only when it or the database has changed, as each redraw asks."""
+        real = self.model()
+        key = (json.dumps([a.to_json() for a in w.actions]), w.name)
+        held = self._whatif_held
+        if held is not None and held[0] is real and held[1] == key:
+            return held[2]
+        pic = self.ctx.rolled_back(lambda: whatif.picture(self.conn, self.ctx.settings, w, self._now(), real))
+        self._whatif_held = (real, key, pic)
+        return pic
+
+    def apply_whatif(self, wid: str, skip: list) -> None:
+        """Review and apply's Apply (decision 226): the ticked changes made and logged, and the what-if gone."""
+        view = self.timeline
+        w = next((x for x in view.whatifs if x.id == wid), None)
+        if w is None:
+            return
+        view.cur = None  # drawn after it as the real plan, which now has the changes
+        out = self._do(lambda: edits.apply_whatif(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, w, skip, self._now()))
+        if out is None:
+            view.cur = wid
+            view.render(self.model(), self.today())
+            return
+        view.whatifs.remove(w)
+        view.wi_undo.pop(wid, None)
+        whatif.save_all(self.conn, view.whatifs)
+        view.render(self.model(), self.today())
 
     # ---- a move that reaches another tree asks first (release 5.50, decision 249) ----
     def ask_move(self, task_id: str, followed: list, parent: QWidget | None = None) -> set[str] | None:

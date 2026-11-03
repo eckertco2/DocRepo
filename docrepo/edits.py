@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from docrepo import activity, agenda, bulk, captures, notes_page, people, priorities, search, tasks
+from docrepo import activity, agenda, bulk, captures, notes_page, people, priorities, search, tasks, whatif
 from docrepo.config import Settings
 from docrepo.dates import stamp
 from docrepo.db import transaction
@@ -459,6 +459,29 @@ def change_moves(conn: sqlite3.Connection, settings: Settings, task_id: str, at:
 def key_dates_move(conn: sqlite3.Connection, settings: Settings, task_id: str, rows: list[tasks.KeyDateRow], at: datetime) -> list[tasks.Followed]:
     """What ``set_key_dates`` would move."""
     return _what_moves(conn, lambda: tasks.set_key_dates(conn, task_id, rows, at=at, via=BROWSE, settings=settings))
+
+
+# ---- a what-if, applied (release 5.64, decision 226) ----
+def apply_whatif(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, w: whatif.WhatIf, skip: Collection[int],
+                 at: datetime) -> Outcome:
+    """Review and apply: a what-if's things done, but those unticked (their places in ``skip``) and those whose tasks have changed
+    since, made in one transaction, through the same calls as its picture, each in its task's status log as from the what-if."""
+    m = Model(conn)
+    leave = {*skip, *(i for i, a in enumerate(w.actions) if whatif.stale(m, a))}
+    with transaction(conn):
+        done = whatif.run(conn, settings, w.actions, at, whatif.via(w.name), leave)
+    made = [d for d in done if d is not None and not d.problem]
+    failed = [d.problem for d in done if d is not None and d.problem]
+    followed = {x for d in made for x in d.followed} - {x for d in made for x in d.changed}
+    message = f"Applied {len(made)} change{'' if len(made) == 1 else 's'} from {w.name}. Each is in its task's status log."
+    if followed:
+        message += f" Moved {len(followed)} tied task{'' if len(followed) == 1 else 's'} with them."
+    out = Outcome(message)
+    if failed:
+        out.problems.append(f"{len(failed)} couldn't be made: {' '.join(failed)}")
+    write_all_pages(conn, data_root, fs, at, out.problems)
+    log.info("what-if applied: %d of %d changes", len(made), len(w.actions))
+    return out
 
 
 # ---- key dates (release 5.31, the key dates plan) ----

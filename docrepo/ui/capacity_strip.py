@@ -57,6 +57,7 @@ class StripData:
     adds: set[tuple[str, date]] = field(default_factory=set)  # the weeks the selected bar adds to
     spot: Spot | None = None
     hover: tuple[date, date] | None = None
+    was: Cells | None = None  # in a what-if (release 5.64), the real plan's hours, outlined behind the team chart's columns
 
 
 class _Strip(QWidget):
@@ -141,7 +142,7 @@ class CapacityTeam(_Strip):
     def _top(self) -> float:
         """The chart's scale, in hours: room for the tallest column and the capacity line."""
         d = self.data
-        tallest = max((load.team_bucket(d.cells, d.people, b)[0].total for b in d.buckets), default=0.0)
+        tallest = max((load.team_bucket(c, d.people, b)[0].total for c in (d.cells, d.was or {}) for b in d.buckets), default=0.0)
         return max(load.capacity_of(d.people), tallest, 1.0) * 1.08
 
     def column_rect(self, bucket: Bucket) -> QRectF:
@@ -195,6 +196,12 @@ class CapacityTeam(_Strip):
                 p.fillRect(QRectF(x0, floor - within, w, within), QColor(C.bar_soft))
             if over > 0:
                 p.fillRect(QRectF(x0, floor - within - over, w, over), QColor(C.critical))
+            if d.was is not None:  # a what-if: the real plan's column, outlined behind, so the change shows
+                real = load.team_bucket(d.was, d.people, b)[0].total / top * height
+                if real > 0 and abs(real - within - over) > 0.5:
+                    p.setPen(QPen(QColor(C.text2), 1, Qt.PenStyle.DashLine))
+                    p.setBrush(Qt.BrushStyle.NoBrush)
+                    p.drawRect(QRectF(x0 + 0.5, floor - real, w - 1, real))
         p.setPen(QPen(QColor(C.stroke), 1))
         p.drawLine(QPointF(0, floor + 0.5), QPointF(right, floor + 0.5))
         self._paint_bands(p, self.MINI_H, floor)
@@ -236,7 +243,11 @@ class CapacityTeam(_Strip):
         when = f"{b.first.strftime('%B %Y')}, worst week {short(week, d.today)}" if b.month else f"Week of {short(b.first, d.today)}"
         cap = load.capacity_of(d.people)
         words = f"{when}: {round(team.total, 1):g} h" + (f" of {cap:g} h" if cap else "")
-        return words + (f", {round(team.over, 1):g} h over people's own capacity" if team.over else "")
+        words += f", {round(team.over, 1):g} h over people's own capacity" if team.over else ""
+        if d.was is not None:
+            real = load.team_week(d.was, d.people, week).total
+            words += f". On the real plan: {round(real, 1):g} h" if abs(real - team.total) > 0.05 else ""
+        return words
 
 
 class CapacityRows(_Strip):

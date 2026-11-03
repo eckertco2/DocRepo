@@ -141,7 +141,9 @@ class DropButton(QPushButton):
         words, option.text = option.text, ""
         p.drawControl(QStyle.ControlElement.CE_PushButton, option)
         room = self.style().subElementRect(QStyle.SubElement.SE_PushButtonContents, option, self)
-        shown = self.fontMetrics().elidedText(words, Qt.TextElideMode.ElideRight, max(0, room.width() - self.ROOM))
+        # Cut only when the words don't fit: Qt's eliding cuts some at exactly their width ("What-ifs", "Real plan", release 5.64).
+        fits = self.fontMetrics().horizontalAdvance(words.replace("&&", "&")) <= room.width() - self.ROOM
+        shown = words if fits else self.fontMetrics().elidedText(words, Qt.TextElideMode.ElideRight, max(0, room.width() - self.ROOM))
         wide = self.fontMetrics().horizontalAdvance(shown.replace("&&", "&"))
         left = room.left()
         self.style().drawItemText(p, QRect(left, room.top(), wide + 2, room.height()),

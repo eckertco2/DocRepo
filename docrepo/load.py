@@ -176,24 +176,28 @@ def case(cells: Cells, people: list[Person], weeks: list[date], today: date) -> 
     return out
 
 
-def sentence(c: Case, name: Callable[[str], str], today: date) -> tuple[str, str]:
+def sentence(c: Case, name: Callable[[str], str], today: date, real: Case | None = None) -> tuple[str, str]:
     """The case in words: what goes in bold, then who. For example "Over in 9 weeks, the worst the week of 29 Mar, by 62 h."
-    and "Tom Becker 7 weeks, Mike Ortiz 5.\""""
+    and "Tom Becker 7 weeks, Mike Ortiz 5." In a what-if (release 5.64), ``real`` is the real plan's, said beside it: "Over in 5
+    weeks (9 on the real plan), the worst the week of 20 Sep, by 50 h (62 h).\""""
     n = len(c.over_weeks)
+    was_n = len(real.over_weeks) if real is not None else None
     if not n:
+        was = f" ({was_n} week{'' if was_n == 1 else 's'} on the real plan)" if was_n else ""
         if c.busiest is None:
-            return "Nobody is over in this range.", ""
+            return f"Nobody is over in this range{was}.", ""
         who, week, use = c.busiest
-        return "Nobody is over in this range.", f"Busiest: {name(who)}, {round(use * 100)}% in the week of {short(week, today)}."
+        return f"Nobody is over in this range{was}.", f"Busiest: {name(who)}, {round(use * 100)}% in the week of {short(week, today)}."
     first, last = c.over_weeks[0], c.over_weeks[-1]
-    hours = f"{round(c.most)} h"
+    hours = f"{round(c.most)} h" + (f" ({round(real.most)} h)" if real is not None and was_n and round(real.most) != round(c.most) else "")
+    was = f" ({was_n} on the real plan)" if was_n is not None else ""
     if n == 1:
-        lead = f"Over in the week of {short(first, today)}, by {hours}."
+        lead = f"Over in the week of {short(first, today)}" + (f" ({was_n} week{'' if was_n == 1 else 's'} on the real plan)" if was_n is not None else "") + f", by {hours}."
     elif (last - first).days == (n - 1) * 7:
-        lead = f"Over in {n} weeks, {short(first, today)} to {short(last + timedelta(days=6), today)}, by up to {hours}."
+        lead = f"Over in {n} weeks{was}, {short(first, today)} to {short(last + timedelta(days=6), today)}, by up to {hours}."
     else:
         assert c.worst is not None
-        lead = f"Over in {n} weeks, the worst the week of {short(c.worst, today)}, by {hours}."
+        lead = f"Over in {n} weeks{was}, the worst the week of {short(c.worst, today)}, by {hours}."
     ranked = sorted(c.by_person.items(), key=lambda x: -x[1])
     words = [f"{name(p)} {count if i else f'{count} week' + ('s' if count != 1 else '')}" for i, (p, count) in enumerate(ranked[:3])]
     more = f" and {len(ranked) - 3} more" if len(ranked) > 3 else ""

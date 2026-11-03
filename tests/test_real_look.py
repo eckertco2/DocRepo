@@ -223,10 +223,14 @@ settle()
 view = browse.timeline
 day = date(2026, 10, 26)
 xs = [view.scale.x(w, day) for w in (view.head, view.chart, view.cap_team, view.cap_rows)]
-print(json.dumps({"tools": view.tools.height(), "button": view.plan_button.height(), "xs": xs, "top": view.split.sizes()[0], "bottom": view.split.sizes()[1],
-                  "right": view.range_box.geometry().right(), "width": view.tools.width()}))
+got = {"tools": view.tools.height(), "button": view.plan_button.height(), "xs": xs, "top": view.split.sizes()[0], "bottom": view.split.sizes()[1],
+       "right": view.range_box.geometry().right(), "width": view.tools.width()}
+view.take_off(view.chart.rows[0].task)  # a what-if (release 5.64): its strip names it, and the row stays one line
+settle()
+got["whatif"] = view.tools.height()
+print(json.dumps(got))
 """, "windows")
-    assert got["tools"] <= got["button"] + 2, got
+    assert got["tools"] <= got["button"] + 2 and got["whatif"] <= got["button"] + 2, got
     assert got["right"] >= got["width"] - 2, got  # the range at the row's right end
     assert len(set(got["xs"])) == 1, got
     assert got["top"] >= got["bottom"] * 0.6, got  # the chart keeps its room
