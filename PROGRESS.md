@@ -76,8 +76,8 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.59 | Quieter windows (stage V3): row actions on hover and the right-click menu, level buttons as icons, hints behind Show hints, one arrow family, one accent button, and popups' corners and the title bar's colour | Built 2026-11-02, hand-tested by the owner, merged to `main` and on GitHub the same day |
 | 5.60 | One meaning per colour (stage V4): every colour a token, state in rows as words, plain names and neutral lanes on the Timeline, a load tint apart from selection, and dots when Parse fills much | Built 2026-11-02, hand-tested by the owner, merged to `main` and on GitHub the same day |
 | 5.61 | Forms and small things (stage V6): Edit task and New task without scrolling, questions that name their answers, one label role, Settings' More hotkeys, Quick edit's heights, chips in one shape and empty states | Built 2026-11-02, hand-tested by the owner, merged to `main` and on GitHub the same day |
-| 5.62 | Thread A's fields and ties in a capture (decisions 293 to 300): `**duration`, `**weekends`, `**involvement`, a rate in `**hours` and `**lead hours`, and a tie in `**start` and `**due` | Built 2026-11-02 on the `round5-templates` branch and merged to `main` 2026-11-03, before the owner's hand test. Next: the hand test, then `handoff/docrepo/release-5-62-test.md` |
-| 5.63 | Apply template (decisions 301 to 309): a template put into tasks that already exist, which keep all they have, from Select mode, a template's page or a task's menu | Built 2026-11-02 on the `round5-templates` branch, without a mock at the owner's word, and merged to `main` 2026-11-03, before the owner's hand test. Next: the hand test, then `handoff/docrepo/release-5-63-test.md` |
+| 5.62 | Thread A's fields and ties in a capture (decisions 293 to 300): `**duration`, `**weekends`, `**involvement`, a rate in `**hours` and `**lead hours`, and a tie in `**start` and `**due` | Built 2026-11-02 on the `round5-templates` branch, and merged to `main` and on GitHub 2026-11-03, before the owner's hand test. Next: the hand test, then `handoff/docrepo/release-5-62-test.md` |
+| 5.63 | Apply template (decisions 301 to 309): a template put into tasks that already exist, which keep all they have, from Select mode, a template's page or a task's menu | Built 2026-11-02 on the `round5-templates` branch, without a mock at the owner's word, and merged to `main` and on GitHub 2026-11-03, before the owner's hand test. Next: the hand test, then `handoff/docrepo/release-5-63-test.md` |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
 ## Decisions
@@ -551,7 +551,7 @@ Round 5's thread A, the owner's ask of 2026-11-02: six trials already planned at
 - `tests/test_apply_template.py` (new, 60 tests). 2411 pass in all, 1 skipped.
 - **Checked:** the window drawn with the real fonts and look, on six trials, folded and unfolded, which found the dates wrapping, the chevron not turning in a window already showing, and closing after only unfolding asking to discard. Each is fixed, and the last two have tests. **Not tested here:** a real mouse on the window, and the Select mode buttons on screen, which are the owner's hand test.
 
-**Merged to `main`** (2026-11-03), with release 5.62, once `main`'s releases 5.40 and 5.40.1 were merged into the branch: 2464 pass in all, 1 skipped. **Not yet:** GitHub, the owner's hand test and the corporate computer.
+**Merged to `main` and on GitHub** (2026-11-03), with release 5.62, once `main`'s releases 5.40 and 5.40.1 were merged into the branch: 2464 pass in all, 1 skipped. **Not checked yet:** the owner's hand test and the corporate computer.
 
 ## Decisions (release 5.63)
 
@@ -579,7 +579,7 @@ Round 5's thread A, the owner's approval of the wording on 2026-11-02 (decisions
 - The mockup's `items.js` reads the same forms, checked in the browser, with no key dates to check as it has none.
 - **Checked:** the capture window's cards drawn with the real fonts and look. **Not tested here:** the keyboard on the `#` list inside a tie's sentence, which is the owner's hand test.
 
-**Merged to `main`** (2026-11-03), with release 5.63, whose section has the test run.
+**Merged to `main` and on GitHub** (2026-11-03), with release 5.63, whose section has the test run.
 
 ## Decisions (release 5.62)
 
