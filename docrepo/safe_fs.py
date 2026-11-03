@@ -8,6 +8,9 @@ data streams, reserved names such as NUL) are refused before they're resolved.
 
 There is deliberately no delete function. Every refusal is logged.
 
+Windows refuses to replace a file while anything has it open, even for an instant, so a replace waits a moment and tries
+again before it gives up (``_replace``, release 5.40.1).
+
 Copying and moving never overwrite (``write_text`` replaces DocRepo's own text
 files). The one exception is inside the "replace roots" a SafeFS is given: only
 the backup folder, where a backup brings its copies up to date
@@ -21,11 +24,17 @@ import os
 import re
 import shutil
 import tempfile
+import time
 from collections.abc import Iterable
 from pathlib import Path
 from typing import NoReturn
 
 log = logging.getLogger(__name__)
+
+#: How long a replace keeps trying, in seconds, and its first wait. A refusal from something that only looks at the file clears in
+#: milliseconds: Qt's file watcher, on the wheels' config, was gone within 70 ms in 1500 saves. Antivirus and the search indexer
+#: can take longer, and a file that truly can't be replaced costs only this wait before it says so.
+REPLACE_PATIENCE, REPLACE_FIRST_WAIT = 1.0, 0.005
 
 #: The only kinds of file ``write_text`` produces. .jsonc is the wheels' config (JSON with comments); .csv their usage log.
 TEXT_SUFFIXES = frozenset({".md", ".json", ".jsonc", ".txt", ".log", ".csv"})
@@ -74,6 +83,22 @@ def _is_within(path: Path, root: Path) -> bool:
     p = os.path.normcase(str(path))
     r = os.path.normcase(str(root)).rstrip("\\/")
     return p == r or p.startswith(r + os.sep)
+
+
+def _replace(source: PathLike, target: PathLike) -> None:
+    """``os.replace``, waiting out "access denied" for a moment. Windows gives that while anything has either file open, which
+    happens to a file just written or being watched. It's how pip replaces files too, for the same reason."""
+    deadline = time.monotonic() + REPLACE_PATIENCE
+    wait = REPLACE_FIRST_WAIT
+    while True:
+        try:
+            os.replace(source, target)
+            return
+        except PermissionError:
+            if time.monotonic() + wait > deadline:
+                raise
+        time.sleep(wait)
+        wait = min(wait * 2, 0.1)
 
 
 class SafeFS:
@@ -135,7 +160,7 @@ class SafeFS:
         try:
             with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
                 f.write(text)
-            os.replace(tmp, target)
+            _replace(tmp, target)
         except BaseException:
             # Removes only the temporary file this call just created.
             with contextlib.suppress(OSError):
@@ -180,7 +205,7 @@ class SafeFS:
                 f.write(data)
             if target.exists():
                 raise FileExistsError(f"{target} already exists.")
-            os.replace(tmp, target)
+            _replace(tmp, target)
         except BaseException:
             with contextlib.suppress(OSError):
                 os.unlink(tmp)
@@ -217,7 +242,7 @@ class SafeFS:
         os.close(fd)
         try:
             shutil.copy2(os.fspath(src), tmp)
-            os.replace(tmp, target)
+            _replace(tmp, target)
         except BaseException:
             with contextlib.suppress(OSError):
                 os.unlink(tmp)  # only the temporary file this call just created
@@ -227,7 +252,7 @@ class SafeFS:
     def replace(self, src: PathLike, dst: PathLike) -> Path:
         """Move ``src`` over ``dst`` in one step. Both must be inside a replace root (the backup folder)."""
         source, target = self._replaceable(src), self._replaceable(dst)
-        os.replace(source, target)
+        _replace(source, target)
         return target
 
     def move(self, src: PathLike, dst: PathLike) -> Path:

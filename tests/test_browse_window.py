@@ -124,10 +124,10 @@ def test_each_view_selects_its_first_item(browse):
         assert browse.sel == sel, view
         if view != "agenda":  # the agenda's own meeting isn't one of its rows
             assert browse.tree.currentItem().data(0, KEY_ROLE) == sel
-    browse.set_view("capacity")
-    assert not browse.detail.isVisible() and browse.cap_table.rowCount() == 6
+    browse.set_view("capacity")  # its route leads to the Timeline's page (decision 229)
+    assert browse.view == "timeline" and not browse.detail.isVisible() and len(browse.timeline.cap_rows.lines) == 6
     browse.set_view("settings")
-    assert browse.middle.currentIndex() == 2 and browse.settings_view.hotkey.text() == "Ctrl+Shift+Space"
+    assert browse.middle.currentWidget() is browse.settings_view and browse.settings_view.hotkey.text() == "Ctrl+Shift+Space"
 
 
 def test_opening_a_hidden_task_turns_its_filter_on(browse):
@@ -970,11 +970,11 @@ def test_release_59_people_labels_reference_fields_and_capacity(browse, ctx):
     assert QGuiApplication.clipboard().text() == "48213"
     # Capacity: each group's people under its heading, and a plant event's weeks named.
     browse.set_view("capacity")
-    browse.cap_by_group.setChecked(True)
-    heads = [x if isinstance(x, str) else x.person for x in browse._cap_line_rows]
+    view = browse.timeline
+    view.cap_group.setChecked(True)
+    heads = [key for _, key, _ in view.cap_rows.lines]
     assert heads[:4] == ["Engineering", "P001", "P002", "Maintenance"] and heads[-2:] == ["No group", "P006"]
-    weeks = [browse.cap_table.horizontalHeaderItem(i).text() for i in range(1, browse.cap_table.columnCount())]
-    assert [w.split("\n")[1] for w in weeks if "\n" in w] == ["Spring outage"]
+    assert [b.title for b in view.scale.tl.events] == ["Spring outage"]  # its band runs down both halves
 
 
 def test_edit_task_and_edit_selected_have_plant_event_and_reference_fields(browse, ctx):

@@ -323,7 +323,8 @@ class BrowseWindow(QWidget):
             self.nav.setIndentation(0)
             self.nav.picked.connect(lambda key: self.set_view(key[1]) if key[0] == "view" else None)
         else:  # the visual overhaul's O10 (release 5.22): a sidebar of its own, not the tree
-            self.nav = NavPane(VIEWS)
+            # Capacity is under the Timeline now, on one page (decision 229), and its key and other routes lead there.
+            self.nav = NavPane([v for v in VIEWS if v.id != "capacity"])
             self.nav.picked.connect(self.set_view)
             self.nav.folded.connect(self._nav_folded)
         if not LOOK.classic:
@@ -369,7 +370,9 @@ class BrowseWindow(QWidget):
         self.tree.itemDoubleClicked.connect(lambda item, _col: self.double_click(item))
         lp.addWidget(self.tree, 1)
         self.middle.addWidget(list_page)
-        self.middle.addWidget(self._build_capacity())
+        if LOOK.classic:  # the new look has it on the Timeline's page (decision 229)
+            self.cap_page = self._build_capacity()
+            self.middle.addWidget(self.cap_page)
         self.settings_view = SettingsView(self.ctx, self.say, lambda title, text: self.confirm(title, text),
                                           lambda path: self.reveal(path), lambda: self.open_import())
         self.middle.addWidget(self.settings_view)
@@ -386,6 +389,9 @@ class BrowseWindow(QWidget):
         self.timeline.set_dates.connect(self.set_timeline_dates)
         self.timeline.set_key_date.connect(self.set_timeline_key_date)
         self.timeline.quick_edit.connect(self.quick_edit)
+        self.timeline.load_cells = lambda weeks: capacity.week_cells(self.ctx.conn, weeks)
+        self.timeline.load_unplaced = lambda m, today: capacity.unplaced(m, today, self.ctx.settings)
+        self.timeline.add_person.connect(self.add_person)
         self.quick_window = None
         self.middle.addWidget(self.timeline)
         self.priorities = PrioritiesView()  # mods log round 2, M0029, M0030 (release 5.23)
@@ -557,6 +563,9 @@ class BrowseWindow(QWidget):
             self._placed = True
         if self.dirty:
             self.refresh(render=False)
+        if view == "capacity" and not LOOK.classic:  # one page for both (decision 229): a wheel's slice can still name it
+            self.timeline.show_capacity()
+            view = "timeline"
         if view:
             self.view = view
         if task:
@@ -799,7 +808,7 @@ class BrowseWindow(QWidget):
             self.priorities.render(self.model(), self.today(), self.sel[1] if self.sel and self.sel[0] == "task" else None, self.ctx.settings.me)
             return
         if self.view == "capacity":
-            self.middle.setCurrentIndex(1)
+            self.middle.setCurrentWidget(self.cap_page)
             self.render_capacity()
             return
         if self.view == "timeline":
@@ -807,7 +816,7 @@ class BrowseWindow(QWidget):
             self.timeline.render(self.model(), self.today())
             return
         if self.view == "settings":
-            self.middle.setCurrentIndex(2)
+            self.middle.setCurrentWidget(self.settings_view)
             self.settings_view.load()
             return
         self.middle.setCurrentIndex(0)
@@ -2725,6 +2734,9 @@ class BrowseWindow(QWidget):
     def set_view(self, view: str) -> None:
         if view not in VIEW_IDS:
             return
+        if view == "capacity" and not LOOK.classic:  # one page for both (decision 229)
+            self.timeline.show_capacity()
+            view = "timeline"
         if self.query:
             self.query = ""
             self.search_box.blockSignals(True)

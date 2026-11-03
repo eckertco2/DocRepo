@@ -1,14 +1,16 @@
 """The browse tool's Timeline view (mods log round 1, M0019; round 4, M0067, releases 5.29 and 5.30): one chart of open
-tasks over the coming weeks.
+tasks over the coming weeks, and, since release 5.40 (round 5's items 71 to 73, the visual review's stage V5), each person's
+load under it on the same dates, the one page the owner asked for, to show where too much is being asked. The Classic look
+keeps the chart alone, with Capacity as a page of its own.
 
 The rows come from ``docrepo/timeline.py``; this module paints them and handles the mouse and keys. Each top-level task is
 a row that folds (its arrow, Right and Left, or Collapse a level and Expand a level), with a summary bar over its
 subtasks. The scale and the plant events lane (``TimelineHead``) stay at the top while the rows scroll. Clicking a row
-shows its dates, hours and people in a card above the chart; double-clicking a bar or a name asks for Quick edit
-(``quick_edit``); Enter or the card's Open task opens the task. Plan mode (P) lets a one-time task's bar be moved, or its
+shows its dates, hours and people, on a line under the chart so nothing moves (decision 292; a card above it in the Classic
+look); double-clicking a bar or a name asks for Quick edit (``quick_edit``); Enter or Open task opens the task. Plan mode (P) lets a one-time task's bar be moved, or its
 ends stretched, and an undated task's name be dragged onto the chart for a working week; each drop is sent as
 ``set_dates`` for the browse window to save and log, and Ctrl+Z sends the step back. It takes the middle and right panes
-together, as Capacity does.
+together.
 
 Key dates (release 5.31, the key dates plan) are marks on their task's row: a window a thin segment under the bar (or in
 the bar's place when the task has none in view), a start alone an opening bracket, an end alone a closing tick, a Deadline
@@ -18,37 +20,48 @@ sends it back, in the same order as the bars' drops.
 
 The range can be typed (release 5.39, item 70, decision 225): From and To beside Show always say what's in view, and a day
 typed in either, or picked from its calendar, shows exactly those days until a Show choice replaces them.
+
+Capacity's half (``capacity_strip``, ``docrepo/load.py``) has the chart's dates, a sentence on who is over and when, the team
+chart and a heat strip per person. Clicking a week puts the spotlight on it (decision 233): a band through the chart, the bars
+behind that load strong and the rest faded, and a card listing their hours. One People control narrows the bars and the load
+together (decision 232). Bars are one colour unless Display says otherwise, with a lighter solid for Not started and a thin
+line under the bar for its subtasks' span (decision 234).
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, timedelta
 
-from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, Qt, Signal
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen, QPolygonF
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
     QComboBox,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
+    QSplitter,
     QToolButton,
     QToolTip,
     QVBoxLayout,
     QWidget,
 )
 
-from docrepo import key_dates, timeline
+from docrepo import key_dates, load, timeline
 from docrepo.dates import days_text, long_date, monday_of, short, to_date
 from docrepo.detail import esc
 from docrepo.model import KeyDate, Model, Task
 from docrepo.schedule import due_of, start_of
 from docrepo.timeline import Band, KeyMark, Row, Timeline
 from docrepo.ui import tokens
-from docrepo.ui.icons import icon
+from docrepo.ui.capacity_strip import CapacityRows, CapacityTeam, Spot, StripData
+from docrepo.ui.icons import icon, set_fold
 from docrepo.ui.look import LOOK, Help
 from docrepo.ui.tokens import C
 from docrepo.ui.tree_view import GROUP_COLOURS
@@ -157,13 +170,18 @@ class _Scale:
         self.tl: Timeline | None = None
         self.inset = 0  # room on the right for the rows' scroll bar, so the head lines up with them
         self.key_w = 0  # the lane column, while the rows are ordered by a field
+        self.room: int | None = None  # the page's width, so a day is in one place whatever a part's own width, scroll bar or not
 
     def set_order(self, order: str) -> None:
         self.key_w = 0 if order == "top" else KEY_W
         self.NAME_W = NAME_W + self.key_w
 
     def width_of(self, widget: QWidget) -> float:
-        return max(1.0, widget.width() - self.NAME_W - 10 - self.inset)
+        return max(1.0, (self.room or widget.width()) - self.NAME_W - 10 - self.inset)
+
+    def right(self, widget: QWidget) -> float:
+        """Where the track ends."""
+        return self.NAME_W + self.width_of(widget)
 
     def x(self, widget: QWidget, day: date) -> float:
         """Where a day starts across the track, clamped to it."""
@@ -238,7 +256,7 @@ class TimelineHead(QWidget):
             lane_end[lane] = reach
             placed.append((QRectF(x0, self.SCALE_H + 4 + lane * self.LANE_H, max(3.0, x1 - x0), self.LANE_H - 3), b, lane))
         self.lanes = max(1 if LOOK.classic else 0, len(lane_end))  # no events in view: no lane saying so
-        right = self.width() - 10 - self.scale.inset
+        right = self.scale.right(self)
         self.placed = []
         ends: dict[int, float] = {}  # where the last name in each lane ends
         for i, (rect, b, lane) in enumerate(placed):
@@ -260,7 +278,7 @@ class TimelineHead(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.fillRect(self.rect(), QColor(CONTENT))
-        right = self.width() - 10 - self.scale.inset
+        right = self.scale.right(self)
         bold, small = QFont(self.font()), QFont(self.font())
         bold.setBold(True)
         small.setPointSizeF(max(7.0, self.font().pointSizeF() - 1))
@@ -323,6 +341,9 @@ class TimelineHead(QWidget):
                        p.fontMetrics().elidedText(self.field, Qt.TextElideMode.ElideRight, self.scale.key_w - 14))
             p.drawText(QRectF(self.scale.key_w + 6, 20, NAME_W - 12, self.SCALE_H - 22), Qt.AlignmentFlag.AlignVCenter, "Task")
             p.setFont(small)
+        elif not LOOK.classic:  # beside Collapse a level and Expand a level (the review's stage V5)
+            p.setPen(QColor(MUTED))
+            p.drawText(QRectF(8, 20, 40, self.SCALE_H - 22), Qt.AlignmentFlag.AlignVCenter, "Task")
         if not self.lanes:
             p.end()
             return
@@ -404,6 +425,10 @@ class TimelineChart(QWidget):
         self.runs: list[tuple[int, int, int | None, str]] = []  # the lane column's bands: first and last row, key, name
         self.drag: Drag | None = None
         self.hover = -1  # the row under the mouse, lightly shaded
+        self.strong: set[str] | None = None  # the spotlight (decision 233): the rows that stay strong, the rest faded
+        self.spot: tuple[date, date] | None = None  # its week
+        self.hover_week: tuple[date, date] | None = None  # the week under the mouse in Capacity
+        self._fade = 1.0  # how strongly the row being painted is drawn
 
     @property
     def tl(self) -> Timeline | None:
@@ -474,7 +499,7 @@ class TimelineChart(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.fillRect(self.rect(), QColor(CONTENT))
-        right = self.width() - 10 - self.scale.inset
+        right = self.scale.right(self)
         base, bold, small = QFont(self.font()), QFont(self.font()), QFont(self.font())
         bold.setBold(True)
         small.setPointSizeF(max(7.0, self.font().pointSizeF() - 1))
@@ -508,6 +533,15 @@ class TimelineChart(QWidget):
             p.drawLine(QPointF(x1, 0), QPointF(x1, bottom))
         for i, r in enumerate(self.rows):
             self._paint_row(p, i * self.ROW_H, r, base, bold, small)
+        if self.hover_week is not None:
+            x0, x1 = self._x(self.hover_week[0]), self._x(self.hover_week[1])
+            p.fillRect(QRectF(x0, 0, x1 - x0, bottom), _alpha(FG, 14))
+        if self.spot is not None:  # the week the spotlight is on, down the chart
+            x0, x1 = self._x(self.spot[0]), self._x(self.spot[1])
+            p.fillRect(QRectF(x0, 0, x1 - x0, bottom), _alpha(ACCENT, 26))
+            p.setPen(QPen(QColor(ACCENT), 1))
+            p.drawLine(QPointF(x0, 0), QPointF(x0, bottom))
+            p.drawLine(QPointF(x1, 0), QPointF(x1, bottom))
         if tl.start <= self.today < tl.end:
             x = self._mid(self.today)
             p.setPen(QPen(QColor(ACCENT), 2))
@@ -563,7 +597,10 @@ class TimelineChart(QWidget):
     def _paint_row(self, p: QPainter, top: int, r: Row, base: QFont, bold: QFont, small: QFont) -> None:
         assert self.model is not None and self.tl is not None
         t = self.model.task(r.task)
-        right = self.width() - 10 - self.scale.inset
+        right = self.scale.right(self)
+        faded = self.strong is not None and r.task not in self.strong and not r.plant_event
+        lit = self.strong is not None and r.task in self.strong
+        self._fade = 0.22 if faded else 1.0
         p.setPen(QPen(QColor(LINE), 1))
         p.drawLine(QPointF(0, top + self.ROW_H - 0.5), QPointF(right, top + self.ROW_H - 0.5))
         # Ordered by top-level task, its project's colour is an edge, as in the task tree; by a field, the lane column's band
@@ -604,9 +641,9 @@ class TimelineChart(QWidget):
         badge = f"{r.kids}" if r.kids and not r.open else ""
         late_w = 30 if r.late else 0
         badge_w = (p.fontMetrics().horizontalAdvance(badge) + 12) if badge else 0
-        p.setFont(bold if not r.depth else base)
+        p.setFont(bold if not r.depth or lit else base)
         # Plain words beside the colour edge, as in the task tree (the review's decision V3).
-        colour = QColor(MUTED) if r.ctx else (_mix(kc, 0.6, FG) if kc and LOOK.classic else QColor(FG))
+        colour = QColor(FAINT) if faded else QColor(MUTED) if r.ctx else (_mix(kc, 0.6, FG) if kc and LOOK.classic else QColor(FG))
         p.setPen(colour)
         name_w = max(20.0, self.scale.NAME_W - x - 6 - late_w - badge_w)
         text = p.fontMetrics().elidedText(t.title, Qt.TextElideMode.ElideRight, int(name_w))
@@ -624,7 +661,9 @@ class TimelineChart(QWidget):
             p.setFont(small)
             p.setPen(QColor(BAD))
             p.drawText(QRectF(self.scale.NAME_W - 32, top, 30, self.ROW_H), Qt.AlignmentFlag.AlignVCenter, "late")
+        p.setOpacity(self._fade)
         self._paint_track(p, top, r, t, bold, small)
+        p.setOpacity(1.0)
 
     def _bar_look(self, t: Task, r: Row) -> tuple[QColor | None, QColor | None, QColor, bool, bool, bool]:
         """(fill, edge, text colour, hatched, dashed outline, event stripe) for a one-time task's bar (decision 133)."""
@@ -634,14 +673,21 @@ class TimelineChart(QWidget):
             b = timeline.hour_bin(t, self.today)
             if b < 0:
                 return None, QColor(FAINT), QColor(MUTED), False, True, False
+            if r.not_started and not LOOK.classic:  # a lighter solid, whatever colours the bars (decision 234)
+                fill = _mix(HOUR_COLOURS[b], 0.72)
+                return fill, None, QColor(FG if fill.lightnessF() > 0.55 else CONTENT), False, False, False
             return QColor(HOUR_COLOURS[b]), None, QColor(HOUR_INK[b]), r.not_started, False, False
         if self.bars == "priority":
             if not t.priority or t.priority not in PRIORITY_COLOURS:
                 return None, QColor(FAINT), QColor(MUTED), False, True, False
             colour = PRIORITY_COLOURS[t.priority]
+        elif self.bars == "one":
+            colour = C.bar
         else:
             colour = GROUP_COLOURS[r.colour % len(GROUP_COLOURS)]
         if r.not_started:
+            if not LOOK.classic:
+                return _mix(colour, 0.3), None, QColor(FG), False, False, False
             return _mix(colour, 0.3), QColor(colour), QColor(FG), True, False, False
         return _mix(colour, 0.72), None, QColor(FG), False, False, False
 
@@ -653,6 +699,8 @@ class TimelineChart(QWidget):
             return PRIORITY_COLOURS.get(t.priority or "", FAINT)
         if self.bars == "hours":
             return FAINT
+        if self.bars == "one":
+            return C.bar
         return GROUP_COLOURS[r.colour % len(GROUP_COLOURS)]
 
     def _paint_track(self, p: QPainter, top: int, r: Row, t: Task, bold: QFont, small: QFont) -> None:
@@ -675,7 +723,7 @@ class TimelineChart(QWidget):
                 continue
             rect = QRectF(x0, top + self.BAR_TOP, max(3.0, x1 - x0), self.BAR_H)
             if self.drag and self.drag.moved and self.drag.task == r.task:
-                p.setOpacity(0.35)
+                p.setOpacity(0.35 * self._fade)
             p.setPen(QPen(edge, 1, Qt.PenStyle.DashLine if dashed else Qt.PenStyle.SolidLine) if edge is not None else Qt.PenStyle.NoPen)
             p.setBrush(fill if fill is not None else Qt.BrushStyle.NoBrush)
             p.drawRoundedRect(rect, 4, 4)
@@ -693,7 +741,7 @@ class TimelineChart(QWidget):
                 p.setPen(ink)
                 p.drawText(rect.adjusted(5, 0, -5, 0), Qt.AlignmentFlag.AlignVCenter,
                            p.fontMetrics().elidedText(text, Qt.TextElideMode.ElideRight, int(rect.width() - 10)))
-            elif label and rect.right() + 50 < self.width() - 10 - self.scale.inset:
+            elif label and rect.right() + 50 < self.scale.right(self):
                 # Too narrow for its hours: they go just after the bar, never cut off (the playbook's timeline labels).
                 p.setFont(small)
                 p.setPen(QColor(MUTED))
@@ -704,14 +752,15 @@ class TimelineChart(QWidget):
             if self.plan and not r.routine and rect.width() > 14:  # the ends that stretch
                 p.fillRect(QRectF(rect.left(), rect.top() + 4, 2, rect.height() - 8), _alpha(FG, 60))
                 p.fillRect(QRectF(rect.right() - 2, rect.top() + 4, 2, rect.height() - 8), _alpha(FG, 60))
-            p.setOpacity(1.0)
+            p.setOpacity(self._fade)
         if r.deadline:
             self._diamond(p, self._mid(r.deadline), top + 14.0, 6.0, QColor(BAD if r.deadline < self.today else FG), QColor(CONTENT))
         if r.span:  # the summary bar: its subtasks' span, with their deadlines (item 51)
             only = not r.own or not r.windows
             a, b = r.span
             x0, x1 = self._x(max(a, self.tl.start)), self._x(min(b, self.tl.end - timedelta(days=1)) + timedelta(days=1))
-            y, h, tick = (top + 12.0, 4.0, 12.0) if only else (top + 23.0, 3.0, 7.0)
+            # Under a bar of its own, a thin line, so a row isn't three marks on top of each other (decision 234).
+            y, h, tick = (top + 12.0, 4.0, 12.0) if only else (top + 23.0, 3.0, 7.0) if LOOK.classic else (top + 24.0, 2.0, 4.0)
             p.fillRect(QRectF(x0, y, max(2.0, x1 - x0), h), QColor(MUTED))
             if a >= self.tl.start:
                 p.fillRect(QRectF(x0, y + h - tick, 2, tick), QColor(MUTED))
@@ -743,6 +792,8 @@ class TimelineChart(QWidget):
             return EV_LINE
         if self.bars == "priority":
             return PRIORITY_COLOURS.get(t.priority or "", MUTED)
+        if self.bars == "one":
+            return C.bar
         return GROUP_COLOURS[r.colour % len(GROUP_COLOURS)]
 
     def _paint_key(self, p: QPainter, top: float, r: Row, t: Task, k: KeyMark) -> None:
@@ -753,7 +804,7 @@ class TimelineChart(QWidget):
         colour = QColor(self._key_colour(t, r, k))
         dragging = self.drag is not None and self.drag.moved and self.drag.key_id == k.id
         if dragging:
-            p.setOpacity(0.35)
+            p.setOpacity(0.35 * self._fade)
         if k.kind in ("window", "on"):
             x0, x1 = self._x(k.first), self._x(k.last + timedelta(days=1))
             p.setPen(Qt.PenStyle.NoPen)
@@ -773,7 +824,7 @@ class TimelineChart(QWidget):
             p.drawLine(QPointF(x - 1, cy + 5), QPointF(x - 5, cy + 5))
         if k.deadline and k.kind != "from" and self.tl.start <= k.last < self.tl.end:  # a hard date: a red diamond (decision 147)
             self._diamond(p, self._mid(k.last), cy, 5.0, QColor(LINE_STRONG if k.done else BAD), QColor(CONTENT))
-        p.setOpacity(1.0)
+        p.setOpacity(self._fade)
 
     def _key_at(self, r: Row, top: float, x: float, y: float) -> tuple[KeyMark, str] | None:
         """In Plan mode, the key date under the mouse that isn't done, and where on it: "kd-start" or "kd-end" (a window's
@@ -879,7 +930,7 @@ class TimelineChart(QWidget):
     def _drag_to(self, d: Drag, x: float) -> None:
         """Where a drag puts the dates, snapping to days: a whole working week for a name, else the bar moved or stretched."""
         if d.mode == "new":
-            if x < self.scale.NAME_W or x > self.width() - 10 - self.scale.inset:
+            if x < self.scale.NAME_W or x > self.scale.right(self):
                 d.start = d.end = None
                 return
             d.start, d.end = week_from(self.scale.day_at(self, x))
@@ -965,9 +1016,73 @@ class TimelineChart(QWidget):
         return super().event(e)
 
 
+class Popover(QFrame):
+    """A small panel under a button that goes when you click elsewhere: Display and Legend (the review's stage V5, so the
+    chart keeps the room their controls took)."""
+
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
+        self.setObjectName("popover")
+
+    def open_under(self, button: QWidget) -> None:
+        """Show it just under a button, kept on the screen."""
+        self.adjustSize()
+        at = button.mapToGlobal(button.rect().bottomLeft()) + QPoint(0, 3)
+        screen = button.screen().availableGeometry()
+        at.setX(max(screen.left(), min(at.x(), screen.right() - self.width())))
+        self.move(at)
+        self.show()
+
+
+class FootLine(QWidget):
+    """The one line that says what's selected (decision 292): its title in bold, then the rest in grey, ending in "…" when it
+    doesn't fit, with all of it in the tooltip. ``text()`` is always all of it."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.title, self.rest = "", ""
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+
+    def set_line(self, title: str, rest: str, tip: str = "") -> None:
+        self.title, self.rest = title, rest
+        self.setToolTip(tip)
+        self.setAccessibleName(self.text())
+        self.update()
+
+    def text(self) -> str:
+        return f"{self.title}. {self.rest}" if self.title else self.rest
+
+    def sizeHint(self) -> QSize:  # noqa: N802 - Qt's name
+        return QSize(200, self.fontMetrics().height() + 4)
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802 - Qt's name
+        return QSize(0, self.fontMetrics().height() + 4)
+
+    def paintEvent(self, _event) -> None:  # noqa: N802 - Qt's name
+        p = QPainter(self)
+        room = float(self.width())
+        if self.title:
+            bold = QFont(self.font())
+            bold.setBold(True)
+            p.setFont(bold)
+            p.setPen(QColor(FG))
+            shown = p.fontMetrics().elidedText(self.title, Qt.TextElideMode.ElideRight, int(room * 0.6))
+            p.drawText(QRectF(0, 0, room, self.height()), Qt.AlignmentFlag.AlignVCenter, shown)
+            used = p.fontMetrics().horizontalAdvance(shown) + 10
+            room -= used
+            p.translate(used, 0)
+        small = QFont(self.font())
+        small.setPointSizeF(tokens.CAPTION)
+        p.setFont(small)
+        p.setPen(QColor(MUTED))
+        p.drawText(QRectF(0, 0, room, self.height()), Qt.AlignmentFlag.AlignVCenter,
+                   p.fontMetrics().elidedText(self.rest, Qt.TextElideMode.ElideRight, int(room)))
+        p.end()
+
+
 class TimelineView(QWidget):
-    """The Timeline view: its controls, Plan mode's strip, the card for the row clicked last, the head and the rows, a
-    legend and the undated tasks. ``open_task`` and ``update_task`` send a task to open, or to update in the capture
+    """The Timeline view: its controls, Plan mode's strip, the head and the rows, what's selected and the undated tasks, and
+    Capacity's half under them (the Classic look: a legend, a card for the row clicked last, and no Capacity). ``open_task`` and ``update_task`` send a task to open, or to update in the capture
     window; ``quick_edit`` a task and its bar, for Quick edit; ``set_dates`` a task's new Start and Due (ISO dates, or None
     to clear), from a drag or Ctrl+Z, with what to say; ``folds_changed`` the rows now open, to remember them."""
 
@@ -980,9 +1095,14 @@ class TimelineView(QWidget):
     set_key_date = Signal(str, int, object, object, str)
     folds_changed = Signal(list)
     #: The view's choices that are remembered (the playbook: the zoom kept): the range, Order by, the bars' colour,
-    #: Total or A week, and Show routine.
+    #: Total or A week, and Show routine; and Capacity's half: open or folded, Percent or Hours, Group by group, and its height
+    #: once it's been dragged.
     settings_changed = Signal(dict)
-    REMEMBERED = ("weeks", "order", "bars", "a_week", "routine", "undated_open")
+    REMEMBERED = ("weeks", "order", "bars", "a_week", "routine", "undated_open", "cap_open", "cap_unit", "cap_by_group", "cap_h")
+    #: Add person, from Capacity with nobody to show.
+    add_person = Signal()
+    #: The most of the page Capacity's half takes to start with, and the least either part can be dragged to.
+    CAP_SHARE, CAP_MIN, TOP_MIN = 0.62, 96, 150
 
     def __init__(self) -> None:
         super().__init__()
@@ -992,7 +1112,7 @@ class TimelineView(QWidget):
         self.weeks = 9
         self.typed_days: int | None = None  # a typed range's length (decision 225), in place of ``weeks``
         self.order = "top"
-        self.bars = "project"
+        self.bars = "project" if LOOK.classic else "one"  # decision 234
         self.a_week = False
         self.labels: list[str] = []
         self.people: list[str] = []
@@ -1005,74 +1125,31 @@ class TimelineView(QWidget):
         # and End before), last first.
         self.undo: list[tuple] = []
         self.scale = _Scale()
+        # Capacity's half: where its hours come from (the browse window says), and its choices.
+        self.load_cells: Callable[[list[date]], load.Cells] | None = None
+        self.load_unplaced: Callable[[Model, date], tuple[list[str], list[str]]] | None = None
+        self.cap_open = True
+        self.cap_unit = "pct"
+        self.cap_by_group = False
+        self.cap_h: int | None = None
+        self.cells: load.Cells = {}
+        self.spot: Spot | None = None
+        self.not_counted = ""  # the list of tasks Capacity can't count that's open: "hours", "dates" or none
+        self.not_counted_ids: dict[str, list[str]] = {}
+        # The tasks with no dates: all on one line when they fit on one, or else a count, with a fold that opens a short list
+        # scrolling inside itself, so they never take the chart's room (the owner's comment, release 5.57).
+        self.undated_ids: tuple[str, ...] = ()
+        self.undated_open = False
         lay = QVBoxLayout(self)
         lay.setContentsMargins(12, 8, 12, 8) if LOOK.classic else lay.setContentsMargins(16, 12, 16, 10)
         lay.addWidget(QLabel("Timeline", objectName="paneTitle"))
         lay.addWidget(Help("Open tasks over the coming weeks: a row per project, folded to start with, a bar from Start to Due, "
                            "a diamond for a deadline and a dot for each occurrence of a routine task. Parked and closed tasks are "
-                           "left out. Click a row to see its dates and people; double-click a bar or a name for Quick edit."))
-        self.controls = QWidget()
-        rows = QVBoxLayout(self.controls)
-        rows.setContentsMargins(0, 0, 0, 0)
-        rows.setSpacing(6)
-        time_row, show_row = QWidget(), QWidget()
-        self.time_layout = FlowLayout(time_row, spacing=8)
-        self.show_layout = FlowLayout(show_row, spacing=8)
-        self.range_note = QLabel(objectName="error")  # what's wrong with a typed day, on its own line so the boxes stay put
-        self.range_note.hide()
-        rows.addWidget(time_row)
-        rows.addWidget(self.range_note)
-        rows.addWidget(show_row)
-        lay.addWidget(self.controls)
-        # From and To (decision 225) outlive the redraws that rebuild the other controls, so the caret stays in them.
-        self.range_box = QWidget(time_row)
-        rb = QHBoxLayout(self.range_box)
-        rb.setContentsMargins(0, 0, 0, 0)
-        rb.setSpacing(6)
-        self.range_from, self.range_to = DateField(), DateField()
-        rb.addWidget(QLabel("From", objectName="hint"))
-        rb.addWidget(self.range_from)
-        rb.addWidget(QLabel("to", objectName="hint"))
-        rb.addWidget(self.range_to)
-        for field, name, which, what in ((self.range_from, "First day shown", "from", "first"), (self.range_to, "Last day shown", "to", "last")):
-            field.setFixedWidth(162)
-            field.line.setAccessibleName(name)
-            field.line.setToolTip(f"The {what} day to show. Type a date such as 2027-01-31, 31 Jan 2027 or Jan 2027, then press Enter")
-            field.line.editingFinished.connect(lambda which=which: self._range_typed(which))
-            field.picked.connect(lambda which=which: self._range_typed(which))
-        self.plan_strip = QFrame(objectName="fileRow")
-        ps = QHBoxLayout(self.plan_strip)
-        ps.setContentsMargins(10, 4, 6, 4)
-        # It says what mode you're in. How it works is behind Show hints (decision 7, release 5.59).
-        ps.addWidget(QLabel("<b>Plan mode</b>"))
-        ps.addWidget(Help("Drag a bar, or its ends, to change its dates; drag a ⋮⋮ name onto the chart for a working week. Saved and "
-                          "logged; Ctrl+Z undoes."), 1)
-        ps.addStretch()
-        done = QPushButton("Done")
-        done.clicked.connect(lambda: self.set_plan(False))
-        ps.addWidget(done)
-        self.plan_strip.setStyleSheet(f"QFrame#fileRow {{ background-color: {SEL}; border: 1px solid {C.info_line}; border-radius: 4px; }}")
-        lay.addWidget(self.plan_strip)
-        self.card = QFrame(objectName="fileRow")
-        cl = QHBoxLayout(self.card)
-        cl.setContentsMargins(10, 6, 10, 6)
-        self.card_text = QLabel()
-        self.card_text.setWordWrap(True)
-        self.card_text.setTextFormat(Qt.TextFormat.RichText)
-        cl.addWidget(self.card_text, 1)
-        self.open_button = QPushButton("Open task", objectName="primary" if LOOK.classic else "")
-        self.open_button.clicked.connect(lambda: self.sel and self.open_task.emit(self.sel))
-        self.quick_button = QPushButton("Quick edit")
-        self.quick_button.clicked.connect(self._quick_from_card)
-        self.update_button = QPushButton("Update")
-        self.update_button.clicked.connect(lambda: self.sel and self.update_task.emit(self.sel))
-        for b in (self.open_button, self.quick_button, self.update_button):
-            cl.addWidget(b)
-        self.legend_slot = lay.count()  # the legend goes here, under the controls (the visual overhaul's O5)
-        lay.addWidget(self.card)
+                           "left out. Click a row to see its dates and people; double-click a bar or a name for Quick edit."
+                           + ("" if LOOK.classic else " Under it, Capacity has each person's load on the same dates: click a week "
+                              "to see which tasks fill it.")))
         self.head = TimelineHead(self.scale)
         self.head.picked.connect(self._pick)
-        lay.addWidget(self.head)
         self.chart = TimelineChart(self.scale)
         self.chart.picked.connect(self._pick)
         self.chart.opened.connect(self.open_task)
@@ -1085,40 +1162,31 @@ class TimelineView(QWidget):
         self.scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.scroll.setWidget(self.chart)
         self.scroll.verticalScrollBar().rangeChanged.connect(lambda *_: self._sync_inset())
-        lay.addWidget(self.scroll, 1)
-        self.marks_legend = " &nbsp; ".join(_entry(mark, words) for mark, words in (
-            (f'<span style="background-color:{_mix(C.g1, 0.72).name()}">&nbsp;&nbsp;&nbsp;&nbsp;</span>', "In progress"),
-            (f'<span style="background-color:{_mix(C.g1, 0.3).name()}; border:1px solid {C.g1}">&nbsp;&nbsp;&nbsp;&nbsp;</span>', "Not started"),
-            (f'<span style="color:{BAD}"><b>▌</b></span>', "Late"), ("◆", "Deadline"), (f'<span style="color:{MUTED}"><b>⊢⊣</b></span>', "Its subtasks' span"),
-            (f'<span style="color:{C.g1}">●</span>', "Routine: each occurrence"), (f'<span style="color:{ACCENT}"><b>│</b></span>', "Today"),
-            (f'<span style="background-color:{EV_BG}; color:{EV_LINE}">&nbsp;{FLAG}&nbsp;</span>', "Plant event"),
-            # Key dates (release 5.31): a window, a start or an end alone, a hard deadline
-            (f'<span style="color:{C.g1}"><b>▬</b></span>', "Key date"), ("<b>[ ]</b>", "Its start or end"),
-            (f'<span style="color:{BAD}">◆</span>', "Its deadline")))
-        self.legend = QLabel(self.marks_legend, objectName="hint")  # one line: the marks, then what colours the bars
-        self.legend.setWordWrap(True)
-        if LOOK.classic:
-            lay.addWidget(self.legend)
-        else:
-            lay.insertWidget(self.legend_slot, self.legend)
-        # The tasks with no dates, under the chart (the owner's comment, release 5.57): all on one line when they fit on one, or
-        # else a count, with a fold that opens a short list scrolling inside itself, so they never take the chart's room.
-        self.undated_ids: tuple[str, ...] = ()
-        self.undated_open = False
-        self.undated_bar = QWidget()
-        ub = QHBoxLayout(self.undated_bar)
-        ub.setContentsMargins(0, 0, 0, 0)
-        ub.setSpacing(4)
+        self.plan_strip = QFrame(objectName="fileRow")
+        ps = QHBoxLayout(self.plan_strip)
+        ps.setContentsMargins(10, 4, 6, 4)
+        # It says what mode you're in. How it works is behind Show hints (decision 7, release 5.59).
+        ps.addWidget(QLabel("<b>Plan mode</b>"))
+        ps.addWidget(Help("Drag a bar, or its ends, to change its dates; drag a ⋮⋮ name onto the chart for a working week. Saved and "
+                          "logged; Ctrl+Z undoes."), 1)
+        ps.addStretch()
+        done = QPushButton("Done")
+        done.clicked.connect(lambda: self.set_plan(False))
+        ps.addWidget(done)
+        self.plan_strip.setStyleSheet(f"QFrame#fileRow {{ background-color: {SEL}; border: 1px solid {C.info_line}; border-radius: 4px; }}")
+        self.open_button = QPushButton("Open task", objectName="primary" if LOOK.classic else "")
+        self.open_button.clicked.connect(lambda: self.sel and self.open_task.emit(self.sel))
+        self.quick_button = QPushButton("Quick edit")
+        self.quick_button.clicked.connect(self._quick_from_card)
+        self.update_button = QPushButton("Update")
+        self.update_button.clicked.connect(lambda: self.sel and self.update_task.emit(self.sel))
         self.undated_fold = QToolButton(objectName="checkFold")
         self.undated_fold.setToolTip("Show or hide the tasks with no dates")
         self.undated_fold.setAccessibleName("Tasks with no dates")
         self.undated_fold.clicked.connect(self._toggle_undated)
-        ub.addWidget(self.undated_fold)
         self.undated = QLabel(objectName="hint")
         self.undated.setWordWrap(True)
         self.undated.linkActivated.connect(self._undated_link)
-        ub.addWidget(self.undated, 1)
-        lay.addWidget(self.undated_bar)
         self.undated_names = QLabel(objectName="hint")
         self.undated_names.setWordWrap(True)
         self.undated_names.setTextFormat(Qt.TextFormat.RichText)
@@ -1129,12 +1197,320 @@ class TimelineView(QWidget):
         self.undated_box.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.undated_box.setWidget(self.undated_names)
         self.undated_box.hide()
+        if LOOK.classic:
+            self._build_classic(lay)
+        else:
+            self._build_page(lay)
+
+    def _build_range(self, parent: QWidget) -> None:
+        """From and To (decision 225), which outlive the redraws, so the caret stays in them."""
+        self.range_box = QWidget(parent)
+        self.range_layout = rb = QHBoxLayout(self.range_box)
+        rb.setContentsMargins(0, 0, 0, 0)
+        rb.setSpacing(6)
+        self.range_from, self.range_to = DateField(), DateField()
+        if LOOK.classic:  # on the page the first box says what it is by what's in it, so the row has room
+            rb.addWidget(QLabel("From", objectName="hint"))
+        rb.addWidget(self.range_from)
+        rb.addWidget(QLabel("to", objectName="hint"))
+        rb.addWidget(self.range_to)
+        for field, name, which, what in ((self.range_from, "First day shown", "from", "first"), (self.range_to, "Last day shown", "to", "last")):
+            field.setFixedWidth(162 if LOOK.classic else 158)
+            field.line.setAccessibleName(name)
+            field.line.setToolTip(f"The {what} day to show. Type a date such as 2027-01-31, 31 Jan 2027 or Jan 2027, then press Enter")
+            field.line.editingFinished.connect(lambda which=which: self._range_typed(which))
+            field.picked.connect(lambda which=which: self._range_typed(which))
+        self.range_note = QLabel(objectName="error")  # what's wrong with a typed day, on its own line so the boxes stay put
+        self.range_note.hide()
+
+    def _build_classic(self, lay: QVBoxLayout) -> None:
+        """The Classic look: the chart alone, with two rows of controls, a card above it and a legend under it."""
+        self.controls = QWidget()
+        rows = QVBoxLayout(self.controls)
+        rows.setContentsMargins(0, 0, 0, 0)
+        rows.setSpacing(6)
+        time_row, show_row = QWidget(), QWidget()
+        self.time_layout = FlowLayout(time_row, spacing=8)
+        self.show_layout = FlowLayout(show_row, spacing=8)
+        self._build_range(time_row)
+        rows.addWidget(time_row)
+        rows.addWidget(self.range_note)
+        rows.addWidget(show_row)
+        lay.addWidget(self.controls)
+        lay.addWidget(self.plan_strip)
+        self.card = QFrame(objectName="fileRow")
+        cl = QHBoxLayout(self.card)
+        cl.setContentsMargins(10, 6, 10, 6)
+        self.card_text = QLabel()
+        self.card_text.setWordWrap(True)
+        self.card_text.setTextFormat(Qt.TextFormat.RichText)
+        cl.addWidget(self.card_text, 1)
+        for b in (self.open_button, self.quick_button, self.update_button):
+            cl.addWidget(b)
+        lay.addWidget(self.card)
+        lay.addWidget(self.head)
+        lay.addWidget(self.scroll, 1)
+        self.marks_legend = " &nbsp; ".join(_entry(mark, words) for mark, words in self._marks(C.g1))
+        self.legend = QLabel(self.marks_legend, objectName="hint")  # one line: the marks, then what colours the bars
+        self.legend.setWordWrap(True)
+        lay.addWidget(self.legend)
+        self.undated_bar = QWidget()
+        ub = QHBoxLayout(self.undated_bar)
+        ub.setContentsMargins(0, 0, 0, 0)
+        ub.setSpacing(4)
+        ub.addWidget(self.undated_fold)
+        ub.addWidget(self.undated, 1)
+        lay.addWidget(self.undated_bar)
         lay.addWidget(self.undated_box)
+
+    @staticmethod
+    def _marks(colour: str) -> list[tuple[str, str]]:
+        """The chart's marks, for the legend, with the bars in ``colour``."""
+        classic = LOOK.classic
+        not_started = f"; border:1px solid {colour}" if classic else ""
+        return [(f'<span style="background-color:{_mix(colour, 0.72).name()}">&nbsp;&nbsp;&nbsp;&nbsp;</span>', "In progress"),
+                (f'<span style="background-color:{_mix(colour, 0.3).name()}{not_started}">&nbsp;&nbsp;&nbsp;&nbsp;</span>', "Not started"),
+                (f'<span style="color:{BAD}"><b>▌</b></span>', "Late"), ("◆", "Deadline"), (f'<span style="color:{MUTED}"><b>⊢⊣</b></span>', "Its subtasks' span"),
+                (f'<span style="color:{colour}">●</span>', "Routine: each occurrence"), (f'<span style="color:{ACCENT}"><b>│</b></span>', "Today"),
+                (f'<span style="background-color:{EV_BG}; color:{EV_LINE}">&nbsp;{FLAG}&nbsp;</span>', "Plant event"),
+                # Key dates (release 5.31): a window, a start or an end alone, a hard deadline
+                (f'<span style="color:{colour}"><b>▬</b></span>', "Key date"), ("<b>[ ]</b>", "Its start or end"),
+                (f'<span style="color:{BAD}">◆</span>', "Its deadline")]
+
+    def _build_page(self, lay: QVBoxLayout) -> None:
+        """The one page (decision 229): one row of controls, the chart, a line saying what's selected, and Capacity's half."""
+        self.tools = QWidget()
+        self.time_layout = FlowLayout(self.tools, spacing=8)
+        self._build_range(self.tools)
+        moves = QWidget()
+        ml = QHBoxLayout(moves)
+        ml.setContentsMargins(0, 0, 0, 0)
+        ml.setSpacing(4)
+        for text, s, tip in (("Earlier", -1, "Back four weeks (13 over six months, 26 over a year), never more than the range shown"),
+                             ("This week", 0, "From last week"),
+                             ("Later", 1, "On four weeks (13 over six months, 26 over a year), never more than the range shown")):
+            b = DropButton(text, arrow="chevron-right") if s > 0 else QPushButton(text)
+            if s < 0:
+                b.setIcon(icon("chevron-left"))
+            b.setToolTip(tip)
+            b.clicked.connect(lambda _=False, s=s: self.shift(s))
+            ml.addWidget(b)
+        self.time_layout.addWidget(moves)
+        self.plan_button = QPushButton("Plan")
+        self.plan_button.setIcon(icon("edit"))
+        self.plan_button.setCheckable(True)
+        self.plan_button.setToolTip("Plan mode: drag bars and names to set dates (P)")
+        self.plan_button.clicked.connect(lambda on: self.set_plan(on))
+        self.time_layout.addWidget(self.plan_button)
+        self.people_button: CheckMenuButton | None = None  # made when there's a model, with its people
+        self.labels_button: CheckMenuButton | None = None
+        self.display_button = DropButton("Display")
+        self.display_button.setToolTip("Order by, Colour bars by, Hours, Focus, Show routine and Labels")
+        self.legend_button = DropButton("Legend")
+        self.legend_button.setToolTip("What the marks and colours mean")
+        self.time_layout.addWidget(self.display_button)
+        self.time_layout.addWidget(self.legend_button)
+        # Show and the range at the row's right end, where most tools put them (the review's stage V5).
+        self.show_box = QComboBox()
+        self.show_box.setAccessibleName("Show")
+        self.show_box.currentIndexChanged.connect(lambda _: self._box_changed(self.show_box, "weeks"))
+        self.range_layout.insertWidget(0, self.show_box)
+        self.range_box.setProperty("flowEnd", True)
+        self.time_layout.addWidget(self.range_box)
+        lay.addWidget(self.tools)
+        lay.addWidget(self.range_note)
+        self.chips = QWidget()  # the filters in use
+        self.chips_layout = FlowLayout(self.chips, spacing=6)
+        self.chips.hide()
+        self._chips_shown: tuple = ()
+        lay.addWidget(self.chips)
+        lay.addWidget(self.plan_strip)
+        self._build_display()
+        self.legend_box = Popover(self)
+        self.legend = QLabel()
+        self.legend.setTextFormat(Qt.TextFormat.RichText)
+        lb = QVBoxLayout(self.legend_box)
+        lb.setContentsMargins(12, 10, 12, 10)
+        lb.addWidget(self.legend)
+        self.display_button.clicked.connect(lambda: self.display_box.open_under(self.display_button))
+        self.legend_button.clicked.connect(lambda: self.legend_box.open_under(self.legend_button))
+        # The levels, at the head of the names' column.
+        self.level_buttons = []
+        for i, (text, n, name) in enumerate((("Collapse a level", -1, "level-fold"), ("Expand a level", 1, "level-open"))):
+            b = QToolButton(self.head, objectName="checkFold")
+            b.setIcon(icon(name))
+            b.setAccessibleName(text)
+            b.setToolTip(text)
+            b.setFixedSize(22, 20)
+            b.clicked.connect(lambda _=False, n=n: self.level(n))
+            b.move(40 + i * 24, 20)
+            self.level_buttons.append(b)
+        # The top part: the chart, then what's selected, on a line of its own so picking a bar moves nothing (decision 292).
+        self.card = QFrame(objectName="timelineFoot")
+        cl = QHBoxLayout(self.card)
+        cl.setContentsMargins(0, 3, 0, 3)
+        cl.setSpacing(6)
+        self.card_text = FootLine()
+        cl.addWidget(self.card_text, 1)
+        for b in (self.open_button, self.quick_button, self.update_button):
+            cl.addWidget(b)
+        self.undated_fold.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        cl.addWidget(self.undated_fold)
+        self.card.setMinimumHeight(tokens.CONTROL + 8)
+        top = QWidget()
+        tl = QVBoxLayout(top)
+        tl.setContentsMargins(0, 0, 0, 0)
+        tl.setSpacing(0)
+        tl.addWidget(self.head)
+        tl.addWidget(self.scroll, 1)
+        tl.addWidget(self.undated_box)
+        tl.addWidget(self.card)
+        top.setMinimumHeight(self.TOP_MIN)
+        self._build_capacity()
+        self.split = QSplitter(Qt.Orientation.Vertical, objectName="timelineSplit")
+        self.split.setChildrenCollapsible(False)
+        self.split.setHandleWidth(7)
+        self.split.addWidget(top)
+        self.split.addWidget(self.cap_box)
+        self.split.setStretchFactor(0, 1)
+        self.split.setStretchFactor(1, 0)
+        self.split.splitterMoved.connect(self._split_moved)
+        lay.addWidget(self.split, 1)
+        self.cap_card = QFrame(self, objectName="capCard")  # the spotlight's card, over the page
+        self.cap_card.hide()
+        self.scale.inset = self.scroll.verticalScrollBar().sizeHint().width()  # kept whether or not a bar shows, so nothing shifts
+
+    def _build_display(self) -> None:
+        """Display: how the chart is drawn and filtered."""
+        self.display_box = Popover(self)
+        grid = QGridLayout(self.display_box)
+        grid.setContentsMargins(12, 10, 12, 10)
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(6)
+
+        def row(n: int, words: str, widget: QWidget) -> None:
+            grid.addWidget(QLabel(words, objectName="fieldLabel"), n, 0)
+            grid.addWidget(widget, n, 1)
+
+        self.order_box, self.bars_box, self.focus_box = QComboBox(), QComboBox(), QComboBox()
+        for box, name, key in ((self.order_box, "Order by", "order"), (self.bars_box, "Colour bars by", "bars"), (self.focus_box, "Focus on", "focus")):
+            box.setAccessibleName(name)
+            box.currentIndexChanged.connect(lambda _, box=box, key=key: self._box_changed(box, key))
+        self.focus_box.setMaximumWidth(280)
+        row(0, "Order by", self.order_box)
+        row(1, "Colour bars by", self.bars_box)
+        seg, self.hours_buttons = self._seg(((False, "Total"), (True, "A week")), lambda on: self._set("a_week", on),
+                                            "What each bar says: its total hours, or that a week over its workdays")
+        row(2, "Hours on bars", seg)
+        row(3, "Focus on", self.focus_box)
+        self.routine_box = QCheckBox("Show routine")
+        self.routine_box.setToolTip("Recurring tasks, such as meetings")
+        self.routine_box.toggled.connect(lambda on: self._set("routine", on))
+        grid.addWidget(self.routine_box, 4, 1)
+        grid.addWidget(QLabel("Labels", objectName="fieldLabel"), 5, 0)
+        self.display_grid = grid
+
+    @staticmethod
+    def _seg(items, picked: Callable, tip: str = "") -> tuple[QWidget, dict]:
+        """Two buttons of which one is on."""
+        seg = QWidget()
+        sl = QHBoxLayout(seg)
+        sl.setContentsMargins(0, 0, 0, 0)
+        sl.setSpacing(0)
+        group = QButtonGroup(seg)
+        buttons = {}
+        for value, text in items:
+            b = QPushButton(text)
+            b.setCheckable(True)
+            b.setToolTip(tip)
+            group.addButton(b)
+            b.clicked.connect(lambda _=False, value=value: picked(value))
+            sl.addWidget(b)
+            buttons[value] = b
+        return seg, buttons
+
+    def _build_capacity(self) -> None:
+        """Capacity's half: its head with the sentence, the team chart, and the people's rows, which scroll."""
+        self.cap_box = QWidget()
+        self.cap_box.setMinimumHeight(self.CAP_MIN)
+        box = QVBoxLayout(self.cap_box)
+        box.setContentsMargins(0, 0, 0, 0)
+        box.setSpacing(0)
+        self.cap_head = QWidget()
+        head = QHBoxLayout(self.cap_head)
+        head.setContentsMargins(0, 4, 0, 4)
+        head.setSpacing(8)
+        self.cap_fold = QToolButton(objectName="checkFold")
+        self.cap_fold.setAccessibleName("Fold Capacity")
+        self.cap_fold.clicked.connect(lambda: self._set("cap_open", not self.cap_open))
+        head.addWidget(self.cap_fold)
+        title = QLabel("Capacity")
+        title.setFont(tokens.ui_font(semibold=True))
+        head.addWidget(title)
+        self.cap_say = QLabel()
+        self.cap_say.setWordWrap(True)
+        self.cap_say.setTextFormat(Qt.TextFormat.RichText)
+        self.cap_say.setAccessibleName("Who is over, and when")
+        head.addWidget(self.cap_say, 1)
+        seg, self.unit_buttons = self._seg((("pct", "Percent"), ("hours", "Hours")), lambda unit: self._set("cap_unit", unit),
+                                           "What each cell says. The other number is in its tooltip")
+        head.addWidget(seg)
+        self.cap_group = QCheckBox("Group by group")
+        self.cap_group.setToolTip("Put people under their groups' headings")
+        self.cap_group.toggled.connect(lambda on: self._set("cap_by_group", on))
+        head.addWidget(self.cap_group)
+        box.addWidget(self.cap_head)
+        self.cap_team = CapacityTeam(self.scale)
+        self.cap_rows = CapacityRows(self.scale)
+        for strip in (self.cap_team, self.cap_rows):
+            strip.picked.connect(self._cell_picked)
+            strip.hovered.connect(self._week_hovered)
+        self.cap_rows.solo.connect(self._solo)
+        box.addWidget(self.cap_team)
+        self.cap_scroll = QScrollArea()
+        self.cap_scroll.setWidgetResizable(True)
+        self.cap_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.cap_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.cap_scroll.setWidget(self.cap_rows)
+        box.addWidget(self.cap_scroll, 1)
+        self.cap_empty = QWidget()
+        el = QHBoxLayout(self.cap_empty)
+        el.setContentsMargins(12, 8, 0, 8)
+        el.setSpacing(12)
+        el.addWidget(QLabel("Add people to see their load."))
+        add = QPushButton("Add person")
+        add.clicked.connect(lambda _=False: self.add_person.emit())
+        el.addWidget(add)
+        el.addStretch()
+        self.cap_empty.hide()
+        box.addWidget(self.cap_empty)
+        # What isn't counted, since that work makes the load look lighter than it is.
+        self.cap_note = QLabel(objectName="hint")
+        self.cap_note.setWordWrap(True)
+        self.cap_note.setTextFormat(Qt.TextFormat.RichText)
+        self.cap_note.linkActivated.connect(self._note_link)
+        self.cap_note.setContentsMargins(0, 4, 0, 2)
+        box.addWidget(self.cap_note)
+        self.cap_list = QLabel(objectName="hint")
+        self.cap_list.setWordWrap(True)
+        self.cap_list.setTextFormat(Qt.TextFormat.RichText)
+        self.cap_list.linkActivated.connect(self._undated_link)
+        self.cap_list_box = QScrollArea()
+        self.cap_list_box.setWidgetResizable(True)
+        self.cap_list_box.setFrameShape(QFrame.Shape.NoFrame)
+        self.cap_list_box.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.cap_list_box.setWidget(self.cap_list)
+        self.cap_list_box.hide()
+        box.addWidget(self.cap_list_box)
 
     def resizeEvent(self, event) -> None:  # noqa: N802 - Qt's name
         super().resizeEvent(event)
+        self._fit_room()
         if self.undated_ids:
             self._draw_undated()
+        if not LOOK.classic and self.scale.tl is not None:
+            self._draw_capacity()
+            self._fit_split()
 
     def keyPressEvent(self, event) -> None:  # noqa: N802 - Qt's name
         """P for Plan mode, and Ctrl+Z for the last drop (decisions 136 and 144), wherever the caret is in the view but a
@@ -1144,6 +1520,10 @@ class TimelineView(QWidget):
             self.set_plan(not self.plan)
         elif event.key() == Qt.Key.Key_Z and mods == Qt.KeyboardModifier.ControlModifier:
             self.undo_last()
+        elif event.key() == Qt.Key.Key_Escape and not LOOK.classic and self.spot is not None:
+            self.clear_spot()
+        elif event.key() == Qt.Key.Key_Escape and not LOOK.classic and self.sel:
+            self._pick(None)
         else:
             super().keyPressEvent(event)
 
@@ -1158,23 +1538,50 @@ class TimelineView(QWidget):
             self.focus = None
         if self.order not in {k for k, _ in timeline.order_choices(model)}:  # a parent label that's no longer one
             self.order = "top"
-        self._controls()
+        if LOOK.classic:
+            self._controls()
+        else:
+            self._sync_tools()
+        # With the page, tasks with no dates join the chart only while their fold is open, Plan mode or not (decision 291).
+        rows_undated = self.plan and (LOOK.classic or self.undated_open)
         tl = timeline.build(model, today, self.start, self.weeks, self.order, tuple(self.labels), tuple(self.people), self.routine,
-                            self.open_ids, self.plan, self.focus, self.typed_days)
+                            self.open_ids, rows_undated, self.focus, self.typed_days, list_undated=not LOOK.classic)
         self.scale.tl = tl
         self._show_range(tl)
         self.scale.set_order(self.order)
+        self._fit_room()
         self._sync_inset()
         self.head.set_timeline(model, today, model.task(self.focus).title if self.focus else "", self.sel, field_names(self.order)[0])
         self.chart.set_timeline(model, today, self.sel, self.plan, self.bars, self.a_week, self.order)
+        if not LOOK.classic:  # gone where nothing nests
+            for i, b in enumerate(self.level_buttons):
+                b.move(self.scale.key_w + 40 + i * 24, 20)
+                b.setVisible(any(r.kids for r in tl.rows))
         self.plan_strip.setVisible(self.plan)
         self._card()
         self.undated_ids = tl.undated
         self._draw_undated()
+        if not LOOK.classic:
+            self._render_capacity()
+            self._fit_split()
 
     def _draw_undated(self) -> None:
-        """The tasks with no dates: their names if they fit on one line, or else how many, with the names behind the fold."""
+        """The tasks with no dates: their names if they fit on one line, or else how many, with the names behind the fold. On
+        the page they're a count on the line under the chart, and with the fold open in Plan mode they're rows on the chart."""
         ids = self.undated_ids
+        if not LOOK.classic:
+            n = len(ids)
+            self.undated_fold.setVisible(bool(n))
+            set_fold(self.undated_fold, f"{n} with no dates", self.undated_open)
+            self.undated_box.setVisible(bool(n) and self.undated_open)
+            if n and self.undated_open and self.model is not None:
+                if self.plan:
+                    self.undated_names.setText("They're on the chart now, each with a ⋮⋮ to drag onto the dates.")
+                else:
+                    names = ", ".join(f'<a href="task:{esc(x)}">{esc(self.model.task(x).title)}</a>' for x in ids)
+                    self.undated_names.setText(f'{names}. <a href="plan:">Plan mode</a> puts them on the chart, to drag onto the dates.')
+                self.undated_box.setFixedHeight(min(UNDATED_MAX_HEIGHT, self.undated_names.heightForWidth(max(200, self.scale.room or 200))))
+            return
         self.undated_bar.setVisible(bool(ids))
         if not ids or self.model is None:
             self.undated_box.hide()
@@ -1200,10 +1607,27 @@ class TimelineView(QWidget):
 
     def _toggle_undated(self) -> None:
         self.undated_open = not self.undated_open
-        self._draw_undated()
         self.settings_changed.emit(self.settings())
+        if not LOOK.classic and self.plan and self.model is not None:  # its rows join the chart or leave it
+            self.render(self.model, self.today)
+            return
+        self._draw_undated()
+
+    def _fit_room(self) -> None:
+        """Every part of the page places a day by the page's width, so the chart, its head and Capacity's rows line up."""
+        m = self.layout().contentsMargins()
+        room = self.width() - m.left() - m.right()
+        if room == self.scale.room:
+            return
+        self.scale.room = room
+        if self.scale.tl is not None:
+            self.head._place()
+            self.head.update()
+            self.chart.update()
 
     def _sync_inset(self) -> None:
+        if not LOOK.classic:  # the page keeps the room for a scroll bar whether or not one shows
+            return
         bar = self.scroll.verticalScrollBar()
         inset = bar.sizeHint().width() if bar.maximum() > 0 else 0
         if inset != self.scale.inset:
@@ -1217,6 +1641,105 @@ class TimelineView(QWidget):
             self.set_plan(True)
         else:
             self.open_task.emit(ref)
+
+    @staticmethod
+    def _fill(box: QComboBox, items: list[tuple], current) -> None:
+        """A combo box's items and choice, without saying it changed. Its list changes only when it has to."""
+        box.blockSignals(True)
+        if [(box.itemData(i), box.itemText(i)) for i in range(box.count())] != list(items):
+            box.clear()
+            for value, label in items:
+                box.addItem(label, value)
+        box.setCurrentIndex(max(0, box.findData(current)))
+        box.blockSignals(False)
+
+    def _box_changed(self, box: QComboBox, key: str) -> None:
+        value = box.currentData()
+        if value == 0 and key == "weeks":  # Show these dates is what a typed range says, not a choice
+            return
+        self._set(key, value)
+
+    def _sync_tools(self) -> None:
+        """The page's controls say what's chosen. Those that list people or labels are made again when the list changes."""
+        m = self.model
+        assert m is not None
+        self.plan_button.setChecked(self.plan)
+        shows = [(n, f"Show {label}") for n, label in timeline.RANGES]
+        self._fill(self.show_box, [*shows, (0, "Show these dates")] if self.typed_days else shows, 0 if self.typed_days else self.weeks)
+        self._fill(self.order_box, [(k, label[0].upper() + label[1:]) for k, label in timeline.order_choices(m)], self.order)
+        self._fill(self.bars_box, [(k, label) for k, label in timeline.BARS], self.bars)
+        self._fill(self.focus_box, [("", "All projects"), *self._focus_choices()], self.focus or "")
+        self.hours_buttons[self.a_week].setChecked(True)
+        self.routine_box.blockSignals(True)
+        self.routine_box.setChecked(self.routine)
+        self.routine_box.blockSignals(False)
+        choices, sets = people_filter(m)
+        self.people_button = self._menu_button(self.people_button, "People", "anyone", choices, sets, self.people, "people",
+                                               lambda b: self.time_layout.insert_widget(self.time_layout.indexOf(self.display_button), b))
+        choices, sets = label_filter(m)
+        self.labels_button = self._menu_button(self.labels_button, "Labels", "any", choices, sets, self.labels, "labels",
+                                               lambda b: self.display_grid.addWidget(b, 5, 1))
+        self.legend.setText(self._legend_text())
+        self._sync_chips()
+        for value, b in self.unit_buttons.items():
+            b.setChecked(value == self.cap_unit)
+        self.cap_group.blockSignals(True)
+        self.cap_group.setChecked(self.cap_by_group)
+        self.cap_group.blockSignals(False)
+
+    def _menu_button(self, old: CheckMenuButton | None, noun: str, empty: str, choices, sets, picked: list[str], key: str, place: Callable) -> CheckMenuButton:
+        """A filter's button, kept while its list and ticks are as they were."""
+        ids = [v for _, v in choices]
+        if old is not None and [a.data() for a in old.choices] == ids and [a.text() for a in old.choices] == [t for t, _ in choices] and sorted(old.values()) == sorted(picked):
+            return old
+        if old is not None:  # hidden now, deleted once the signal that redraws the view has returned
+            self.time_layout.removeWidget(old)
+            self.display_grid.removeWidget(old)
+            old.hide()
+            old.deleteLater()
+        b = CheckMenuButton(noun, empty, choices, picked, sets)
+        b.chosen.connect(lambda values, key=key: self._set(key, values))
+        place(b)
+        return b
+
+    def _sync_chips(self) -> None:
+        """The filters in use, each with its ×."""
+        m = self.model
+        assert m is not None
+        wanted = [("people", p, m.person_name(p)) for p in self.people] + [("labels", n, n) for n in self.labels]
+        if self.focus and self.focus in m.tasks:
+            wanted.append(("focus", self.focus, f"Focus: {m.task(self.focus).title}"))
+        if tuple(wanted) == self._chips_shown:
+            return
+        self._chips_shown = tuple(wanted)
+        while self.chips_layout.count():
+            w = self.chips_layout.takeAt(0).widget()
+            if w is not None:
+                w.hide()
+                w.deleteLater()
+        for kind, value, words in wanted:
+            b = QPushButton(f"{words}  ×", objectName="filterChip")
+            b.setToolTip(f"Stop filtering by {words}")
+            b.clicked.connect(lambda _=False, kind=kind, value=value: self._drop_filter(kind, value))
+            self.chips_layout.addWidget(b)
+        self.chips.setVisible(bool(wanted))
+
+    def _drop_filter(self, kind: str, value: str) -> None:
+        if kind == "focus":
+            self._set("focus", "")
+        else:
+            self._set(kind, [x for x in getattr(self, kind) if x != value])
+
+    def _legend_text(self) -> str:
+        """What the marks and colours mean, behind the Legend button."""
+        colour = C.g1 if self.bars == "project" else C.bar
+        marks = "<br>".join(_entry(mark, words) for mark, words in self._marks(colour))
+        keys = self._keys_legend()
+        cell = '<span style="background-color:{}">&nbsp;&nbsp;&nbsp;&nbsp;</span>'
+        steps = "<br>".join(_entry(cell.format(c), words) for c, words in ((C.load1, "Under 40%"), (C.load2, "40 to 79%"), (C.load3, "80 to 100%"),
+                                                                            (C.load4, "Over 100%"), (C.load5, "125% or more")))
+        extra = f"<br><br>{keys}" if keys else ""
+        return f"<b>The bars</b><br>{marks}{extra}<br><br><b>A week's load</b><br>{steps}"
 
     def _controls(self) -> None:
         """The controls in two rows, each in groups with a divider between (the playbook's toolbar groups): time and what's
@@ -1285,7 +1808,7 @@ class TimelineView(QWidget):
         lay.addWidget(plan)
         lay = self.show_layout
         combo(lay, "Order by", [(k, f"Order by {label}") for k, label in timeline.order_choices(m)], self.order, "order")
-        combo(lay, "Colour bars by", [(k, f"Colour bars by {label.lower()}") for k, label in timeline.BARS], self.bars, "bars")
+        combo(lay, "Colour bars by", [(k, f"Colour bars by {label.lower()}") for k, label in timeline.BARS if k != "one"], self.bars, "bars")
         seg = QWidget()
         sl = QHBoxLayout(seg)
         sl.setContentsMargins(0, 0, 0, 0)
@@ -1358,20 +1881,26 @@ class TimelineView(QWidget):
 
     def settings(self) -> dict:
         kept = {k: getattr(self, k) for k in self.REMEMBERED}
+        kept["bars_v"] = 2  # bars can be one colour: a "project" saved since then was chosen
         if self.typed_days and self.start is not None:  # a typed range: its days, until a Show choice replaces them
             kept["range"] = [self.start.isoformat(), (self.start + timedelta(days=self.typed_days - 1)).isoformat()]
         return kept
 
     def restore(self, saved: dict) -> None:
         """The choices kept from last time, each only when it's still one the view offers."""
-        valid = {"weeks": {n for n, _ in timeline.RANGES}, "bars": {k for k, _ in timeline.BARS}}
+        valid = {"weeks": {n for n, _ in timeline.RANGES}, "bars": {k for k, _ in timeline.BARS if k != "one" or not LOOK.classic},
+                 "cap_unit": {"pct", "hours"}}
         for key in self.REMEMBERED:
             value = saved.get(key)
             if value is None or (key in valid and value not in valid[key]):
                 continue
-            if key in ("a_week", "routine", "undated_open"):
+            if key == "bars" and value == "project" and not saved.get("bars_v"):  # saved before bars could be one colour (decision 234)
+                continue
+            if key in ("a_week", "routine", "undated_open", "cap_open", "cap_by_group"):
                 value = bool(value)
             elif key == "order" and not isinstance(value, str):
+                continue
+            elif key == "cap_h" and not isinstance(value, int):
                 continue
             setattr(self, key, value)
         try:
@@ -1483,22 +2012,279 @@ class TimelineView(QWidget):
         if self.model is not None:
             self.render(self.model, self.today)
 
-    def _pick(self, task_id: str) -> None:
+    def _pick(self, task_id: str | None) -> None:
         self.sel = task_id
         if self.model is not None:
             self.chart.sel = self.head.sel = task_id
             self.chart.update()
             self.head.update()
             self._card()
-            top = self.chart.top_of(task_id)
+            top = self.chart.top_of(task_id) if task_id else None
             if top is not None:
                 self.scroll.ensureVisible(0, top + self.chart.ROW_H // 2, 0, self.chart.ROW_H)
+            if not LOOK.classic:
+                self._draw_capacity()
         self.chart.setFocus()
 
     def _quick_from_card(self) -> None:
-        if self.sel:
-            r = self.card.rect()
-            self.quick_edit.emit(self.sel, QRect(self.card.mapToGlobal(r.topLeft()), r.size()))
+        if not self.sel:
+            return
+        top = self.chart.top_of(self.sel)
+        row = next((r for r in self.chart.rows if r.task == self.sel), None)
+        bar = self.chart.bar_rect(row, top) if row is not None and top is not None else None
+        if bar is not None and not LOOK.classic:  # beside its bar when there's one to be beside
+            self.quick_edit.emit(self.sel, QRect(self.chart.mapToGlobal(bar.topLeft().toPoint()), bar.size().toSize()))
+            return
+        r = self.card.rect()
+        self.quick_edit.emit(self.sel, QRect(self.card.mapToGlobal(r.topLeft()), r.size()))
+
+    # ---- Capacity's half ----
+    def show_capacity(self) -> None:
+        """Capacity's key and its other routes: this page, with Capacity showing (decision 229)."""
+        if not self.cap_open:
+            self.cap_open = True
+            self.settings_changed.emit(self.settings())
+
+    def _chosen_people(self) -> list:
+        m = self.model
+        assert m is not None
+        people = m.active_people()
+        return [p for p in people if p.id in self.people] if self.people else people
+
+    def _render_capacity(self) -> None:
+        """The hours in view, read again, and everything that says them."""
+        tl = self.scale.tl
+        if self.model is None or tl is None:
+            return
+        self.cap_box.setVisible(self.load_cells is not None)
+        weeks = load.mondays(tl.start, tl.end)
+        self.cells = self.load_cells(weeks) if self.load_cells else {}
+        self._draw_capacity()
+
+    def _draw_capacity(self) -> None:
+        """Everything that says the hours: the sentence, the team chart, the rows, the spotlight and the card."""
+        m, tl = self.model, self.scale.tl
+        if m is None or tl is None or LOOK.classic:
+            return
+        people = self._chosen_people()
+        week_px = self.scale.width_of(self) / max(1.0, tl.days / 7)
+        buckets = load.buckets(tl.start, tl.end, week_px)
+        if self.spot is not None and not any(b.first == self.spot.first and b.end == self.spot.end for b in buckets):
+            self.spot = None  # out of view, or a week that's now part of a month
+        if self.spot is not None and self.spot.person and all(p.id != self.spot.person for p in people):
+            self.spot = None
+        weeks = [w for b in buckets for w in b.weeks]
+        lead, who = load.sentence(load.case(self.cells, people, weeks, self.today), m.person_name, self.today)
+        self.cap_say.setText(f"<b>{esc(lead)}</b> {esc(who)}" if people else "")
+        self.cap_fold.setIcon(icon("chevron-down" if self.cap_open else "chevron-right"))
+        self.cap_fold.setToolTip("Fold Capacity" if self.cap_open else "Open Capacity")
+        chosen = {self.sel, *m.descendants_of(self.sel)} if self.sel and self.sel in m.tasks and self.spot is None else set()
+        data = StripData(m, self.today, self.cells, people, buckets, self.cap_unit, self.cap_by_group, load.adds_to(self.cells, chosen), self.spot,
+                         self.chart.hover_week)
+        self.cap_team.set_data(data)
+        self.cap_rows.set_data(data)
+        for w in (self.cap_team, self.cap_scroll):
+            w.setVisible(self.cap_open and bool(people))
+        self.cap_empty.setVisible(self.cap_open and not people)
+        self._draw_not_counted(people)
+        if self.spot is None:
+            self.chart.strong, self.chart.spot = None, None
+        else:
+            who_ids = [self.spot.person] if self.spot.person else [p.id for p in people]
+            behind = load.cell_tasks(self.cells, who_ids, [w for b in buckets if b.first == self.spot.first for w in b.weeks])
+            self.chart.strong = {x for task, _ in behind if task in m.tasks for chain in m.chains_of(task) for x in chain}
+            self.chart.spot = (self.spot.first, self.spot.end)
+            self._draw_card(behind, people, next(b for b in buckets if b.first == self.spot.first))
+        self.cap_card.setVisible(self.spot is not None)
+        self.chart.update()
+
+    def _draw_not_counted(self, people: list) -> None:
+        """What Capacity can't count: people but no hours, or hours but no dates. It's said, as it makes the load look lighter."""
+        m = self.model
+        assert m is not None
+        hours, dates = self.load_unplaced(m, self.today) if self.load_unplaced else ([], [])
+        ids = {p.id for p in people}
+
+        def mine(found: list[str]) -> list[str]:
+            return [x for x in found if not self.people or ids & {*m.task(x).leads, *m.task(x).assignees}]
+
+        self.not_counted_ids = {"hours": mine(hours), "dates": mine(dates)}
+        parts = []
+        for key, words in (("hours", "with people but no hours"), ("dates", "with hours but no dates")):
+            n = len(self.not_counted_ids[key])
+            if n:
+                parts.append(f'<a href="nc:{key}">{n} {"task" if n == 1 else "tasks"} {words}</a>')
+        self.cap_note.setVisible(self.cap_open and bool(parts))
+        self.cap_note.setText("Not counted, so the load could be higher: " + ", ".join(parts))
+        shown = self.not_counted_ids.get(self.not_counted, [])
+        self.cap_list_box.setVisible(self.cap_open and bool(shown))
+        self.cap_list.setText(", ".join(f'<a href="task:{esc(x)}">{esc(m.task(x).title)}</a>' for x in shown))
+        if shown:
+            self.cap_list_box.setFixedHeight(min(UNDATED_MAX_HEIGHT, self.cap_list.heightForWidth(self.scale.room or self.width())))
+
+    def _note_link(self, href: str) -> None:
+        key = href.partition(":")[2]
+        self.not_counted = "" if self.not_counted == key else key
+        self._draw_capacity()
+        self._fit_split()
+
+    def _natural_height(self) -> int:
+        """Capacity's half with all its rows showing."""
+        room = self.scale.room or self.width()
+        return (self._head_height() + (self.cap_team.height() if self.cap_team.isVisibleTo(self) else 0)
+                + (self.cap_rows.natural_height() if self.cap_scroll.isVisibleTo(self) else 0)
+                + (self.cap_empty.sizeHint().height() if self.cap_empty.isVisibleTo(self) else 0)
+                + (self.cap_note.heightForWidth(room) if self.cap_note.isVisibleTo(self) else 0)
+                + (self.cap_list_box.height() if self.cap_list_box.isVisibleTo(self) else 0) + 2)
+
+    def _head_height(self) -> int:
+        """Capacity's head at this width: its sentence wraps."""
+        return self.cap_head.layout().totalHeightForWidth(self.scale.room or self.width())
+
+    def _fit_split(self) -> None:
+        """Its height: folded, only its head; dragged, as it was left; otherwise all its rows, up to its share of the page."""
+        total = sum(self.split.sizes())
+        if total <= 0 or self.load_cells is None:
+            return
+        if not self.cap_open:
+            want = self._head_height() + 2
+            self.cap_box.setMinimumHeight(want)
+            self.cap_box.setMaximumHeight(want)
+            self.split.handle(1).setEnabled(False)
+        else:
+            self.cap_box.setMinimumHeight(self.CAP_MIN)
+            self.cap_box.setMaximumHeight(16777215)
+            self.split.handle(1).setEnabled(True)
+            want = self.cap_h if self.cap_h is not None else min(self._natural_height(), int(total * self.CAP_SHARE))
+        want = max(self.cap_box.minimumHeight(), min(want, total - self.TOP_MIN))
+        if self.split.sizes()[1] != want:
+            self.split.blockSignals(True)
+            self.split.setSizes([total - want, want])
+            self.split.blockSignals(False)
+
+    def _split_moved(self, *_) -> None:
+        """The divider was dragged: its place is kept."""
+        self.cap_h = self.split.sizes()[1]
+        self.settings_changed.emit(self.settings())
+        self._place_card()
+
+    def _week_hovered(self, week) -> None:
+        """A week under the mouse in Capacity shows through the chart and the other half, with nothing drawn again."""
+        if week == self.chart.hover_week:
+            return
+        self.chart.hover_week = week
+        self.chart.update()
+        for strip in (self.cap_team, self.cap_rows):
+            strip.data.hover = week
+            strip.update()
+
+    def _cell_picked(self, person: str, first: date, end: date) -> None:
+        """The spotlight on a week (decision 233), or off it, for a second click on the same one."""
+        spot = Spot(person, first, end)
+        self.spot = None if self.spot == spot else spot
+        if self.spot is not None and self.sel:
+            self.sel = self.chart.sel = self.head.sel = None
+            self._card()
+            self.head.update()
+        self._draw_capacity()
+
+    def clear_spot(self) -> None:
+        self.spot = None
+        self._draw_capacity()
+
+    def _solo(self, person: str) -> None:
+        """A name in Capacity: only them, bars and load, or back to everyone (decision 232)."""
+        self._set("people", [] if self.people == [person] else [person])
+
+    def _draw_card(self, behind: list[tuple[str, float]], people: list, bucket: load.Bucket) -> None:
+        """The spotlight's card: whose week it is, how full, and the tasks behind it, biggest first."""
+        m, spot = self.model, self.spot
+        assert m is not None and spot is not None
+        old = self.cap_card.layout()
+        if old is not None:
+            while old.count():
+                item = old.takeAt(0)
+                if item.widget() is not None:
+                    item.widget().hide()
+                    item.widget().deleteLater()
+            grid = old
+        else:
+            grid = QGridLayout(self.cap_card)
+            grid.setContentsMargins(12, 8, 8, 10)
+            grid.setHorizontalSpacing(10)
+            grid.setVerticalSpacing(4)
+        who = next((p for p in people if p.id == spot.person), None)
+        weeks = len(bucket.weeks)
+        cap = ((who.hours or 0) if who else load.capacity_of(people)) * weeks
+        total = sum(h for _, h in behind)
+        when = load.when(bucket, self.today)
+        title = QLabel(f"{who.name if who else 'Team'}, {when}")
+        title.setTextFormat(Qt.TextFormat.PlainText)
+        title.setFont(tokens.ui_font(semibold=True))
+        grid.addWidget(title, 0, 0)
+        says = QLabel(f"{round(total, 1):g} h" + (f" of {round(cap, 1):g} h, {round(total / cap * 100)}%" if cap else ""), objectName="hint")
+        grid.addWidget(says, 0, 1)
+        close = QToolButton(objectName="checkFold")
+        close.setText("×")
+        close.setAccessibleName("Close")
+        close.setToolTip("Close (Esc)")
+        close.clicked.connect(lambda: self.clear_spot())
+        grid.addWidget(close, 0, 2, Qt.AlignmentFlag.AlignRight)
+        for i, (task, hours) in enumerate(behind[:7], 1):
+            path = " › ".join(m.task(x).title for x in m.chains_of(task)[0][:-1]) if task in m.tasks else ""
+            words = m.task(task).title if task in m.tasks else task
+            line = QLabel(f'<a href="task:{esc(task)}">{esc(words)}</a>' + (f'<br><span style="color:{MUTED}; font-size:{tokens.CAPTION}pt">{esc(path)}</span>' if path else ""))
+            line.setTextFormat(Qt.TextFormat.RichText)
+            line.linkActivated.connect(lambda href: self._card_task(href.partition(":")[2]))
+            grid.addWidget(line, i, 0, 1, 1)
+            amount = QLabel(f"{round(hours, 1):g} h")
+            amount.setFont(tokens.numeric_font())
+            grid.addWidget(amount, i, 1, Qt.AlignmentFlag.AlignRight)
+        if not behind:
+            grid.addWidget(QLabel("Nothing scheduled.", objectName="hint"), 1, 0, 1, 3)
+        if len(behind) > 7:
+            grid.addWidget(QLabel(f"and {len(behind) - 7} more, under {round(behind[7][1] + 0.05, 1):g} h each", objectName="hint"), 8, 0, 1, 3)
+        grid.setColumnStretch(0, 1)
+        self.cap_card.setFixedWidth(min(420, max(240, self.width() - 16)))
+        self.cap_card.adjustSize()
+        self.cap_card.raise_()
+        self._place_card()
+
+    def _place_card(self) -> None:
+        """Over the page, above its cell, or under it when there's no room above, so nothing moves."""
+        spot = self.spot
+        if LOOK.classic or spot is None:
+            return
+        b = next((x for x in self.cap_rows.data.buckets if x.first == spot.first), None)
+        if b is None:
+            return
+        if spot.person:
+            line = self.cap_rows.line_of(spot.person)
+            if line is None:
+                return
+            r = self.cap_rows.cell_rect(line, b).toRect()
+            at = QRect(self.cap_rows.mapTo(self, r.topLeft()), r.size())
+        else:
+            r = self.cap_team.column_rect(b).toRect()
+            at = QRect(self.cap_team.mapTo(self, r.topLeft()), r.size())
+        w, h = self.cap_card.width(), self.cap_card.sizeHint().height()
+        x = max(8, min(self.width() - w - 8, at.center().x() - w // 2))
+        y = at.top() - h - 8
+        if y < 8:
+            y = min(self.height() - h - 8, at.bottom() + 8)
+        self.cap_card.setGeometry(x, y, w, h)
+
+    def _card_task(self, task_id: str) -> None:
+        """A task on the spotlight's card: selected on the chart, with its parents opened so its row is there."""
+        m = self.model
+        if m is None or task_id not in m.tasks:
+            return
+        folded = [x for chain in m.chains_of(task_id)[:1] for x in chain[:-1] if x not in self.open_ids]
+        if folded:
+            self.open_ids.update(folded)
+            self.folds_changed.emit(sorted(self.open_ids))
+            self.render(m, self.today)
+        self._pick(task_id)
 
     def _dropped(self, task_id: str, start: date, end: date, mode: str) -> None:
         """A Plan mode drop: the new dates, kept for Ctrl+Z, and sent to be saved and logged."""
@@ -1554,6 +2340,43 @@ class TimelineView(QWidget):
         items = [f"<span style='color:{FAINT if kd.done else FG}'>{esc(timeline.key_date_text(kd, today))}</span>" for kd in kds]
         return f"<br><span style='color:{MUTED}'>Key dates:</span> " + " &nbsp;·&nbsp; ".join(items)
 
+    def _foot(self, t: Task | None) -> None:
+        """The line under the chart for the row clicked last: its title, state, dates, hours and people, with the rest in its
+        tooltip. It's always there, so picking a bar moves nothing (decision 292)."""
+        m, today = self.model, self.today
+        if t is None or m is None:
+            self.card_text.set_line("", "Click a bar for its details, or a week in Capacity for what fills it." if LOOK.show_help else "")
+            return
+        row = next((r for r in self.chart.rows if r.task == t.id), None)
+        if timeline.is_undated(t, today) and row is not None and row.span:
+            dates = f"Its subtasks: {short(row.span[0], today)} to {short(row.span[1], today)}"
+        elif timeline.is_undated(t, today):
+            dates = "No dates of its own" if m.key_dates_of(t.id) else "No dates yet"
+        elif t.recurrence:
+            due = due_of(t, today)
+            dates = t.recurrence + (f", next {short(due.date, today)}" if due else "")
+        else:
+            end = to_date(t.due or t.deadline) if (t.due or t.deadline) else None
+            dates = f"{short(start_of(t), today)} to {short(end, today) if end else 'no end date'}"
+        if t.deadline and (t.due or t.recurrence):
+            dates += f" · Deadline {short(to_date(t.deadline), today)}"
+
+        def people(ids: list[str]) -> str:
+            return ", ".join(m.person_name(p) for p in ids) or "None"
+
+        parts = [t.state, dates, timeline.hours_words(m, t, today)]
+        if t.leads:
+            parts.append(f"Lead: {people(t.leads)}")
+        if t.assignees:
+            parts.append(f"Assignees: {people(t.assignees)}")
+        if t.plant_event:
+            parts.append("Plant event")
+        kds = m.key_dates_of(t.id)
+        if kds:
+            parts.append("Key dates: " + ", ".join(timeline.key_date_text(kd, today) for kd in kds))
+        path = " › ".join(m.task(x).title for x in m.chains_of(t.id)[0][:-1]) or "Top-level task"
+        self.card_text.set_line(t.title, " · ".join(parts), f"{t.title}\n{path}\n" + "\n".join(parts))
+
     def _card(self) -> None:
         """The card for the row clicked last: its title, state, path, dates, hours and people, with Open task, Quick edit and
         Update."""
@@ -1561,6 +2384,9 @@ class TimelineView(QWidget):
         t = m.tasks.get(self.sel) if m and self.sel else None
         for b in (self.open_button, self.quick_button, self.update_button):
             b.setVisible(t is not None)
+        if not LOOK.classic:
+            self._foot(t)
+            return
         self.card.setVisible(t is not None or LOOK.show_help)  # no card, and no sentence about it, until a row is picked
         if t is None or m is None:
             self.card_text.setMinimumHeight(0)

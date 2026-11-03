@@ -41,6 +41,10 @@ LIGHT = {
     "hour1": "#86b6ef", "hour2": "#5598e7", "hour3": "#256abf", "hour4": "#184f95", "hour5": "#0d366b",
     "hour_ink1": "#0b1b2e", "hour_ink2": "#0b1b2e", "hour_ink3": "#ffffff", "hour_ink4": "#ffffff", "hour_ink5": "#ffffff",
     "pri_high": "#d9622b",
+    # The Timeline page (release 5.40): bars' one colour, the team chart's hours within capacity, and a week's load, a cell's
+    # steps from under 40% to 125% or more, with the text on the last.
+    "bar": "#64788c", "bar_soft": "#9fabb8",
+    "load1": "#f4f4f5", "load2": "#e1e2e3", "load3": "#f7d894", "load4": "#e6a6a0", "load5": "#b3261a", "load5_ink": "#ffffff",
     # The capture window's item cards, each kind's edge, and its references.
     "item_task": "#e3ecf7", "item_note": "#e0f1ee", "item_update": "#f6ecd8", "item_decision": "#ece6f6", "item_date": "#e8f0dc", "item_heading": "#e9edf1",
     "ref_task": "#22706a", "ref_task_bg": "#d6eeea",
@@ -61,6 +65,8 @@ DARK = {
     "hour1": "#1c3a5e", "hour2": "#25507f", "hour3": "#3a70ad", "hour4": "#6699d4", "hour5": "#9cc0ea",
     "hour_ink1": "#ffffff", "hour_ink2": "#ffffff", "hour_ink3": "#ffffff", "hour_ink4": "#0b1b2e", "hour_ink5": "#0b1b2e",
     "pri_high": "#f08a69",
+    "bar": "#8fa3b6", "bar_soft": "#5f6f7d",
+    "load1": "#343434", "load2": "#454545", "load3": "#6b5220", "load4": "#8a3a32", "load5": "#e8776c", "load5_ink": "#1b1b1b",
     "item_task": "#1f3447", "item_note": "#1c3532", "item_update": "#3a2e13", "item_decision": "#2d2b3d", "item_date": "#26331c", "item_heading": "#333333",
     "ref_task": "#56c2b0", "ref_task_bg": "#1c3532",
     "caution": "#e8b85c", "caution_bg": "#3a2e13", "caution_line": "#5a4720", "critical": "#f3968e", "critical_bg": "#3e1f1c",
@@ -342,6 +348,12 @@ QTextEdit#checkText, QTextEdit#checkText:focus { border: none; border-radius: 0;
 QLabel#checkCount, QLabel#checkHeading { color: $text2; }
 QLabel#checkHeading { padding-top: 6px; padding-left: 4px; }
 QToolButton#checkFold, QToolButton#rowAction { border: none; background: transparent; padding: 0 2px; }
+QFrame#popover, QFrame#capCard { background: $content; border: 1px solid $stroke_strong; border-radius: 8px; }
+QPushButton#filterChip { background: $info_bg; border: none; border-radius: 4px; padding: 2px 10px; min-height: 18px; max-height: 22px; }
+QPushButton#filterChip:hover { background: $pressed; }
+QFrame#timelineFoot { background: $content; border-top: 1px solid $stroke; }
+QSplitter#timelineSplit::handle:vertical { height: 7px; background: $base; border-top: 1px solid $stroke_strong; border-bottom: 1px solid $stroke_strong; }
+QSplitter#timelineSplit::handle:vertical:hover { background: $hover; }
 QToolButton#linkMark { border: none; background: transparent; padding: 0 3px; color: $text2; font-size: ${caption}pt; }
 QToolButton#linkMark:hover { background: $hover; color: $accent; }
 QLabel#linkLeaving { color: $caution; font-size: ${caption}pt; }

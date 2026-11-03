@@ -213,6 +213,26 @@ print(json.dumps(out))
 
 
 @windows_only
+def test_the_timeline_pages_controls_fit_one_row_and_its_parts_share_the_axis():
+    """The review's stage V5: one row of controls at the usual window, not three, and a day in one place all down the page."""
+    got = run_look(SAMPLE + """
+from datetime import date
+browse.set_view("timeline")
+browse.resize(1574, 918)  # 82% and 85% of a 1920 by 1080 screen, how it opens
+settle()
+view = browse.timeline
+day = date(2026, 10, 26)
+xs = [view.scale.x(w, day) for w in (view.head, view.chart, view.cap_team, view.cap_rows)]
+print(json.dumps({"tools": view.tools.height(), "button": view.plan_button.height(), "xs": xs, "top": view.split.sizes()[0], "bottom": view.split.sizes()[1],
+                  "right": view.range_box.geometry().right(), "width": view.tools.width()}))
+""", "windows")
+    assert got["tools"] <= got["button"] + 2, got
+    assert got["right"] >= got["width"] - 2, got  # the range at the row's right end
+    assert len(set(got["xs"])) == 1, got
+    assert got["top"] >= got["bottom"] * 0.6, got  # the chart keeps its room
+
+
+@windows_only
 def test_the_task_page_is_as_narrow_as_its_pane():
     """It stayed 481 px wide in a 288 px pane, so its words ran off the edge with nothing to show it."""
     got = run_look(SAMPLE + """

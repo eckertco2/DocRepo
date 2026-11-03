@@ -228,9 +228,9 @@ def test_only_new_capture_is_filled_in_the_browse_window(browse):
 
 def test_instructions_wait_for_show_hints(browse, hints_off):
     browse.set_view("timeline")
-    assert browse.timeline.card.isHidden()  # no card until a row is picked
+    assert browse.timeline.card_text.text() == "" and browse.timeline.open_button.isHidden()  # nothing said until a row is picked
     browse.timeline._pick("T000001")
-    assert not browse.timeline.card.isHidden()
+    assert browse.timeline.card_text.text() and not browse.timeline.open_button.isHidden()
     browse.set_view("priorities")
     browse.priorities.sel = None
     browse.priorities._strip()
@@ -238,13 +238,14 @@ def test_instructions_wait_for_show_hints(browse, hints_off):
     assert not [w for w in browse.priorities.findChildren(QLabel, "hotkey") if not w.isHidden()]  # the digits, too
     assert all(not b.text()[0].isdigit() for b in browse.priorities.bucket_buttons.values())
     browse.set_view("capacity")
-    assert "Click a cell" not in browse.cap_detail.toPlainText()
+    browse.timeline._pick(None)
+    assert "Capacity" not in browse.timeline.card_text.text()
     pages = browse.pages() if callable(getattr(browse, "pages", None)) else None
     if pages is not None:
         assert pages.hints is False
     set_hints(True)
     browse.render_all()
-    assert "Click a cell" in browse.cap_detail.toPlainText()
+    assert "a week in Capacity" in browse.timeline.card_text.text()
 
 
 def test_an_error_stays_until_the_next_thing_is_said(browse):
@@ -317,9 +318,11 @@ def test_list_rows_show_states_as_words(browse):
 
 def test_capacity_marks_the_clicked_cell_after_drawing_again(browse):
     browse.set_view("capacity")
-    t = browse.findChild(QTableWidget) if browse.cap_table is None else browse.cap_table
-    browse._capacity_clicked(0, 2)
-    assert (t.currentRow(), t.currentColumn()) == (0, 2)
+    view = browse.timeline
+    b = view.cap_rows.data.buckets[2]
+    view._cell_picked("P001", b.first, b.end)
+    browse.render_all()
+    assert view.spot is not None and view.cap_rows.data.spot == view.spot
 
 
 def test_a_parse_that_fills_much_leaves_dots_and_one_that_fills_little_a_tint(ctx):
@@ -400,8 +403,9 @@ def test_a_new_data_roots_task_tree_says_what_to_do(qapp, tmp_path, fs, data_roo
     assert [b.text() for b in w.tree._empty.findChildren(QPushButton)] == ["New task"]
     assert w.tree.isHeaderHidden()
     w.set_view("capacity")
-    assert not w.cap_empty.isHidden() and w.cap_table.isHidden()
-    assert [b.text() for b in w.cap_empty.findChildren(QPushButton)] == ["Add person"]
+    view = w.timeline
+    assert not view.cap_empty.isHidden() and view.cap_scroll.isHidden() and view.cap_team.isHidden()
+    assert [b.text() for b in view.cap_empty.findChildren(QPushButton)] == ["Add person"]
     capture.deleteLater()
     w.deleteLater()
     conn.close()

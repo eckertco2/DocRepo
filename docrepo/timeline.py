@@ -5,8 +5,8 @@ straight down. A row's bar runs from Start to Due (or to the Deadline when there
 routine task is a row of dots, one for each occurrence (a short bar when an occurrence spans days). A row with subtasks
 on the chart has a summary bar, their span, with their deadlines; a parent with no dates in view has only that. There are
 no group headers: Order by (top-level task, label, person, group, or a parent label's sublabels) sorts the rows that share
-a parent by their key, then by their first date, and colours each title by its key. Bars are coloured by project, hours a
-week or priority (``BARS``), and show their hours. The Labels and People filters work as the task tree's do. Parked,
+a parent by their key, then by their first date, and colours each title by its key. Bars are one colour, or coloured by
+project, hours a week or priority (``BARS``; decision 234), and show their hours. The Labels and People filters work as the task tree's do. Parked,
 closed and discarded tasks are left out, and open tasks with no dates are named under the chart; in Plan mode (release
 5.30) they're rows of their own, to be dragged onto it. Focus shows one task and everything under it.
 
@@ -39,7 +39,7 @@ from docrepo.stories import and_list
 ORDERS = (("top", "Top-level task"), ("label", "Label"), ("person", "Person"), ("group", "Group"))
 PARENT = "parent:"
 #: What the bars can be coloured by.
-BARS = (("project", "Project"), ("hours", "Hours a week"), ("priority", "Priority"))
+BARS = (("one", "One colour"), ("project", "Project"), ("hours", "Hours a week"), ("priority", "Priority"))
 #: Hours a week, light to dark: (below this many, its name).
 HOUR_BINS = ((2.0, "Under 2"), (5.0, "2 to 5"), (10.0, "5 to 10"), (20.0, "10 to 20"), (math.inf, "20 or more"))
 #: The ranges the view offers, in weeks.
@@ -321,10 +321,10 @@ def key_of(m: Model, task_id: str, order: str, keys: list[tuple[str, str]] | Non
 
 def build(m: Model, today: date, start: date, weeks: int, order: str = "top", labels: tuple[str, ...] = (),
           people: tuple[str, ...] = (), routine: bool = True, open_ids: Collection[str] = (), plan: bool = False,
-          focus: str | None = None, typed_days: int | None = None) -> Timeline:
+          focus: str | None = None, typed_days: int | None = None, list_undated: bool = False) -> Timeline:
     """The timeline from ``start`` (a Monday) for ``weeks`` weeks, or from any day for ``typed_days`` days when the range was
     typed: the tree's rows, each shown under its parent when that's in ``open_ids``. In Plan mode, tasks with no dates are
-    rows too. ``focus`` shows that task and what's under it."""
+    rows too, and not listed in ``undated`` unless ``list_undated`` asks. ``focus`` shows that task and what's under it."""
     if typed_days:
         weeks = math.ceil(typed_days / 7)
     end = start + timedelta(days=typed_days or weeks * 7)
@@ -395,7 +395,7 @@ def build(m: Model, today: date, start: date, weeks: int, order: str = "top", la
 
     walk([focus] if focus and focus in m.tasks else [t.id for t in m.top_level()], 0)
     # The built-in Quick tasks (mods log round 2) has no dates of its own, so it's left out of them.
-    undated = () if plan else tuple(t.id for t in m.tasks.values() if base(t) and is_undated(t, today, m))
+    undated = () if plan and not list_undated else tuple(t.id for t in m.tasks.values() if base(t) and is_undated(t, today, m))
     return Timeline(start, weeks, tuple(rows), undated, bands(m, start, end), tuple(name for _, name in keys) if order != "top" else (),
                     typed_days)
 
