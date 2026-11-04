@@ -123,6 +123,26 @@ def test_headings_today_s_heading_and_saving(qapp):
     assert saved == [notes.page()] and not notes.dirty
 
 
+def test_a_long_page_is_laid_out_once_as_it_opens(qapp):
+    """Release 5.68: set_page writes a page as one edit, so a page already shown at a width is laid out once, not again
+    after every line. It's as tall as its text, so each line was a relayout of the whole page: a year of weekly meetings
+    (1,508 lines) took 4 to 5 s to open."""
+    week = ["# Tue 3 Nov 2026", "Attendees: Tom Becker, Priya Nair", "## Pumps", "- Seal on order", "  - due **Fri**",
+            "- [ ] Book the crane", "- [x] Drawings back", notes_page.caption_line("Tue 3 Nov · 10:42 am · Note", "C000101")]
+    body = "\n".join(week * 40)
+    notes = NotesEdit()
+    notes.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen)
+    notes.resize(700, 400)
+    notes.show()
+    notes.set_page("Before")
+    QApplication.processEvents()
+    relayouts = []
+    notes.document().documentLayout().documentSizeChanged.connect(lambda _: relayouts.append(1))
+    notes.set_page(body)
+    assert notes.page() == body
+    assert len(relayouts) <= 2  # one for each of its 320 lines before
+
+
 def test_moving_lines_keeps_what_each_line_is(qapp):
     notes = NotesEdit()
     cap = notes_page.caption_line("Thu 8 Oct 2026 · 10:42 am · Note", "C000101")

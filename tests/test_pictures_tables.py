@@ -187,6 +187,23 @@ def test_a_table_pasted_from_html_and_one_inserted(qapp):
     assert n.page() == "Plain\n| A |  |  |\n|---|---|---|\n|  |  |  |"
 
 
+def test_a_table_pasted_on_a_long_page_is_one_step_for_ctrl_z(qapp):
+    """Release 5.68: the page's lines are styled inside the paste's own edit, so one Ctrl+Z takes the paste back. Styled
+    after it, every line of the page was a step of undo of its own, and a relayout (2.5 s on a year of weekly meetings)."""
+    body = "\n".join(["# Week", "- Seal on order", "Notes on the pumps"] * 50)
+    n = NotesEdit()
+    n.set_page(body)
+    c = QTextCursor(n.document())
+    c.movePosition(QTextCursor.MoveOperation.End)
+    n.setTextCursor(c)
+    md = QMimeData()
+    md.setHtml("<table><tr><td>Part</td><td>Qty</td></tr><tr><td>Gasket</td><td>4</td></tr></table>")
+    n.insertFromMimeData(md)
+    assert "| Part | Qty |" in n.page()
+    n.undo()
+    assert n.page() == body
+
+
 def test_a_table_folds_with_its_section_counted_by_its_rows(qapp):
     n = NotesEdit()
     n.set_page("## H\nIn\n| A | B |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n## Next\nAfter")

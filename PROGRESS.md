@@ -79,6 +79,7 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.62 | Thread A's fields and ties in a capture (decisions 293 to 300): `**duration`, `**weekends`, `**involvement`, a rate in `**hours` and `**lead hours`, and a tie in `**start` and `**due` | Built 2026-11-02 on the `round5-templates` branch, and merged to `main` and on GitHub 2026-11-03, before the owner's hand test. Next: the hand test, then `handoff/docrepo/release-5-62-test.md` |
 | 5.63 | Apply template (decisions 301 to 309): a template put into tasks that already exist, which keep all they have, from Select mode, a template's page or a task's menu | Built 2026-11-02 on the `round5-templates` branch, without a mock at the owner's word, and merged to `main` and on GitHub 2026-11-03, before the owner's hand test. Next: the hand test, then `handoff/docrepo/release-5-63-test.md` |
 | 5.64 | What-ifs on the Timeline page (round 5, thread D, item 73; decisions 226 to 228 and 290): Take off, the drags and a whole parent in whole weeks, kept by name, the load as each would be, and Review and apply | Built 2026-11-03, hand-tested by the owner and merged to `main` the same day |
+| 5.68 | Long notes pages open at once: a page is written in as one edit, laid out once rather than after every line, and a table pasted on a page is one step for Ctrl+Z (found by the design workspace's notes workspace sample) | Built 2026-11-03 in the `notes-load` worktree, hand-tested by the owner and merged to `main` the same day. Not on GitHub yet |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
 ## Decisions
@@ -672,6 +673,18 @@ The owner asked for the review's next stages, and took its decisions V2, V3, V4,
 - **Priorities' columns are at least 216 px,** not the review's 260 to 300, so all five show at 1440 px. They reach 258 px at the 82% window on a 1920 px screen.
 
 
+
+## Release 5.68: long notes pages open at once (2026-11-03)
+
+Found by the design workspace's notes workspace sample (`docs/mods/notes-workspace-sample/`, the notes workspace plan's decision 359), which times a year of weekly meetings on DocRepo's own notes page. No schema change, no new package, nothing new to see: a long page just opens without the wait. 5.65 to 5.67 are round 6's.
+
+- **Opening a page** (`NotesEdit.set_page`). The page was written in a line at a time. The editor is as tall as its text, so once it had been shown at a width, Qt laid the whole page out again after every line: a year of weekly meetings (1,508 lines) took 4 to 5 s to open on the task page or the Task view's Notes page tab. The lines and their styling are now one edit (`beginEditBlock` and `endEditBlock`), so Qt lays the page out once, at its end: the same 1,508 lines open in about 0.15 s, and give exactly the same page back. Moving lines (Alt+Shift+Up and Down) was always one edit, so it was never slow.
+- **Pasting a table** (`NotesEdit._paste_html_tables`, release 5.27). After the paste's edit, every line of the page was styled again, each a relayout and a step of undo of its own: 2.5 s on the year's page, and one Ctrl+Z took back only the last line's styling, not the table. The styling is now inside the paste's edit: about 0.1 s, and one Ctrl+Z takes the paste back.
+- **Measured** on this computer (offscreen, the task pane at 900 px): the year's page opened in 4.8 s before and 0.15 s after, with 1,509 relayouts before and one after; the table pasted on it in 2.5 s before and 0.1 s after. On the corporate computer a long-running meeting's page should open without a pause.
+
+**Tests:** `tests/test_notes_edit.py`: a 320-line page set on an editor already shown is laid out at most twice, and reads out as it went in (it was laid out once for each line before). `tests/test_pictures_tables.py`: a table pasted at the end of a 150-line page is taken back by one Ctrl+Z. Both fail on 5.64 (322 relayouts; the page not as it was). The full run: 2493 passed, 1 skipped, none failed.
+
+**Hand-tested by the owner and merged to `main`** (2026-11-03). **Not checked yet:** the corporate computer, with the design workspace's `handoff/docrepo/release-5-68-test.md`.
 
 ## Release 5.64: what-ifs (2026-11-03)
 
