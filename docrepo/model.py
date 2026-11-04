@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from datetime import date
 
 from docrepo.dates import long_date
-from docrepo.links import is_link
+from docrepo.links import is_folder, is_link
 from docrepo.schedule import due_of, is_open, start_of
 
 TYPE_NAMES = {"note": "Note", "new_task": "New task", "update": "Update"}
@@ -629,7 +629,7 @@ class Model:
         out = [FileEntry("Old version" if f.old else "Saved copy", f.name, f.document, task_id) for f in self.copies if f.task == task_id]
         for doc_id in _unique(d for c in self.notes_of(task_id) for d in c.document_ids):
             d = self.documents[doc_id]
-            kind = "Link" if is_link(d.original) else "Tracked original" if d.original else "Email attachment"
+            kind = "Link" if is_link(d.original) else "Folder" if is_folder(d.original) else "Tracked original" if d.original else "Email attachment"
             out.append(FileEntry(kind, d.name, doc_id, task_id))
         return out
 

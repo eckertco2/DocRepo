@@ -291,7 +291,7 @@ class FileSearch(QWidget):
         p = opener.plan(r, self._email_file)
         if p.action == "copy_link":
             QGuiApplication.clipboard().setText(p.path.strip())
-            self.foot.setText(f"Copied the link to {r.title}. DocRepo never opens links: paste it into your browser.")
+            self.foot.setText(f"Copied the link to {r.title}.")
         elif p.action == "show":
             self._show(r, p.reason)
         elif p.action == "capture":

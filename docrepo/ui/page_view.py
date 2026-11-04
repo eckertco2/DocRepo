@@ -8,7 +8,8 @@ page names its pictures and this view draws them:
 - ``mark:ip``, a task's state (``ns``, ``ip``, ``pk`` or ``cl``), from the state icons;
 - ``progress:1:4``, a thin bar, 1 of 4 filled;
 - ``timing:...``, a lane of a template's chart, or its ruler (release 5.51);
-- ``chev:right`` and ``chev:down``, the icons' chevrons for a fold or a menu (release 5.59).
+- ``chev:right`` and ``chev:down``, the icons' chevrons for a fold or a menu (release 5.59);
+- ``lk:link``, ``lk:folder``, ``lk:note``, ``lk:ref`` and ``lk:pin``, the marks of the Links group's rows (release 5.67).
 """
 from __future__ import annotations
 
@@ -76,6 +77,18 @@ def mark(state: str, scale: float) -> QImage:
     return image
 
 
+#: The Links group's marks (release 5.67): the icon each draws, and its colour.
+LINK_MARKS = {"link": ("link", "text2"), "folder": ("folder", "text2"), "note": ("note", "text2"), "ref": ("link", "accent"), "pin": ("pin", "accent")}
+
+
+def link_mark(key: str, scale: float) -> QImage:
+    name, colour = LINK_MARKS[key]
+    image, p = _canvas(MARK, MARK, scale)
+    p.drawPixmap(QPointF(0, 0), tinted(name, tokens.LIGHT[colour], MARK, scale))
+    p.end()
+    return image
+
+
 def chevron(direction: str, scale: float) -> QImage:
     image, p = _canvas(MARK, MARK, scale)
     p.drawPixmap(QPointF(0, 0), tinted(f"chevron-{direction}", tokens.LIGHT["text2"], MARK, scale))
@@ -113,6 +126,8 @@ def picture(url: QUrl, scale: float) -> QImage | None:
         return timing_picture(key, scale)
     if kind == "chev" and key in ("right", "down"):
         return chevron(key, scale)
+    if kind == "lk" and key in LINK_MARKS:
+        return link_mark(key, scale)
     return None
 
 

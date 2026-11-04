@@ -97,15 +97,17 @@ def test_a_new_task_with_a_link_keeps_it_out_of_its_description(sample_root):
     assert [(f.kind, f.name) for f in m.files_of(r.created_task)] == [("Link", "Pump datasheet.docx")]
 
 
-def test_the_pages_offer_copy_link_only(sample_root):
+def test_the_pages_open_and_copy_a_link(sample_root):
+    """Release 5.67 (round 6's decision 314): a link's name opens it, beside Copy link and Details. It was copy only."""
     conn, root, _ = sample_root
     save(sample_root, CaptureDraft(task="T000008", types={"note"}, files=[FileRow(link_name(SPEC), SPEC, "Vendor's seal kit spec.")]))
     m = Model(conn)
     pages = DetailPages(m, AT.date(), lambda cid: read_content(root, m.captures[cid]) or "", "P001", conn)
     files = pages.task_page("T000008", PageState(tab="files"))
-    assert 'href="doc:D000005"' in files and 'href="copylink:D000005"' in files and "show:doc:D000005" not in files
+    assert 'href="opendoc:D000005"' in files and 'href="copylink:D000005"' in files and 'href="doc:D000005"' in files
+    assert "show:doc:D000005" not in files
     doc = pages.document_page("D000005")
-    assert "Link D000005" in doc and SPEC in doc and "never opens or fetches links" in doc and "Saved copies" not in doc
+    assert "Link D000005" in doc and SPEC in doc and "never fetches links" in doc and "Saved copies" not in doc
 
 
 def test_the_capture_window_takes_links(qapp, sample_root):
@@ -124,7 +126,7 @@ def test_the_capture_window_takes_links(qapp, sample_root):
         w._sync_paths()
         assert w.files == []
         w.add_link_url("example.com/a")
-        assert w.error.text().startswith("That isn't a web link") and w.files == []
+        assert w.error.text().startswith("That isn't a link or a path") and w.files == []  # release 5.66's words
         w.add_link_url(OFFICE)
         w.add_link_url(OFFICE)
         assert len(w.files) == 1 and "is already added" in w.error.text()
@@ -136,25 +138,26 @@ def test_the_capture_window_takes_links(qapp, sample_root):
         w.deleteLater()
 
 
-def test_the_browse_tool_copies_a_link_and_never_shows_it(qapp, sample_root):
+def test_the_browse_tool_opens_and_copies_a_link_and_never_shows_it(qapp, sample_root):
+    """Release 5.67 (decisions 314 and 315): Open link, and a double-click, hand it to the browser; Copy link copies it."""
     conn, root, fs = sample_root
     save(sample_root, CaptureDraft(task="T000008", types={"note"}, files=[FileRow(link_name(SPEC), SPEC, "Vendor's seal kit spec.")]))
     ctx = AppContext(conn, root, fs, SETTINGS, now=lambda: AT)
     capture = CaptureWindow(ctx)
     w = BrowseWindow(ctx, capture)
-    w.revealed = []
+    w.revealed, started = [], []
     w.reveal = lambda path: w.revealed.append(path) or True
+    w.link_starter = started.append
     w.show_browse()
     try:
         w.on_link(QUrl("doc:D000005"))
         assert w.sel == ("doc", "D000005")
-        assert [b.text() for b in w.actions.findChildren(QPushButton) if b.isVisible()] == ["Copy link"]
+        assert [b.text() for b in w.actions.findChildren(QPushButton) if b.isVisible()] == ["Open link", "Copy link"]
         QGuiApplication.clipboard().clear()
         w.on_link(QUrl("copylink:D000005"))
         assert QGuiApplication.clipboard().text() == SPEC and "Copied the link to Seal kit spec" in w.status.text()
-        QGuiApplication.clipboard().clear()
-        w.reveal_key(("doc", "D000005"))  # double-clicking its row copies it too
-        assert QGuiApplication.clipboard().text() == SPEC and w.revealed == []
+        w.reveal_key(("doc", "D000005"))  # double-clicking its row opens it, in the browser
+        assert started == [SPEC] and w.revealed == [] and "Opened Seal kit spec" in w.status.text()
     finally:
         capture.deleteLater()
         w.deleteLater()

@@ -951,6 +951,11 @@ class TaskView(QWidget):
         QThreadPool.globalInstance().waitForDone(int(timeout * 1000))
         QGuiApplication.processEvents()
 
+    def show_type(self, file_type: str) -> None:
+        """Show only one type of file, such as "link" from the task page's Links group (release 5.67)."""
+        self.filters.types = {file_type}
+        self.refresh()
+
     def focus_box(self) -> None:
         self.box.setFocus()
         self.box.selectAll()
@@ -1105,8 +1110,8 @@ class TaskView(QWidget):
 
     def _actions_for(self, r: Record) -> list[tuple[str, str, bool, str]]:
         if r.kind == "file":
-            if r.type == "link":
-                out = [("Copy link", "copylink", True, "Enter. DocRepo never opens links")]
+            if r.type == "link":  # Enter opens it in the browser (release 5.67, round 6's decision 315)
+                out = [("Open link", "open", True, "Enter: in your default browser"), ("Copy link", "copylink", False, "Ctrl+Shift+C")]
             else:
                 p = opener.plan(r)
                 first = ("Open", "open", True, "Enter: in its own program") if p.action == "open" else (
@@ -1182,10 +1187,17 @@ class TaskView(QWidget):
             QGuiApplication.clipboard().setText(opener.copy_text([r.path]))
             self.use(r, "copy_link" if r.type == "link" else "copy_path")
             self.say(f"Copied the {'link' if r.type == 'link' else 'path'} of {r.title}.")
-        elif name == "copylink" or (name in ("open", "show") and r.type == "link"):
+        elif name == "open" and r.type == "link":
+            problem = opener.start_link(r.path, self.browse.link_starter)
+            if problem:
+                self.say(problem, error=True)
+                return
+            self.use(r, "open")
+            self.say(f"Opened {r.title} in your browser.")
+        elif name == "copylink" or (name == "show" and r.type == "link"):
             QGuiApplication.clipboard().setText(r.path.strip())
             self.use(r, "copy_link")
-            self.say(f"Copied the link to {r.title}. DocRepo never opens links: paste it into your browser.")
+            self.say(f"Copied the link to {r.title}.")
         elif name == "show":
             self.show_file(r)
         elif name == "open":

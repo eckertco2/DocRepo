@@ -273,6 +273,8 @@ class ResultDelegate(QStyledItemDelegate):
             return ("update" if r.type == "update" else "note"), tokens.LIGHT["text2"]
         if r.kind == "email":
             return "type-mail", tokens.LIGHT["type_mail"]
+        if r.type == "folder":  # release 5.66
+            return "folder", tokens.LIGHT["type_other"]
         return f"type-{r.type if r.type in ('doc', 'sheet', 'slides', 'pdf', 'picture', 'drawing', 'mail', 'link') else 'other'}", tokens.LIGHT.get(f"type_{r.type}", tokens.LIGHT["type_other"])
 
     @staticmethod

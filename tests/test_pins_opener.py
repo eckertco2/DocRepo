@@ -58,7 +58,7 @@ def test_open_plans_by_what_a_file_is():
     saved = opener.plan(record(type="pdf", source="Email attachment", path="C:\\a\\Curve.pdf", copy="C:\\data\\Tasks\\T1\\Files\\Curve.pdf"))
     assert saved == opener.Plan("open", "C:\\data\\Tasks\\T1\\Files\\Curve.pdf")  # saved to the repo, so it opens
     link = opener.plan(record(type="link", source="Link", path="https://example.sharepoint.com/sites/x"))
-    assert link.action == "copy_link"
+    assert link.action == "open_link"  # in the browser, on a click (release 5.67, decision 314); it was copy_link
     macro = opener.plan(record(type="sheet", source="Tracked original", path="\\\\server\\eng\\Tool.xlsm"))
     assert macro.action == "show" and ".xlsm" in macro.reason
     program = opener.plan(record(type="other", source="Tracked original", path="\\\\server\\eng\\setup.exe"))

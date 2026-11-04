@@ -16,18 +16,19 @@ from __future__ import annotations
 
 import html
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from urllib.parse import quote
 
 from docrepo import capacity, items, markup, notes_page, ties
 from docrepo.dates import ago, days_words, long_date, monday_of, short, to_date
-from docrepo.links import NO_TEXT, is_link
+from docrepo.links import FOLDER_TEXT, NO_TEXT, is_folder, is_link, reference_link
 from docrepo.model import PRIORITY_NAMES, TODAY, TYPE_NAMES, Capture, Model, Task, is_person
 from docrepo.pages import num
 from docrepo.schedule import due_of, is_open, start_of
 from docrepo.stories import Event, RawItem, Stories, clip
+from docrepo.task_links import SHOWN, all_documents, links_of
 from docrepo.views import CapacityRow, due_cell, label_tasks, markers, rem_text
 
 CSS = """
@@ -212,8 +213,10 @@ class Pages:
     that say how a page works, which show only with Show hints on (decision 7, release 5.59)."""
 
     def __init__(self, model: Model, today: date, content_of: Callable[[str], str], me: str | None = None,
-                 conn: sqlite3.Connection | None = None, hints: bool = True) -> None:
+                 conn: sqlite3.Connection | None = None, hints: bool = True, reference_links: Mapping[str, str] | None = None) -> None:
         self.m = model
+        #: Settings' link address for each reference field (release 5.67, round 6's decision 320).
+        self.reference_links = dict(reference_links or {})
         self.hints = hints
         self.today = today
         self.content_of = content_of
@@ -307,14 +310,15 @@ class Pages:
         head = (self.discarded_box(t.discarded, t.discard_reason, "the task tree, the lists, the pickers, search and the capacity calendar")
                 if t.discarded else "") + self.page_head(t, state)  # mods log round 1, M0021
         when, who = group("When", self.when_rows(t)) + self.key_dates_block(t), group("Who", self.who_rows(t))
+        links = self.links_group(t)  # release 5.67, decision 316: after When and Who, in the rail on a wide page
         if width >= WIDE_PAGE:
             main = head + self.status_block(t) + self.agenda_section(t) + self.subtask_section(t, state) + (self.history(t, state) if history else "")
             return (f'<table width="{min(width, PAGE_MAX)}" cellspacing="0" cellpadding="0"><tr><td valign="top">{main}</td>'
                     f'<td width="24"></td><td width="1" class="rule"></td><td width="20"></td>'
-                    f'<td width="{RAIL}" valign="top">{when}{who}{self.details(t, state, rail=True)}</td></tr></table>')
+                    f'<td width="{RAIL}" valign="top">{when}{who}{links}{self.details(t, state, rail=True)}</td></tr></table>')
         facts = (f'<table width="100%" cellspacing="0" cellpadding="0" style="margin-top: 8px"><tr><td width="50%" valign="top">{when}</td>'
                  f'<td width="50%" valign="top">{who}</td></tr></table>' if width >= SIDE_BY_SIDE else when + who)
-        return (head + self.status_block(t) + facts + self.agenda_section(t) + self.subtask_section(t, state) + self.details(t, state)
+        return (head + self.status_block(t) + facts + links + self.agenda_section(t) + self.subtask_section(t, state) + self.details(t, state)
                 + (self.history(t, state) if history else ""))
 
     def page_head(self, t: Task, state: PageState) -> str:
@@ -529,6 +533,37 @@ class Pages:
         return (section("Subtasks", f' <span class="rel">{count}</span>{bar} &nbsp;{link(f"new:{t.id}", "New subtask", "A new task under this one (T)")}')
                 + f'<table width="100%" cellspacing="0" cellpadding="3">{"".join(rows)}</table>{toggle}')
 
+    def reference_value(self, name: str, value: str) -> str:
+        """A reference field's value in Details: a link to its page when Settings gives the field a link address (release
+        5.67, decision 320), with Copy (the value) and Copy link; with no link address, Copy and Add a link (to Settings)."""
+        copy = link("copyref:" + quote(name, safe=""), "Copy", f"Copy {name} {value}")
+        address = reference_link(self.reference_links.get(name), value)
+        if not address:
+            return f'{esc(value)} &nbsp;{copy} &nbsp;{link("settings:reference", "Add a link", f"Give {name} a link address in Settings", "tq")}'
+        return (f'{link("openurl:" + quote(address, safe=""), value, f"Opens in your browser: {address}")} &nbsp;{copy}'
+                f' &nbsp;{link("copyaddr:" + quote(address, safe=""), "Copy link")}')
+
+    def links_group(self, t: Task) -> str:
+        """The task's links in one place (release 5.67, round 6's decision 316): its reference fields' links, then its
+        pinned links, then the newest, SHOWN at most; each name opens it (a folder in File Explorer), with its host and
+        Copy. With more, a link to the Task view's Link type, named for what it lists (decision 323)."""
+        xs = links_of(self.m, t.id, self.reference_links)
+        if not xs:
+            return ""
+        marks = {"reference": "ref", "link": "link", "folder": "folder", "text": "note"}
+        rows = []
+        for x in xs[:SHOWN]:
+            href = f"opendoc:{x.document}" if x.document else "openurl:" + quote(x.address, safe="")
+            pin = ' <img src="lk:pin" width="12" height="12" title="Pinned on this task">' if x.pinned else ""
+            copy = link("copyaddr:" + quote(x.address, safe=""), "Copy path" if x.kind == "folder" else "Copy", f"Copy {x.address}", "tq")
+            rows.append(f'<tr><td valign="top" width="18"><img src="lk:{marks[x.kind]}" width="14" height="14"></td>'
+                        f'<td valign="top">{link(href, x.name, x.opens)}{pin} <span class="sub">{esc(x.where)}</span> &nbsp;{copy}</td></tr>')
+        more = ""
+        if len(xs) > SHOWN:
+            words = f"All {len(xs)} links" if all_documents(xs) else "Show link files in the Task view"
+            more = f'<p>{link(f"taskviewlinks:{t.id}", words, "The Task view, showing only links")}</p>'
+        return section("Links", f' <span class="sub">{len(xs)}</span>') + f'<table cellspacing="0" cellpadding="2">{"".join(rows)}</table>' + more
+
     def details(self, t: Task, state: PageState, rail: bool = False) -> str:
         """The record: folded to one line that still shows the ID, the reference fields and when the task was made. In the
         wide page's rail there's room, so it's open."""
@@ -542,8 +577,8 @@ class Pages:
         chains = [c for c in m.chains_of(t.id) if len(c) > 1]
         if len(chains) > 1:
             rows.append(("Parents", "<br>".join(" › ".join(self.task_link(x) for x in c[:-1]) for c in chains)))
-        for name, value in t.references.items():  # reference fields (release 5.9, M0034)
-            rows.append((name, f'{esc(value)} &nbsp;{link("copyref:" + quote(name, safe=""), "Copy")}'))
+        for name, value in t.references.items():  # reference fields (release 5.9, M0034), with their links (release 5.67)
+            rows.append((name, self.reference_value(name, value)))
         rows.append(("Folder", link(f"folder:{t.id}", f"Tasks\\{t.id}", "Open it in File Explorer")))
         if rail:
             return group("Details", rows)
@@ -597,8 +632,15 @@ class Pages:
         rows = []
         for f in self.files_in(ids):
             d = self.m.documents.get(f.document)
-            name = (f'{link(f"doc:{f.document}", f.name, d.original if d else "")} · {link(f"copylink:{f.document}", "Copy link")}'
-                    if f.kind == "Link" else link(self.show_key(f), f.name, "Show it in File Explorer"))
+            original = d.original if d and d.original else ""
+            if f.kind == "Link":  # it opens in the browser, on a click (release 5.67, decision 315)
+                name = (f'{link(f"opendoc:{f.document}", f.name, "Opens in your browser: " + original)} · '
+                        f'{link(f"copylink:{f.document}", "Copy link")} · {link(f"doc:{f.document}", "Details")}')
+            elif f.kind == "Folder":  # release 5.66: it opens in File Explorer
+                name = (f'{link(f"opendoc:{f.document}", f.name, "Opens in File Explorer: " + original)} · '
+                        f'{link("copyaddr:" + quote(original, safe=""), "Copy path")}')
+            else:
+                name = link(self.show_key(f), f.name, "Show it in File Explorer")
             rows.append(f'<tr><td>{name} <span class="sub">{esc(f.kind)}</span>'
                         f'{self.from_chip(f.task, t.id)}{"<br><span class=sub>" + esc(d.description) + "</span>" if d and d.description else ""}</td></tr>')
         # Decision 166: the Task view is where a task's files are searched, previewed and opened.
@@ -783,7 +825,7 @@ class Pages:
             files = []
             for cd in c.documents:
                 d = self.m.documents[cd.document]
-                choices = (" · Link" if is_link(d.original) else "") + (" · Save a copy" if cd.save_a_copy else "") + (
+                choices = (" · Link" if is_link(d.original) else " · Folder" if is_folder(d.original) else "") + (" · Save a copy" if cd.save_a_copy else "") + (
                     " · Extract information" if cd.extract else "")
                 files.append(f'{link(f"doc:{d.id}", d.name)} <span class="sub">{d.id}{choices}</span>'
                              + (f'<br><span class="sub">{esc(d.description)}</span>' if d.description else ""))
@@ -821,7 +863,14 @@ class Pages:
                     ("Link", f"<span>{esc(d.original)}</span>"), ("Text", esc(f"No text: {NO_TEXT}")),
                     ("Tasks", ", ".join(self.task_link(x) for x in tasks) or none_text("Not filed yet"))]
             return (f'<p class="crumbs">Link {d.id}</p><h2>{esc(d.name)}</h2>{fields_table(rows)}'
-                    '<p class="note">Copy link puts the address on the clipboard, to paste into your browser. DocRepo never opens it.</p>')
+                    '<p class="note">Open link hands it to your default browser, only when you click it (release 5.67). Copy link puts the address on the clipboard. DocRepo never fetches it.</p>')
+        if is_folder(d.original):
+            # A folder (release 5.66, round 6's decision 318): kept by where it is, with no text, checks or saved copies.
+            rows = [("File description", esc(d.description) if d.description else none_text("None yet")), ("ID", d.id),
+                    ("Folder", f"<span>{esc(d.original)}</span>"), ("Text", esc(f"No text: {FOLDER_TEXT}")),
+                    ("Tasks", ", ".join(self.task_link(x) for x in tasks) or none_text("Not filed yet"))]
+            return (f'<p class="crumbs">Folder {d.id}</p><h2>{esc(d.name)}</h2>{fields_table(rows)}'
+                    '<p class="note">Show in File Explorer opens the folder.</p>')
         rows = [("File description", esc(d.description) if d.description else none_text("None yet")), ("ID", d.id),
                 ("Original", f"<span>{esc(d.original)}</span>" if d.original else f"Email attachment in {self.capture_link(d.capture)}" if d.capture else none_text()),
                 ("Status", esc(d.status)), ("Text", esc(text.get(d.text_status or "", "Not read yet"))),

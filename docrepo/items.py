@@ -1264,6 +1264,9 @@ def options(t: Typing, names: Names) -> list[Option]:
         return not q or any(any(w.startswith(q) for w in n.lower().split()) or n.lower().startswith(q) for n in ns)
 
     if t.sigil == "#":
+        if not q and names.model is not None:  # "#" alone: the top-level tasks, in the tree's order, to walk down from (decision 313)
+            tops = [names.tasks[x.id] for x in names.model.top_level() if x.id in names.tasks]
+            return [Option(x.title, x.title, ref=x.id) for x in tops if x.open]
         return [Option(x.title, x.title, ref=x.id) for x in names.tasks.values() if x.open and hit([x.title, x.id])][:8]
     out = [Option(p.name, p.name + (" (me)" if p.me else ""), ", ".join(p.aliases), p.id) for p in names.active if hit([p.name, *p.aliases])][:7]
     if t.sigil == "@" and "__".startswith(q or "_"):

@@ -33,6 +33,7 @@ from __future__ import annotations
 from datetime import date
 
 from pathlib import Path
+from urllib.parse import quote
 
 from PySide6.QtCore import QByteArray, QPoint, QRect, QRectF, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import (QBrush, QColor, QFont, QFontMetrics, QImage, QPainter, QPainterPath, QTextBlockFormat, QTextCharFormat,
@@ -41,6 +42,7 @@ from PySide6.QtGui import (QBrush, QColor, QFont, QFontMetrics, QImage, QPainter
 from PySide6.QtWidgets import QSizePolicy, QTextEdit, QWidget
 
 from docrepo import markup, notes_page
+from docrepo.links import ADDRESS, read_address
 from docrepo.notes_page import Line
 from docrepo.ui import tokens
 from docrepo.ui.look import LOOK
@@ -63,6 +65,9 @@ class NotesEdit(RichEdit):
 
     changed = Signal(str)
     open_ref = Signal(str)
+    #: Ctrl+click on a link or folder line ("opendoc:D000001"), or on an address in the words ("openurl:" and the address,
+    #: quoted), for the browse window to open (release 5.67, round 6's decision 315).
+    open_link = Signal(str)
     message = Signal(str)
     folds_changed = Signal()
     files_dropped = Signal(list)  # local files dropped on the page (release 5.27)
@@ -85,6 +90,9 @@ class NotesEdit(RichEdit):
         self.on_page_key = None  # the pane's Page Up and Page Down: this box is as tall as its text
         self._quiet = self._moving = False
         self._hover = -1
+        # Addresses in the words, underlined as they're typed, a moment after the last key (release 5.67).
+        self._addresses = QTimer(self, singleShot=True, interval=250, timeout=self.mark_addresses)
+        self.document().contentsChanged.connect(self._addresses.start)
         self._clip = None
         self._clip_lines = False
         self._clip_first = None  # the first copied line's format and list, which Qt's fragment loses
@@ -1282,10 +1290,54 @@ class NotesEdit(RichEdit):
                 self.toggle_fold(h)
                 return
             scheme, _, ref = self.anchorAt(pos).partition(":")
+            if event.modifiers() & Qt.KeyboardModifier.ControlModifier:  # Ctrl+click opens a link (release 5.67)
+                if scheme == "document" and ref:
+                    self.open_link.emit(f"opendoc:{ref}")
+                    return
+                address = self.address_at(pos)
+                if address:
+                    self.open_link.emit("openurl:" + quote(address, safe=""))
+                    return
             if scheme in ("capture", "document") and ref and not event.modifiers():
                 self.open_ref.emit(ref)
                 return
         super().mousePressEvent(event)
+
+    # ---- addresses in the page's words (release 5.67, round 6's decision 315) ----
+    def address_at(self, pos: QPoint) -> str | None:
+        """The web address in the words under ``pos``, tidied, or None."""
+        c = self.cursorForPosition(pos)
+        b, i = c.block(), c.positionInBlock()
+        for m in ADDRESS.finditer(b.text()):
+            if m.start() <= i < m.end() or (i == m.end() and pos.x() <= self.cursorRect(c).right() + 2):
+                a = read_address(m.group(0), one=False)
+                return a.value if a.kind == "link" else None
+        return None
+
+    def mark_addresses(self) -> None:
+        """Underline each web address in the page's words in the accent colour, as extra selections: shown, never saved,
+        so the page's markup doesn't change. Ctrl+click opens one."""
+        fmt = QTextCharFormat()
+        fmt.setForeground(QColor(tokens.colour("accent")))
+        fmt.setFontUnderline(True)
+        marks = []
+        b = self.document().begin()
+        while b.isValid():
+            text = b.text()
+            if "http" in text.lower():
+                for m in ADDRESS.finditer(text):
+                    a = read_address(m.group(0), one=False)
+                    if a.kind != "link":
+                        continue
+                    c = QTextCursor(b)
+                    c.setPosition(b.position() + m.start())
+                    # The tidied address starts where the match does and is no longer than it: a full stop after it is the sentence's.
+                    c.setPosition(b.position() + m.start() + len(a.value), QTextCursor.MoveMode.KeepAnchor)
+                    mark = QTextEdit.ExtraSelection()
+                    mark.cursor, mark.format = c, fmt
+                    marks.append(mark)
+            b = b.next()
+        self.setExtraSelections(marks)
 
     def mouseMoveEvent(self, event) -> None:  # noqa: N802 - Qt's name
         pos = event.position().toPoint()
@@ -1295,7 +1347,10 @@ class NotesEdit(RichEdit):
             self._hover = hover
             self.viewport().update()
         scheme = self.anchorAt(pos).partition(":")[0]
-        hand = (row is not None and pos.x() < LEFT) or scheme in ("capture", "document") or self.checkbox_at(pos) is not None
+        address = self.address_at(pos) if not scheme else None
+        hand = ((row is not None and pos.x() < LEFT) or scheme in ("capture", "document") or self.checkbox_at(pos) is not None
+                or (address is not None and event.modifiers() & Qt.KeyboardModifier.ControlModifier))
+        self.viewport().setToolTip(f"Ctrl+click opens it in your browser: {address}" if address else "")
         self.viewport().setCursor(Qt.CursorShape.PointingHandCursor if hand else Qt.CursorShape.IBeamCursor)
         QTextEdit.mouseMoveEvent(self, event)  # the cursor's shape is set here, for the arrows and links too
 

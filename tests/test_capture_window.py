@@ -478,8 +478,9 @@ def test_drops_that_bring_no_file_say_why(window, tmp_path):
     assert "doesn't hand DocRepo a file" in window.error.text() and not window.files
     folder = tmp_path / "Drawings"
     folder.mkdir()
-    _drop(window.content.viewport(), _mime([folder], EXPLORER_FORMATS))
-    assert "Drawings is a folder" in window.error.text() and not window.files
+    _drop(window.content.viewport(), _mime([folder], EXPLORER_FORMATS))  # a folder is kept since release 5.66 (decision 318)
+    [entry] = window.files
+    assert (entry.row.name, entry.row.path) == ("Drawings", str(folder) + "\\") and entry.copy.isHidden() and entry.extract.isHidden()
 
 
 def test_editing_a_mods_log_entry_from_the_panel(window, ctx):

@@ -94,6 +94,30 @@ def note_drag(stage: str, formats: Sequence[str], urls: int, local_files: int, t
     log.info("drag %s: %d formats, %d urls (%d local), taken as %s", stage, len(formats), urls, local_files, taken_as or "text")
 
 
+#: This session's links the capture window didn't keep (release 5.66): when, and the address's shape, never the address.
+REFUSED_LINKS: deque[tuple[str, str]] = deque(maxlen=12)
+
+
+def link_shape(text: str) -> str:
+    """What an address looked like, without saying what it was: its scheme and what came with it ("mailto:",
+    "https:, with spaces, in angle brackets", "no scheme, 2 lines")."""
+    t = (text or "").strip()
+    lines = [x for x in t.splitlines() if x.strip()]
+    first = lines[0].strip() if lines else ""
+    m = re.match(r"^[<\"'“]*([A-Za-z][A-Za-z0-9+.-]+):", first)
+    bits = [f"{m.group(1).lower()}:" if m and len(m.group(1)) > 1 else "a drive or share path" if re.match(r"^[<\"']*(?:[A-Za-z]:|\\\\)", first)
+            else "www." if first.lower().lstrip("<\"'").startswith("www.") else "no scheme"]
+    bits += [w for w, on in (("with spaces", " " in first), ("in angle brackets", first.startswith("<")), ("in quotes", first[:1] in "\"'“"),
+                             (f"{len(lines)} lines", len(lines) > 1)) if on]
+    return ", ".join(bits)
+
+
+def note_refused_link(text: str) -> None:
+    shape = link_shape(text)
+    REFUSED_LINKS.append((datetime.now().strftime("%Y-%m-%d %H:%M:%S"), shape))
+    log.info("link not kept: %s", shape)
+
+
 def short_format(name: str) -> str:
     """A drag format's name: Qt names the Windows-only ones application/x-qt-windows-mime;value="…"."""
     m = re.fullmatch(r'application/x-qt-windows-mime;value="(.+)"', name)
@@ -473,6 +497,14 @@ def build_report(data_root: Path | None, now: datetime, drags: Sequence[DragNote
         lines += ["| When | Stage | Taken as | URLs (local files) | Formats |", "|---|---|---|---|---|"]
         lines += [f"| {d.at} | {d.stage} | {d.taken_as or 'text, or nothing'} | {d.urls} ({d.local_files}) | {_cell(', '.join(short_format(f) for f in d.formats)) or 'none'} |"
                   for d in drags]
+    lines += ["", "## Links the capture window didn't keep", "",
+              "Each one's shape only: its scheme and what came with it, never the address (release 5.66)."]
+    if drags is None:
+        lines += ["", "Not available from the command line."]
+    elif not REFUSED_LINKS:
+        lines += ["", "None since DocRepo started."]
+    else:
+        lines += ["", *[f"- {at} · {shape}" for at, shape in REFUSED_LINKS]]
     lines += ["", "## Drops on DocRepo's own drop target", "",
               "Emails dragged from Outlook (and attachments, and files in zip folders) are taken from the copy the drag carries, "
               "without asking Outlook (release 5.33). Each drop's formats, how each file came, and its size."]

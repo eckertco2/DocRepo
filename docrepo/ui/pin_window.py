@@ -24,7 +24,7 @@ from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QCursor, QGuiApplication, QKeySequence, QShortcut
 from PySide6.QtWidgets import QCheckBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QToolButton, QVBoxLayout, QWidget
 
-from docrepo.links import is_link
+from docrepo.links import is_folder, is_link
 from docrepo.save import held_text
 from docrepo.text import typed_path
 from docrepo.ui import tokens
@@ -55,16 +55,18 @@ def what_was_added(capture: CaptureWindow) -> str:
         m = capture.ctx.model()
         said = [f"{m.tasks[p.task].title if p.task in m.tasks else 'Unfiled'}: {held}" for p in parts if (held := held_text(p.files))]
         return " · ".join(said) if said else "Nothing added yet"
-    files = emails = links = 0
+    files = emails = links = folders = 0
     for e in capture.files:
         if e.src == "outlook":
             emails += 1
         elif e.src != "email":  # an email's attachments, links and pictures count with the email
             if is_link(e.row.path or ""):
                 links += 1
+            elif is_folder(e.row.path):
+                folders += 1
             else:
                 files += 1
-    parts = [f"{n} {word}{'s' if n != 1 else ''}" for n, word in ((files, "file"), (emails, "email"), (links, "link")) if n]
+    parts = [f"{n} {word}{'s' if n != 1 else ''}" for n, word in ((files, "file"), (folders, "folder"), (emails, "email"), (links, "link")) if n]
     return ", ".join(parts) + " added" if parts else "Nothing added yet"
 
 
@@ -164,6 +166,7 @@ class PinWindow(QWidget):
         self.text.cursorPositionChanged.connect(capture._ref_list)
         self.text.list_keys = lambda key: self.ref_popup.handle_key(key)
         self.text.left = lambda: self.ref_popup.hide()
+        self.text.link_pasted = capture._paste_link  # a pasted link is added, as a dropped one is (release 5.66)
         # ---- the landing row: a path or link, typed or pasted; the email selected in Outlook ----
         self.drop = DropZone()
         dl = QHBoxLayout(self.drop)
@@ -284,12 +287,14 @@ class PinWindow(QWidget):
             self.desc.setFocus()
 
     def add_typed(self) -> None:
-        """Enter in the landing row: a web link, or a file's path (quoted or not), is added as if dropped."""
+        """Enter in the landing row: a web link, or a file's or folder's path (quoted or not), is added as if dropped.
+        It's read as ``links.read_address`` reads it (release 5.66), so a space in a link is its own, and anything else
+        says why it isn't kept."""
         text = typed_path(self.path.text())
         if not text:
             return
         before = len(self.capture.files)
-        self.capture.dropped("links" if is_link(text) else "files", [text])
+        self.capture.dropped("links", [text])
         if len(self.capture.files) > before:
             self.path.clear()
             self.desc.setFocus()

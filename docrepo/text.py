@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from docrepo.links import is_link
+from docrepo.links import is_link, link_of_line
 
 #: An email's header lines at the start of the content text.
 MAIL_HEAD = re.compile(r"^(?:(?:From|To|Cc|Sent|Date|Subject):.*\n)+\s*")
@@ -44,8 +44,9 @@ def is_path_line(line: str) -> bool:
 
 
 def is_file_line(line: str) -> bool:
-    """True for a line the capture window makes a file row of: a file path, or a link on its own (mods log round 1, M0001)."""
-    return is_path_line(line) or is_link(line)
+    """True for a line the capture window makes a file row of: a file path, or a link on its own (mods log round 1, M0001),
+    with angle brackets round it or a full stop after it, or starting www. (release 5.66)."""
+    return is_path_line(line) or is_link(line) or link_of_line(line) is not None
 
 
 def plain_text(content: str) -> str:

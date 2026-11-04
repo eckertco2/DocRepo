@@ -79,6 +79,9 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.62 | Thread A's fields and ties in a capture (decisions 293 to 300): `**duration`, `**weekends`, `**involvement`, a rate in `**hours` and `**lead hours`, and a tie in `**start` and `**due` | Built 2026-11-02 on the `round5-templates` branch, and merged to `main` and on GitHub 2026-11-03, before the owner's hand test. Next: the hand test, then `handoff/docrepo/release-5-62-test.md` |
 | 5.63 | Apply template (decisions 301 to 309): a template put into tasks that already exist, which keep all they have, from Select mode, a template's page or a task's menu | Built 2026-11-02 on the `round5-templates` branch, without a mock at the owner's word, and merged to `main` and on GitHub 2026-11-03, before the owner's hand test. Next: the hand test, then `handoff/docrepo/release-5-63-test.md` |
 | 5.64 | What-ifs on the Timeline page (round 5, thread D, item 73; decisions 226 to 228 and 290): Take off, the drags and a whole parent in whole weeks, kept by name, the load as each would be, and Review and apply | Built 2026-11-03, hand-tested by the owner and merged to `main` the same day |
+| 5.65 | The # list (round 6's stage 24, decisions 310 to 313): whole rows with their paths, never a sideways scroll bar, Right and Left into a task's subtasks and back, and `#` alone listing the top-level tasks | Built 2026-11-03 in the `round6` worktree, before the owner's hand test |
+| 5.66 | Links that go in (round 6's item 89, decisions 318, 319 and 321): a dragged link kept exactly, one reader for addresses, folders kept, a link pasted with its name, and the report's links not kept | Built 2026-11-03 in the `round6` worktree, before the owner's hand test |
+| 5.67 | Links that open (round 6's items 87, 88 and 90, decisions 314 to 317, 320 and 323): a link opens in the browser on a click, through `opener.start_link`; the task page's Links group; a reference field's link from Settings' link address; Ctrl+click on the notes page; Task.md's links; the rules file changed | Built 2026-11-03 in the `round6` worktree, from the approved mock, before the owner's hand test |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
 ## Decisions
@@ -672,6 +675,81 @@ The owner asked for the review's next stages, and took its decisions V2, V3, V4,
 - **Priorities' columns are at least 216 px,** not the review's 260 to 300, so all five show at 1440 px. They reach 258 px at the 82% window on a 1920 px screen.
 
 
+
+## Release 5.67: links that open, a task's links in one place, and a reference field's link (2026-11-03)
+
+Round 6's items 87, 88 and 90 (the design workspace's `docs/mods/round-6-plan.md`), from the owner's voice memo of 2026-11-03, built from the mock the owner approved the same day (`docs/browse-tool/mockup/links.js` there), with decisions 314 to 317, 320 and 323, all as recommended. It overturns round 1's decision 5 (copy only, 2026-10-20) and changes the rules file. No schema change and no new package.
+
+- **Opening a link (decision 314).** `opener.start_link` hands a web link to Windows' "open", which gives it to the default browser, as clicking a link in Outlook does. Only on the owner's click, and only an http or https address that `links.read_address` keeps, with a host and no name or password in it. Anything else is refused in words. DocRepo still makes no connection: the browser does. `webbrowser` stays banned, nothing uses Qt's `QDesktopServices`, and only `opener.py` calls `os.startfile` (`tests/test_open_links.py` checks the source). An opened link is recorded in `document_uses` as "open", which the table already allows, so there's no schema change. A folder opens in File Explorer, which is what showing it does.
+- **Where links open from (decision 315):**
+  - the Links group;
+  - the task page's Files tab, where a link's name opens it, with Copy link and Details (its page), and a folder's name opens it, with Copy path;
+  - a link's page, with **Open link** beside Copy link;
+  - the Task view, where Enter opens a link (it copied it), with Copy link beside it and Ctrl+Shift+C;
+  - the Documents view, where a double-click opens a link (it copied it);
+  - the notes page, with Ctrl+click on an address in the words, or on a link's or folder's line.
+- **The notes page's addresses.** Web addresses in the page's words are underlined in the accent colour, as extra selections, so they're shown and never saved, and the page's markup doesn't change. They're marked again a quarter of a second after typing stops. Hovering one gives "Ctrl+click opens it in your browser" and the address, and with Ctrl held the pointer is a hand. A plain click still places the cursor, and on a file line still opens its page.
+- **The Links group (decisions 316 and 317, the mock's order).** `docrepo/task_links.py` gathers a task's links, each once:
+  1. its reference fields' links;
+  2. its pinned link and folder documents;
+  3. the rest of them, newest first;
+  4. the web addresses in its notes page's words (named by their path's last part, "In a note" before the host).
+
+  The task page shows them after When and Who, or in the rail on a wide page (`Pages.links_group`), five at most. Each row has a mark (`lk:` pictures in `page_view.py`), its name, which opens it with the whole address in its tooltip, its host, and Copy. A subtask's links are on its own page. With more than five, **All n links** opens the Task view on its Link type (`open_task_view(file_type=...)`, `TaskView.show_type`). That button reads **Show link files in the Task view** when some of the links aren't documents, since the Task view lists only documents (decision 323).
+- **A reference field's link (decision 320).**
+  - **Settings:** reference fields are now a table, each a name and an optional link address, with what a value of 1234 would link to, worked out as it's typed (`settings_view.ReferenceFields`). `Settings.reference_links` holds the addresses, written once one is set. An address must be http or https, with `{}` once at most (`links.check_link_template`). A malformed `reference_links` in settings.json is left out with a warning, not refused.
+  - **The link:** `links.reference_link` puts the value, encoded, where `{}` is or at the end.
+  - **Where it shows:**
+    - Details, where the value is the link, with Copy and Copy link, or **Add a link**, which opens Settings, for a field with no address;
+    - first in the Links group;
+    - an open button beside the field's box in Edit task, greyed until a number is typed;
+    - Task.md's field table, as a Markdown link.
+
+  `Pages` takes the addresses, and Task.md's writers read them from settings.json (`pages.reference_links_of`), as a dozen callers write pages without the settings.
+- **Task.md** gets a Links section after Files, each a Markdown link, a folder's as a `file:` address.
+- **The words:** the link's page, a link's row in the capture window, Add link, the help text and the file search's message no longer say DocRepo never opens links. They say it never fetches one, and opens it in the browser on a click. `links.NO_TEXT` changed too; documents saved before keep their old note.
+- **Not mocked, built as decided:** the notes page's Ctrl+click (the mockup has no notes page). **Different from the mock:** addresses found in the notes page come after the documents rather than among them by date, since a line on the page has no date of its own.
+
+**Tests:** `tests/test_open_links.py` (new) covers:
+- what `start_link` hands over and refuses, and that only `opener.py` calls `startfile`;
+- reference links and their checks, and Settings keeping, and leaving out, link addresses;
+- a task's links in their order;
+- the Links group, narrow and in the rail, with each button's words (decision 323), and Details' link and Add a link;
+- Task.md's links;
+- the page's open, copy and folder links in the browse window, with an address with `%20` handed over exactly;
+- All links to the Task view's Link type, a link's page and its Documents row, and the Task view's Enter;
+- Settings' table and its refusal, and Edit task's open button;
+- the notes page's underlines and Ctrl+click.
+
+Old tests that pinned copy-only now check opening (`test_links.py`, `test_pins_opener.py`), and the Settings test fills the table (`test_browse_window.py`). Checked by eye on Windows' real platform: Installation's page with its Links group, and Settings' reference fields. The full run, with 5.65 and 5.66: 2556 passed, 1 skipped, none failed.
+
+## Release 5.66: links that go in, whatever their kind (2026-11-03)
+
+Round 6's item 89 (the design workspace's `docs/mods/round-6-plan.md`), from the owner's voice memo of 2026-11-03 ("I'm still getting some errors when I try and upload certain types of links"), with decisions 318, 319 and 321, all as recommended, built without a mock. Which links the owner hit isn't known yet: the plan's table lists what each kind did, tried against the code. No schema change and no new package.
+
+- **A dragged link with `%20` was refused (a bug).** `read_drop` took a dragged address with `QUrl.toString()`, which turns `%20` back into a space, and a link may not have spaces, so dragging most SharePoint and OneDrive document links onto the pinned window said "That isn't a web link". It now takes the address fully encoded, exactly as dragged. With `links`, any address that isn't a file comes through, so a dragged `mailto:` link says why it isn't kept rather than vanishing.
+- **One reader for addresses** (`links.read_address`). Add link, drops, pastes and the pinned window's landing row all go through it. Quotes and angle brackets round an address are taken off (Outlook's plain text writes `<https://…>`). A full stop, comma, semicolon, colon, ! or ? after a web link is taken off, and so is a closing bracket with no opening one in the address. `www.` gets `https://`. A `file:` address becomes the path it names (`file:///C:/…`, `file://server/share/…`). In a box for one address, a web link's spaces become `%20` (SharePoint's Copy path has spaces). OneNote's Copy link, a web line and an `onenote:` line, gives its web line (decision 321). Anything else isn't kept, with why in words: "That's a mailto: link. DocRepo keeps web links (http or https), files and folders." It replaces messages made of a fragment of the address, like "page> can't be found."
+- **The content text's link lines** (`links.link_of_line`, used by `text.is_file_line` and the capture window's `_sync_paths`) take angle brackets, a full stop after, and `www.` the same way. A line with a space in it is still words ("https://example.com is down"). The mockup's `isLinkLine` in `model.js` changed with it.
+- **Folders (decision 318).** A dropped folder, local or on the LAN, or one typed in the landing row, is kept as a document whose original is its path ending in `\` (`links.is_folder`; no schema change). It has no text (`text_status` none, `FOLDER_TEXT`), no saved copy and nothing to extract. Its row is marked Folder and asks "What's in this folder?". It's listed by its own name (`links.folder_name`, or the whole path for a drive or a share), marked Folder on the capture page, the task page's Files, Task.md and a page of its own. In the Task view it's a type of its own, Folder, with the folder icon, and Enter shows it in File Explorer, which opens it. `held_text` and the pinned window count folders ("1 file, 1 folder, 1 link added"). A folder path typed as a line of the content text stays text, since a folder's path matches while a file's path is still being typed.
+- **A link pasted with its name (decision 319).** SharePoint's, OneDrive's, Teams' and Outlook's Copy link put the file's name, linked, on the clipboard. The paste kept bold, lists and so on, but not links, so only the name stayed, and nothing said so. Now:
+  - A paste that is one link and nothing else (`paste.lone_link`), on an empty line of the full window, goes in as the address, so the line gives it its row, listed by the name it was copied with (`_link_names`). In the pinned window it's added as a dropped link is, with nothing typed.
+  - A link inside other pasted words keeps its address after them, "the pump spec <https://…>" (`rich_edit.spell_out_links`, in every RichEdit's formatted paste).
+  - Safe Links are unwrapped in both, with email layer 0's `unwrap`.
+- **The troubleshooting report** has a new section, "Links the capture window didn't keep": each one's shape (`diagnose.link_shape`: its scheme, and whether it had spaces, brackets, quotes or several lines), never the address.
+
+**Tests:** `tests/test_link_input.py` (new) has each kind of address in the plan's table, what isn't kept and why, content text lines, `file:` addresses and folder names, the dragged `%20` link, drops and the landing row on the pinned window, a folder saved with no text and shown as Folder everywhere, Open on a folder, a link pasted with its name on its own line, with a name over its address's, inside other words, through Safe Links and on the pinned window, and the report's shapes with no address in them. Two tests that pinned the old refusal of folders (`test_pin_window.py`, `test_capture_window.py`) now check a folder is kept, and one message in `test_links.py` has the new words. The full run, with 5.65: 2541 passed, 1 skipped, none failed.
+
+## Release 5.65: the # list (2026-11-03)
+
+Round 6's stage 24 (the design workspace's `docs/mods/round-6-plan.md`), from the owner's voice memo of 2026-11-03: items 85 and 86, decisions 310 to 313, all as recommended, built without a mock. No schema change and no new package.
+
+- **The cut-off name (item 85).** The memo's "with only one result, the dropdown is too short to show the whole name". The cause, measured on Windows' real platform: the list was a fixed 320 px wide, and a row with its path is usually wider, so the list put a horizontal scroll bar inside itself. With one row, the list was one row tall, and the bar covered it (a 13 px viewport for a 22 px row). With several rows, it covered part of the last one. The full window's list had it too.
+- **The rows (decision 310).** `RefPopup` (`docrepo/ui/items_panel.py`) now paints each row (`_RefDelegate`): the name in the Body font, then its path or aliases in grey in the Caption size, on one baseline. When they don't fit, the grey part is shortened in its middle, down to 48 px, before the name is cut at its end. Part of a row that fits is drawn whole: Qt's eliding wants a little more room than words measure, as release 5.64's `DropButton` found, and `QRect.right()` is a pixel short of the edge, so both would cut words that fit exactly. The list never scrolls sideways. It's as wide as its longest row, from 320 to 480 px, one row tall per row up to 8, with its frame and padding counted as Qt reports them, not a fixed 6 px. It keeps itself in view as it changes size, in the window or, for the pinned window's list, on the screen, going above the cursor when it can't fit under it (`show_options`'s `above`).
+- **Into subtasks (item 86, decisions 311 and 312).** A row whose task has open subtasks ends with a chevron. Right, or a click on the chevron, lists them in the tree's order, under a first row naming the task with a back chevron. Enter there picks the task itself. Left, or the back chevron, goes back up, with the task picked. A level's rows have no grey path of their own, since the task heading the list says where they are, but each one's tooltip has the whole path. Right and Left are the list's only when they do something there; otherwise they move the cursor as before. Typing goes back to the search by name, since every change of the cursor shows a new list, and the text changes only on a pick. Picking puts `#Title ` in with the task's ID, as before. The capture window gives the list `subtasks` (`_subtask_options`: open, not discarded, in `children_of` order), and the `@` list has none.
+- **`#` alone (decision 313).** `items.options` lists the top-level tasks in the tree's order, all of them (the list scrolls past 8), so the tree can be walked down with Right. Without a Model, the old list stands. The mockup's `items.js` copy of `options` changed with it.
+- **Noted, not changed:** a picked task's ID is kept by its name (`ref_ids`), so two different tasks with the same name, picked in one capture (two "Order parts" under two projects), both go to the one picked last. Keeping each `#` by its place in the text would change how `items.scan` and capture.md read names, so it waits for a need.
+
+**Tests:** `tests/test_ref_list.py` (new) has a lone long row whole with no sideways bar, in both windows; the list one row tall per row; `#` alone; Right and Left two levels down and back, in both windows; picking a subtask, with its ID; Enter on the task itself; Right with nothing to go into; typing going back to the search; `@` with no levels; the chevrons clicked; a level of 12 scrolling down, not across; and the list kept inside the window. Checked by eye on Windows' real platform, before and after, in pictures of the list with one result and two levels down.
 
 ## Release 5.64: what-ifs (2026-11-03)
 

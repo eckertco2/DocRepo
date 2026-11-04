@@ -25,7 +25,7 @@ from docrepo.config import Settings
 from docrepo.dates import long_date, short, stamp, workday_numbers
 from docrepo.db import next_id, transaction
 from docrepo.extract import extract_text, file_info
-from docrepo.links import NO_TEXT, is_link
+from docrepo.links import FOLDER_TEXT, NO_TEXT, is_folder, is_link, keeps_no_text
 from docrepo.model import TODAY, Model
 from docrepo.pages import write_pages
 from docrepo.parse import ParseLabel, ParsePerson, Who, parse_capture
@@ -118,7 +118,7 @@ class FileRow:
 def default_description(row: FileRow, task_title: str | None) -> str:
     """What a description left empty becomes (mods log round 2, M0041): "*task* – Attached document – *file name*", with
     "Attached link" or "Attached picture" for those, or just the file name when the capture has no task."""
-    kind = "picture" if row.part and row.part.kind == "picture" else "link" if is_link(row.path) else "document"
+    kind = "picture" if row.part and row.part.kind == "picture" else "link" if is_link(row.path) else "folder" if is_folder(row.path) else "document"
     how = "Pasted" if row.part and row.part.pasted else "Attached"  # release 5.27, decisions 125 and 129
     return f"{task_title.strip()} – {how} {kind} – {row.name}" if task_title and task_title.strip() else row.name
 
@@ -356,8 +356,9 @@ def held_text(files: list[FileRow]) -> str:
     """What a capture's files are, in words: "2 emails, 1 file and 1 link", or "" for none. An email's parts count with it."""
     emails = sum(r.email is not None for r in files)
     links = sum(r.of is None and r.email is None and is_link(r.path) for r in files)
-    others = sum(r.of is None and r.email is None and not is_link(r.path) for r in files)
-    return _and_list([f"{n} {word}{'s' if n != 1 else ''}" for n, word in ((emails, "email"), (others, "file"), (links, "link")) if n])
+    folders = sum(r.of is None and r.email is None and is_folder(r.path) for r in files)
+    others = sum(r.of is None and r.email is None and not keeps_no_text(r.path) for r in files)
+    return _and_list([f"{n} {word}{'s' if n != 1 else ''}" for n, word in ((emails, "email"), (others, "file"), (folders, "folder"), (links, "link")) if n])
 
 
 def split_parts(draft: CaptureDraft, reading: items.Reading, read_part: Callable[[CaptureDraft], items.Reading]) -> list[CaptureDraft] | None:
@@ -441,8 +442,8 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
     if draft.from_capture:
         draft.types = {"new_task"}
     for row in draft.files:
-        if is_link(row.path):
-            row.save_a_copy = row.extract = False  # DocRepo keeps only a link's address (mods log round 1, M0001)
+        if keeps_no_text(row.path):
+            row.save_a_copy = row.extract = False  # DocRepo keeps only a link's address (mods log round 1, M0001), or a folder's place
         if row.part and row.part.kind == "picture":
             row.extract = False  # a picture has no text to read
     if draft.meeting:
@@ -603,8 +604,8 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
                     conn.execute("UPDATE documents SET description = ? WHERE id = ?", (desc, doc))
                 else:
                     doc = captures.add_document(conn, name=row.name, description=desc, original=row.path)
-                    if link:
-                        conn.execute("UPDATE documents SET text_status = 'none', text_note = ? WHERE id = ?", (NO_TEXT, doc))
+                    if link or is_folder(row.path):  # a folder has no text either (release 5.66)
+                        conn.execute("UPDATE documents SET text_status = 'none', text_note = ? WHERE id = ?", (NO_TEXT if link else FOLDER_TEXT, doc))
                 if conn.execute("SELECT 1 FROM capture_documents WHERE capture = ? AND document = ?", (capture_id, doc)).fetchone():
                     continue
                 captures.link_document(conn, capture_id, doc, save_a_copy=row.save_a_copy, extract=row.extract)
@@ -887,7 +888,7 @@ def _write_files(
             except Exception as e:  # noqa: BLE001
                 result.problems.append(f"The attachment {name} couldn't be saved ({type(e).__name__}).")
                 continue
-        elif row.path and not is_link(row.path):
+        elif row.path and not keeps_no_text(row.path):
             sources[doc] = Path(row.path)
     pictures = {doc for doc, row, _ in documents if row.part and row.part.kind == "picture"}
     for doc, source in sources.items():

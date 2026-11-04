@@ -20,7 +20,7 @@ from pathlib import Path
 
 from docrepo import markup, notes_page
 from docrepo.captures import capture_folder
-from docrepo.links import is_link
+from docrepo.links import is_folder, is_link
 from docrepo.model import Capture, Model
 
 #: A file's type, by its extension. Anything else is "other"; a link is "link".
@@ -35,8 +35,8 @@ TYPES = {
 }
 _EXT = {ext: kind for kind, exts in TYPES.items() for ext in exts}
 TYPE_NAMES = {"doc": "Word", "sheet": "Excel", "slides": "PowerPoint", "pdf": "PDF", "picture": "Picture", "mail": "Email",
-              "drawing": "Drawing", "link": "Link", "other": "Other"}
-TYPE_ORDER = ("doc", "sheet", "slides", "pdf", "drawing", "picture", "mail", "link", "other")
+              "drawing": "Drawing", "folder": "Folder", "link": "Link", "other": "Other"}
+TYPE_ORDER = ("doc", "sheet", "slides", "pdf", "drawing", "picture", "mail", "folder", "link", "other")
 #: Where a file came from, in the order Group by Source lists them.
 SOURCES = ("Tracked original", "Email attachment", "Saved copy", "Link", "Pasted on the notes page")
 SOURCE_NAMES = {"Tracked original": "Tracked originals", "Email attachment": "Email attachments", "Saved copy": "Saved copies",
@@ -67,6 +67,8 @@ def words_of(folded: str) -> list[str]:
 def file_type(name: str, original: str | None = None) -> str:
     if is_link(original):
         return "link"
+    if is_folder(original):  # release 5.66
+        return "folder"
     ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
     return _EXT.get(ext, "other")
 

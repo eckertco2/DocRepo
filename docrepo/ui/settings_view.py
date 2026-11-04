@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSpinBox,
     QTimeEdit,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -37,6 +38,7 @@ from PySide6.QtWidgets import (
 from docrepo import backup, capacity, db, diagnose, hotkey, outlook, prompts, search, startup, wheels_config
 from docrepo.config import Settings, data_root_problem, init_data_root, make_safe_fs, resolve_data_root, save_location
 from docrepo.dates import WEEKDAYS, long_date
+from docrepo.links import check_link_template
 from docrepo.model import Model
 from docrepo.pages import write_pages
 from docrepo.safe_fs import WriteRefused
@@ -125,6 +127,12 @@ def check_values(ctx: AppContext, values: dict[str, Any]) -> dict[str, Any]:
     if len({n.lower() for n in names}) < len(names):
         raise SettingsProblem("Give each reference field its own name.")
     out["reference_fields"] = names
+    links = {k.strip(): v.strip() for k, v in (out.get("reference_links") or {}).items() if k.strip() in names and v.strip()}
+    for name, template in links.items():  # release 5.67, decision 320
+        why = check_link_template(template)
+        if why:
+            raise SettingsProblem(f"{name}'s link address needs to be one that {why}, such as https://example.com/record/{{}}.")
+    out["reference_links"] = links
     if out.get("look", "new") not in ("new", "classic"):
         raise SettingsProblem("The look is the new one or the Classic one.")
     if out.get("me") and out["me"] not in Model(ctx.conn).people:
@@ -216,6 +224,77 @@ def _row(*widgets: QWidget) -> QWidget:
     for w in widgets:
         lay.addWidget(w)
     return box
+
+
+class ReferenceFields(QWidget):
+    """Settings' reference fields (release 5.9) with their link addresses (release 5.67, round 6's decision 320): a row for
+    each, its name and link address side by side, then what a value of 1234 would link to, worked out as it's typed."""
+
+    SAMPLE = "1234"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.grid = QGridLayout(self)
+        self.grid.setContentsMargins(0, 0, 0, 12)
+        self.grid.setHorizontalSpacing(8)
+        self.grid.setVerticalSpacing(4)
+        for col, words in enumerate(("Field", "Link address", f"A value of {self.SAMPLE} links to")):
+            self.grid.addWidget(QLabel(words, objectName="hint"), 0, col)
+        self.grid.setColumnStretch(1, 2)
+        self.grid.setColumnStretch(2, 2)
+        self.rows: list[tuple[QLineEdit, QLineEdit, QLabel, QToolButton]] = []
+        self.add_button = QPushButton("Add a field")
+        self.add_button.clicked.connect(lambda: self.add_row("", "", focus=True))
+        self.grid.addWidget(self.add_button, 999, 0, Qt.AlignmentFlag.AlignLeft)
+
+    def set(self, names: list[str], links: dict[str, str]) -> None:
+        for row in self.rows:
+            for w in row:
+                w.deleteLater()
+        self.rows = []
+        for name in names:
+            self.add_row(name, links.get(name, ""))
+
+    def add_row(self, name: str, link: str, focus: bool = False) -> None:
+        n = len(self.rows) + 1
+        name_box, link_box = QLineEdit(name), QLineEdit(link)
+        name_box.setPlaceholderText("Such as Change #")
+        name_box.setAccessibleName(f"Reference field {n}'s name")
+        link_box.setPlaceholderText("None: its value is only copied")
+        link_box.setAccessibleName(f"Reference field {n}'s link address, with {{}} where its value goes")
+        link_box.setToolTip("Where the field's value goes, such as https://example.com/record/{}. With no {}, the value goes at the end.")
+        made = QLabel(objectName="hint")
+        made.setWordWrap(True)
+        remove = QToolButton(text="×")
+        remove.setAccessibleName(f"Remove reference field {n}")
+        remove.setToolTip("Remove this field. A task's value stays, and still shows.")
+        row = (name_box, link_box, made, remove)
+        remove.clicked.connect(lambda: self.remove_row(row))
+        link_box.textChanged.connect(lambda: self.show_made(row))
+        self.rows.append(row)
+        for col, w in enumerate(row):
+            self.grid.addWidget(w, len(self.rows), col)
+        self.show_made(row)
+        if focus:
+            name_box.setFocus()
+
+    def remove_row(self, row) -> None:
+        self.rows.remove(row)
+        for w in row:
+            w.deleteLater()
+
+    def show_made(self, row) -> None:
+        from docrepo.links import check_link_template, reference_link
+
+        template, made = row[1].text().strip(), row[2]
+        why = check_link_template(template)
+        made.setText("No link: Copy only" if not template else f"Needs an address that {why}" if why else reference_link(template, self.SAMPLE))
+
+    def names(self) -> list[str]:
+        return [r[0].text() for r in self.rows]
+
+    def links(self) -> dict[str, str]:
+        return {r[0].text().strip(): r[1].text().strip() for r in self.rows if r[0].text().strip() and r[1].text().strip()}
 
 
 class SettingsView(QWidget):
@@ -383,13 +462,14 @@ class SettingsView(QWidget):
         self.events = QLineEdit()
         self.events.setPlaceholderText("Comma-separated")
         self.events.setMinimumWidth(380)
-        self.references = QLineEdit()  # release 5.9, mods log round 2, M0034
-        self.references.setPlaceholderText("Comma-separated, such as Change #")
-        self.references.setMinimumWidth(380)
+        self.references = ReferenceFields()  # release 5.9, mods log round 2, M0034; link addresses since release 5.67
         self._card(lay, "Parse and populate", [
             ("Event words", "Words Parse and populate reads as events, for deadlines.", self.events),
             ("Reference fields", "Fields every task gets, such as a change record's number. Each shows on the task's page with Copy, is "
-                                 "found by search, and Parse and populate reads its name followed by a number.", self.references),
+                                 "found by search, and Parse and populate reads its name followed by a number. With a link address, "
+                                 "its value is also a link to its page: the value goes where {} is, or at the end. The address stays on "
+                                 "this computer.", self.references.add_button),
+            (None, "", self.references),
         ])
 
         # ---- files and prompts ----
@@ -555,7 +635,7 @@ class SettingsView(QWidget):
             box.setChecked(d in s.workdays)
         self.horizon.setValue(s.capacity_horizon_years)
         self.events.setText(", ".join(s.event_words))
-        self.references.setText(", ".join(s.reference_fields))
+        self.references.set(s.reference_fields, s.reference_links)
         self.cap.setValue(s.extracted_text_cap_chars)
         self.warn.setValue(s.prompt_warn_chars)
         self.check.setValue(s.doc_check_minutes)
@@ -579,7 +659,7 @@ class SettingsView(QWidget):
             "copilot_folder": self.copilot.text(),
             "reminder_time": self.reminder.time().toString("HH:mm"), "workdays": [d for d, box in self.workdays.items() if box.isChecked()],
             "capacity_horizon_years": self.horizon.value(), "event_words": [w for w in self.events.text().split(",")],
-            "reference_fields": [w for w in self.references.text().split(",")],
+            "reference_fields": self.references.names(), "reference_links": self.references.links(),
             "extracted_text_cap_chars": self.cap.value(), "prompt_warn_chars": self.warn.value(), "doc_check_minutes": self.check.value(),
             "backup_every_days": self.backup_days.value(), "backup_keep": self.backup_keep.value(),
             "look": self.look.currentData(), "show_hints": self.hints.isChecked(), "outlook_categories": self.categories.isChecked(),

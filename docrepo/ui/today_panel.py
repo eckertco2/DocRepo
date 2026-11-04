@@ -588,7 +588,7 @@ class TodayPanel(QWidget):
         for key, button in self.detail_buttons.items():
             button.setVisible(key in {"back", "done", "remove", "edit"} or (key == "browse" and kind == "task") or (key == "make" and kind == "note"))
         if kind == "task":
-            pages = Pages(m, self._today(), self.browse.content_of, self.ctx.settings.me, self.ctx.conn)
+            pages = Pages(m, self._today(), self.browse.content_of, self.ctx.settings.me, self.ctx.conn, reference_links=self.ctx.settings.reference_links)
             width = self.settings.detail_width - 28
             middle = notes_html(m.pages.get(task, ""))
             self.detail_page.setHtml(pages.task_page(task, PageState(), width, "top") + middle + pages.task_page(task, PageState(), width, "bottom"))

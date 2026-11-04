@@ -50,13 +50,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo import activity, bulk, capacity, db, edits, items, key_dates, notes_page, people, pins, priorities, prompts, search, ties, whatif
+from docrepo import activity, bulk, capacity, db, edits, items, key_dates, notes_page, opener, people, pins, priorities, prompts, search, ties, whatif
 from docrepo.lists import key_dates_due, reminders_due
 from docrepo.agenda import AgendaError
 from docrepo.captures import capture_folder, capture_md_path
 from docrepo.dates import long_date, short, to_date, workday_numbers
 from docrepo.detail import SCOPE_NAMES, PageState, Pages, chip, esc, row_state, state_chip
-from docrepo.links import is_link
+from docrepo.links import is_folder, is_link
 from docrepo.model import TODAY, Model, is_person
 from docrepo.people import PeopleError
 from docrepo.safe_fs import WriteRefused
@@ -183,6 +183,8 @@ class BrowseWindow(QWidget):
         self.setStyleSheet(CLASSIC_BROWSE if LOOK.classic else style_sheet())
         #: Shows a file in File Explorer. Tests replace it.
         self.reveal: Callable[[Path], bool] = show_in_explorer
+        #: What hands a checked link to the browser (release 5.67): Windows' "open", or a stand-in in the tests.
+        self.link_starter: Callable[[str], None] | None = None
         #: Asks a yes-or-no question. Tests replace it.
         self.confirm: Callable[[str, str], bool] = lambda title, text: ask(self, title, text, *_answers(title, text))
         #: Shows a form and waits for it: true when it was saved. Tests replace it.
@@ -635,7 +637,8 @@ class BrowseWindow(QWidget):
         return text
 
     def pages(self) -> Pages:
-        return Pages(self.model(), self.today(), self.content_of, self.ctx.settings.me, self.conn, LOOK.show_help)
+        return Pages(self.model(), self.today(), self.content_of, self.ctx.settings.me, self.conn, LOOK.show_help,
+                     self.ctx.settings.reference_links)
 
     def refresh(self, render: bool = True) -> None:
         """Read docs.db again and show what's there now."""
@@ -2249,8 +2252,12 @@ class BrowseWindow(QWidget):
 
     def _doc_actions(self, document_id: str) -> None:
         m = self.model()
-        if is_link(m.documents[document_id].original):
-            self._action("Copy link", lambda: self.copy_link(document_id), "Copy the address, to paste into your browser", primary=True)
+        if is_link(m.documents[document_id].original):  # Open link since release 5.67 (decision 315)
+            self._action("Open link", lambda: self.open_document_link(document_id), "Open it in your default browser", primary=True)
+            self._action("Copy link", lambda: self.copy_link(document_id), "Copy the address")
+            return
+        if is_folder(m.documents[document_id].original):  # release 5.66
+            self._action("Show in File Explorer", lambda: self.open_document_link(document_id), "Open the folder in File Explorer", primary=True)
             return
         source = edits.source_of(self.ctx.data_root, m, document_id)
         self._action("Show in File Explorer", lambda: self.reveal(source) if source else None, "Show the original", source is not None)
@@ -2305,6 +2312,19 @@ class BrowseWindow(QWidget):
             self.reveal_key(tuple(rest.split(":", 1)))
         elif kind == "copylink":
             self.copy_link(rest)
+        # Links open, on a click (release 5.67, round 6's decisions 314 to 316): a link or folder document, an address
+        # (a reference field's link, or one in a note's words), its Copy, the Task view's links, and Settings.
+        elif kind == "opendoc":
+            self.open_document_link(rest)
+        elif kind == "openurl":
+            self.open_address(unquote(rest))
+        elif kind == "copyaddr":
+            QGuiApplication.clipboard().setText(unquote(rest))
+            self.say("Copied the path." if is_folder(unquote(rest)) else "Copied the link.")
+        elif kind == "taskviewlinks":
+            self.open_task_view(rest, file_type="link")
+        elif kind == "settings":
+            self.set_view("settings")
         elif kind == "taskview":  # the Files tab's Open in Task view (decision 166)
             self.open_task_view(rest)
         elif kind in ("tab", "scope", "order"):
@@ -2382,6 +2402,7 @@ class BrowseWindow(QWidget):
         pane.say = say
         notes.changed.connect(lambda body: self._save_notes(body, pane))
         notes.open_ref.connect(open_ref)
+        notes.open_link.connect(lambda href: self.on_link(QUrl(href)))  # Ctrl+click on a link (release 5.67)
         notes.message.connect(say)
         notes.folds_changed.connect(lambda: self._save_folds(pane))
         # Pictures pasted and files dropped on the page (release 5.27, decisions 124 to 126), and where a picture's file is.
@@ -2680,7 +2701,7 @@ class BrowseWindow(QWidget):
             self.reveal(capture_md_path(root, m.captures[item]))
         elif kind == "doc" and item in m.documents:
             if is_link(m.documents[item].original):
-                self.copy_link(item)  # a link has no file to show, and is never opened
+                self.open_document_link(item)  # a link opens in the browser, on this click (release 5.67)
                 return
             source = edits.source_of(root, m, item)
             if source:
@@ -3128,13 +3149,39 @@ class BrowseWindow(QWidget):
         self.say(f"Copied {name} {value}.")
 
     def copy_link(self, document_id: str) -> None:
-        """Put a link's address on the clipboard. DocRepo only copies links; it never opens one (round 1 plan, decision 5)."""
+        """Put a link's address on the clipboard."""
         d = self.model().documents.get(document_id)
         if d is None or not is_link(d.original):
             return
         QGuiApplication.clipboard().setText(d.original.strip())
         self._used(document_id, "copy_link")
-        self.say(f"Copied the link to {d.name}. Paste it into your browser to open it.")
+        self.say(f"Copied the link to {d.name}.")
+
+    def open_document_link(self, document_id: str) -> None:
+        """Open a link document in the default browser, or a folder in File Explorer, on the owner's click (release 5.67,
+        round 6's decision 314), and note the use."""
+        d = self.model().documents.get(document_id)
+        if d is None:
+            return
+        if is_folder(d.original):
+            found = self.reveal(Path(d.original))
+            self._used(document_id, "show")
+            self.say(f"Opened {d.name} in File Explorer." if found is not False else f"{d.name} isn't at {d.original} any more.", error=found is False)
+            return
+        if not is_link(d.original):
+            return
+        problem = opener.start_link(d.original, self.link_starter)
+        if problem:
+            self.say(problem, error=True)
+            return
+        self._used(document_id, "open")
+        self.say(f"Opened {d.name} in your browser.")
+
+    def open_address(self, address: str) -> None:
+        """Open an address that isn't a document (a reference field's link, or one in a note's words) in the default
+        browser, on the owner's click (release 5.67)."""
+        problem = opener.start_link(address, self.link_starter)
+        self.say(problem or "Opened the link in your browser.", error=bool(problem))
 
     def _used(self, document_id: str, action: str) -> None:
         """Note a file shown or a link copied from the task page (the Task view's uses, decision 159)."""
@@ -3145,8 +3192,9 @@ class BrowseWindow(QWidget):
             log.warning("a use of %s wasn't kept: %s", document_id, type(e).__name__)
 
     # ================= the Task view (releases 5.34 and 5.35) =================
-    def open_task_view(self, task_id: str | None = None) -> None:
-        """A task's Task view: a window of its own (decision 156), one per task, brought forward when it's open."""
+    def open_task_view(self, task_id: str | None = None, file_type: str | None = None) -> None:
+        """A task's Task view: a window of its own (decision 156), one per task, brought forward when it's open.
+        ``file_type`` shows only that type of file, such as "link" from the Links group (release 5.67)."""
         task_id = task_id or (self.sel[1] if self.sel and self.sel[0] == "task" else None)
         if not task_id or task_id not in self.model().tasks:
             self.say("Select a task first. O opens the Task view of the task that's selected.")
@@ -3160,6 +3208,8 @@ class BrowseWindow(QWidget):
         view.show()
         view.raise_()
         view.activateWindow()
+        if file_type:
+            view.show_type(file_type)
         view.focus_box()
 
     def current_task_for_view(self) -> str | None:
@@ -3218,7 +3268,8 @@ class BrowseWindow(QWidget):
         dialog = TaskEditDialog(self, self.model(), task_id, self._label_options, self._people_options,
                                 lambda anchor, picked: self._pick_task(anchor, picked, None),
                                 reference_fields=self.ctx.settings.reference_fields, today=self.today(), checklist=checklist,
-                                link=self.templates.link_of(task_id), workdays=self._workdays())
+                                link=self.templates.link_of(task_id), workdays=self._workdays(),
+                                reference_links=self.ctx.settings.reference_links, open_link=self.open_address)
         self._edit_dialog = dialog  # kept, so tests can reach it
         while True:
             try:

@@ -8,16 +8,18 @@ listed as Captures.
 """
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import quote
 
 from docrepo import ties
 from docrepo.dates import day_diff, days_text, minutes, to_date
+from docrepo.links import reference_link
 from docrepo.model import PRIORITY_NAMES, TODAY, TYPE_NAMES, Capture, FileEntry, Model, StatusEntry, Task, is_person
 from docrepo.safe_fs import SafeFS
 from docrepo.schedule import due_of, is_open, start_of
+from docrepo.task_links import links_of
 
 CONTENTS_FILE = "Contents.md"
 TASK_FILE = "Task.md"
@@ -63,10 +65,12 @@ def _value(value: str | None) -> str:
 class Pages:
     """Builds the page texts from a Model, as of ``today``."""
 
-    def __init__(self, model: Model, today: date, generated_at: datetime) -> None:
+    def __init__(self, model: Model, today: date, generated_at: datetime, reference_links: Mapping[str, str] | None = None) -> None:
         self.m = model
         self.today = today
         self.generated = generated_at.strftime("%Y-%m-%d %H:%M")
+        #: Settings' link address for each reference field (release 5.67, round 6's decision 320).
+        self.reference_links = dict(reference_links or {})
 
     # ---- links ----
     def _task_link(self, from_dir: list[str], task_id: str) -> str:
@@ -132,7 +136,9 @@ class Pages:
             rows.append(("Tied to this", ", ".join(link(x.id) for x in tied)))
         if t.reminder:
             rows.append(("Reminder", t.reminder))
-        rows += list(t.references.items())  # its reference fields (release 5.9, M0034)
+        for name, value in t.references.items():  # its reference fields (release 5.9, M0034), as links when they have one (5.67)
+            address = reference_link(self.reference_links.get(name), value)
+            rows.append((name, f"[{_text(value)}]({address})" if address else value))
         on = self.m.agendas_on(t.id)
         if on:
             rows.append(("On agendas", ", ".join(self._target(here, a.target) for a in on)))
@@ -200,6 +206,10 @@ class Pages:
         pinned = [self.m.documents[d].name for d in self.m.pins.get(t.id, []) if d in self.m.documents]
         key_docs = [f"Key documents: {', '.join(pinned)}", ""] if pinned else []
         out += ["## Files", "", *key_docs, *([self._file_line(here, f) for f in self.m.files_of(t.id)] or ["_None._"]), ""]
+        # Its links in one place (release 5.67, decision 316), each a Markdown link, when it has any.
+        found = links_of(self.m, t.id, self.reference_links)
+        if found:
+            out += ["## Links", "", *[f"- [{_text(x.name)}]({_link_target(x.address) if x.kind == 'folder' else x.address})" for x in found], ""]
         return "\n".join(out)
 
     def _target(self, here: list[str], target: str) -> str:
@@ -227,6 +237,8 @@ class Pages:
             return f"- Tracked original: `{d.original}` · {d.id} · {text_link}"
         if f.kind == "Link":  # as code, not a Markdown link: DocRepo's pages never open a link (round 1 plan, decision 5)
             return f"- Link: {_text(f.name)} · `{d.original}` · {d.id}"
+        if f.kind == "Folder":  # release 5.66: where it is, with no text
+            return f"- Folder: `{d.original}` · {d.id}"
         capture = self.m.captures[d.capture]
         return f"- Email attachment: [{_text(f.name)}]({rel_link(here, [*capture_dir(capture), 'attachments', f.name])}) · {d.id} · {text_link}"
 
@@ -310,16 +322,35 @@ def _write(fs: SafeFS, path: Path, text: str) -> bool:
     return True
 
 
+def _link_target(path: str) -> str:
+    """A folder's path as a Markdown link's target: a file: address, so a Markdown preview opens it."""
+    try:
+        return Path(path.rstrip("\\") or path).as_uri()
+    except ValueError:
+        return path
+
+
+def reference_links_of(data_root: Path) -> dict[str, str]:
+    """Settings' link addresses for reference fields (release 5.67), for Task.md; none when settings.json can't be read."""
+    from docrepo.config import Settings, SettingsError
+
+    try:
+        return Settings.load(data_root).reference_links
+    except SettingsError:
+        return {}
+
+
 def write_task_page(model: Model, data_root: Path, fs: SafeFS, task_id: str, today: date, generated_at: datetime) -> bool:
     """Write one task's Task.md, as an edit of its notes page does (release 5.25). Says whether it was written."""
-    return _write(fs, data_root.joinpath(*task_dir(task_id), TASK_FILE), Pages(model, today, generated_at).task_page(model.task(task_id)))
+    pages = Pages(model, today, generated_at, reference_links_of(data_root))
+    return _write(fs, data_root.joinpath(*task_dir(task_id), TASK_FILE), pages.task_page(model.task(task_id)))
 
 
 def write_pages(
     model: Model, data_root: Path, fs: SafeFS, today: date, generated_at: datetime, task_ids: Iterable[str] | None = None
 ) -> int:
     """Write Task.md for every task (or only ``task_ids``) and Contents.md. Returns how many files were written."""
-    pages = Pages(model, today, generated_at)
+    pages = Pages(model, today, generated_at, reference_links_of(data_root))
     ids = list(model.tasks) if task_ids is None else [i for i in task_ids if i in model.tasks]
     written = 0
     for task_id in ids:

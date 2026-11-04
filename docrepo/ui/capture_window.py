@@ -26,7 +26,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QPoint, Qt, QTimer, Signal
+from PySide6.QtCore import QPoint, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import (
     QCursor,
     QDragEnterEvent,
@@ -67,7 +67,7 @@ from docrepo.dates import workday_numbers
 from docrepo.db import RECURRENCES, STATES
 from docrepo.extract import extract_text, to_unc
 from docrepo.layer0 import Part, size_text
-from docrepo.links import is_link, link_name
+from docrepo.links import folder_name, folder_original, is_folder, is_link, keeps_no_text, link_name, link_of_line, read_address, short_name
 from docrepo.text import typed_path
 from docrepo.model import TODAY, Model, is_person
 from docrepo.parse import Found, Known, Who, as_plant_event, parse_capture, quick_update
@@ -221,7 +221,9 @@ def read_drop(mime, links: bool = False) -> tuple[str, list[str]]:
         return "outlook", []
     if any("FileGroupDescriptor" in f for f in formats):
         return "virtual", []
-    web = [u.toString() for u in mime.urls() if u.scheme() in ("http", "https")] if links else []
+    # Exactly as dragged (release 5.66): toString() turns SharePoint's %20 back into a space, which no link may have.
+    # Any address that isn't a file comes through, so one DocRepo doesn't keep (mailto:) says why rather than vanishing.
+    web = [u.toString(QUrl.ComponentFormattingOption.FullyEncoded) for u in mime.urls() if not u.isLocalFile() and u.scheme()] if links else []
     if web:
         return "links", web
     return "", []
@@ -284,6 +286,17 @@ class ContentEdit(RichEdit):
 
     #: The @ and # list's keys (release 5.8): given a key, True when the open list used it.
     list_keys: Callable[[int], bool] | None = None
+    #: Given (the box, the address, its name) when a paste is one link and nothing else, as Copy link puts one on the
+    #: clipboard; True when it was taken (release 5.66, round 6's decision 319).
+    link_pasted: Callable[["ContentEdit", str, str], bool] | None = None
+
+    def insertFromMimeData(self, source) -> None:  # noqa: N802 - Qt's name
+        from docrepo import paste
+
+        lone = paste.lone_link(source.html()) if source.hasHtml() else None
+        if lone and self.link_pasted is not None and self.link_pasted(self, *lone):
+            return
+        super().insertFromMimeData(source)
     #: Called when the box loses the keyboard, to close that list.
     left: Callable[[], None] | None = None
 
@@ -471,6 +484,7 @@ class CaptureWindow(QWidget):
         self._saving = False
         self.today_on = False  # Today, beside the capture types (M0037)
         self._missing_paths: dict[str, bool] = {}  # path lines that aren't files DocRepo can find, and whether it's said so
+        self._link_names: dict[str, str] = {}  # a link pasted with its name: the name its row is listed by (release 5.66)
         self._path_timer = QTimer(self)
         self._path_timer.setSingleShot(True)
         self._path_timer.setInterval(350)
@@ -674,6 +688,7 @@ class CaptureWindow(QWidget):
         self.content.cursorPositionChanged.connect(self._tell_missing_paths)
         self.content.list_keys = lambda key: self.ref_popup.handle_key(key)
         self.content.left = lambda: self.ref_popup.hide()
+        self.content.link_pasted = self._paste_link
         self.highlighter = OperatorHighlighter(self.content.document())
         self.format_bar = FormatBar(self.content)
         for key, keys in FORMAT_KEYS.items():
@@ -1606,19 +1621,27 @@ class CaptureWindow(QWidget):
         if t.sigil == "#":
             m = self.ctx.model()
             options = [replace(o, sub=path_text(m, o.ref) or "Top-level task") if o.ref in m.tasks else o for o in options]
+        popup.subtasks = self._subtask_options if t.sigil == "#" else None
         self._typing = t
-        if popup is self.ref_popup:
-            at = self.content.viewport().mapTo(self, self.content.cursorRect(cursor).bottomLeft()) + QPoint(0, 3)
-            at.setX(max(4, min(at.x(), self.width() - self.ref_popup.width() - 4)))
-            self.ref_popup.show_options(options, at)
-            return
-        # The pinned window's list is a window of its own, placed under the cursor, or above it at the screen's foot.
+        # Under the cursor, or above it where it wouldn't fit: in the window, or, for the pinned window's list, which is
+        # a window of its own, on the screen. The list keeps itself in view as it changes size (release 5.65).
         rect = box.cursorRect(cursor)
-        area = box.screen().availableGeometry()
-        at = box.viewport().mapToGlobal(rect.bottomLeft()) + QPoint(0, 3)
-        popup.show_options(options, QPoint(max(area.left(), min(at.x(), area.right() - popup.width())), at.y()))
-        if popup.geometry().bottom() > area.bottom():
-            popup.move(popup.x(), box.viewport().mapToGlobal(rect.topLeft()).y() - popup.height() - 3)
+        if popup is self.ref_popup:
+            at = box.viewport().mapTo(self, rect.bottomLeft()) + QPoint(0, 3)
+            above = box.viewport().mapTo(self, rect.topLeft()).y() - 3
+        else:
+            at = box.viewport().mapToGlobal(rect.bottomLeft()) + QPoint(0, 3)
+            above = box.viewport().mapToGlobal(rect.topLeft()).y() - 3
+        popup.show_options(options, at, above)
+
+    def _subtask_options(self, task_id: str) -> list[items.Option]:
+        """A task's open subtasks, in the tree's order, for the # list's Right (release 5.65, decision 311). They have no
+        grey path: the task they're under heads the list, and each one's tooltip has the whole path."""
+        m = self.ctx.model()
+        if task_id not in m.tasks:
+            return []
+        kids = (m.task(x) for x in m.children_of(task_id))
+        return [items.Option(k.title, k.title, ref=k.id) for k in kids if k.state != "Closed" and not k.discarded]
 
     def _pick_ref(self, option: items.Option) -> None:
         """Put the picked name in, with a space after it; a picked one's ID is kept, ahead of names alike."""
@@ -2313,16 +2336,18 @@ class CaptureWindow(QWidget):
         """A line of the content text that's an existing file's path, or a link, adds a row for it; deleting the line
         removes it. A path may have the quotes File Explorer's Copy as path puts round it (release 5.26.1). A path line
         that isn't a file DocRepo can find says so once the cursor leaves it, rather than staying text without a word."""
-        lines = [line.strip() for line in self.content.toPlainText().split("\n") if PATH_LINE.match(typed_path(line)) or is_link(line)]
+        lines = [line.strip() for line in self.content.toPlainText().split("\n") if PATH_LINE.match(typed_path(line)) or link_of_line(line)]
         keep = {line.lower() for line in lines}
         for entry in [e for e in self.files if e.src == "pasted" and (e.line or "").lower() not in keep]:
             self._remove_file(entry, from_content=False)
         self._missing_paths = {line: told for line, told in self._missing_paths.items() if line in lines}
         for line in lines:
-            if not any(line.lower() == (e.line or "").lower() or typed_path(line).lower() == (e.row.path or "").lower() for e in self.files):
-                if is_link(line):
+            link = link_of_line(line)  # with angle brackets or a full stop taken off, or www. made https:// (release 5.66)
+            if not any(line.lower() == (e.line or "").lower() or typed_path(line).lower() == (e.row.path or "").lower()
+                       or (link and link == e.row.path) for e in self.files):
+                if link:
                     # No focus move: a link typed by hand matches before it's finished, and typing must go on.
-                    self._add_file(FileRow(link_name(line), line), "pasted", line, focus=False)
+                    self._add_file(FileRow(self._link_names.get(link) or link_name(link), link), "pasted", line, focus=False)
                     continue
                 if line in self._missing_paths:
                     continue  # looked for already; editing the line looks again
@@ -2350,8 +2375,9 @@ class CaptureWindow(QWidget):
                    "and each folder's name), or drop the file on the window.")
 
     def add_paths(self, paths: list[str]) -> None:
-        """Files dropped or picked. A .msg file is read through Outlook as an email. A folder, or something that
-        isn't there, is left out, and the window says so."""
+        """Files and folders dropped, picked or typed. A .msg file is read through Outlook as an email. A folder is kept
+        as where it is (release 5.66, round 6's decision 318). Something that isn't there is left out, and the window
+        says so."""
         left_out = []
         for p in paths:
             path = Path(p)
@@ -2362,8 +2388,12 @@ class CaptureWindow(QWidget):
                 is_file, is_dir = path.is_file(), path.is_dir()
             except OSError:
                 is_file = is_dir = False
-            if not is_file:
-                left_out.append(f"{path.name or p} is a folder: add the files in it instead." if is_dir else f"{path.name or p} can't be found.")
+            if is_dir:
+                original = folder_original(to_unc(str(path)))
+                if not any((e.row.path or "").lower() == original.lower() for e in self.files):
+                    self._add_file(FileRow(folder_name(original), original), "dropped")
+            elif not is_file:
+                left_out.append(f"{path.name or p} can't be found. Check the path (the drive and each folder's name).")
             elif not any((e.row.path or "").lower() == to_unc(str(path)).lower() for e in self.files):
                 self._add_file(FileRow(path.name, to_unc(str(path))), "dropped")
         if left_out:
@@ -2376,20 +2406,45 @@ class CaptureWindow(QWidget):
     def add_link(self) -> None:
         """Add link…: asks for the address, starting with the clipboard's when it holds one."""
         clip = QGuiApplication.clipboard().text().strip()
-        url, ok = QInputDialog.getText(self, "Add link", "A web or SharePoint link. DocRepo keeps the address, and never opens or fetches it.",
-                                       text=clip if is_link(clip) else "")
+        url, ok = QInputDialog.getText(self, "Add link", "A web or SharePoint link. DocRepo keeps the address and never fetches it; it opens in your browser when you click it.",
+                                       text=read_address(clip).value if read_address(clip).kind == "link" else "")
         if ok and url.strip():
             self.add_link_url(url)
 
-    def add_link_url(self, url: str) -> None:
-        """A link as a row of its own, like a file (mods log round 1, M0001)."""
-        url = url.strip()
-        if not is_link(url):
-            self._fail("That isn't a web link: a link starts with http:// or https:// and has no spaces.", self.content)
-        elif any(e.row.path == url for e in self.files):
-            self._fail(f"{link_name(url)} is already added.", self.content)
+    def add_link_url(self, url: str, name: str = "") -> None:
+        """An address added with Add link, dropped, pasted, or typed in the pinned window's landing row: a link as a row of
+        its own, like a file (mods log round 1, M0001), or a file or folder. Read as ``links.read_address`` reads it
+        (release 5.66): what came round it taken off, www. made https://, a file: address its path. Anything else says
+        why it isn't kept. ``name``: the words a link was copied with, which it's listed by."""
+        a = read_address(url)
+        if a.kind == "path":
+            self.add_paths([a.value])
+        elif a.kind == "refused":
+            diagnose.note_refused_link(url)
+            self._fail(a.why, self.content)
+        elif any(e.row.path == a.value for e in self.files):
+            self._fail(f"{link_name(a.value)} is already added.", self.content)
         else:
-            self._add_file(FileRow(link_name(url), url), "added")
+            self._add_file(FileRow(short_name(name) or link_name(a.value), a.value), "added")
+
+    def _paste_link(self, box: "ContentEdit", address: str, name: str) -> bool:
+        """A paste that is one link (release 5.66, decision 319). On a line of its own in the full window, it goes in as
+        the address on that line, which gives it its row, listed by the name it was copied with; in the pinned window
+        it's added as a dropped link is. Inside other words it's left to the paste, which writes "name <address>"."""
+        a = read_address(address)
+        if a.kind == "refused":
+            return False
+        if box.take_links:
+            self.add_link_url(a.value, name)
+            if self.pinned and self.pin_window is not None:
+                self.pin_window.sync()
+            return True
+        if a.kind != "link" or box.textCursor().block().text().strip():
+            return False
+        if name:
+            self._link_names[a.value] = short_name(name)
+        box.insertPlainText(a.value)
+        return True
 
     def add_outlook(self) -> None:
         """The email selected in Outlook, copied whole through an attachment where Outlook allows it (release 5.33.1)."""
@@ -2451,7 +2506,9 @@ class CaptureWindow(QWidget):
         if doc_id:
             return f"Already tracked as {doc_id}, so that record is reused."
         if link:
-            return ("Unwrapped from Outlook's Safe Links. " if part and part.safe else "") + "Only the address is kept. DocRepo never opens or fetches it."
+            return ("Unwrapped from Outlook's Safe Links. " if part and part.safe else "") + "Only the address is kept, and DocRepo never fetches it."
+        if is_folder(row.path):
+            return "It stays where it is. DocRepo keeps where it is, and reads nothing in it."
         return "It stays where it is."
 
     def _picture_pasted(self, image) -> None:
@@ -2497,8 +2554,9 @@ class CaptureWindow(QWidget):
             entry.keep.setToolTip("Untick to leave it out of the capture")
             entry.keep.toggled.connect(lambda on: self._keep(entry, on))
             top.addWidget(entry.keep)
+        folder = is_folder(row.path)
         label = "Email" if row.email else {"attachment": "Attachment", "picture": "Picture"}.get(kind) or (
-            "Link" if link else "Path" if src == "pasted" else "File")
+            "Link" if link else "Folder" if folder else "Path" if src == "pasted" else "File")
         name = QLabel(f"<span style='color:{C.text2}'>{label}</span>  <b>{esc(row.name)}</b>")
         name.setToolTip(row.path or "")
         top.addWidget(name)
@@ -2526,7 +2584,8 @@ class CaptureWindow(QWidget):
             self._show_layer0()
             self.refresh()
             return
-        entry.what = ("What's at this link?" if link else "What does this picture show?" if kind == "picture" else "What's in this file?")
+        entry.what = ("What's at this link?" if link else "What does this picture show?" if kind == "picture"
+                      else "What's in this folder?" if folder else "What's in this file?")
         entry.desc = QLineEdit(doc.description or "" if doc else "")
         entry.desc.setAccessibleName(f"Description of {row.name}")
         fl.addWidget(entry.desc)
@@ -2536,8 +2595,8 @@ class CaptureWindow(QWidget):
         opts.addWidget(entry.extract)
         opts.addStretch()
         fl.addLayout(opts)
-        entry.copy.setVisible(not link)  # a link has nothing to copy or read, and a picture no text
-        entry.extract.setVisible(not link and kind != "picture")
+        entry.copy.setVisible(not link and not folder)  # a link or a folder has nothing to copy or read, and a picture no text
+        entry.extract.setVisible(not link and not folder and kind != "picture")
         entry.desc.textEdited.connect(self._apply_same_all)
         for box in (entry.copy, entry.extract):
             box.toggled.connect(self._apply_same_all)
@@ -2778,7 +2837,7 @@ class CaptureWindow(QWidget):
         # The markup, as saved: an LLM reads Markdown's bold and lists (mods log round 2, M0045).
         text = "\n\n".join(x for x in [self.content.value()[0].strip(), *self._email_texts()] if x)
         cap = self.ctx.settings.extracted_text_cap_chars
-        file_texts = [(e.row.name, extract_text(Path(e.row.path), cap).text) for e in self.files if e.row.path and not is_link(e.row.path)]
+        file_texts = [(e.row.name, extract_text(Path(e.row.path), cap).text) for e in self.files if e.row.path and not keeps_no_text(e.row.path)]
         blocks = capture_blocks(st, self.ctx.model(), text, file_texts, self.task)
         if not blocks:
             self._fail("Type or paste something first. This summary type sends the capture's content text."

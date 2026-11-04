@@ -6,7 +6,10 @@ the Task view.
 - An **email attachment** isn't opened, keeping the hard rule against launching attachments: it's shown in File
   Explorer, where Windows' own protections apply. One saved to the repo opens as its saved copy.
 - An **email** (its ``.msg``, kept in its capture's folder) opens in Outlook, which shows it read-only.
-- A **link** is copied, never opened or fetched (release 5.4).
+- A **link** opens in the default browser, only on the owner's click (release 5.67, round 6's decision 314; until then
+  it was only copied): ``start_link`` hands an http or https address to Windows' "open", as clicking a link in
+  Outlook does. DocRepo never fetches it: the browser makes the connection, not DocRepo. Copy link stays beside it.
+- A **folder** (release 5.66) opens in File Explorer, which is what showing it does.
 
 Starting the program is the caller's (``start``): the window runs it on a worker thread, so a slow LAN drive never
 freezes it, and says so if the file isn't there.
@@ -17,7 +20,9 @@ import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlsplit
 
+from docrepo.links import read_address
 from docrepo.overview import Record
 
 #: The document types Open may start: Word, Excel, PowerPoint, PDF, Visio, text, CSV, OpenDocument, pictures and emails.
@@ -51,7 +56,9 @@ def plan(r: Record, email_file: Callable[[Record], str] = lambda r: "") -> Plan:
         msg = email_file(r)
         return Plan("open", msg) if msg else Plan("capture", r.capture, "Its .msg file isn't in its capture's folder, so its capture opens.")
     if r.type == "link":
-        return Plan("copy_link", r.path, "DocRepo never opens links: it copies them, for your browser.")
+        return Plan("open_link", r.path)
+    if r.type == "folder":  # a folder (release 5.66) opens in File Explorer, which is what showing it does
+        return Plan("show", r.path)
     if r.source == "Email attachment":
         if r.copy and openable(r.copy):
             return Plan("open", r.copy)
@@ -98,3 +105,23 @@ def folder_of(path: str) -> str:
 def copy_text(paths: list[str]) -> str:
     """Paths for the clipboard, one a line, each quoted when it has a space (as File Explorer's Copy as path does)."""
     return "\n".join(f'"{p}"' if " " in p else p for p in paths)
+
+
+def start_link(address: str, starter: Callable[[str], None] | None = None) -> str | None:
+    """Open a web link in the default browser (release 5.67, round 6's decision 314), on the owner's click only: Windows'
+    "open" hands the address to the browser, as clicking a link in Outlook does, and the browser makes the connection.
+    Only an http or https address that ``links.read_address`` keeps, with a host and no name or password in it. Returns
+    None when it was handed over, else what went wrong, in words."""
+    a = read_address(address or "", one=False)
+    if a.kind != "link":
+        return "DocRepo opens only web links (http or https)."
+    parts = urlsplit(a.value)
+    if parts.scheme.lower() not in ("http", "https") or not parts.hostname:
+        return "DocRepo opens only web links (http or https)."
+    if parts.username or parts.password:
+        return "That link has a name or password in it, so DocRepo won't open it. Copy it instead."
+    try:
+        (starter or os.startfile)(a.value)  # noqa: S606 - Windows' "open", for a checked web link only, on a click
+    except OSError as e:
+        return f"Windows couldn't hand the link to your browser ({type(e).__name__})."
+    return None

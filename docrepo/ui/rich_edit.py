@@ -1058,6 +1058,7 @@ class RichEdit(QTextEdit):
             else:
                 doc = QTextDocument()
                 doc.setHtml(raw)
+                spell_out_links(doc)  # release 5.66: a link's address isn't lost with its formatting
                 text, _ = document_markup(doc, headings=False)  # a pasted heading comes in as bold text, as before
                 diagnose.note_drag("paste", list(source.formats()), 0, 0, "formatted text, from its HTML")
             self.insert_markup(text.strip("\n"))
@@ -1076,6 +1077,40 @@ class RichEdit(QTextEdit):
             cursor.insertHtml(markup.to_html(text))
         self.setTextCursor(cursor)
 
+
+
+def spell_out_links(doc: QTextDocument) -> None:
+    """A web link inside pasted words keeps its address after them, "Pump spec <https://…>", as Outlook's plain text
+    writes one (release 5.66, round 6's decision 319): a paste keeps bold, lists and so on, but not links, so the address
+    was lost. Safe Links are unwrapped. Words that are the address already stay as they are."""
+    from docrepo.layer0 import unwrap
+    from docrepo.links import read_address
+
+    runs: list[tuple[int, str, str]] = []  # (where a link's words end, its address, its words)
+    block = doc.begin()
+    while block.isValid():
+        it = block.begin()
+        href, words, end = "", "", -1
+        while not it.atEnd():
+            frag = it.fragment()
+            here = frag.charFormat().anchorHref() if frag.charFormat().isAnchor() else ""
+            if here and here == href:
+                words, end = words + frag.text(), frag.position() + frag.length()
+            else:
+                if href:
+                    runs.append((end, href, words))
+                href, words, end = here, frag.text(), frag.position() + frag.length()
+            it += 1
+        if href:
+            runs.append((end, href, words))
+        block = block.next()
+    for end, href, words in reversed(runs):
+        address = read_address(unwrap(href)[0])
+        if address.kind != "link" or words.strip() in (address.value, href.strip()):
+            continue
+        cursor = QTextCursor(doc)
+        cursor.setPosition(end)
+        cursor.insertText(f" <{address.value}>", QTextCharFormat())
 
 
 class FormatBar(QWidget):

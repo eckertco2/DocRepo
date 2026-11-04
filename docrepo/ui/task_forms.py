@@ -9,7 +9,7 @@ first.
 """
 from __future__ import annotations
 
-from collections.abc import Callable, Collection, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import replace
 from datetime import date
 from typing import Any
@@ -40,6 +40,7 @@ from docrepo.bulk import BulkEdit, LabelMatch, TaskOutcome, summary
 from docrepo.db import RECURRENCES, STATES
 from docrepo.dates import long_date, to_date
 from docrepo.detail import esc
+from docrepo.links import reference_link
 from docrepo.model import Model, Tie
 from docrepo.pages import num
 from docrepo.parse import Who
@@ -893,7 +894,8 @@ class TaskEditDialog(FormDialog):
 
     def __init__(self, parent: QWidget | None, m: Model, task_id: str, labels: Options, people: Options, pick_task: PickTask | None = None,
                  reference_fields: Sequence[str] = (), today: date | None = None, checklist: QWidget | None = None,
-                 link: templates.TaskLink | None = None, workdays: Collection[int] = MON_TO_FRI) -> None:
+                 link: templates.TaskLink | None = None, workdays: Collection[int] = MON_TO_FRI,
+                 reference_links: Mapping[str, str] | None = None, open_link: Callable[[str], None] | None = None) -> None:
         super().__init__(parent)
         t = m.task(task_id)
         self.m, self.task_id, self._pick_task, self.link = m, task_id, pick_task, link
@@ -1174,10 +1176,33 @@ class TaskEditDialog(FormDialog):
             refs = QGridLayout()
             refs.setHorizontalSpacing(16)
             refs.setVerticalSpacing(16)
+            self.reference_opens: dict[str, QToolButton] = {}
             for i, name in enumerate(reference_fields):
                 box = QLineEdit(t.references.get(name, ""))
                 self.references[name] = box
-                refs.addWidget(field(name, box, "references" if i == 0 else None), i // 2, i % 2)
+                cell: QWidget = box
+                template = (reference_links or {}).get(name, "")
+                if template and open_link is not None:  # its page, from Settings' link address (release 5.67, decision 320)
+                    cell = QWidget()
+                    cl = QHBoxLayout(cell)
+                    cl.setContentsMargins(0, 0, 0, 0)
+                    cl.setSpacing(4)
+                    cl.addWidget(box, 1)
+                    opener_button = QToolButton()
+                    opener_button.setIcon(icon("open"))
+                    opener_button.setAccessibleName(f"Open {name}'s page")
+                    cl.addWidget(opener_button)
+                    self.reference_opens[name] = opener_button
+
+                    def follow(_text: str = "", box=box, button=opener_button, template=template) -> None:
+                        address = reference_link(template, box.text())
+                        button.setEnabled(bool(address))
+                        button.setToolTip(f"Opens in your browser: {address}" if address else "Type its number first")
+
+                    box.textChanged.connect(follow)
+                    opener_button.clicked.connect(lambda _=False, box=box, template=template: open_link(reference_link(template, box.text())))
+                    follow()
+                refs.addWidget(field(name, cell, "references" if i == 0 else None), i // 2, i % 2)
             ml.addLayout(refs)
         g.addWidget(self.more)
         # Open when anything is set in it but a task's place, which nearly every task has and its page shows, and for a task made from a

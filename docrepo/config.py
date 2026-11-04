@@ -142,6 +142,9 @@ class Settings:
     #: Reference fields every task has (mods log round 2, M0034, release 5.9), such as a change record's number. Named
     #: here, never in the code, so DocRepo names no company system.
     reference_fields: list[str] = field(default_factory=list)
+    #: Each reference field's link address, by its name (release 5.67, round 6's decision 320): the field's value goes
+    #: where ``{}`` is, or at the end, and becomes a link to its page. Typed on the owner's computer, never in the code.
+    reference_links: dict[str, str] = field(default_factory=dict)
     #: The visual overhaul (releases 5.10 to 5.16): "new", or "classic" for release 5.9's look (decision 15); and Show
     #: hints, which brings back the help text, ⓘ buttons and key badges (decision 7). Both take effect when DocRepo starts.
     look: str = "new"
@@ -170,11 +173,22 @@ class Settings:
         known = {f.name for f in fields(cls)}
         for key in sorted(set(data) - known):
             log.warning("Ignoring unknown setting %r in %s", key, file)
+        links = data.get("reference_links")
+        if links is not None and not (isinstance(links, dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in links.items())):
+            log.warning("Ignoring reference_links in %s: it isn't names and addresses", file)
+            data = {k: v for k, v in data.items() if k != "reference_links"}
         return cls(**{k: v for k, v in data.items() if k in known})
+
+    def reference_link(self, name: str, value: str | None) -> str:
+        """A reference field's value as a link to its page, from the field's link address (release 5.67), or "" for a field
+        with no link address, or no value."""
+        from docrepo.links import reference_link
+
+        return reference_link(self.reference_links.get(name), value)
 
     def save(self, fs: SafeFS, data_root: Path) -> Path:
         data = asdict(self)
-        for key in ("wheel_hotkeys", "today_panel_hotkey", "copilot_folder"):  # written once they're set, as they're optional (releases 5.41 and 5.56)
+        for key in ("wheel_hotkeys", "today_panel_hotkey", "copilot_folder", "reference_links"):  # written once they're set, as they're optional (releases 5.41, 5.56 and 5.67)
             if not data[key]:
                 del data[key]
         return fs.write_text(data_root / SETTINGS_FILE, json.dumps(data, indent=2) + "\n")

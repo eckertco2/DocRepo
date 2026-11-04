@@ -124,3 +124,57 @@ _BULLET_LINE = re.compile(r"^([ \t]*)(?:[•·▪◦‣§●○■□➢➤✓]|
 def bullets_to_dashes(text: str) -> str:
     """Plain text with bullet characters starting its lines ("•\\tItem") as "- Item", two spaces for each tab before it."""
     return _BULLET_LINE.sub(lambda m: m.group(1).replace("\t", "  ") + "- ", text)
+
+
+# ---- a link copied with its name (release 5.66, round 6's decision 319) ----
+class _Anchors(HTMLParser):
+    """The clipboard HTML's links, each with its words, and whether there are any words outside them."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.links: list[tuple[str, str]] = []
+        self.href: str | None = None
+        self.words: list[str] = []
+        self.outside = False
+        self.skip = 0
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        if tag in SKIP:
+            self.skip += 1
+        elif tag == "a":
+            self.href = dict(attrs).get("href") or ""
+            self.words = []
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in SKIP:
+            self.skip = max(0, self.skip - 1)
+        elif tag == "a" and self.href is not None:
+            self.links.append((self.href, _SPACES.sub(" ", "".join(self.words)).strip()))
+            self.href = None
+
+    def handle_data(self, data: str) -> None:
+        if self.skip:
+            return
+        if self.href is not None:
+            self.words.append(data)
+        elif data.strip():
+            self.outside = True
+
+
+def lone_link(html: str) -> tuple[str, str] | None:
+    """When a paste is one link and nothing else, as SharePoint's, OneDrive's, Teams' and Outlook's Copy link put it on the
+    clipboard (the file's name, linked to its address): (the address, its name). A Safe Links address is unwrapped.
+    None for anything else, including a link inside other words, which the formatted paste spells out."""
+    from docrepo.layer0 import unwrap
+
+    if not html or "<a" not in html.lower():
+        return None
+    reader = _Anchors()
+    reader.feed(html)
+    reader.close()
+    hrefs = {unwrap(href)[0] for href, _ in reader.links if href.strip()}
+    if reader.outside or len(hrefs) != 1:
+        return None
+    address = hrefs.pop()
+    name = next((words for _, words in reader.links if words), "")
+    return address, ("" if name == address else name)

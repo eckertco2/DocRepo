@@ -70,13 +70,15 @@ def test_pinning_keeps_the_capture(window, tmp_path):
     window.dropped("files", [str(tmp_path / "Pump datasheet.pdf")])
     window.dropped("links", ["https://example.com/sites/maintenance/seal-kit"])
     assert pin.status.text() == "1 file, 1 link added"
-    window.dropped("files", [str(tmp_path)])  # a folder: the pinned window says so, and stays
-    assert window.pinned and pin.message.isVisibleTo(pin) and "is a folder" in pin.message.text() and not pin.status.isVisibleTo(pin)
+    window.dropped("files", [str(tmp_path)])  # a folder is kept (release 5.66, round 6's decision 318)
+    assert pin.status.text() == "1 file, 1 folder, 1 link added"
+    window.dropped("files", [str(tmp_path / "Not there.pdf")])  # a path that isn't there: the pinned window says so, and stays
+    assert window.pinned and pin.message.isVisibleTo(pin) and "can't be found" in pin.message.text() and not pin.status.isVisibleTo(pin)
     window.dropped("files", [str(tmp_path / "Pump datasheet.pdf")])  # the next drop clears it
     assert not pin.message.isVisibleTo(pin)
     window.unpin()
     assert not window.pinned and window.isVisible() and not pin.isVisible()
-    assert window.task == "T000008" and len(window.files) == 2 and "Guards fitted" in window.content.toPlainText()
+    assert window.task == "T000008" and len(window.files) == 3 and "Guards fitted" in window.content.toPlainText()
     window.toggle_pin()  # F12 pins it again, and again brings it back
     assert window.pinned
     window.toggle_pin()

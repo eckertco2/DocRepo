@@ -13,12 +13,24 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import date
 from html import escape as esc
 
-from PySide6.QtCore import QPoint, Qt, Signal
-from PySide6.QtGui import QColor, QSyntaxHighlighter, QTextBlock, QTextBlockUserData, QTextCharFormat, QTextDocument
+from PySide6.QtCore import QPoint, QRect, QSize, Qt, Signal
+from PySide6.QtGui import (
+    QColor,
+    QFontMetrics,
+    QGuiApplication,
+    QPainter,
+    QSyntaxHighlighter,
+    QTextBlock,
+    QTextBlockUserData,
+    QTextCharFormat,
+    QTextDocument,
+)
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QFrame,
     QHBoxLayout,
@@ -28,6 +40,9 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QPushButton,
     QSizePolicy,
+    QStyle,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
     QVBoxLayout,
     QWidget,
 )
@@ -37,7 +52,7 @@ from docrepo.dates import long_date, short
 from docrepo.model import AgendaItem, Model
 from docrepo.ui import tokens
 from docrepo.ui.tokens import C
-from docrepo.ui.icons import icon
+from docrepo.ui.icons import icon, tinted
 from docrepo.ui.look import LOOK, Help
 from docrepo.ui.widgets import DateField, ElidedCheck, ElidedLabel
 
@@ -434,42 +449,230 @@ class AgendaPanel(QFrame):
                           if open_items else "")
 
 
+#: The @ and # list (release 5.65, decision 310): as wide as its longest row, between these, and this many rows in view
+#: before it scrolls. It never scrolls sideways: a scroll bar there hid a lone row's name.
+REF_MIN_W, REF_MAX_W, REF_ROWS = 320, 480, 8
+#: The grey part of a row gives way down to this before the name is shortened.
+REF_SUB_MIN = 48
+_OPTION, _HEAD = Qt.ItemDataRole.UserRole, Qt.ItemDataRole.UserRole + 1
+
+
+class _RefDelegate(QStyledItemDelegate):
+    """A row of the @ and # list: its name in the Body font, then its grey part (a task's path, a person's aliases) in the
+    Caption size, the grey part shortened in its middle before the name is shortened at its end. A task with open
+    subtasks has a chevron at the right edge (Right goes into them), and a level's first row, the task it's under, has a
+    back chevron (Left goes back up)."""
+
+    PAD, GAP, CHEV = 8, 12, 18
+
+    def __init__(self, popup: "RefPopup") -> None:
+        super().__init__(popup)
+        self.popup = popup
+        self.font = tokens.ui_font(tokens.BODY)
+        self.bold = tokens.ui_font(tokens.BODY, semibold=True)
+        self.small = tokens.ui_font(tokens.CAPTION)
+
+    def row_height(self) -> int:
+        return max(24, QFontMetrics(self.font).height() + 8)
+
+    def natural_width(self, o: items.Option, head: bool) -> int:
+        """The row's width with nothing shortened."""
+        w = 2 * self.PAD + 4 + QFontMetrics(self.bold if head else self.font).horizontalAdvance(o.label)  # 4 px to spare
+        if o.sub:
+            w += self.GAP + QFontMetrics(self.small).horizontalAdvance(o.sub)
+        if head or self.popup.opens(o):
+            w += self.CHEV
+        return w
+
+    def sizeHint(self, option, index) -> QSize:  # noqa: N802 - Qt's name
+        return QSize(1, self.row_height())  # as wide as the list, never wider
+
+    def paint(self, p: QPainter, option: QStyleOptionViewItem, index) -> None:
+        o: items.Option = index.data(_OPTION)
+        head = bool(index.data(_HEAD))
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        opt.text = ""
+        style = opt.widget.style() if opt.widget is not None else QApplication.style()
+        style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, p, opt.widget)  # the row's back and selection, from the style sheet
+        p.save()
+        rect = opt.rect.adjusted(self.PAD, 0, -self.PAD, 0)
+        left, right = rect.left(), rect.left() + rect.width()  # QRect.right() is a pixel short of the edge
+        scale = p.device().devicePixelRatioF()
+        grey = tokens.colour("text2")
+        if head:
+            p.drawPixmap(QPoint(left - 2, rect.top() + (rect.height() - 14) // 2), tinted("chevron-left", grey, 14, scale))
+            left += self.CHEV
+        elif self.popup.opens(o):
+            p.drawPixmap(QPoint(right - 12, rect.top() + (rect.height() - 14) // 2), tinted("chevron-right", grey, 14, scale))
+            right -= self.CHEV
+        name_font = self.bold if head else self.font
+        fn, fs = QFontMetrics(name_font), QFontMetrics(self.small)
+        room = max(0, right - left)
+        name_w = fn.horizontalAdvance(o.label)
+        sub_w = fs.horizontalAdvance(o.sub) if o.sub else 0
+        sub_room = 0
+        if o.sub:  # the grey part gives way first, down to REF_SUB_MIN; then the name does
+            sub_room = min(sub_w, max(room - name_w - self.GAP, min(sub_w, REF_SUB_MIN)))
+            if sub_room < min(sub_w, REF_SUB_MIN) or room - sub_room - self.GAP < fn.horizontalAdvance("…") * 4:
+                sub_room = 0
+        name_room = room - (sub_room + self.GAP if sub_room else 0)
+        # A part that fits is drawn whole: Qt's eliding wants a little more room than the words measure (release 5.64's
+        # DropButton found the same), so it would shorten words that fit exactly.
+        name = o.label if name_w <= name_room else fn.elidedText(o.label, Qt.TextElideMode.ElideRight, name_room)
+        base = rect.top() + (rect.height() + fn.ascent() - fn.descent()) // 2  # both parts on one baseline
+        p.setFont(name_font)
+        p.setPen(QColor(tokens.colour("text")))
+        p.drawText(QPoint(left, base), name)
+        if sub_room:
+            sub = o.sub if sub_w <= sub_room else fs.elidedText(o.sub, Qt.TextElideMode.ElideMiddle, sub_room)
+            p.setFont(self.small)
+            p.setPen(QColor(grey))
+            p.drawText(QPoint(left + fn.horizontalAdvance(name) + self.GAP, base), sub)
+        p.restore()
+
+
 class RefPopup(QListWidget):
-    """The list @ and # open while typing the content text: Up and Down move, Enter or Tab picks, Esc closes it."""
+    """The list @ and # open while typing the content text: Up and Down move, Enter or Tab picks, Esc closes it. For #,
+    Right on a task with open subtasks lists them under the task itself, and Left goes back up (release 5.65, decisions
+    311 and 312); typing goes back to the search, as the text box shows a new list."""
 
     picked = Signal(object)  # the items.Option
 
-    def __init__(self, parent: QWidget) -> None:
+    def __init__(self, parent: QWidget | None) -> None:
         super().__init__(parent)
         self.setObjectName("refPopup")
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.setFixedWidth(320)
-        self.itemClicked.connect(lambda item: self.picked.emit(item.data(Qt.ItemDataRole.UserRole)))
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setUniformItemSizes(True)
+        self.delegate = _RefDelegate(self)
+        self.setItemDelegate(self.delegate)
+        #: A task's open subtasks as options, for Right; None for a list with no levels (@).
+        self.subtasks: Callable[[str], list[items.Option]] | None = None
+        # Each level above this one: its rows, the row it was left from, and the task it was under (None at the top).
+        self._levels: list[tuple[list[items.Option], int, items.Option | None]] = []
+        self._opens: dict[str, bool] = {}
+        self._under = ""  # the path of the level showing: its head's path and name
+        self._at, self._above = QPoint(), None
+        self.setFixedWidth(REF_MIN_W)
+        self.itemClicked.connect(lambda item: self.picked.emit(item.data(_OPTION)))
         self.hide()
 
-    def show_options(self, options: list[items.Option], at: QPoint) -> None:
-        self.clear()
-        for o in options:
-            item = QListWidgetItem(o.label + (f"    {o.sub}" if o.sub else ""))
-            item.setData(Qt.ItemDataRole.UserRole, o)
-            self.addItem(item)
-        self.setCurrentRow(0)
-        self.setFixedHeight(min(8, len(options)) * (self.sizeHintForRow(0) or 22) + 6)
-        self.move(at)
+    # ---- what it shows ----
+    def opens(self, o: items.Option | None) -> bool:
+        """True when Right on this row would list its task's subtasks."""
+        if o is None or not o.ref or self.subtasks is None:
+            return False
+        if o.ref not in self._opens:
+            self._opens[o.ref] = bool(self.subtasks(o.ref))
+        return self._opens[o.ref]
+
+    def show_options(self, options: list[items.Option], at: QPoint, above: int | None = None) -> None:
+        """The list for what's typed, at ``at`` (in its parent, or on the screen when it's a window of its own), or
+        with its foot at ``above`` when it wouldn't fit under the cursor."""
+        self._levels = []
+        self._opens = {}
+        self._at, self._above = QPoint(at), above
+        self._fill(options, 0)
         self.show()
         self.raise_()
 
+    def _fill(self, options: list[items.Option], row: int, head: items.Option | None = None) -> None:
+        self.clear()
+        rows = ([(head, True)] if head is not None else []) + [(o, False) for o in options]
+        # A level's rows have no grey part of their own: they're under the task heading the list.
+        under = " › ".join(x for x in ((head.sub if head.ref and head.sub != "Top-level task" else ""), head.label) if x) if head else ""
+        self._under = under
+        for o, is_head in rows:
+            where = o.sub or ("" if is_head else under)
+            item = QListWidgetItem(o.label + (f", {where}" if where else ""))  # what a screen reader says
+            item.setData(_OPTION, o)
+            item.setData(_HEAD, is_head)
+            item.setToolTip(o.label + (f"\n{where}" if where else ""))
+            self.addItem(item)
+        self.setCurrentRow(min(row, max(0, self.count() - 1)))
+        self._fit([(o, h) for o, h in rows])
+
+    def _area(self) -> QRect:
+        if self.isWindow():
+            screen = self.screen() or QGuiApplication.primaryScreen()
+            return screen.availableGeometry()
+        parent = self.parentWidget()
+        return parent.rect().adjusted(4, 4, -4, -4) if parent is not None else QRect(0, 0, REF_MAX_W, 600)
+
+    def _fit(self, rows: list[tuple[items.Option, bool]]) -> None:
+        """Size it to its rows and keep it in view: as wide as the widest row allows, one row tall per row up to
+        REF_ROWS, its frame and padding counted as Qt reports them."""
+        self.ensurePolished()
+        area = self._area()
+        frame = 2 * self.frameWidth()
+        shown = min(REF_ROWS, len(rows))
+        bar = self.verticalScrollBar().sizeHint().width() if len(rows) > REF_ROWS else 0
+        natural = max((self.delegate.natural_width(o, h) for o, h in rows), default=REF_MIN_W) + frame + bar
+        self.setFixedSize(max(REF_MIN_W, min(natural, REF_MAX_W, area.width())), shown * self.delegate.row_height() + frame)
+        x = max(area.left(), min(self._at.x(), area.right() - self.width()))
+        y = self._at.y()
+        if y + self.height() > area.bottom() and self._above is not None:
+            y = self._above - self.height()
+        self.move(x, max(area.top(), min(y, area.bottom() - self.height())))
+
+    # ---- levels ----
+    def _current(self) -> tuple[items.Option | None, bool]:
+        item = self.currentItem()
+        return (item.data(_OPTION), bool(item.data(_HEAD))) if item is not None else (None, False)
+
+    def go_into(self, row: int | None = None) -> bool:
+        """List the subtasks of the task on ``row`` (the current one), under it; True when it has any."""
+        item = self.item(self.currentRow() if row is None else row)
+        o = item.data(_OPTION) if item is not None else None
+        if o is None or bool(item.data(_HEAD)) or not self.opens(o):
+            return False
+        self._levels.append(([self.item(i).data(_OPTION) for i in range(self.count()) if not self.item(i).data(_HEAD)],
+                             self.row(item), self.item(0).data(_OPTION) if self.item(0).data(_HEAD) else None))
+        # A level's row has no grey part of its own; as the next level's head it shows where it is.
+        self._fill(self.subtasks(o.ref), 1, head=o if o.sub else replace(o, sub=self._under or "Top-level task"))
+        return True
+
+    def go_up(self) -> bool:
+        """Back to the level above, with the task it came from picked; False at the top."""
+        if not self._levels:
+            return False
+        options, row, head = self._levels.pop()
+        self._fill(options, row, head=head)
+        return True
+
+    @property
+    def depth(self) -> int:
+        return len(self._levels)
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        """A row's chevron goes into its subtasks, and the back chevron goes up; a click anywhere else picks the row."""
+        item = self.itemAt(event.position().toPoint())
+        if item is not None and event.button() == Qt.MouseButton.LeftButton:
+            x = event.position().x()
+            if item.data(_HEAD) and x < self.delegate.PAD + self.delegate.CHEV:
+                self.go_up()
+                return
+            if not item.data(_HEAD) and x > self.viewport().width() - self.delegate.PAD - self.delegate.CHEV and self.go_into(self.row(item)):
+                return
+        super().mousePressEvent(event)
+
     def handle_key(self, key: int) -> bool:
-        """A key typed in the content text while the list is open; True when the list used it."""
+        """A key typed in the content text while the list is open; True when the list used it. Right and Left are the
+        list's only when they do something there (decision 312): otherwise they move the cursor, as before."""
         if not self.isVisible():
             return False
         if key in (Qt.Key.Key_Down, Qt.Key.Key_Up):
             self.setCurrentRow((self.currentRow() + (1 if key == Qt.Key.Key_Down else -1)) % max(1, self.count()))
             return True
+        if key == Qt.Key.Key_Right:
+            return self.go_into()
+        if key == Qt.Key.Key_Left:
+            return self.go_up()
         if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Tab):
             item = self.currentItem() or self.item(0)
             if item:
-                self.picked.emit(item.data(Qt.ItemDataRole.UserRole))
+                self.picked.emit(item.data(_OPTION))
             return True
         if key == Qt.Key.Key_Escape:
             self.hide()

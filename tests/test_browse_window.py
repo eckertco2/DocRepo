@@ -959,7 +959,7 @@ def test_release_59_people_labels_reference_fields_and_capacity(browse, ctx):
     assert labels.values() == ["Line 1", "Line 2"] and labels.sets[0][0].isChecked()
     # Reference fields: named in Settings, a box each in Edit task.
     browse.set_view("settings")
-    browse.settings_view.references.setText("Work order #, Permit no.")
+    browse.settings_view.references.set(["Work order #", "Permit no."], {})  # a table since release 5.67
     assert "reference_fields" in browse.settings_view.save()
     assert ctx.settings.reference_fields == ["Work order #", "Permit no."]
     tasks.update_task(browse.conn, ctx.settings, "T000012", at=NOW, via="Browse tool", references={"Work order #": "48213"})
