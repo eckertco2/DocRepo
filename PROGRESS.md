@@ -736,6 +736,8 @@ Round 6's items 87, 88 and 90 (the design workspace's `docs/mods/round-6-plan.md
 
 Old tests that pinned copy-only now check opening (`test_links.py`, `test_pins_opener.py`), and the Settings test fills the table (`test_browse_window.py`). Checked by eye on Windows' real platform: Installation's page with its Links group, and Settings' reference fields. The full run, with 5.65 and 5.66: 2556 passed, 1 skipped, none failed.
 
+**Merged to `main`** (2026-11-04), with 5.65 and 5.66, before the owner's hand test, with `main`'s 5.68 merged into `round6` first: 2558 passed, 1 skipped, none failed. Not on GitHub yet. **Not checked yet:** the owner's hand test, and the corporate computer, with the design workspace's `handoff/docrepo/release-5-65-and-5-66-test.md`, then `release-5-67-test.md`.
+
 ## Release 5.66: links that go in, whatever their kind (2026-11-03)
 
 Round 6's item 89 (the design workspace's `docs/mods/round-6-plan.md`), from the owner's voice memo of 2026-11-03 ("I'm still getting some errors when I try and upload certain types of links"), with decisions 318, 319 and 321, all as recommended, built without a mock. Which links the owner hit isn't known yet: the plan's table lists what each kind did, tried against the code. No schema change and no new package.
