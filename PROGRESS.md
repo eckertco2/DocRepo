@@ -78,10 +78,11 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.61 | Forms and small things (stage V6): Edit task and New task without scrolling, questions that name their answers, one label role, Settings' More hotkeys, Quick edit's heights, chips in one shape and empty states | Built 2026-11-02, hand-tested by the owner, merged to `main` and on GitHub the same day |
 | 5.62 | Thread A's fields and ties in a capture (decisions 293 to 300): `**duration`, `**weekends`, `**involvement`, a rate in `**hours` and `**lead hours`, and a tie in `**start` and `**due` | Built 2026-11-02 on the `round5-templates` branch, and merged to `main` and on GitHub 2026-11-03, before the owner's hand test. Next: the hand test, then `handoff/docrepo/release-5-62-test.md` |
 | 5.63 | Apply template (decisions 301 to 309): a template put into tasks that already exist, which keep all they have, from Select mode, a template's page or a task's menu | Built 2026-11-02 on the `round5-templates` branch, without a mock at the owner's word, and merged to `main` and on GitHub 2026-11-03, before the owner's hand test. Next: the hand test, then `handoff/docrepo/release-5-63-test.md` |
-| 5.64 | What-ifs on the Timeline page (round 5, thread D, item 73; decisions 226 to 228 and 290): Take off, the drags and a whole parent in whole weeks, kept by name, the load as each would be, and Review and apply | Built 2026-11-03, hand-tested by the owner and merged to `main` the same day |
-| 5.65 | The # list (round 6's stage 24, decisions 310 to 313): whole rows with their paths, never a sideways scroll bar, Right and Left into a task's subtasks and back, and `#` alone listing the top-level tasks | Built 2026-11-03 in the `round6` worktree, before the owner's hand test |
-| 5.66 | Links that go in (round 6's item 89, decisions 318, 319 and 321): a dragged link kept exactly, one reader for addresses, folders kept, a link pasted with its name, and the report's links not kept | Built 2026-11-03 in the `round6` worktree, before the owner's hand test |
-| 5.67 | Links that open (round 6's items 87, 88 and 90, decisions 314 to 317, 320 and 323): a link opens in the browser on a click, through `opener.start_link`; the task page's Links group; a reference field's link from Settings' link address; Ctrl+click on the notes page; Task.md's links; the rules file changed | Built 2026-11-03 in the `round6` worktree, from the approved mock, before the owner's hand test |
+| 5.64 | What-ifs on the Timeline page (round 5, thread D, item 73; decisions 226 to 228 and 290): Take off, the drags and a whole parent in whole weeks, kept by name, the load as each would be, and Review and apply | Built 2026-11-03, hand-tested by the owner and merged to `main` the same day; on GitHub 2026-11-04 |
+| 5.65 | The # list (round 6's stage 24, decisions 310 to 313): whole rows with their paths, never a sideways scroll bar, Right and Left into a task's subtasks and back, and `#` alone listing the top-level tasks | Built 2026-11-03 in the `round6` worktree, and merged to `main` 2026-11-04, before the owner's hand test |
+| 5.66 | Links that go in (round 6's item 89, decisions 318, 319 and 321): a dragged link kept exactly, one reader for addresses, folders kept, a link pasted with its name, and the report's links not kept | Built 2026-11-03 in the `round6` worktree, and merged to `main` 2026-11-04, before the owner's hand test |
+| 5.67 | Links that open (round 6's items 87, 88 and 90, decisions 314 to 317, 320 and 323): a link opens in the browser on a click, through `opener.start_link`; the task page's Links group; a reference field's link from Settings' link address; Ctrl+click on the notes page; Task.md's links; the rules file changed | Built 2026-11-03 in the `round6` worktree, from the approved mock, and merged to `main` 2026-11-04, before the owner's hand test |
+| 5.68 | Long notes pages open at once: a page is written in as one edit, laid out once rather than after every line, and a table pasted on a page is one step for Ctrl+Z (found by the design workspace's notes workspace sample) | Built 2026-11-03 in the `notes-load` worktree, hand-tested by the owner and merged to `main` the same day; on GitHub 2026-11-04 |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
 ## Decisions
@@ -676,6 +677,18 @@ The owner asked for the review's next stages, and took its decisions V2, V3, V4,
 
 
 
+## Release 5.68: long notes pages open at once (2026-11-03)
+
+Found by the design workspace's notes workspace sample (`docs/mods/notes-workspace-sample/`, the notes workspace plan's decision 359), which times a year of weekly meetings on DocRepo's own notes page. No schema change, no new package, nothing new to see: a long page just opens without the wait. 5.65 to 5.67 are round 6's.
+
+- **Opening a page** (`NotesEdit.set_page`). The page was written in a line at a time. The editor is as tall as its text, so once it had been shown at a width, Qt laid the whole page out again after every line: a year of weekly meetings (1,508 lines) took 4 to 5 s to open on the task page or the Task view's Notes page tab. The lines and their styling are now one edit (`beginEditBlock` and `endEditBlock`), so Qt lays the page out once, at its end: the same 1,508 lines open in about 0.15 s, and give exactly the same page back. Moving lines (Alt+Shift+Up and Down) was always one edit, so it was never slow.
+- **Pasting a table** (`NotesEdit._paste_html_tables`, release 5.27). After the paste's edit, every line of the page was styled again, each a relayout and a step of undo of its own: 2.5 s on the year's page, and one Ctrl+Z took back only the last line's styling, not the table. The styling is now inside the paste's edit: about 0.1 s, and one Ctrl+Z takes the paste back.
+- **Measured** on this computer (offscreen, the task pane at 900 px): the year's page opened in 4.8 s before and 0.15 s after, with 1,509 relayouts before and one after; the table pasted on it in 2.5 s before and 0.1 s after. On the corporate computer a long-running meeting's page should open without a pause.
+
+**Tests:** `tests/test_notes_edit.py`: a 320-line page set on an editor already shown is laid out at most twice, and reads out as it went in (it was laid out once for each line before). `tests/test_pictures_tables.py`: a table pasted at the end of a 150-line page is taken back by one Ctrl+Z. Both fail on 5.64 (322 relayouts; the page not as it was). The full run: 2493 passed, 1 skipped, none failed.
+
+**Hand-tested by the owner and merged to `main`** (2026-11-03), **on GitHub** (2026-11-04). **Not checked yet:** the corporate computer, with the design workspace's `handoff/docrepo/release-5-68-test.md`.
+
 ## Release 5.67: links that open, a task's links in one place, and a reference field's link (2026-11-03)
 
 Round 6's items 87, 88 and 90 (the design workspace's `docs/mods/round-6-plan.md`), from the owner's voice memo of 2026-11-03, built from the mock the owner approved the same day (`docs/browse-tool/mockup/links.js` there), with decisions 314 to 317, 320 and 323, all as recommended. It overturns round 1's decision 5 (copy only, 2026-10-20) and changes the rules file. No schema change and no new package.
@@ -768,7 +781,7 @@ Round 5's thread D, item 73, from the mock the owner approved with release 5.40 
 
 **Tests:** `tests/test_whatif.py` (new) has the picture changing nothing in seven tables, ties, a whole parent with a tie inside it moved once, key dates that stay, out of date, Apply making exactly what the picture showed, one change that can't be made, the list kept and read back, and the review's words. `tests/test_timeline_whatif.py` (new) drives the page: Take off from the line and the card, a bar and a whole parent dragged with real mouse events, no Quick edit, P and Ctrl+Z, naming, flipping, keeping, deleting, Review and apply, and a picture worked out once for each change. `tests/test_real_look.py` checks on Windows' real platform that the row of controls stays one line in a what-if too. The full run: 2306 passed, 1 skipped, none failed, and 2491 passed, 1 skipped, with `main`'s 5.62 and 5.63 merged in.
 
-**Hand-tested by the owner and merged to `main`** (2026-11-03). **Not checked yet:** the corporate computer, with the design workspace's `handoff/docrepo/release-5-64-test.md`, after its `release-5-40-test.md`.
+**Hand-tested by the owner and merged to `main`** (2026-11-03), **on GitHub** (2026-11-04). **Not checked yet:** the corporate computer, with the design workspace's `handoff/docrepo/release-5-64-test.md`, after its `release-5-40-test.md`.
 
 ## Release 5.40.1: a save waits out a brief refusal (2026-11-02)
 

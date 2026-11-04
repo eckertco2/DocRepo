@@ -558,11 +558,16 @@ class NotesEdit(RichEdit):
         frame.setLeftMargin(LEFT)
         doc.rootFrame().setFrameFormat(frame)
         lines = notes_page.lines_of(body)
+        # One edit, so Qt lays the page out once, at its end. Line by line, a page already shown was laid out again after
+        # every line, as it's as tall as its text: a year of weekly meetings (1,508 lines) took 4 to 5 s to open (release
+        # 5.68, found by the notes workspace sample). Moving lines was always one edit.
+        c = QTextCursor(doc)
+        c.beginEditBlock()
         if lines:
-            c = QTextCursor(doc)
             self._write_lines(c, lines, True)
         for b in list(self.blocks()):
             self.style_block(b)
+        c.endEditBlock()
         wanted = set(folds)
         for b in self.blocks():
             if b.blockFormat().headingLevel() and self.fold_key(b) in wanted:
@@ -1185,12 +1190,15 @@ class NotesEdit(RichEdit):
         c.clearSelection()
         here = c.block()
         fresh = not here.text() and self.kind(here) == "text" and here.textList() is None
+        # The lines and their styling are one edit, so the page is laid out once and one Ctrl+Z takes the paste back.
+        # Styled after the edit, each line was a relayout and a step of undo of its own: 2.5 s and 1,839 steps on a year
+        # of weekly meetings (release 5.68).
         c.beginEditBlock()
         self._write_lines(c, lines, fresh)
-        c.endEditBlock()
         for b in list(self.blocks()):
             if self.kind(b) != "cell":
                 self.style_block(b)
+        c.endEditBlock()
         self.setTextCursor(c)
         self._restructure.start()
 
