@@ -78,8 +78,8 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.61 | Forms and small things (stage V6): Edit task and New task without scrolling, questions that name their answers, one label role, Settings' More hotkeys, Quick edit's heights, chips in one shape and empty states | Built 2026-11-02, hand-tested by the owner, merged to `main` and on GitHub the same day |
 | 5.62 | Thread A's fields and ties in a capture (decisions 293 to 300): `**duration`, `**weekends`, `**involvement`, a rate in `**hours` and `**lead hours`, and a tie in `**start` and `**due` | Built 2026-11-02 on the `round5-templates` branch, and merged to `main` and on GitHub 2026-11-03, before the owner's hand test. Next: the hand test, then `handoff/docrepo/release-5-62-test.md` |
 | 5.63 | Apply template (decisions 301 to 309): a template put into tasks that already exist, which keep all they have, from Select mode, a template's page or a task's menu | Built 2026-11-02 on the `round5-templates` branch, without a mock at the owner's word, and merged to `main` and on GitHub 2026-11-03, before the owner's hand test. Next: the hand test, then `handoff/docrepo/release-5-63-test.md` |
-| 5.64 | What-ifs on the Timeline page (round 5, thread D, item 73; decisions 226 to 228 and 290): Take off, the drags and a whole parent in whole weeks, kept by name, the load as each would be, and Review and apply | Built 2026-11-03, hand-tested by the owner and merged to `main` the same day |
-| 5.68 | Long notes pages open at once: a page is written in as one edit, laid out once rather than after every line, and a table pasted on a page is one step for Ctrl+Z (found by the design workspace's notes workspace sample) | Built 2026-11-03 in the `notes-load` worktree, hand-tested by the owner and merged to `main` the same day. Not on GitHub yet |
+| 5.64 | What-ifs on the Timeline page (round 5, thread D, item 73; decisions 226 to 228 and 290): Take off, the drags and a whole parent in whole weeks, kept by name, the load as each would be, and Review and apply | Built 2026-11-03, hand-tested by the owner and merged to `main` the same day; on GitHub 2026-11-04 |
+| 5.68 | Long notes pages open at once: a page is written in as one edit, laid out once rather than after every line, and a table pasted on a page is one step for Ctrl+Z (found by the design workspace's notes workspace sample) | Built 2026-11-03 in the `notes-load` worktree, hand-tested by the owner and merged to `main` the same day; on GitHub 2026-11-04 |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
 ## Decisions
@@ -684,7 +684,7 @@ Found by the design workspace's notes workspace sample (`docs/mods/notes-workspa
 
 **Tests:** `tests/test_notes_edit.py`: a 320-line page set on an editor already shown is laid out at most twice, and reads out as it went in (it was laid out once for each line before). `tests/test_pictures_tables.py`: a table pasted at the end of a 150-line page is taken back by one Ctrl+Z. Both fail on 5.64 (322 relayouts; the page not as it was). The full run: 2493 passed, 1 skipped, none failed.
 
-**Hand-tested by the owner and merged to `main`** (2026-11-03). **Not checked yet:** the corporate computer, with the design workspace's `handoff/docrepo/release-5-68-test.md`.
+**Hand-tested by the owner and merged to `main`** (2026-11-03), **on GitHub** (2026-11-04). **Not checked yet:** the corporate computer, with the design workspace's `handoff/docrepo/release-5-68-test.md`.
 
 ## Release 5.64: what-ifs (2026-11-03)
 
@@ -703,7 +703,7 @@ Round 5's thread D, item 73, from the mock the owner approved with release 5.40 
 
 **Tests:** `tests/test_whatif.py` (new) has the picture changing nothing in seven tables, ties, a whole parent with a tie inside it moved once, key dates that stay, out of date, Apply making exactly what the picture showed, one change that can't be made, the list kept and read back, and the review's words. `tests/test_timeline_whatif.py` (new) drives the page: Take off from the line and the card, a bar and a whole parent dragged with real mouse events, no Quick edit, P and Ctrl+Z, naming, flipping, keeping, deleting, Review and apply, and a picture worked out once for each change. `tests/test_real_look.py` checks on Windows' real platform that the row of controls stays one line in a what-if too. The full run: 2306 passed, 1 skipped, none failed, and 2491 passed, 1 skipped, with `main`'s 5.62 and 5.63 merged in.
 
-**Hand-tested by the owner and merged to `main`** (2026-11-03). **Not checked yet:** the corporate computer, with the design workspace's `handoff/docrepo/release-5-64-test.md`, after its `release-5-40-test.md`.
+**Hand-tested by the owner and merged to `main`** (2026-11-03), **on GitHub** (2026-11-04). **Not checked yet:** the corporate computer, with the design workspace's `handoff/docrepo/release-5-64-test.md`, after its `release-5-40-test.md`.
 
 ## Release 5.40.1: a save waits out a brief refusal (2026-11-02)
 
