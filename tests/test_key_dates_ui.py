@@ -24,7 +24,7 @@ from docrepo.ui.capture_window import CaptureWindow  # noqa: E402
 from docrepo.ui.context import AppContext  # noqa: E402
 from docrepo.ui.quick_edit import QuickEdit  # noqa: E402
 from docrepo.ui.task_forms import TaskEditDialog  # noqa: E402
-from docrepo.ui.tree_view import HTML_ROLE, KEY_ROLE  # noqa: E402
+from docrepo.ui.tree_view import HTML_ROLE, KEY_ROLE, LINE_ROLE  # noqa: E402
 from docrepo.views import view_counts  # noqa: E402
 
 NOW = datetime(2026, 10, 8, 14, 10)  # a Thursday
@@ -64,7 +64,7 @@ def put(ctx, task_id: str = "T000008", rows=TRIAL) -> None:
 
 def key_rows(browse) -> list:
     """The tree's key date rows: those with the Key date chip."""
-    return [it for it in browse.tree.items() if "Key date" in (it.data(1, HTML_ROLE) or "")]
+    return [it for it in browse.tree.items() if getattr(it.data(0, LINE_ROLE), "icon_tip", "") == "Key date"]  # its icon (release 5.78)
 
 
 # ---- Edit task (item 57) ----
@@ -150,7 +150,7 @@ def test_the_overdue_list_has_a_row_for_each_key_date_with_done(browse, ctx):
     browse.set_view("due")
     rows = key_rows(browse)
     assert [it.data(0, KEY_ROLE) for it in rows] == [("task", "T000008")] * 2
-    assert "Order the seals, was due Tue 6 Oct" in rows[0].data(0, HTML_ROLE) and tokens.colour("critical") in rows[0].data(2, HTML_ROLE)
+    assert "Order the seals, was due Tue 6 Oct" in rows[0].data(0, HTML_ROLE) and tokens.colour("critical") in rows[0].data(1, HTML_ROLE)
     assert "Target for trial preparations, by Mon 12 Oct" in rows[1].data(0, HTML_ROLE)
     browse.tree.action_strip(rows[0]).findChild(QPushButton).click()  # Done
     assert Model(ctx.conn).key_dates_of("T000008")[1].done == "2026-10-08"

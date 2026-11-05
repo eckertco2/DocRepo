@@ -219,6 +219,9 @@ QPushButton#link:hover, QPushButton#moreLink:hover, QPushButton#rowLink:hover { 
 /* a row's actions, over the row: its colour, so what's under them doesn't show through */
 QWidget#rowActions { background: $hover; }
 QWidget#rowActions[sel="true"] { background: $selected; }
+/* their icon buttons (release 5.78, decision L5): no frame, a tint under the pointer */
+QPushButton#rowIcon { background: transparent; border: none; border-radius: 4px; padding: 0; min-height: 0; min-width: 0; }
+QPushButton#rowIcon:hover { background: $pressed; }
 QPushButton::menu-indicator { image: url("$arrow"); width: 12px; height: 12px; subcontrol-origin: padding; subcontrol-position: right center;
   right: 6px; }
 QPushButton[menu="true"] { padding-right: 8px; text-align: left; }

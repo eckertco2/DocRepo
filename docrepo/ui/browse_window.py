@@ -57,6 +57,7 @@ from docrepo.captures import capture_folder, capture_md_path
 from docrepo.dates import long_date, short, to_date, workday_numbers
 from docrepo.detail import SCOPE_NAMES, PageState, Pages, chip, esc, row_state, state_chip
 from docrepo.links import is_folder, is_link
+from docrepo.overview import file_type
 from docrepo.model import TODAY, Model, is_person
 from docrepo.people import PeopleError
 from docrepo.safe_fs import WriteRefused
@@ -85,9 +86,10 @@ from docrepo.ui.timeline_view import TimelineView
 from docrepo.ui.keymap import KeyMapDialog
 from docrepo.timeline import bands as timeline_bands
 from docrepo.ui.tokens import C
-from docrepo.ui.tree_view import DIM_ROLE, HTML_ROLE, KEY_ROLE, RowTree, edge, group_ground, tint, with_actions
+from docrepo.ui.tree_view import DIM_ROLE, HTML_ROLE, KEY_ROLE, LINE_ROLE, Line, RowTree, edge, group_ground, state_icon, tint, with_actions
 from docrepo.ui.widgets import SAVE_KEYS, CheckMenuButton, DateField, DropButton, FlowLayout, Option, ViewStack, ask, label_filter, label_options, people_filter, people_options
 from docrepo.views import (
+    project_text,
     LIST_IDS,
     SORTS,
     TASK_VIEWS,
@@ -116,7 +118,6 @@ from docrepo.views import (
     markers,
     meetings_for_menu,
     open_count,
-    path_text,
     since_text,
     sort_tree,
     task_tree,
@@ -143,6 +144,17 @@ SELECT_VIEWS = ("tasks", *LIST_IDS)
 NESTING_VIEWS = ("today", *LIST_IDS, "agenda", "activity", "docs", "labels", "templates")
 #: Activity's line chips, by what happened (release 5.23): the pages' chip classes.
 ACT_CHIPS = {"task": "multi", "update": "st-ip", "note": "lbl", "email": "lbl", "change": "routine", "doc": "st-pk", "agenda": "new"}
+#: Each view's rows in the new look (the list rows review, decision L1): its row height, and whether rows with a second line
+#: take two. Views whose rows nest are 28 px; Agendas, Documents, Activity and Search show a second line. Others are 32 px.
+ROW_DENSITY = {"tasks": (tokens.TREE_ROW, False), **{v: (tokens.TREE_ROW, False) for v in LIST_IDS}, "labels": (tokens.TREE_ROW, False),
+               "templates": (tokens.TREE_ROW, False), "docs": (tokens.TREE_ROW, True), "agenda": (tokens.LIST_ROW, True),
+               "activity": (tokens.LIST_ROW, True), "search": (tokens.LIST_ROW, True)}
+#: Views whose column headings say nothing their cells don't (decision L6). Search has one column, so none either.
+NO_HEADINGS = ("today", "tasks", "unfiled", "search", *LIST_IDS)
+#: Activity's kinds as icons (release 5.78), in place of their chips.
+ACT_ICONS = {"task": "task", "update": "update", "note": "note", "email": "type-mail", "change": "edit", "doc": "file", "agenda": "agenda"}
+#: Unfiled's sources as icons (release 5.78), in place of a Source column.
+SOURCE_ICONS = {"Email": ("type-mail", "type_mail"), "File path": ("file", "text2"), "Typed": ("note", "text2")}
 UNFILED_NOTE = ("Unfiled captures: saved without a task. Their folders are already in Captures. Filing one links it in docs.db and sets "
                 "the task in its capture.md; the folder doesn't move.")
 
@@ -167,8 +179,38 @@ def _row_state(state: str) -> str:
 
 
 def _row_word(word: str) -> str:
-    """What stands in a row's State column in place of a task's state, such as Note."""
+    """What stands in a row's State column in place of a task's state, such as Note. The new look has no State column: the
+    word is the row's icon's tooltip (decision L7)."""
     return chip(word, "st-ns") if LOOK.classic else f'<span class="faint">{esc(word)}</span>'
+
+
+def _shape(cells: list) -> list:
+    """A row's cells, written as the Classic look's (title, State, then the rest), without the State cell in the new look,
+    where the state is an icon before the title (decision L7)."""
+    return cells if LOOK.classic else [cells[0], *cells[2:]]
+
+
+def _cols(labels: list[str], widths: list[int] | None = None) -> tuple[list[str], list[int] | None]:
+    """A list's columns, without State in the new look (decision L7)."""
+    if LOOK.classic or "State" not in labels:
+        return labels, widths
+    i = labels.index("State")
+    return labels[:i] + labels[i + 1:], (widths[:i] + widths[i + 1:] if widths else None)
+
+
+#: The Classic look's deadline: a small grey word under the date (release 5.9's colours).
+CLASSIC_DEADLINE = '<br><span style="color:#87919c; font-weight:400; font-size:8pt">deadline</span>'
+
+
+def _due_html(cell, deadline_line: bool = True) -> str:
+    """A row's date, at its right: red when it's late, caution's colour when it's soon. A deadline is a red ◆ before it in the
+    new look, rather than a line under it, so the row keeps one line."""
+    if cell is None:
+        return ""
+    if cell.deadline and not LOOK.classic:
+        return f'<p align="right" style="{_due_css(cell.cls)}"><span class="critical">◆</span> {esc(cell.text)}</p>'
+    mark = CLASSIC_DEADLINE if cell.deadline and deadline_line else ""
+    return f'<p align="right" style="{_due_css(cell.cls)}">{esc(cell.text)}{mark}</p>'
 
 
 class BrowseWindow(QWidget):
@@ -840,6 +882,7 @@ class BrowseWindow(QWidget):
                    "discarded": self._discarded_view, "activity": self._activity_view}.get(self.view)
         self.tree.stop_row_moves()  # the Templates view turns it back on
         self.tree.begin()
+        self.tree.set_density(*ROW_DENSITY.get(self.view, (tokens.LIST_ROW, False)))
         try:
             if builder:
                 builder()
@@ -850,8 +893,8 @@ class BrowseWindow(QWidget):
                 self._level_buttons()
         finally:
             self.tree.end(self._row_to_select())
-        if not LOOK.classic:  # no column headings over nothing, or over Search's one column, whose heading says nothing the title doesn't
-            self.tree.setHeaderHidden(self.view == "search" or not any(k is not None for k in self.tree.keys()))
+        if not LOOK.classic:  # no column headings over nothing, or where they say nothing the cells don't (decision L6)
+            self.tree.setHeaderHidden(self.view in NO_HEADINGS or not any(k is not None for k in self.tree.keys()))
         if self.view in NESTING_VIEWS:
             self._sync_level_buttons()
         self.filters.setVisible(any(not self.filters_layout.itemAt(i).isEmpty() for i in range(self.filters_layout.count())))
@@ -897,6 +940,8 @@ class BrowseWindow(QWidget):
             key = item.data(0, KEY_ROLE)
             cells = " ".join(item.data(i, HTML_ROLE) or "" for i in range(self.tree.columnCount()))
             text = html.unescape(re.sub(r"<[^>]+>", " ", cells)).lower()
+            if key and isinstance(key, tuple) and len(key) > 1 and isinstance(key[1], str):  # its ID, which rows no longer show (decision L4)
+                text += " " + key[1].lower()
             return text + (" " + find_text(m, key[1]) if key and key[0] == "task" and key[1] in m.tasks else "")
 
         hits = 0
@@ -936,31 +981,26 @@ class BrowseWindow(QWidget):
         self.run_dialog(KeyMapDialog(self, self.ctx.settings.hotkey))
 
     # ---- rows ----
-    def _task_cells(self, task_id: str, depth: int, context: bool = False, extra: str = "", when: DueDate | None = None,
-                    use_due: bool = True) -> list[str]:
+    def _task_cells(self, task_id: str, depth: int, context: bool = False, muted: tuple[str, ...] = (), people: str = "",
+                    when: DueDate | None = None, use_due: bool = True) -> list:
+        """A task's row: a ``Line`` (its state's icon, its title, Urgent or Critical as chips, its other marks and ``muted`` as
+        quiet words, and ``people``), then its State in the Classic look, and its date. Regular weight in the new look
+        (decision L2); the Classic look's top-level tasks are bold."""
         m, t = self.model(), self.model().task(task_id)
-        title = esc(t.title)
-        if depth == 0:
-            title = f"<b>{title}</b>"
+        icon, colour = state_icon(t.state)
         if context:
-            return [f'<span style="color:{C.text2}">{title}</span>', "", ""]
-        if t.state == "Closed":
-            title = f'<s><span style="color:{C.text2}">{title}</span></s>'
-        chips = "".join(" " + chip(text, cls) for text, cls in markers(m, t))
-        cell = due_cell(t, self.today(), when, use_due)
-        colour = _due_css(cell.cls if cell else "")
-        mark = ""
-        if cell and cell.deadline:
-            mark = ('<br><span style="color:#87919c; font-weight:400; font-size:8pt">deadline</span>' if LOOK.classic else
-                    '<br><span class="note" style="font-weight:400">deadline</span>')
-        due = f'<p align="right" style="{colour}">{esc(cell.text)}{mark}</p>' if cell else ""
-        return [title + chips + extra, _row_state(t.state), due]
+            return _shape([Line(t.title, icon=icon, icon_tip=t.state, dim=True, strong=depth == 0), "", ""])
+        chips, quiet = [], []
+        for text, cls in markers(m, t):  # a chip only for an exception; the rest are quiet words (the review's recipe)
+            (chips if LOOK.classic or cls in ("urgent", "pri-critical") else quiet).append((text, cls))
+        line = Line(t.title, icon=icon, icon_colour=colour, icon_tip=t.state, chips=tuple(chips), muted=(*(x for x, _ in quiet), *muted),
+                    context=people, strong=depth == 0, closed=t.state == "Closed")
+        return _shape([line, _row_state(t.state), _due_html(due_cell(t, self.today(), when, use_due))])
 
-    def _label_words(self, task_id: str, skip: str = "") -> str:
+    def _label_words(self, task_id: str, skip: str = "") -> tuple[str, ...]:
         """After a title in the task tree (item 76, decision 235): the task's own labels, as quiet words rather than chips.
         Not the ones it inherits, or every subtask would repeat its parent's, nor ``skip``, which its section is named for."""
-        names = [name for name in self.model().task(task_id).labels if name != skip]
-        return f' <span class="sub">&nbsp;{esc(" · ".join(names))}</span>' if names else ""
+        return tuple(name for name in self.model().task(task_id).labels if name != skip)
 
     def _add_nodes(self, nodes: list[Node], parent=None, filtered: bool = False, expand_all: bool = True,
                    row: Callable[[Node], tuple[list[str], str]] | None = None) -> None:
@@ -971,13 +1011,17 @@ class BrowseWindow(QWidget):
             elif n.kind == "doc":
                 d = m.documents[n.id]
                 link = is_link(d.original)
-                cells = [f'{esc(d.name)}<br><span class="sub">{esc(d.description or "No description yet")}</span>',
+                kind = file_type(d.name, d.original)
+                cells = [Line(d.name, icon="folder" if kind == "folder" else f"type-{kind}", icon_colour=f"type_{kind}" if f"type_{kind}" in tokens.LIGHT else "type_other",
+                              icon_tip=kind.capitalize(), second=d.description or "No description yet"),
                          chip("Link", "st-ns") if link else chip(d.status, "st-ns" if d.status == "Current" else "st-pk"),
                          f'<p align="right">{esc(short(date.fromisoformat(d.checked[:10]), self.today())) if d.checked else ""}</p>']
                 tip = f"{d.original} (double-click copies it)" if link else f"Last checked {d.checked or 'not yet'}"
                 item = self.tree.add_row(parent, ("doc", n.id), cells, tint(n.group, n.depth), tip=tip, edge=edge(n.group, n.depth))
             else:
                 cells, tip = row(n) if row else (self._task_cells(n.id, n.depth, filtered and not n.match), full_path(m, n.id))
+                if isinstance(cells[0], Line) and n.children:  # a folded parent says how many open subtasks it holds (decision L8)
+                    cells[0].count = sum(1 for c in n.children if c.kind == "task" and c.id in m.tasks and is_open(m.task(c.id)))
                 item = self.tree.add_row(parent, ("task", n.id), cells, tint(n.group, n.depth), tip=tip, edge=edge(n.group, n.depth))
                 if self.selecting and n.match and self.view in SELECT_VIEWS:
                     self.tree.add_tick(item, n.id in self.ticked)
@@ -1021,11 +1065,11 @@ class BrowseWindow(QWidget):
         expand = self._level_button(True, lambda: self._level(nodes, "expand"), can_open)
         collapse.setVisible(can_fold or can_open or LOOK.classic)  # gone where nothing nests
         expand.setVisible(can_fold or can_open or LOOK.classic)
-        self.tree.set_columns(["Title", "State", "Due"])
+        self.tree.set_columns(*_cols(["Title", "State", "Due"]))
 
-        def row(n: Node, section: str = "") -> tuple[list[str], str]:
+        def row(n: Node, section: str = "") -> tuple[list, str]:
             dimmed = bool(how or filtered) and not n.match
-            return self._task_cells(n.id, n.depth, dimmed, extra=self._label_words(n.id, section)), full_path(m, n.id)
+            return self._task_cells(n.id, n.depth, dimmed, muted=self._label_words(n.id, section)), full_path(m, n.id)
 
         if how:  # a section per group, each with its tasks in tree shape (release 5.24)
             grey = group_ground()
@@ -1242,8 +1286,8 @@ class BrowseWindow(QWidget):
         self._set_head(v.label, v.note + " Dimmed rows are their parents, shown for context.")
         reminders = view_id == "reminders"
         with_keys = view_id == "due"  # key dates have a row each, with Done (release 5.31, decision 150)
-        self.tree.set_columns(*with_actions(["Title", "State", "Reminder" if reminders else "Due"], [0, 96, 96], 56)
-                              if reminders or with_keys else (["Title", "State", "Due"], None))
+        self.tree.set_columns(*_cols(*(with_actions(["Title", "State", "Reminder" if reminders else "Due"], [0, 96, 96], 56)
+                                       if reminders or with_keys else (["Title", "State", "Due"], None))))
         self._sort_box(view_id)
         grouped = self._group_box(view_id)
         self._select_controls()
@@ -1258,9 +1302,9 @@ class BrowseWindow(QWidget):
             if not n.match:
                 return self._task_cells(n.id, n.depth, context=True), full_path(m, n.id)
             t = m.task(n.id)
-            who = f' <span class="sub">{esc(", ".join(m.person_name(p) for p in t.assignees))}</span>' if view_id == "waiting" else ""
+            who = ", ".join(m.person_name(p) for p in t.assignees) if view_id == "waiting" else ""
             when = list_date(task_list, t, self.today()) if reminders else None
-            return self._task_cells(n.id, n.depth, extra=who, when=when, use_due=not reminders), full_path(m, n.id)
+            return self._task_cells(n.id, n.depth, people=who, when=when, use_due=not reminders), full_path(m, n.id)
 
         self._add_nodes(nodes, row=row)
         if reminders:
@@ -1272,15 +1316,15 @@ class BrowseWindow(QWidget):
         if not nodes and not keyed:
             self.tree.add_row(None, None, ['<span class="sub">Nothing here right now.</span>'], selectable=False, span=True)
 
-    def _key_date_cells(self, d: key_dates.Due) -> list[str]:
-        """A key date's row (release 5.31): its task's title, with the key date's words under it and its marks, a Key date
-        chip, and its days until due, red when it's overdue."""
+    def _key_date_cells(self, d: key_dates.Due) -> list:
+        """A key date's row (release 5.31): its task's title, the key date's words after it in quiet text (under it in the
+        Classic look), its plant and deadline marks, a Key date icon (a chip in the Classic look), and its days until due, red
+        when it's overdue."""
         today = self.today()
         cell = key_date_cell(d, today)
-        colour = _due_css(cell.cls)
-        marks = (f' <span style="color:{C.caution}">⚑</span>' if d.key_date.plant else "") + (f' <span style="color:{C.critical}">◆</span>' if d.key_date.deadline else "")
-        return [f'{esc(d.task.title)}<br><span class="sub">{esc(d.text(today))}</span>{marks}', _row_word("Key date"),
-                f'<p align="right" style="{colour}">{esc(cell.text)}</p>']
+        marks = ((("⚑", "caution"),) if d.key_date.plant else ()) + ((("◆", "critical"),) if d.key_date.deadline else ())
+        line = Line(d.task.title, icon="calendar", icon_tip="Key date", chips=marks, context=d.text(today))
+        return _shape([line, _row_word("Key date"), f'<p align="right" style="{_due_css(cell.cls)}">{esc(cell.text)}</p>'])
 
     def _key_date_actions(self, key_id: int) -> list[tuple[str, Callable[[], None], str]]:
         return [("Done", lambda: self.key_date_done(key_id, True), "Mark this key date done: off Today and this list, and in its task's status log (decision 148)")]
@@ -1362,11 +1406,13 @@ class BrowseWindow(QWidget):
 
     def _unfiled_view(self) -> None:
         self._set_head("Unfiled", UNFILED_NOTE)
-        self.tree.set_columns(["Capture", "Source", "Saved"])
+        self.tree.set_columns(["Capture", "Source", "Saved"] if LOOK.classic else ["Capture", "Saved"])
         rows = unfiled_rows(self.model(), self.today())
-        for r in rows:
-            self.tree.add_row(None, ("capture", r.id), [f'{esc(r.title)}<br><span class="sub">{esc(r.sub)}</span>', chip(r.source, "st-ns"),
-                                                         f'<p align="right">{esc(r.saved)}</p>'])
+        for r in rows:  # one line: its source's icon, its title and how many documents; no ID (decision L4)
+            name, colour = SOURCE_ICONS.get(r.source, ("note", "text2"))
+            line = Line(r.title, icon=name, icon_colour=colour, icon_tip=r.source, context=r.sub)
+            source = [chip(r.source, "st-ns")] if LOOK.classic else []
+            self.tree.add_row(None, ("capture", r.id), [line, *source, f'<p align="right">{esc(r.saved)}</p>'], tip=f"{r.id} · {r.source}")
         if not rows:
             self.tree.add_row(None, None, ['<span class="sub">No unfiled captures.</span>'], selectable=False, span=True)
 
@@ -1395,22 +1441,21 @@ class BrowseWindow(QWidget):
             self._button("Update…", lambda: self.answer_today("update"))
             self._button("Close the task…", lambda: self.answer_today("close"))
             self._button("No", lambda: self.answer_today(None))
-        self.tree.set_columns(*with_actions(["Item", "State", "Due"], [0, 96, 96], 220))
+        self.tree.set_columns(*_cols(*with_actions(["Item", "State", "Due"], [0, 96, 96], 220)))
         grey = group_ground()
         for name, items in today_groups(m, today):  # each group's items under its heading, which folds (release 5.24)
             head = self.tree.add_row(None, None, [f"<b>{esc(name)}</b>"], grey, selectable=False, span=True)
             for a in items:
                 t = m.tasks.get(a.subject) if a.subject else None
                 key = ("task", t.id) if t else ("capture", a.added_by) if a.added_by in m.captures else None
-                since = chip(f"since {since_text(a.added, today)}", "st-ns") + " " if a.added[:10] < today.isoformat() else ""
-                where = esc(path_text(m, t.id) or "Top-level task") if t else "A note"
-                note = f" · {esc(a.note)}" if t and a.note else ""
-                cell = due_cell(t, today) if t else None
-                colour = _due_css(cell.cls if cell else "")
-                item = self.tree.add_row(head, key, [f'{esc(t.title if t else a.note)}<br><span class="sub">{since}{where}{note}</span>',
-                                                     _row_state(t.state) if t else _row_word("Note"),
-                                                     f'<p align="right" style="{colour}">{esc(cell.text)}</p>' if cell else ""],
-                                         tip=f"Added {long_date(date.fromisoformat(a.added[:10]), today)}")
+                # One line (decisions L1 and L3): the title, then its project and how long it's been carried, in quiet words.
+                since = f"since {since_text(a.added, today)}" if a.added[:10] < today.isoformat() else ""
+                context = " · ".join(x for x in (project_text(m, t.id) if t else "", a.note if t else "", since) if x)
+                icon, colour = state_icon(t.state) if t else ("note", "text2")
+                line = Line(t.title if t else a.note, icon=icon, icon_colour=colour, icon_tip=t.state if t else "Note", context=context)
+                tip = f"{full_path(m, t.id)}\n" if t else ""
+                item = self.tree.add_row(head, key, _shape([line, _row_state(t.state) if t else _row_word("Note"), _due_html(due_cell(t, today) if t else None, False)]),
+                                         tip=f"{tip}Added {long_date(date.fromisoformat(a.added[:10]), today)}")
                 self.tree.set_actions(item, self._today_actions(a.id, t.id if t else None))
             head.setExpanded(True)
         if not m.today_items():
@@ -1423,10 +1468,8 @@ class BrowseWindow(QWidget):
             head = self.tree.add_row(None, None, ["<b>Done today</b>"], grey, selectable=False, span=True)
             for a in done:
                 t = m.tasks.get(a.subject) if a.subject else None
-                self.tree.add_row(head, ("task", t.id) if t else None,
-                                  [f'<s><span style="color:{C.text2}">{esc(t.title if t else a.note)}</span></s><br>'
-                                   f'<span class="sub">Done at {esc((a.closed or "")[11:16])}</span>',
-                                   _row_state(t.state) if t else _row_word("Note"), ""])
+                line = Line(t.title if t else a.note, icon="state-cl", icon_tip="Done", context=f"Done at {(a.closed or '')[11:16]}", closed=True)
+                self.tree.add_row(head, ("task", t.id) if t else None, _shape([line, _row_state(t.state) if t else _row_word("Note"), ""]))
             head.setExpanded(True)
 
     def _today_reminder_rows(self, m: Model, today: date, grey: QColor) -> None:
@@ -1439,10 +1482,9 @@ class BrowseWindow(QWidget):
         head = self.tree.add_row(None, None, ["<b>Reminders</b>"], grey, selectable=False, span=True)
         for t in due:
             cell = due_cell(t, today, DueDate(to_date(t.reminder), "Reminder"), use_due=False)
-            colour = _due_css(cell.cls)
-            item = self.tree.add_row(head, ("task", t.id), [f'{esc(t.title)}<br><span class="sub">{esc(path_text(m, t.id) or "Top-level task")}</span>',
-                                                            _row_word("Reminder"), f'<p align="right" style="{colour}">{esc(cell.text)}</p>'],
-                                     tip=cell.tip)
+            line = Line(t.title, icon="reminders", icon_tip="Reminder", context=project_text(m, t.id))
+            item = self.tree.add_row(head, ("task", t.id), _shape([line, _row_word("Reminder"), f'<p align="right" style="{_due_css(cell.cls)}">{esc(cell.text)}</p>']),
+                                     tip=f"{full_path(m, t.id)}\n{cell.tip}")
             self.tree.set_actions(item, self._reminder_actions(t.id, t.id in on_today))
         head.setExpanded(True)
 
@@ -1468,10 +1510,9 @@ class BrowseWindow(QWidget):
                                          tip=f"A key date of {t.task.title}: {key_dates.label(t.key_date, today)}")
                 self.tree.set_actions(item, self._key_date_actions(t.key_date.id))
                 continue
-            cell = due_cell(t, today)
-            colour = _due_css(cell.cls if cell else "")
-            item = self.tree.add_row(head, ("task", t.id), [f'{esc(t.title)}<br><span class="sub">{esc(path_text(m, t.id) or "Top-level task")}</span>',
-                                                          _row_state(t.state), f'<p align="right" style="{colour}">{esc(cell.text)}</p>' if cell else ""])
+            icon, colour = state_icon(t.state)
+            line = Line(t.title, icon=icon, icon_colour=colour, icon_tip=t.state, context=project_text(m, t.id))
+            item = self.tree.add_row(head, ("task", t.id), _shape([line, _row_state(t.state), _due_html(due_cell(t, today), False)]), tip=full_path(m, t.id))
             self.tree.set_actions(item, [("Add to Today", lambda i=t.id: self.add_to_today(i), "Put it on Today (D)")])
         if not entries:
             self.tree.add_row(head, None, ['<span class="sub">Nothing else is due in the next 7 days' + (" for you." if mine else ".") + "</span>"],
@@ -1499,8 +1540,8 @@ class BrowseWindow(QWidget):
         self.tree.set_columns(["Item", "Why", "Discarded"], [0, 180, 80])
         rows = discarded_rows(self.model(), self.today(), self.templates.discarded())
         for r in rows:
-            self.tree.add_row(None, (r.kind, r.id), [f'{esc(r.title)}<br><span class="sub">{esc(r.sub)}</span>', esc(r.reason),
-                                                      f'<p align="right">{esc(r.when)}</p>'])
+            line = Line(r.title, icon={"task": "task", "capture": "note"}.get(r.kind, "templates"), icon_tip=r.kind.capitalize(), context=r.sub)
+            self.tree.add_row(None, (r.kind, r.id), [line, esc(r.reason), f'<p align="right">{esc(r.when)}</p>'], tip=f"{r.id} · {r.reason}" if r.reason else r.id)
         if not rows:
             self.tree.add_row(None, None, ['<span class="sub">Nothing is discarded.</span>'], selectable=False, span=True)
 
@@ -1511,7 +1552,7 @@ class BrowseWindow(QWidget):
         if not target:
             self._set_head("Agendas", "No agendas yet. Check Meeting on a task to give it an agenda, or put something on an agenda with "
                                       "Add to agenda in the capture window.")
-            self.tree.set_columns(*with_actions(["Item", "State", "Added"], [0, 96, 70], 130))
+            self.tree.set_columns(*_cols(*with_actions(["Item", "State", "Added"], [0, 96, 70], 130)))
             return
         when = m.meeting_when(target, self.today())
         when_text = f" {'Next meeting' if m.task(target).recurrence else 'Date'}: {when}." if when and when != "no date set" else ""
@@ -1528,19 +1569,21 @@ class BrowseWindow(QWidget):
         meeting = m.tasks.get(target)
         if meeting and meeting.meeting and is_open(meeting):  # release 5.8
             self._button("Meeting notes", lambda: self.open_capture(task=target, meeting=True))
-        self.tree.set_columns(*with_actions(["Item", "State", "Added"], [0, 96, 70], 130))
+        self.tree.set_columns(*_cols(*with_actions(["Item", "State", "Added"], [0, 96, 70], 130)))
         grey = group_ground()
         for name, items in agenda_groups(m, target):  # each topic's items under its heading, which folds (release 5.24)
             head = self.tree.add_row(None, None, [f"<b>{esc(name)}</b>"], grey, selectable=False, span=True)
             for a in items:
                 t = m.tasks.get(a.subject) if a.subject else None
                 key = ("task", t.id) if t else ("capture", a.added_by) if a.added_by in m.captures else None
-                main = esc(t.title if t else a.note)
-                note = f'<br><span class="sub">{esc(a.note)}</span>' if t and a.note else ""
-                where = f'<br><span class="sub">{esc(path_text(m, t.id) or "Top-level task") if t else "A note, with no task"}</span>'
-                item = self.tree.add_row(head, key, [main + note + where, _row_state(t.state) if t else _row_word("Note"),
-                                                     f'<p align="right">{esc(short(date.fromisoformat(a.added[:10]), self.today()))}</p>'],
-                                         tip=f"Added {long_date(date.fromisoformat(a.added[:10]), self.today())}")
+                # Two lines (decision L1): the item, then its note. Its heading already names its project.
+                icon, colour = state_icon(t.state) if t else ("note", "text2")
+                line = Line(t.title if t else a.note, icon=icon, icon_colour=colour, icon_tip=t.state if t else "A note, with no task",
+                            second=a.note if t else "")
+                tip = f"{full_path(m, t.id)}\n" if t else ""
+                item = self.tree.add_row(head, key, _shape([line, _row_state(t.state) if t else _row_word("Note"),
+                                                            f'<p align="right">{esc(short(date.fromisoformat(a.added[:10]), self.today()))}</p>']),
+                                         tip=f"{tip}Added {long_date(date.fromisoformat(a.added[:10]), self.today())}")
                 self.tree.set_actions(item, self._agenda_actions(a.id))
             head.setExpanded(True)
         closed = closed_items(m, target)
@@ -1548,11 +1591,11 @@ class BrowseWindow(QWidget):
             head = self.tree.add_row(None, None, ["<b>Closed recently</b>"], grey, selectable=False, span=True)
             for a in closed:
                 t = m.tasks.get(a.subject) if a.subject else None
+                line = Line(t.title if t else a.note, icon="state-cl", icon_tip=a.how, closed=True,
+                            second=f"{a.how} {long_date(date.fromisoformat(a.closed[:10]), self.today())}")
                 self.tree.add_row(head, ("task", t.id) if t else None,
-                                  [f'<s><span style="color:{C.text2}">{esc(t.title if t else a.note)}</span></s><br>'
-                                   f'<span class="sub">{esc(a.how)} {esc(long_date(date.fromisoformat(a.closed[:10]), self.today()))}</span>',
-                                   _row_state(t.state) if t else _row_word("Note"),
-                                   f'<p align="right">{esc(short(date.fromisoformat(a.closed[:10]), self.today()))}</p>'])
+                                  _shape([line, _row_state(t.state) if t else _row_word("Note"),
+                                          f'<p align="right">{esc(short(date.fromisoformat(a.closed[:10]), self.today()))}</p>']))
             head.setExpanded(True)
         if not agenda_groups(m, target):
             self.tree.add_row(None, None, ['<span class="sub">No open agenda items.</span>'], selectable=False, span=True)
@@ -1572,11 +1615,11 @@ class BrowseWindow(QWidget):
         for p in m.people.values():
             if p.status != "active" and not self.retired["people"]:
                 continue
-            chips = (" " + chip("me", "st-ip") if p.id == self.ctx.settings.me else "") + (" " + chip("retired", "st-cl") if p.status == "retired" else "") + \
-                (" " + chip("new", "new") if p.added_note else "")
-            aliases = f'<br><span class="sub">{esc(", ".join(p.aliases))}</span>' if p.aliases else ""
+            chips = ((("me", "st-ip"),) if p.id == self.ctx.settings.me else ()) + ((("retired", "st-cl"),) if p.status == "retired" else ()) + \
+                ((("new", "new"),) if p.added_note else ())
             count = open_count(m, lambda t, pid=p.id: pid in (*t.leads, *t.assignees))
-            self.tree.add_row(None, ("person", p.id), [esc(p.name) + chips + aliases, esc(p.group or ""), esc(p.role or ""),
+            line = Line(p.name, chips=chips, context=", ".join(p.aliases))
+            self.tree.add_row(None, ("person", p.id), [line, esc(p.group or ""), esc(p.role or ""),
                                                         f'<p align="right">{"–" if p.hours is None else f"{p.hours:g}"}</p>', f'<p align="right">{count}</p>'])
 
     def _labels_view(self) -> None:
@@ -1619,7 +1662,8 @@ class BrowseWindow(QWidget):
             self._button("Show all", lambda: self._set_doc_task(None))
         self.tree.set_columns(["Document", "Status", "Checked"])
         nodes = documents_tree(m, self.doc_task if self.doc_task in m.tasks else None, self.doc_subs)
-        self._add_nodes(nodes, filtered=True, row=lambda n: (self._task_cells(n.id, n.depth, context=not n.match), full_path(m, n.id)))
+        # A task's row holds its documents: only its title, so nothing stands under Status and Checked but a document's.
+        self._add_nodes(nodes, filtered=True, row=lambda n: (self._task_cells(n.id, n.depth, context=not n.match)[:1], full_path(m, n.id)))
         if not nodes:
             self.tree.add_row(None, None, ['<span class="sub">No documents for this task.</span>'], selectable=False, span=True)
 
@@ -1652,8 +1696,8 @@ class BrowseWindow(QWidget):
                                            f'{f", and {loose} not filed yet" if loose else ""}. <span class="sub">{esc(" · ".join(kinds))}</span>'],
                               selectable=False, span=True)
         for t, first, last in act.plant_events(*span):
-            self.tree.add_row(None, ("task", t.id), [f'{chip("Plant event", "new")} <b>{esc(t.title)}</b> <span class="sub">'
-                                                     f'{esc(long_date(first, today))} to {esc(long_date(last, today))}</span>', ""], span=True)
+            line = Line(t.title, chips=(("Plant event", "new"),), context=f"{long_date(first, today)} to {long_date(last, today)}", strong=True)
+            self.tree.add_row(None, ("task", t.id), [line, ""], span=True)
         for g in groups:
             self._activity_group(m, today, g)
 
@@ -1741,16 +1785,22 @@ class BrowseWindow(QWidget):
                 t = m.task(h.task)
                 chain = m.chains_of(t.id)[0]
                 above = " › ".join(m.task(x).title for x in chain[(1 if g.task else 0):-1])
-                cells = [(f'<span class="sub">{esc(above)} ›</span> ' if above else "") + f"<b>{esc(t.title)}</b> {_row_state(t.state)}"
+                icon, colour = state_icon(t.state)
+                cells = [Line(t.title, icon=icon, icon_colour=colour, icon_tip=t.state, lead=f"{above} ›" if above else "", strong=True,
+                              chips=tuple(markers(m, t))) if not LOOK.classic else
+                         (f'<span class="sub">{esc(above)} ›</span> ' if above else "") + f"<b>{esc(t.title)}</b> {_row_state(t.state)}"
                          + "".join(" " + chip(text, cls) for text, cls in markers(m, t)), ""]
                 parent = self.tree.add_row(top, ("task", t.id), cells)
                 if select:
                     self.tree.add_tick(parent, f"t:{t.id}" in self.act["picked"])
             for line in h.lines:
                 facts = "".join(f'<br><span class="sub">{esc(x)}</span>' for x in line.facts)
+                # Two lines (decision L1): its kind's icon and its words, then what kind it is and its facts.
+                what = Line(line.text, icon=ACT_ICONS.get(line.kinds[0], "note"), icon_tip=line.chip, second=" · ".join((line.chip, *line.facts)))
                 when = (f'<p align="right">{esc(short(line.day, today))}<br><span class="sub">{esc(long_date(line.day, today)[:3])} {esc(line.at[11:16])}</span></p>'
                         if LOOK.classic else f'<p align="right">{esc(short(line.day, today))} <span class="sub">{esc(line.at[11:16])}</span></p>')  # one line
-                row = self.tree.add_row(parent, ("actline", line.key), [f"{chip(line.chip, ACT_CHIPS.get(line.kinds[0], 'lbl') if LOOK.classic else 'lbl')} {esc(line.text)}{facts}", when],
+                row = self.tree.add_row(parent, ("actline", line.key), [f"{chip(line.chip, ACT_CHIPS.get(line.kinds[0], 'lbl'))} {esc(line.text)}{facts}"
+                                                                        if LOOK.classic else what, when],
                                         tip=f"{long_date(line.day, today)}, {line.at[11:16]}")
                 if select:
                     self.tree.add_tick(row, f"l:{line.key}" in self.act["picked"])
@@ -1944,8 +1994,18 @@ class BrowseWindow(QWidget):
             if r.group != group:
                 group = r.group
                 self.tree.add_row(None, None, [f"<b>{esc(group)}</b>"], grey, selectable=False)
-            snippet = f'<br><span class="sub">{esc(r.snippet)}</span>' if r.snippet else ""
-            self.tree.add_row(None, (r.kind, r.id), [f'{esc(r.title)}<br><span class="sub">{esc(r.sub)}</span>{snippet}'])
+            if LOOK.classic:
+                snippet = f'<br><span class="sub">{esc(r.snippet)}</span>' if r.snippet else ""
+                self.tree.add_row(None, (r.kind, r.id), [f'{esc(r.title)}<br><span class="sub">{esc(r.sub)}</span>{snippet}'])
+                continue
+            kind = file_type(r.title) if r.kind == "doc" else ""
+            name = {"task": "task", "capture": "note", "person": "person", "label": "labels"}.get(r.kind, f"type-{kind}" if kind not in ("", "other") else "file")
+            colour, tip = "text2", r.kind.capitalize()
+            if r.kind == "task" and r.id in m.tasks:  # a task's state, as everywhere else (decision L7)
+                (name, colour), tip = state_icon(m.task(r.id).state), m.task(r.id).state
+            sub = re.sub(rf"^{re.escape(r.id)}( · )?", "", r.sub)  # no ID (decision L4): it's in the tooltip
+            line = Line(r.title, icon=name, icon_colour=colour, icon_tip=tip, context=sub if r.snippet else "", second=r.snippet or sub)
+            self.tree.add_row(None, (r.kind, r.id), [line], tip=f"{r.title}\n{r.sub}")
         if not results:
             self.tree.add_row(None, None, ['<span class="sub">No matches.</span>'], selectable=False)
 

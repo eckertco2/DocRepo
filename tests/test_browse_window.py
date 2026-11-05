@@ -19,7 +19,7 @@ from docrepo.model import Model  # noqa: E402
 from docrepo.ui.browse_window import BrowseWindow  # noqa: E402
 from docrepo.ui.capture_window import CaptureWindow  # noqa: E402
 from docrepo.ui.context import AppContext  # noqa: E402
-from docrepo.ui.tree_view import HTML_ROLE, KEY_ROLE  # noqa: E402
+from docrepo.ui.tree_view import HTML_ROLE, KEY_ROLE, LINE_ROLE  # noqa: E402
 
 NOW = datetime(2026, 10, 8, 14, 10)
 
@@ -218,7 +218,7 @@ def test_clearing_a_reminder_from_the_list(browse):
     browse.set_view("reminders")
     item = next(i for i in browse.tree.items() if i.data(0, KEY_ROLE) == ("task", "T000018"))
     button = browse.tree.action_strip(item).findChild(QPushButton)
-    assert button.text() == "Clear"
+    assert button.accessibleName() == "Clear"  # an icon, with its words for screen readers and in its tooltip (release 5.78)
     button.click()
     assert Model(browse.conn).task("T000018").reminder is None
     assert ("task", "T000018") not in rows(browse)
@@ -228,15 +228,20 @@ def _title_cell(browse, task_id: str) -> str:
     return next(i for i in browse.tree.items() if i.data(0, KEY_ROLE) == ("task", task_id)).data(0, HTML_ROLE)
 
 
+def _line(browse, task_id: str):
+    """A task's row as the new look paints it (release 5.78)."""
+    return next(i for i in browse.tree.items() if i.data(0, KEY_ROLE) == ("task", task_id)).data(0, LINE_ROLE)
+
+
 def test_the_task_tree_s_rows_name_their_own_labels(browse):
     """Item 76 (decision 235): quiet words after the title, not chips, on the task tree only."""
     browse.set_view("tasks")
     browse.open.update(Model(browse.conn).tasks)
     browse.render_list()
-    assert 'class="sub">&nbsp;Line 1 · Strategic Plan</span>' in _title_cell(browse, "T000001")
-    assert "Safety</span>" in _title_cell(browse, "T000019") and "Urgent" in _title_cell(browse, "T000019")  # after its chips
+    assert _line(browse, "T000001").muted == ("Line 1", "Strategic Plan") and 'class="faint">&nbsp;Line 1 · Strategic Plan</span>' in _title_cell(browse, "T000001")
+    assert "Safety</span>" in _title_cell(browse, "T000019") and _line(browse, "T000019").chips == (("Urgent", "urgent"),)  # after its chips
     assert "Line 1" not in _title_cell(browse, "T000012")  # a subtask doesn't repeat what it inherits
-    assert 'class="sub"' not in _title_cell(browse, "T000016")  # no labels, nothing added
+    assert _line(browse, "T000016").muted == ()  # no labels, nothing added
     browse.set_view("due")
     assert "Safety" not in _title_cell(browse, "T000019")  # the other lists are as they were
 
@@ -264,8 +269,9 @@ def test_reminders_whose_day_has_come_are_on_today(browse):
     head = _today_heading(browse, "Reminders")
     rows_under = [head.child(i) for i in range(head.childCount())]
     assert [r.data(0, KEY_ROLE) for r in rows_under] == [("task", "T000016"), ("task", "T000018")]  # not T000019, tomorrow's
-    assert "1 d ago" in rows_under[0].data(2, HTML_ROLE) and "Today" in rows_under[1].data(2, HTML_ROLE) and "Reminder" in rows_under[0].data(1, HTML_ROLE)
-    links = [b.text() for b in browse.tree.action_strip(rows_under[1]).findChildren(QPushButton)]
+    # No State column in the new look (decision L7): the row's icon says Reminder, and its date is the next cell.
+    assert "1 d ago" in rows_under[0].data(1, HTML_ROLE) and "Today" in rows_under[1].data(1, HTML_ROLE) and rows_under[0].data(0, LINE_ROLE).icon_tip == "Reminder"
+    links = [b.accessibleName() for b in browse.tree.action_strip(rows_under[1]).findChildren(QPushButton)]
     assert links == ["Add to Today", "Clear"]
     today_rows = browse.tree.keys()
     assert today_rows.index(("task", "T000018")) < today_rows.index(("task", "T000012"))  # above what's due in the next 7 days
@@ -274,13 +280,13 @@ def test_reminders_whose_day_has_come_are_on_today(browse):
 def test_a_reminder_on_today_can_be_added_and_cleared(browse):
     browse.set_view("today")
     head = _today_heading(browse, "Reminders")
-    buttons = {b.text(): b for b in browse.tree.action_strip(head.child(1)).findChildren(QPushButton)}
+    buttons = {b.accessibleName(): b for b in browse.tree.action_strip(head.child(1)).findChildren(QPushButton)}
     buttons["Add to Today"].click()
     m = Model(browse.conn)
     assert [a.subject for a in m.today_items()] == ["T000018"] and m.task("T000018").reminder == "2026-10-08"  # on Today, reminder kept
     head = _today_heading(browse, "Reminders")
     row = next(head.child(i) for i in range(head.childCount()) if head.child(i).data(0, KEY_ROLE) == ("task", "T000018"))
-    buttons = {b.text(): b for b in browse.tree.action_strip(row).findChildren(QPushButton)}
+    buttons = {b.accessibleName(): b for b in browse.tree.action_strip(row).findChildren(QPushButton)}
     assert list(buttons) == ["Clear"]  # already on Today
     buttons["Clear"].click()
     m = Model(browse.conn)
@@ -663,7 +669,7 @@ def test_today_shows_what_is_due_this_week(browse):
     browse.set_view("today")
     assert rows(browse).count(("task", "T000019")) == 1 and ("task", "T000012") in rows(browse)
     add = browse.tree.action_strip(_item(browse, ("task", "T000012"))).findChild(QPushButton)
-    assert add.text() == "Add to Today"
+    assert add.accessibleName() == "Add to Today"
     add.click()
     m = Model(browse.conn)
     assert [a.subject for a in m.today_items()] == ["T000012"] and rows(browse).count(("task", "T000012")) == 1  # now on Today, not below

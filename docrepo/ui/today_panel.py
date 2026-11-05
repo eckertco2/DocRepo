@@ -52,9 +52,8 @@ from docrepo.ui.context import AppContext
 from docrepo.ui.icons import icon
 from docrepo.ui.page_view import PageView
 from docrepo.ui.style import page_css, style_sheet
-from docrepo.ui.task_picker import path_text
 from docrepo.ui.wheel_window import animations_on
-from docrepo.views import due_cell, since_text, today_due_entries, today_groups
+from docrepo.views import due_cell, project_text, since_text, today_due_entries, today_groups
 
 if TYPE_CHECKING:
     from docrepo.ui.browse_window import BrowseWindow
@@ -428,10 +427,11 @@ class TodayPanel(QWidget):
             for a in items:
                 t = m.tasks.get(a.subject) if a.subject else None
                 since = f"since {since_text(a.added, today)} · " if a.added[:10] < today.isoformat() else ""
-                where = (path_text(m, t.id) or "Top-level task") if t else "A note"
+                where = project_text(m, t.id) if t else ""  # its project (the list rows review, decision L3)
                 cell = due_cell(t, today) if t else None
-                state = f"{t.state} · " if t else ""
-                row = _Row(self, a.id, t.id if t else None, t.title if t else a.note, f"{since}{state}{where}", cell.text if cell else "")
+                state = t.state if t else "Note"
+                row = _Row(self, a.id, t.id if t else None, t.title if t else a.note, " · ".join(x for x in (since.rstrip(" ·"), state, where) if x),
+                           cell.text if cell else "")
                 self.rows.append(row)
                 self._add(row)
         if not total:
