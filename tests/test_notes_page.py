@@ -90,22 +90,49 @@ def root(sample_root):
     return sample_root
 
 
-def test_a_note_goes_on_its_task_s_page_with_a_dated_caption(root):
+#: A link makes a note a capture still (release 5.69, the notes workspace plan's decision 345), for the tests of captures' blocks.
+LINK = "https://example.com/spec"
+
+
+def linked(**kw) -> CaptureDraft:
+    return CaptureDraft(files=[FileRow("Spec sheet", LINK, "the spec")], **kw)
+
+
+def test_a_note_goes_on_its_task_s_page_under_its_day(root):
+    """Release 5.69 (decisions 341 and 345): text alone on a task is no capture. It goes on the page under the day's
+    heading, made the first time that day; the next day's goes under a heading of its own."""
+    conn = root[0]
     r = save(root, CaptureDraft(content="Wear rings checked: 0.9 mm.\n- Replace both", task="T000012", formatted=True))
+    assert r.capture_id is None and r.noted_under == ["Fri 16 Oct 2026"]
     lines = lines_of(page(root, "T000012"))
-    assert [(x.kind, x.text) for x in lines] == [("caption", "Fri 16 Oct 2026 · 9:30 am · Note"), ("text", "Wear rings checked: 0.9 mm."),
-                                                 ("text", "- Replace both")]
-    assert lines[0].ref == r.capture_id
+    assert [(x.kind, x.text) for x in lines] == [("heading", "Fri 16 Oct 2026"), ("text", "Wear rings checked: 0.9 mm."), ("text", "- Replace both")]
+    save(root, CaptureDraft(content="Later that day.", task="T000012"), datetime(2026, 10, 16, 15, 0))
     save(root, CaptureDraft(content="Second note.", task="T000012"), datetime(2026, 10, 17, 14, 5))
-    assert page(root, "T000012").endswith("\n" + caption_line("Sat 17 Oct 2026 · 2:05 pm · Note", "C000027") + "\nSecond note.")
+    assert page(root, "T000012").endswith("- Replace both\nLater that day.\n# Sat 17 Oct 2026\nSecond note.")
+    assert notes_page.versions(conn, "T000012") == [("2026-10-17", True), ("2026-10-16", True)]  # the owner's own edits, in Activity
+    assert [(x.group, x.id) for x in search.search(conn, Model(conn), "Second note")] == [("Notes", "T000012")]
+
+
+def test_a_note_s_headings_go_under_the_page_s_with_the_same_words(root):
+    """Decision 345: each heading of a note goes under the page's heading with the same words (case and spacing aside,
+    the last of two), at its section's end; a heading the page hasn't got is made at the page's end."""
+    conn, data_root, fs = root
+    edits.save_page(conn, data_root, fs, "T000012", "# Seals\n- Old seal noted\n## Rigging\n- Crane booked\n# Other\n- x", AT)
+    r = save(root, CaptureDraft(content="Loose line\n# SEALS\n- New seal fitted\n## Lifting plan\n- Two cranes", task="T000012", formatted=True))
+    assert r.noted_under == ["Fri 16 Oct 2026", "Seals", "Lifting plan"]
+    assert r.message == "Added to the notes of Rigging plan, under Fri 16 Oct 2026, Seals and Lifting plan."
+    assert page(root, "T000012").split("\n") == [
+        "# Seals", "- Old seal noted", "## Rigging", "- Crane booked", "- New seal fitted", "# Other", "- x",
+        "# Fri 16 Oct 2026", "Loose line", "## Lifting plan", "- Two cranes"]
 
 
 def test_an_update_s_caption_says_what_changed_and_its_text_follows(root):
     save(root, CaptureDraft(content="Vendor drawings came in late.", task="T000009", types={"update"},
                             update={"due": "2026-10-30", "current_status": "Vendor drawings came in late."}))
     lines = lines_of(page(root, "T000009"))
-    assert lines[0].text == "Fri 16 Oct 2026 · 9:30 am · Update: Due date moved to Fri 30 Oct."
-    assert lines[1].text == "Vendor drawings came in late."  # decision 114
+    assert lines[0].text == "Fri 16 Oct 2026" and lines[0].kind == "heading"  # every capture under its day (release 5.69)
+    assert lines[1].text == "Fri 16 Oct 2026 · 9:30 am · Update: Due date moved to Fri 30 Oct."
+    assert lines[2].text == "Vendor drawings came in late."  # decision 114
 
 
 def test_a_new_task_s_text_goes_on_its_page_and_its_first_line_is_its_description(root):
@@ -113,13 +140,14 @@ def test_a_new_task_s_text_goes_on_its_page_and_its_first_line_is_its_descriptio
     t = Model(root[0]).task(r.created_task)
     assert t.description == "Coupling guard is cracked."  # decision 115
     lines = lines_of(page(root, r.created_task))
-    assert [x.text for x in lines] == ["Fri 16 Oct 2026 · 9:30 am · New task", "Coupling guard is cracked.", "Order a new one from the vendor."]
+    assert [x.text for x in lines] == ["Fri 16 Oct 2026", "Fri 16 Oct 2026 · 9:30 am · New task", "Coupling guard is cracked.",
+                                       "Order a new one from the vendor."]
     assert page(root, "T000008") == ""  # a new subtask's capture is the subtask's, not its parent's
 
 
 def test_a_one_line_new_task_doesn_t_repeat_its_title(root):
     r = save(root, CaptureDraft(content="Call the vendor about seals", types={"new_task"}, quick=True))
-    assert [x.kind for x in lines_of(page(root, r.created_task))] == ["caption"]
+    assert [x.kind for x in lines_of(page(root, r.created_task))] == ["heading", "caption"]
     assert first_line("  - First item\nSecond") == "First item"
 
 
@@ -128,8 +156,8 @@ def test_an_email_s_caption_names_it_and_its_text_stays_with_it(root):
                       body="The guard ships Monday.", save_msg=lambda path: Path(path).write_bytes(b"MSG"))
     save(root, CaptureDraft(content="Check the date against the outage.", task="T000012", files=email_rows(email)))
     lines = lines_of(page(root, "T000012"))
-    assert lines[0].text.startswith("Fri 16 Oct 2026 · 9:30 am · Email from Norvane Pumps (vendor): ")
-    assert [x.text for x in lines[1:] if x.kind == "text"] == ["Check the date against the outage."]
+    assert lines[1].text.startswith("Fri 16 Oct 2026 · 9:30 am · Email from Norvane Pumps (vendor): ")
+    assert [x.text for x in lines[2:] if x.kind == "text"] == ["Check the date against the outage."]
     assert "The guard ships Monday." not in page(root, "T000012")
 
 
@@ -138,27 +166,29 @@ def test_a_file_is_a_line_with_its_description(root, tmp_path):
     f.write_bytes(b"x")
     save(root, CaptureDraft(task="T000012", files=[FileRow("Pump spec.docx", str(f), "the vendor's datasheet")]))
     lines = lines_of(page(root, "T000012"))
-    assert [(x.kind, x.text) for x in lines][1:] == [("file", "File: Pump spec.docx, the vendor's datasheet")]
+    assert [(x.kind, x.text) for x in lines][2:] == [("file", "File: Pump spec.docx, the vendor's datasheet")]
 
 
 def test_meeting_notes_go_on_the_meeting_and_an_item_on_its_task(root):
     r = save(root, CaptureDraft(content="Crane is booked.\n#Rigging plan **decision, Lift on the 20th.", task="T000010", meeting=True))
     meeting = r.meeting
     lines = lines_of(page(root, meeting))
-    assert lines[0].kind == "heading" and lines[0].text == "Fri 16 Oct 2026"  # a meeting's day headings are on (decision 119)
+    assert lines[0].kind == "heading" and lines[0].text == "Fri 16 Oct 2026"  # every page's day headings are on (release 5.69)
     assert lines[1].text == "Fri 16 Oct 2026 · 9:30 am · Meeting notes"
     item_page = page(root, "T000012")
     assert "Decision from the notes of" in item_page and "Lift on the 20th." in item_page
 
 
-def test_day_headings_for_a_task_come_from_edit_task(root):
+def test_every_page_has_day_headings(root):
+    """Release 5.69 retires decision 119's per-task choice: every task's captures go under their day's heading, a late
+    one under its own day in date order (decision 113), whatever the task's old setting."""
     conn, data_root, fs = root
-    edits.edit_task(conn, data_root, fs, SETTINGS, "T000012", AT, day_headings=True)
-    assert Model(conn).uses_day_headings("T000012") and not Model(conn).uses_day_headings("T000011")
-    save(root, CaptureDraft(content="Under its day.", task="T000012"))
-    assert page(root, "T000012").startswith("# Fri 16 Oct 2026\n")
-    edits.edit_task(conn, data_root, fs, SETTINGS, "T000012", AT, day_headings=None)
-    assert not Model(conn).uses_day_headings("T000012") and Model(conn).uses_day_headings("T000010")  # a meeting's default
+    conn.execute("UPDATE tasks SET day_headings = 0 WHERE id = 'T000012'")  # set off before 5.69: no longer read
+    assert Model(conn).uses_day_headings("T000012") and Model(conn).uses_day_headings("T000011")
+    save(root, linked(content="Under its day.", task="T000012"))
+    save(root, linked(content="Two days before.", task="T000012"), datetime(2026, 10, 14, 8, 0))
+    p = page(root, "T000012")
+    assert p.startswith("# Wed 14 Oct 2026\n") and p.index("# Wed 14 Oct 2026") < p.index("# Fri 16 Oct 2026")
 
 
 # ---- the first pages, filing, discarding ----
@@ -189,7 +219,7 @@ def test_filing_puts_a_capture_on_the_page_and_discarding_takes_it_off(root):
 
 def test_a_block_edited_on_the_page_stays_unless_asked(root):
     conn, data_root, fs = root
-    r = save(root, CaptureDraft(content="Typed twice.", task="T000012"))
+    r = save(root, linked(content="Typed twice.", task="T000012"))
     edits.save_page(conn, data_root, fs, "T000012", page(root, "T000012").replace("Typed twice.", "Typed twice, then reworded."), AT)
     model, stories = edits.stories_for(conn, data_root, AT)
     assert notes_page.edited_blocks(model, stories, r.capture_id) == ["T000012"]
@@ -202,7 +232,7 @@ def test_a_block_edited_on_the_page_stays_unless_asked(root):
 
 def test_add_it_again(root):
     conn, data_root, fs = root
-    r = save(root, CaptureDraft(content="Gone and back.", task="T000012"))
+    r = save(root, linked(content="Gone and back.", task="T000012"))
     edits.save_page(conn, data_root, fs, "T000012", "", AT)
     assert edits.add_again(conn, data_root, fs, r.capture_id, "T000012", AT).message == f"{r.capture_id} is on the page again."
     assert "Gone and back." in page(root, "T000012")
@@ -228,7 +258,7 @@ def test_the_owner_s_edit_keeps_the_day_s_version_and_updates_task_md_and_search
 
 def test_task_md_links_captions_and_lists_captures_not_on_the_page(root):
     conn, data_root, fs = root
-    r = save(root, CaptureDraft(content="Linked.", task="T000012"))
+    r = save(root, linked(content="Linked.", task="T000012"))
     md = (data_root / "Tasks" / "T000012" / "Task.md").read_text(encoding="utf-8")
     assert f"_[Fri 16 Oct 2026 · 9:30 am · Note](../../Captures/2026/10/{r.capture_id}/capture.md)_" in md
     assert "## Captures\n" in md and "## Raw text log" not in md

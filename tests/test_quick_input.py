@@ -12,12 +12,12 @@ import pytest  # noqa: E402
 from PySide6.QtWidgets import QApplication, QLabel  # noqa: E402
 
 from conftest import FIXTURES  # noqa: E402
-from docrepo import captures, db, items  # noqa: E402
+from docrepo import captures, db, items, notes_page  # noqa: E402
 from docrepo.config import Settings  # noqa: E402
 from docrepo.model import Model  # noqa: E402
 from docrepo.parse import ParsePerson  # noqa: E402
 from docrepo.sample import load_sample  # noqa: E402
-from docrepo.save import CaptureDraft, NewTaskFields, add_quick_task, save_capture  # noqa: E402
+from docrepo.save import CaptureDraft, FileRow, NewTaskFields, add_quick_task, save_capture  # noqa: E402
 from docrepo.ui.capture_window import CaptureWindow  # noqa: E402
 from docrepo.ui.context import AppContext  # noqa: E402
 from test_parse_vectors import split_row  # noqa: E402
@@ -153,10 +153,11 @@ def test_an_empty_field_fills_and_a_filled_one_stays(sample_root):
     t = m.tasks["T000012"]
     assert (t.due, t.reminder, t.references) == ("2026-10-14", "2026-11-05", {"Work order #": "48213"})
     assert r.made == {"param": 2} and "Made 2 fields from its items." in r.message and "1 line wasn't used: it stays in the notes." in r.message
-    log = sample_root[0].execute("SELECT field, via FROM status_log WHERE task = 'T000012' AND via = ?", (r.capture_id,)).fetchall()
-    assert sorted(x["field"] for x in log) == ["Reminder", "Work order #"]
-    assert "**due, 5 Nov." in captures.read_content(sample_root[1], m.captures[r.capture_id])  # the notes keep the lines
-    assert not any(c.from_notes == r.capture_id for c in m.captures.values())  # no capture of their own
+    # A note of text alone is no capture (release 5.69): the fields are logged as the capture window's, and the page keeps the lines.
+    log = sample_root[0].execute("SELECT field, via FROM status_log WHERE task = 'T000012' AND via = 'Capture window'").fetchall()
+    assert r.capture_id is None and sorted(x["field"] for x in log) == ["Reminder", "Work order #"]
+    assert "**due, 5 Nov." in notes_page.words(notes_page.get(sample_root[0], "T000012"))  # the notes keep the lines
+    assert r.items == []  # no capture of their own
 
 
 def test_lists_add(sample_root):
@@ -187,7 +188,7 @@ def test_a_new_task_s_title_skips_a_line_of_parameters(sample_root):
 
 def test_a_task_item_takes_the_line_on_it(sample_root):
     r, m = save(sample_root, CaptureDraft(content="- @Tom check the pump. **due, 5 Nov.\n  - **hours, 3.", task="T000008"))
-    made = next(c.created_task for c in m.captures.values() if c.from_notes == r.capture_id)
+    made = m.captures[r.items[0]].created_task
     assert (m.tasks[made].title, m.tasks[made].due, m.tasks[made].assignee_hours) == ("Check the pump", "2026-11-05", 3.0)
     assert m.tasks["T000008"].due == "2026-10-30" and m.tasks["T000008"].assignee_hours == 60
 
@@ -207,7 +208,7 @@ def test_what_can_t_be_read_stays_in_the_notes(sample_root):
     t = m.tasks["T000012"]
     assert (t.state, t.due, m.key_dates_of("T000012")) == ("In progress", "2026-10-14", [])
     assert r.made == {} and "4 lines weren't used: they stay in the notes." in r.message
-    assert content in captures.read_content(sample_root[1], m.captures[r.capture_id])
+    assert content in notes_page.words(notes_page.get(sample_root[0], "T000012"))  # on the page, as written (release 5.69)
 
 
 def test_a_value_the_task_can_t_take_changes_nothing(sample_root):
@@ -224,14 +225,16 @@ def test_a_quick_task_reads_its_parameters(sample_root):
 
 
 def test_a_capture_of_a_parameter_alone_is_still_called_something(sample_root):
-    r, m = save(sample_root, CaptureDraft(content="**reminder, 5 Nov.", task="T000012"))
+    r, m = save(sample_root, CaptureDraft(content="**reminder, 5 Nov."))  # unfiled, so a capture still (release 5.69)
     assert m.captures[r.capture_id].title == "Reminder, 5 Nov"
 
 
 def test_saved_captures_are_not_read_again(sample_root):
     """Decision 206: an old **date stays as written. Nothing rereads a saved capture's operators."""
     conn, root, fs = sample_root
-    r, m = save(sample_root, CaptureDraft(content="Notes.\n**date Dec 1 to 5 Trial window", task="T000012"))
+    # A link makes it a capture still (release 5.69).
+    r, m = save(sample_root, CaptureDraft(content="Notes.\n**date Dec 1 to 5 Trial window", task="T000012",
+                                          files=[FileRow("Spec sheet", "https://example.com/spec", "the spec")]))
     before = captures.read_content(root, m.captures[r.capture_id])
     save(sample_root, CaptureDraft(content="Another.", task="T000012"))
     assert captures.read_content(root, Model(conn).captures[r.capture_id]) == before

@@ -210,16 +210,22 @@ def own_heading(line: str, task_id: str) -> bool:
 
 
 def capture_markup(c: Capture, content: str | None, title: str = "", own: str | None = None) -> list[str]:
-    """A capture's note text as page lines: its names as written (``@Tom Becker``), its file and link lines left out
-    (they're file lines on the page), and empty lines at its ends dropped. A new task's text that's only its title isn't
-    repeated (decision 115). Its headings are the page's headings, at the level they were typed (release 5.28, the
-    mods log round 4's decision 132). On ``own``'s page, a # heading naming only that task is left out (release 5.32)."""
+    """A capture's note text as page lines (``note_markup``)."""
+    return note_markup(content, c.formatted, title, own)
+
+
+def note_markup(content: str | None, formatted: bool, title: str = "", own: str | None = None) -> list[str]:
+    """Note text, as a capture or the capture window keeps it, as page lines: its names as written (``@Tom Becker``),
+    its file and link lines left out (they're file lines on the page), and empty lines at its ends dropped. A new task's
+    text that's only its title isn't repeated (decision 115). Its headings are the page's headings, at the level they
+    were typed (release 5.28, the mods log round 4's decision 132). On ``own``'s page, a # heading naming only that task
+    is left out (release 5.32)."""
     if not content:
         return []
     if own:
         content = "\n".join(line for line in content.split("\n") if not own_heading(line, own))
     content = items.unstore(content)
-    text = content if c.formatted else markup.escape(content)
+    text = content if formatted else markup.escape(content)
     lines = [line for line in text.split("\n") if not is_file_line(markup.to_plain(line).strip())]
     while lines and not lines[0].strip():
         lines.pop(0)
@@ -315,6 +321,56 @@ def add_block(page: str, new: list[str], day: date, day_headings: bool) -> str:
     if later is None:
         return "\n".join(_trim_end(raw) + head + new)
     return "\n".join(raw[:later] + head + new + raw[later:])
+
+
+def _same_words(a: str, b: str) -> bool:
+    return " ".join(a.split()).casefold() == " ".join(b.split()).casefold()
+
+
+def place_note(page: str, note: list[str], day: date) -> tuple[str, list[str]]:
+    """The page with a note from the capture window on it, which is no capture (release 5.69, the notes workspace plan's
+    decision 345). Each of the note's headings goes under the page's heading with the same words (case and spacing
+    aside; the last on the page when it has two), at the end of that heading's section, or at the page's end, at the
+    level it was typed, when the page has none. The note's lines under none of its headings go under the day's heading,
+    at the end of the day's lines, as a capture's block does (``add_block``). Returns the page and the headings the
+    note went under, in order, for Save's message."""
+    loose: list[str] = []
+    sections: list[tuple[int, str, list[str]]] = []  # each of the note's headings: its level, its words, its lines
+    for x in note:
+        line = read_line(x)
+        if line.kind == "heading":
+            sections.append((line.level, line.text, []))
+        elif sections:
+            sections[-1][2].append(x)
+        else:
+            loose.append(x)
+
+    def trimmed(lines: list[str]) -> list[str]:
+        lines = _trim_end(lines)
+        while lines and not lines[0].strip():
+            lines = lines[1:]
+        return lines
+
+    out, under = page, []
+    loose = trimmed(loose)
+    if loose:
+        out = add_block(out, loose, day, True)
+        under.append(day_title(day))
+    for level, words, lines in sections:
+        lines = trimmed(lines)
+        raw = out.split("\n") if out else []
+        read = [read_line(x) for x in raw]
+        match = max((i for i, x in enumerate(read) if x.kind == "heading" and _same_words(x.text, words)), default=None)
+        if match is None:
+            out = "\n".join(_trim_end(raw) + [heading_line(words, level)] + lines)
+            under.append(words)
+            continue
+        end = next((i for i in range(match + 1, len(read)) if read[i].kind == "heading" and read[i].level <= read[match].level), len(raw))
+        while end > match + 1 and not raw[end - 1].strip():
+            end -= 1
+        out = "\n".join(raw[:end] + lines + raw[end:])
+        under.append(read[match].text)
+    return out, list(dict.fromkeys(under))
 
 
 def find_block(page: str, capture_id: str) -> tuple[int, int] | None:

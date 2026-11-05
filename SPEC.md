@@ -237,10 +237,21 @@ The words used here are defined in `GLOSSARY.md`.
   typed text in full with names as written (`@Tom Becker`) and without file and link lines (96, 114), and a file line for
   each of its files. An email's own text stays with the email. A new task's text that's only its title isn't repeated.
   Its headings (release 5.28) are the page's headings, at the level they were typed (the mods log round 4's decision 132).
-- **Where it goes** (`notes_page.add_block`): at the end of the page; or, when the task uses day headings, at the end of
-  its day's lines, which run to the next day heading whatever other headings come between (release 5.28), or under a
-  new heading for its day, made in date order among the day headings (97, 113). Day
-  headings are off by default and on for a meeting (119; `Model.uses_day_headings`), and set in the task page's Notes menu.
+- **Where it goes** (`notes_page.add_block`): at the end of its day's lines, which run to the next day heading whatever
+  other headings come between (release 5.28), or under a new heading for its day, made in date order among the day
+  headings (97, 113). Since release 5.69 every task's page has day headings (`Model.uses_day_headings`): decision 119's
+  per-task choice, in the Notes menu, is gone, and `tasks.day_headings` is kept in docs.db, unread.
+- **A note that's no capture** (release 5.69; the notes workspace plan's decisions 341 and 345 in the parent workspace):
+  a Note on a picked task of typed text alone (no file, email, link or summary, and not with New task, Update or
+  meeting notes) keeps no capture. Its text goes straight onto the task's page (`edits.add_note`,
+  `notes_page.place_note`), in Save's own transaction, as the owner's edit of the page (the day's version, Activity's
+  Notes edited, search, `Task.md`). Each of its headings goes under the page's heading with the same words (case and
+  spacing aside; the last on the page when it has two), at the end of that heading's section, or at the page's end, at
+  the level typed, when the page has none; its lines under none of its headings go under the day's heading, as a
+  block does. Its items (5.8) are made as before, each a capture of its own with no notes behind it (`from_notes` empty),
+  and what its parameters fill is logged as the capture window's. A note split by `#task` (5.32) does the same with
+  each part of text alone. Save's message says where it went ("Added to the notes of Installation, under Thu 8 Oct
+  2026."), and the capture window says so before Save.
 - **When blocks are added** (`notes_page.add_capture`, `edits.add_to_pages`): when a capture is saved, on each task it
   belongs to (`Model.capture_tasks`), and each item's (5.8) on its own task; when an unfiled capture is filed or made
   into a task; when a discarded capture is brought back; and Add it again (109). A page that can't be changed is a
@@ -608,7 +619,8 @@ The task page reads top to bottom as the task's story (release 5.21, the visual 
   - **Saving** a moment after typing stops, and when the editor loses the caret ("Saved 14:10" beside Notes); the Captures
     tab is drawn again when the page's captions change. Page Up and Page Down move the scroll a screen; a wheel notch
     glides (not in the Classic look); the scroll keeps the caret in view.
-  - **The Notes menu:** Fold all headings, Unfold all, Day headings for new captures (119), and **Page history…** (103):
+  - **The Notes menu:** Fold all headings, Unfold all, and **Page history…** (103; Day headings for new captures, 119,
+    went in release 5.69):
     the page as it stood at the end of each day it changed, read-only, and Restore, which is an edit like any other.
   - **The format bar** (release 5.26) is beside Notes, with the **Checklist** button; since release 5.27 it's always
     shown, with the **Table** button.
@@ -637,7 +649,7 @@ The task page reads top to bottom as the task's story (release 5.21, the visual 
     the count ("1 of 4 done"). Each row is bound to its line (a `QTextBlock` of the editor): ticking, rewording (with the
     formatting keys) or removing it in either place changes the one line at once, in the page's undo, and the page saves.
     Done lines hide behind **Show N done**. **Add item** puts a new line at the end of the page, under today's heading
-    when the task uses day headings. On a row's hover, **Go to** shows its line on the page and **Remove** takes it off.
+    (every task's, since release 5.69). On a row's hover, **Go to** shows its line on the page and **Remove** takes it off.
     The summary folds by its arrow, kept for each task (`app_state`, `checklist_folded:<task>`).
 
 ### 8.5 The capture page

@@ -51,8 +51,8 @@ class Task:
     #: Its priority (mods log round 2, M0029, M0030, release 5.23): a bucket (``priorities.BUCKETS``) and its place in it.
     priority: str | None = None
     priority_rank: int | None = None
-    #: Whether new captures go under a heading for their day on its notes page (release 5.25, decision 119): None is the
-    #: default, which is on for a meeting and off for any other task (``uses_day_headings``).
+    #: Whether new captures went under a heading for their day on its notes page (release 5.25, decision 119). Unread
+    #: since release 5.69, when they always do (``uses_day_headings``); kept so docs.db needs no change.
     day_headings: bool | None = None
     #: Release 5.46 (decisions 189 to 191): its length in days, kept when its dates move, whether those days run through
     #: weekends, and each role's hours a day. With a rate, ``lead_hours`` or ``assignee_hours`` is the total worked out from it.
@@ -425,10 +425,10 @@ class Model:
 
     # ---- names ----
     def uses_day_headings(self, task_id: str) -> bool:
-        """Whether the task's new captures go under a heading for their day (decision 119): off by default, on for a
-        meeting, unless set on the task in Edit task."""
-        t = self.tasks[task_id]
-        return t.meeting if t.day_headings is None else t.day_headings
+        """Whether the task's new captures go under a heading for their day: always, since release 5.69 (the notes
+        workspace plan's decision 345, which retires decision 119's per-task choice). ``Task.day_headings`` is kept in
+        docs.db, unread."""
+        return task_id in self.tasks
 
     def task(self, task_id: str) -> Task:
         return self.tasks[task_id]
