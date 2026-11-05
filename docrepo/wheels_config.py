@@ -369,8 +369,8 @@ DEFAULT_TEXT = """\
       "id": "capture",
       "name": "Capture",
       "slots": {
-        // capture.new: the capture window, truly blank; a draft is set aside, and comes back when you save or close this one.
-        //   args: "mode" is note, new_task or update; "blank": false opens on the draft instead.
+        // capture.new: the capture window, empty; a capture open with something in it goes to Drafts first.
+        //   args: "mode" is note, new_task or update; "blank": false keeps the open capture instead.
         "N": { "label": "Blank capture", "icon": "add", "command": "capture.new" },
         // capture.selection: the pinned window, with the email or file selected in the window you were in.
         "E": { "label": "Email or file", "icon": "mail", "command": "capture.selection" },

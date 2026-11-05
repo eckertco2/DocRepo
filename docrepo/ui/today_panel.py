@@ -49,8 +49,9 @@ from docrepo.schedule import DueDate
 from docrepo.ui import tokens
 from docrepo.ui.browse_window import TODAY_MINE_KEY
 from docrepo.ui.context import AppContext
-from docrepo.ui.icons import icon
+from docrepo.ui.icons import icon, icon_size
 from docrepo.ui.page_view import PageView
+from docrepo.ui.state_menu import UNDO_MS, UndoButton
 from docrepo.ui.style import page_css, style_sheet
 from docrepo.ui.task_picker import path_text
 from docrepo.ui.wheel_window import animations_on
@@ -89,6 +90,8 @@ QLabel#tpDone {{ color: {disabled}; text-decoration: line-through; }}
 QToolButton#tpFold {{ border: 0; color: {text2}; font-size: {caption}pt; font-weight: 600; text-align: left; padding: 2px; }}
 QPushButton#tpLink {{ border: 0; background: transparent; color: {accent}; padding: 0 3px; min-height: 0; font-size: {caption}pt; }}
 QPushButton#tpLink:hover {{ text-decoration: underline; }}
+QPushButton#tpState {{ border: 0; border-radius: 4px; background: transparent; color: {text2}; padding: 0 3px; min-height: 0; font-size: {caption}pt; }}
+QPushButton#tpState:hover {{ background: {pressed}; }}
 """
 
 
@@ -111,7 +114,7 @@ class _Row(QFrame):
     """One Today item: a tick box and its line at rest; widened, a second line, state and due date, and Done and Remove while
     the pointer is on it. Clicking opens its detail."""
 
-    def __init__(self, panel: TodayPanel, item_id: int, task_id: str | None, title: str, sub: str, due: str) -> None:
+    def __init__(self, panel: TodayPanel, item_id: int, task_id: str | None, title: str, sub: str, due: str, state: str = "") -> None:
         super().__init__(objectName="tpRow")
         self.panel, self.item_id, self.task_id, self.title = panel, item_id, task_id, title
         self.setProperty("current", False)
@@ -129,6 +132,18 @@ class _Row(QFrame):
         self.subtitle = _Elided(sub, "tpSub")
         text.addWidget(self.subtitle)
         lay.addLayout(text, 1)
+        # The task's state, as a button that opens the state menu (release 5.76, round 7's item 101, decision 361).
+        self.state_button: QPushButton | None = None
+        if task_id and state:
+            self.state_button = QPushButton(state, objectName="tpState")
+            self.state_button.setIcon(icon("chevron-down", size=10))
+            self.state_button.setIconSize(icon_size(10))
+            self.state_button.setLayoutDirection(Qt.LayoutDirection.RightToLeft)  # the chevron after the words
+            self.state_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            self.state_button.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.state_button.setToolTip(f"{state}. Click to change the state.")
+            self.state_button.clicked.connect(lambda: panel.state_clicked(self))
+            lay.addWidget(self.state_button, 0, Qt.AlignmentFlag.AlignTop)
         self.due = QLabel(due, objectName="tpSub")
         lay.addWidget(self.due)
         self.buttons = QWidget()
@@ -153,6 +168,8 @@ class _Row(QFrame):
     def set_wide(self, wide: bool) -> None:
         self.subtitle.setVisible(wide and bool(self.subtitle.full))
         self.due.setVisible(wide and bool(self.due.text()))
+        if self.state_button is not None:
+            self.state_button.setVisible(wide)
 
     def enterEvent(self, event) -> None:  # noqa: N802
         super().enterEvent(event)
@@ -306,6 +323,22 @@ class TodayPanel(QWidget):
         al.addLayout(answers)
         self.ask_row.hide()
         outer.addWidget(self.ask_row)
+        # What a state picked from a row did, with Undo, for ten seconds (release 5.76, decision 363).
+        self.note_row = QWidget()
+        nl = QHBoxLayout(self.note_row)
+        nl.setContentsMargins(6, 2, 6, 2)
+        nl.setSpacing(4)
+        self.note_label = QLabel(objectName="tpSub")
+        self.note_label.setWordWrap(True)
+        nl.addWidget(self.note_label)
+        self.note_undo = UndoButton()
+        self.note_undo.setObjectName("tpLink")
+        self.note_undo.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        nl.addWidget(self.note_undo)
+        nl.addStretch()  # Undo right after the words, as in the status line
+        self._note_timer = QTimer(self, singleShot=True, interval=UNDO_MS, timeout=self.note_row.hide)
+        self.note_row.hide()
+        outer.addWidget(self.note_row)
         self.box_row = QWidget()
         bl = QHBoxLayout(self.box_row)
         bl.setContentsMargins(6, 4, 6, 6)
@@ -430,8 +463,9 @@ class TodayPanel(QWidget):
                 since = f"since {since_text(a.added, today)} · " if a.added[:10] < today.isoformat() else ""
                 where = (path_text(m, t.id) or "Top-level task") if t else "A note"
                 cell = due_cell(t, today) if t else None
-                state = f"{t.state} · " if t else ""
-                row = _Row(self, a.id, t.id if t else None, t.title if t else a.note, f"{since}{state}{where}", cell.text if cell else "")
+                # The state is a button of its own now, not words in the second line (release 5.76).
+                state = "" if t is None or t.discarded else t.state
+                row = _Row(self, a.id, t.id if t else None, t.title if t else a.note, f"{since}{where}", cell.text if cell else "", state)
                 self.rows.append(row)
                 self._add(row)
         if not total:
@@ -517,6 +551,28 @@ class TodayPanel(QWidget):
             line = _Elided(f"{t.title if t else a.note}  ({(a.closed or '')[11:16]})", "tpDone")
             self.extras.append(line)
             self._add(line)
+
+    # ================= a row's state (release 5.76, round 7's item 101) =================
+    def state_clicked(self, row: _Row) -> None:
+        """A row's state: the browse tool's state menu, under it. The panel stays open while the menu is."""
+        if row.task_id is None or row.state_button is None:
+            return
+        b = row.state_button
+        self._menu_open = True
+        try:
+            self.browse.popup_state_menu(row.task_id, b.mapToGlobal(QPoint(0, b.height() + 2)), after=self.refresh, tell=self.tell_state)
+        finally:
+            self._menu_open = False
+
+    def tell_state(self, text: str, undo: Callable[[], None] | None) -> None:
+        """What a pick did, under the list, with Undo for ten seconds (decision 363)."""
+        self.note_label.setText(text)
+        self.note_row.show()
+        self._note_timer.start()
+        if undo is not None:
+            self.note_undo.offer(undo)
+        else:
+            self.note_undo.forget()
 
     # ================= what the buttons do: the browse tool's own methods =================
     def done(self, item_id: int | None) -> None:

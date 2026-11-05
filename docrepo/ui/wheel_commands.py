@@ -36,10 +36,12 @@ class Registered:
 
 
 def _capture_new(app: CaptureApp, args: Mapping[str, Any]) -> None:
+    """An empty capture window: a capture open with something in it goes to Drafts first (release 5.77, decision 337).
+    With "blank" false, the open capture stays, with that type checked."""
     if args["blank"]:
         app.window.open_blank(args["mode"])
     else:
-        app.window.show_capture(mode=args["mode"])
+        app.window.show_capture(mode=args["mode"], keep=True)
 
 
 def _capture_pin(app: CaptureApp, _args: Mapping[str, Any]) -> None:

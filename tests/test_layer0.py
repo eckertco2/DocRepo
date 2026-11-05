@@ -113,12 +113,12 @@ def test_the_capture_window_shows_each_part(qapp, sample_root):
         email = sample_email()
         w._add_email(email)
         email_entry, *parts = w.files
-        assert email_entry.desc is None and "Email layer 0" in email_entry.layer0.text()
+        assert email_entry.desc is None and email_entry.email_desc is not None and "Email layer 0" in email_entry.layer0.text()
         assert [(e.row.name, e.keep.isChecked(), e.desc.isEnabled()) for e in parts] == [
             ("Coupling guard drawing rev C.pdf", True, True), ("Packing list 4471.xlsx", True, True), ("install-guide.pdf", True, True),
             ("Guard install checklist.docx", True, True), ("image001.jpg", True, True), ("image002.png", False, False)]
         assert parts[2].copy.isHidden() and parts[4].extract.isHidden() and not parts[4].copy.isHidden()
-        assert w.focusWidget() is parts[0].desc and w.same_all.isVisibleTo(w)
+        assert w.focusWidget() is email_entry.email_desc and w.same_all.isVisibleTo(w)  # the email's own description (round 7's decision 331)
         parts[2].keep.setChecked(False)
         assert not parts[2].desc.isEnabled() and "2 unticked rows" in email_entry.layer0.text()
         w.same_all.setChecked(True)

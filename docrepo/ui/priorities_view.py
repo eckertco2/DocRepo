@@ -101,6 +101,10 @@ class Card(QFrame):
             self.view.pick(self.task_id)
         super().mousePressEvent(event)
 
+    def contextMenuEvent(self, event) -> None:  # noqa: N802 - Qt's name: the card's menu, with its State submenu (release 5.76)
+        event.accept()
+        self.view.card_menu.emit(self.task_id, event.globalPos())
+
     def mouseMoveEvent(self, event) -> None:  # noqa: N802
         if self._press is None or (event.position().toPoint() - self._press).manhattanLength() < QApplication.startDragDistance():
             return
@@ -234,6 +238,8 @@ class PrioritiesView(QWidget):
     edit_task = Signal(str)
     moved = Signal(str, str, object)
     nudged = Signal(str, int, list)
+    #: A card's right-click menu, at a point on the screen: Open, Edit and its State submenu (release 5.76, decision 361).
+    card_menu = Signal(str, QPoint)
 
     def __init__(self) -> None:
         super().__init__()

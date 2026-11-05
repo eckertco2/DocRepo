@@ -13,8 +13,9 @@ Outlook emails and web links on while finding them in Outlook and File Explorer.
 - the description of each file, link or email part added, one at a time, with ‹ and › between them;
 - a line for what's been added ("2 files, 1 link added"), or a problem with a drop.
 
-The main hotkey, its open button, F12, or double-clicking its top line bring the full window back. Ctrl+Enter saves;
-Esc hides it, keeping the draft. It stays where it's moved to until DocRepo restarts.
+The main hotkey, its open button, F12, or double-clicking its top line bring the full window back, on the same capture.
+Ctrl+Enter saves; Esc closes it, and anything unsaved goes to Drafts, as the full window's does (release 5.77, decision
+334). It stays where it's moved to until DocRepo restarts.
 """
 from __future__ import annotations
 
@@ -132,7 +133,7 @@ class PinWindow(QWidget):
         head.addWidget(self.task_button, 1)
         self.open_button = self._button("expand", "Back to the full capture window", "F12", capture.unpin)
         head.addWidget(self.open_button)
-        head.addWidget(self._button("close", "Hide it; the capture stays as a draft", "Esc", capture.hide_pinned))
+        head.addWidget(self._button("close", "Close it; anything unsaved goes to Drafts", "Esc", capture.hide_pinned))
         lay.addLayout(head)
         # ---- the capture types, small ----
         types = QHBoxLayout()
@@ -363,7 +364,7 @@ class PinWindow(QWidget):
             self._take(kind, paths)
 
     def _escape(self) -> None:
-        """Esc closes the @ or # list when it's open, and otherwise hides the pinned window."""
+        """Esc closes the @ or # list when it's open, and otherwise closes the pinned window, its capture to Drafts."""
         if self.ref_popup.isVisible():
             self.ref_popup.hide()
         else:
@@ -373,6 +374,6 @@ class PinWindow(QWidget):
         self.ref_popup.hide()
         super().hideEvent(event)
 
-    def closeEvent(self, event) -> None:  # noqa: N802 - Alt+F4 hides it; the draft is kept
+    def closeEvent(self, event) -> None:  # noqa: N802 - Alt+F4 closes it as Esc does: its capture goes to Drafts
         event.ignore()
         self.capture.hide_pinned()

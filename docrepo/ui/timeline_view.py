@@ -1188,6 +1188,8 @@ class TimelineView(QWidget):
     whatifs_changed = Signal()
     apply_whatif = Signal(str, list)
     said = Signal(str)
+    #: The card's right-click menu, for the task picked, at a point on the screen: its State submenu (release 5.76, decision 361).
+    card_menu = Signal(str, QPoint)
     #: The most of the page Capacity's half takes to start with, and the least either part can be dragged to.
     CAP_SHARE, CAP_MIN, TOP_MIN = 0.62, 96, 150
 
@@ -1344,6 +1346,7 @@ class TimelineView(QWidget):
         lay.addWidget(self.controls)
         lay.addWidget(self.plan_strip)
         self.card = QFrame(objectName="fileRow")
+        self._card_menu_on(self.card)
         cl = QHBoxLayout(self.card)
         cl.setContentsMargins(10, 6, 10, 6)
         self.card_text = QLabel()
@@ -1455,6 +1458,7 @@ class TimelineView(QWidget):
             self.level_buttons.append(b)
         # The top part: the chart, then what's selected, on a line of its own so picking a bar moves nothing (decision 292).
         self.card = QFrame(objectName="timelineFoot")
+        self._card_menu_on(self.card)
         cl = QHBoxLayout(self.card)
         cl.setContentsMargins(0, 3, 0, 3)
         cl.setSpacing(6)
@@ -2798,6 +2802,16 @@ class TimelineView(QWidget):
             parts.append("Key dates: " + ", ".join(timeline.key_date_text(kd, today) for kd in kds))
         path = " › ".join(m.task(x).title for x in m.chains_of(t.id)[0][:-1]) or "Top-level task"
         self.card_text.set_line(t.title, " · ".join(parts), f"{t.title}\n{path}\n" + "\n".join(parts))
+
+    def _card_menu_on(self, card: QFrame) -> None:
+        card.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        card.customContextMenuRequested.connect(lambda pos, c=card: self._card_menu(c.mapToGlobal(pos)))
+
+    def _card_menu(self, at: QPoint) -> None:
+        """Right-click on the card: its task's menu, with the State submenu (release 5.76). Not in a what-if, which would change
+        the real task, as Quick edit and Update aren't."""
+        if self.model is not None and self.sel in self.model.tasks and self.cur is None:
+            self.card_menu.emit(self.sel, at)
 
     def _card(self) -> None:
         """The card for the row clicked last: its title, state, path, dates, hours and people, with Open task, Quick edit and

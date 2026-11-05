@@ -23,7 +23,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from urllib.parse import unquote
 
-from PySide6.QtCore import Qt, QTimer, QUrl
+from PySide6.QtCore import QPoint, Qt, QTimer, QUrl
 from PySide6.QtGui import QColor, QCursor, QGuiApplication, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -85,6 +85,7 @@ from docrepo.ui.timeline_view import TimelineView
 from docrepo.ui.keymap import KeyMapDialog
 from docrepo.timeline import bands as timeline_bands
 from docrepo.ui.tokens import C
+from docrepo.ui.state_menu import UNDO_MS, can_change, open_below, picked_line, state_menu
 from docrepo.ui.tree_view import DIM_ROLE, HTML_ROLE, KEY_ROLE, RowTree, edge, group_ground, tint, with_actions
 from docrepo.ui.widgets import SAVE_KEYS, CheckMenuButton, DateField, DropButton, FlowLayout, Option, ViewStack, ask, label_filter, label_options, people_filter, people_options
 from docrepo.views import (
@@ -370,6 +371,10 @@ class BrowseWindow(QWidget):
         self.tree.itemExpanded.connect(lambda item: self._expanded(item, True))
         self.tree.itemCollapsed.connect(lambda item: self._expanded(item, False))
         self.tree.itemDoubleClicked.connect(lambda item, _col: self.double_click(item))
+        # A task's state from its row (release 5.76, round 7's item 101): a State cell opens the state menu, and a task row's
+        # right-click menu has it as a submenu.
+        self.tree.state_clicked = self.popup_state_menu
+        self.tree.state_menu = lambda task_id, parent: self.state_menu_for(task_id, parent)
         lp.addWidget(self.tree, 1)
         self.middle.addWidget(list_page)
         if LOOK.classic:  # the new look has it on the Timeline's page (decision 229)
@@ -400,6 +405,7 @@ class BrowseWindow(QWidget):
         self.timeline.picture_of = self.whatif_picture
         self.timeline.apply_whatif.connect(self.apply_whatif)
         self.timeline.said.connect(self.say)
+        self.timeline.card_menu.connect(lambda task_id, at: self.card_menu(task_id, at))
         self.timeline.confirm = lambda title, text: self.confirm(title, text)
         self.timeline.run_dialog = lambda dialog: self.run_dialog(dialog)
         self._whatif_held: tuple | None = None
@@ -411,6 +417,7 @@ class BrowseWindow(QWidget):
         self.priorities.edit_task.connect(self.edit_task)
         self.priorities.moved.connect(self.move_priority)
         self.priorities.nudged.connect(self.nudge_priority)
+        self.priorities.card_menu.connect(lambda task_id, at: self.card_menu(task_id, at))
         self.middle.addWidget(self.priorities)
         self.split.addWidget(self.middle)
 
@@ -459,6 +466,10 @@ class BrowseWindow(QWidget):
         self._status_timer.setSingleShot(True)
         self._status_timer.setInterval(9000)
         self._status_timer.timeout.connect(lambda: self.status.setText(""))
+        #: Undo after a state picked from a row: a link after the line's words, for ten seconds (release 5.76, decision 363).
+        self._undo: Callable[[], None] | None = None
+        self._status_timer.timeout.connect(lambda: setattr(self, "_undo", None))
+        self.status.linkActivated.connect(self._status_link)
         outer.addWidget(self.status)
 
     def _build_capacity(self) -> QWidget:
@@ -668,6 +679,7 @@ class BrowseWindow(QWidget):
 
     def say(self, text: str, error: bool = False) -> None:
         """A line in the status line at the bottom, for a few seconds. An error stays until the next thing it says (release 5.59)."""
+        self._undo = None  # a new line: an Undo was for the last one
         self.status.setText(text)
         self.status.setProperty("error", error)
         self.status.style().unpolish(self.status)
@@ -675,7 +687,95 @@ class BrowseWindow(QWidget):
         if error and not LOOK.classic:
             self._status_timer.stop()
         else:
-            self._status_timer.start()
+            self._status_timer.start(9000)
+
+    def say_undo(self, text: str, undo: Callable[[], None]) -> None:
+        """A line with Undo after its words, for ten seconds (release 5.76, decision 363)."""
+        self.say(text)
+        self.status.setText(f'{esc(text)} &nbsp;<a href="undo">Undo</a>')
+        self._undo = undo
+        self._status_timer.start(UNDO_MS)
+
+    def _status_link(self, href: str) -> None:
+        if href == "undo" and self._undo is not None:
+            undo, self._undo = self._undo, None
+            undo()
+
+    # ================= a task's state from its row (release 5.76, round 7's item 101, decisions 360 to 364) =================
+    def state_menu_for(self, task_id: str | None, parent: QWidget | None) -> QMenu | None:
+        """The state menu for a task, or None for one that's gone or discarded. ``parent`` owns it: a row's menu, as a submenu."""
+        m = self.model()
+        if not can_change(m, task_id):
+            return None
+        return state_menu(parent, m, task_id, lambda to, branch: self.set_state(task_id, to, branch))
+
+    def popup_state_menu(self, task_id: str, at: QPoint, after: Callable[[], None] | None = None,
+                         tell: Callable[[str, Callable[[], None] | None], None] | None = None) -> None:
+        """Open the state menu at a point on the screen: a State cell's click, the task page's state, the Task view or the Today
+        side panel. ``after`` redraws the place it came from, and ``tell`` says what happened there too."""
+        m = self.model()
+        if not can_change(m, task_id):
+            return
+        menu = state_menu(self, m, task_id, lambda to, branch: self.set_state(task_id, to, branch, after, tell))
+        try:
+            self.run_menu(menu, at)
+        finally:
+            menu.deleteLater()
+
+    def run_menu(self, menu: QMenu, at: QPoint) -> None:
+        """Show a menu and wait for it. Tests replace it."""
+        menu.exec(at)
+
+    def set_state(self, task_id: str, to: str, branch: bool = False, after: Callable[[], None] | None = None,
+                  tell: Callable[[str, Callable[[], None] | None], None] | None = None) -> bool:
+        """A state picked from a menu: saved at once, a status log line as "Browse tool" and no capture (decision 362); with
+        ``branch``, every open task below closes too (364). The status line says so, with Undo for ten seconds (363), and a
+        closed task leaves a list of open ones at once, as the list is drawn again. True when something changed."""
+        m = self.model()
+        if not can_change(m, task_id):
+            return False
+        ids = [task_id, *(open_below(m, task_id) if branch else [])]
+        was = {x: m.task(x).state for x in ids}
+        if all(state == to for state in was.values()):
+            return False
+        out = self._do(lambda: edits.set_states(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, {x: to for x in ids}, self._now()))
+        if out is None:
+            return False
+        line = picked_line(m, task_id, to, len(ids) - 1) + (" Problems: " + " ".join(out.problems) if out.problems else "")
+
+        def undo() -> None:
+            back = self._do(lambda: edits.set_states(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, was, self._now()))
+            if back is None:
+                return
+            self.say("Set back. The status log keeps both changes.")
+            if after is not None:
+                after()
+            if tell is not None:
+                tell("Set back. The status log keeps both changes.", None)
+
+        self.say_undo(line, undo)
+        if after is not None:
+            after()
+        if tell is not None:
+            tell(line, undo)
+        return True
+
+    def card_menu(self, task_id: str, at: QPoint, open_it: bool = True) -> None:
+        """The right-click menu of a Priorities card or the timeline's card (decision 361, settled as mocked): Open task and
+        Edit task, then the State submenu."""
+        menu = QMenu(self)
+        menu.setToolTipsVisible(True)
+        if open_it:
+            menu.addAction("Open task", lambda: self.go_task(task_id))
+        menu.addAction("Edit task…", lambda: self.edit_task(task_id))
+        sub = self.state_menu_for(task_id, menu)
+        if sub is not None:
+            menu.addSeparator()
+            menu.addMenu(sub)
+        try:
+            self.run_menu(menu, at)
+        finally:
+            menu.deleteLater()
 
     # ================= the views pane =================
     def render_nav(self) -> None:
@@ -848,6 +948,7 @@ class BrowseWindow(QWidget):
             if self.view in NESTING_VIEWS:
                 self._apply_shut()
                 self._level_buttons()
+            self._mark_states()
         finally:
             self.tree.end(self._row_to_select())
         if not LOOK.classic:  # no column headings over nothing, or over Search's one column, whose heading says nothing the title doesn't
@@ -856,6 +957,20 @@ class BrowseWindow(QWidget):
             self._sync_level_buttons()
         self.filters.setVisible(any(not self.filters_layout.itemAt(i).isEmpty() for i in range(self.filters_layout.count())))
         self._apply_find()
+
+    def _mark_states(self) -> None:
+        """Each task row's State cell becomes a button that opens the state menu (release 5.76, decisions 360 and 361): the
+        cells that show the row's task's own state, not a key date's, a reminder's or a context row's."""
+        header = self.tree.headerItem()
+        column = next((i for i in range(self.tree.columnCount()) if header.text(i) == "State"), None)
+        if column is None:
+            return
+        m = self.model()
+        for item in self.tree.items():
+            task_id = self.tree.row_task(item)
+            t = m.tasks.get(task_id) if task_id else None
+            if t is not None and not t.discarded and item.data(column, HTML_ROLE) == _row_state(t.state):
+                self.tree.mark_state(item, column, t.id, t.state)
 
     def _row_to_select(self):
         """The row to show selected: the page on the right's, or in Activity the line clicked last, while it opens that page."""
@@ -2291,6 +2406,9 @@ class BrowseWindow(QWidget):
     def on_link(self, url: QUrl) -> None:
         kind, _, rest = url.toString().partition(":")
         st = self.state
+        if kind == "state":  # the task page's state (release 5.76, decision 361): its menu, at the pointer
+            self.popup_state_menu(rest, QCursor.pos())
+            return
         if kind == "task":
             self.go_task(rest)
         elif kind == "capture":

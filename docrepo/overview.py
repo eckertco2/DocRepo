@@ -213,9 +213,11 @@ def build(model: Model, data_root: Path, task_id: str, texts: dict[str, str]) ->
         if c.source == "outlook_email":
             sender = sender_of(text)
             n = len(c.document_ids)
-            r = Record("email", c.id, tid, c.saved, c.title, f"From {sender or 'an unknown sender'}" + (f" · {n} attachment{'s' * (n != 1)}" if n else ""),
+            about = "; ".join(e.description for e in c.emails if e.description)  # the description typed on its row (round 7's item 93)
+            r = Record("email", c.id, tid, c.saved, c.title, f"From {sender or 'an unknown sender'}" + (f" · {about}" if about else "")
+                       + (f" · {n} attachment{'s' * (n != 1)}" if n else ""),
                        _HEAD.sub("", text, count=1), "mail", sender=sender, capture=c.id, attachments=list(c.document_ids))
-            r.fold(" ".join(model.documents[d].name for d in c.document_ids if d in model.documents))
+            r.fold(" ".join([*(model.documents[d].name for d in c.document_ids if d in model.documents), about]))
             out.append(r)
         else:
             body = on_pages[tid][0].get(c.id) if tid in on_pages else None

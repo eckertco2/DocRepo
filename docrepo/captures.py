@@ -74,6 +74,15 @@ def link_document(conn: sqlite3.Connection, capture: str, document: str, *, save
         )
 
 
+def add_email(conn: sqlite3.Connection, capture: str, pos: int, *, file: str | None, subject: str, sender: str, sent: str,
+              description: str | None) -> None:
+    """Record one of a capture's emails (round 7's item 93, release 5.74): its place among them, its .msg file, and the
+    description typed on its row, or None."""
+    with transaction(conn):
+        conn.execute("INSERT INTO capture_emails (capture, pos, file, subject, sender, sent, description) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                     (capture, pos, file, subject or "", sender or "", sent or "", description or None))
+
+
 def add_attachment(conn: sqlite3.Connection, capture: str, name: str) -> None:
     """Note an Outlook email's attachment, saved in the capture's attachments folder."""
     with transaction(conn):
@@ -149,6 +158,9 @@ def capture_md(model: Model, capture_id: str, content: str) -> str:
          "description": model.documents[d.document].description, "save_a_copy": d.save_a_copy, "extract": d.extract}
         for d in c.documents
     ]
+    if c.emails:  # each email, with the description typed on its row (round 7's item 93, release 5.74)
+        front["emails"] = [{"file": e.file, "subject": e.subject, "sender": e.sender, "sent": e.sent, "description": e.description}
+                           for e in c.emails]
     if c.email_layer_0:  # what email layer 0 kept and left out (mods log round 1, M0024), for later layers
         front["email_layer_0"] = c.email_layer_0
     if c.formatted:  # the content text below is markup (mods log round 2, M0045), not plain text

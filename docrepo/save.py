@@ -92,7 +92,8 @@ class FileRow:
     """A file, link or email added to the capture, with its description and choices. ``path`` is its original: a file's
     path, or a link (``links.is_link``), which has nothing to copy or read, so its choices are always off.
 
-    An email's row (``email``) holds its text and becomes its .msg file (``msg_name``); it has no description of its own. Each part email
+    An email's row (``email``) holds its text and becomes its .msg file (``msg_name``). Its description, if typed, is kept with the
+    email in ``capture_emails``, not as a document's (round 7's item 93, release 5.74). Each part email
     layer 0 finds in it (``part``: an attachment, a link or a picture) is a row of its own, ``of`` that email, kept only
     while ``keep`` is ticked (mods log round 1, M0024)."""
 
@@ -579,6 +580,11 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
                 email_layer_0=" ".join(email_layer0_line(e, draft.files) for e in emails) or None,
                 item="notes" if draft.meeting else None, meeting=meeting_made, page_made=draft.page_made,
             )
+            # Each email, with what's typed on its row (round 7's item 93, release 5.74), named as the files below are written.
+            for position, row in enumerate(f for f in draft.files if f.email):
+                e = row.email
+                captures.add_email(conn, capture_id, position, file=msg_name(position) if e.msg_bytes is not None or e.save_msg else None,
+                                   subject=e.subject, sender=e.sender, sent=e.sent, description=row.description.strip() or None)
             attachment_names: set[str] = set()
             for row in draft.files:
                 if not row.described:

@@ -17,7 +17,8 @@ from docrepo import capacity, db, prompts  # noqa: E402
 from docrepo.config import Settings  # noqa: E402
 from docrepo.model import Model  # noqa: E402
 from docrepo.sample import load_sample  # noqa: E402
-from docrepo.ui.capture_window import DRAFT_FILE, CaptureWindow  # noqa: E402
+from docrepo import drafts  # noqa: E402
+from docrepo.ui.capture_window import CaptureWindow  # noqa: E402
 from docrepo.ui.context import AppContext  # noqa: E402
 
 NOW = datetime(2026, 10, 8, 14, 10)
@@ -135,27 +136,28 @@ def test_meeting_notes_with_no_meeting_picked(window):
 
 
 def test_the_draft_keeps_itself(window, ctx):
+    """Every 30 seconds, in its own folder in System\\Drafts (release 5.77): after a crash or a restart it's in Drafts, and
+    the window opens empty."""
     window.set_task("T000008")
     window.content.setPlainText("Walkdown notes\n- @Tom check the guards")
     assert window.draft_dirty
-    window.keep_draft()
-    path = ctx.data_root / DRAFT_FILE
-    data = json.loads(path.read_text(encoding="utf-8"))
+    assert window.keep_draft()
+    data = json.loads((drafts.folder(ctx.data_root, window.draft_id) / drafts.DRAFT_JSON).read_text(encoding="utf-8"))
     assert (data["task"], data["content"], data["formatted"]) == ("T000008", "Walkdown notes\n- @Tom check the guards", False)
     assert window.draft_label.text() == "Draft kept at 14:10:00." and not window.draft_dirty
     again = CaptureWindow(ctx)  # as after a crash or a restart
     try:
+        assert again.content.toPlainText() == "" and again.drafts_button.isVisibleTo(again)
+        (kept,) = drafts.listed(ctx.data_root)
+        again.open_draft(kept.id)
         assert again.task == "T000008" and again.content.toPlainText() == "Walkdown notes\n- @Tom check the guards"
-        assert again.draft_label.text() == "The draft from 14:10 came back." and len(again.item_cards.cards) == 1
+        assert len(again.item_cards.cards) == 1
     finally:
+        again._draft_timer.stop()
+        again.hide()
         again.deleteLater()
     window.clear()
-    assert json.loads(path.read_text(encoding="utf-8")) == {}
-    fresh = CaptureWindow(ctx)
-    try:
-        assert fresh.content.toPlainText() == ""
-    finally:
-        fresh.deleteLater()
+    assert drafts.listed(ctx.data_root) == [] and (ctx.data_root / drafts.DONE_DIR).is_dir()  # moved to Done, not deleted
 
 
 def test_the_browse_tool_opens_meeting_notes(ctx, monkeypatch):

@@ -22,6 +22,8 @@ from docrepo.ui.icons import tinted
 
 ITEM_HEIGHT, COMPACT_HEIGHT, HEAD_HEIGHT, SUB_HEIGHT, TIP_HEIGHT, MORE_HEIGHT, EMPTY_HEIGHT = 48, 32, 30, 26, 34, 32, 110
 ROW_ROLE = Qt.ItemDataRole.UserRole + 1
+#: The chevron after a task row's state, on hover (release 5.76, round 7's decision 360).
+STATE_CHEVRON = 12
 #: Each row's quick actions, right to left: what they do, their icon and tooltip.
 ACTIONS = (("copy", "copy", "Copy path (Ctrl+Shift+C)"), ("show", "folder", "Show in File Explorer (Ctrl+Enter)"), ("open", "open", "Open (Enter)"))
 
@@ -231,6 +233,15 @@ class ResultDelegate(QStyledItemDelegate):
         right -= 8
         when = row.why or (short(to_date(r.at), self.view.today) if r.kind != "task" else r.state)
         w = max(64, QFontMetrics(self.numbers).horizontalAdvance(when))
+        button = self.state_rect(row, rect)
+        if button is not None and self.view.state_lit(row):  # the state as a button: a backplate and a chevron (release 5.76)
+            p.save()
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(_c("pressed"))
+            p.drawRoundedRect(button, 4, 4)
+            p.restore()
+            p.drawPixmap(QPoint(button.right() - STATE_CHEVRON - 2, button.top() + (button.height() - STATE_CHEVRON) // 2),
+                         tinted("chevron-down", tokens.LIGHT["text2"], STATE_CHEVRON, p.device().devicePixelRatioF()))
         p.drawText(QRect(right - w, rect.top(), w, rect.height()), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, when)
         right -= w + 14
         if row.subtask:
@@ -318,6 +329,15 @@ class ResultDelegate(QStyledItemDelegate):
         p.setClipping(False)
 
     # ---- the quick actions ----
+    def state_rect(self, row: Row, rect: QRect) -> QRect | None:
+        """Where a task row's state is, as a button with room for its chevron after it (release 5.76, decision 361), or None
+        for any other row, or a task row that shows why it matched instead."""
+        if row.kind != "item" or row.record is None or row.record.kind != "task" or row.why:
+            return None
+        right = rect.right() - 12 - 16 - 8
+        text = QFontMetrics(self.numbers).horizontalAdvance(row.record.state)
+        return QRect(right - text - 6, rect.top() + 4, text + 6 + STATE_CHEVRON + 4, rect.height() - 8)
+
     def action_at(self, row: Row, rect: QRect, pos: QPoint) -> str | None:
         if row.kind != "item" or row.record.kind != "file":
             return None
@@ -347,6 +367,10 @@ class ResultList(QListView):
     activated_row = Signal(int)
     action = Signal(int, str)
     folded = Signal(str)
+    #: A task row's state clicked: its row, and where its menu goes on the screen (release 5.76, round 7's decision 361).
+    state_clicked = Signal(int, QPoint)
+    #: A row's right-click menu asked for: its row, and the point on the screen.
+    row_menu = Signal(int, QPoint)
 
     def __init__(self, today) -> None:
         super().__init__()
@@ -366,6 +390,9 @@ class ResultList(QListView):
         self.setObjectName("taskViewList")
         self.setAccessibleName("Results")
         self.selectionModel().currentChanged.connect(lambda cur, _: self.chosen.emit(cur.row()) if cur.isValid() else None)
+        self._state_hover: int | None = None  # the task row whose state is under the mouse
+        self._state_open: int | None = None  # the task row whose state menu is open
+        self._swallow_release = False
 
     @property
     def rows(self) -> list[Row]:
@@ -414,8 +441,68 @@ class ResultList(QListView):
             target = rows[max(0, min(len(rows) - 1, k + by))] if k >= 0 else rows[0]
         self.choose(target)
 
+    # ---- a task row's state (release 5.76, round 7's item 101) ----
+    def state_at(self, pos: QPoint) -> int | None:
+        """The task row whose state is at a point in the viewport."""
+        index = self.indexAt(pos)
+        if not index.isValid():
+            return None
+        rect = self.delegate.state_rect(self.rows[index.row()], self.visualRect(index))
+        return index.row() if rect is not None and rect.contains(pos) else None
+
+    def state_lit(self, row: Row) -> bool:
+        lit = [self.rows[i] for i in (self._state_hover, self._state_open) if i is not None and 0 <= i < len(self.rows)]
+        return any(r is row for r in lit)
+
+    def open_state(self, i: int) -> None:
+        """Ask for a task row's state menu, under its state, lit while it's open."""
+        index = self.model_.index(i)
+        rect = self.delegate.state_rect(self.rows[i], self.visualRect(index))
+        if rect is None:
+            return
+        self._state_open = i
+        self.viewport().update()
+        try:
+            self.state_clicked.emit(i, self.viewport().mapToGlobal(QPoint(rect.left(), rect.bottom() + 2)))
+        finally:
+            self._state_open = None
+            self._state_hover = None
+            self.viewport().update()
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        super().mouseMoveEvent(event)
+        now = self.state_at(event.position().toPoint())
+        if now != self._state_hover:
+            self._state_hover = now
+            self.viewport().update()
+            if now is None:
+                self.viewport().unsetCursor()
+            else:
+                self.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        i = self.state_at(event.position().toPoint()) if event.button() == Qt.MouseButton.LeftButton else None
+        if i is not None:  # the state opens its menu, and doesn't choose the row
+            event.accept()
+            self._swallow_release = True
+            self.open_state(i)
+            return
+        super().mousePressEvent(event)
+
+    def contextMenuEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        index = self.indexAt(self.viewport().mapFromGlobal(event.globalPos())) if event.reason() == event.Reason.Mouse else self.currentIndex()
+        if index.isValid() and self.rows[index.row()].kind == "item":
+            event.accept()
+            self.row_menu.emit(index.row(), event.globalPos())
+            return
+        super().contextMenuEvent(event)
+
     # ---- the mouse ----
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        if self._swallow_release:  # the press opened a state's menu
+            self._swallow_release = False
+            event.accept()
+            return
         index = self.indexAt(event.position().toPoint())
         if index.isValid() and event.button() == Qt.MouseButton.LeftButton:
             row = self.rows[index.row()]
@@ -439,6 +526,8 @@ class ResultList(QListView):
         super().mouseDoubleClickEvent(event)
 
     def leaveEvent(self, event) -> None:  # noqa: N802 - redraw so a hovered row's actions go
+        self._state_hover = None
+        self.viewport().unsetCursor()
         self.viewport().update()
         super().leaveEvent(event)
 

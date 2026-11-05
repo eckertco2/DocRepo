@@ -83,6 +83,10 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.66 | Links that go in (round 6's item 89, decisions 318, 319 and 321): a dragged link kept exactly, one reader for addresses, folders kept, a link pasted with its name, and the report's links not kept | Built 2026-11-03 in the `round6` worktree, and merged to `main` 2026-11-04, before the owner's hand test; on GitHub 2026-11-05 |
 | 5.67 | Links that open (round 6's items 87, 88 and 90, decisions 314 to 317, 320 and 323): a link opens in the browser on a click, through `opener.start_link`; the task page's Links group; a reference field's link from Settings' link address; Ctrl+click on the notes page; Task.md's links; the rules file changed | Built 2026-11-03 in the `round6` worktree, from the approved mock, and merged to `main` 2026-11-04, before the owner's hand test; on GitHub 2026-11-05 |
 | 5.68 | Long notes pages open at once: a page is written in as one edit, laid out once rather than after every line, and a table pasted on a page is one step for Ctrl+Z (found by the design workspace's notes workspace sample) | Built 2026-11-03 in the `notes-load` worktree, hand-tested by the owner and merged to `main` the same day; on GitHub 2026-11-04 |
+| 5.74 | The `#` and `@` lists search past a space, words in any order and through a task's path (round 7's item 91, decisions 324 to 326); an email's own description box, with the cursor in it after a drop, kept in `capture_emails` (item 93, decisions 331 and 332, schema version 21). 5.69 to 5.73 are reserved for the notes workspace | Built 2026-11-05 in the `round7` worktree, without a mock, before the owner's hand test |
+| 5.75 | The `#` list's marks (round 7's item 92, decisions 327 to 330): a top-level task's dot and Semibold name, a ring in its top-level task's colour for the rest, how many open subtasks before a chevron with a backplate, and a level's header row with its subtasks indented | Built 2026-11-05 in the `round7` worktree, from the approved mock, before the owner's hand test |
+| 5.76 | A task's state from its row (round 7's item 101, decisions 360 to 364): the State cell as a button that opens a menu of the four states, "Closed, with its n open subtasks", a State submenu on every task row's right-click menu and the Priorities and timeline cards, saved at once as "Browse tool", and Undo for ten seconds | Built 2026-11-05 in the `round7` worktree, from the approved mock, before the owner's hand test |
+| 5.77 | Every capture window fresh, and Drafts (round 7's item 94, decisions 333 to 338): closing with something unsaved files it in Drafts, a folder for each in `System\Drafts` with its files, so a restart keeps it whole; the footer's Drafts button and the tray's Drafts…; a saved or discarded draft moved to `Drafts\Done`; the draft set aside of 5.41 retired; the rules file changed | Built 2026-11-05 in the `round7` worktree, from the approved mock, before the owner's hand test |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
 ## Decisions
@@ -676,6 +680,176 @@ The owner asked for the review's next stages, and took its decisions V2, V3, V4,
 - **Priorities' columns are at least 216 px,** not the review's 260 to 300, so all five show at 1440 px. They reach 258 px at the 82% window on a 1920 px screen.
 
 
+
+## Release 5.77: every capture window fresh, and Drafts (2026-11-05)
+
+Round 7's item 94 (the design workspace's `docs/mods/round-7-plan.md`), asked for in chat on 2026-11-05 ("I want every capture window opened to be a new, fresh capture window. If I close a window that has content that hasn't been saved, I want it to be available to edit as a draft"), with decisions 333 to 338, all as recommended, built from the mock the owner approved the same day (`docs/browse-tool/mockup/round7.js` there). It changes the rules file. No schema change and no new package.
+
+- **What it was.** There was one capture window, and X, Esc and Alt+F4 only hid it, with everything still in it, so every way of opening it showed the same capture again. Its words went to `System\capture-draft.json` every 30 seconds and came back after a restart. The Capture wheel's blank capture (release 5.41, decision 215) was the one way to start fresh: it set the open capture aside, one only, in `System\capture-draft-aside.json`, and its files were kept only while DocRepo ran.
+- **Every open fresh (decision 333).** Closing the window files what it holds in Drafts, without asking: X, Esc, Alt+F4, the main hotkey on the window in front, and the pinned window's Esc and ✕. The window then empties, so the next open starts empty. A notification says "Kept in Drafts". Holding nothing, or only a picked task, it just closes. `hideEvent` does it, except when the window is pinned (pinning hides it), saving or minimized (a spontaneous hide).
+- **While it's open (decision 334, the mock's rule).** `show_capture` takes `keep`:
+  - **Kept as they are:** the main hotkey, the tray's New capture and a type's hotkey bring the window forward or change its type. So do the pinned window's open-in-full and F12, which are the same capture.
+  - **Afresh:** a command for a task, a meeting, some text or Make it a task (the browse tool's N, T and U, the wheel's Meeting) puts what's there in Drafts first, and the footer says "Your other capture is in Drafts."
+  - **The wheel's blank capture** is an ordinary open (decision 337). A capture with something in it goes to Drafts, and a picked task alone is cleared. `"blank": false` keeps the open capture, as the type hotkeys do.
+- **The list (decision 335).** A **Drafts** button in the footer, with how many there are (not counting the one open), shows only when there are some, in the row with More and Save at their height. It opens a list above it (`draft_ui.DraftsList`): each draft's first words (else its title, its first file's name, or Meeting notes), then its task, its files and when it last changed, the newest first, as 48 px two-line rows. A click opens one, putting what the window held in Drafts first ("The capture you had is in Drafts."). × discards it. The tray menu has **Drafts…**, and the palette has Drafts.
+- **The folders (decision 336, `docrepo/drafts.py`).** Each draft is a folder in `System\Drafts` in the data root, named by when it was first kept ("2026-11-05 104233"). It holds `draft.json`, with the whole form and a row for each file, and beside it:
+  - a dragged email's `.msg` under `emails`, written as handed over (`SafeFS.write_copy`), with its EntryID and StoreID in `draft.json` for Outlook's category;
+  - a file a program handed over under `files`, written the same way;
+  - a pasted picture as its PNG (`SafeFS.write_picture`, through the picture's own save).
+
+  Paths and links stay as text. A restart keeps a draft whole. The email is read again from its `.msg` (`msg.read`), and its parts get their descriptions, choices and Keep back, by name, else by place. An email whose `.msg` DocRepo can't read keeps its bytes and comes back from its fields. A file the folder already holds isn't written again, and an unchanged capture isn't written at all. A row's file name can't leave its draft's folder (`drafts.file_path`).
+- **Done.** A draft saved as a capture, or discarded, moves to `System\Drafts\Done` (`SafeFS.move`), as DocRepo deletes nothing; the owner can empty that folder by hand. Drafts never expire (decision 338). Discarding has Undo in the footer for ten seconds, which moves the folder back. Clear still empties the window without making a draft, and its Undo now brings the files back too.
+- **What it replaces (decision 337).** The 30-second keeping goes on, into the open capture's own folder, so after a crash or a restart it's in Drafts and the window opens empty. The app's Quit keeps it too. On the first start, `capture-draft.json` and `capture-draft-aside.json`, when they hold something, move into Drafts as drafts of their own (`drafts.move_old_drafts`), each named by when it was saved. A draft set aside before kept no files, so opening it says which to add again. `docrepo/ui/draft_aside.py` is gone; its form code is in `docrepo/ui/drafts.py`.
+- **The words:** the footer's hint, the key list, the help text, the pinned window's ✕ and the palette say Esc closes the window and anything unsaved goes to Drafts. The default wheels config's comment on `capture.new` says what it does now.
+- **The rules file** says where drafts' files are written, and that a finished draft moves to Done, never deleted.
+
+**Tests:** `tests/test_drafts.py` (new) covers:
+- closing to Drafts and the next open empty, Esc, and a picked task alone just closing;
+- the main and type hotkeys keeping the capture, a command for a task starting afresh, one with only a task in the window moving nothing, and the wheel's blank capture;
+- the list's rows, opening a draft while the window holds another, and a saved draft moving to Done;
+- discarding with Undo, and Clear with Undo bringing files back;
+- a restart keeping a draft whole: an email's `.msg` with an attachment's description and a part unticked, its EntryID, a file a program handed over, a pasted picture, a path and a link, saved after the restart as before;
+- an unchanged capture not written again, the old draft files moving in (and an empty one staying), and a stored name that would leave its folder;
+- the pinned window's Esc and open-in-full, the tray's Drafts…, and an empty list.
+
+**Changed for 5.77:**
+- `test_meeting_window.py`: the draft kept in its folder, and found in Drafts after a restart.
+- `test_pin_window.py`: the pinned window's Esc makes a draft, which is opened and saved from it.
+- `test_wheel_window.py`: the set-aside tests replaced by two for the blank capture as an ordinary open.
+- `test_hours_a_week.py`: the form's h a week through `drafts.form_of`.
+
+The touched modules' tests and the capture window's other tests, in the worktree beside 5.74 to 5.76 (not the full run): 999 passed, 1 skipped. Checked by eye on Windows' real platform, with the app's look: the footer's Drafts button, and the list with two drafts, one from today and one from the day before.
+
+The full run, with 5.74 to 5.76 in the same worktree: 2612 passed, 1 skipped, none failed.
+
+## Release 5.76: a task's state from its row (2026-11-05)
+
+Round 7's item 101 (the design workspace's `docs/mods/round-7-plan.md`), asked for in chat on 2026-11-05 ("the ability to click on a task's state ... and have a dropdown open so that I can impromptu change the task state"), built from the mock the owner approved the same day (`docs/browse-tool/mockup/round7.js` there), with decisions 360 to 364, all as recommended, and the mock's two open points settled as mocked. No schema change and no new package.
+
+- **The menu (decision 360).** `docrepo/ui/state_menu.py` builds it for every place below:
+  - **The states:** Not started, In progress, Parked and Closed, each with its mark (`state-ns` and so on, in the task page's colours). The current state is ticked, and it's where the keyboard starts. Arrows, Enter and Esc work, as it's a `QMenu`.
+  - **The tick:** Qt draws no tick beside an action that has an icon, so `StateMenu` paints one after the current state, in the accent (`icons/tick.svg`, new), where the mock has it.
+  - **Closing a branch:** a task with open subtasks also gets "Closed, with its n open subtasks" (decision 364).
+- **The State cell as a button.** In the browse tool's lists, a row's State cell is a button (`RowTree.mark_state`, `STATE_ROLE`):
+  - On hover, a 4 px-corner backplate in the pressed colour sits round it, with the chevron after the words, and the pointer is a hand. Both stay while its menu is open.
+  - A click opens the menu under the cell, and doesn't pick the row. A quick second click isn't a double-click on the row.
+  - Its tooltip says "In progress. Click to change the state."
+
+  `BrowseWindow._mark_states` marks, after each list is drawn, the cells that show their row's task's own state, on:
+  - the task tree;
+  - Today, with its due rows;
+  - the agenda;
+  - the sidebar's lists (Overdue and next 7 days, Waiting on others and the rest).
+
+  A key date's, a reminder's or a context row's cell stays words.
+- **Where else (decision 361):**
+  - **Every task row's right-click menu** in those lists gets a **State** submenu after its other commands (`RowTree.row_menu`), which is also how the keyboard reaches it, with the menu key. Activity's task rows have it too.
+  - **The Task view's task rows:** the state at the right of a Subtasks row is the button (`ResultDelegate.state_rect`, `ResultList.state_clicked`). A right-click on any row gives its commands, and a task row's State submenu (`ResultList.row_menu`).
+  - **The Today side panel's rows:** the state is a small button with its chevron, shown when the panel is wide, in place of the state's words in the second line.
+  - **The task page:** the state under the title is a link with its chevron always shown (`state:` links, `Pages.state_button`), as a page has no hover. A discarded task's is only its chip.
+  - **The Priorities board's cards and the timeline's card:** a right-click gives Open task, Edit task… and the State submenu (`card_menu`). There's no button there, as settled with the mock. Not in a what-if, as Quick edit and Update aren't.
+- **Saving (decision 362).** A pick saves at once through `edits.set_states`, as Edit task does:
+  - a status log line as "Browse tool", which Activity lists with the other changes made outside a capture;
+  - no capture;
+  - one transaction, and the pages written once.
+
+  Picking the state a task already has changes nothing.
+- **Undo (decision 363).** The status line says "Closed: Rigging plan." with an **Undo** link after it, for ten seconds (`say_undo`). Undo sets each task back, logged too, and says "Set back. The status log keeps both changes." A list of open tasks drops a closed one at once, since the list is drawn again. The Task view's footer and the Today side panel say it there too, each with Undo (`state_menu.UndoButton`).
+- **A whole branch (decision 364).** "Closed, with its n open subtasks" closes the task and every task below it at every level that isn't Closed or discarded (`open_below`), Parked ones too, as mocked. One Undo puts each back as it was. The line says "Closed: Installation and its 3 open subtasks."
+- **Different from the mock:**
+  - the task page's chevron is always shown, as rich text has no hover;
+  - the Today side panel's state shows only while the panel is wide, as its second line does.
+
+**Tests:** `tests/test_state_menu.py` (new) covers:
+- the menu's states, tick, starting point and branch line, and none for a Closed task;
+- `set_states` logged as "Browse tool" with no capture, its closed day, and Activity's line;
+- a task row's State cell as a button, a click opening the menu without picking the row, and hover lighting it with a hand;
+- Closed leaving the task tree and Undo bringing it back, with both status log lines, and the same state changing nothing;
+- a branch closed and set back with one Undo;
+- the State submenu on the task tree's and Today's rows, and key date rows left as words;
+- the task page's `state:` link;
+- the Priorities and timeline cards' menus;
+- the Task view's task rows, with the footer's Undo and the right-click menu;
+- the Today side panel's state button and its Undo line.
+
+Checked by eye on Windows' real platform, with the app's look:
+- the task tree with a state lit on hover;
+- the menu, with its marks, tick and branch line;
+- the task page's state;
+- the status line's Undo;
+- the Task view's Subtasks with a lit state and the footer's Undo;
+- the Today side panel's row.
+
+`tests/test_state_menu.py` with the tests of every view and module it touches (Activity, the browse window, the task page, edits, Priorities, the Task view, templates, the timeline, Today, the Today side panel, tree files and the visual stages): 563 passed. The full run comes with 5.75 and 5.77.
+
+## Release 5.75: the `#` list's marks (2026-11-05)
+
+Round 7's item 92 (the design workspace's `docs/mods/round-7-plan.md`), asked for in chat on 2026-11-05 ("some form of clearer visual distinction assigned to parent level tasks in the dropdown list and to tasks that have subtasks", following the UI playbook), with decisions 327 to 330, all as recommended. Built from the mock the owner approved the same day (`docs/browse-tool/mockup/round7.js` there). No schema change and no new package.
+
+- **The playbook's rules it follows:**
+  - hierarchy from weight and colour before size;
+  - the top-level task's colour as a dot on its own row, never tinted across its children;
+  - leading marks on every row or none, lined up;
+  - a chevron that only goes in, with a backplate under the pointer;
+  - the task tree's 16 px indent.
+- **A task's mark** (`_RefDelegate.parts`, `RefPopup.mark`). Every `#` row starts with an 8 px slot:
+  - **A top-level task (decision 327)** has a filled dot in its colour, the task tree's and the timeline's (`task_colour`), and its name in Semibold. The grey "Top-level task" goes: it's in the row's tooltip.
+  - **Every other task (decision 328)** has a 7 px ring in its top-level task's colour, and its name in Regular. Inside a level, a ring takes the colour of the first task gone into (`RefPopup._root`). Q4 overtime budget, under Installation and under Q4 cost reduction, is blue under Reactor impeller upgrade, as in the mock.
+  - The capture window gives the list each task's mark (`CaptureWindow._task_mark`, `RefPopup.task_info`). The `@` list has none.
+- **Open subtasks (decision 329).** A task with open subtasks ends with how many, in grey Caption, then the chevron in a 20 px box (`RefPopup.kids`, which replaces the yes-or-no `opens` cache). Under the pointer, the chevron and the back chevron get a 4 px-corner backplate in the hover colour and the pointer becomes a hand (`RefPopup.hot`, `chevron_at`, `mouseMoveEvent`, `leaveEvent`). A row's words for a screen reader and its tooltip say "3 open subtasks".
+- **A level (decision 330).** The task heading it is a header row:
+  - its own fill (the base layer's colour) and a hairline under it;
+  - the back chevron, its mark and its name in Semibold;
+  - "3 open subtasks" at its right end, in place of its path.
+
+  Its subtasks are indented 16 px. Rows are 28 px tall, the tree's height (they were 24 px or the font's height and 8).
+
+**Tests:** `tests/test_ref_marks.py` (new):
+- a top-level task's dot, Semibold name and count, with "Top-level task" in its tooltip;
+- a ring in the top-level task's colour, with the path;
+- a level's header and indented rows;
+- the two-parent task's colour inside a level;
+- no mark on people;
+- the backplate's chevron under the pointer, into and back, and gone on leaving.
+
+`tests/test_ref_list.py` (release 5.65's) passes unchanged. Checked by eye on Windows' real platform, with the app's look: the top level, a level two deep with a hovered chevron, and a search.
+
+## Release 5.74: the lists search past a space, and an email's description (2026-11-05)
+
+Round 7's items 91 and 93 (the design workspace's `docs/mods/round-7-plan.md`), asked for in chat on 2026-11-05, with decisions 324 to 326, 331 and 332, all as recommended, built without a mock. 5.69 to 5.73 are reserved for the notes workspace.
+
+- **The search stopped at a space (item 91).** The owner's "it will do a live search until I enter a space". `items.typing` read the word being typed with a pattern that needed a letter after each space, so `#Pump ` closed the list. The next letter opened it again, but `items.options` then matched only names starting with everything typed: `#seal pump` never found "Replace pump seals". After five words or 30 characters, the list closed for good. Now:
+  - **Past a space (decision 324).** The list stays open after a space, over up to 8 words and 60 characters (`items.TYPING_LIMIT`). `# ` with nothing before the space stays a heading. The `@` list works the same way.
+  - **How words match (decision 325).** Each word typed must start a different word of the name, in any order (`items._each_its_own`): "rigging plan r" doesn't match "Rigging plan", whose two words the first two took. A name's words are split at spaces and at anything that isn't a letter or a digit. A task's words may also come from the names on its path, with one word at least in its own name, so `#install pump` finds the Pump under Installation and not the one under Commissioning, and `#installation` doesn't list everything under it. A person's aliases count as their names.
+  - **Ranking and closing (decision 326).** Whole names first, then names that start with what's typed (its space too), then names with every word, then those found through their path, each in its old order. A space after a whole name that no other name goes on from closes the list: `#Valve ` is done, while `#Pump ` stays open for "Pump station". The rule looks at every name, so `@Ana ` stays open for Ana Lopez, whose alias is Ana. A pick doesn't open the list again (`CaptureWindow._pick_end`, set before the pick goes in, as putting it in reads the list).
+- **An email's description (item 93).** The owner's "captures of emails do not usually cause the description field to be activated for input". An email's own row had no description box, by design: an email is the capture itself. Only its parts had boxes, and the cursor went to the first kept part's. Most emails have no attachment, or only a signature picture that starts unticked, so the cursor went to the content text. Now:
+  - **The box (decision 331).** Each email's row has a box, "What's this email about?", optional, as its subject already names it (`FileEntry.email_desc`, outside "Use the first file's description", which is for documents). After a drop, the Outlook button or a drag through DocRepo's own drop target, the cursor is in the first new email's box, attachments or not.
+  - **The window comes forward.** A drop brings the window it landed on forward (`_come_forward`, the pinned window while pinned), since a drop on Windows leaves the keyboard in the program the drag came from. That's files, links, and emails through the drop target or Outlook. The Outlook email hotkey still leaves the keyboard in Outlook (release 5.33.1).
+  - **Where it's kept (decision 332).** In `capture_emails`, schema version 21: one row per email, by its place among the capture's emails, with its `.msg` file (`msg_name`, or none when there was nothing to save), subject, sender, sent time and description. It's the table the knowledge base's K1 plans, started now; K1 adds Outlook's identifiers. The model has it as `Capture.emails` (`CaptureEmail`).
+  - **Where it shows:**
+    - the Task view's email row ("From Ann Example · Crane for the Tuesday lift"), found by its words;
+    - the capture's page, a new Emails row with each subject, file and description;
+    - capture.md's new `emails` list, only for captures with emails saved since;
+    - search;
+    - the notes page's caption ("Email from Ann Example: Crane booking – Crane for the Tuesday lift").
+
+    Left empty, everything shows as before.
+  - **Different from the plan:** emails captured before have no rows, not rows read from their `.msg` files at the upgrade. Docs.db's upgrades are SQL only, with no data root to read files from, and a backfilled row would show nothing new, as older emails have no description. K1's planned `email-ids` command covers them.
+
+**Tests:**
+- `tests/test_hash_search.py` (new):
+  - what's typed past a space, and what ends it: a heading, two spaces, 9 words, 61 characters;
+  - matching over a made-up tree: after a space, any order, each word its own, the path telling two Pumps apart, a path match needing a word of the task's own name;
+  - the ranking, a finished name closing the list, 8 at most, and people with aliases;
+  - in the capture window over the sample data: the list open past a space, any order and the path, a finished name and a sentence closing it, and a pick not opening it again until you type on.
+- `tests/test_email_description.py` (new):
+  - descriptions kept per email, an email with nothing to save having no file, and capture.md's `emails`;
+  - the sample's older email captures with none, and schema version 21;
+  - the Task view's row, search, the capture's page and the notes page's caption, with and without a description;
+  - in the window: the box with the cursor for an email with no attachment, the first of two emails getting it, the description reaching the row, and a drop bringing the window forward while the Outlook button doesn't need to.
+- **Changed for 5.74:** `test_layer0.py` (the cursor is in the email's own box now, not its first part's), `test_db.py` (version 21, and an empty `capture_emails` after upgrading), and `test_template_timing.py` (the schema at 20 or later).
+
+Checked by eye on Windows' real platform, with the app's look: the capture window with an email's row, its subject and its box, and `#install rig` listing Rigging plan. The full run: 2579 passed, 1 skipped, none failed.
 
 ## Release 5.68: long notes pages open at once (2026-11-03)
 

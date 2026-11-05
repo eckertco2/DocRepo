@@ -641,6 +641,6 @@ def test_moves_with_finds_a_chain():
 
 
 def test_the_schema_holds_a_timing(sample_conn):
-    assert db.SCHEMA_VERSION == 20
+    assert db.SCHEMA_VERSION >= 20
     assert sample_conn.execute("SELECT count(*) FROM template_row_ties").fetchone()[0] == 0
     assert sample_conn.execute("SELECT count(*) FROM templates WHERE anchor_row IS NOT NULL").fetchone()[0] == 0

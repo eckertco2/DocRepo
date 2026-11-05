@@ -565,135 +565,29 @@ def test_the_config_opener_starts_only_that_file(tmp_path):
     assert "no program for it" in start_own_file(config, refuses)
 
 
-# ---- the blank capture, with a draft set aside (decision 215) ----
+# ---- the blank capture: an ordinary open since release 5.77 (decision 337); drafts are in tests/test_drafts.py ----
 @pytest.fixture
 def capture(app):
     return app.window
 
 
-def type_draft(capture, text="A draft about the pump"):
-    capture._set_plain(capture.content, text)
-    capture.draft_dirty = True
+def test_the_blank_capture_puts_an_open_capture_in_drafts(capture, data_root):
+    from docrepo import drafts
 
-
-def test_a_draft_is_set_aside_and_the_window_is_blank(capture, data_root):
     capture.show_capture()
-    type_draft(capture)
+    capture._set_plain(capture.content, "A draft about the pump")
     capture.title.setText("Its title")
     capture.open_blank()
-    assert capture.content.value()[0] == "" and capture.title.text() == ""
-    assert "set aside" in capture.draft_label.text()
-    kept = json.loads((data_root / "System" / "capture-draft-aside.json").read_text(encoding="utf-8"))
-    assert kept["content"] == "A draft about the pump"
+    assert capture.content.value()[0] == "" and capture.title.text() == "" and capture.isVisible()
+    assert capture.draft_label.text() == "Your other capture is in Drafts."
+    (kept,) = drafts.listed(data_root)
+    assert kept.data["content"] == "A draft about the pump" and kept.data["title"] == "Its title"
 
 
-def test_closing_the_blank_capture_empty_brings_the_draft_back(capture):
-    capture.show_capture()
-    type_draft(capture)
-    capture.today_on = False
-    capture.n_due.set_value("2026-11-02")
-    capture.types = {"new_task"}
-    capture.open_blank()
-    assert capture.n_due.value() is None
-    capture.hide()
-    assert capture.content.value()[0] == "A draft about the pump" and capture.n_due.value() == "2026-11-02"
-    assert "came back" in capture.draft_label.text() and capture.aside.data is None
+def test_the_blank_capture_with_nothing_in_the_window_just_opens(capture, data_root):
+    from docrepo import drafts
 
-
-def test_a_draft_set_aside_keeps_its_duration_and_hours_unit(capture):
-    """Release 5.46's fields in the capture window come back with the rest of the form."""
-    capture.show_capture()
-    type_draft(capture)
-    capture.types = {"new_task"}
-    capture.n_duration.setText("5")
-    capture.n_calendar.setChecked(True)
-    capture.n_asg_hours.setText("6")
-    capture.n_asg_row.set_per_day(True)
-    capture.open_blank()
-    assert capture.n_duration.text() == "" and not capture.n_calendar.isChecked() and not capture.n_asg_row.per_day()
-    capture.hide()
-    assert capture.n_duration.text() == "5" and capture.n_calendar.isChecked()
-    assert capture.n_asg_hours.text() == "6" and capture.n_asg_row.per_day()
-
-
-def test_saving_the_blank_capture_brings_the_draft_back(capture):
-    capture.show_capture()
-    type_draft(capture)
-    capture.open_blank()
-    type_draft(capture, "A quick other note")
-    capture.save()
-    assert capture.content.value()[0] == "A draft about the pump"
-    assert capture.aside.data is None
-
-
-def test_hiding_the_blank_capture_with_something_typed_keeps_both(capture):
-    capture.show_capture()
-    type_draft(capture)
-    capture.open_blank()
-    type_draft(capture, "Something new")
-    capture.hide()
-    assert capture.content.value()[0] == "Something new" and capture.aside.data is not None
-    capture.save()
-    assert capture.content.value()[0] == "A draft about the pump"
-
-
-def test_a_window_with_nothing_in_it_sets_nothing_aside(capture):
     capture.show_capture()
     capture.set_task("T000008")
     capture.open_blank()
-    assert capture.aside.data is None and capture.task is None
-
-
-def test_its_files_come_back_while_docrepo_runs(capture, tmp_path):
-    f = tmp_path / "notes.txt"
-    f.write_text("x", encoding="utf-8")
-    capture.show_capture()
-    capture.add_paths([str(f)])
-    capture.open_blank()
-    assert not capture.files
-    capture.hide()
-    assert [e.row.name for e in capture.files] == ["notes.txt"]
-
-
-def test_a_restart_keeps_the_draft_set_aside(capture, data_root, tmp_path):
-    from docrepo.ui.draft_aside import DraftAside
-
-    f = tmp_path / "notes.txt"
-    f.write_text("x", encoding="utf-8")
-    capture.show_capture()
-    type_draft(capture)
-    capture.add_paths([str(f)])
-    capture.open_blank()
-    capture.aside = DraftAside(capture)  # as a new start reads it
-    assert capture.aside.data["content"] == "A draft about the pump"
-    capture.hide()
-    assert capture.content.value()[0] == "A draft about the pump" and "notes.txt" in capture.draft_label.text()
-
-
-def test_it_comes_back_in_the_pinned_window_if_that_is_where_it_was(capture):
-    capture.show_capture()
-    type_draft(capture)
-    capture.pin()
-    capture.open_blank()
-    assert not capture.pinned
-    capture.hide()
-    assert capture.pinned and capture.content.value()[0] == "A draft about the pump"
-    capture.pin_window.hide()
-
-
-def test_one_already_aside_asks_about_this_one(capture, monkeypatch):
-    from PySide6.QtWidgets import QMessageBox
-
-    capture.show_capture()
-    type_draft(capture)
-    capture.open_blank()
-    type_draft(capture, "A second one")
-    # Keep working on this one: nothing moves
-    monkeypatch.setattr(QMessageBox, "exec", lambda self: 0)
-    monkeypatch.setattr(QMessageBox, "clickedButton", lambda self: self.defaultButton())
-    capture.open_blank()
-    assert capture.content.value()[0] == "A second one" and capture.aside.data["content"] == "A draft about the pump"
-    # Clear this one
-    monkeypatch.setattr(QMessageBox, "clickedButton", lambda self: self.buttons()[1])
-    capture.open_blank()
-    assert capture.content.value()[0] == "" and capture.aside.data["content"] == "A draft about the pump"
+    assert capture.task is None and drafts.listed(data_root) == []

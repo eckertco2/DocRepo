@@ -15,7 +15,7 @@ from pathlib import Path
 from docrepo.safe_fs import SafeFS
 
 DB_FILE = Path("System") / "docs.db"
-SCHEMA_VERSION = 20
+SCHEMA_VERSION = 21
 
 #: Each kind of ID: its letter and how many digits follow it.
 ID_FORMATS = {"T": 6, "C": 6, "D": 6, "P": 3}
@@ -485,6 +485,21 @@ CREATE TABLE template_row_ties (
     PRIMARY KEY (row_id, field)
 );
 CREATE INDEX template_row_ties_source ON template_row_ties (source_row);
+""",
+    21: """
+-- Each email in a capture (round 7's item 93, decisions 331 and 332, release 5.74): its place among the capture's emails, the .msg file
+-- it's saved as (none when there was nothing to save), its subject, sender and sent time, and the description typed on its row. The
+-- knowledge base's K1 plans this table, and adds Outlook's identifiers to it. Emails captured before have no rows.
+CREATE TABLE capture_emails (
+    capture     TEXT NOT NULL REFERENCES captures(id),
+    pos         INTEGER NOT NULL,
+    file        TEXT,
+    subject     TEXT NOT NULL DEFAULT '',
+    sender      TEXT NOT NULL DEFAULT '',
+    sent        TEXT NOT NULL DEFAULT '',
+    description TEXT,
+    PRIMARY KEY (capture, pos)
+);
 """,
 }
 

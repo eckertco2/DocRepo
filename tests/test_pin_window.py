@@ -12,7 +12,7 @@ from PySide6.QtCore import QMimeData, Qt, QUrl  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from docrepo import capacity, db, hotkey, prompts  # noqa: E402
+from docrepo import capacity, db, drafts, hotkey, prompts  # noqa: E402
 from docrepo.config import Settings  # noqa: E402
 from docrepo.sample import load_sample  # noqa: E402
 from docrepo.ui.capture_window import CaptureWindow, read_drop  # noqa: E402
@@ -86,7 +86,8 @@ def test_pinning_keeps_the_capture(window, tmp_path):
 
 
 def test_saving_from_the_pinned_window(window):
-    """Ctrl+Enter saves from it. When Save can't, the full window opens with the problem; Esc hides it, keeping the draft."""
+    """Ctrl+Enter saves from it. When Save can't, the full window opens with the problem; Esc closes it, and the capture
+    goes to Drafts (release 5.77, decision 334), where it's opened and saved from the pinned window."""
     window.set_type("new_task", True)
     window.content.setPlainText("")
     window.pin()
@@ -97,9 +98,14 @@ def test_saving_from_the_pinned_window(window):
     window.content.setPlainText("Crane inspection passed.")
     window.pin()
     window.hide_pinned()  # Esc
-    assert not window.pinned and not window.pin_window.isVisible() and window.content.toPlainText() == "Crane inspection passed."
+    assert not window.pinned and not window.pin_window.isVisible() and window.content.toPlainText() == ""
+    (kept,) = drafts.listed(window.ctx.data_root)
+    assert kept.data["content"] == "Crane inspection passed." and kept.data["task"] == "T000008"
+    window.open_draft(kept.id)
+    assert window.content.toPlainText() == "Crane inspection passed." and window.task == "T000008"
     window.pin()
     window.save()
+    assert drafts.listed(window.ctx.data_root) == []  # saved: its folder is in Done
     assert window.messages[-1][0] == "Saved" and not window.pinned and not window.isVisible() and not window.pin_window.isVisible()
 
 

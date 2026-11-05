@@ -77,7 +77,10 @@ _TRAIL = re.compile(r"[\s,;:&.!?–—-]*(?:and\b[\s,;:&.!?–—-]*)?\Z", re.I)
 _PREP = re.compile(r"\b(?:with|to|for|from|by|of|at|about|ask|tell|call|email|and|see|on|in|under)\s*\Z", re.I)
 _LEAD_IN = re.compile(r"^(?:to|will|should|please|needs? to|has to|must)\s+", re.I)
 _MARKER = re.compile(r"^\s*(?:[-*•]|\d+[.)])\s+", re.M)
-_TYPING = re.compile(r"(?:^|[\s(])(@L\.|@|#)([^\s@#*]*(?: [^\s@#*]+){0,4})\Z", re.I)
+# The @, @L. or # word being typed: up to 8 words, with a space after the last one (round 7's decision 324, release 5.74).
+# A sigil with only a space after it isn't one: "# " starts a heading.
+_TYPING = re.compile(r"(?:^|[\s(])(@L\.|@|#)((?:[^\s@#*]+(?: [^\s@#*]+){0,7} ?)?)\Z", re.I)
+TYPING_LIMIT = 60  # characters after the sigil
 
 
 def _is_word(ch: str) -> bool:
@@ -1251,24 +1254,85 @@ class Option:
 def typing(before: str) -> Typing | None:
     """The @, @L. or # word being typed, from the text before the cursor in its line."""
     m = _TYPING.search(before)
-    if not m or len(m.group(2)) > 30:
+    if not m or len(m.group(2)) > TYPING_LIMIT:
         return None
     return Typing(m.group(1), m.group(2), len(before) - len(m.group(1)) - len(m.group(2)))
 
 
+def _words(name: str) -> set[str]:
+    """A name's words, in lower case: split at spaces, and at anything that isn't a letter or a digit ("pump-seal" gives
+    "pump-seal", "pump" and "seal")."""
+    low = name.lower()
+    return {w for w in (*low.split(), *re.split(r"[\W_]+", low)) if w}
+
+
+def _rank(q: str, own: Sequence[str], path: Sequence[str] = ()) -> int | None:
+    """Where a name comes in the list for what's typed, or None when it doesn't match (round 7's decisions 325 and 326):
+    0, one of ``own`` is what's typed; 1, one starts with it, its space too; 2, every word typed starts a word of ``own``,
+    in any order; 3, the same with the words of the names on its ``path``, one of them at least in ``own``."""
+    ql = q.lower()
+    s = ql.strip()
+    if not s:
+        return 1
+    names = [n.lower() for n in own if n]
+    if s in names:
+        return 0
+    if any(n.startswith(ql) for n in names):
+        return 1
+    typed = s.split()
+    mine = set().union(*map(_words, names)) if names else set()
+    if _each_its_own(typed, mine):
+        return 2
+    above = set().union(*(_words(n) for n in path if n)) if path else set()
+    if above and any(w.startswith(t) for t in typed for w in mine) and _each_its_own(typed, mine | above):
+        return 3
+    return None
+
+
+def _each_its_own(typed: Sequence[str], words: set[str]) -> bool:
+    """Whether each word typed starts a different one of ``words``: "rigging plan r" doesn't match "Rigging plan", whose
+    two words the first two took. The longest typed words choose first, and each takes the shortest word it starts."""
+    free = sorted(words, key=lambda w: (len(w), w))
+    for t in sorted(typed, key=len, reverse=True):
+        w = next((w for w in free if w.startswith(t)), None)
+        if w is None:
+            return False
+        free.remove(w)
+    return True
+
+
+def _ranked(q: str, candidates: Sequence[tuple[Any, Sequence[str], Sequence[str]]]) -> list[Any]:
+    """The candidates that match ``q``, best first and in their own order within a rank, or none when a space follows a
+    whole name that no other name goes on from: the name is finished (decision 326)."""
+    if q.endswith(" "):
+        ql = q.lower()
+        every = [n.lower() for _, own, _ in candidates for n in own if n]
+        if ql.strip() in every and not any(n.startswith(ql) for n in every):
+            return []
+    ranks = [(r, i, c) for i, (c, own, path) in enumerate(candidates) if (r := _rank(q, own, path)) is not None]
+    return [c for _, _, c in sorted(ranks, key=lambda x: (x[0], x[1]))]
+
+
 def options(t: Typing, names: Names) -> list[Option]:
-    """The list for what's being typed: open tasks for #; people for @ and @L., then @__ and "Add … to people"."""
+    """The list for what's being typed: open tasks for #; people for @ and @L., then @__ and "Add … to people". Words
+    after a space go on narrowing it, matching the start of any word of a name, in any order; a task's words also match
+    the names on its path (round 7's item 91, release 5.74)."""
     q = t.q.lower()
-
-    def hit(ns: Sequence[str]) -> bool:
-        return not q or any(any(w.startswith(q) for w in n.lower().split()) or n.lower().startswith(q) for n in ns)
-
     if t.sigil == "#":
         if not q and names.model is not None:  # "#" alone: the top-level tasks, in the tree's order, to walk down from (decision 313)
             tops = [names.tasks[x.id] for x in names.model.top_level() if x.id in names.tasks]
             return [Option(x.title, x.title, ref=x.id) for x in tops if x.open]
-        return [Option(x.title, x.title, ref=x.id) for x in names.tasks.values() if x.open and hit([x.title, x.id])][:8]
-    out = [Option(p.name, p.name + (" (me)" if p.me else ""), ", ".join(p.aliases), p.id) for p in names.active if hit([p.name, *p.aliases])][:7]
+        m = names.model
+
+        def path(task_id: str) -> list[str]:
+            if m is None or task_id not in m.tasks:
+                return []
+            return [m.tasks[a].title for a in m.ancestors_of(task_id) if a in m.tasks]
+
+        found = _ranked(t.q, [(x, (x.title, x.id), path(x.id) if q.strip() else ()) for x in names.tasks.values() if x.open])
+        return [Option(x.title, x.title, ref=x.id) for x in found][:8]
+    found = _ranked(t.q, [(p, (p.name, *p.aliases), ()) for p in names.active])
+    out = [Option(p.name, p.name + (" (me)" if p.me else ""), ", ".join(p.aliases), p.id) for p in found][:7]
     if t.sigil == "@" and "__".startswith(q or "_"):
         out.append(Option("__", "@__  no one yet", "A task to assign later"))
     if q and re.fullmatch(r"[a-z][a-z'-]*", q) and not any(n.lower() == q for p in names.people for n in (p.name, *p.aliases)):

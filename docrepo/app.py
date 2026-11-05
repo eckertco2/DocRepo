@@ -152,6 +152,7 @@ class CaptureApp(QObject):
         self.panel: TodayPanel | None = None  # the Today side panel, made the first time it opens (release 5.43)
         menu = QMenu()
         menu.addAction("New capture", lambda: self.window.show_capture())
+        menu.addAction("Drafts…", lambda: self.window.open_drafts())  # captures closed before they were saved (release 5.77)
         menu.addAction("Open browse tool", lambda: self.show_browse())
         menu.addAction("Mods log", lambda: self.window.show_capture(mods=True))
         self.pause_action = QAction("Pause hotkeys", menu)
@@ -397,6 +398,7 @@ class CaptureApp(QObject):
             log.exception("background check failed")
 
     def quit(self) -> None:
+        self.window.keep_draft(closing=True)  # an open capture waits in Drafts for the next start (release 5.77)
         self.unregister_hotkeys()
         self.tray.hide()
         self.qt.quit()

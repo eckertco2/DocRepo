@@ -17,12 +17,13 @@ from dataclasses import replace
 from datetime import date
 from html import escape as esc
 
-from PySide6.QtCore import QPoint, QRect, QSize, Qt, Signal
+from PySide6.QtCore import QPoint, QPointF, QRect, QSize, Qt, Signal
 from PySide6.QtGui import (
     QColor,
     QFontMetrics,
     QGuiApplication,
     QPainter,
+    QPen,
     QSyntaxHighlighter,
     QTextBlock,
     QTextBlockUserData,
@@ -459,11 +460,16 @@ _OPTION, _HEAD = Qt.ItemDataRole.UserRole, Qt.ItemDataRole.UserRole + 1
 
 class _RefDelegate(QStyledItemDelegate):
     """A row of the @ and # list: its name in the Body font, then its grey part (a task's path, a person's aliases) in the
-    Caption size, the grey part shortened in its middle before the name is shortened at its end. A task with open
-    subtasks has a chevron at the right edge (Right goes into them), and a level's first row, the task it's under, has a
-    back chevron (Left goes back up)."""
+    Caption size, the grey part shortened in its middle before the name is shortened at its end.
 
-    PAD, GAP, CHEV = 8, 12, 18
+    For #, since release 5.75 (round 7's item 92, decisions 327 to 330), a task's row starts with its mark in an 8 px slot,
+    so names line up: a top-level task's filled dot in its colour, with its name in Semibold and no grey part ("Top-level
+    task" is in its tooltip), or another task's ring in its top-level task's colour. A task with open subtasks ends with
+    how many, then the chevron (Right goes into them), which has a backplate under the pointer. Inside a level, the task
+    heading it is a header row: a faint fill, a hairline under it, the back chevron (Left goes back up), and how many open
+    subtasks it has; its subtasks are indented 16 px, the task tree's indent."""
+
+    PAD, GAP, CHEV, SLOT, INDENT = 8, 12, 20, 8, 16
 
     def __init__(self, popup: "RefPopup") -> None:
         super().__init__(popup)
@@ -473,19 +479,44 @@ class _RefDelegate(QStyledItemDelegate):
         self.small = tokens.ui_font(tokens.CAPTION)
 
     def row_height(self) -> int:
-        return max(24, QFontMetrics(self.font).height() + 8)
+        return max(28, QFontMetrics(self.font).height() + 8)
+
+    def parts(self, o: items.Option, head: bool) -> tuple[tuple[bool, str] | None, bool, str, str]:
+        """What a row shows beside its name: its mark ((top-level, colour), or None for a person), whether it's indented
+        under a level's header, its grey part, and the words at its right end."""
+        p = self.popup
+        mark = p.mark(o)
+        kid = p.depth > 0 and not head
+        n = p.kids(o)
+        if head:
+            return mark, False, "", f"{n} open subtask{'s' * (n != 1)}" if n else ""
+        top = bool(mark and mark[0])
+        return mark, kid, "" if top or kid else o.sub, str(n) if n else ""
+
+    def name_font(self, o: items.Option, head: bool):
+        mark = self.popup.mark(o)
+        return self.bold if head or (mark and mark[0]) else self.font
 
     def natural_width(self, o: items.Option, head: bool) -> int:
         """The row's width with nothing shortened."""
-        w = 2 * self.PAD + 4 + QFontMetrics(self.bold if head else self.font).horizontalAdvance(o.label)  # 4 px to spare
-        if o.sub:
-            w += self.GAP + QFontMetrics(self.small).horizontalAdvance(o.sub)
-        if head or self.popup.opens(o):
-            w += self.CHEV
+        mark, kid, sub, right = self.parts(o, head)
+        fs = QFontMetrics(self.small)
+        w = 2 * self.PAD + 4 + QFontMetrics(self.name_font(o, head)).horizontalAdvance(o.label)  # 4 px to spare
+        w += (self.INDENT if kid else 0) + (self.CHEV if head else 0) + (self.SLOT + 8 if mark else 0)
+        if sub:
+            w += self.GAP + fs.horizontalAdvance(sub)
+        if right:
+            w += self.GAP + fs.horizontalAdvance(right) + (0 if head else 4 + self.CHEV)
         return w
 
     def sizeHint(self, option, index) -> QSize:  # noqa: N802 - Qt's name
         return QSize(1, self.row_height())  # as wide as the list, never wider
+
+    def _plate(self, p: QPainter, box: QRect) -> None:
+        """The backplate under a chevron the pointer is on: it's a button."""
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(tokens.colour("hover")))
+        p.drawRoundedRect(box, 4, 4)
 
     def paint(self, p: QPainter, option: QStyleOptionViewItem, index) -> None:
         o: items.Option = index.data(_OPTION)
@@ -494,25 +525,60 @@ class _RefDelegate(QStyledItemDelegate):
         self.initStyleOption(opt, index)
         opt.text = ""
         style = opt.widget.style() if opt.widget is not None else QApplication.style()
+        rect = opt.rect
+        if head:  # the level's header (decision 330): a faint fill under the style's hover and selection
+            p.fillRect(rect, QColor(tokens.colour("base")))
         style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, p, opt.widget)  # the row's back and selection, from the style sheet
         p.save()
-        rect = opt.rect.adjusted(self.PAD, 0, -self.PAD, 0)
-        left, right = rect.left(), rect.left() + rect.width()  # QRect.right() is a pixel short of the edge
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if head:
+            p.setPen(QPen(QColor(tokens.colour("stroke")), 1))
+            p.drawLine(QPointF(rect.left(), rect.bottom() + 0.5), QPointF(rect.left() + rect.width(), rect.bottom() + 0.5))
+        mark, kid, sub, right_words = self.parts(o, head)
+        left = rect.left() + self.PAD + (self.INDENT if kid else 0)
+        right = rect.left() + rect.width() - self.PAD  # QRect.right() is a pixel short of the edge
+        mid = rect.top() + rect.height() / 2
         scale = p.device().devicePixelRatioF()
         grey = tokens.colour("text2")
+        hot = self.popup.hot
         if head:
-            p.drawPixmap(QPoint(left - 2, rect.top() + (rect.height() - 14) // 2), tinted("chevron-left", grey, 14, scale))
+            on = hot == (index.row(), "back")
+            if on:
+                self._plate(p, QRect(left - 5, int(mid - self.CHEV / 2), self.CHEV, self.CHEV))
+            p.drawPixmap(QPoint(left - 2, int(mid - 7)), tinted("chevron-left", tokens.colour("text") if on else grey, 14, scale))
             left += self.CHEV
-        elif self.popup.opens(o):
-            p.drawPixmap(QPoint(right - 12, rect.top() + (rect.height() - 14) // 2), tinted("chevron-right", grey, 14, scale))
-            right -= self.CHEV
-        name_font = self.bold if head else self.font
-        fn, fs = QFontMetrics(name_font), QFontMetrics(self.small)
+        if mark:  # decisions 327 and 328: a dot for a top-level task, a ring in its top-level task's colour for the rest
+            is_top, colour = mark
+            centre = QPointF(left + self.SLOT / 2, mid)
+            if is_top:
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(QColor(colour))
+                p.drawEllipse(centre, 4, 4)
+            else:
+                p.setPen(QPen(QColor(colour), 1.5))
+                p.setBrush(Qt.BrushStyle.NoBrush)
+                p.drawEllipse(centre, 2.75, 2.75)  # 7 px across, its 1.5 px line inside
+            left += self.SLOT + 8
+        fn, fs = QFontMetrics(self.name_font(o, head)), QFontMetrics(self.small)
+        base = int(rect.top() + (rect.height() + fn.ascent() - fn.descent()) / 2)  # every part on one baseline
+        if right_words:  # how many open subtasks, then the chevron into them (decision 329)
+            if not head:
+                box = QRect(right - self.CHEV, int(mid - self.CHEV / 2), self.CHEV, self.CHEV)
+                on = hot == (index.row(), "into")
+                if on:
+                    self._plate(p, box)
+                p.drawPixmap(QPoint(box.left() + 3, int(mid - 7)), tinted("chevron-right", tokens.colour("text") if on else grey, 14, scale))
+                right -= self.CHEV + 4
+            w = fs.horizontalAdvance(right_words)
+            p.setFont(self.small)
+            p.setPen(QColor(grey))
+            p.drawText(QPoint(right - w, base), right_words)
+            right -= w + self.GAP
         room = max(0, right - left)
         name_w = fn.horizontalAdvance(o.label)
-        sub_w = fs.horizontalAdvance(o.sub) if o.sub else 0
+        sub_w = fs.horizontalAdvance(sub) if sub else 0
         sub_room = 0
-        if o.sub:  # the grey part gives way first, down to REF_SUB_MIN; then the name does
+        if sub:  # the grey part gives way first, down to REF_SUB_MIN; then the name does
             sub_room = min(sub_w, max(room - name_w - self.GAP, min(sub_w, REF_SUB_MIN)))
             if sub_room < min(sub_w, REF_SUB_MIN) or room - sub_room - self.GAP < fn.horizontalAdvance("…") * 4:
                 sub_room = 0
@@ -520,15 +586,14 @@ class _RefDelegate(QStyledItemDelegate):
         # A part that fits is drawn whole: Qt's eliding wants a little more room than the words measure (release 5.64's
         # DropButton found the same), so it would shorten words that fit exactly.
         name = o.label if name_w <= name_room else fn.elidedText(o.label, Qt.TextElideMode.ElideRight, name_room)
-        base = rect.top() + (rect.height() + fn.ascent() - fn.descent()) // 2  # both parts on one baseline
-        p.setFont(name_font)
+        p.setFont(self.name_font(o, head))
         p.setPen(QColor(tokens.colour("text")))
         p.drawText(QPoint(left, base), name)
         if sub_room:
-            sub = o.sub if sub_w <= sub_room else fs.elidedText(o.sub, Qt.TextElideMode.ElideMiddle, sub_room)
+            shown = sub if sub_w <= sub_room else fs.elidedText(sub, Qt.TextElideMode.ElideMiddle, sub_room)
             p.setFont(self.small)
             p.setPen(QColor(grey))
-            p.drawText(QPoint(left + fn.horizontalAdvance(name) + self.GAP, base), sub)
+            p.drawText(QPoint(left + fn.horizontalAdvance(name) + self.GAP, base), shown)
         p.restore()
 
 
@@ -545,33 +610,60 @@ class RefPopup(QListWidget):
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setUniformItemSizes(True)
+        self.setMouseTracking(True)
         self.delegate = _RefDelegate(self)
         self.setItemDelegate(self.delegate)
         #: A task's open subtasks as options, for Right; None for a list with no levels (@).
         self.subtasks: Callable[[str], list[items.Option]] | None = None
+        #: For #: whether a task is top-level, and its top-level task's colour (release 5.75); None for @.
+        self.task_info: Callable[[str], tuple[bool, str] | None] | None = None
         # Each level above this one: its rows, the row it was left from, and the task it was under (None at the top).
         self._levels: list[tuple[list[items.Option], int, items.Option | None]] = []
-        self._opens: dict[str, bool] = {}
+        self._kids: dict[str, int] = {}
+        self._info: dict[str, tuple[bool, str] | None] = {}
+        self._root: str | None = None  # the first task gone into: a level's marks take its colour
         self._under = ""  # the path of the level showing: its head's path and name
         self._at, self._above = QPoint(), None
+        #: The chevron under the pointer, as (row, "into" or "back"), drawn with a backplate.
+        self.hot: tuple[int, str] | None = None
         self.setFixedWidth(REF_MIN_W)
         self.itemClicked.connect(lambda item: self.picked.emit(item.data(_OPTION)))
         self.hide()
 
     # ---- what it shows ----
+    def kids(self, o: items.Option | None) -> int:
+        """How many open subtasks the row's task has: Right lists them."""
+        if o is None or not o.ref or self.subtasks is None:
+            return 0
+        if o.ref not in self._kids:
+            self._kids[o.ref] = len(self.subtasks(o.ref))
+        return self._kids[o.ref]
+
     def opens(self, o: items.Option | None) -> bool:
         """True when Right on this row would list its task's subtasks."""
-        if o is None or not o.ref or self.subtasks is None:
-            return False
-        if o.ref not in self._opens:
-            self._opens[o.ref] = bool(self.subtasks(o.ref))
-        return self._opens[o.ref]
+        return self.kids(o) > 0
+
+    def _task(self, ref: str) -> tuple[bool, str] | None:
+        if ref not in self._info:
+            self._info[ref] = self.task_info(ref) if self.task_info is not None else None
+        return self._info[ref]
+
+    def mark(self, o: items.Option | None) -> tuple[bool, str] | None:
+        """A task row's mark: (whether it's top-level, its colour). Inside a level, the colour is the first task gone
+        into's, so a task with two parents shows the colour of the one it's listed under."""
+        if o is None or not o.ref or self.task_info is None:
+            return None
+        info = self._task(o.ref)
+        if info is None:
+            return None
+        root = self._task(self._root) if self._levels and self._root else None
+        return (info[0], root[1]) if root else info
 
     def show_options(self, options: list[items.Option], at: QPoint, above: int | None = None) -> None:
         """The list for what's typed, at ``at`` (in its parent, or on the screen when it's a window of its own), or
         with its foot at ``above`` when it wouldn't fit under the cursor."""
         self._levels = []
-        self._opens = {}
+        self._kids, self._info, self._root, self.hot = {}, {}, None, None
         self._at, self._above = QPoint(at), above
         self._fill(options, 0)
         self.show()
@@ -579,16 +671,19 @@ class RefPopup(QListWidget):
 
     def _fill(self, options: list[items.Option], row: int, head: items.Option | None = None) -> None:
         self.clear()
+        self.hot = None
         rows = ([(head, True)] if head is not None else []) + [(o, False) for o in options]
         # A level's rows have no grey part of their own: they're under the task heading the list.
         under = " › ".join(x for x in ((head.sub if head.ref and head.sub != "Top-level task" else ""), head.label) if x) if head else ""
         self._under = under
         for o, is_head in rows:
             where = o.sub or ("" if is_head else under)
-            item = QListWidgetItem(o.label + (f", {where}" if where else ""))  # what a screen reader says
+            n = self.kids(o)
+            more = f"{n} open subtask{'s' * (n != 1)}" if n else ""
+            item = QListWidgetItem(", ".join(x for x in (o.label, where, more) if x))  # what a screen reader says
             item.setData(_OPTION, o)
             item.setData(_HEAD, is_head)
-            item.setToolTip(o.label + (f"\n{where}" if where else ""))
+            item.setToolTip("\n".join(x for x in (o.label, where, more) if x))
             self.addItem(item)
         self.setCurrentRow(min(row, max(0, self.count() - 1)))
         self._fit([(o, h) for o, h in rows])
@@ -627,6 +722,8 @@ class RefPopup(QListWidget):
         o = item.data(_OPTION) if item is not None else None
         if o is None or bool(item.data(_HEAD)) or not self.opens(o):
             return False
+        if not self._levels:
+            self._root = o.ref
         self._levels.append(([self.item(i).data(_OPTION) for i in range(self.count()) if not self.item(i).data(_HEAD)],
                              self.row(item), self.item(0).data(_OPTION) if self.item(0).data(_HEAD) else None))
         # A level's row has no grey part of its own; as the next level's head it shows where it is.
@@ -638,6 +735,8 @@ class RefPopup(QListWidget):
         if not self._levels:
             return False
         options, row, head = self._levels.pop()
+        if not self._levels:
+            self._root = None
         self._fill(options, row, head=head)
         return True
 
@@ -645,15 +744,41 @@ class RefPopup(QListWidget):
     def depth(self) -> int:
         return len(self._levels)
 
+    def chevron_at(self, pos: QPoint) -> tuple[int, str] | None:
+        """The chevron at ``pos`` in the viewport, as (row, "into" or "back"), or None."""
+        item = self.itemAt(pos)
+        if item is None:
+            return None
+        x, d = pos.x(), self.delegate
+        if item.data(_HEAD):
+            return (self.row(item), "back") if x < d.PAD + d.CHEV else None
+        if self.opens(item.data(_OPTION)) and x > self.viewport().width() - d.PAD - d.CHEV:
+            return self.row(item), "into"
+        return None
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        hot = self.chevron_at(event.position().toPoint())
+        if hot != self.hot:
+            self.hot = hot
+            self.viewport().setCursor(Qt.CursorShape.PointingHandCursor if hot else Qt.CursorShape.ArrowCursor)
+            self.viewport().update()
+        super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        if self.hot is not None:
+            self.hot = None
+            self.viewport().unsetCursor()
+            self.viewport().update()
+        super().leaveEvent(event)
+
     def mousePressEvent(self, event) -> None:  # noqa: N802 - Qt's name
         """A row's chevron goes into its subtasks, and the back chevron goes up; a click anywhere else picks the row."""
-        item = self.itemAt(event.position().toPoint())
-        if item is not None and event.button() == Qt.MouseButton.LeftButton:
-            x = event.position().x()
-            if item.data(_HEAD) and x < self.delegate.PAD + self.delegate.CHEV:
+        if event.button() == Qt.MouseButton.LeftButton:
+            hot = self.chevron_at(event.position().toPoint())
+            if hot and hot[1] == "back":
                 self.go_up()
                 return
-            if not item.data(_HEAD) and x > self.viewport().width() - self.delegate.PAD - self.delegate.CHEV and self.go_into(self.row(item)):
+            if hot and hot[1] == "into" and self.go_into(hot[0]):
                 return
         super().mousePressEvent(event)
 

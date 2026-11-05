@@ -334,7 +334,7 @@ class Pages:
             crumbs = f'<p class="crumbs">{" › ".join(self.task_link(x, "tq") for x in chains[0][:-1])} ›{more}</p>'
         labels = "".join(f' <a href="{esc(label_href(name))}" title="{"Inherited from a parent task" if inherited else "Set on this task"}">'
                          f'{chip(name, "lbli" if inherited else "lbl")}</a>' for name, inherited in m.labels_of(t.id))
-        tags = (state_chip(t.state) + self.priority_chip(t) + self.markers_html(t, critical=False) + (" " + chip("Meeting", "routine") if t.meeting else "")
+        tags = (self.state_button(t) + self.priority_chip(t) + self.markers_html(t, critical=False) + (" " + chip("Meeting", "routine") if t.meeting else "")
                 + (" " + chip("Plant event", "new") if t.plant_event else "") + labels)
         desc = ""
         if t.description:
@@ -348,6 +348,14 @@ class Pages:
             gone = " (discarded)" if origin.discarded else ""
             made = f'<p class="rel">From template: {link(f"tplrow:{origin.row}", " › ".join(origin.path), "Open it in Templates")}{gone}</p>'
         return f'{crumbs}<h2 title="{t.id}">{esc(t.title)}</h2><p class="tags">{tags}</p>{desc}{made}'
+
+    def state_button(self, t: Task) -> str:
+        """The task's state under its title: a link that opens the state menu, with its chevron, as a page has no hover to show
+        it on (release 5.76, round 7's decision 361). A discarded task's is only its chip."""
+        if t.discarded:
+            return state_chip(t.state)
+        return (f'<a href="state:{t.id}" title="{esc(t.state)}. Click to change the state." style="text-decoration: none">'
+                f'{state_chip(t.state)}{CHEVRON_DOWN}</a>')
 
     def status_since(self, t: Task) -> str | None:
         """When the current status last changed: its latest status log entry, or the day the task was made, for a status
@@ -819,6 +827,10 @@ class Pages:
         changes = [e for e in self.m.status if e.via == c.id]
         if changes:
             rows.append(("Changes", "<br>".join(esc(f"{e.field}: {e.from_value or 'None'} → {e.to_value or 'None'}") for e in changes)))
+        if c.emails:  # each email, its .msg file and what it's about (round 7's item 93, release 5.74)
+            rows.append(("Emails", "<br>".join(
+                f'{esc(e.subject or "(no subject)")} <span class="sub">{esc(e.file or "not saved as a file")}</span>'
+                + (f"<br>{esc(e.description)}" if e.description else "") for e in c.emails)))
         if c.email_layer_0:
             rows.append(("Email layer 0", esc(c.email_layer_0)))
         if c.documents:

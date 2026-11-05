@@ -26,7 +26,7 @@ KEY_MAP = (
 OTHER_KEYS = (
     ("Ctrl+Shift+Space", "Opens the capture window (the main hotkey)"),
     ("Ctrl+Enter", "Saves: the capture window, the mods log and every form"),
-    ("Esc", "Hides the capture window, closes a form (asking first if you changed something), or clears Find"),
+    ("Esc", "Closes the capture window, anything unsaved to Drafts; closes a form (asking first if you changed something), or clears Find"),
     ("F11", "Expands the capture window's content text"),
     ("F12", "Pins the capture window at the bottom right, to drop files, emails and links on; the main hotkey brings it back"),
     ("Ctrl+B", "Hides the views on the left of the browse tool"),

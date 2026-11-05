@@ -4,14 +4,18 @@ Top to bottom: the task picker, the capture types (Note, New task, Update) with
 Agenda and Today beside them, a line saying what Save will do, then the title
 (New task only) and the content text, with what Parse and populate found beside
 them, then the files, Copy prompt and the summary, and the New task and Update
-fields. A "?" button opens the mods log. Esc hides the window and keeps the
-draft; Ctrl+Enter saves; Alt+P parses; Alt+N, Alt+T and Alt+U tick the capture
+fields. A "?" button opens the mods log. Esc closes the window, and anything
+unsaved goes to Drafts; Ctrl+Enter saves; Alt+P parses; Alt+N, Alt+T and Alt+U tick the capture
 types, Alt+A goes to the agenda picker and Alt+D to Today; F11 expands the
 content text; F1 lists the keys (mods log round 2, M0036, M0037, M0042, M0046).
 
 Release 5.8 (M0048 phase 2, M0049, M0052): the content text's operators make items, with a card for each beside it
 (``docrepo.items``, ``items_panel``), and Meeting notes (Alt+M) takes a meeting's notes, with its agenda beside them.
-The draft saves itself every 30 seconds to the data root, and comes back after a crash or a restart.
+The draft saves itself every 30 seconds to the data root.
+
+Release 5.77 (round 7's item 94, decisions 333 to 338): every open starts empty. Closing the window with something unsaved
+files it in Drafts, a folder for each in ``System\\Drafts`` (``docrepo.drafts``), and the footer's Drafts button opens one
+again (``docrepo.ui.drafts``). After a crash or a restart, the capture is in Drafts.
 
 Ported from the browse tool mockup's ``capture.js``; SPEC section 7 describes it.
 """
@@ -51,7 +55,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMenu,
-    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
@@ -62,7 +65,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo import diagnose, items, key_dates, msg, outlook, timeline
+from docrepo import diagnose, drafts, items, key_dates, msg, outlook, timeline
 from docrepo.dates import workday_numbers
 from docrepo.db import RECURRENCES, STATES
 from docrepo.extract import extract_text, to_unc
@@ -96,7 +99,7 @@ from docrepo.tasks import KeyDateRow, hours_values, stated
 from docrepo.ui import tokens
 from docrepo.ui.tokens import C
 from docrepo.ui.context import AppContext
-from docrepo.ui.draft_aside import ASIDE_NOTE, DraftAside
+from docrepo.ui import drafts as draft_ui
 from docrepo.ui.drop_target import DropOverlay, DropRead
 from docrepo.ui.icons import icon, icon_size, set_fold
 from docrepo.ui.items_panel import AgendaPanel, ItemCards, OperatorHighlighter, RefPopup, _drop, task_colour, where_text
@@ -144,8 +147,7 @@ def existing_file(path: str) -> str | None:
 WIDTH = 940
 #: Below this width, what Parse and populate found goes under the content text instead of beside it.
 NARROW = 700
-#: The draft the capture window keeps every 30 seconds (release 5.8), in the data root.
-DRAFT_FILE = Path("System") / "capture-draft.json"
+#: How often the capture keeps itself as a draft (release 5.8), in its folder in System\Drafts since release 5.77.
 DRAFT_EVERY_MS = 30_000
 DRAFT_NOTE = "The draft saves itself every 30 seconds."
 #: How long after the last key the content text is read again. Longer than the gap between keys at an easy pace, about
@@ -186,8 +188,8 @@ def esc(text: str) -> str:
 
 @dataclass
 class FileEntry:
-    """A file or email added to the capture, with its row of widgets. An email's own row has no description: its parts
-    (email layer 0) are rows of their own, each with Keep."""
+    """A file or email added to the capture, with its row of widgets. An email's own row has a description of its own,
+    kept with the email (round 7's item 93, release 5.74); its parts (email layer 0) are rows of their own, each with Keep."""
 
     row: FileRow
     src: str  # dropped, picked, pasted, added (Add link…), outlook (an email) or email (one of its parts)
@@ -202,6 +204,7 @@ class FileEntry:
     note: QLabel | None = None  # the line beside its name (_file_note); an email's names its .msg file
     goes: QToolButton | None = None  # in a note split by # task, which capture it goes with (release 5.32)
     what: str = ""  # the description's question, the start of its placeholder
+    email_desc: QLineEdit | None = None  # an email's row: what it's about (round 7's decision 331)
 
 
 def read_drop(mime, links: bool = False) -> tuple[str, list[str]]:
@@ -494,13 +497,19 @@ class CaptureWindow(QWidget):
         self.reading: items.Reading | None = None
         self._names: items.Names | None = None
         self._typing: items.Typing | None = None
+        self._pick_end: tuple[int, int, int] | None = None  # where the last pick ended: the list doesn't open again there (decision 326)
         self._highlighting = False
         self._items_timer = QTimer(self)
         self._items_timer.setSingleShot(True)
         self._items_timer.setInterval(ITEMS_WAIT_MS)
         self._items_timer.timeout.connect(self.read_items)
-        # The draft keeps itself every 30 seconds, in the data root, and comes back after a crash or a restart.
+        # The capture keeps itself as a draft every 30 seconds, in its own folder in System\Drafts (release 5.77): after a
+        # crash or a restart it's in Drafts, and the window opens empty.
         self.draft_dirty = False
+        self.draft_id: str | None = None  # the open capture's draft folder, once it's been kept
+        self._kept: str | None = None  # what was kept last, so a capture that hasn't changed isn't written again
+        self._undo: Callable[[], None] | None = None  # what the footer's Undo does: bring back a cleared capture or a discarded draft
+        self._drafts_list: QWidget | None = None
         self._draft_timer = QTimer(self)
         self._draft_timer.setInterval(DRAFT_EVERY_MS)
         self._draft_timer.timeout.connect(self.keep_draft)
@@ -511,8 +520,8 @@ class CaptureWindow(QWidget):
         self._fit_timer.timeout.connect(self._fit)
         self._build()
         self.reset_draft()
-        self.restore_draft()
-        self.aside = DraftAside(self)  # the Capture wheel's blank capture (release 5.41, decision 215)
+        drafts.move_old_drafts(ctx.fs, ctx.data_root, ctx.now())  # releases 5.8's and 5.41's draft files (decision 337)
+        self._sync_drafts()
         self._draft_timer.start()
         for keys, handler in (("Ctrl+Return", self.save), ("Ctrl+Enter", self.save), ("Alt+P", self.parse),
                               # One letter per topic (mods log round 2, M0036)
@@ -838,7 +847,7 @@ class CaptureWindow(QWidget):
         state = QHBoxLayout()
         state.setSpacing(8)
         self.draft_label = QLabel(DRAFT_NOTE if LOOK.show_help else "", objectName="hint")
-        self.draft_label.setToolTip(f"In {DRAFT_FILE} in the data root. After a crash or a restart, the capture window opens with it.")
+        self.draft_label.setToolTip("Kept in System\\Drafts in the data root. After a crash or a restart it's in Drafts, and the window opens empty.")
         state.addWidget(self.draft_label)
         self.undo_clear = QPushButton("Undo", objectName="link")
         self.undo_clear.clicked.connect(self._undo_clear)
@@ -847,8 +856,15 @@ class CaptureWindow(QWidget):
         state.addStretch()
         status.addLayout(state)
         fl.addLayout(status, 1)
-        footer_hint = Help("Ctrl+Enter saves. Esc hides the window and keeps the draft. F1 lists the keys.")
+        footer_hint = Help("Ctrl+Enter saves. Esc closes the window; anything unsaved goes to Drafts. F1 lists the keys.")
         fl.addWidget(footer_hint)
+        # Drafts, with how many, only when there are some (release 5.77, decision 335): in the row with More and Save,
+        # at their height, rather than under the footer's words.
+        self.drafts_button = QPushButton("Drafts", objectName="subtle")
+        tip(self.drafts_button, "Captures closed before they were saved: open one, or discard it")
+        self.drafts_button.clicked.connect(self.show_drafts)
+        self.drafts_button.hide()
+        fl.addWidget(self.drafts_button)
         more = QPushButton("More", objectName="subtle")  # its words and a chevron: the "…" icon said it twice
         more.setProperty("menu", True)
         tip(more, "Copy prompt, a summary, Clear, hints, keys and the mods log")
@@ -869,8 +885,7 @@ class CaptureWindow(QWidget):
         self._undo_timer = QTimer(self)
         self._undo_timer.setSingleShot(True)
         self._undo_timer.setInterval(10_000)
-        self._undo_timer.timeout.connect(lambda: (self.undo_clear.hide(), setattr(self, "_cleared", None)))
-        self._cleared: dict | None = None
+        self._undo_timer.timeout.connect(self._undo_gone)
         return footer
 
     def _fill_more(self) -> None:
@@ -914,10 +929,11 @@ class CaptureWindow(QWidget):
         out += [Command("", "Add a summary", lambda: self._show_summary(True)),
                 Command("", "Save", self.save, "Ctrl+Enter"),
                 Command("", "Clear the capture", self.clear),
+                Command("", "Drafts", self.show_drafts),
                 Command("", "Hide hints" if LOOK.hints else "Show hints", lambda: self._set_hints(not LOOK.hints)),
                 Command("", "Keys", self.show_keys, "F1"),
                 Command("", "Mods log", lambda: self.show_mods(True)),
-                Command("", "Hide the window", self.hide, "Esc"),
+                Command("", "Close the window (anything unsaved goes to Drafts)", self.hide, "Esc"),
                 *self.ctx.wheel_palette()]  # the wheels' slots (release 5.41)
         return out
 
@@ -1211,10 +1227,21 @@ class CaptureWindow(QWidget):
 
     # ================= showing and hiding =================
     def show_capture(self, task: str | None = None, mode: str | None = None, content: str | None = None, mods: bool = False,
-                     agenda: list[str] | None = None, agenda_focus: bool = False, from_capture: str | None = None, meeting: bool = False) -> None:
+                     agenda: list[str] | None = None, agenda_focus: bool = False, from_capture: str | None = None, meeting: bool = False,
+                     keep: bool = False) -> None:
         """Open the window. ``mode`` checks only that capture type ("note", "new_task" or "update"). ``agenda`` picks
         agenda targets under Add to agenda. ``from_capture`` starts Make it a task from an unfiled capture. ``meeting``
-        turns on meeting notes (release 5.8), for the picked task's meeting. A pinned capture comes back in full."""
+        turns on meeting notes (release 5.8), for the picked task's meeting. A pinned capture comes back in full.
+
+        Every open starts empty, as closing files what the window held in Drafts (release 5.77, decision 333). While it's
+        open, with something in it, a command for a task, a meeting, some text or Make it a task (the browse tool's, the
+        wheel's) puts that in Drafts first and starts afresh; the main hotkey, a type's hotkey and ``keep`` leave it as it
+        is (decision 334)."""
+        note = ""
+        command = not keep and bool(task or from_capture or meeting or content is not None)
+        showing = self.isVisible() or (self.pinned and self.pin_window is not None and self.pin_window.isVisible())
+        if command and showing and self.holds_draft() and self.file_draft():
+            note = "Your other capture is in Drafts."
         self._close_pin()
         self._load_summary_types()
         self._names = None  # people and tasks may have changed in the browse tool
@@ -1250,51 +1277,43 @@ class CaptureWindow(QWidget):
                   else self.title if "new_task" in self.types and not self.title.text() else self.content)
         target.setFocus()
         self.read_items()
+        self._sync_drafts()
+        if note:
+            self.draft_label.setText(note)
 
     def open_with_hotkey(self, kind: str) -> None:
         """A capture type's own hotkey (mods log round 1, M0010 and M0020): "note", "new_task", "update" or "agenda", or
         "today" for a quick task on Today (round 2, M0039).
-        Note and New task open with that type checked. Update and Add to agenda need a task: with the draft's task,
+        Note and New task open with that type checked. Update and Add to agenda need a task: with the open capture's task,
         Update is checked at once (and for Add to agenda, the cursor goes there); with none, the task picker opens,
-        and picking a task does the same."""
+        and picking a task does the same. While the window is open they change its type, keeping what it holds
+        (decision 334)."""
         if kind in ("note", "new_task"):
-            self.show_capture(mode=kind)
+            self.show_capture(mode=kind, keep=True)
             return
         if kind == "today":  # a quick task on Today (mods log round 2, M0039): New task, Today on, the cursor in Title
-            self.show_capture(mode="new_task", agenda=[TODAY, *self.agenda.values()])
+            self.show_capture(mode="new_task", agenda=[TODAY, *self.agenda.values()], keep=True)
             return
         agenda = kind == "agenda"
         if self.task:
-            self.show_capture(mode="update", agenda_focus=agenda)
+            self.show_capture(mode="update", agenda_focus=agenda, keep=True)
             return
-        self.show_capture()
+        self.show_capture(keep=True)
         self._after_pick = kind
         QTimer.singleShot(0, self._open_picker)  # once the window is placed, so the picker opens under the task button
 
     def open_blank(self, mode: str | None = None) -> None:
-        """The Capture wheel's blank capture window (release 5.41, decision 215): a draft holding anything is set aside
-        first, so the window is truly blank. Only one is held: with one aside already, it asks about this one."""
+        """The Capture wheel's blank capture window (release 5.41, decision 215), an ordinary open since release 5.77
+        (decision 337): a capture open with something in it goes to Drafts first, and the window starts empty."""
         if self.pages.currentIndex() != 0:
             self.show_mods(False)
-        if self.aside.holds_draft():
-            if self.aside.data is None:
-                self.aside.set_aside()
-            else:
-                ask = QMessageBox(QMessageBox.Icon.NoIcon, "DocRepo", "A draft is already set aside, and this one holds something too. "
-                                  "Only one can be set aside.", parent=self)
-                keep = ask.addButton("Keep working on this one", QMessageBox.ButtonRole.AcceptRole)
-                ask.addButton("Clear this one", QMessageBox.ButtonRole.DestructiveRole)
-                ask.setDefaultButton(keep)
-                ask.exec()
-                if ask.clickedButton() is keep:
-                    self.show_capture(mode=mode)
-                    return
-                self.clear()
-        else:
+        showing = self.isVisible() or (self.pinned and self.pin_window is not None and self.pin_window.isVisible())
+        moved = showing and self.holds_draft() and self.file_draft()
+        if not self.holds_draft():  # a task picked and nothing else: nothing to keep, and the window is empty
             self.reset_draft()
-        self.show_capture(mode=mode)
-        if self.aside.data is not None:
-            self.draft_label.setText(ASIDE_NOTE)
+        self.show_capture(mode=mode, keep=True)
+        if moved:
+            self.draft_label.setText("Your other capture is in Drafts.")
 
     def capture_selection(self, snap: object | None) -> None:
         """The Capture wheel's "Email or file" (release 5.42): the pinned window, with what's selected in the window you
@@ -1613,6 +1632,8 @@ class CaptureWindow(QWidget):
         t = None
         if not cursor.hasSelection() and not self.from_capture and box.hasFocus():
             t = items.typing(cursor.block().text()[:cursor.positionInBlock()])
+            if t and self._pick_end == (id(box), cursor.blockNumber(), cursor.positionInBlock()):
+                t = None  # right after a pick, whose name and space are what's "typed" (round 7's decision 326)
         options = items.options(t, self.names()) if t else []
         if not options:
             popup.hide()
@@ -1622,6 +1643,7 @@ class CaptureWindow(QWidget):
             m = self.ctx.model()
             options = [replace(o, sub=path_text(m, o.ref) or "Top-level task") if o.ref in m.tasks else o for o in options]
         popup.subtasks = self._subtask_options if t.sigil == "#" else None
+        popup.task_info = self._task_mark if t.sigil == "#" else None  # each row's dot or ring (release 5.75)
         self._typing = t
         # Under the cursor, or above it where it wouldn't fit: in the window, or, for the pinned window's list, which is
         # a window of its own, on the screen. The list keeps itself in view as it changes size (release 5.65).
@@ -1643,6 +1665,14 @@ class CaptureWindow(QWidget):
         kids = (m.task(x) for x in m.children_of(task_id))
         return [items.Option(k.title, k.title, ref=k.id) for k in kids if k.state != "Closed" and not k.discarded]
 
+    def _task_mark(self, task_id: str) -> tuple[bool, str] | None:
+        """A task's mark in the # list (release 5.75, round 7's decisions 327 and 328): whether it's top-level, and its
+        top-level task's colour, as the task tree and the timeline give it."""
+        m = self.ctx.model()
+        if task_id not in m.tasks:
+            return None
+        return not m.parents_of(task_id), task_colour(m, task_id)
+
     def _pick_ref(self, option: items.Option) -> None:
         """Put the picked name in, with a space after it; a picked one's ID is kept, ahead of names alike."""
         t = self._typing
@@ -1652,7 +1682,10 @@ class CaptureWindow(QWidget):
             return
         cursor = box.textCursor()
         cursor.setPosition(cursor.position() - (cursor.positionInBlock() - t.start), QTextCursor.MoveMode.KeepAnchor)
-        cursor.insertText(t.sigil + option.value + " ")
+        words = t.sigil + option.value + " "
+        # Where the pick ends, before it goes in: putting it in reads the list again (round 7's decision 326).
+        self._pick_end = (id(box), cursor.blockNumber(), t.start + len(words))
+        cursor.insertText(words)
         box.setTextCursor(cursor)
         if option.ref:
             self.ref_ids[("#" if t.sigil == "#" else "@") + option.value.lower()] = option.ref
@@ -1660,44 +1693,171 @@ class CaptureWindow(QWidget):
         self._typing = None
         self.read_items()
 
-    # ---- the draft keeps itself (release 5.8) ----
-    def _draft_path(self) -> Path:
-        return self.ctx.data_root / DRAFT_FILE
-
+    # ---- the draft keeps itself (release 5.8), in Drafts (release 5.77) ----
     def _draft_data(self) -> dict:
-        """The draft as capture-draft.json keeps it."""
+        """The capture's words and what it's on, as a draft's draft.json keeps them (with the rest of the form and the
+        files, ``draft_ui.snapshot``)."""
         content, formatted = self.content.value()
         return {"saved": self.ctx.now().isoformat(timespec="seconds"), "task": self.task, "task_auto": self.task_auto, "by_hand": self.by_hand,
                 "types": sorted(self.types), "title": self.title.text(),
                 "content": content, "formatted": formatted, "meeting": self.meeting_on,
                 "meeting_name": self.meet_name.text() if self._meet_name_typed else "", "refs": self.ref_ids}
 
-    def keep_draft(self) -> None:
-        """Every 30 seconds, when something changed: the draft goes to System\\capture-draft.json in the data root."""
-        if not self.draft_dirty:
-            return
-        data = self._draft_data()
-        if not data["content"].strip():
-            return
-        try:
-            self.ctx.fs.write_text(self._draft_path(), json.dumps(data, ensure_ascii=False, indent=1))
-        except OSError as e:
-            self.draft_label.setText(f"The draft couldn't be kept ({type(e).__name__}).")
-            return
-        self.draft_dirty = False
-        self.draft_label.setText(f"Draft kept at {self.ctx.now():%H:%M:%S}.")
+    def holds_draft(self) -> bool:
+        """Whether the window holds something worth keeping as a draft (decision 333): a picked task alone isn't."""
+        return draft_ui.holds_draft(self)
 
-    def restore_draft(self) -> None:
-        """After a crash or a restart: the window opens with the draft it kept."""
+    def keep_draft(self, closing: bool = False) -> bool:
+        """Every 30 seconds, and on closing: the capture goes to its folder in System\\Drafts, with its files, unless it
+        holds nothing or hasn't changed since it was last kept. Returns whether it's kept there now. A file already in
+        the folder isn't written again."""
+        if not self.holds_draft():
+            return False
+        data, writes = draft_ui.snapshot(self)
+        seen = json.dumps({k: v for k, v in data.items() if k != "saved"}, ensure_ascii=False, sort_keys=True, default=str)
+        root = self.ctx.data_root
+        if seen == self._kept and self.draft_id and (drafts.folder(root, self.draft_id) / drafts.DRAFT_JSON).exists():
+            return True
+        draft_id = self.draft_id or drafts.new_id(root, self.ctx.now())
         try:
-            data = json.loads(self._draft_path().read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+            for stored, write in writes:
+                path = drafts.file_path(root, draft_id, stored)
+                if path is not None and not path.exists():
+                    self.ctx.fs.makedirs(path.parent)
+                    write(path)
+            drafts.write(self.ctx.fs, root, draft_id, data)
+        except Exception as e:  # noqa: BLE001 - Outlook's SaveAs can raise anything; the capture stays in the window
+            log.warning("the capture wasn't kept as a draft: %s", type(e).__name__)
+            self.draft_label.setText(f"The draft couldn't be kept ({type(e).__name__}).")
+            return False
+        self.draft_id, self._kept, self.draft_dirty = draft_id, seen, False
+        if not closing:
+            self.draft_label.setText(f"Draft kept at {self.ctx.now():%H:%M:%S}.")
+        return True
+
+    def file_draft(self) -> bool:
+        """Put what the window holds in Drafts and empty the window (decisions 333 and 334). Returns False, leaving the
+        window as it is, when it held nothing or couldn't be kept."""
+        if not self.keep_draft(closing=True):
+            return False
+        log.info("capture filed in Drafts as %s", self.draft_id)
+        self.draft_id, self._kept = None, None
+        self.reset_draft()
+        self.draft_label.setText(DRAFT_NOTE if LOOK.show_help else "")
+        self._sync_drafts()
+        return True
+
+    def _closed(self) -> None:
+        """The window, or the pinned window, closed: what it held goes to Drafts, without asking (decision 333)."""
+        self._close_drafts_list()
+        if self.holds_draft() and self.file_draft():
+            self.ctx.notify("Kept in Drafts", "The capture window's Drafts button opens it.")
+
+    # ---- the Drafts list (decision 335) ----
+    def _sync_drafts(self) -> None:
+        """The footer's Drafts button: how many there are, but the one open here; hidden when there are none."""
+        n = len(drafts.listed(self.ctx.data_root, but=self.draft_id))
+        self.drafts_button.setText(f"Drafts {n}")
+        self.drafts_button.setAccessibleName(f"Drafts: {n}")
+        self.drafts_button.setVisible(n > 0)
+
+    def show_drafts(self) -> None:
+        """The Drafts button: the list, above it."""
+        found = drafts.listed(self.ctx.data_root, but=self.draft_id)
+        self._sync_drafts()
+        if not found:
+            self.draft_label.setText("There are no drafts. A capture closed before it's saved waits there.")
             return
-        if not isinstance(data, dict) or not str(data.get("content") or "").strip():
+        m = self.ctx.model()
+        self._close_drafts_list()
+        self._drafts_list = draft_ui.DraftsList(self, found, lambda t: m.tasks[t].title if t in m.tasks else "", self.ctx.now().date(),
+                                                self.open_draft, self.discard_draft)
+        self._drafts_list.show_at(self.drafts_button)
+
+    def _close_drafts_list(self) -> None:
+        if self._drafts_list is not None:
+            self._drafts_list.close()
+            self._drafts_list = None
+
+    def open_drafts(self) -> None:
+        """The tray's Drafts…: the window, as it is or empty, with the list open."""
+        if not self.isVisible():
+            self.show_capture(keep=True)
+        QTimer.singleShot(0, self.show_drafts)  # once the window is placed, so the list goes above its button
+
+    def open_draft(self, draft_id: str) -> None:
+        """A draft from the list, in the window. What the window held goes to Drafts first, so nothing is lost."""
+        data = drafts.read(self.ctx.data_root, draft_id)
+        if data is None:
+            self.draft_label.setText("That draft can't be read any more.")
+            self._sync_drafts()
             return
-        self._apply_draft(data)
-        self.draft_label.setText(f"The draft from {str(data.get('saved', ''))[11:16]} came back.")
+        swapped = self.holds_draft() and self.file_draft()
+        if self.holds_draft():  # it couldn't be kept: the draft waits
+            return
+        self.reset_draft()
+        lost = self._restore_draft(draft_id, data)
+        self.draft_id, self._kept = draft_id, None
+        log.info("draft %s opened", draft_id)
+        self.show_capture(keep=True)
+        if lost:
+            self.draft_label.setText(f"Not everything came back: add {', '.join(lost)} again.")
+        else:
+            self.draft_label.setText("The capture you had is in Drafts." if swapped else "The draft is open. Saving it takes it out of Drafts.")
+
+    def _restore_draft(self, draft_id: str, data: dict) -> list[str]:
+        """A kept draft back in the window: its words, the rest of its form and its files. Returns what couldn't come back."""
+        self._restore_state(data)
+        lost = draft_ui.restore_files(self, draft_id, data)
+        if not data.get("files") and data.get("file_names"):  # a draft set aside before release 5.77 kept no files
+            lost += [str(n) for n in data["file_names"]]
+        self.refresh()
         self.read_items()
+        return lost
+
+    def _restore_state(self, data: dict) -> None:
+        """Everything but the files: the words, the task, the types and the rest of the form."""
+        self._apply_draft({**data, "content": str(data.get("content") or "")})
+        self._setting = True
+        draft_ui.restore_form(self, data.get("form") or {})
+        self.today_on = bool(data.get("today"))
+        self.note_auto = bool(data.get("note_auto", self.types == {"note"}))
+        self.touched = set(data.get("touched") or [])
+        self.item_ov = dict(data.get("item_ov") or {})
+        self.agenda_ticks = {int(k): bool(v) for k, v in (data.get("agenda_ticks") or {}).items()}
+        self.from_capture = data.get("from_capture")
+        self._setting = False
+
+    def discard_draft(self, draft_id: str) -> None:
+        """× in the list: the draft's folder moves to Done, with Undo in the footer for ten seconds (decision 338)."""
+        try:
+            done = drafts.finish(self.ctx.fs, self.ctx.data_root, draft_id)
+        except OSError as e:
+            self.draft_label.setText(f"The draft couldn't be discarded ({type(e).__name__}).")
+            return
+        self._sync_drafts()
+
+        def undo() -> None:
+            if done:
+                try:
+                    drafts.bring_back(self.ctx.fs, self.ctx.data_root, done, draft_id)
+                except OSError as e:
+                    self.draft_label.setText(f"The draft couldn't come back ({type(e).__name__}). It's in System\\Drafts\\Done.")
+                    return
+            self._sync_drafts()
+            self.draft_label.setText("The draft is back in Drafts.")
+
+        self._offer_undo("Draft discarded.", undo)
+
+    def _offer_undo(self, text: str, undo: Callable[[], None]) -> None:
+        self._undo = undo
+        self.draft_label.setText(text)
+        self.undo_clear.show()
+        self._undo_timer.start()
+
+    def _undo_gone(self) -> None:
+        self.undo_clear.hide()
+        self._undo = None
 
     def _apply_draft(self, data: dict) -> None:
         """Put a kept draft back in the window."""
@@ -1720,36 +1880,50 @@ class CaptureWindow(QWidget):
                 self._meet_name_typed = True
 
     def forget_draft(self) -> None:
-        """Once the capture is saved or cleared, the kept draft is emptied."""
+        """Once the capture is saved or cleared, its draft is done: its folder moves to System\\Drafts\\Done (decision 336)."""
         self.draft_dirty = False
-        if self._draft_path().exists():
+        if self.draft_id:
             try:
-                self.ctx.fs.write_text(self._draft_path(), "{}")
-            except OSError:
-                pass
+                drafts.finish(self.ctx.fs, self.ctx.data_root, self.draft_id)
+            except OSError as e:
+                log.warning("a finished draft's folder wasn't moved to Done: %s", type(e).__name__)
+        self.draft_id, self._kept = None, None
         self.draft_label.setText(DRAFT_NOTE if LOOK.show_help else "")
+        self._sync_drafts()
 
     def clear(self) -> None:
-        """Clear: a fresh capture, and no kept draft. In the new look, Undo in the footer brings it back for ten seconds."""
-        data = self._draft_data()
+        """Clear: a fresh capture, and no draft (decision 338). In the new look, Undo in the footer brings it back for ten
+        seconds, files and all."""
+        self._file_rows()  # the description boxes into the rows
+        state = {**self._draft_data(), "today": self.today_on, "note_auto": self.note_auto, "touched": sorted(self.touched),
+                 "item_ov": self.item_ov, "agenda_ticks": {str(k): v for k, v in self.agenda_ticks.items()},
+                 "from_capture": self.from_capture, "form": draft_ui.form_of(self)}
+        rows = [(e.row, e.src, e.line) for e in self.files]
         self.reset_draft()
         self.forget_draft()
-        if not LOOK.classic and (data["content"].strip() or data["title"].strip()):
-            self._cleared = data
-            self.draft_label.setText("Cleared.")
-            self.undo_clear.show()
-            self._undo_timer.start()
+        if not LOOK.classic and (state["content"].strip() or state["title"].strip() or rows):
+
+            def undo() -> None:
+                self.reset_draft()
+                self._restore_state(state)
+                for row, src, line in rows:
+                    self._add_file(row, src, line=line, focus=False)
+                    draft_ui._fill(self, row)
+                self.draft_dirty = True
+                self.draft_label.setText("Brought back.")
+                self.refresh()
+                self.read_items()
+                self.content.setFocus()
+
+            self._offer_undo("Cleared.", undo)
 
     def _undo_clear(self) -> None:
-        data, self._cleared = self._cleared, None
+        """The footer's Undo: brings back what Clear cleared, or the draft just discarded."""
+        undo, self._undo = self._undo, None
         self.undo_clear.hide()
         self._undo_timer.stop()
-        if data:
-            self._apply_draft(data)
-            self.draft_dirty = True
-            self.draft_label.setText("Brought back.")
-            self.read_items()
-            self.content.setFocus()
+        if undo is not None:
+            undo()
 
     def show_keys(self) -> None:
         """F1: every key, in one list (mods log round 2, M0036)."""
@@ -1828,7 +2002,7 @@ class CaptureWindow(QWidget):
 
     def unpin(self) -> None:
         """Back to the full window, on the same capture (the main hotkey, F12, or the pinned window's open button)."""
-        self.show_capture()
+        self.show_capture(keep=True)
 
     def _close_pin(self) -> None:
         self.pinned = False
@@ -1836,10 +2010,10 @@ class CaptureWindow(QWidget):
             self.pin_window.hide()
 
     def hide_pinned(self) -> None:
-        """Esc on the pinned window: it hides, and the capture stays as a draft; the main hotkey opens it in full."""
+        """Esc on the pinned window, or its ✕: it closes, and what it holds goes to Drafts, as the full window's do
+        (release 5.77, decision 334)."""
         self._close_pin()
-        self.keep_draft()
-        self.aside.window_hidden()
+        self._closed()
 
     def show_mods(self, on: bool) -> None:
         self.pages.setCurrentIndex(1 if on else 0)
@@ -1849,13 +2023,16 @@ class CaptureWindow(QWidget):
         else:
             self.content.setFocus()
 
-    def closeEvent(self, event) -> None:  # noqa: N802 - the X hides it; the draft is kept
+    def closeEvent(self, event) -> None:  # noqa: N802 - the X hides it, made once at start-up; hideEvent files the draft
         event.ignore()
         self.hide()
 
-    def hideEvent(self, event) -> None:  # noqa: N802 - a draft set aside comes back when the blank capture is closed empty
+    def hideEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        """Closing the window (X, Esc, Alt+F4, the main hotkey) files what it holds in Drafts, so the next open starts
+        empty (decision 333). Not when it's pinned, which hides it for the pinned window, nor when it's minimized."""
         super().hideEvent(event)
-        self.aside.window_hidden()
+        if not event.spontaneous() and not self.pinned and not self._saving:
+            self._closed()
 
     def keyPressEvent(self, event) -> None:  # noqa: N802
         if event.key() == Qt.Key.Key_Escape:
@@ -1896,12 +2073,28 @@ class CaptureWindow(QWidget):
                 self.add_link_url(url)
         elif kind == "outlook":
             # Outlook is asked only after its drag is over: asking during the drop can hang it (release 5.33).
-            QTimer.singleShot(0, self.add_outlook)
+            QTimer.singleShot(0, self._add_dropped_outlook)
         elif kind == "virtual":
             self._fail("These files come from a program that doesn't hand DocRepo a file it can read, such as a zip folder. "
                        "Save or extract them to a folder first, then drop them from there.", self.content)
         if self.pinned:
             self.pin_window.sync()
+        if kind in ("files", "links"):
+            self._come_forward()
+
+    def _add_dropped_outlook(self) -> None:
+        """An email dropped from Outlook, read through Outlook, then the window forward. The Outlook email hotkey leaves the
+        keyboard in Outlook instead (release 5.33.1)."""
+        self.add_outlook()
+        self._come_forward()
+
+    def _come_forward(self) -> None:
+        """After a drop, the window it landed on comes forward, so typing goes into the description the cursor is in. A
+        drop on Windows leaves the keyboard in the program the drag came from (round 7's decision 331, release 5.74)."""
+        w = self.pin_window if self.pinned and self.pin_window is not None else self
+        if w.isVisible():
+            w.raise_()
+            w.activateWindow()
 
     def _drag_entered(self, kind: str) -> None:
         """A drag of an email from Outlook, or of a file only a program holds, puts up the cover with DocRepo's own drop
@@ -1930,13 +2123,15 @@ class CaptureWindow(QWidget):
                 outlook.match_places(emails, outlook.selected_places())
             except outlook.OutlookError:
                 pass  # Save says which couldn't be marked
-        for email in emails:
-            self._add_email(email)
+        for n, email in enumerate(emails):
+            self._add_email(email, focus=n == 0)
         if problems:
             self._fail("Not all of the drop could be read: " + "; ".join(problems) + ". Settings → Troubleshooting report has the details.",
                        self.content)
         if self.pinned:
             self.pin_window.sync()
+        if found.items:
+            self._come_forward()
 
     # ================= the draft =================
     def reset_draft(self) -> None:
@@ -2287,7 +2482,7 @@ class CaptureWindow(QWidget):
         self.set_task(task_id)  # by hand: the text's # no longer picks it
         after, self._after_pick = self._after_pick, None
         if after and task_id:  # the Update or Add to agenda hotkey opened the picker: only Update is checked, as with a task already picked
-            self.show_capture(mode="update", agenda_focus=after == "agenda")
+            self.show_capture(mode="update", agenda_focus=after == "agenda", keep=True)
             return
         if self.pinned:  # picked on the pinned window: the cursor goes back to its box
             self.pin_window.text.setFocus()
@@ -2475,20 +2670,21 @@ class CaptureWindow(QWidget):
             log.exception("Outlook: %s failed", step)
             self._fail(f"Outlook didn't give DocRepo the email ({detail}). Settings → Troubleshooting report collects the details.", self.content)
             return
-        for email in emails:
-            self._add_email(email)
+        for n, email in enumerate(emails):
+            self._add_email(email, focus=n == 0)  # the cursor in the first new email's description
         note = outlook.refused_note(emails)
         if note:
             self._fail(note, self.content)
 
-    def _add_email(self, email: EmailItem) -> None:
+    def _add_email(self, email: EmailItem, focus: bool = True) -> None:
         """The email's row, then a row for each attachment, link and picture email layer 0 finds in it (mods log round 1,
-        M0024), with the cursor in the first kept part's description."""
-        rows = email_rows(email)
-        for row in rows:
+        M0024). With ``focus``, the cursor goes in the email's own description (round 7's decision 331, release 5.74),
+        attachments or not: before, it went to the first kept part's, so an email with none had nothing to type in."""
+        for row in email_rows(email):
             self._add_file(row, "outlook" if row.email else "email", focus=False)
-        first = next((e for e in self.files if e.row.of is email and e.row.keep), None)
-        (first.desc if first and first.desc else self.content).setFocus()
+        if focus:
+            own = next((e for e in self.files if e.row.email is email), None)
+            (own.email_desc if own and own.email_desc else self.content).setFocus()
 
     def _file_note(self, row: FileRow, doc_id: str | None, link: bool) -> str:
         """The line beside a row's name: where its file stays or goes, or what layer 0 made of it."""
@@ -2578,6 +2774,11 @@ class CaptureWindow(QWidget):
         self.files.append(entry)
         self.files_box.addWidget(holder)
         if row.email:
+            # What the email is about (round 7's item 93, decision 331): kept with the email, not as a document's description.
+            entry.email_desc = QLineEdit(row.description)
+            entry.email_desc.setAccessibleName(f"Description of the email {row.name}")
+            entry.email_desc.setPlaceholderText("What's this email about? Optional: its subject already names it.")
+            fl.addWidget(entry.email_desc)
             entry.layer0 = QLabel(objectName="hint")
             entry.layer0.setWordWrap(True)
             fl.addWidget(entry.layer0)
@@ -2671,6 +2872,9 @@ class CaptureWindow(QWidget):
             # A choice a row doesn't offer (a link's, a picture's Extract information) stays off.
             e.row.save_a_copy = source.copy.isChecked() and not e.copy.isHidden()
             e.row.extract = source.extract.isChecked() and not e.extract.isHidden()
+        for e in self.files:
+            if e.email_desc is not None:
+                e.row.description = e.email_desc.text()
         return [e.row for e in self.files]
 
     def _email_texts(self) -> list[str]:
@@ -3010,10 +3214,9 @@ class CaptureWindow(QWidget):
         problems = (" Problems: " + " ".join(found)) if found else ""
         self.ctx.notify("Saved", message + problems)
         self.reset_draft()
-        self.forget_draft()
+        self.forget_draft()  # its draft, if it was one, is done: to System\Drafts\Done
         self._close_pin()
         self.hide()
-        self.aside.window_hidden()  # the pinned window may have been the one saved, with this one hidden already
         self.saved.emit(result)
 
 

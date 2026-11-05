@@ -163,6 +163,19 @@ class CaptureDocument:
 
 
 @dataclass
+class CaptureEmail:
+    """One of a capture's emails (round 7's item 93, release 5.74): its .msg file, its subject, sender and sent time, and the
+    description typed on its row. Emails captured before release 5.74 have none."""
+
+    pos: int
+    file: str | None
+    subject: str
+    sender: str
+    sent: str
+    description: str | None
+
+
+@dataclass
 class Capture:
     id: str
     saved: str
@@ -192,6 +205,7 @@ class Capture:
     page_made: bool = False
     documents: list[CaptureDocument] = field(default_factory=list)
     attachments: list[str] = field(default_factory=list)
+    emails: list[CaptureEmail] = field(default_factory=list)
 
     def has(self, capture_type: str) -> bool:
         return capture_type in self.types
@@ -399,6 +413,10 @@ class Model:
             self.captures[r["capture"]].documents.append(CaptureDocument(r["document"], bool(r["save_a_copy"]), bool(r["extract"])))
         for r in q("SELECT capture, name FROM capture_attachments ORDER BY capture, pos"):
             self.captures[r["capture"]].attachments.append(r["name"])
+        for r in q("SELECT * FROM capture_emails ORDER BY capture, pos"):
+            if r["capture"] in self.captures:
+                self.captures[r["capture"]].emails.append(
+                    CaptureEmail(r["pos"], r["file"], r["subject"], r["sender"], r["sent"], r["description"]))
         self.documents: dict[str, Document] = {r["id"]: Document(**{k: r[k] for k in r.keys()}) for r in q("SELECT * FROM documents ORDER BY id")}
         self.versions: list[Version] = [Version(**{k: r[k] for k in r.keys()}) for r in q("SELECT * FROM document_versions ORDER BY id")]
         self.copies: list[SavedCopy] = [

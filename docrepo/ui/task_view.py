@@ -42,6 +42,7 @@ from docrepo.ui.icons import icon
 from docrepo.ui.look import LOOK, Help
 from docrepo.ui.page_view import PageView
 from docrepo.ui.result_list import ResultList, Row
+from docrepo.ui.state_menu import UndoButton, can_change, state_menu
 from docrepo.ui.style import page_css
 from docrepo.ui.task_pane import TaskPane
 
@@ -270,6 +271,8 @@ class TaskView(QWidget):
         self.list.activated_row.connect(lambda r: self.act("open", r))
         self.list.action.connect(lambda r, name: self.act(name, r))
         self.list.folded.connect(self._fold)
+        self.list.state_clicked.connect(self._state_clicked)  # a task row's state (release 5.76, round 7's item 101)
+        self.list.row_menu.connect(self._row_menu)
         self.list.installEventFilter(self)
         self.stack.addWidget(self.list)
         self.empty = _page()
@@ -307,6 +310,9 @@ class TaskView(QWidget):
         fh.setContentsMargins(16, 5, 16, 5)
         self.foot = QLabel(self._rest_foot(), objectName="tvFoot")
         fh.addWidget(self.foot)
+        self.foot_undo = UndoButton()  # after a state picked from a row, for ten seconds (release 5.76, decision 363)
+        fh.addWidget(self.foot_undo)
+        fh.addStretch()
         outer.addWidget(foot)
 
     def _rest_foot(self) -> str:
@@ -1371,7 +1377,46 @@ class TaskView(QWidget):
         self.foot.setText(text or self._rest_foot())
         self.foot.setStyleSheet(f"color: {tokens.LIGHT['critical' if error else 'text' if text else 'text2']};")
         if text:
-            self._foot_timer.start()
+            self._foot_timer.start(6000)
+
+    # ---- a task row's state (release 5.76, round 7's item 101, decisions 360 to 364) ----
+    def _state_clicked(self, i: int, at) -> None:
+        """A task row's state: the browse tool's state menu, at it; the list is drawn again after a pick."""
+        row = self.list.rows[i] if 0 <= i < len(self.list.rows) else None
+        if row is not None and row.record is not None and row.record.kind == "task":
+            self.browse.popup_state_menu(row.record.id, at, after=lambda: self.refresh(keep=True), tell=self._tell_state)
+
+    def _tell_state(self, text: str, undo) -> None:
+        """What a pick did, in the footer, with Undo for ten seconds (decision 363)."""
+        self.say(text)
+        if undo is not None:
+            self._foot_timer.start(10_000)
+            self.foot_undo.offer(undo)
+        else:
+            self.foot_undo.forget()
+
+    def _row_menu(self, i: int, at) -> None:
+        """A row's right-click menu: what its buttons do, and a task row's State submenu (decision 361)."""
+        row = self.list.rows[i] if 0 <= i < len(self.list.rows) else None
+        if row is None or row.record is None:
+            return
+        self.list.choose(i)
+        r = row.record
+        menu = QMenu(self)
+        menu.setToolTipsVisible(True)
+        for label, name, _primary, tip in self._actions_for(r):
+            action = menu.addAction(label, lambda n=name, k=i: self.act(n, k))
+            if tip:
+                action.setToolTip(tip)
+        if r.kind == "task" and can_change(self.browse.model(), r.id):
+            sub = state_menu(menu, self.browse.model(), r.id, lambda to, branch, t=r.id: self.browse.set_state(
+                t, to, branch, after=lambda: self.refresh(keep=True), tell=self._tell_state))
+            menu.addSeparator()
+            menu.addMenu(sub)
+        try:
+            self.browse.run_menu(menu, at)
+        finally:
+            menu.deleteLater()
 
     # ================= menus =================
     def _fill_type_menu(self) -> None:

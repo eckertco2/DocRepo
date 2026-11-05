@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QHBoxLayout, QHeaderView, QLab
                                QTreeWidget, QTreeWidgetItem, QWidget)
 
 from docrepo.ui import tokens
+from docrepo.ui.icons import tinted
 from docrepo.ui.look import LOOK, paint_focus_ring
 from docrepo.ui.style import CLASSIC_TREE, page_css
 
@@ -25,6 +26,10 @@ DIM_ROLE = Qt.ItemDataRole.UserRole + 2
 EDGE_ROLE = Qt.ItemDataRole.UserRole + 3
 #: A row's actions, a ``RowActions`` (release 5.59).
 ACTIONS_ROLE = Qt.ItemDataRole.UserRole + 4
+#: On a State cell: the task whose state it shows, so the cell is a button that opens the state menu (release 5.76, decision 360).
+STATE_ROLE = Qt.ItemDataRole.UserRole + 5
+#: The chevron after a state on hover, and the room it takes.
+STATE_CHEVRON = 12
 
 GROUP_COLOURS = tuple(tokens.LIGHT[k] for k in tokens.GROUP_KEYS)
 GREY = "#b8c1cb"  # Classic's, for a task with no group
@@ -132,6 +137,15 @@ class HtmlDelegate(QStyledItemDelegate):
         if opt.features & QStyleOptionViewItem.ViewItemFeature.HasCheckIndicator:  # a tick box, drawn above: the HTML goes after it
             left = style.subElementRect(QStyle.SubElement.SE_ItemViewItemText, opt, opt.widget).left()
         doc = self._doc(html, opt.rect.right() - left - self.view.cell_pad - 3, opt)
+        lit = index.data(STATE_ROLE) is not None and self.view.state_lit(index)
+        if lit:  # a state as a button, under the mouse or with its menu open: a backplate round it (release 5.76, decision 360)
+            painter.save()
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(tokens.colour("pressed")))
+            width = int(doc.idealWidth()) + STATE_CHEVRON + 6
+            painter.drawRoundedRect(QRect(left + self.view.cell_pad - 3, opt.rect.top() + 3, width, opt.rect.height() - 6), 4, 4)
+            painter.restore()
         painter.save()
         if index.siblingAtColumn(0).data(DIM_ROLE):
             painter.setOpacity(0.5)
@@ -141,6 +155,10 @@ class HtmlDelegate(QStyledItemDelegate):
         ctx.palette.setColor(QPalette.ColorRole.Text, QColor(tokens.colour("text")))
         doc.documentLayout().draw(painter, ctx)
         painter.restore()
+        if lit:  # and the chevron that says it opens a menu
+            x = left + self.view.cell_pad + int(doc.idealWidth())
+            y = opt.rect.top() + (opt.rect.height() - STATE_CHEVRON) // 2
+            painter.drawPixmap(QPoint(x, y), tinted("chevron-down", tokens.LIGHT["text2"], STATE_CHEVRON, painter.device().devicePixelRatioF()))
 
     def sizeHint(self, option, index) -> QSize:  # noqa: N802
         html = index.data(HTML_ROLE)
@@ -177,6 +195,13 @@ class RowTree(QTreeWidget):
         self._strips: list[ActionStrip] = []
         self._widths: list[int] = []
         self._empty: QWidget | None = None
+        # A task's state from its row (release 5.76, round 7's item 101): the browse window gives these.
+        #: Opens the state menu for a task, at a point on the screen, when its State cell is clicked.
+        self.state_clicked: Callable[[str, QPoint], None] | None = None
+        #: The state menu for a task, as a submenu of ``parent``, for a task row's right-click menu; None when it has none.
+        self.state_menu: Callable[[str, QWidget], QMenu | None] | None = None
+        self._state_hover: tuple[QTreeWidgetItem, int] | None = None  # the State cell under the mouse
+        self._state_open: tuple[QTreeWidgetItem, int] | None = None  # the State cell whose menu is open
         self._relayout = QTimer(self)
         self._relayout.setSingleShot(True)
         self._relayout.setInterval(60)
@@ -293,6 +318,7 @@ class RowTree(QTreeWidget):
         """Start filling the list again. Changing the current row while filling doesn't count as picking."""
         self._building = True
         self._forget_strips()
+        self._state_hover = self._state_open = None
         if self._empty is not None:
             self._empty.hide()
             self._empty.deleteLater()
@@ -331,6 +357,63 @@ class RowTree(QTreeWidget):
             item.setCheckState(0, Qt.CheckState.Checked if on else Qt.CheckState.Unchecked)
         finally:
             self._building = building
+
+    # ---- a task's state from its row (release 5.76, round 7's item 101, decisions 360 and 361) ----
+    def mark_state(self, item: QTreeWidgetItem, column: int, task_id: str, state: str) -> None:
+        """Make a row's State cell a button that opens the state menu for ``task_id``."""
+        item.setData(column, STATE_ROLE, task_id)
+        item.setToolTip(column, f"{state}. Click to change the state.")
+
+    def state_cell(self, pos: QPoint) -> tuple[QTreeWidgetItem, int, str] | None:
+        """The State cell at a point in the viewport: its row, its column and its task."""
+        item = self.itemAt(pos)
+        column = self.columnAt(pos.x())
+        task = item.data(column, STATE_ROLE) if item is not None and column >= 0 else None
+        return (item, column, task) if task else None
+
+    def state_lit(self, index: QModelIndex) -> bool:
+        """Whether a State cell shows as a button now: under the mouse, or with its menu open."""
+        item = self.itemFromIndex(index)
+        return any(cell is not None and cell[0] is item and cell[1] == index.column() for cell in (self._state_hover, self._state_open))
+
+    def row_task(self, item: QTreeWidgetItem) -> str | None:
+        """The task a row is: the one its State cell shows, or its key's."""
+        for column in range(self.columnCount()):
+            task = item.data(column, STATE_ROLE)
+            if task:
+                return task
+        key = item.data(0, KEY_ROLE)
+        return key[1] if isinstance(key, tuple) and len(key) == 2 and key[0] == "task" else None
+
+    def open_state_menu(self, item: QTreeWidgetItem, column: int) -> None:
+        """Open a State cell's menu under it, lit while it's open. What a click on the cell does."""
+        task = item.data(column, STATE_ROLE)
+        if not task or self.state_clicked is None:
+            return
+        rect = self.visualRect(self.indexFromItem(item, column))
+        self._state_open = (item, column)
+        self.viewport().update(rect)
+        try:
+            self.state_clicked(task, self.viewport().mapToGlobal(QPoint(rect.left() + self.cell_pad - 3, rect.bottom() + 2)))
+        finally:
+            self._state_open = None
+            self._state_hover = None
+            self.viewport().update()
+
+    def _hover_state(self, pos: QPoint | None) -> None:
+        cell = self.state_cell(pos) if pos is not None else None
+        now = (cell[0], cell[1]) if cell else None
+        was = self._state_hover
+        if (now is None and was is None) or (now is not None and was is not None and now[0] is was[0] and now[1] == was[1]):
+            return
+        self._state_hover = now
+        for c in (was, now):
+            if c is not None:
+                self.viewport().update(self.visualRect(self.indexFromItem(c[0], c[1])))
+        if now is not None:
+            self.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
+        else:
+            self.viewport().unsetCursor()
 
     # ---- a row's actions (release 5.59): over the row on hover and when current, and as its right-click menu ----
     def set_actions(self, item: QTreeWidgetItem, actions: list[tuple[str, Callable[[], None], str]]) -> None:
@@ -426,6 +509,7 @@ class RowTree(QTreeWidget):
 
     def mouseMoveEvent(self, event) -> None:  # noqa: N802 - Qt's name
         super().mouseMoveEvent(event)
+        self._hover_state(event.position().toPoint())
         if not LOOK.classic:
             item = self.itemAt(event.position().toPoint())
             if item is not self._hover:
@@ -435,21 +519,40 @@ class RowTree(QTreeWidget):
     def leaveEvent(self, event) -> None:  # noqa: N802 - Qt's name
         super().leaveEvent(event)
         self._hover = None
+        self._hover_state(None)
         self._sync_strips()
 
     def contextMenuEvent(self, event) -> None:  # noqa: N802 - Qt's name
         at = self.viewport().mapFromGlobal(event.globalPos())
         item = self.itemAt(at) if event.reason() == event.Reason.Mouse else self.currentItem()
-        row = item.data(0, ACTIONS_ROLE) if item is not None else None
-        if row is None:
+        menu = self.row_menu(item)
+        if menu is None:
             super().contextMenuEvent(event)
             return
+        menu.exec(event.globalPos())
+        menu.deleteLater()
+
+    def row_menu(self, item: QTreeWidgetItem | None) -> QMenu | None:
+        """A row's right-click menu: its actions, then a task row's State submenu (release 5.76, decision 361), which is also
+        where the keyboard reaches a state, with the menu key. None for a row with neither."""
+        if item is None:
+            return None
+        row = item.data(0, ACTIONS_ROLE)
         menu = QMenu(self)
-        for label, clicked, tip in row.actions:
+        menu.setToolTipsVisible(True)
+        for label, clicked, tip in row.actions if row is not None else ():
             action = menu.addAction(label, clicked)
             action.setToolTip(tip)
-        menu.setToolTipsVisible(True)
-        menu.exec(event.globalPos())
+        task = self.row_task(item) if self.state_menu is not None else None
+        sub = self.state_menu(task, menu) if task else None
+        if sub is not None:
+            if not menu.isEmpty():
+                menu.addSeparator()
+            menu.addMenu(sub)
+        if menu.isEmpty():
+            menu.deleteLater()
+            return None
+        return menu
 
     def is_shown(self, item: QTreeWidgetItem) -> bool:
         """True when every parent of the row is expanded, so the row can be seen."""
@@ -525,7 +628,18 @@ class RowTree(QTreeWidget):
     def mousePressEvent(self, event) -> None:  # noqa: N802 - Qt's name
         self.window().setAttribute(Qt.WidgetAttribute.WA_KeyboardFocusChange, False)  # the mouse has taken over: no ring
         self.viewport().update()
+        cell = self.state_cell(event.position().toPoint()) if event.button() == Qt.MouseButton.LeftButton else None
+        if cell is not None and self.state_clicked is not None:  # the state opens its menu, and doesn't pick the row (decision 360)
+            event.accept()
+            self.open_state_menu(cell[0], cell[1])
+            return
         super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        if self.state_clicked is not None and self.state_cell(event.position().toPoint()) is not None:
+            event.accept()  # a quick second click on a state isn't a double-click on its row
+            return
+        super().mouseDoubleClickEvent(event)
 
     def focusInEvent(self, event) -> None:  # noqa: N802 - Qt's name
         super().focusInEvent(event)

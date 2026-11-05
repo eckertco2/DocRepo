@@ -57,7 +57,8 @@ def _put(conn: sqlite3.Connection, kind: str, item_id: str, body: str) -> None:
 
 def capture_body(model: Model, data_root: Path, capture_id: str) -> str:
     c = model.captures[capture_id]
-    return "\n".join(x for x in (c.id, c.title, c.summary or "", plain(c, read_content(data_root, c)) or "") if x)
+    described = [e.description for e in c.emails if e.description]  # what its emails are about (round 7's item 93)
+    return "\n".join(x for x in (c.id, c.title, *described, c.summary or "", plain(c, read_content(data_root, c)) or "") if x)
 
 
 def document_body(model: Model, data_root: Path, document_id: str) -> str:

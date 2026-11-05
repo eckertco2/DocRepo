@@ -353,6 +353,20 @@ def change_task(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings:
     return out
 
 
+def set_states(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, states: dict[str, str], at: datetime) -> Outcome:
+    """Set tasks' states from a row's state menu (release 5.76, round 7's item 101, decisions 362 to 364): each change a status
+    log line as "Browse tool", as Edit task's are, with no capture, all in one transaction, and the pages written once. A
+    whole branch closed at once is one change to take back, and so is its Undo."""
+    logged = 0
+    with transaction(conn):
+        for task_id, state in states.items():
+            logged += len(tasks.update_task(conn, settings, task_id, at=at, via=BROWSE, state=state))
+    out = Outcome(f"{logged} change{'s' if logged != 1 else ''} in the status log." if logged else "Nothing changed.")
+    write_all_pages(conn, data_root, fs, at, out.problems)
+    log.info("States set from a row: %d task(s), %d change(s)", len(states), logged)
+    return out
+
+
 def edit_task(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, task_id: str, at: datetime, **values) -> Outcome:
     """Save the Edit task form (mods log round 1, M0008, M0011): every field on one page, in one transaction.
 

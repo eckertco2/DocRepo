@@ -482,17 +482,21 @@ def test_the_capture_windows_week_follows_its_tick(capture):
     assert capture.n_asg_row.total() == 6
 
 
-def test_a_draft_set_aside_keeps_h_a_week(capture):
+def test_a_draft_keeps_h_a_week(capture):
+    from docrepo.ui import drafts as draft_ui
+
     capture.n_asg_row.set_unit_name("week")
-    form = capture.aside._form()
+    form = draft_ui.form_of(capture)
     assert form["units"]["n_asg_row"] == "week"
     capture.n_asg_row.set_unit_name("all")
-    capture.aside._restore_form(form)
+    draft_ui.restore_form(capture, form)
     assert capture.n_asg_row.unit_name() == "week"
 
 
 def test_a_draft_saved_before_h_a_week_still_reads(capture):
-    capture.aside._restore_form({"units": {"n_asg_row": True, "n_lead_row": False}})
+    from docrepo.ui import drafts as draft_ui
+
+    draft_ui.restore_form(capture, {"units": {"n_asg_row": True, "n_lead_row": False}})
     assert capture.n_asg_row.unit_name() == "day" and capture.n_lead_row.unit_name() == "all"
 
 
