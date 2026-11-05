@@ -13,7 +13,7 @@ from PySide6.QtWidgets import QApplication, QLabel  # noqa: E402
 from docrepo import captures, items, tasks, templates  # noqa: E402
 from docrepo.config import Settings  # noqa: E402
 from docrepo.model import Model, Tie  # noqa: E402
-from docrepo.save import CaptureDraft, NewTaskFields, item_names, save_capture  # noqa: E402
+from docrepo.save import CaptureDraft, FileRow, NewTaskFields, item_names, save_capture  # noqa: E402
 from docrepo.templates import Library, RowTiming  # noqa: E402
 from docrepo.timing import RowTie  # noqa: E402
 from docrepo.ui.capture_window import CaptureWindow  # noqa: E402
@@ -340,7 +340,8 @@ def test_your_example_makes_the_whole_task(world):
 
 def test_the_notes_keep_the_ties_hash_with_its_id(world):
     conn, root, fs, outage, blank = world
-    r, m = save(world, CaptureDraft(content="Plan.\n**start, 3 workdays after #Line 2 outage ends.", task=blank))
+    # A link keeps the note a capture (release 5.69), whose capture.md keeps each # with its ID.
+    r, m = save(world, CaptureDraft(content="Plan.\n**start, 3 workdays after #Line 2 outage ends.", task=blank, files=[FileRow("Spec sheet", "https://example.com/spec", "the spec")]))
     assert f"#[Line 2 outage]({outage})" in captures.read_content(root, m.captures[r.capture_id]).replace("\r\n", "\n")
     assert m.tasks[blank].start == "2026-11-16"
 
@@ -430,7 +431,7 @@ def test_a_share_saves_on_each_role_they_hold(world):
     t = task(conn, "Shared one", leads=[TOM], assignees=[TOM, PRIYA])
     r, m = save(world, CaptureDraft(content="**involvement, Tom 25%, Priya 50%.", task=t))
     assert m.tasks[t].involvement == {("lead", TOM): 25, ("assignee", TOM): 25, ("assignee", PRIYA): 50}
-    log = [x["field"] for x in conn.execute("SELECT field FROM status_log WHERE task = ? AND via = ?", (t, r.capture_id))]
+    log = [x["field"] for x in conn.execute("SELECT field FROM status_log WHERE task = ? AND via = 'Capture window'", (t,))]  # no capture (5.69)
     assert sorted(log) == ["Priya Shah's involvement", "Tom Becker's involvement", "Tom Becker's involvement"]
 
 

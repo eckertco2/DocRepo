@@ -65,7 +65,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo import diagnose, drafts, items, key_dates, msg, outlook, timeline
+from docrepo import diagnose, drafts, items, key_dates, msg, notes_page, outlook, timeline
 from docrepo.dates import workday_numbers
 from docrepo.db import RECURRENCES, STATES
 from docrepo.extract import extract_text, to_unc
@@ -1436,6 +1436,14 @@ class CaptureWindow(QWidget):
             return
         self.agenda_panel.show_agenda(m, meeting, m.open_items_for(meeting) if meeting else [], self._discussed)
 
+    def _lands_under(self, m: Model) -> str:
+        """Where Save puts a note that's no capture on its task's page (release 5.69): the headings it goes under."""
+        content, formatted = self.content.value()
+        typed = items.store(content.strip(), self.names(), formatted)
+        lines = notes_page.note_markup(typed, formatted, own=self.task)
+        _, under = notes_page.place_note(m.pages.get(self.task, ""), lines, self.ctx.now().date())
+        return and_list([f"<b>{esc(h)}</b>" for h in under]) or "today's heading"
+
     def _discussed(self, a: Any) -> bool:
         if a.id in self.agenda_ticks:
             return self.agenda_ticks[a.id]
@@ -2321,7 +2329,7 @@ class CaptureWindow(QWidget):
         parts = self.split()
         self.task_button.setText(full_path(m, t.id) + ("  (from #)" if self.task_auto else "") if t else
                                  ("None: a quick task, under Quick tasks" if self._quick() else "None: a new top-level task" if new
-                                  else "None: a capture per #task" if parts else "None: keep it unfiled"))
+                                  else "None: split by #task" if parts else "None: keep it unfiled"))
         self._show_goes(parts)
         self.title_field.setVisible(new)
         self.content_field.property("label").setText("Content text" + (f"  <span style='color:{C.text2}'>becomes the new task's description</span>" if new else ""))
@@ -2430,8 +2438,10 @@ class CaptureWindow(QWidget):
             said = []
             for p in split:
                 held = held_text(p.files)
-                if p.task:
-                    said.append(f"a note on <b>{esc(m.task(p.task).title)}</b>" + (f" with {held}" if held else ""))
+                if p.task and not held:  # text alone is no capture: it goes on the task's page (release 5.69)
+                    said.append(f"a part on the notes of <b>{esc(m.task(p.task).title)}</b>")
+                elif p.task:
+                    said.append(f"a note on <b>{esc(m.task(p.task).title)}</b> with {held}")
                 elif p.words().strip():
                     said.append("an unfiled note with the lines under no #task" + (f" and {held}" if held else ""))
                 else:
@@ -2441,7 +2451,7 @@ class CaptureWindow(QWidget):
             names, today = self.names(), self.ctx.now().date()
             its = [it for p in split for it in items.read(p.lines(), names, today, home=bool(p.task), own=p.own_task()).items if it.on]
             counts = [f"{n} {label.lower()}{'s' if n > 1 else ''}" for k, label in items.KIND_NAMES.items() if (n := sum(it.kind == k for it in its))]
-            return (f"Save makes {len(split)} capture{'s' if len(split) != 1 else ''}, one per #task: {and_list(said)}.{agenda_text}"
+            return (f"Save splits this by #task: {and_list(said)}.{agenda_text}"
                     + (f" From their items it makes {and_list(counts)}." if counts else ""))
         text = bool(self.content.toPlainText().strip())
         new, upd, note = ("new_task" in self.types, "update" in self.types, "note" in self.types)
@@ -2454,7 +2464,10 @@ class CaptureWindow(QWidget):
             parts.append(f"updates {name}: " + (f"{n_changes} changed field{'s go' if n_changes > 1 else ' goes'} into its status log" if n_changes
                                                    else "this goes into its status log" if text else "nothing has changed yet"))
         targets = self._targets()
-        if note and not new:
+        if note and not new and t and not upd and not self.files and not self.summary.toPlainText().strip():
+            # Text alone is no capture (release 5.69, the notes workspace plan's decision 345): it goes on the task's page.
+            parts.append(f"adds this to the notes of {name}, under {self._lands_under(m)}")
+        elif note and not new:
             parts.append(f"adds this to the raw text log of {name}" if t else "" if targets else "keeps this as an unfiled capture, to file later")
         if note and new:
             parts.append("keeps this as reference information on the new task")
@@ -3195,6 +3208,8 @@ class CaptureWindow(QWidget):
             if not self._check_fields():
                 return
             draft = self.draft()
+            # A note can go straight onto its task's page (release 5.69): any page open with unsaved typing is saved first.
+            self.ctx.save_open_pages()
             QGuiApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
             try:
                 result = save_capture(self.ctx.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, draft, self.ctx.now())

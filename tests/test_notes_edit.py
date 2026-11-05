@@ -17,7 +17,7 @@ from PySide6.QtWidgets import QApplication, QDialog  # noqa: E402
 from docrepo import db, notes_page  # noqa: E402
 from docrepo.config import Settings  # noqa: E402
 from docrepo.model import Model  # noqa: E402
-from docrepo.save import CaptureDraft, save_capture  # noqa: E402
+from docrepo.save import CaptureDraft, FileRow, save_capture  # noqa: E402
 from docrepo.ui.browse_window import BrowseWindow  # noqa: E402
 from docrepo.ui.capture_window import CaptureWindow  # noqa: E402
 from docrepo.ui.context import AppContext  # noqa: E402
@@ -189,7 +189,8 @@ def test_the_task_page_holds_its_notes_between_its_facts_and_history(browse):
     assert "Current status" in pane.top.toPlainText() and "Captures" not in pane.top.toPlainText()
     assert pane.bottom.toPlainText().strip().startswith("Captures") and "On the notes page" in pane.bottom.toPlainText()
     notes = pane.notes
-    assert [k for k, _ in lines(notes)][:2] == ["caption", "text"] and "Install and align the new impeller" in notes.toPlainText()
+    # Its blocks under their days' headings: every page has them since release 5.69.
+    assert [k for k, _ in lines(notes)][:3] == ["heading", "caption", "text"] and "Install and align the new impeller" in notes.toPlainText()
 
 
 def test_typing_saves_to_docs_db_task_md_and_search(browse, ctx):
@@ -218,12 +219,33 @@ def test_a_capture_arriving_joins_the_open_page(browse, ctx):
     QTest.keyClick(notes, Qt.Key.Key_Return)
     QTest.keyClicks(notes, "Typed, not saved yet")
     assert notes.dirty
-    r = save_capture(ctx.conn, ctx.data_root, ctx.fs, ctx.settings, CaptureDraft(content="Second capture.", task="T000012"), NOW)
+    r = save_capture(ctx.conn, ctx.data_root, ctx.fs, ctx.settings, CaptureDraft(content="Second capture.", task="T000012", files=[FileRow("Spec sheet", "https://example.com/spec", "the spec")]), NOW)
     browse.refresh()  # two writers: the typing stays, the new block comes in, and the page is saved
     text = notes.toPlainText()
     assert "Typed, not saved yet" in text and "Second capture." in text and not notes.dirty
     body = notes_page.get(ctx.conn, "T000012")
     assert "Typed, not saved yet" in body and r.capture_id in notes_page.capture_ids(body)
+
+
+def test_the_capture_window_saves_an_open_page_before_a_note_lands(browse, ctx):
+    """Release 5.69: a note that's no capture goes straight onto its page, and only captures' blocks are merged into a
+    page with unsaved typing, so the capture window's Save saves every open page first: neither is lost."""
+    browse.go_task("T000012")
+    notes = browse.task_pane.notes
+    to_end(notes)
+    QTest.keyClick(notes, Qt.Key.Key_Return)
+    QTest.keyClicks(notes, "Typed, not saved yet")
+    assert notes.dirty
+    window = browse.capture
+    window.show_capture()
+    window.set_task("T000012")
+    window.content.setPlainText("A note from the capture window.")
+    window.save()
+    browse.refresh()
+    body = notes_page.get(ctx.conn, "T000012")
+    assert "Typed, not saved yet" in body and body.endswith("A note from the capture window.")
+    assert "A note from the capture window." in notes.toPlainText() and not notes.dirty
+    window.hide()
 
 
 def test_captures_tab_goes_to_a_block_and_adds_one_again(browse, ctx):
@@ -252,13 +274,14 @@ def test_folds_are_kept_for_each_task(browse, ctx):
 
 def test_day_headings_from_the_notes_menu(browse, ctx):
     browse.go_task("T000012")
-    browse.task_pane.day_action.setChecked(True)
-    browse._notes_menu("day_headings")
+    # Release 5.69: every page has day headings, so the Notes menu has no switch for them.
+    menu = [a.text() for a in browse.task_pane.menu_button.menu().actions() if a.text()]
+    assert menu == ["Fold all headings", "Unfold all", "Page history…"]
     assert Model(ctx.conn).uses_day_headings("T000012") and browse.task_pane.notes.day_headings
 
 
 def test_discarding_an_edited_capture_asks(browse, ctx):
-    r = save_capture(ctx.conn, ctx.data_root, ctx.fs, ctx.settings, CaptureDraft(content="Typed twice.", task="T000012"), NOW)
+    r = save_capture(ctx.conn, ctx.data_root, ctx.fs, ctx.settings, CaptureDraft(content="Typed twice.", task="T000012", files=[FileRow("Spec sheet", "https://example.com/spec", "the spec")]), NOW)
     body = notes_page.get(ctx.conn, "T000012").replace("Typed twice.", "Typed twice, reworded.")
     notes_page.put(ctx.conn, "T000012", body, NOW, by_owner=True)
     asked: list[str] = []

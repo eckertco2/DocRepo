@@ -125,7 +125,7 @@ def test_items_in_an_ordinary_capture(env):
     r = save(env, CaptureDraft(content="Markups finished.\n**closed, drawings sent to Mike for sign-off.", task="T000018", types={"note"}))
     m = Model(conn)
     assert m.task("T000018").state == "Closed" and m.task("T000018").current_status == "Drawings sent to Mike for sign-off."
-    assert m.captures[r.capture_id].title == "Markups finished" and r.meeting is None
+    assert r.capture_id is None and r.noted_on == "T000018" and r.meeting is None  # text alone: on the page (release 5.69)
     # A new task: its first line's @ and # fill its own fields, and the lines under it go under it.
     r = save(env, CaptureDraft(content="@Tom check the coupling alignment #Rigging plan\n- @Mike paint the guard rails by Friday",
                                task="T000001", types={"new_task"}, new_task=NewTaskFields()))

@@ -11,7 +11,7 @@ from datetime import datetime  # noqa: E402
 import pytest  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from docrepo import captures, tasks  # noqa: E402
+from docrepo import captures, notes_page, tasks  # noqa: E402
 from docrepo.config import Settings  # noqa: E402
 from docrepo.model import Model  # noqa: E402
 from docrepo.save import CaptureDraft, NewTaskFields, save_capture  # noqa: E402
@@ -36,9 +36,9 @@ def test_saving_adds_each_date_line_to_its_task(sample_root):
     assert key_dates_of(conn, "T000012") == [(None, "2026-11-25", "Prep done", False, True)]  # its # task's
     assert r.made.get("date") == 2 and "Made 2 key dates from its items." in r.message  # the one with no date isn't made
     log = conn.execute("SELECT field, via FROM status_log WHERE task = 'T000008' AND field = 'Key date'").fetchall()
-    assert [tuple(x) for x in log] == [("Key date", r.capture_id)]  # logged as the notes'
-    c = Model(conn).captures[r.capture_id]
-    assert "**key date, Dec 1 to 5 trial execution window, plant activity." in captures.read_content(root, c)  # the notes keep the line
+    # Text alone on a task is no capture (release 5.69): the date is logged as the capture window's, and the page keeps the line.
+    assert r.capture_id is None and [tuple(x) for x in log] == [("Key date", "Capture window")]
+    assert "**key date, Dec 1 to 5 trial execution window, plant activity." in notes_page.words(notes_page.get(conn, "T000008"))
     assert not any(x.item == "date" for x in Model(conn).captures.values())  # no capture of its own
 
 

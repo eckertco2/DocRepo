@@ -9,7 +9,6 @@ glides there, and the scroll keeps the caret in view as you type (the Qt sample'
 from __future__ import annotations
 
 from PySide6.QtCore import QEasingCurve, QEvent, QPoint, QPropertyAnimation, Qt, Signal
-from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QApplication, QFrame, QHBoxLayout, QLabel, QLayout, QMenu, QScrollArea, QToolButton, QVBoxLayout, QWidget
 
 from docrepo.ui import tokens
@@ -44,7 +43,7 @@ class FitPageView(PageView):
 class TaskPane(QScrollArea):
     """The task page's one scroll: ``top``, the Notes heading with its menu, ``notes``, and ``bottom``."""
 
-    #: A Notes menu choice: "fold", "unfold", "history" or "day_headings".
+    #: A Notes menu choice: "fold", "unfold" or "history".
     notes_menu = Signal(str)
 
     def __init__(self, css: str, margin: int) -> None:
@@ -83,17 +82,15 @@ class TaskPane(QScrollArea):
         self.saved.setFont(tokens.ui_font(tokens.CAPTION))
         self.menu_button = QToolButton(objectName="notesMenu")
         self.menu_button.setIcon(icon("more"))
-        self.menu_button.setToolTip("Notes: fold, the page's history, day headings")
+        self.menu_button.setToolTip("Notes: fold, and the page's history")
         self.menu_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.menu_button.setAutoRaise(True)
         menu = QMenu(self.menu_button)
         menu.addAction("Fold all headings", lambda: self.notes_menu.emit("fold"))
         menu.addAction("Unfold all", lambda: self.notes_menu.emit("unfold"))
+        # Release 5.69 retired "Day headings for new captures" (decision 119): new notes and captures always go under
+        # their day's heading, or a note under its own headings (the notes workspace plan's decision 345).
         menu.addSeparator()
-        self.day_action = QAction("Day headings for new captures", menu, checkable=True)
-        self.day_action.setToolTip("New captures go under a heading for their day, in date order")
-        self.day_action.triggered.connect(lambda: self.notes_menu.emit("day_headings"))
-        menu.addAction(self.day_action)
         menu.addAction("Page history…", lambda: self.notes_menu.emit("history"))
         self.menu_button.setMenu(menu)
         self.notes = NotesEdit()

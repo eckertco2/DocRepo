@@ -24,7 +24,7 @@ from docrepo.model import Model  # noqa: E402
 from docrepo.ui.browse_window import BrowseWindow  # noqa: E402
 from docrepo.ui.context import AppContext  # noqa: E402
 from docrepo.ui.state_menu import UNDO_MS, open_below, state_menu  # noqa: E402
-from docrepo.ui.tree_view import KEY_ROLE, STATE_ROLE  # noqa: E402
+from docrepo.ui.tree_view import KEY_ROLE, LINE_ROLE, ROW_ICON, STATE_ICONS, STATE_ROLE  # noqa: E402
 
 NOW = datetime(2026, 10, 8, 14, 10)
 INSTALLATION = "T000008"
@@ -134,27 +134,45 @@ def test_set_states_logs_as_the_browse_tool_with_no_capture(sample_root):
 
 
 # ---- the browse window's lists ----
-def test_a_task_rows_state_cell_is_a_button(browse):
+def icon_at(w: BrowseWindow, item) -> QPoint:
+    """The middle of a row's icon, before its title: in the new look, the state's button (release 5.78's decision L7)."""
+    rect = w.tree.visualRect(w.tree.indexFromItem(item, 0))
+    return QPoint(rect.left() + w.tree.cell_pad + 2 + ROW_ICON // 2, rect.center().y())
+
+
+def title_at(w: BrowseWindow, item) -> QPoint:
+    """A point on a row's title, after its icon."""
+    rect = w.tree.visualRect(w.tree.indexFromItem(item, 0))
+    return QPoint(rect.left() + w.tree.cell_pad + 2 + ROW_ICON + 30, rect.center().y())
+
+
+def in_sight(w: BrowseWindow, item) -> None:
+    parent = item.parent()
+    while parent is not None:  # its row in sight, under its open parents
+        parent.setExpanded(True)
+        parent = parent.parent()
+    w.tree.scrollToItem(item)
+    QApplication.processEvents()
+
+
+def test_a_task_rows_state_icon_is_a_button(browse):
+    """The new look has no State column (release 5.78): the state's icon before the title is the button."""
     browse.show_browse(view="tasks")
+    header = browse.tree.headerItem()
+    assert "State" not in [header.text(i) for i in range(browse.tree.columnCount())]
     item = row(browse, INSTALLATION)
-    assert item.data(1, STATE_ROLE) == INSTALLATION
-    assert item.toolTip(1).endswith("Click to change the state.")
+    assert item.data(0, STATE_ROLE) == INSTALLATION
+    line = item.data(0, LINE_ROLE)
+    assert line.icon_tip == states(browse, INSTALLATION)[0] and line.icon == STATE_ICONS[line.icon_tip][0]
     assert browse.tree.row_task(item) == INSTALLATION
 
 
 def test_a_click_opens_the_menu_and_doesnt_pick_the_row(browse):
     picking(browse, "Parked")
     item = row(browse, RIGGING)
-    parent = item.parent()
-    while parent is not None:  # its row in sight, under its open parents
-        parent.setExpanded(True)
-        parent = parent.parent()
-    browse.tree.scrollToItem(item)
-    QApplication.processEvents()
-    assert not browse.tree.isColumnHidden(1)
+    in_sight(browse, item)
     current = browse.tree.currentItem()
-    rect = browse.tree.visualRect(browse.tree.indexFromItem(item, 1))
-    QTest.mouseClick(browse.tree.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, rect.center())
+    QTest.mouseClick(browse.tree.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, icon_at(browse, item))
     assert browse.menus and browse.menus[0][0][:4] == ["Not started", "In progress", "Parked", "Closed"]
     assert states(browse, RIGGING) == ["Parked"]
     assert browse.tree.currentItem() is current or browse.tree.currentItem().data(0, KEY_ROLE) != ("task", RIGGING)
@@ -204,17 +222,23 @@ def test_every_task_rows_right_click_menu_has_state(browse):
     edits.add_to_today(browse.conn, browse.ctx.data_root, browse.ctx.fs, INSTALLATION, "", NOW)
     browse.refresh(render=False)
     browse.show_browse(view="today")
-    today_row = next(i for i in browse.tree.items() if i.data(0, KEY_ROLE) == ("task", INSTALLATION) and i.data(1, STATE_ROLE))
+    today_row = next(i for i in browse.tree.items() if i.data(0, KEY_ROLE) == ("task", INSTALLATION) and i.data(0, STATE_ROLE))
     menu = browse.tree.row_menu(today_row)
     assert labels(menu)[-1] == "State" and len(labels(menu)) > 1  # Today's own commands, then State
 
 
 def test_a_key_dates_row_isnt_a_state_button(browse):
+    """Only a row whose icon is its task's own state is a button: a key date's, a reminder's or a note's icon isn't."""
+    from docrepo import tasks
+
+    tasks.add_key_dates(browse.conn, INSTALLATION, [tasks.KeyDateRow("2026-10-09", None, "Crane on site")], at=NOW, via="Browse tool")
+    browse.refresh(render=False)
     browse.show_browse(view="due")
-    marked = [i for i in browse.tree.items() if i.data(1, STATE_ROLE)]
-    words = [i for i in browse.tree.items() if "Key date" in (i.data(1, Qt.ItemDataRole.UserRole + 1) or "")]
-    assert all(i.data(1, STATE_ROLE) is None for i in words)
-    assert all(i.data(1, Qt.ItemDataRole.UserRole + 1) not in ("", None) for i in marked)
+    lines = [(i, i.data(0, LINE_ROLE)) for i in browse.tree.items() if i.data(0, LINE_ROLE) is not None]
+    states_shown = {icon for icon, _ in STATE_ICONS.values()}
+    assert any(line.icon == "calendar" for _, line in lines)  # the key date due tomorrow has a row of its own
+    assert all(i.data(0, STATE_ROLE) is None for i, line in lines if line.icon not in states_shown)
+    assert all(line.icon in states_shown for i, line in lines if i.data(0, STATE_ROLE))
 
 
 # ---- the task page, the Priorities board and the timeline ----
@@ -283,20 +307,52 @@ def test_the_today_side_panels_rows(browse):
 
 def test_hovering_a_state_lights_it_and_shows_a_hand(browse):
     item = row(browse, INSTALLATION)
-    parent = item.parent()
-    while parent is not None:
-        parent.setExpanded(True)
-        parent = parent.parent()
-    QApplication.processEvents()
-    index = browse.tree.indexFromItem(item, 1)
-    move(browse.tree.viewport(), browse.tree.visualRect(index).center())
-    assert browse.tree.state_lit(index) and not browse.tree.state_lit(browse.tree.indexFromItem(item, 0))
+    in_sight(browse, item)
+    index = browse.tree.indexFromItem(item, 0)
+    move(browse.tree.viewport(), icon_at(browse, item))
+    assert browse.tree.state_lit(index)
     assert browse.tree.viewport().cursor().shape() == Qt.CursorShape.PointingHandCursor
-    move(browse.tree.viewport(), browse.tree.visualRect(browse.tree.indexFromItem(item, 0)).center())
+    move(browse.tree.viewport(), title_at(browse, item))  # the rest of the row is the row, not the button
     assert not browse.tree.state_lit(index)
+
+
+def test_a_click_on_the_title_picks_the_row_and_opens_no_menu(browse):
+    picking(browse, "Parked")
+    item = row(browse, RIGGING)
+    in_sight(browse, item)
+    was = states(browse, RIGGING)
+    QTest.mouseClick(browse.tree.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, title_at(browse, item))
+    assert not browse.menus and states(browse, RIGGING) == was
+    assert browse.tree.currentItem() is not None and browse.tree.currentItem().data(0, KEY_ROLE) == ("task", RIGGING)
 
 
 def move(widget, at: QPoint) -> None:
     """The mouse moving to a point, with no button down, as the offscreen platform doesn't send it for QTest.mouseMove."""
     QApplication.sendEvent(widget, QMouseEvent(QEvent.Type.MouseMove, QPointF(at), QPointF(widget.mapToGlobal(at)), Qt.MouseButton.NoButton,
                                                Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier))
+
+
+def test_the_classic_look_keeps_its_state_cell_as_the_button(qapp, sample_root):
+    """The Classic look keeps its State column (release 5.78), so the cell is the button there, as 5.76 built it."""
+    from docrepo.ui.look import configure
+
+    conn, root, fs = sample_root
+    configure("classic", False)
+    try:
+        w = BrowseWindow(AppContext(conn, root, fs, Settings(me="P001"), now=lambda: NOW), None)
+        w.menus = []
+        w.show_browse(view="tasks")
+        w.resize(1600, 900)
+        QApplication.processEvents()
+        header = w.tree.headerItem()
+        column = [header.text(i) for i in range(w.tree.columnCount())].index("State")
+        item = row(w, INSTALLATION)
+        assert item.data(column, STATE_ROLE) == INSTALLATION and item.data(0, STATE_ROLE) is None
+        assert item.toolTip(column).endswith("Click to change the state.")
+        picking(w, "Parked")
+        w.tree.open_state_menu(item, column)
+        assert w.menus and states(w, INSTALLATION) == ["Parked"]
+        w.hide()
+        w.deleteLater()
+    finally:
+        configure("new", False)

@@ -24,7 +24,7 @@ from docrepo.ui.look import LOOK, set_hints  # noqa: E402
 from docrepo.ui.priorities_view import COLUMN_MIN  # noqa: E402
 from docrepo.ui.task_pane import TaskPane  # noqa: E402
 from docrepo.ui.task_view import FOOT  # noqa: E402
-from docrepo.ui.tree_view import ACTIONS_ROLE, KEY_ROLE, RowTree, with_actions  # noqa: E402
+from docrepo.ui.tree_view import ACTIONS_ROLE, KEY_ROLE, Line, RowTree, with_actions  # noqa: E402
 from docrepo.ui.widgets import DropButton, ElidedCheck, ElidedLabel, ViewStack, ask  # noqa: E402
 
 NOW = datetime(2026, 10, 8, 14, 10)
@@ -155,21 +155,25 @@ def test_the_agenda_panel_keeps_its_count_whatever_the_meetings_name(ctx):
 
 
 # ---- V3: quiet the chrome ----
-def test_row_actions_come_with_the_mouse_and_the_current_row_and_go_with_them(qapp):
+def test_row_actions_come_with_the_mouse_and_go_with_it(qapp):
+    """Release 5.78 (decision L5): icon buttons at the row's right end, over its date, only while the mouse is on the row. The
+    current row keeps its date in view; its actions are on its right-click menu and their keys."""
     t = tree()
     first, second = t.topLevelItem(0), t.topLevelItem(1)
     t._hover, t._strips = None, []
     t._sync_strips()
     assert t._strips == []  # none at rest: a list isn't a column of links
     strip = t.action_strip(first)
-    assert [b.text() for b in strip.findChildren(QPushButton)] == ["Done", "Remove"]
-    assert strip.geometry().right() < t.columnWidth(0)  # over the end of the title's column, so State and Due stay in view
+    buttons = strip.findChildren(QPushButton)
+    assert [b.accessibleName() for b in buttons] == ["Done", "Remove"] and all(b.text() == "" and not b.icon().isNull() for b in buttons)
+    assert buttons[0].toolTip().startswith("Done")
+    assert strip.geometry().right() == t.viewport().width() - 1  # at the row's end, over its date
     t.setCurrentItem(second)
     t._sync_strips()
-    assert {id(s.item) for s in t._strips} == {id(first), id(second)}
+    assert [s.item for s in t._strips] == [first]  # the current row shows its date
     t._hover = None
     t._sync_strips()
-    assert [s.item for s in t._strips] == [second]
+    assert t._strips == []
     t.begin()
     assert t._strips == [] and t._hover is None  # the rows have gone, and their strips with them
 
@@ -181,26 +185,24 @@ def test_a_rows_actions_are_on_its_right_click_menu_too(qapp, monkeypatch):
     assert with_actions(["Title"], [0], 56) == (["Title"], [0])  # no column for them in the new look
 
 
-def test_a_current_rows_strip_never_covers_its_words(qapp):
+def test_a_hovered_rows_words_stop_short_of_its_strip(qapp):
+    """Release 5.78: the title is never under the actions. The painter ends the row's words where the strip starts."""
     t = RowTree()
-    t.set_columns(["Title", "State"], [0, 96])
+    t.set_columns(["Title", "Due"], [0, 96])
     t.resize(420, 200)
     t.begin()
-    long_row = t.add_row(None, ("task", "T1"), ["A title long enough to run the whole way across this column and on", ""])
-    t.set_actions(long_row, [("Discussed", lambda: None, ""), ("Remove", lambda: None, "")])
-    short_row = t.add_row(None, ("task", "T2"), ["Short", ""])
-    t.set_actions(short_row, [("Done", lambda: None, "")])
+    long_row = t.add_row(None, ("task", "T1"), [Line("A title long enough to run the whole way across this column and on"), ""])
+    t.set_actions(long_row, [("Discussed", lambda: None, ""), ("Remove", lambda: None, ""), ("Edit", lambda: None, ""), ("Note", lambda: None, "")])
     t.end()
     t.doItemsLayout()
     t.show()
     QApplication.processEvents()
-    t._hover = None
-    t.setCurrentItem(long_row)
+    t._hover = None  # wherever the pointer is on this screen
     t._sync_strips()
-    assert not any(s.isVisibleTo(t.viewport()) for s in t._strips)  # hover still shows them
-    t.setCurrentItem(short_row)
-    t._sync_strips()
-    assert any(s.isVisibleTo(t.viewport()) for s in t._strips)
+    assert t.strip_left(long_row) is None  # at rest, the words have the row
+    strip = t.action_strip(long_row)
+    assert t.strip_left(long_row) == strip.geometry().left() == t.viewport().width() - (2 * 6 + 4 * 28)
+    assert strip.geometry().left() < t.columnWidth(0)  # wider than the date's column: the words make room
     t.hide()
 
 
@@ -414,8 +416,11 @@ def test_a_new_data_roots_task_tree_says_what_to_do(qapp, tmp_path, fs, data_roo
 def test_rows_with_no_key_have_no_column_headings(browse):
     browse.set_view("discarded")
     assert browse.tree.isHeaderHidden() == (not any(k is not None for k in browse.tree.keys()))
-    browse.set_view("tasks")
-    assert not browse.tree.isHeaderHidden()
+    browse.set_view("people")
+    assert not browse.tree.isHeaderHidden()  # People compares attributes, so its headings stay (decision L6)
+    for view in ("tasks", "today", "unfiled", "due"):  # where the cells say what they are, none (decision L6)
+        browse.set_view(view)
+        assert browse.tree.isHeaderHidden(), view
 
 
 def test_a_row_key_stays_on_its_item(qapp):

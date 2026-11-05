@@ -175,6 +175,13 @@ def path_text(m: Model, task_id: str) -> str:
     return " › ".join(m.task(x).title for x in m.chains_of(task_id)[0][:-1])
 
 
+def project_text(m: Model, task_id: str) -> str:
+    """A row's context on Today (the list rows review, decision L3): the task's project, its top-level task, or nothing when
+    it is one. The whole path is in the row's tooltip."""
+    chain = m.chains_of(task_id)[0]
+    return m.task(chain[0]).title if len(chain) > 1 else ""
+
+
 def full_path(m: Model, task_id: str) -> str:
     return " › ".join(m.task(x).title for x in m.chains_of(task_id)[0])
 
@@ -490,7 +497,7 @@ def unfiled_rows(m: Model, today: date) -> list[CaptureRow]:
     rows = []
     for c in reversed(m.unfiled_captures()):
         n = len(c.documents)
-        sub = c.id + (f" · {n} document{'s' if n > 1 else ''}" if n else "")
+        sub = f"{n} document{'s' if n > 1 else ''}" if n else ""  # no ID: rows don't show one (decision L4)
         saved = c.saved[11:16] if c.saved[:10] == today.isoformat() else short(to_date(c.saved), today)
         rows.append(CaptureRow(c.id, c.title, sub, SOURCE_NAMES.get(c.source, c.source), saved))
     return rows
@@ -513,9 +520,9 @@ def discarded_rows(m: Model, today: date, others: Iterable[tuple[str, str, str, 
     def when(at: str) -> str:
         return at[11:16] if at[:10] == today.isoformat() else short(to_date(at), today)
 
-    items = [(t.discarded or "", DiscardedRow("task", t.id, t.title, f"Task {t.id} · {path_text(m, t.id) or 'Top-level task'}",
-                                              t.discard_reason or "", when(t.discarded or ""))) for t in m.discarded_tasks()]
-    items += [(c.discarded or "", DiscardedRow("capture", c.id, c.title, f"Capture {c.id} · saved {short(to_date(c.saved), today)}",
+    items = [(t.discarded or "", DiscardedRow("task", t.id, t.title, path_text(m, t.id), t.discard_reason or "", when(t.discarded or "")))
+             for t in m.discarded_tasks()]  # no IDs (decision L4): the row's icon says what it is, and its tooltip has the ID
+    items += [(c.discarded or "", DiscardedRow("capture", c.id, c.title, f"saved {short(to_date(c.saved), today)}",
                                                c.discard_reason or "", when(c.discarded or ""))) for c in m.discarded_captures()]
     items += [(at, DiscardedRow(kind, item, title, sub, reason, when(at))) for kind, item, title, sub, reason, at in others]
     return [row for _, row in sorted(items, key=lambda x: x[0], reverse=True)]

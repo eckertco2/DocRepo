@@ -53,9 +53,8 @@ from docrepo.ui.icons import icon, icon_size
 from docrepo.ui.page_view import PageView
 from docrepo.ui.state_menu import UNDO_MS, UndoButton
 from docrepo.ui.style import page_css, style_sheet
-from docrepo.ui.task_picker import path_text
 from docrepo.ui.wheel_window import animations_on
-from docrepo.views import due_cell, since_text, today_due_entries, today_groups
+from docrepo.views import due_cell, project_text, since_text, today_due_entries, today_groups
 
 if TYPE_CHECKING:
     from docrepo.ui.browse_window import BrowseWindow
@@ -461,11 +460,13 @@ class TodayPanel(QWidget):
             for a in items:
                 t = m.tasks.get(a.subject) if a.subject else None
                 since = f"since {since_text(a.added, today)} · " if a.added[:10] < today.isoformat() else ""
-                where = (path_text(m, t.id) or "Top-level task") if t else "A note"
+                where = project_text(m, t.id) if t else ""  # its project (the list rows review, decision L3)
                 cell = due_cell(t, today) if t else None
-                # The state is a button of its own now, not words in the second line (release 5.76).
+                # The state is a button of its own (release 5.76), not words in the second line; the rest is joined as
+                # the list rows review joins quiet words (release 5.78).
                 state = "" if t is None or t.discarded else t.state
-                row = _Row(self, a.id, t.id if t else None, t.title if t else a.note, f"{since}{where}", cell.text if cell else "", state)
+                row = _Row(self, a.id, t.id if t else None, t.title if t else a.note, " · ".join(x for x in (since.rstrip(" ·"), where) if x),
+                           cell.text if cell else "", state)
                 self.rows.append(row)
                 self._add(row)
         if not total:

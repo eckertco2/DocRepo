@@ -6,7 +6,7 @@ from datetime import datetime
 from docrepo import search, tasks
 from docrepo.config import Settings
 from docrepo.model import Model
-from docrepo.save import CaptureDraft, save_capture
+from docrepo.save import CaptureDraft, FileRow, save_capture
 
 
 def found(conn, query):
@@ -37,9 +37,12 @@ def test_results_carry_the_text_around_the_match(sample_root):
 
 def test_a_saved_capture_is_searchable_at_once(sample_root):
     conn, root, fs = sample_root
-    save_capture(conn, root, fs, Settings(me="P001"), CaptureDraft(content="The flange gasket is spiral wound.", task="T000008"),
+    save_capture(conn, root, fs, Settings(me="P001"), CaptureDraft(content="The flange gasket is spiral wound.", task="T000008", files=[FileRow("Spec sheet", "https://example.com/spec", "the spec")]),
                  datetime(2026, 10, 8, 15, 0))
     assert found(conn, "spiral wound") == [("Capture", "C000026")]
+    # Text alone on a task is no capture (release 5.69): it's found on its notes page.
+    save_capture(conn, root, fs, Settings(me="P001"), CaptureDraft(content="The bolts are B7 studs.", task="T000008"), datetime(2026, 10, 8, 15, 5))
+    assert found(conn, "B7 studs") == [("Notes", "T000008")]
 
 
 def test_rebuild_and_needs_rebuild(sample_root):

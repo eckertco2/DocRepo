@@ -30,6 +30,9 @@ class AppContext:
     wheel_palette: Callable[[], list] = lambda: []
     #: Told when Today may have changed, so the Today side panel draws it again (release 5.43).
     today_changed: Callable[[], None] = lambda: None
+    #: Saves every notes page open with typing not yet saved: the capture window asks before Save, as a note that's no
+    #: capture goes straight onto its page, which only a capture's block would otherwise be merged into (release 5.69).
+    save_open_pages: Callable[[], None] = lambda: None
     #: The Model last loaded, and the database's state when it was (``model``).
     _model: Model | None = field(default=None, init=False, repr=False)
     _model_at: tuple[int, int] | None = field(default=None, init=False, repr=False)

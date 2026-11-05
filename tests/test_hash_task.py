@@ -93,11 +93,11 @@ def test_a_note_on_the_captures_own_task_makes_no_item(env):
 def test_saving_a_note_on_its_own_task(env):
     conn = env[0]
     r = save(env, CaptureDraft(content="#Installation\nCrane booked for Tuesday.", task=INSTALLATION))
-    assert r.items == [] and r.message == f"Saved {r.capture_id}. Added to the raw text log of Installation."
-    assert "#[Installation](T000008)\nCrane booked for Tuesday." in capture_md(env, r.capture_id)  # capture.md keeps it
+    # Text alone on a task is no capture (release 5.69): it goes on the page, without the heading that names only its task.
+    assert r.items == [] and r.capture_id is None and r.message == "Added to the notes of Installation, under Thu 8 Oct 2026."
     page = notes_page.get(conn, INSTALLATION)
-    block = page[page.index(f"(capture:{r.capture_id})"):]
-    assert "Crane booked for Tuesday." in block and "#Installation" not in block and "Installation](T" not in block  # the heading is left out
+    day = page[page.index("# Thu 8 Oct 2026"):]
+    assert "Crane booked for Tuesday." in day and "#Installation" not in day and "Installation](T" not in day
     assert notes_page.own_heading("#[Installation](T000008):", INSTALLATION)
     assert not notes_page.own_heading("#[Installation](T000008) #[Rigging plan](T000012)", INSTALLATION)
     assert not notes_page.own_heading("#[Installation](T000008) crane", INSTALLATION)
@@ -141,9 +141,11 @@ def test_what_isnt_split(env):
     conn = env[0]
     names = names_of(conn)
     text = "#Installation\nCrane booked.\n\n#Rigging plan\nSling approved."
-    # A task picked: one capture, with the other # task's lines a note item on it, as before.
+    # A task picked: no split. The text goes on its page (release 5.69), and the other # task's lines are a note item on it.
     r = save(env, CaptureDraft(content=text, task=INSTALLATION))
-    assert not r.parts and Model(conn).captures[r.capture_id].task == INSTALLATION and r.made == {"note": 1}
+    assert not r.parts and r.capture_id is None and r.noted_on == INSTALLATION and r.made == {"note": 1}
+    item = Model(conn).captures[r.items[0]]
+    assert (item.task, item.from_notes) == (RIGGING, None)
     # A new task: its own line's # tasks are its parents; the rest are items.
     r = save(env, CaptureDraft(content="Order seals\n" + text, types={"new_task"}))
     assert not r.parts and r.created_task
@@ -161,16 +163,17 @@ def test_a_split_drops_empty_sections_and_keeps_unticked_items(env):
     sam = next(it for it in whole.items if "scaffolding" in it.text)
     r = save(env, CaptureDraft(content=text, item_overrides={sam.key: {"off": True}}))
     m = Model(conn)
-    # Reactor impeller upgrade's heading has nothing under it, so it makes no capture; nothing is under no # task either.
-    assert [m.captures[p.capture_id].task for p in r.parts] == [INSTALLATION, RIGGING]
+    # Reactor impeller upgrade's heading has nothing under it, so it makes no part; nothing is under no # task either. Each
+    # part is text alone, so it goes on its task's page (release 5.69).
+    assert [(p.capture_id, p.noted_on) for p in r.parts] == [(None, INSTALLATION), (None, RIGGING)]
+    assert r.message.startswith("Added to the notes of Installation and Rigging plan, one part per #task.")
     assert r.made == {"task": 1}  # Sam's card was unticked in the window, and stays so in Installation's capture
     assert [m.tasks[m.captures[x].created_task].title for x in r.items] == ["Check the rigging"]
 
 
 def test_parts_of_one_task_are_joined(env):
     r = save(env, CaptureDraft(content="#Installation\nCrane booked.\n#Rigging plan\nSling approved.\n#Installation\nGuard rails fitted."))
-    first = capture_md(env, r.parts[0].capture_id)
-    assert "Crane booked.\n\n#[Installation](T000008)\nGuard rails fitted." in first and len(r.parts) == 2
+    assert "Crane booked.\n\nGuard rails fitted." in notes_page.get(env[0], INSTALLATION) and len(r.parts) == 2
 
 
 # ---- the capture window ----
@@ -216,13 +219,13 @@ def test_one_hash_task_fills_the_task_picker(window):
     type_text(window, "#Installation\nCrane booked for Tuesday.")
     assert window.task == INSTALLATION and window.task_auto
     assert window.task_button.text().endswith("Installation  (from #)")
-    assert "adds this to the raw text log of <b>Installation</b>" in window.does.text()
+    assert "adds this to the notes of <b>Installation</b>, under <b>Thu 8 Oct 2026</b>" in window.does.text()  # release 5.69
     assert window.item_cards.cards == []  # the heading's lines are the capture's own note, not an item
     type_text(window, "#Rigging plan\nSling approved.")  # the # changed: the picker follows
     assert window.task == RIGGING
     type_text(window, "#Installation\nCrane booked.\n#Rigging plan\nSling approved.")  # a second # task: no task, a split
-    assert window.task is None and window.task_button.text() == "None: a capture per #task"
-    assert window.does.text() == "Save makes 2 captures, one per #task: a note on <b>Installation</b> and a note on <b>Rigging plan</b>."
+    assert window.task is None and window.task_button.text() == "None: split by #task"
+    assert window.does.text() == "Save splits this by #task: a part on the notes of <b>Installation</b> and a part on the notes of <b>Rigging plan</b>."
     type_text(window, "Crane booked.")  # the # gone: no task
     assert window.task is None and not window.task_auto
     window.save()
@@ -262,7 +265,7 @@ def test_files_go_with_the_section_the_cursor_is_in(window, tmp_path):
     window.add_paths([str(b)])
     assert [e.row.section for e in window.files] == [INSTALLATION, RIGGING]
     assert [e.goes.text() for e in window.files] == ["→ Installation", "→ Rigging plan"] and not window.files[0].goes.isHidden()
-    assert window.does.text().startswith("Save makes 2 captures, one per #task: a note on <b>Installation</b> with 1 file and a note on "
+    assert window.does.text().startswith("Save splits this by #task: a note on <b>Installation</b> with 1 file and a note on "
                                          "<b>Rigging plan</b> with 1 file.")
     window._set_goes(window.files[1], None)  # moved by hand to the unfiled capture
     assert window.files[1].goes.text() == "→ Unfiled" and "an unfiled note with 1 file" in window.does.text()

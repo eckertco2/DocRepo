@@ -112,7 +112,7 @@ def test_view_counts(m):
 def test_unfiled_rows_newest_first(m):
     rows = views.unfiled_rows(m, TODAY)
     assert [(r.id, r.source, r.saved) for r in rows] == [("C000023", "File path", "13:15"), ("C000022", "Typed", "11:30"), ("C000021", "Email", "10:05")]
-    assert rows[2].sub == "C000021 · 1 document"
+    assert rows[2].sub == "1 document" and rows[1].sub == ""  # no ID: rows don't show one (release 5.78, decision L4)
 
 
 def test_agenda_groups_and_markdown(m):
