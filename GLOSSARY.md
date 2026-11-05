@@ -47,7 +47,7 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Checklist summary**: every checklist line on a task's notes page, shown again at the top of its notes and in Edit task; each row is the line itself, so a change in either place changes both.
 - **Picture** and **attachment** (on a notes page): a list item that shows one of the task's files, as the picture itself or as a link to the file (release 5.27), with its description as the list item under it. Saving the page keeps that description as the file's.
 - **Made on the page**: said of a capture made by pasting a picture or dropping a file on a notes page (release 5.27). It has no caption: its picture or attachment is its block.
-- **Day heading**: a heading on a notes page that reads as a date. With day headings on for a task, its new captures go under the heading for their day.
+- **Day heading**: a heading on a notes page that reads as a date. New captures go under the heading for their day, and so does a note's text under none of its own headings (since release 5.69 on every task; before it, with day headings on for the task).
 - **Task description**: the short "what it is" of a task. A task made from a capture takes the first line of its content text; the whole text goes on its notes page (release 5.25).
 - **Label**: a category on a task, such as Safety. A task can have several, and subtasks can inherit them.
 - **Parent label**: a label with labels under it (its **sublabels**), such as Production line over Line 1 and Line 2. It's a heading: tasks get its sublabels, not it. Labels nest one level only.

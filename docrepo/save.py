@@ -243,6 +243,10 @@ class SaveResult:
     filed_emails: list[tuple[EmailItem, str]] = field(default_factory=list)
     #: The lines whose items couldn't be made: they stay in the notes, as written (release 5.38, decision 205).
     unused: int = 0
+    #: A note on a task's page, which is no capture (release 5.69, the notes workspace plan's decision 345): the task, and
+    #: the headings it went under (the day's, or the page's own with the note's headings' words).
+    noted_on: str | None = None
+    noted_under: list[str] = field(default_factory=list)
 
 
 def meeting_case(model: Model, task_id: str | None) -> str:
@@ -421,7 +425,12 @@ def _save_split(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings:
     kept = [(p, r) for p, r in zip(parts, results) if r.capture_id]
     said = [f"{r.capture_id}, {'a note on ' + model.task(p.task).title if p.task else 'an unfiled note'}"
             + (f" with {held}" if (held := held_text(p.files)) else "") for p, r in kept]
-    text = f"Saved {len(kept)} capture{'s' if len(kept) != 1 else ''}, one per #task: {'; '.join(said)}."
+    # A part of text alone is no capture: it's on its task's page (release 5.69).
+    noted = [model.task(r.noted_on).title for r in results if r.noted_on]
+    out.noted_on = next((r.noted_on for r in results if r.noted_on), None)
+    text = " ".join(
+        [f"Added to the notes of {_and_list(noted)}, one part per #task."] * bool(noted)
+        + [f"Saved {len(kept)} capture{'s' if len(kept) != 1 else ''}{', one per #task' if not noted else ''}: {'; '.join(said)}."] * bool(kept))
     if out.agenda_targets:
         others = [model.target_name(x) for x in out.agenda_targets if x != TODAY]
         text += " Each is on " + " and ".join(["Today"] * (TODAY in out.agenda_targets) + [f"the agenda of {_and_list(others)}"] * bool(others)) + "."
@@ -433,7 +442,7 @@ def _save_split(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings:
     if out.added_people:
         text += f" Added {' and '.join(out.added_people)} to people."
     out.message = text
-    log.info("note split by #task into %s", ", ".join(r.capture_id or "(none kept)" for r in results))
+    log.info("note split by #task into %s", ", ".join(r.capture_id or (f"{r.noted_on}'s page" if r.noted_on else "(none kept)") for r in results))
     return out
 
 
@@ -484,7 +493,12 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
     task_words = "\n\n".join([items.words(own_words, names)] * bool(own_words) + [e.text() for e in emails])
     summary = draft.summary.strip()
     targets = list(dict.fromkeys(draft.agenda)) if draft.agenda_shown() else []
-    keep = bool(content or draft.files or summary) and not draft.from_capture
+    # A note on a task, of text alone, is no capture (release 5.69, the notes workspace plan's decisions 341 and 345): its
+    # text goes on the task's page, and its items are made as before. A file, an email, a link or a summary makes it a
+    # capture still, a record of what arrived; so do an update, a new task and meeting notes.
+    page_note = (is_note and not is_new and not is_upd and not draft.meeting and bool(t) and bool(content) and not draft.files
+                 and not summary and not draft.page_made and not draft.from_capture)
+    keep = bool(content or draft.files or summary) and not draft.from_capture and not page_note
     when, day = stamp(at), at.date().isoformat()
     source_capture = Model(conn).captures.get(draft.from_capture) if draft.from_capture else None
     if draft.from_capture and source_capture is None:
@@ -629,9 +643,10 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
         item_files: list[tuple[str, str, bool]] = []  # (item capture, its block, whether it's markup)
         made: dict[str, int] = {}
         unused = 0
-        if capture_id and reading:
-            item_files, made, unused = _save_items(conn, settings, reading, names, content, formatted, capture_id, created or t, when, at, person,
-                                                   home_is_new=bool(created or meeting_made))
+        if (capture_id or page_note) and reading:
+            item_files, made, unused = _save_items(conn, settings, reading, names, content, formatted, via, capture_id, created or t, when, at,
+                                                   person, home_is_new=bool(created or meeting_made))
+        noted_under = edits.add_note(conn, t, items.store(content, names, formatted), formatted, at) if page_note else []
         # Meeting notes: the agenda items the notes worked through close as Discussed.
         discussed = 0
         if agenda_task and capture_id:
@@ -642,27 +657,31 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
 
     result = SaveResult(capture_id, created, t if is_upd else None, changes, added_people, "", agenda_targets=targets,
                         filed_capture=source_capture.id if source_capture else None, picked_task=draft.task,
-                        meeting=t if draft.meeting else None, items=[cid for cid, _, _ in item_files], made=made, discussed=discussed, unused=unused)
-    if capture_id:
+                        meeting=t if draft.meeting else None, items=[cid for cid, _, _ in item_files], made=made, discussed=discussed, unused=unused,
+                        noted_on=t if page_note else None, noted_under=noted_under)
+    if capture_id or item_files:
         model = Model(conn)
         if names.people != (now := _parse_people(model, settings)):  # someone was added: their @ is kept with their ID too
             names = items.names_of(model, now, draft.refs)
             full_content = "\n\n".join([items.store(content, names, formatted)] * bool(content)
                                        + [markup.escape(e.text()) if formatted else e.text() for e in emails])
-        _write_files(conn, data_root, fs, settings, capture_id, full_content, emails, documents, copies, created or t, result)
-        filed = model.capture_tasks(model.captures[capture_id])  # the task the capture's page is on, a new task first
-        result.filed_emails = [(e, filed[0]) for e in emails] if filed else []
+        if capture_id:
+            _write_files(conn, data_root, fs, settings, capture_id, full_content, emails, documents, copies, created or t, result)
+            filed = model.capture_tasks(model.captures[capture_id])  # the task the capture's page is on, a new task first
+            result.filed_emails = [(e, filed[0]) for e in emails] if filed else []
         for cid, block, block_formatted in item_files:
             try:
                 fs.makedirs(captures.capture_folder(data_root, cid, model.captures[cid].saved))
                 captures.write_capture_md(fs, data_root, model, cid, items.store(block, names, block_formatted))
             except OSError as e:
                 result.problems.append(f"{cid}'s capture.md couldn't be written ({type(e).__name__}).")
-        search.index_items(conn, data_root, captures=[capture_id, *result.items], documents=[d for d, _, _ in documents])
-        # The notes page (release 5.25): the capture's block on its tasks' pages, and each item's on its own task's.
+        search.index_items(conn, data_root, captures=[*([capture_id] if capture_id else []), *result.items], documents=[d for d, _, _ in documents])
+        # The notes page (release 5.25): the capture's block on its tasks' pages, and each item's on its own task's. A
+        # note that's no capture is on its page already (release 5.69).
         typed = items.store(content, names, formatted) if content else ""
         if not draft.page_made:
-            edits.add_to_pages(conn, data_root, at, [(capture_id, typed), *((cid, None) for cid in result.items)], result.problems)
+            edits.add_to_pages(conn, data_root, at, [*([(capture_id, typed)] if capture_id else []), *((cid, None) for cid in result.items)],
+                               result.problems)
     if source_capture and created:
         edits.rewrite_capture_md(conn, data_root, fs, source_capture.id, source_content, result.problems)
         edits.copy_files(conn, data_root, fs, created, filed_copies, result.problems)
@@ -691,13 +710,14 @@ def first_line(text: str) -> str:
 
 
 def _save_items(conn: sqlite3.Connection, settings: Settings, reading: items.Reading, names: items.Names, content: str, formatted: bool,
-                notes_id: str, home: str | None, when: str, at: datetime, person: Callable[[Who], str],
+                notes_id: str, from_notes: str | None, home: str | None, when: str, at: datetime, person: Callable[[Who], str],
                 home_is_new: bool = False) -> tuple[list[tuple[str, str, bool]], dict[str, int], int]:
-    """Each ticked item as a small capture of its own, linked to the notes (release 5.8). A task item makes its task,
-    under the capture's task (or meeting, or new task) and its # tasks; a note, an update or a decision is filed to each
-    of its tasks. A parameter (release 5.38), a key date among them, fills in or adds to each of its tasks, logged as the
-    notes', with no capture of its own: its line stays in the notes. Returns each item's capture with its block as written
-    (and whether that's markup), how many of each kind were made, and how many lines couldn't be used."""
+    """Each ticked item as a small capture of its own, linked to the notes (release 5.8): ``from_notes``, the notes'
+    capture, or None for a note on a task's page that's no capture (release 5.69). A task item makes its task, under the
+    capture's task (or meeting, or new task) and its # tasks; a note, an update or a decision is filed to each of its
+    tasks. A parameter (release 5.38), a key date among them, fills in or adds to each of its tasks, logged as
+    ``notes_id``'s, with no capture of its own: its line stays in the notes. Returns each item's capture with its block as
+    written (and whether that's markup), how many of each kind were made, and how many lines couldn't be used."""
     lines = content.split("\n")
     files: list[tuple[str, str, bool]] = []
     made: dict[str, int] = {}
@@ -743,7 +763,7 @@ def _save_items(conn: sqlite3.Connection, settings: Settings, reading: items.Rea
                 assignee_hours=float(it.assignee_hours) if it.assignee_hours else None, labels=it.labels, plant_event=it.plant_event)
             item_task[it.key] = task_id
             captures.add_capture(conn, capture_id=cid, saved=when, source="typed", types=["new_task"], title=title, task=where[0] if where else None,
-                                 created_task=task_id, formatted=block_formatted, from_notes=notes_id, item="task")
+                                 created_task=task_id, formatted=block_formatted, from_notes=from_notes, item="task")
             files.append((cid, text, block_formatted))
         else:
             for task_id in where:
@@ -754,7 +774,7 @@ def _save_items(conn: sqlite3.Connection, settings: Settings, reading: items.Rea
                         changes["current_status"] = it.text
                     tasks.update_task(conn, settings, task_id, at=at, via=cid, **changes)
                 captures.add_capture(conn, capture_id=cid, saved=when, source="typed", types=["update" if it.kind == "update" else "note"],
-                                     title=title, task=task_id, formatted=block_formatted, from_notes=notes_id, item=it.kind)
+                                     title=title, task=task_id, formatted=block_formatted, from_notes=from_notes, item=it.kind)
                 files.append((cid, text, block_formatted))
         made[it.kind] = made.get(it.kind, 0) + 1
     return files, {k: made[k] for k in items.KIND_NAMES if k in made}, unused
@@ -948,7 +968,10 @@ def _message(conn: sqlite3.Connection, draft: CaptureDraft, r: SaveResult, targe
     if r.updated_task and t:
         n = len(r.changes)
         bits.append(f"{n} change{'s' if n != 1 else ''} in the status log of {t.title}." if n else f"Added to the status log of {t.title}." if r.capture_id else "")
-    if "note" in draft.types and not r.created_task and not r.updated_task and not r.meeting:
+    if r.noted_on:  # a note that's no capture (release 5.69)
+        page = model.task(r.noted_on).title
+        bits.append(f"Added to the notes of {page}, under {_and_list(r.noted_under)}." if r.noted_under else f"Added to the notes of {page}.")
+    elif "note" in draft.types and not r.created_task and not r.updated_task and not r.meeting:
         bits.append(f"Added to the raw text log of {t.title}." if t else "" if targets else "Kept as an unfiled capture, listed under Unfiled.")
     if targets:
         others = [model.target_name(x) for x in targets if x != TODAY]
@@ -979,7 +1002,9 @@ def _log_line(draft: CaptureDraft, r: SaveResult, targets: list[str], documents:
         parts.append(f"new task {r.created_task}" + (f" under {draft.task}" if draft.task else ""))
     if r.updated_task:
         parts.append(f"update to {r.updated_task}, {len(r.changes)} changes")
-    if "note" in draft.types and draft.task and not r.created_task and not r.updated_task:
+    if r.noted_on:
+        parts.append(f"note on {r.noted_on}'s notes page, no capture")
+    elif "note" in draft.types and draft.task and not r.created_task and not r.updated_task:
         parts.append(f"raw text log of {draft.task}")
     if targets:
         parts.append(f"agenda items for {', '.join(targets)}")

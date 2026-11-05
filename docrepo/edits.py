@@ -78,6 +78,22 @@ def add_to_pages(conn: sqlite3.Connection, data_root: Path, at: datetime, added:
     return changed
 
 
+def add_note(conn: sqlite3.Connection, task_id: str, typed: str, formatted: bool, at: datetime) -> list[str]:
+    """A note from the capture window on its task's page, as no capture (release 5.69, the notes workspace plan's
+    decisions 341 and 345): under the page's headings with the same words as its own, or under the day's heading
+    (``notes_page.place_note``). It's the owner's own edit, so the day's version counts in Activity's Notes edited, and
+    the page is indexed for search. ``typed`` is the text as capture.md would keep it. It joins the caller's
+    transaction, so a save that fails keeps nothing and the window keeps the text. Returns the headings it went under."""
+    lines = notes_page.note_markup(typed, formatted, own=task_id)
+    if not lines:
+        return []
+    with transaction(conn):
+        page, under = notes_page.place_note(notes_page.get(conn, task_id), lines, at.date())
+        notes_page.put(conn, task_id, page, at, by_owner=True)
+        search.index_pages(conn, [task_id])
+    return under
+
+
 def save_page(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, task_id: str, body: str, at: datetime) -> Outcome:
     """The owner's edit of a task's notes page, saved as they type (decision 103): docs.db, the day's version, the
     search index and the task's Task.md. Nothing goes into the status log (decision 90)."""
@@ -386,10 +402,7 @@ def _edit(conn: sqlite3.Connection, settings: Settings, task_id: str, at: dateti
     priority = values.pop("priority", None)
     follow = values.pop("follow", None)
     leave = values.pop("leave", ())
-    day_headings = values.pop("day_headings", "unset")  # decision 119: a setting of the page, not logged
     with transaction(conn):
-        if day_headings != "unset":
-            conn.execute("UPDATE tasks SET day_headings = ? WHERE id = ?", (None if day_headings is None else int(day_headings), task_id))
         t = tasks.get_task(conn, task_id)
         if values.get("start") == start_of(t).isoformat() and not t.start:
             values.pop("start")

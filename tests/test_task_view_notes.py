@@ -320,12 +320,11 @@ def test_the_whole_frame_comes_with_it(view):
     assert "- [ ] Book the crane" in notes.page() and len(notes.checklist_blocks()) == 1 and view.pane.summary.isVisibleTo(view.pane)
 
 
-def test_day_headings_and_page_history_answer_in_this_window(view, browse):
+def test_the_notes_menu_in_this_window_has_no_day_headings_switch(view, browse):
+    """Release 5.69: every page has day headings, so the switch is gone from the Notes menu here too."""
     on_page(view)
-    view.pane.day_action.setChecked(True)
-    view.pane.notes_menu.emit("day_headings")
-    assert Model(view.conn).uses_day_headings(TOP) and view.pane.day_action.isChecked()
-    assert view.foot.text() == "New captures go under a heading for their day."
+    assert [a.text() for a in view.pane.menu_button.menu().actions() if a.text()] == ["Fold all headings", "Unfold all", "Page history…"]
+    assert Model(view.conn).uses_day_headings(TOP)
 
 
 def test_page_history_opens_over_this_window(view, browse, monkeypatch):
@@ -349,7 +348,8 @@ def test_folds_are_kept_for_the_page_in_either_window(view, browse):
     notes.save_now()
     view.pane.notes_menu.emit("fold")
     browse.go_task(TOP)
-    assert browse.task_pane.notes.folds() == ["1:A heading"]
+    # The page's day headings fold too, since every page has them (release 5.69).
+    assert "1:A heading" in browse.task_pane.notes.folds() and browse.task_pane.notes.folds() == view.pane.notes.folds()
 
 
 def _picture() -> QImage:

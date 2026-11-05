@@ -63,12 +63,12 @@ def test_a_capture_s_headings_are_the_page_s_at_the_level_typed(sample_root):
     conn.execute("DELETE FROM task_pages")
     r = save_capture(conn, root, fs, Settings(me="P001"), CaptureDraft(content=NOTES + "\n\\# a hash, not a heading", formatted=True,
                                                                        task="T000012"), AT)
-    c = Model(conn).captures[r.capture_id]
-    assert c.formatted and c.title == "Walkdown"
-    assert captures.read_content(root, c).startswith("Walkdown\n# Pumps\n")
+    # Text alone on a task is no capture (release 5.69): its lines go under the day's heading, and its headings, which the
+    # page hasn't got yet, at the page's end at the level typed.
+    assert r.capture_id is None and r.noted_under == ["Fri 16 Oct 2026", "Pumps", "Pump 3", "Valves"]
     lines = lines_of(notes_page.get(conn, "T000012"))
-    assert [(x.kind, x.level, x.text) for x in lines if x.kind == "heading"] == [("heading", 1, "Pumps"), ("heading", 2, "Pump 3"),
-                                                                               ("heading", 1, "Valves")]
+    assert [(x.kind, x.level, x.text) for x in lines if x.kind == "heading"] == [("heading", 1, "Fri 16 Oct 2026"), ("heading", 1, "Pumps"),
+                                                                               ("heading", 2, "Pump 3"), ("heading", 1, "Valves")]
     assert lines[-1] == notes_page.Line("text", "# a hash, not a heading")
 
 

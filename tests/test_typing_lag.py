@@ -13,7 +13,7 @@ from PySide6.QtCore import QEvent, Qt  # noqa: E402
 from PySide6.QtGui import QKeyEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication, QLabel  # noqa: E402
 
-from docrepo import capacity, db, prompts  # noqa: E402
+from docrepo import capacity, db, notes_page, prompts  # noqa: E402
 from docrepo.config import Settings  # noqa: E402
 from docrepo.model import Model  # noqa: E402
 from docrepo.sample import load_sample  # noqa: E402
@@ -160,7 +160,8 @@ def test_save_straight_after_typing_reads_what_s_waiting(window, ctx):
     assert window._items_timer.isActive() and window.task is None
     window.save()
     assert "Installation" in ctx.messages[-1][1]
-    assert not window._items_timer.isActive() and [c.task for c in Model(ctx.conn).captures.values()][-1] == TASK
+    # The # picked the task, so the text went on its page (release 5.69).
+    assert not window._items_timer.isActive() and "the crane came on site" in notes_page.get(ctx.conn, TASK)
 
 
 # ---- the cards ----

@@ -39,7 +39,7 @@ def pages(conn, root) -> Pages:
 
 def test_a_formatted_note_keeps_its_markup(env):
     conn, root, _ = env
-    r = save(env, CaptureDraft(content=NOTES, formatted=True, task="T000008", types={"note"}))
+    r = save(env, CaptureDraft(content=NOTES, formatted=True, task="T000008", types={"note"}, files=[FileRow("Spec sheet", "https://example.com/spec", "the spec")]))  # a capture (5.69)
     c = Model(conn).captures[r.capture_id]
     assert c.formatted and c.title == "Coupling guard walkdown"
     text = captures.capture_md_path(root, c).read_text(encoding="utf-8")
@@ -61,7 +61,7 @@ def test_a_formatted_note_keeps_its_markup(env):
 
 def test_plain_text_stays_plain(env):
     conn, root, _ = env
-    r = save(env, CaptureDraft(content="Rate *2* and 3*4.", task="T000008", types={"note"}))
+    r = save(env, CaptureDraft(content="Rate *2* and 3*4.", task="T000008", types={"note"}, files=[FileRow("Spec sheet", "https://example.com/spec", "the spec")]))
     c = Model(conn).captures[r.capture_id]
     text = captures.capture_md_path(root, c).read_text(encoding="utf-8")
     assert not c.formatted and "content_format" not in text and text.endswith("\n\nRate *2* and 3*4.\n")

@@ -17,7 +17,7 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 from docrepo import db, items, markup, notes_page  # noqa: E402
 from docrepo.config import Settings  # noqa: E402
 from docrepo.model import Model  # noqa: E402
-from docrepo.save import CaptureDraft, first_line, item_names, save_capture  # noqa: E402
+from docrepo.save import CaptureDraft, FileRow, first_line, item_names, save_capture  # noqa: E402
 from docrepo.ui.browse_window import BrowseWindow  # noqa: E402
 from docrepo.ui.capture_window import CaptureWindow  # noqa: E402
 from docrepo.ui.checklist_summary import ChecklistSummary  # noqa: E402
@@ -97,7 +97,8 @@ def test_ctrl_1_brackets_ticks_and_enter(qapp):
 def test_a_capture_s_checklist_lines_reach_capture_md_and_the_page(sample_root):
     conn, root, fs = sample_root
     r = save_capture(conn, root, fs, Settings(me="P001"),
-                     CaptureDraft(content="Walkdown\n- [ ] Check the guards\n- [x] Order the seal", formatted=True, task="T000012"), NOW)
+                     CaptureDraft(content="Walkdown\n- [ ] Check the guards\n- [x] Order the seal", formatted=True, task="T000012",
+                                  files=[FileRow("Spec sheet", "https://example.com/spec", "the spec")]), NOW)  # a capture, with a link (release 5.69)
     from docrepo import captures
 
     assert captures.read_content(root, Model(conn).captures[r.capture_id]).endswith("- [ ] Check the guards\n- [x] Order the seal")

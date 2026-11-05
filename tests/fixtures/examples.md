@@ -237,11 +237,15 @@ Procedure rev 2 approved. Waiting on the rigging plan.
 
 ## Notes
 
+### Tue 22 Sep 2026
+
 _[Tue 22 Sep 2026 · 10:31 am · New task](../../Captures/2026/09/C000005/capture.md)_
 
 Install and align the new impeller during the turnaround. Maintenance planning's procedure is attached.
 
 - File: Installation procedure.docx, Maintenance planning's step-by-step procedure for installing and aligning the impeller.
+
+### Mon 5 Oct 2026
 
 _[Mon 5 Oct 2026 · 9:25 am · Update: Added to the agenda of Business team meeting.](../../Captures/2026/10/C000013/capture.md)_
 
@@ -375,6 +379,8 @@ Raise the Q4 overtime forecast for the turnaround.
 _No status yet._
 
 ## Notes
+
+### Tue 6 Oct 2026
 
 _[Tue 6 Oct 2026 · 10:18 am · New task](../../Captures/2026/10/C000015/capture.md)_
 

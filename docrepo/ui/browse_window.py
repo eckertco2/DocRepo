@@ -220,6 +220,7 @@ class BrowseWindow(QWidget):
         super().__init__(None, Qt.WindowType.Window)
         self.ctx = ctx
         self.capture = capture
+        ctx.save_open_pages = self.save_open_notes  # before the capture window adds a note to a page (release 5.69)
         self.setObjectName("browse")
         self.setWindowTitle(WINDOW_TITLE)
         self.setStyleSheet(CLASSIC_BROWSE if LOOK.classic else style_sheet())
@@ -2509,7 +2510,6 @@ class BrowseWindow(QWidget):
         pane = pane or self.task_pane
         notes, m = pane.notes, self.model()
         body, day = m.pages.get(task_id, ""), m.uses_day_headings(task_id)
-        pane.day_action.setChecked(day)
         if pane.task_id == task_id:
             notes.day_headings = day
             if body == notes.saved_body:
@@ -2656,12 +2656,6 @@ class BrowseWindow(QWidget):
             return
         if which in ("fold", "unfold"):
             notes.fold_all(which == "fold")
-        elif which == "day_headings":
-            on = pane.day_action.isChecked()
-            notes.save_now()
-            self._do(lambda: edits.edit_task(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, task_id, self._now(),
-                                             day_headings=on))
-            pane.say("New captures go under a heading for their day." if on else "New captures go at the end of the page.")
         elif which == "history":
             self.page_history(task_id, pane)
 

@@ -55,9 +55,10 @@ def window(ctx):
 def test_a_quick_note(window, ctx):
     window.set_task("T000008")
     window.content.setPlainText("Crane inspection passed.")
-    assert "adds this to the raw text log of <b>Installation</b>" in window.does.text()
+    # Text alone on a task is no capture (release 5.69): it goes on the task's page, as the window says before Save.
+    assert "adds this to the notes of <b>Installation</b>, under <b>Thu 8 Oct 2026</b>" in window.does.text()
     window.save()
-    assert ctx.messages[-1] == ("Saved", "Saved C000026. Added to the raw text log of Installation.")
+    assert ctx.messages[-1] == ("Saved", "Added to the notes of Installation, under Thu 8 Oct 2026.")
     assert window.content.toPlainText() == "" and window.task is None and not window.isVisible()
 
 
@@ -570,8 +571,7 @@ def test_formatted_content_text(window, ctx, tmp_path):
     """Release 5.7 (mods log round 2, M0045): the content text box keeps formatting and lists, saved as markup."""
     from docrepo import captures
 
-    window.set_task("T000008")
-    window.content.setPlainText("Guard fitted and signed off")
+    window.content.setPlainText("Guard fitted and signed off")  # no task: an unfiled capture, whose capture.md keeps the markup
     cursor = window.content.textCursor()
     cursor.setPosition(0)
     cursor.setPosition(5, cursor.MoveMode.KeepAnchor)  # "Guard"

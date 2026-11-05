@@ -918,10 +918,10 @@ def test_the_suggested_hotkeys(browse):
 
 def test_a_capture_s_edit_shows_its_text_and_goes_to_its_block(browse, ctx):
     """Release 5.25 (decision 112): the text shows with its formatting, read-only; Go to it on the page opens its block."""
-    from docrepo.save import CaptureDraft, save_capture
+    from docrepo.save import CaptureDraft, FileRow, save_capture
 
-    r = save_capture(browse.conn, ctx.data_root, ctx.fs, Settings(me="P001"),
-                     CaptureDraft(content="Guard **fitted**.\n- rails next", formatted=True, task="T000012"), NOW)
+    r = save_capture(browse.conn, ctx.data_root, ctx.fs, Settings(me="P001"),  # a capture, with a link (release 5.69)
+                     CaptureDraft(content="Guard **fitted**.\n- rails next", formatted=True, task="T000012", files=[FileRow("Spec sheet", "https://example.com/spec", "the spec")]), NOW)
     browse.refresh()
     browse.go_capture(r.capture_id)
     browse.start_capture_edit(r.capture_id)

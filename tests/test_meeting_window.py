@@ -75,9 +75,10 @@ def test_items_are_read_as_you_type(window):
     draft = window.draft()
     assert draft.item_overrides == {"0": {"title": "Check the guards and rails"}, "1": {"off": True}}
     assert [c.title.text() for c in window.item_cards.cards] == ["Check the guards and rails", "Rails go red"]
+    before = set(Model(window.ctx.conn).captures)
     window.save()
     m = Model(window.ctx.conn)
-    made = [c for c in m.captures.values() if c.from_notes]
+    made = [c for cid, c in m.captures.items() if cid not in before]  # the notes are on the page, no capture (release 5.69)
     assert [(c.item, c.title) for c in made] == [("task", "Check the guards and rails")]
 
 

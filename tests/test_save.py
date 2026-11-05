@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from docrepo import capacity, db
+from docrepo import capacity, db, notes_page
 from docrepo.config import Settings
 from docrepo.log_setup import setup_logging
 from docrepo.model import Model
@@ -49,16 +49,32 @@ def capture_md(root: Path, capture_id: str) -> str:
     return (root / "Captures" / "2026" / "10" / capture_id / "capture.md").read_text(encoding="utf-8")
 
 
-def test_a_note_on_a_task(env):
-    r = save(env, CaptureDraft(content="Crane inspection passed. Certificate is on file.", task="T000008", types={"note"}))
+def test_a_note_on_a_task_is_its_page_s_not_a_capture(env):
+    """Release 5.69 (the notes workspace plan's decisions 341 and 345): text alone on a task is no capture. It goes on the
+    task's notes page under the day's heading, which Task.md then shows."""
     conn, root, _ = env
-    assert r.capture_id == "C000026"
+    before = set(Model(conn).captures)
+    r = save(env, CaptureDraft(content="Crane inspection passed. Certificate is on file.", task="T000008", types={"note"}))
+    assert (r.capture_id, r.noted_on, r.noted_under) == (None, "T000008", ["Fri 16 Oct 2026"])
+    assert set(Model(conn).captures) == before
+    assert r.message == "Added to the notes of Installation, under Fri 16 Oct 2026."
+    assert "# Fri 16 Oct 2026\nCrane inspection passed. Certificate is on file." in notes_page.get(conn, "T000008")
+    assert "Crane inspection passed." in (root / "Tasks" / "T000008" / "Task.md").read_text(encoding="utf-8")
+
+
+def test_a_note_with_a_file_is_still_a_capture(env, tmp_path):
+    """A file, an email, a link or a summary makes a note a capture still: a record of what arrived (decision 345)."""
+    src = tmp_path / "Crane certificate.txt"
+    src.write_text("Certificate 42", encoding="utf-8")
+    r = save(env, CaptureDraft(content="Crane inspection passed.", task="T000008", types={"note"},
+                               files=[FileRow(src.name, str(src), "the certificate")]))
+    conn, root, _ = env
+    assert r.capture_id == "C000026" and r.noted_on is None
     assert r.message == "Saved C000026. Added to the raw text log of Installation."
     assert [e.capture.id for e in Model(conn).raw_log_of("T000008") if e.capture][-1] == "C000026"
     text = capture_md(root, "C000026")
-    assert text.startswith('---\nid: "C000026"\nsaved: "2026-10-16T09:30:00"\nsource: "typed"\ntask: "T000008"\ncapture_types: ["note"]\n')
-    assert text.endswith("---\n\nCrane inspection passed. Certificate is on file.\n")
-    assert "C000026" in (root / "Tasks" / "T000008" / "Task.md").read_text(encoding="utf-8")
+    assert text.startswith('---\nid: "C000026"\nsaved: "2026-10-16T09:30:00"\nsource: "file_path"\ntask: "T000008"\ncapture_types: ["note"]\n')
+    assert "Crane inspection passed." in text and "C000026" in (root / "Tasks" / "T000008" / "Task.md").read_text(encoding="utf-8")
 
 
 def test_a_new_subtask_with_new_people_and_labels(env):
@@ -257,8 +273,10 @@ def test_the_log_holds_ids_not_content(env):
     conn, root, fs = env
     setup_logging(fs, root)
     save(env, CaptureDraft(content="Secret pricing details for the turnaround.", task="T000008", types={"note"}))
+    save(env, CaptureDraft(content="More secret pricing.", types={"note"}))
     log_text = (root / "System" / "logs" / "docrepo.log").read_text(encoding="utf-8")
-    assert "capture C000026 saved: raw text log of T000008" in log_text and "Secret pricing" not in log_text
+    assert "saved: note on T000008's notes page, no capture" in log_text and "capture C000026 saved: unfiled" in log_text
+    assert "Secret pricing" not in log_text and "secret pricing" not in log_text
 
 
 def test_copy_names():

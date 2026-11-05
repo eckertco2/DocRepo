@@ -11,7 +11,7 @@ from docrepo.captures import read_content
 from docrepo.config import Settings
 from docrepo.detail import PageState, Pages
 from docrepo.model import Model
-from docrepo.save import CaptureDraft, save_capture
+from docrepo.save import CaptureDraft, FileRow, save_capture
 
 TODAY = date(2026, 10, 8)
 
@@ -123,7 +123,8 @@ def test_dates_in_words():
 def test_newest_first_and_long_entries(pages, sample_root):
     conn, root, fs = sample_root
     long_text = "First sentence of a long note. " + "More words go here to make it long. " * 15
-    save_capture(conn, root, fs, Settings(me="P001"), CaptureDraft(content=long_text, task="T000012"), datetime(2026, 10, 8, 15, 0))
+    save_capture(conn, root, fs, Settings(me="P001"), CaptureDraft(content=long_text, task="T000012", files=[FileRow("Spec sheet", "https://example.com/spec", "the spec")]),  # a capture (5.69)
+                 datetime(2026, 10, 8, 15, 0))
     m = Model(conn)
     p = Pages(m, TODAY, lambda cid: read_content(root, m.captures[cid]) or "", "P001", conn)
     # Captures (release 5.25, decision 104): the text is the notes page's to show; each entry links to its block there.
