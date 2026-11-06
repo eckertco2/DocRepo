@@ -17,7 +17,9 @@ from docrepo.ui.icons import icon
 from docrepo.ui.look import LOOK
 from docrepo.ui.checklist_summary import ChecklistSummary
 from docrepo.ui.notes_edit import NotesEdit
-from docrepo.ui.page_view import PageView
+from docrepo.detail import RAIL
+from docrepo.ui.page_view import FitPageView, layout_of
+from docrepo.ui.task_header import Expander, TaskHeader
 from docrepo.ui.rich_edit import FormatBar
 
 #: The widest the Notes frame gets, as the task page's HTML stops widening at 1040 px (release 5.21).
@@ -30,28 +32,13 @@ NOTES_LINE = 90
 BAR_LINGER_MS = 200
 
 
-class FitPageView(PageView):
-    """A part of the task page as tall as its HTML, with no scroll bar of its own."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.setOpenLinks(False)
-        self.setOpenExternalLinks(False)
-        self.document().documentLayout().documentSizeChanged.connect(lambda _: self._fit())
-
-    def _fit(self) -> None:
-        h = int(self.document().size().height()) + (self.height() - self.viewport().height())
-        if h != self.height():
-            self.setFixedHeight(max(h, 8))
-
-
 class TaskPane(QScrollArea):
     """The task page's one scroll: ``top``, the Notes heading with its menu, ``notes``, and ``bottom``."""
 
     #: A Notes menu choice: "fold", "unfold" or "history".
     notes_menu = Signal(str)
+    #: The pane crossed a width at which the page lays itself out differently (release 5.84; PageView's did this before).
+    layout_changed = Signal()
 
     def __init__(self, css: str, margin: int) -> None:
         super().__init__()
@@ -74,6 +61,21 @@ class TaskPane(QScrollArea):
         for view in (self.top, self.bottom):
             view.document().setDefaultStyleSheet(css)
             view.document().setDocumentMargin(margin)
+        # Release 5.84 (the task pane review's T2): the facts are a header of widgets (the head, the status card and the
+        # groups as expanders), with ``top`` as the rail beside it on a wide pane, and the history an expander after the notes.
+        self.header = TaskHeader(css, margin)
+        self.top.setFixedWidth(RAIL + 2 * margin)
+        self.top.hide()
+        self.facts = QWidget(objectName="factsRow")
+        fl = QHBoxLayout(self.facts)
+        fl.setContentsMargins(0, 0, 0, 0)
+        fl.setSpacing(0)
+        fl.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
+        fl.addWidget(self.header, 1)
+        fl.addWidget(self.top, 0, Qt.AlignmentFlag.AlignTop)
+        self.history = Expander("history", "History", css, margin, body=self.bottom)
+        self._layout, self._margin = -1, margin
+        for view in self.views():
             view.viewport().installEventFilter(self)
         head = QWidget(objectName="notesHead")
         head.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -167,15 +169,34 @@ class TaskPane(QScrollArea):
         wl.setContentsMargins(margin, 20, margin, 20)
         wl.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         wl.addWidget(self.card, 1)
-        lay.addWidget(self.top)
+        lay.addWidget(self.facts)
         lay.addWidget(self.wrap)
-        lay.addWidget(self.bottom)
+        lay.addWidget(self.history)
         lay.addStretch(1)
         self.setWidget(inner)
 
     def resizeEvent(self, event) -> None:  # noqa: N802 - Qt's name
         super().resizeEvent(event)
         self._fit_head()
+        now = layout_of(self.page_width())
+        if self._layout not in (-1, now):
+            self._layout = now
+            self.layout_changed.emit()
+        self._layout = now
+
+    def views(self) -> list[FitPageView]:
+        """Every HTML part of the page, for the browse window to wire its links."""
+        return [self.top, self.bottom, *self.header.views(), self.history.summary]
+
+    def show_parts(self, parts: dict[str, str], folds: dict[str, bool], wide: bool) -> None:
+        """Draw a task's page from its parts (``Pages.task_parts``): the header, the rail when the pane is wide, and the
+        history, open or closed as the owner left it on this task."""
+        self.header.show_parts(parts, folds)
+        self.top.setVisible(wide)
+        if wide:
+            self.top.setHtml(parts["rail"])
+        self.history.set_content(parts["history_summary"], parts["history"])
+        self.history.set_open(folds.get("history", False))
 
     def _fit_head(self) -> None:
         """The format bar beside the Notes heading while it fits there, or else on a line of its own under it."""
@@ -200,8 +221,8 @@ class TaskPane(QScrollArea):
 
     def notes_only(self) -> None:
         """Only the Notes frame, as the Task view's Notes page tab shows it (release 5.37, decision 243)."""
-        self.top.hide()
-        self.bottom.hide()
+        self.facts.hide()
+        self.history.hide()
         self.wrap.layout().setContentsMargins(0, 0, 0, 12)
         self.setFrameShape(QFrame.Shape.NoFrame)
 
@@ -286,8 +307,11 @@ class TaskPane(QScrollArea):
         self.ensureVisible(p.x(), p.y(), 20, max(80, self.viewport().height() // 3))
 
     def page_width(self) -> int:
-        return self.top.page_width()
+        """The width a page's HTML has in this pane: the viewport's, less the document margins."""
+        return self.viewport().width() - 2 * self._margin
 
     def text(self) -> str:
-        """Everything the pane shows, as words: what the tests read."""
-        return "\n".join((self.top.toPlainText(), "Notes", self.notes.toPlainText(), self.bottom.toPlainText()))
+        """Everything the pane shows, as words: what the tests read. The history's words are included whether it's open or
+        not, as they were when it was always shown."""
+        rail = self.top.toPlainText() if not self.top.isHidden() else ""
+        return "\n".join((self.header.text(), rail, "Notes", self.notes.toPlainText(), "History", self.bottom.toPlainText()))

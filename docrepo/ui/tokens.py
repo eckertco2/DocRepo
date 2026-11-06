@@ -495,6 +495,7 @@ h2 { font-family: 'Segoe UI'; font-size: ${subtitle}pt; font-weight: 600; margin
 .inh { color: $text2; font-style: italic; }
 .sec { font-weight: 600; margin-top: 18px; margin-bottom: 4px; }
 .secx { font-weight: 400; }
+.factline { margin-top: 6px; margin-bottom: 0px; }
 .ttl { font-weight: 600; }
 .foldword { color: $text; }
 .dt { color: $text2; font-size: ${caption}pt; padding-right: 14px; }

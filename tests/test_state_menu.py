@@ -244,7 +244,7 @@ def test_a_key_dates_row_isnt_a_state_button(browse):
 # ---- the task page, the Priorities board and the timeline ----
 def test_the_task_pages_state_opens_the_menu(browse):
     browse.go_task(INSTALLATION)
-    assert f'href="state:{INSTALLATION}"' in browse.task_pane.top.toHtml()
+    assert f'href="state:{INSTALLATION}"' in browse.task_pane.header.head.toHtml()  # the header's head part (release 5.84)
     picking(browse, "In progress")
     browse.on_link(QUrl(f"state:{INSTALLATION}"))
     assert browse.menus and states(browse, INSTALLATION) == ["In progress"]

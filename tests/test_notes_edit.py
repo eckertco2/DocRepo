@@ -186,7 +186,7 @@ def test_the_task_page_holds_its_notes_between_its_facts_and_history(browse):
     browse.go_task("T000008")
     pane = browse.task_pane
     assert browse.detail_stack.currentIndex() == 2 and pane.task_id == "T000008"
-    assert "Current status" in pane.top.toPlainText() and "Captures" not in pane.top.toPlainText()
+    assert "Current status" in pane.header.text() and "Captures" not in pane.header.text()  # the header (release 5.84)
     assert pane.bottom.toPlainText().strip().startswith("Captures") and "On the notes page" in pane.bottom.toPlainText()
     notes = pane.notes
     # Its blocks under their days' headings: every page has them since release 5.69.

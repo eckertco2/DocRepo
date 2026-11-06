@@ -1034,3 +1034,34 @@ def test_the_page_view_draws_the_pages_pictures(qapp):
     view.setHtml('<img src="avatar:TB" width="20" height="20"> <img src="mark:cl" width="14" height="14">')
     assert view.document().resource(2, QUrl("avatar:TB")) is not None
     view.deleteLater()
+
+
+def test_the_header_s_groups_open_fold_and_are_remembered(browse):
+    """Release 5.84 (the task pane review's T2): closed groups share a row, an open one has its body, the status log is
+    behind the status card, the history folds after the notes, and what's open is kept per task."""
+    from docrepo import db
+
+    browse.go_task("T000001")
+    pane = browse.task_pane
+    header, g = pane.header, pane.header.groups
+    assert g["subtasks"].is_open and not g["when_who"].is_open and not g["files"].is_open and not g["details"].is_open
+    assert not g["key_dates"].present and not g["agenda"].present  # nothing in them
+    assert g["when_who"].head.parentWidget() is header.strip and g["subtasks"].head.parentWidget() is g["subtasks"]
+    assert "Installation" in header.text() and "Folder" not in header.text() and g["files"].label.text() == "5"
+    g["details"].toggle()
+    assert g["details"].is_open and g["details"].head.parentWidget() is g["details"] and "Folder" in header.text()
+    assert not header.log_open and "Imported from the Excel tracker" not in header.text()
+    header.status_fold.click()
+    assert header.log_open and "Imported from the Excel tracker" in header.text()
+    assert not pane.history.is_open and pane.history.label.text() == "16 captures"
+    pane.history.toggle()
+    assert pane.history.is_open and "On the notes page" in pane.bottom.toPlainText()
+    browse.go_task("T000008")
+    assert not g["details"].is_open and not pane.history.is_open and not header.log_open
+    browse.go_task("T000001")
+    assert g["details"].is_open and header.log_open and pane.history.is_open  # remembered per task
+    assert json.loads(db.get_state(browse.conn, "page_folds:T000001")) == {"details": True, "status_log": True, "history": True}
+    browse.on_link(QUrl("tab:files"))
+    assert g["files"].is_open and "Open in Task view" in header.text()
+    g["subtasks"].toggle()
+    assert g["subtasks"].head.parentWidget() is header.strip and "Rigging plan" not in header.text()

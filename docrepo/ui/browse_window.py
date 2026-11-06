@@ -55,7 +55,7 @@ from docrepo.lists import key_dates_due, reminders_due
 from docrepo.agenda import AgendaError
 from docrepo.captures import capture_folder, capture_md_path
 from docrepo.dates import long_date, short, to_date, workday_numbers
-from docrepo.detail import SCOPE_NAMES, PageState, Pages, chip, esc, row_state, state_chip
+from docrepo.detail import SCOPE_NAMES, WIDE_PAGE, PageState, Pages, chip, esc, row_state, state_chip
 from docrepo.links import is_folder, is_link
 from docrepo.overview import file_type
 from docrepo.model import TODAY, Model, is_person
@@ -271,7 +271,7 @@ class BrowseWindow(QWidget):
         self.retired = {"people": False, "labels": False}
         self.query = ""
         self.before_search = "tasks"
-        self.state = PageState()
+        self.state = PageState(order="new")  # the history reads newest first (release 5.84, R6)
         self.file_to: dict[str, str] = {}
         self.editing: str | None = None
         self._edit_start: tuple[str, str] = ("", "")  # the capture edit's text and summary as it opened
@@ -491,9 +491,12 @@ class BrowseWindow(QWidget):
         self.detail_stack.addWidget(self._build_edit_form())
         # A task's page with its notes page (release 5.25): its facts, the notes and its history in one scroll.
         self.task_pane = TaskPane(page_css(), 14 if LOOK.classic else 16)
-        for view in (self.task_pane.top, self.task_pane.bottom):
+        for view in self.task_pane.views():
             view.anchorClicked.connect(self.on_link)
-        self.task_pane.top.layout_changed.connect(self._page_width_changed)
+        self.task_pane.layout_changed.connect(self._page_width_changed)
+        # Which groups are open on each task's page (release 5.84), kept in docs.db like the notes' folds.
+        self.task_pane.header.fold_changed.connect(self._save_page_fold)
+        self.task_pane.history.toggled.connect(self._save_page_fold)
         self.wire_notes(self.task_pane, self.say, self.open_ref)
         self.detail_stack.addWidget(self.task_pane)
         dl.addWidget(self.detail_stack, 1)
@@ -2524,6 +2527,11 @@ class BrowseWindow(QWidget):
             self.open_task_view(rest)
         elif kind in ("tab", "scope", "order"):
             setattr(st, kind, rest)
+            if kind == "tab" and rest in ("log", "files"):  # since release 5.84 these are groups of the page, not tabs
+                if rest == "log":
+                    self.task_pane.header.set_log_open(True, emit=True)
+                else:
+                    self.task_pane.header.groups["files"].set_open(True, emit=True)
             self.render_detail(keep_scroll=kind != "tab")
         elif kind in ("chap", "more", "orig"):
             group = {"chap": st.chapters, "more": st.expanded, "orig": st.originals}[kind]
@@ -2536,6 +2544,8 @@ class BrowseWindow(QWidget):
         # and order menus, New subtask, Add one (an update), a reference field's Copy, and the task's folder.
         elif kind == "fold" and rest in ("details", "desc", "closed"):
             setattr(st, rest, not getattr(st, rest))
+            if rest == "details":  # since release 5.84 Details is a group of the page; the link opens it
+                self.task_pane.header.groups["details"].set_open(st.details, emit=True)
             self.render_detail(keep_scroll=True)
         elif kind == "menu":
             self._page_menu(rest)
@@ -2629,9 +2639,8 @@ class BrowseWindow(QWidget):
         pane = self.task_pane
         scroll = pane.verticalScrollBar().value() if keep_scroll and pane.task_id == task_id else 0
         pages = self.pages()
-        width = pane.viewport().width() - 2 * round(pane.top.document().documentMargin())
-        pane.top.setHtml(pages.task_page(task_id, self.state, width, "top"))
-        pane.bottom.setHtml(pages.task_page(task_id, self.state, width, "bottom"))
+        width = pane.page_width()
+        pane.show_parts(pages.task_parts(task_id, self.state, width), self._page_folds(task_id), width >= WIDE_PAGE)
         self.load_notes(task_id)
         self.detail_stack.setCurrentIndex(2)
         pane.verticalScrollBar().setValue(scroll)
@@ -2693,8 +2702,8 @@ class BrowseWindow(QWidget):
     def _history_again(self, task_id: str) -> None:
         """The task page's history drawn again (its Captures tab says what's on the page), the editor left as it is."""
         if self.sel == ("task", task_id):
-            width = self.task_pane.viewport().width() - 2 * round(self.task_pane.top.document().documentMargin())
-            self.task_pane.bottom.setHtml(self.pages().task_page(task_id, self.state, width, "bottom"))
+            parts = self.pages().task_parts(task_id, self.state, self.task_pane.page_width())
+            self.task_pane.history.set_content(parts["history_summary"], parts["history"])
 
     def _picture_pasted(self, image, pane: TaskPane | None = None) -> None:
         """A picture pasted on the notes page (decisions 124, 125 and 127): a PNG in the task's Files folder, kept as a
@@ -2742,6 +2751,21 @@ class BrowseWindow(QWidget):
             pane.notes.save_now()
             self._history_again(task_id)
             pane.say(f"Added {', '.join(kept)} to the page, each a capture of its own. Type what each is on the line under it.")
+
+    def _page_folds(self, task_id: str) -> dict[str, bool]:
+        """Which groups of a task's page are open (release 5.84): "status_log", "history" and each expander's key."""
+        try:
+            out = json.loads(db.get_state(self.conn, f"page_folds:{task_id}") or "{}")
+            return out if isinstance(out, dict) else {}
+        except ValueError:
+            return {}
+
+    def _save_page_fold(self, key: str, is_open: bool) -> None:
+        task_id = self.task_pane.task_id
+        if task_id:
+            folds = self._page_folds(task_id)
+            folds[key] = is_open
+            db.set_state(self.conn, f"page_folds:{task_id}", json.dumps(folds))
 
     def _folds_of(self, task_id: str) -> list[str]:
         try:
