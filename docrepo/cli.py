@@ -76,6 +76,10 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser("app", help="start the capture app: the tray icon, the hotkey and the capture window (use pythonw for no console)")
     commands.add_parser("browse", help="open the browse tool, starting the app if it isn't running (use pythonw for no console)")
     commands.add_parser("backup", help="back up docs.db and the data root's files to the backup folder now")
+    usage = commands.add_parser("usage", help="how often each wheel command and each kind of thing in the Activity view was used in the last 7 and 30 days. It changes nothing")
+    usage.add_argument("--as-of", type=as_of, metavar="WHEN", help=as_of_help)
+    commands.add_parser("check", help="check the data root against docs.db: missing capture.md files, extracted text and saved copies, "
+                                      "the search index and SQLite's quick check. It changes nothing, and writes its list to System\\check-<date>.md")
     commands.add_parser("make-shortcut", help="make DocRepo.lnk, to move into your Startup folder so DocRepo starts when you sign in")
     set_hotkey = commands.add_parser("set-hotkey", help="choose the capture window's hotkey, such as \"Ctrl+Alt+Space\"")
     set_hotkey.add_argument("keys")
@@ -340,6 +344,36 @@ def cmd_outlook_check(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_usage(args: argparse.Namespace) -> int:
+    """What's used (release 5.96): the wheels' commands and the Activity view's kinds, over 7 and 30 days. Reads only."""
+    from docrepo.usage import report
+
+    opened = _open(args)
+    if opened is None:
+        return 1
+    root, _settings, _fs, conn = opened
+    with closing(conn):
+        print(report(conn, root, (args.as_of or datetime.now()).date()))
+    return 0
+
+
+def cmd_check(args: argparse.Namespace) -> int:
+    """Check the data root (release 5.89): print the list, and keep it as System\\check-<date>.md. 0 when nothing needs
+    doing, 2 when something does."""
+    from docrepo.check import run_check, write_report
+
+    opened = _open(args)
+    if opened is None:
+        return 1
+    root, _settings, fs, conn = opened
+    with closing(conn):
+        result = run_check(conn, root, datetime.now())
+    path = write_report(fs, root, result)
+    print(result.markdown())
+    print(f"Kept as {path}")
+    return 2 if result.problems else 0
+
+
 def cmd_backup(args: argparse.Namespace) -> int:
     opened = _open(args)
     if opened is None:
@@ -413,6 +447,8 @@ COMMANDS: dict[str, Callable[[argparse.Namespace], int]] = {
     "app": cmd_app,
     "browse": cmd_browse,
     "backup": cmd_backup,
+    "check": cmd_check,
+    "usage": cmd_usage,
     "make-shortcut": cmd_make_shortcut,
     "set-hotkey": cmd_set_hotkey,
     "where": cmd_where,

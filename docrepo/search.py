@@ -151,7 +151,7 @@ def _like(word: str) -> str:
 
 def _indexed(conn: sqlite3.Connection, kind: str, words: list[str]) -> list[tuple[str, str]]:
     where = " AND ".join("body LIKE ? ESCAPE '\\'" for _ in words)
-    rows = conn.execute(f"SELECT id, body FROM search_text WHERE kind = ? AND {where} ORDER BY id", (kind, *map(_like, words)))
+    rows = conn.execute(f"SELECT id, body FROM search_text WHERE kind = ? AND {where} ORDER BY id", (kind, *map(_like, words)))  # noqa: S608 - a column or table name of DocRepo's own; values are parameters
     return [(r["id"], r["body"]) for r in rows]
 
 

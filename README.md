@@ -2,7 +2,7 @@
 
 Capture work notes, emails and documents in seconds, organize them as a tree of tasks, and keep track of people's capacity. DocRepo is a Windows desktop app written in Python with PySide6. It makes no network connections.
 
-Status: the first everyday version. See `PROGRESS.md`.
+Status: in everyday use. `python -m docrepo --version`, or the Version row in Settings' Look card, says which release is running. `CHANGELOG.md` lists every release in a line, and `PROGRESS.md` has the details.
 
 ## Install on a computer
 
@@ -60,7 +60,7 @@ In the browse tool, open **Settings** and click **Make the Startup shortcut**. D
 - **Capture:** press the hotkey, pick a task (or none, to file it later), type or paste, drop files or Outlook emails on the window, and press **Ctrl+Enter**. Check **New task** to make a task, or **Update** to change one. **Alt+P** (Parse and populate) fills the fields from what you typed, says what it understood under the text, and tints the fields it filled until you change them. **Attach** adds files, a link or the email selected in Outlook. **Today** and the agenda picker sit beside the capture types. **Expand** (F11) makes the content text fill the window, for meeting notes. The content text keeps **formatting**, with OneNote's keys: Ctrl+B, Ctrl+I and Ctrl+U, Ctrl+- for strikethrough, Ctrl+Alt+H to highlight, Ctrl+. and Ctrl+/ for lists (or start a line with “- ”, “* ” or “1. ”; Tab indents an item), Ctrl+Up and Ctrl+Down by paragraph, and Alt+Shift+Up and Alt+Shift+Down to move a line. Ctrl+Alt+1, 2 and 3 make a heading (Ctrl+Alt+0 text again), and the arrow beside a heading folds what's under it while you type. Pasting from OneNote, Word or Outlook keeps it too.
 - **Pin:** while you look for files in Outlook or File Explorer, **Pin** (F12, or the pin button beside Expand) shrinks the capture to a small window at the bottom right, on top of the others. Pick the task and the capture type at its top, drop files, emails and web links on it, paste a path or link, add the email selected in Outlook with its mail button, and describe each file there; the capture hotkey brings the full window back. A **Pin hotkey** in Settings opens it from anywhere.
 - **Outlook emails without their text:** Outlook's security guard can refuse DocRepo an email's text, sender and recipients. When Outlook asks, choose Allow; otherwise copy the email's text into the content text. Settings → Troubleshooting report shows why.
-- **Items:** in any capture, `@Tom` makes a line a task for Tom (`@L.Tom` his lead, `@__` no one yet), `#Rigging plan` files it to that task, and `**Closed.`, `**u`, `**n`, `**t` or `**Decision.` say what it is; `**event. Spring outage, 3 to 14 Nov` makes a plant event. Type `@` or `#` for a list. A card for each item shows beside the text: untick one to skip it, or change its title or due date.
+- **Items:** in any capture, `@Tom` makes a line a task for Tom (`@L.Tom` his lead, `@__` no one yet), `#Rigging plan` files it to that task, and a `**` name with its comma says what a line is or fills a field: `**closed, The seals are fitted`, `**decision, We hire the bigger crane`, `**event, Spring outage 3 to 14 Nov`, `**due, 5 Nov`. Type `@`, `#` or `**` for a list (the `**` list has every name, with an example). A card for each item shows beside the text: untick one to skip it, or change its title or due date. A `**` line that reads as nothing gets an **Unread line** card, and a new name after `@` a ticked **Add … to people** card. Every `**` name is in the table below, and in the **Syntax** tab of the keys (F1).
 - **Meeting notes:** Alt+M in the capture window, M on a task, or **Meeting notes** on a meeting's page. Pick the meeting at the top: a regular meeting gets today's meeting under it. **Start from the agenda** puts its open items in the notes as headings to write under; the ones you write under close as Discussed when you save. The draft saves itself every 30 seconds. Alt+N, Alt+T and Alt+U tick Note, New task and Update; Alt+A goes to the agenda picker and Alt+D to Today. With **Show hints** (in **More**), the **i** buttons explain each field; **F1** lists every key. A file's description is optional: left empty, it's the task's name, "Attached document" and the file's name.
 - **Browse:** the task tree, the lists (overdue, reminders, waiting on others and so on), agendas, capacity, people, labels and documents. With a task selected, **N** adds a note, **T** a new task under it, **U** an update, **A** puts it on an agenda, **E** edits it and **D** puts it on Today (one letter per topic; F1 lists them). Double-clicking a row opens its edit form (Edit task, or a capture's, person's or label's Edit); the arrow, or Right and Left, open and close its subtasks; **Open folder** on its page shows its folder. **Ctrl+F** narrows the view you're in as you type; the search box at the top (Ctrl+Shift+F) searches everything. The task tree filters by several labels and people at once, and the tree and lists can be sorted by due date, title, state or last update. The views button at the top left (Ctrl+B) hides the views on the left, and each group of views folds.
 - **Today:** your list for the day, at the top of the views. Add a task with **D** or **Add to → Today** on its page, or from the capture window's Today button. The view's box makes a **quick task** from one line ("Call the vendor about seals by Fri" is due Friday), which waits under **Quick tasks** until **Edit** on its row puts it under its real task; switch the box to **Note** for a note, which has **Edit** and **Make it a task**. Items stay until you mark them **Done**, carrying over to the next day ("since Mon"). Done on a task offers to update it too. Below your items, **Due in the next 7 days** lists the tasks due soon that aren't on Today yet, each with **Add to Today**; **Mine only** keeps the ones you lead or are assigned to.
@@ -75,6 +75,47 @@ In the browse tool, open **Settings** and click **Make the Startup shortcut**. D
 - **Unfiled captures** wait in the Unfiled view: file each one to a task, or make it a task.
 - **Keys and the look:** **Ctrl+K**, in either window, lists every action and view and narrows as you type. Hold **Alt** to see each button's letter key, or **Ctrl** for the Ctrl shortcuts; each button's tooltip names its key too. **Show hints** (More, or Settings) brings back the help text; **Settings → Look** switches to the Classic look, release 5.9's colours and hints.
 - **Changes to DocRepo itself:** note them in the mods log, the last button at the top right of the capture window. **Edit** on an open entry puts it back in the box, to add to it rather than start another.
+
+## Every `**` name
+
+The comma after the name is what makes it one: `**due, 5 Nov`, not `**due. 5 Nov`. A reference field named in Settings is one too, such as `**change record, 4471`. This table is made from DocRepo's own list (`items.readme_table`), and a test fails when they differ.
+
+| Name | Also | Makes or fills | Example |
+|---|---|---|---|
+| `**task,` | `**t,` | Task | `**task, Book the crane for Tuesday` |
+| `**note,` | `**n,` | Note | `**note, The crane vendor called back` |
+| `**update,` | `**u,` | Update | `**update, Crane booked for Tuesday` |
+| `**decision,` |  | Decision | `**decision, We hire the bigger crane` |
+| `**event,` |  | Task, a plant event | `**event, Turnaround from 3 to 21 Nov` |
+| `**closed,` | `**done,` `**complete,` `**completed,` `**finished,` | Update, Closed | `**closed, The seals are fitted` |
+| `**in progress,` | `**started,` `**under way,` `**underway,` `**reopened,` `**re-opened,` | Update, In progress | `**in progress, Drawings started` |
+| `**parked,` | `**on hold,` | Update, Parked | `**parked, Waiting for the vendor` |
+| `**not started,` |  | Update, Not started | `**not started, Back to the start` |
+| `**start,` | `**start date,` | Start | `**start, 2 Nov` |
+| `**due,` | `**due date,` | Due | `**due, 5 Nov` |
+| `**deadline,` |  | Deadline | `**deadline, 20 Nov` |
+| `**deadline description,` |  | Deadline description | `**deadline description, The audit` |
+| `**reminder,` | `**remind,` | Reminder | `**reminder, 4 Nov` |
+| `**repeat until,` |  | Repeat until | `**repeat until, 31 Dec` |
+| `**key date,` | `**keydate,` | Key date (adds to the list) | `**key date, trial run 1 to 5 Dec, plant activity` |
+| `**lead,` | `**leads,` | Lead (adds to the list) | `**lead, @Tom` |
+| `**assignee,` | `**assignees,` | Assignees (adds to the list) | `**assignee, @Mike` |
+| `**lead hours,` |  | Lead hours | `**lead hours, 8` |
+| `**assignee hours,` | `**hours,` | Assignee hours | `**assignee hours, 2 h a day` |
+| `**duration,` |  | Duration | `**duration, 10 days` |
+| `**weekends,` | `**runs through weekends,` | Runs through weekends | `**weekends, yes` |
+| `**involvement,` |  | Involvement (adds to the list) | `**involvement, Mike 50%` |
+| `**title,` |  | Title | `**title, Crane booking` |
+| `**description,` |  | Description | `**description, The crane for the impeller lift` |
+| `**status,` | `**current status,` | Current status | `**status, Waiting on the vendor's quote` |
+| `**state,` |  | State | `**state, parked` |
+| `**priority,` |  | Priority | `**priority, high` |
+| `**recurrence,` | `**repeat,` | Recurrence | `**recurrence, weekly` |
+| `**urgent,` |  | Urgent | `**urgent, yes` |
+| `**plant event,` |  | Plant event | `**plant event, yes` |
+| `**meeting,` |  | Meeting | `**meeting, yes` |
+| `**label,` | `**labels,` | Labels (adds to the list) | `**label, Safety` |
+| `**parent,` | `**parents,` | Parents (adds to the list) | `**parent, #Installation` |
 
 ## Navigation wheels and the Today side panel
 
@@ -165,6 +206,8 @@ Quit any other running copy first, since both would want the hotkey. You can als
 - **The Today side panel has gone.** It hides while something full screen covers its monitor. If its monitor was unplugged, it's on the main one. Its hotkey or the tray menu opens and closes it.
 - **The data root is refused.** It must be a full path on the local drive, outside OneDrive and outside DocRepo's own folder.
 - **A backup couldn't be made.** The notification says why: often the backup folder's drive isn't there. The next backup tries again; **Back up now** tries at once.
+- **Something seems to be missing from the data root.** In **Settings**, Troubleshooting, click **Check the data root** (or run `.venv\Scripts\python.exe -m docrepo check`). It lists captures whose `capture.md` isn't there, documents and saved copies whose files aren't, the search index, and SQLite's own check of `docs.db`, each with what you can do. It changes nothing, and keeps its list as `System\check-<date>.md`.
+- **Settings says the last backup's database copy wasn't kept.** The new copy of `docs.db` failed SQLite's check, so the last good copies stay. Run **Check the data root**; if its quick check isn't "ok", restore `docs.db` from the backup folder as `backup-log.md` there says.
 - **A page in the data root looks out of date.** `Contents.md` and each `Task.md` are rebuilt from the database. **Rebuild pages, calendar and search** in Settings (or the `rebuild` command) rebuilds them all.
 
 ## Where things are

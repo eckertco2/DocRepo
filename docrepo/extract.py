@@ -105,7 +105,7 @@ def _xml(z: zipfile.ZipFile, name: str) -> ET.Element:
     data = z.read(name)
     if b"<!DOCTYPE" in data:
         raise ValueError(f"{name} has a DTD")
-    return ET.fromstring(data)
+    return ET.fromstring(data)  # noqa: S314 - the document's own XML, read for its words only, with a DTD refused above; defusedxml isn't an approved package
 
 
 def _rels(z: zipfile.ZipFile, part: str) -> dict[str, tuple[str, str]]:

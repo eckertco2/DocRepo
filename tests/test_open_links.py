@@ -14,7 +14,7 @@ from pathlib import Path  # noqa: E402
 from urllib.parse import quote  # noqa: E402
 
 import pytest  # noqa: E402
-from PySide6.QtCore import QEvent, QPoint, QPointF, Qt, QUrl  # noqa: E402
+from PySide6.QtCore import QEvent, QPointF, Qt, QUrl  # noqa: E402
 from PySide6.QtGui import QGuiApplication, QMouseEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication, QPushButton  # noqa: E402
 
@@ -238,7 +238,6 @@ def test_a_links_page_and_its_row_open_it(browse, linked):
 
 
 def test_the_task_views_enter_opens_a_link(browse, linked):
-    conn = linked[0]
     browse.open_task_view(INSTALLATION, file_type="link")
     view = browse.task_views[INSTALLATION]
     record = next(r for r in view.records if r.type == "link" and r.path == LIFT)

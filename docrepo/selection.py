@@ -172,7 +172,7 @@ def explorer_window_for(windows, snap: Snapshot, tab_of: Callable[[object], int]
         try:
             if int(w.HWND) == snap.top:
                 same.append(w)
-        except Exception:  # noqa: BLE001 - a window closing as we look
+        except Exception:  # noqa: BLE001, S112 - a window closing as we look
             continue
     if len(same) <= 1 or not snap.tab:
         return same[0] if same else None
@@ -198,7 +198,7 @@ def items_to_paths(items) -> tuple[list[str], list[str]]:
         try:
             name, path = str(item.Name), str(item.Path)
             on_disk = bool(item.IsFileSystem)
-        except Exception:  # noqa: BLE001 - an item that's gone as we read it
+        except Exception:  # noqa: BLE001, S112 - an item that's gone as we read it
             continue
         if on_disk and path:
             paths.append(path)

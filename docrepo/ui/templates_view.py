@@ -1194,7 +1194,7 @@ class TemplatesPane:
                 under.addAction("    " * depth + x.title, lambda p=x.id: self.reparent(row_id, p))
         under.setEnabled(bool(under.actions()))
         w._action("Move", tip="Only trees made afterwards see a move. You can also drag a row in the list, or press Alt+Up and Alt+Down.", menu=menu)
-        w._action("Take out…", lambda: self.take_out(row_id), "Take this row out of the template. Tasks made from it stay.")
+        w._action("Remove…", lambda: self.take_out(row_id), "Remove this row from the template. Tasks made from it stay.")
 
     def open_row(self, item: str) -> None:
         """A ``tplrow:`` link: the row, in Templates, or in Discarded while its template is discarded."""
@@ -1295,7 +1295,7 @@ class TemplatesPane:
                 if not self._preview(pv):
                     continue
                 left = pv.unticked()
-            w._do(lambda: templates.save_timing(w.conn, w.ctx.data_root, w.ctx.fs, w.ctx.settings, template_id, anchor, rows, w._now(), left), ("tplrow", str(lib.templates[template_id].top)))
+            w._do(lambda anchor=anchor, rows=rows, left=left: templates.save_timing(w.conn, w.ctx.data_root, w.ctx.fs, w.ctx.settings, template_id, anchor, rows, w._now(), left), ("tplrow", str(lib.templates[template_id].top)))
             return
 
     def _add_preview(self, plan: templates.AddPlan) -> PreviewDialog:
@@ -1326,7 +1326,7 @@ class TemplatesPane:
                 left = pv.unticked()
             made: list[int] = []
 
-            def change():
+            def change(left=left, made=made):
                 row_id, out = templates.new_row(w.conn, w.ctx.data_root, w.ctx.fs, w.ctx.settings, parent, dialog.values(), w._now(), left)
                 made.append(row_id)
                 return out
@@ -1354,7 +1354,7 @@ class TemplatesPane:
                 if not self._preview(pv):
                     continue
                 left = pv.unticked()
-            w._do(lambda: templates.save_row(w.conn, w.ctx.data_root, w.ctx.fs, w.ctx.settings, row_id, dialog.values(), w._now(), left), ("tplrow", str(row_id)))
+            w._do(lambda left=left: templates.save_row(w.conn, w.ctx.data_root, w.ctx.fs, w.ctx.settings, row_id, dialog.values(), w._now(), left), ("tplrow", str(row_id)))
             return
         if dialog.after == ("timing",):
             self.timing(row.template)

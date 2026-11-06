@@ -11,7 +11,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest  # noqa: E402
 from PySide6.QtCore import QSize  # noqa: E402
-from PySide6.QtWidgets import QApplication, QFrame, QLabel, QMessageBox, QPushButton, QTableWidget, QTreeWidgetItem, QWidget  # noqa: E402
+from PySide6.QtWidgets import QApplication, QFrame, QLabel, QMessageBox, QPushButton, QTreeWidgetItem, QWidget  # noqa: E402
 
 from docrepo import db  # noqa: E402
 from docrepo.config import Settings  # noqa: E402

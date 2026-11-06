@@ -113,17 +113,20 @@ def test_a_note_goes_on_its_task_s_page_under_its_day(root):
     assert [(x.group, x.id) for x in search.search(conn, Model(conn), "Second note")] == [("Notes", "T000012")]
 
 
-def test_a_note_s_headings_go_under_the_page_s_with_the_same_words(root):
-    """Decision 345: each heading of a note goes under the page's heading with the same words (case and spacing aside,
-    the last of two), at its section's end; a heading the page hasn't got is made at the page's end."""
+def test_a_note_s_headings_go_at_the_end_unless_the_last_heading_has_their_words(root):
+    """Decision 345 with release 5.94's rule (the review of 2026-11-06, F13): new text goes at the page's end. A note's
+    heading goes under the page's heading with the same words (case and spacing aside) only when that's the page's last
+    heading; a match higher up doesn't move it, and a heading the page hasn't got is made at the end too."""
     conn, data_root, fs = root
     edits.save_page(conn, data_root, fs, "T000012", "# Seals\n- Old seal noted\n## Rigging\n- Crane booked\n# Other\n- x", AT)
     r = save(root, CaptureDraft(content="Loose line\n# SEALS\n- New seal fitted\n## Lifting plan\n- Two cranes", task="T000012", formatted=True))
-    assert r.noted_under == ["Fri 16 Oct 2026", "Seals", "Lifting plan"]
-    assert r.message == "Added to the notes of Rigging plan, under Fri 16 Oct 2026, Seals and Lifting plan."
+    assert r.noted_under == ["Fri 16 Oct 2026", "SEALS", "Lifting plan"]
+    assert r.message == "Added to the notes of Rigging plan, under Fri 16 Oct 2026, SEALS and Lifting plan."
     assert page(root, "T000012").split("\n") == [
-        "# Seals", "- Old seal noted", "## Rigging", "- Crane booked", "- New seal fitted", "# Other", "- x",
-        "# Fri 16 Oct 2026", "Loose line", "## Lifting plan", "- Two cranes"]
+        "# Seals", "- Old seal noted", "## Rigging", "- Crane booked", "# Other", "- x",
+        "# Fri 16 Oct 2026", "Loose line", "# SEALS", "- New seal fitted", "## Lifting plan", "- Two cranes"]
+    r = save(root, CaptureDraft(content="## lifting plan\n- Slings tested", task="T000012", formatted=True))  # the last heading: under it
+    assert r.noted_under == ["Lifting plan"] and page(root, "T000012").endswith("## Lifting plan\n- Two cranes\n- Slings tested")
 
 
 def test_an_update_s_caption_says_what_changed_and_its_text_follows(root):
@@ -317,7 +320,7 @@ def test_a_task_made_from_meeting_notes_is_one_line_on_the_meeting_s_page(root):
     assert "get the alignment report" in page(root, made.created_task).lower()  # the task's own page keeps the words
     assert notes_page.read_line(notes_page.task_line(task.text, task.ref)).text == task.text
     printed = notes_page.task_md(p, lambda _: None, task_link=lambda t: f"../{t}/Task.md")
-    assert any(line.startswith(f"- [Task: ") and f"](../{made.created_task}/Task.md)" in line for line in printed)
+    assert any(line.startswith("- [Task: ") and f"](../{made.created_task}/Task.md)" in line for line in printed)
 
 
 def test_a_task_made_from_a_note_on_the_page_is_one_line_there(root):

@@ -32,7 +32,7 @@ from docrepo.db import STATES, transaction
 from docrepo.model import Model, Person, Task
 from docrepo.pages import num
 from docrepo.safe_fs import SafeFS, WriteRefused
-from docrepo.tasks import RATE_FIELDS, RATES, WEEK_RATES, TaskError, hours_values
+from docrepo.tasks import RATE_FIELDS, TaskError, hours_values
 from docrepo.templates import Library, Row
 from docrepo.timing import RowTie
 

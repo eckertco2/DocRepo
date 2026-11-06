@@ -33,6 +33,7 @@ class FakeEmail:
     html: str | None = None
     sent: datetime = datetime(2026, 10, 7, 9, 15, tzinfo=timezone.utc)
     attachments: list[FakeAttachment] = field(default_factory=list)
+    entry_id: bytes | None = None  # PR_ENTRYID, which a dragged .msg rarely carries (release 5.93)
 
 
 def _filetime(moment: datetime) -> int:
@@ -57,6 +58,8 @@ def build(email: FakeEmail) -> bytes:
     for pid, text in ((msg.SUBJECT, email.subject), (msg.SENDER_NAME, email.sender), (msg.DISPLAY_TO, email.to), (msg.BODY, email.body)):
         _write(root, pid, msg.PT_UNICODE, (text + "\0").encode("utf-16-le"))
     fixed = [(msg.CLIENT_SUBMIT_TIME, msg.PT_SYSTIME, struct.pack("<q", _filetime(email.sent)))]
+    if email.entry_id:
+        _write(root, msg.ENTRY_ID, msg.PT_BINARY, email.entry_id)
     if email.html is not None:
         _write(root, msg.HTML, msg.PT_BINARY, email.html.encode("utf-8"))
         fixed.append((msg.INTERNET_CPID, msg.PT_LONG, struct.pack("<i", 65001)))

@@ -1038,7 +1038,7 @@ class Known:
 
 def parse_capture(
     content: str, capture_type: str, today: date, people: Sequence[ParsePerson], labels: Sequence[ParseLabel],
-    events: Sequence[str] = EVENT_WORDS, known: Known = Known(), refs: Sequence[str] = (),
+    events: Sequence[str] = EVENT_WORDS, known: Known = Known(), refs: Sequence[str] = (),  # noqa: B008 - frozen, so one shared default is safe
 ) -> ParseResult:
     """Read the content text and return the values for one capture type, "new_task" or "update".
 

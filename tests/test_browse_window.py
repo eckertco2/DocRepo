@@ -128,6 +128,9 @@ def test_each_view_selects_its_first_item(browse):
     assert browse.view == "timeline" and not browse.detail.isVisible() and len(browse.timeline.cap_rows.lines) == 6
     browse.set_view("settings")
     assert browse.middle.currentWidget() is browse.settings_view and browse.settings_view.hotkey.text() == "Ctrl+Shift+Space"
+    from docrepo import __version__
+
+    assert browse.settings_view.findChild(QLabel, "version").text() == f"DocRepo {__version__}"  # release 5.87
 
 
 def test_opening_a_hidden_task_turns_its_filter_on(browse):
@@ -587,8 +590,38 @@ def test_back_up_now_from_settings(browse, ctx, tmp_path):
     assert "backup_dir" in view.save()
     assert "Backups:</b> none yet" in view.backup_status.text()
     view.backup_now()
-    assert browse.status.text().startswith("Backed up the database (docs-1.db)")
+    assert browse.status.text().startswith("Backed up the database (docs-1.db, checked)")
     assert (tmp_path / "Backups" / "Database" / "docs-1.db").exists() and "the last was on" in view.backup_status.text()
+    assert "The last try" not in view.backup_status.text()
+
+
+def test_a_backup_problem_shows_in_settings(browse, ctx, tmp_path, monkeypatch):
+    """Release 5.89: a copy that fails its check is kept as the last try's problem, on the backup card, until a good one."""
+    from docrepo import backup
+
+    view = browse.settings_view
+    browse.set_view("settings")
+    view.backup.setText(str(tmp_path / "Backups"))
+    view.save()
+    monkeypatch.setattr(backup, "quick_check", lambda conn: "page 7 is never used")
+    view.backup_now()
+    assert "wasn't kept" in browse.status.text() and "The last try" in view.backup_status.text()
+    assert "failed SQLite&#x27;s check" in view.backup_status.text() or "failed SQLite's check" in view.backup_status.text()
+    monkeypatch.undo()
+    view.backup_now()
+    assert "The last try" not in view.backup_status.text()
+
+
+def test_check_the_data_root_from_settings(browse, ctx):
+    """Release 5.89: Settings' Check the data root lists what's missing, keeps the list in System, and changes nothing."""
+    browse.set_view("settings")
+    dialog = browse.settings_view.check_data_root(show=False)
+    try:
+        assert dialog.windowTitle() == "Data root check" and dialog.text.toPlainText().startswith("# Data root check")
+        assert next(ctx.data_root.glob("System/check-*.md")).exists()
+        assert browse.status.text().startswith("Checked the data root:")
+    finally:
+        dialog.deleteLater()
 
 
 def test_the_startup_shortcut_button(browse, ctx, tmp_path, monkeypatch):
@@ -809,7 +842,7 @@ def test_the_task_page_bar_and_its_links(browse, monkeypatch):
     browse.actions_layout.setGeometry(QRect(0, 0, 900, 40))  # the bar at a usual pane's width
     buttons = browse.actions.findChildren(QPushButton)
     more = buttons[-1]
-    assert more.accessibleName() == "More" and more.property("flowEnd") and more.menu().actions()[0].text() == "New subtask\tT"
+    assert more.accessibleName() == "More" and more.property("flowEnd") and more.menu().actions()[0].text() == "New task under this one\tT"
     assert len({b.geometry().center().y() for b in buttons}) == 1 and more.geometry().right() == 899 - 16  # one row, centred, More at its end
     add_to = next(b for b in buttons if b.text() == "Add to").menu().actions()
     assert add_to[0].text().startswith("Today") and add_to[-1].text() == "Someone else or another task…"

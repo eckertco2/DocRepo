@@ -89,3 +89,28 @@ def test_start_says_what_went_wrong():
 def test_copy_path_quotes_paths_with_spaces():
     assert opener.copy_text(["C:\\a\\b.pdf", "\\\\server\\eng\\Line 2\\c.pdf"]) == 'C:\\a\\b.pdf\n"\\\\server\\eng\\Line 2\\c.pdf"'
     assert Path  # noqa: B018
+
+
+# ---- File Explorer (release 5.87, the review's F7) ----
+def test_file_explorer_gets_its_arguments_as_a_list(tmp_path):
+    """Explorer is started only from opener.py, with a list of arguments: a file selected, a folder opened, or the nearest
+    folder there when the file's gone. Windows quotes a path with a space itself."""
+    import subprocess
+
+    folder = tmp_path / "Line 2"
+    folder.mkdir()
+    pdf = folder / "Lift plan.pdf"
+    pdf.write_bytes(b"%PDF")
+    started: list[list[str]] = []
+    assert opener.show_in_explorer(pdf, started.append) and started[-1] == ["/select,", str(pdf)]
+    assert subprocess.list2cmdline(["explorer", *started[-1]]) == f'explorer /select, "{pdf}"'
+    assert opener.show_in_explorer(folder, started.append) and started[-1] == [str(folder)]
+    assert not opener.show_in_explorer(folder / "gone.pdf", started.append) and started[-1] == [str(folder)]  # its folder is shown
+    assert not opener.show_in_explorer(Path("relative.pdf"), started.append) and len(started) == 3  # never a link or a bare name
+    assert opener.open_folder(folder, started.append) and started[-1] == [str(folder)]
+    assert not opener.open_folder(pdf, started.append) and len(started) == 4
+
+    def refuse(_args) -> None:
+        raise OSError
+
+    assert not opener.show_in_explorer(pdf, refuse)

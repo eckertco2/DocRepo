@@ -1,0 +1,13 @@
+# Ruff's settings (release 5.87, the review of 2026-11-06, F7). Ruff is a development tool run on the personal computer
+# only: it isn't in requirements.txt, the tests don't need it, and it's installed in a venv of its own, never in .venv.
+# From that venv's ruff.exe, in this folder:   ruff check .
+# The noqa markers in the code name these rules, each with its reason.
+line-length = 200
+
+[lint]
+select = ["E", "F", "B", "BLE", "S"]
+ignore = [
+    "E501",  # a line is as long as it reads well, up to 200 characters or so; the markers' reasons run past that
+    "S101",  # an assert states an invariant or narrows a type; DocRepo never runs with -O, and the tests are asserts
+    "B905",  # zip pairs lists made together; strict= would change what a mismatch does
+]

@@ -26,7 +26,7 @@ import logging
 import sqlite3
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 from docrepo import agenda, edits, markup, notes_page, search, tasks, ties, timing
@@ -371,7 +371,7 @@ def _store_row_ties(conn: sqlite3.Connection, row_id: int, given: Mapping[str, R
 def _insert_row(conn: sqlite3.Connection, template: int, parent: int | None, v: Mapping) -> int:
     place = conn.execute("SELECT coalesce(max(place), 0) + 1 FROM template_rows WHERE template = ? AND parent IS ?", (template, parent)).fetchone()[0]
     columns = {"template": template, "parent": parent, "place": place, **{k: v[k] for k in _COLUMNS}}
-    cur = conn.execute(f"INSERT INTO template_rows ({', '.join(columns)}) VALUES ({', '.join('?' * len(columns))})", tuple(columns.values()))
+    cur = conn.execute(f"INSERT INTO template_rows ({', '.join(columns)}) VALUES ({', '.join('?' * len(columns))})", tuple(columns.values()))  # noqa: S608 - a column or table name of DocRepo's own; values are parameters
     _store_lists(conn, cur.lastrowid, v)
     _store_row_ties(conn, cur.lastrowid, v.get("ties") or {})
     return cur.lastrowid
@@ -624,7 +624,7 @@ def preview_row(conn: sqlite3.Connection, settings: Settings, row_id: int, value
 
 def _write_row(conn: sqlite3.Connection, settings: Settings, plan: RowPlan, row_id: int, v: Mapping, at: datetime, left: Collection[str]) -> None:
     """A row's change, as planned, in the caller's transaction."""
-    conn.execute(f"UPDATE template_rows SET {', '.join(f'{k} = ?' for k in _COLUMNS)} WHERE id = ?", (*(v[k] for k in _COLUMNS), row_id))
+    conn.execute(f"UPDATE template_rows SET {', '.join(f'{k} = ?' for k in _COLUMNS)} WHERE id = ?", (*(v[k] for k in _COLUMNS), row_id))  # noqa: S608 - a column or table name of DocRepo's own; values are parameters
     _store_lists(conn, row_id, v)
     if v["ties"] is not None:
         _store_row_ties(conn, row_id, v["ties"])

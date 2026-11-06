@@ -30,7 +30,7 @@ from docrepo.pages import num
 from docrepo.schedule import due_of, is_open, start_of
 from docrepo.stories import Event, RawItem, Stories, clip
 from docrepo.task_links import SHOWN, all_documents, links_of
-from docrepo.views import CapacityRow, due_cell, label_tasks, markers, rem_text
+from docrepo.views import CapacityRow, label_tasks, markers
 
 CSS = """
 body { font-family: 'Segoe UI'; font-size: 10pt; color: #1a1f25; }
@@ -652,7 +652,7 @@ class Pages:
         count = f'{sum(is_open(k) for k in kids)} of {len(kids)} open'
         bar = f' <img src="progress:{len(closed)}:{len(kids)}" width="{PROGRESS_WIDTH}" height="4" title="{len(closed)} of {len(kids)} closed">'
         toggle = (f'<p class="more">{link("fold:closed", "Hide closed" if state.closed else f"Show {len(closed)} closed")}</p>' if closed else "")
-        return (section("Subtasks", f' <span class="rel">{count}</span>{bar} &nbsp;{link(f"new:{t.id}", "New subtask", "A new task under this one (T)")}')
+        return (section("Subtasks", f' <span class="rel">{count}</span>{bar} &nbsp;{link(f"new:{t.id}", "New task under this one", "A new task under this one (T)")}')
                 + f'<table width="100%" cellspacing="0" cellpadding="3">{"".join(rows)}</table>{toggle}')
 
     def reference_value(self, name: str, value: str) -> str:

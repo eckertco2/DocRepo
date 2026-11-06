@@ -9,7 +9,8 @@ release 5.9's rows: HTML that wraps, tinted by group.
 """
 from __future__ import annotations
 
-from collections.abc import Callable
+import contextlib
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 
 from PySide6.QtCore import QModelIndex, QPoint, QRect, QSize, Qt, QTimer, Signal
@@ -643,13 +644,25 @@ class RowTree(QTreeWidget):
             item.setFirstColumnSpanned(True)
         return item
 
+    @contextlib.contextmanager
+    def building(self) -> Iterator[None]:
+        """While the rows are being set up rather than changed by the owner (release 5.95, the review's F11, for callers
+        outside this class): opening, folding or ticking a row then isn't remembered or sent on. Nested use keeps it on."""
+        was, self._building = self._building, True
+        try:
+            yield
+        finally:
+            self._building = was
+
+    @property
+    def is_building(self) -> bool:
+        """Whether the rows are being set up now (``building``), rather than changed by the owner."""
+        return self._building
+
     def add_tick(self, item: QTreeWidgetItem, on: bool) -> None:
         """Give a row a tick box in its first column. Setting it doesn't send ``ticked``."""
-        building, self._building = self._building, True
-        try:
+        with self.building():
             item.setCheckState(0, Qt.CheckState.Checked if on else Qt.CheckState.Unchecked)
-        finally:
-            self._building = building
 
     # ---- a task's state from its row (release 5.76, round 7's item 101, decisions 360 and 361) ----
     def mark_state(self, item: QTreeWidgetItem, column: int, task_id: str, state: str) -> None:

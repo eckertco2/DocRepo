@@ -10,20 +10,27 @@ the Task view.
   it was only copied): ``start_link`` hands an http or https address to Windows' "open", as clicking a link in
   Outlook does. DocRepo never fetches it: the browser makes the connection, not DocRepo. Copy link stays beside it.
 - A **folder** (release 5.66) opens in File Explorer, which is what showing it does.
+- **File Explorer** (release 5.87, the review's F7) is started here too, and only here: ``show_in_explorer`` with a
+  file selected, ``open_folder`` on a folder. Its arguments go as a list, never as one string, and never through a
+  shell.
 
 Starting the program is the caller's (``start``): the window runs it on a worker thread, so a slow LAN drive never
 freezes it, and says so if the file isn't there.
 """
 from __future__ import annotations
 
+import logging
 import os
-from collections.abc import Callable
+import subprocess
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from docrepo.links import read_address
 from docrepo.overview import Record
+
+log = logging.getLogger(__name__)
 
 #: The document types Open may start: Word, Excel, PowerPoint, PDF, Visio, text, CSV, OpenDocument, pictures and emails.
 OPENABLE = frozenset({
@@ -125,3 +132,50 @@ def start_link(address: str, starter: Callable[[str], None] | None = None) -> st
     except OSError as e:
         return f"Windows couldn't hand the link to your browser ({type(e).__name__})."
     return None
+
+
+def _start_explorer(args: Sequence[str]) -> None:
+    """Start File Explorer with these arguments, as a list: no shell, and nothing but Explorer."""
+    subprocess.Popen(["explorer", *args])  # noqa: S603, S607 - Explorer only, its arguments as a list, no shell
+
+
+def open_folder(folder: Path, launcher: Callable[[Sequence[str]], None] | None = None) -> bool:
+    """Open File Explorer on a folder. Only a full path: never a link, which Explorer would open in the browser."""
+    target = Path(folder)
+    if os.name != "nt" and launcher is None:
+        return False
+    if not target.is_absolute() or not target.is_dir():
+        return False
+    try:
+        (launcher or _start_explorer)([str(target)])
+    except OSError as e:
+        log.warning("couldn't start File Explorer: %s", type(e).__name__)
+        return False
+    return True
+
+
+def show_in_explorer(path: Path, launcher: Callable[[Sequence[str]], None] | None = None) -> bool:
+    """Open File Explorer with ``path`` selected, or on the folder itself, or on the nearest folder above it that's there.
+    Returns False when nothing was shown. DocRepo never opens or runs the file itself.
+
+    ``/select,`` and the path are two arguments, which Python quotes as Windows expects (``explorer /select, "C:\\Docs\\Lift plan.pdf"``);
+    a Windows path can't hold a quote."""
+    target = Path(path)
+    if os.name != "nt" and launcher is None:
+        return False
+    if not target.is_absolute():  # only a full path: never a link, which Explorer would open in the browser
+        return False
+    start = launcher or _start_explorer
+    try:
+        if target.is_dir():
+            start([str(target)])
+            return True
+        if target.exists():
+            start(["/select,", str(target)])
+            return True
+        folder = next((p for p in target.parents if p.is_dir()), None)
+        if folder is not None:
+            start([str(folder)])
+    except OSError as e:
+        log.warning("couldn't start File Explorer: %s", type(e).__name__)
+    return False

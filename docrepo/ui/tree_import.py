@@ -594,7 +594,7 @@ class EditReviewDialog(_Window):
             if self.plan.kind == "task":
                 keep = f" {plural(c.tied_here, 'task')} tied to it keep their dates." if c.tied_here else ""
                 return f"<span class='sub'>Discard</span> <b>{esc(c.title)}</b>, with the reason “{tf.TAKEN_OUT}”. Bring back restores it.{esc(keep)}"
-            return f"<span class='sub'>Take out</span> <b>{esc(c.title)}</b>"
+            return f"<span class='sub'>Remove</span> <b>{esc(c.title)}</b>"
         old, new = c.old_words(self.m, self.today), c.new_words(self.m, self.today)
         clip = lambda s: s if len(s) <= 90 else s[:90].rsplit(" ", 1)[0] + "…"  # noqa: E731
         return (f"<span style='color:{tokens.colour('text2')}'>{esc(c.title)} · {tf.FIELD_WORDS.get(c.field_name, c.field_name)}</span><br>"
@@ -760,7 +760,7 @@ class TreeFilesPane:
                 return
             made: list[int] = []
 
-            def change():
+            def change(made=made):
                 top, out = tf.import_file(w.conn, w.ctx.data_root, w.ctx.fs, dialog.plan, dialog.settled(), dialog.reading, dialog.name, w._now())
                 made.append(top)
                 return out

@@ -107,7 +107,7 @@ def test_the_backup_command(setup, capsys):
     conn, root, settings, folder = setup
     settings.save(SafeFS([root]), root)
     assert main(["--data-root", str(root), "backup"]) == 0
-    assert "Backed up the database (docs-1.db)" in capsys.readouterr().out
+    assert "Backed up the database (docs-1.db, checked)" in capsys.readouterr().out  # checked since release 5.89
     assert db.get_state(conn, backup.STATE_KEY)
     assert main(["--data-root", str(root), "backup"]) == 0
     Settings(me="P001").save(SafeFS([root]), root)

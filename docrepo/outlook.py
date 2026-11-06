@@ -281,7 +281,7 @@ def copy_whole(app: object, item: object, scratch: Path) -> EmailItem:
     finally:
         try:
             draft.Close(OL_DISCARD)
-        except Exception:  # noqa: BLE001 - never saved, so nothing is left behind either way
+        except Exception:  # noqa: BLE001, S110 - never saved, so nothing is left behind either way
             pass
     email = msg.read(scratch.read_bytes())
     email.entry_id, email.store_id = where_kept(item)
@@ -412,9 +412,9 @@ def is_outlook_drop(formats: list[str]) -> bool:
 
 
 # ---- where a dragged email is in Outlook, and its category (release 5.33) ----
-def selected_places() -> list[tuple[str, str, str]]:
-    """The EntryID, StoreID and subject of each email selected in Outlook, which are the emails being dragged. None of
-    these is covered by the security guard. Raises OutlookError."""
+def selected_places() -> list[tuple[str, str, str, str]]:
+    """The EntryID, StoreID, subject and sent time (to the minute) of each email selected in Outlook, which are the emails
+    being dragged. None of these is covered by the security guard. Raises OutlookError."""
     app, _how = connect()
     try:
         selection = app.ActiveExplorer().Selection  # type: ignore[attr-defined]
@@ -427,19 +427,38 @@ def selected_places() -> list[tuple[str, str, str]]:
         if getattr(item, "Class", None) != OL_MAIL:
             continue
         entry_id, store_id = where_kept(item)
-        out.append((entry_id, store_id, _text(read_field(item, "Subject", []))))
+        out.append((entry_id, store_id, _text(read_field(item, "Subject", [])), _when(read_field(item, "SentOn", []))))
     return out
 
 
-def match_places(emails: Sequence[EmailItem], places: Sequence[tuple[str, str, str]]) -> int:
-    """Give each dragged email the place in Outlook of the selected email with the same subject, in order; failing that,
-    when as many are selected as were dragged, the one in the same position. Returns how many were placed."""
+def match_places(emails: Sequence[EmailItem], places: Sequence[tuple[str, ...]]) -> int:
+    """Give each dragged email its place in Outlook (release 5.93, the review's F14): the EntryID its own .msg carries,
+    when it has one; else the selected email with the same subject and sent minute; else the one selected email with that
+    subject, but never by subject when two selected share it (a reply chain), which is skipped and noted on the email for
+    Save to say; else, with one email dragged and one selected, that one. Returns how many were placed. A place is
+    (EntryID, StoreID, subject, sent minute), the sent minute "" when Outlook didn't give it."""
     left = [p for p in places if p[0]]
     placed = 0
-    for n, email in enumerate(emails):
-        match = next((p for p in left if p[2].strip().casefold() == email.subject.strip().casefold()), None)
-        if match is None and len(places) == len(emails) and places[n][0] and places[n] in left:
-            match = places[n]
+
+    def same(a: str, b: str) -> bool:
+        return a.strip().casefold() == b.strip().casefold()
+
+    for email in emails:
+        if email.entry_id:  # its .msg said where it is
+            placed += 1
+            continue
+        sent = (email.sent or "")[:16]
+        named = [p for p in left if same(p[2], email.subject)]
+        timed = [p for p in named if sent and len(p) > 3 and p[3] == sent]
+        match = timed[0] if len(timed) == 1 else None
+        if match is None and len(named) == 1 and not timed:
+            match = named[0]
+        if match is None and len(named) > 1:
+            email.place_note = (f"{len(named)} emails selected in Outlook have its subject, so DocRepo couldn't tell which it was, "
+                                "and didn't guess")
+            continue
+        if match is None and not named and len(places) == len(emails) == 1 and left:
+            match = left[0]
         if match is not None:
             left.remove(match)
             email.entry_id, email.store_id = match[0], match[1]
@@ -517,9 +536,11 @@ def mark_filed(filed: Sequence[tuple[EmailItem, str]], model: Model, colour: str
     Returns how many were marked, and a problem for each that wasn't, in words safe for the notification."""
     if not filed:
         return 0, []
-    unplaced = sum(not e.entry_id for e, _ in filed)
-    problems = [f"{unplaced} email{'s' if unplaced != 1 else ''} couldn't be marked in Outlook: DocRepo didn't find "
-                f"{'them' if unplaced != 1 else 'it'} there."] if unplaced else []
+    noted = [e for e, _ in filed if not e.entry_id and e.place_note]
+    unplaced = sum(not e.entry_id and not e.place_note for e, _ in filed)
+    problems = [f"An email ({e.subject[:60]}) couldn't be marked in Outlook: {e.place_note}." for e in noted]
+    problems += [f"{unplaced} email{'s' if unplaced != 1 else ''} couldn't be marked in Outlook: DocRepo didn't find "
+                 f"{'them' if unplaced != 1 else 'it'} there."] if unplaced else []
     todo = [(e, task) for e, task in filed if e.entry_id]
     if not todo:
         return 0, problems

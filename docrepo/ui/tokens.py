@@ -40,7 +40,6 @@ LIGHT = {
     # Hours a week on the Timeline's bars, light to dark, and the text on each.
     "hour1": "#86b6ef", "hour2": "#5598e7", "hour3": "#256abf", "hour4": "#184f95", "hour5": "#0d366b",
     "hour_ink1": "#0b1b2e", "hour_ink2": "#0b1b2e", "hour_ink3": "#ffffff", "hour_ink4": "#ffffff", "hour_ink5": "#ffffff",
-    "pri_high": "#d9622b",
     # The Timeline page (release 5.40): bars' one colour, the team chart's hours within capacity, and a week's load, a cell's
     # steps from under 40% to 125% or more, with the text on the last.
     "bar": "#64788c", "bar_soft": "#9fabb8",
@@ -66,7 +65,6 @@ DARK = {
     "lane1": "#6fa6e8", "lane2": "#f08a69", "lane3": "#56c2b0", "lane4": "#dca64a", "lane5": "#ee9fbd", "lane6": "#5cbf86", "lane7": "#ad8ee8", "lane8": "#f3968e",
     "hour1": "#1c3a5e", "hour2": "#25507f", "hour3": "#3a70ad", "hour4": "#6699d4", "hour5": "#9cc0ea",
     "hour_ink1": "#ffffff", "hour_ink2": "#ffffff", "hour_ink3": "#ffffff", "hour_ink4": "#0b1b2e", "hour_ink5": "#0b1b2e",
-    "pri_high": "#f08a69",
     "bar": "#8fa3b6", "bar_soft": "#5f6f7d",
     "load1": "#343434", "load2": "#454545", "load3": "#6b5220", "load4": "#8a3a32", "load5": "#e8776c", "load5_ink": "#1b1b1b",
     "item_task": "#1f3447", "item_note": "#1c3532", "item_update": "#3a2e13", "item_decision": "#2d2b3d", "item_date": "#26331c", "item_heading": "#333333",

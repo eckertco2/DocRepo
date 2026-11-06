@@ -40,7 +40,7 @@ def test_a_task_page(pages):
     # Release 5.83 (the task pane review's R7): the status says its date, its age in the tooltip; a subtask row its date alone.
     order = ["Current status Mon 5 Oct Procedure rev 2 approved. Waiting on the rigging plan.",
              "When Due Fri 30 Oct in 22 days Deadline too · Turnaround ends Starts Mon 19 Oct in 11 days",
-             "Who Lead Me 8 h Assignees Tom Becker 60 h Mike Ortiz 60 h", "Subtasks 3 of 3 open New subtask Rigging plan Wed 14 Oct",
+             "Who Lead Me 8 h Assignees Tom Becker 60 h Mike Ortiz 60 h", "Subtasks 3 of 3 open New task under this one Rigging plan Wed 14 Oct",
              "Details T000008 · Created Tue 22 Sep from C000005", "Captures 6 Status log 14 Summaries 1 Files 3 With subtasks ⇅ Oldest first",
              "This task September 2026", "Subtasks · 3"]
     at = [words.find(part) for part in order]
@@ -102,7 +102,7 @@ def test_the_wide_page_has_its_facts_on_the_right(pages):
 
 def test_tabs_scopes_and_chapters(pages):
     log = text(pages.task_page("T000008", PageState(tab="log")))
-    assert "Work started" in log and "↳ New subtask: Rigging plan · Mike Ortiz, due 14 Oct" in log
+    assert "Work started" in log and "↳ New task under this one: Rigging plan · Mike Ortiz, due 14 Oct" in log
     closed = text(pages.task_page("T000008", PageState(tab="log", scope="self")))
     assert "Subtasks ·" not in closed and "This task" in closed  # the scope's name is its menu's
     assert log.count("Status log") == closed.count("Status log") and log.split("Status log ")[1][:2] != closed.split("Status log ")[1][:2]
@@ -234,7 +234,7 @@ def test_the_page_in_parts(pages):
     assert (parts["status_name"], parts["status_when"], parts["status_age"]) == ("Current status", "Mon 5 Oct", "3 days ago")
     assert "Procedure rev 2 approved" in parts["status_body"]
     assert parts["status_log_summary"] == f"{len(pages.stories.story('T000008'))} changes" and "Work started" in text(parts["status_log"])
-    assert text(parts["subtasks_summary"]) == "3 of 3 open New subtask" and "Rigging plan" in text(parts["subtasks"]) and "Subtasks" not in text(parts["subtasks"])
+    assert text(parts["subtasks_summary"]) == "3 of 3 open New task under this one" and "Rigging plan" in text(parts["subtasks"]) and "Subtasks" not in text(parts["subtasks"])
     assert "Starts" in parts["when_who_summary"] and "Due" not in parts["when_who_summary"] and "h" in parts["when_who_summary"]
     assert "Deadline too" in text(parts["when_who"]) and "Who Lead Me 8 h" in text(parts["when_who"])
     assert parts["details_summary"] == "" and "ID T000008" in text(parts["details"]) and "Folder" in text(parts["details"])

@@ -39,7 +39,7 @@ from docrepo.overview import KIND_NAMES, KINDS, SOURCE_NAMES, SOURCES, TYPE_NAME
 from docrepo.search import extracted_text
 from docrepo.ui import tokens
 from docrepo.ui.icons import icon
-from docrepo.ui.look import LOOK, Help
+from docrepo.ui.look import LOOK
 from docrepo.ui.page_view import PageView
 from docrepo.ui.result_list import ResultList, Row
 from docrepo.ui.state_menu import UndoButton, can_change, state_menu
@@ -358,10 +358,10 @@ class TaskView(QWidget):
         button("Edit", lambda: b.edit_task(tid), "Edit task (E)", "edit")
         button("Task page", self.open_task_page, "Open it in the browse tool: its status log and Details, with its notes page", "open")
         more = QMenu(self)
-        more.addAction(icon("add"), "New subtask\tT", lambda: self.command("new_task"))
+        more.addAction(icon("add"), "New task under this one\tT", lambda: self.command("new_task"))
         more.addAction(icon("copy"), "Copy prompt", lambda: b.copy_prompt(tid))
         more.addAction(icon("folder"), "Open folder", lambda: b.reveal(self.ctx.data_root / "Tasks" / tid))
-        m = button("", None, "More: New subtask, Copy prompt, Open folder", "more", more)
+        m = button("", None, "More: New task under this one, Copy prompt, Open folder", "more", more)
         m.setAccessibleName("More")
         if t.discarded:
             for i in range(self.commands.count()):
@@ -1306,7 +1306,7 @@ class TaskView(QWidget):
         self.browse.activateWindow()
 
     def command(self, mode: str) -> None:
-        """The task's own commands, as the browse tool's letters: Note, Update, New subtask, Agenda, Today, Edit, Meeting."""
+        """The task's own commands, as the browse tool's letters: Note, Update, New task under this one, Agenda, Today, Edit, Meeting."""
         b, tid = self.browse, self.task_id
         if mode == "edit":
             b.edit_task(tid)
@@ -1507,7 +1507,7 @@ class TaskView(QWidget):
                 *(Command("Go to", self.model().task(t).title, lambda t=t: self.set_scope(t)) for t in overview.family(self.model(), self.task_id)[1:]),
                 Command("Go to", "Another task's Task view", self.go_to_task, "Ctrl+O"), Command("Go to", "The parent task's Task view", self.go_to_parent, "Alt+Up"),
                 Command("Task", "Open task page", self.open_task_page), Command("Task", "Note", lambda: self.command("note"), "N"),
-                Command("Task", "Update", lambda: self.command("update"), "U"), Command("Task", "New subtask", lambda: self.command("new_task"), "T"),
+                Command("Task", "Update", lambda: self.command("update"), "U"), Command("Task", "New task under this one", lambda: self.command("new_task"), "T"),
                 Command("Task", "Add to Today", lambda: self.command("today"), "D"), Command("Task", "Edit task", lambda: self.command("edit"), "E")]
         self._palette = CommandPalette(self, cmds)
         self._palette.open_over(self)

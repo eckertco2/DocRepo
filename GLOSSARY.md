@@ -64,7 +64,10 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Quick task**: a task made from one line and put on Today, from Today's box, the Today hotkey, or a new task with no task picked that goes on Today. It's an ordinary task.
 - **Quick tasks**: the built-in top-level task that quick tasks wait under until Edit task puts them under their real task. DocRepo makes it the first time it's needed.
 - **Today side panel**: the Today view as a floating strip beside the other windows (release 5.43). It has the same items as the Today view, not a list of its own.
-- **Discard**: hiding a task or capture made by mistake, with a reason. Nothing is deleted, and Bring back restores it. It's how DocRepo "deletes" anything.
+- **Discard**: hiding a task or capture made by mistake, with a reason. Nothing is deleted, and Bring back restores it. It's how DocRepo "deletes" anything. Since release 5.91 it's the one word for getting rid of a record: a task, a capture or a draft.
+- **Remove**: taking a link away (release 5.91): a person from a task, a file from a capture, an item from an agenda or Today, a task from under a parent, a row from a template, a task from a what-if's plan, or a row or column from a table on a notes page. What it linked stays. In a what-if, **Add back** undoes it.
+- **Clear**: emptying a field, or the content text (release 5.91).
+- **New task under this one**: the task page's, the Task view's and the Activity view's name for a new task made under the task you're on (release 5.91), in place of "New subtask".
 - **Scope**: which tasks a view or prompt draws on: this task, with ancestors, with subtasks, or family. Family is all ancestors plus all descendants.
 - **Event**: a dated happening, such as an audit or a turnaround, entered as a task's Deadline. "Event" means nothing else, except in "plant event".
 
@@ -104,7 +107,7 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Me**: the person marked as DocRepo's owner. "I" and "me" in a capture mean them.
 - **Lead hours, Assignee hours**: estimated hours for each person in that role: a total for a one-time task, per occurrence for a routine one.
 - **Capacity calendar**: hours per person, workday and task, built from task fields. It's a cache that can be rebuilt at any time.
-- **What-if**: a named change to the plan, made on the Timeline page, that changes no task until it's applied (release 5.64). Its things done are taking a task off, moving a bar or a whole parent, and moving a key date. **Take off** in a what-if means Parked once it's applied. The **real plan** is the tasks as they are.
+- **What-if**: a named change to the plan, made on the Timeline page, that changes no task until it's applied (release 5.64). Its things done are removing a task from the plan, moving a bar or a whole parent, and moving a key date. **Remove** in a what-if (Take off until release 5.91) means Parked once it's applied, and **Add back** undoes it. The **real plan** is the tasks as they are.
 
 ## 4. Files and documents
 
@@ -155,7 +158,8 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 
 - **Capture event**: say capture. It covers both the act and its record.
 - **Content type**: say capture type.
-- **New subtask**: as an option name, say New task. It's a subtask when it has a parent.
+- **New subtask**: as an option name, say New task. It's a subtask when it has a parent. On a task's own page and menus, say New task under this one (release 5.91).
+- **Delete**, **Take off**, **Take out** and **Put back** (in the windows, release 5.91): say Discard for a record, Remove for a link and Clear for a field. Bring back stays as Discard's opposite, and Add back as Remove's in a what-if. A what-if itself is still deleted, as it holds no record of the owner's: nothing changed until it was applied.
 - **File a copy**: say Save a copy, so "filing" only means linking an unfiled capture.
 - **Project notes**: say Note.
 - **Tag**: captures have a type, and tasks have labels.

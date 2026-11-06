@@ -396,13 +396,32 @@ def _same_words(a: str, b: str) -> bool:
     return " ".join(a.split()).casefold() == " ".join(b.split()).casefold()
 
 
+@dataclass(frozen=True)
+class Landing:
+    """Where one of a note's headings went (release 5.94): under the page's last heading, which has its words ("under"),
+    or at the page's end under its own heading ("end"), with whether a heading with its words is higher up."""
+
+    words: str
+    how: str
+    higher_up: bool = False
+
+
 def place_note(page: str, note: list[str], day: date) -> tuple[str, list[str]]:
+    """The page with a note from the capture window on it, which is no capture: ``place_note_where`` without the
+    landings. Returns the page and the headings the note went under, in order, for Save's message."""
+    out, under, _ = place_note_where(page, note, day)
+    return out, under
+
+
+def place_note_where(page: str, note: list[str], day: date) -> tuple[str, list[str], list[Landing]]:
     """The page with a note from the capture window on it, which is no capture (release 5.69, the notes workspace plan's
-    decision 345). Each of the note's headings goes under the page's heading with the same words (case and spacing
-    aside; the last on the page when it has two), at the end of that heading's section, or at the page's end, at the
-    level it was typed, when the page has none. The note's lines under none of its headings go under the day's heading,
-    at the end of the day's lines, as a capture's block does (``add_block``). Returns the page and the headings the
-    note went under, in order, for Save's message."""
+    decision 345, with release 5.94's simpler rule, the review of 2026-11-06, F13, taken 2026-11-06). New text goes at
+    the end of the page. Each of the note's headings goes under the page's heading with the same words (case and spacing
+    aside) only when that heading is the page's last heading; otherwise it goes at the page's end under its own heading,
+    at the level it was typed, even when a heading with its words is higher up (the footer says so). The note's lines
+    under none of its headings go under the day's heading, at the end of the day's lines, as a capture's block does
+    (``add_block``), which is the page's end unless a later day follows. Returns the page, the headings the note went
+    under, in order, for Save's message, and where each of its headings went, for the capture window's sentence."""
     loose: list[str] = []
     sections: list[tuple[int, str, list[str]]] = []  # each of the note's headings: its level, its words, its lines
     for x in note:
@@ -420,7 +439,7 @@ def place_note(page: str, note: list[str], day: date) -> tuple[str, list[str]]:
             lines = lines[1:]
         return lines
 
-    out, under = page, []
+    out, under, landed = page, [], []
     loose = trimmed(loose)
     if loose:
         out = add_block(out, loose, day, True)
@@ -429,17 +448,21 @@ def place_note(page: str, note: list[str], day: date) -> tuple[str, list[str]]:
         lines = trimmed(lines)
         raw = out.split("\n") if out else []
         read = [read_line(x) for x in raw]
-        match = max((i for i, x in enumerate(read) if x.kind == "heading" and _same_words(x.text, words)), default=None)
-        if match is None:
-            out = "\n".join(_trim_end(raw) + [heading_line(words, level)] + lines)
-            under.append(words)
+        heads = [i for i, x in enumerate(read) if x.kind == "heading"]
+        last = heads[-1] if heads else None
+        if last is not None and _same_words(read[last].text, words):  # the page's last heading: under it, at the page's end
+            end = len(raw)
+            while end > last + 1 and not raw[end - 1].strip():
+                end -= 1
+            out = "\n".join(raw[:end] + lines + raw[end:])
+            under.append(read[last].text)
+            landed.append(Landing(read[last].text, "under"))
             continue
-        end = next((i for i in range(match + 1, len(read)) if read[i].kind == "heading" and read[i].level <= read[match].level), len(raw))
-        while end > match + 1 and not raw[end - 1].strip():
-            end -= 1
-        out = "\n".join(raw[:end] + lines + raw[end:])
-        under.append(read[match].text)
-    return out, list(dict.fromkeys(under))
+        higher = any(_same_words(read[i].text, words) for i in heads)
+        out = "\n".join(_trim_end(raw) + [heading_line(words, level)] + lines)
+        under.append(words)
+        landed.append(Landing(words, "end", higher))
+    return out, list(dict.fromkeys(under)), landed
 
 
 def _file_run(lines: list[Line], start: int, refs: set[str]) -> int:

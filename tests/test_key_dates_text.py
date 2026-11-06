@@ -11,7 +11,7 @@ from datetime import datetime  # noqa: E402
 import pytest  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from docrepo import captures, notes_page, tasks  # noqa: E402
+from docrepo import notes_page, tasks  # noqa: E402
 from docrepo.config import Settings  # noqa: E402
 from docrepo.model import Model  # noqa: E402
 from docrepo.save import CaptureDraft, NewTaskFields, save_capture  # noqa: E402

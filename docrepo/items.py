@@ -79,6 +79,8 @@ _LEAD_IN = re.compile(r"^(?:to|will|should|please|needs? to|has to|must)\s+", re
 _MARKER = re.compile(r"^\s*(?:[-*•]|\d+[.)])\s+", re.M)
 # The @, @L. or # word being typed: up to 8 words, with a space after the last one (round 7's decision 324, release 5.74).
 # A sigil with only a space after it isn't one: "# " starts a heading.
+#: A ** being typed at a line's start or after a space, with the start of a name (release 5.92).
+_STAR_TYPING = re.compile(r"(?:^|[\s(])(\*\*)([A-Za-z]+(?: [A-Za-z]+){0,2})?\Z")
 _TYPING = re.compile(r"(?:^|[\s(])(@L\.|@|#)((?:[^\s@#*]+(?: [^\s@#*]+){0,7} ?)?)\Z", re.I)
 TYPING_LIMIT = 60  # characters after the sigil
 
@@ -898,6 +900,10 @@ class Reading:
     items: list[Item]
     headings: list[Heading]
     self_block: Block | None
+    #: Lines with a ** that read as nothing, by line number with their text (release 5.92): each gets an Unread line card.
+    unread: list[tuple[int, str]] = field(default_factory=list)
+    #: The names an @ makes a new person of, as typed, each with whether it's still ticked to be added (release 5.92).
+    new_people: list[tuple[str, bool]] = field(default_factory=list)
 
 
 @dataclass
@@ -1100,7 +1106,12 @@ def read(content: str, names: Names, today: date, *, labels: Sequence[ParseLabel
         for p in params:
             items.append(param_item(p, b, mine, parent_item))
     _settle(items, names, home_task)
-    return Reading(lines, blocks, items, headings, self_block)
+    off = {k.lower() for k, v in ((overrides or {}).get(PEOPLE_KEY) or {}).items() if v is False}
+    if off:  # an unticked new person (release 5.92): their @ makes no one, and the item is for no one yet
+        for it in items:
+            it.assignees = [x for x in it.assignees if x.id or x.name.lower() not in off]
+            it.leads = [x for x in it.leads if x.id or x.name.lower() not in off]
+    return Reading(lines, blocks, items, headings, self_block, unread_lines(lines), _new_people(lines, off))
 
 
 def _settle(found: list[Item], names: Names, own: str | None) -> None:
@@ -1137,7 +1148,8 @@ def self_fields(r: Reading, names: Names) -> SelfFields | None:
     if not r.self_block or r.self_block.owner is None:
         return None
     L = r.lines[r.self_block.owner]
-    people = [x for x in L.toks if x.kind == "person" and not x.none and not x.inside]
+    off = {name.lower() for name, on in r.new_people if not on}
+    people = [x for x in L.toks if x.kind == "person" and not x.none and not x.inside and (x.id or x.name.lower() not in off)]
     return SelfFields([x for x in people if x.lead], [x for x in people if not x.lead], _tasks_of([x for x in L.toks if not x.inside]), clean(L.text, L.toks, names), bool(L.toks),
                       any(x.kind == "type" and x.event for x in L.toks))
 
@@ -1252,7 +1264,11 @@ class Option:
 
 
 def typing(before: str) -> Typing | None:
-    """The @, @L. or # word being typed, from the text before the cursor in its line."""
+    """The @, @L., # or ** word being typed, from the text before the cursor in its line. A ** list (release 5.92) is for
+    a name and its comma: once the comma's typed, the list goes."""
+    s = _STAR_TYPING.search(before)
+    if s:
+        return Typing("**", s.group(2) or "", len(before) - len(s.group(1)) - len(s.group(2) or ""))
     m = _TYPING.search(before)
     if not m or len(m.group(2)) > TYPING_LIMIT:
         return None
@@ -1318,6 +1334,8 @@ def options(t: Typing, names: Names) -> list[Option]:
     after a space go on narrowing it, matching the start of any word of a name, in any order; a task's words also match
     the names on its path (round 7's item 91, release 5.74)."""
     q = t.q.lower()
+    if t.sigil == "**":
+        return star_options(t.q, names)
     if t.sigil == "#":
         if not q and names.model is not None:  # "#" alone: the top-level tasks, in the tree's order, to walk down from (decision 313)
             tops = [names.tasks[x.id] for x in names.model.top_level() if x.id in names.tasks]
@@ -1338,6 +1356,121 @@ def options(t: Typing, names: Names) -> list[Option]:
     if q and re.fullmatch(r"[a-z][a-z'-]*", q) and not any(n.lower() == q for p in names.people for n in (p.name, *p.aliases)):
         out.append(Option(t.q, f"Add “{t.q}” to people", "Added when you save", add=True))
     return out
+
+
+#: The overrides' key for the new people's ticks (release 5.92): {name: False} for each one unticked.
+PEOPLE_KEY = "people"
+#: A ** with a word after it: the start of an operator, read or not. ``**bold**`` closes, and isn't one.
+_STAR_WORD = re.compile(r"(?:^|(?<=[\s(]))\*\*(?=[A-Za-z])")
+_BOLD = re.compile(r"\*\*[^*\n]+\*\*")
+
+
+def unread_lines(lines: Sequence[Line]) -> list[tuple[int, str]]:
+    """The lines with a ** that started no operator (release 5.92, the review's F6): ``**Tom to book the crane`` reads as
+    plain text, so its card says so. A ``**bold**`` pair isn't one, and a ** whose name isn't a field already has a card."""
+    out = []
+    for L in lines:
+        text = _BOLD.sub(lambda m: " " * len(m.group(0)), L.text)
+        starts = {x.start for x in L.toks if x.kind in ("param", "type")}
+        if any(m.start() not in starts for m in _STAR_WORD.finditer(text)):
+            out.append((L.n, L.raw.strip()))
+    return out
+
+
+def _new_people(lines: Sequence[Line], off: set[str]) -> list[tuple[str, bool]]:
+    """Each name an @ makes a new person of, once, as first typed, with whether it's still ticked (release 5.92)."""
+    seen: dict[str, str] = {}
+    for L in lines:
+        for x in L.toks:
+            if x.kind == "person" and not x.id and not x.none and x.name and x.name.lower() not in seen:
+                seen[x.name.lower()] = x.name
+    return [(name, low not in off) for low, name in seen.items()]
+
+
+#: What each ** kind and field looks like in use (release 5.92): the ** list's second line, the Keys dialog's Syntax tab
+#: and the README's table. Each one reads with no problem (``tests/test_star_syntax.py``).
+STAR_EXAMPLES = {
+    "task": "**task, Book the crane for Tuesday",
+    "note": "**note, The crane vendor called back",
+    "update": "**update, Crane booked for Tuesday",
+    "decision": "**decision, We hire the bigger crane",
+    "event": "**event, Turnaround from 3 to 21 Nov",
+    "closed": "**closed, The seals are fitted",
+    "in progress": "**in progress, Drawings started",
+    "parked": "**parked, Waiting for the vendor",
+    "not started": "**not started, Back to the start",
+    "start": "**start, 2 Nov",
+    "due": "**due, 5 Nov",
+    "deadline": "**deadline, 20 Nov",
+    "deadline description": "**deadline description, The audit",
+    "reminder": "**reminder, 4 Nov",
+    "repeat until": "**repeat until, 31 Dec",
+    "key date": "**key date, trial run 1 to 5 Dec, plant activity",
+    "lead": "**lead, @Tom",
+    "assignee": "**assignee, @Mike",
+    "lead hours": "**lead hours, 8",
+    "assignee hours": "**assignee hours, 2 h a day",
+    "duration": "**duration, 10 days",
+    "weekends": "**weekends, yes",
+    "involvement": "**involvement, Mike 50%",
+    "title": "**title, Crane booking",
+    "description": "**description, The crane for the impeller lift",
+    "status": "**status, Waiting on the vendor's quote",
+    "state": "**state, parked",
+    "priority": "**priority, high",
+    "recurrence": "**recurrence, weekly",
+    "urgent": "**urgent, yes",
+    "plant event": "**plant event, yes",
+    "meeting": "**meeting, yes",
+    "label": "**label, Safety",
+    "parent": "**parent, #Installation",
+}
+
+
+def star_name(op: Operator) -> str:
+    """An operator's name in the ** list: its first full name ("task", not "t")."""
+    return next((n for n in op.names if len(n) > 1), op.names[0])
+
+
+def star_options(q: str, names: Names) -> list[Option]:
+    """The ** list (release 5.92): the kinds first, then the fields (with the reference fields from Settings), each with
+    its example; what's typed narrows it by any of its names. Choosing one puts in "**name, "."""
+    kinds = [op for op in OPERATORS if op.item and not op.gone]
+    fields = [op for op in OPERATORS if not op.item and not op.gone]
+    every = [*kinds, *fields, *names.field_ops.values()]
+    found = _ranked(q, [(op, op.names, ()) for op in every]) if q.strip() else every
+    out = []
+    for op in found:
+        name = star_name(op) if not op.reference else op.label.lower()
+        kind = KIND_NAMES.get(op.item, "Update") if op.item else "Field"
+        example = STAR_EXAMPLES.get(name) or (f"**{name}, 4471" if op.reference else "")
+        out.append(Option(f"{name},", f"**{name},", f"{kind}: {example}" if example else kind))
+    return out
+
+
+def syntax_rows(names: Names | None = None) -> list[tuple[str, str, str, str]]:
+    """Every ** name, for the Keys dialog's Syntax tab and the README (release 5.92): (its name, its other names, what it
+    makes or fills, its example). Kinds first, then fields, then the reference fields named in Settings."""
+    rows = []
+    for op in OPERATORS:
+        if op.gone:
+            continue
+        name = star_name(op)
+        others = ", ".join(f"**{n}," for n in op.names if n != name)
+        what = (f"{KIND_NAMES.get(op.item, 'Item')}" + (f", {op.state}" if op.state else "") + (", a plant event" if op.event else "")
+                if op.item else op.label + (" (adds to the list)" if op.adds else ""))
+        rows.append((f"**{name},", others, what, STAR_EXAMPLES.get(name, "")))
+    for op in (names.field_ops.values() if names else ()):
+        rows.append((f"**{op.label.lower()},", "", f"{op.label} (a reference field, from Settings)", f"**{op.label.lower()}, 4471"))
+    return rows
+
+
+def readme_table() -> str:
+    """The README's table of ** names (release 5.92): ``tests/test_star_syntax.py`` fails when the README's isn't this."""
+    out = ["| Name | Also | Makes or fills | Example |", "|---|---|---|---|"]
+    for name, others, what, example in syntax_rows():
+        out.append(f"| `{name}` | {' '.join(f'`{x.strip()}`' for x in others.split(', ')) if others else ''} | {what} | `{example}` |")
+    return "\n".join(out)
 
 
 # ---- capture.md: each @ and # with its ID ----

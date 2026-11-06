@@ -351,7 +351,7 @@ def load_tasks(conn: sqlite3.Connection, task_ids: Iterable[str] | None = None) 
         params = tuple(task_ids)
         where = f" WHERE id IN ({','.join('?' * len(params))})" if params else " WHERE 0"
     tasks: dict[str, Task] = {}
-    for r in conn.execute(f"SELECT {_TASK_COLUMNS} FROM tasks{where} ORDER BY id", params):
+    for r in conn.execute(f"SELECT {_TASK_COLUMNS} FROM tasks{where} ORDER BY id", params):  # noqa: S608 - a column or table name of DocRepo's own; values are parameters
         tasks[r["id"]] = Task(**{k: r[k] for k in r.keys()})
         t = tasks[r["id"]]
         t.urgent, t.meeting, t.inherit_labels, t.plant_event = bool(t.urgent), bool(t.meeting), bool(t.inherit_labels), bool(t.plant_event)
@@ -425,6 +425,13 @@ class Model:
         ]
         self.agenda: list[AgendaItem] = [AgendaItem(**{k: r[k] for k in r.keys()}) for r in q("SELECT * FROM agenda_items ORDER BY id")]
         self._holders: dict[str, list[str]] | None = None  # document -> tasks, worked out when first asked
+        # Per-task indexes (release 5.90, the review's F5), each built once on first use. A Model is a read-only snapshot
+        # of docs.db, so they can't go stale: each page asked its own question of every capture before.
+        self._captures_by_task: dict[str, list[Capture]] | None = None
+        self._status_by_task: dict[str, list[StatusEntry]] | None = None
+        self._agenda_by_subject: dict[str, list[AgendaItem]] | None = None
+        self._copies_by_task: dict[str, list[SavedCopy]] | None = None
+        self._versions_by_task: dict[str, list[Version]] | None = None
         self.status: list[StatusEntry] = [
             StatusEntry(r["task"], r["at"], r["field"], r["from_value"], r["to_value"], r["via"])
             for r in q("SELECT * FROM status_log ORDER BY id")
@@ -600,7 +607,23 @@ class Model:
         return [c for c in self.captures.values() if not c.discarded]
 
     def notes_of(self, task_id: str) -> list[Capture]:
-        return [c for c in self.live_captures() if task_id in self.capture_tasks(c)]
+        """The task's live captures, in ID order (release 5.90: from one index of every capture, built once)."""
+        if self._captures_by_task is None:
+            index: dict[str, list[Capture]] = {}
+            for c in self.live_captures():
+                for t in self.capture_tasks(c):
+                    index.setdefault(t, []).append(c)
+            self._captures_by_task = index
+        return list(self._captures_by_task.get(task_id, ()))
+
+    def copies_of(self, task_id: str) -> list[SavedCopy]:
+        """The task's saved copies, in ID order (release 5.90)."""
+        if self._copies_by_task is None:
+            index: dict[str, list[SavedCopy]] = {}
+            for f in self.copies:
+                index.setdefault(f.task, []).append(f)
+            self._copies_by_task = index
+        return list(self._copies_by_task.get(task_id, ()))
 
     # ---- discarded tasks and captures (mods log round 1, M0021) ----
     def discarded_tasks(self) -> list[Task]:
@@ -627,7 +650,14 @@ class Model:
         return self._holders.get(document_id, [])
 
     def versions_of(self, task_id: str) -> list[Version]:
-        return [v for v in self.versions if task_id in self.document_holders(v.document)]
+        """The versions of the task's documents, in ID order (release 5.90: from one index, built once)."""
+        if self._versions_by_task is None:
+            index: dict[str, list[Version]] = {}
+            for v in self.versions:
+                for t in self.document_holders(v.document):
+                    index.setdefault(t, []).append(v)
+            self._versions_by_task = index
+        return list(self._versions_by_task.get(task_id, ()))
 
     def raw_log_of(self, task_id: str) -> list[RawEntry]:
         """The task's raw text log, oldest first: its captures and its documents' versions."""
@@ -637,14 +667,13 @@ class Model:
 
     def summaries_of(self, task_id: str) -> list[Summary]:
         """The task's summary log, oldest first: pasted summaries from its captures and its documents' versions."""
-        out = [Summary(task_id, c.saved, c.summary_type, c.summary, c.id)
-               for c in self.live_captures() if c.summary and task_id in self.capture_tasks(c)]
+        out = [Summary(task_id, c.saved, c.summary_type, c.summary, c.id) for c in self.notes_of(task_id) if c.summary]
         out += [Summary(task_id, v.at, v.summary_type, v.summary, v.document) for v in self.versions_of(task_id) if v.summary]
         return sorted(out, key=lambda s: s.at)
 
     def files_of(self, task_id: str) -> list[FileEntry]:
         """Every file connected to a task: its saved copies, then the documents of its captures."""
-        out = [FileEntry("Old version" if f.old else "Saved copy", f.name, f.document, task_id) for f in self.copies if f.task == task_id]
+        out = [FileEntry("Old version" if f.old else "Saved copy", f.name, f.document, task_id) for f in self.copies_of(task_id)]
         for doc_id in _unique(d for c in self.notes_of(task_id) for d in c.document_ids):
             d = self.documents[doc_id]
             kind = "Link" if is_link(d.original) else "Folder" if is_folder(d.original) else "Tracked original" if d.original else "Email attachment"
@@ -653,11 +682,19 @@ class Model:
 
     # ---- the status log ----
     def status_log_of(self, task_id: str) -> list[StatusEntry]:
-        """The task's field changes, then its agenda items as they were added and closed."""
-        out = [e for e in self.status if e.task == task_id]
-        for a in self.agenda:
-            if a.subject != task_id:
-                continue
+        """The task's field changes, then its agenda items as they were added and closed (release 5.90: from indexes of
+        the status log and the agenda, built once)."""
+        if self._status_by_task is None:
+            by_task: dict[str, list[StatusEntry]] = {}
+            for e in self.status:
+                by_task.setdefault(e.task, []).append(e)
+            by_subject: dict[str, list[AgendaItem]] = {}
+            for a in self.agenda:
+                if a.subject:
+                    by_subject.setdefault(a.subject, []).append(a)
+            self._status_by_task, self._agenda_by_subject = by_task, by_subject
+        out = list(self._status_by_task.get(task_id, ()))
+        for a in self._agenda_by_subject.get(task_id, ()):
             name = self.target_name(a.target)
             out.append(StatusEntry(task_id, a.added, "Agenda", None, name, a.added_by, a.target))
             if a.closed:

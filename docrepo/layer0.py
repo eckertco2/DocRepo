@@ -85,7 +85,7 @@ def read_body(html: str) -> tuple[list[str], list[str]]:
     try:
         reader.feed(html or "")
         reader.close()
-    except Exception:  # noqa: BLE001 - a broken body gives what was read before the break
+    except Exception:  # noqa: BLE001, S110 - a broken body gives what was read before the break
         pass
     return reader.hrefs, reader.cids
 

@@ -349,10 +349,50 @@ def write_task_page(model: Model, data_root: Path, fs: SafeFS, task_id: str, tod
     return _write(fs, data_root.joinpath(*task_dir(task_id), TASK_FILE), pages.task_page(model.task(task_id)))
 
 
+def pages_touched(m: Model, task_ids: Iterable[str]) -> set[str]:
+    """The tasks whose Task.md can show something of these tasks (release 5.90, the review's F5), so a change to them
+    rewrites only those pages:
+
+    - the tasks themselves, and the tasks tied to them, and to those, since a move follows its ties;
+    - each one's ancestors (a parent's Subtasks table, and the chains) and descendants (inherited labels, and Parents);
+    - the tasks it's tied to (Tied to this), its agenda items' targets and subjects, open or closed, and the tasks
+      whose notes page holds a task line for it (a task made from those notes).
+
+    Call it on the Model from before a change as well as after, since a move, an untie or a discard takes a link away."""
+    seeds = {t for t in task_ids if t in m.tasks}
+    tied_by: dict[str, set[str]] = {}
+    for t in m.tasks.values():
+        for tie in t.ties.values():
+            tied_by.setdefault(tie.source, set()).add(t.id)
+    frontier = list(seeds)
+    while frontier:
+        for x in tied_by.get(frontier.pop(), ()):
+            if x not in seeds:
+                seeds.add(x)
+                frontier.append(x)
+    out: set[str] = set()
+    for t in seeds:
+        out.add(t)
+        out.update(m.ancestors_of(t))
+        out.update(m.descendants_of(t))
+        out.update(tie.source for tie in m.tasks[t].ties.values())
+        out.update(tied_by.get(t, ()))
+    for a in m.agenda:
+        if a.subject in seeds and not is_person(a.target) and a.target != TODAY:
+            out.add(a.target)
+        if a.target in seeds and a.subject:
+            out.add(a.subject)
+    for c in m.captures.values():  # a task line on the notes page it was made from (release 5.83)
+        if c.created_task in seeds and c.from_notes and c.from_notes in m.captures:
+            out.update(m.capture_tasks(m.captures[c.from_notes]))
+    return {t for t in out if t in m.tasks}
+
+
 def write_pages(
     model: Model, data_root: Path, fs: SafeFS, today: date, generated_at: datetime, task_ids: Iterable[str] | None = None
 ) -> int:
-    """Write Task.md for every task (or only ``task_ids``) and Contents.md. Returns how many files were written."""
+    """Write Task.md for every task (or only ``task_ids``) and Contents.md. Returns how many files were written. Contents.md
+    is one page listing every task: it's made each time, and written only when its text changed, as every page is."""
     pages = Pages(model, today, generated_at, reference_links_of(data_root))
     ids = list(model.tasks) if task_ids is None else [i for i in task_ids if i in model.tasks]
     written = 0

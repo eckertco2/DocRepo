@@ -277,11 +277,27 @@ class ItemCard(QFrame):
         self.line_button.setText(f"line {it.line + 1}")
 
 
+class _UnreadCard(QFrame):
+    """An Unread line card (release 5.92): a click goes to its line, as an item's card does."""
+
+    go = Signal(int)
+
+    def __init__(self, line: int) -> None:
+        super().__init__(objectName="itemCard")
+        self.setProperty("kind", "off")
+        self.line = line
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        self.go.emit(self.line)
+        super().mousePressEvent(event)
+
+
 class ItemCards(QFrame):
     """A card for each item, beside the content text."""
 
     changed = Signal(str, str, object)
     go = Signal(int)
+    open_capture = Signal(str)  # an email's capture, from its Already captured line (release 5.93)
 
     def __init__(self) -> None:
         super().__init__(objectName="items")
@@ -305,6 +321,18 @@ class ItemCards(QFrame):
         self._rows: list[tuple] = []  # what each card shows (``ItemCard.shows``)
         self._own_box: QFrame | None = None
         self._own_said: str | None = None
+        # Release 5.92: a card for each ** line that read as nothing, and one for each new person an @ makes, ticked.
+        self.extra_box = QVBoxLayout()
+        self.extra_box.setSpacing(6)
+        lay.insertLayout(lay.indexOf(self.hint), self.extra_box)
+        self.unread_cards: list[QFrame] = []
+        self.people_ticks: dict[str, QCheckBox] = {}
+        self._extra: tuple = ()
+        # Release 5.93: an email already captured, with a link to the capture that holds it.
+        self.before_box = QVBoxLayout()
+        self.before_box.setSpacing(4)
+        lay.insertLayout(lay.indexOf(self.hint), self.before_box)
+        self.before_notes: list[QLabel] = []
 
     def editing(self) -> bool:
         """Whether a card's title or due date has the keyboard: the cards aren't rebuilt under you."""
@@ -350,6 +378,7 @@ class ItemCards(QFrame):
                 self.cards_box.removeWidget(card)
                 self.cards_box.insertWidget(first + i, card)
         self.cards, self._rows = cards, rows
+        self._show_extra(r)
         on = [it for it in its if it.on]
         counts = [f"{n} {name.lower()}{'s' if n > 1 else ''}" for k, name in items.KIND_NAMES.items() if (n := sum(it.kind == k for it in on))]
         self.count.setText("Save makes " + _and(counts) if counts else "Nothing to make" if its else "")
@@ -360,11 +389,58 @@ class ItemCards(QFrame):
             "<b>#Rigging plan</b> files a note to that task, and <b>**closed,</b>, <b>**u,</b>, <b>**n,</b>, <b>**t,</b>, <b>**decision,</b> "
             "or <b>**event,</b> say what a line is. <b>**due, 5 Nov.</b> or <b>**key date, trial run 1 to 5 Dec, plant activity.</b> fills in "
             "a field: any field, by its name. Type @ or # for a list.")
-        empty = not its and said is None
+        empty = not its and said is None and not self.unread_cards and not self.people_ticks
         if self.property("empty") != empty:
             self.setProperty("empty", empty)
             self.style().unpolish(self)
             self.style().polish(self)
+
+    def show_captured_before(self, notes: list[tuple[str, str]]) -> None:
+        """For each email a capture already holds: its sentence, and Open it, which shows that capture's page."""
+        for w in self.before_notes:
+            self.before_box.removeWidget(w)
+            w.deleteLater()
+        self.before_notes = []
+        for text, cid in notes:
+            note = QLabel(f"{esc(text)} <a href='{esc(cid)}'>Open {esc(cid)}</a>. Save keeps it again, as a capture of its own.",
+                          objectName="hint")
+            note.setWordWrap(True)
+            note.linkActivated.connect(self.open_capture)
+            self.before_box.addWidget(note)
+            self.before_notes.append(note)
+
+    def _show_extra(self, r: items.Reading | None) -> None:
+        """The Unread line cards and the new people's ticks (release 5.92, the review's F6), made again only when they change,
+        so a tick isn't rebuilt under the pointer."""
+        unread, people = (tuple(r.unread), tuple(r.new_people)) if r else ((), ())
+        if (unread, people) == self._extra:
+            return
+        self._extra = (unread, people)
+        while self.extra_box.count():
+            w = self.extra_box.takeAt(0).widget()
+            if w is not None:
+                w.deleteLater()
+        self.unread_cards, self.people_ticks = [], {}
+        for n, text in unread:
+            card = _UnreadCard(n)
+            card.go.connect(self.go)
+            cl = QVBoxLayout(card)
+            cl.setContentsMargins(8, 5, 6, 6)
+            cl.addWidget(QLabel(f"<b>Unread line</b>  <span style='color:{C.text2}'>line {n + 1}</span>"))
+            words = QLabel(f"This ** line wasn't read; check its name and comma. <i>“{esc(text[:120])}”</i> Save keeps it as it is.",
+                           objectName="hint")
+            words.setWordWrap(True)
+            cl.addWidget(words)
+            self.extra_box.addWidget(card)
+            self.unread_cards.append(card)
+        for name, on in people:
+            tick = QCheckBox(f"Add {name} to people")
+            tick.setChecked(on)
+            tick.setToolTip(f"Saving adds {name} to the people list, as @{name} names no one there yet. Untick it if that's a slip: "
+                            f"the line's item is then for no one yet.")
+            tick.toggled.connect(lambda checked, name=name: self.changed.emit(items.PEOPLE_KEY, name.lower(), checked))
+            self.extra_box.addWidget(tick)
+            self.people_ticks[name] = tick
 
     def _show_own(self, said: str | None) -> None:
         """The new task's own card, above the items, while its first line says anything."""

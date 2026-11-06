@@ -13,7 +13,7 @@ from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtGui import QTextCursor  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from docrepo import agenda, capacity, captures, db, items, notes_page, prompts  # noqa: E402
+from docrepo import capacity, captures, db, items, notes_page, prompts  # noqa: E402
 from docrepo.config import Settings  # noqa: E402
 from docrepo.model import TODAY, Model  # noqa: E402
 from docrepo.parse import ParsePerson  # noqa: E402

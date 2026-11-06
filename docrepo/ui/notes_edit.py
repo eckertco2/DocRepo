@@ -510,8 +510,8 @@ class NotesEdit(RichEdit):
                               ("Insert column right", lambda: table.insertColumns(col + 1, 1))):
                 menu.addAction(text, lambda act=act: self._change_table(table, act))
             menu.addSeparator()
-            menu.addAction("Delete row", lambda: table.removeRows(r, 1) if table.rows() > 1 else None)
-            menu.addAction("Delete column", lambda: table.removeColumns(col, 1) if table.columns() > 1 else None)
+            menu.addAction("Remove row", lambda: table.removeRows(r, 1) if table.rows() > 1 else None)
+            menu.addAction("Remove column", lambda: table.removeColumns(col, 1) if table.columns() > 1 else None)
         self._menu = menu  # kept, so tests can reach it
         menu.popup(event.globalPos())
 

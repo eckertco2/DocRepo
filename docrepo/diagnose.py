@@ -142,7 +142,7 @@ def install_excepthook(notify: Callable[[str, str], None]) -> None:
             try:
                 notify("DocRepo hit a problem", f"Something failed ({kind.__name__}). It's in DocRepo's log, and Settings → "
                                                 "Troubleshooting report collects the details.")
-            except Exception:  # noqa: BLE001 - the hook itself must never fail
+            except Exception:  # noqa: BLE001, S110 - the hook itself must never fail
                 pass
 
     sys.excepthook = hook

@@ -36,6 +36,8 @@ CLIENT_SUBMIT_TIME, MESSAGE_DELIVERY_TIME, CREATION_TIME = 0x0039, 0x0E06, 0x300
 BODY, HTML, INTERNET_CPID, MESSAGE_CODEPAGE = 0x1000, 0x1013, 0x3FDE, 0x3FFD
 ATTACH_DATA, ATTACH_LONG_FILENAME, ATTACH_FILENAME, DISPLAY_NAME = 0x3701, 0x3707, 0x3704, 0x3001
 ATTACH_METHOD, ATTACH_SIZE, ATTACH_CONTENT_ID, ATTACHMENT_HIDDEN = 0x3705, 0x0E20, 0x3712, 0x7FFE
+#: PR_ENTRYID and PR_STORE_ENTRYID: where Outlook keeps the email, when the .msg carries them (release 5.93).
+ENTRY_ID, STORE_ENTRY_ID = 0x0FFF, 0x0FFB
 PT_LONG, PT_BOOLEAN, PT_I8, PT_STRING8, PT_UNICODE, PT_SYSTIME, PT_BINARY = 0x0003, 0x000B, 0x0014, 0x001E, 0x001F, 0x0040, 0x0102
 ATTACH_BY_VALUE = 1
 #: The fixed-size properties stream's header: 32 bytes for the email itself, 8 for an attachment.
@@ -201,6 +203,7 @@ def read(data: bytes) -> EmailItem:
     except Exception as e:  # noqa: BLE001 - pywin32 raises its own errors for a damaged file
         raise MsgError(f"The .msg file couldn't be read ({type(e).__name__}).") from e
     body = _string(props, BODY)
+    entry, store = props.streams.get(ENTRY_ID), props.streams.get(STORE_ENTRY_ID)  # rarely in a dragged .msg (release 5.93)
     return EmailItem(
         subject=_string(props, SUBJECT) or "(no subject)",
         sender=_string(props, SENDER_NAME, SENT_REPRESENTING_NAME),
@@ -210,4 +213,6 @@ def read(data: bytes) -> EmailItem:
         attachments=attachments,
         html=_html(props),
         msg_bytes=data,
+        entry_id=entry.hex().upper() if isinstance(entry, bytes) and entry else "",
+        store_id=store.hex().upper() if isinstance(store, bytes) and store else "",
     )

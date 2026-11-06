@@ -4,15 +4,21 @@ The schema is created here, and its version is kept in SQLite's ``user_version``
 SQLite writes the file itself, so its path goes through ``SafeFS.checked_path``
 first. Connections run in autocommit mode; every change is made inside
 ``transaction()``, so a save either happens completely or not at all.
+
+An older docs.db is brought up to date by ``MIGRATIONS``, in order, in one transaction. Before that, it's copied to the
+backup folder, when one is set, as ``Database\\docs-before-v<old version>.db`` (release 5.88, ``backup.copy_before_upgrade``).
 """
 from __future__ import annotations
 
 import contextlib
+import logging
 import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
 
 from docrepo.safe_fs import SafeFS
+
+log = logging.getLogger(__name__)
 
 DB_FILE = Path("System") / "docs.db"
 SCHEMA_VERSION = 21
@@ -339,8 +345,7 @@ CREATE INDEX task_dates_task ON task_dates (task, pos);
     13: """
 -- The Task view (release 5.35, the task overview design's decisions 159 and 160): what the owner did with a file from
 -- DocRepo (opened it, showed it in File Explorer, copied its path or link), for Recent, Last opened and the search's
--- tie-breaks. And each task's pinned files, its key documents, in the owner's order. (No semicolons in comments: the
--- script is run a statement at a time.)
+-- tie-breaks. And each task's pinned files, its key documents, in the owner's order.
 CREATE TABLE document_uses (
     id       INTEGER PRIMARY KEY,
     document TEXT NOT NULL REFERENCES documents(id),
@@ -505,7 +510,11 @@ CREATE TABLE capture_emails (
 
 
 class DatabaseError(Exception):
-    """docs.db can't be used: it's from a newer DocRepo, or isn't a DocRepo database."""
+    """docs.db can't be used: it's from a newer DocRepo, isn't a DocRepo database, or is damaged."""
+
+
+#: What DocRepo says when docs.db can't be read as a database at all (release 5.88).
+DAMAGED = "docs.db is damaged; restore it from the backup folder. Its backup-log.md says how."
 
 
 def db_path(data_root: Path) -> Path:
@@ -513,18 +522,59 @@ def db_path(data_root: Path) -> Path:
 
 
 def connect(fs: SafeFS, data_root: Path) -> sqlite3.Connection:
-    """Open docs.db, creating it with the current schema if it doesn't exist yet."""
+    """Open docs.db, creating it with the current schema if it doesn't exist yet. An older one is copied to the backup
+    folder first (release 5.88), then brought up to date. A damaged one raises ``DatabaseError`` with ``DAMAGED``."""
     path = fs.checked_path(db_path(data_root))
     fs.makedirs(path.parent)
     conn = sqlite3.connect(path, isolation_level=None)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
     try:
+        conn.execute("PRAGMA foreign_keys = ON")
+        version = schema_version(conn)
+        if 0 < version < SCHEMA_VERSION:
+            _copy_before_upgrade(data_root, version)
         _ensure_schema(conn)
     except BaseException:
         conn.close()
         raise
     return conn
+
+
+def schema_version(conn: sqlite3.Connection) -> int:
+    """docs.db's schema version, or ``DatabaseError`` with ``DAMAGED`` when the file isn't a database SQLite can read.
+    A locked or busy database is SQLite's ``OperationalError``, and stays that, since restoring won't help it."""
+    try:
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        conn.execute("SELECT count(*) FROM sqlite_master").fetchone()
+    except sqlite3.OperationalError:
+        raise
+    except sqlite3.DatabaseError as e:
+        log.error("docs.db can't be read: %s", e)
+        raise DatabaseError(DAMAGED) from e
+    return version
+
+
+def _copy_before_upgrade(data_root: Path, version: int) -> None:
+    """A copy of docs.db as it is, in the backup folder, before a migration changes it. Never stops the upgrade: with no
+    backup folder, or one that can't be used, it says so in the log and DocRepo goes on (the migration is one
+    transaction, so a failed one leaves docs.db as it was)."""
+    from docrepo import backup  # backup imports this module
+    from docrepo.config import Settings, SettingsError
+
+    try:
+        settings = Settings.load(data_root)
+    except SettingsError as e:
+        log.warning("no copy of docs.db before the upgrade from schema %d: settings unreadable (%s)", version, e)
+        return
+    if not settings.backup_dir:
+        log.info("no copy of docs.db before the upgrade from schema %d: no backup folder is set", version)
+        return
+    try:
+        copy = backup.copy_before_upgrade(data_root, settings, version)
+    except (backup.BackupError, OSError, sqlite3.Error) as e:
+        log.warning("no copy of docs.db before the upgrade from schema %d: %s", version, e)
+        return
+    log.info("docs.db copied to %s before the upgrade from schema %d", copy, version)
 
 
 def connect_memory() -> sqlite3.Connection:
@@ -536,15 +586,35 @@ def connect_memory() -> sqlite3.Connection:
     return conn
 
 
+def statements(script: str) -> Iterator[str]:
+    """A script's statements, one at a time, split where SQLite says a statement is complete (release 5.88), so a
+    semicolon in a quoted string, a comment or a trigger's body doesn't end one. ``executescript`` isn't used: it
+    commits the open transaction first, and a migration must be one transaction with the others."""
+    buf = ""
+    for piece in script.split(";"):
+        buf += piece + ";"
+        if sqlite3.complete_statement(buf):
+            if _has_sql(buf):
+                yield buf
+            buf = ""
+    if _has_sql(buf.removesuffix(";")):
+        yield buf.removesuffix(";")
+
+
+def _has_sql(text: str) -> bool:
+    """True when ``text`` is more than blank lines, comments and a semicolon."""
+    lines = [line.split("--", 1)[0] for line in text.splitlines()]
+    return bool("".join(lines).replace(";", "").strip())
+
+
 def _run(conn: sqlite3.Connection, script: str) -> None:
-    for statement in script.split(";"):
-        if statement.strip():
-            conn.execute(statement)
+    for statement in statements(script):
+        conn.execute(statement)
 
 
 def _ensure_schema(conn: sqlite3.Connection) -> None:
     """Create the schema in a new database, or bring an older DocRepo database up to date."""
-    version = conn.execute("PRAGMA user_version").fetchone()[0]
+    version = schema_version(conn)
     if version == SCHEMA_VERSION:
         return
     if version > SCHEMA_VERSION:

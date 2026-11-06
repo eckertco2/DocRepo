@@ -136,7 +136,7 @@ def capture_texts(conn: sqlite3.Connection, capture_ids: Iterable[str]) -> dict[
     out: dict[str, str] = {}
     for i in range(0, len(ids), 500):
         chunk = ids[i:i + 500]
-        rows = conn.execute(f"SELECT id, body FROM search_text WHERE kind = 'capture' AND id IN ({','.join('?' * len(chunk))})", chunk)
+        rows = conn.execute(f"SELECT id, body FROM search_text WHERE kind = 'capture' AND id IN ({','.join('?' * len(chunk))})", chunk)  # noqa: S608 - a column or table name of DocRepo's own; values are parameters
         for r in rows:
             body = r["body"]
             out[r["id"]] = body.split("\n", 2)[2] if body.count("\n") >= 2 else ""
@@ -150,7 +150,7 @@ def file_texts(conn: sqlite3.Connection, model: Model, document_ids: Iterable[st
     out: dict[str, str] = {}
     for i in range(0, len(ids), 500):
         chunk = ids[i:i + 500]
-        for r in conn.execute(f"SELECT id, body FROM search_text WHERE kind = 'document' AND id IN ({','.join('?' * len(chunk))})", chunk):
+        for r in conn.execute(f"SELECT id, body FROM search_text WHERE kind = 'document' AND id IN ({','.join('?' * len(chunk))})", chunk):  # noqa: S608 - a column or table name of DocRepo's own; values are parameters
             d = model.documents.get(r["id"])
             head = "\n".join(x for x in (d.id, d.name, d.description or "", d.original or "") if x) if d else ""
             body = r["body"]

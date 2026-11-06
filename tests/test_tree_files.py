@@ -965,7 +965,7 @@ def root_on_disk(tmp_path):
 def counts(root) -> tuple:
     conn = db.connect(*_fs_for(root))
     try:
-        return tuple(conn.execute(f"SELECT count(*) FROM {t}").fetchone()[0] for t in ("tasks", "templates", "status_log", "people"))
+        return tuple(conn.execute(f"SELECT count(*) FROM {t}").fetchone()[0] for t in ("tasks", "templates", "status_log", "people"))  # noqa: S608 - a column or table name of DocRepo's own; values are parameters
     finally:
         conn.close()
 

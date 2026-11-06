@@ -174,7 +174,7 @@ def key_followers(conn: sqlite3.Connection, key_ids: Iterable[int]) -> list[str]
     if not ids:
         return []
     marks = ",".join("?" * len(ids))
-    return [r["task"] for r in conn.execute(f"SELECT DISTINCT task FROM task_ties WHERE key_date IN ({marks}) ORDER BY task", ids)]
+    return [r["task"] for r in conn.execute(f"SELECT DISTINCT task FROM task_ties WHERE key_date IN ({marks}) ORDER BY task", ids)]  # noqa: S608 - a column or table name of DocRepo's own; values are parameters
 
 
 def problem(conn: sqlite3.Connection, task_id: str, tie: Tie) -> str | None:

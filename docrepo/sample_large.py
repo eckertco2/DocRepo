@@ -165,7 +165,7 @@ def _last(ids: list[str], prefix: str) -> int:
 def add_large_project(data: dict[str, Any]) -> dict[str, Any]:
     """The sample data with the large project added: new tasks, captures, documents and saved copies, with IDs after
     the sample's own. The sample's own records are left as they are."""
-    rnd = random.Random(20261029)
+    rnd = random.Random(20261029)  # noqa: S311 - made-up sample data, the same each time
     t_n = _last([t["id"] for t in data["tasks"]], "T")
     c_n = _last([c["id"] for c in data["captures"]], "C")
     d_n = _last([d["id"] for d in data["documents"]], "D")

@@ -23,7 +23,7 @@ from docrepo.model import Model  # noqa: E402
 from docrepo.ui.browse_window import BrowseWindow  # noqa: E402
 from docrepo.ui.capture_window import CaptureWindow  # noqa: E402
 from docrepo.ui.context import AppContext  # noqa: E402
-from docrepo.ui.task_view import FOOT, PAGE, PAGE_FOOT  # noqa: E402
+from docrepo.ui.task_view import PAGE  # noqa: E402
 
 NOW = datetime(2026, 10, 8, 14, 10)
 TOP, SUB, LEAF = "T000001", "T000008", "T000012"  # Reactor impeller upgrade, its Installation, and that one's Rigging plan

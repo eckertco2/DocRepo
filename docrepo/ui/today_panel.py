@@ -395,7 +395,7 @@ class TodayPanel(QWidget):
     def open_panel(self) -> None:
         self.user_open = True
         self._hidden_for_full_screen = False
-        db.set_state(self.ctx.conn, OPEN_KEY, "1")
+        self.ctx.keep_state(OPEN_KEY, "1")
         self.hover.enabled = self.settings.hover
         self.hover.contract_ms = self.settings.contract_ms
         self.hover.hover_ms = self.settings.hover_ms if self.settings.hover_ms is not None else windows_hover_ms()
@@ -410,7 +410,7 @@ class TodayPanel(QWidget):
     def close_panel(self) -> None:
         self.user_open = False
         self._hidden_for_full_screen = False
-        db.set_state(self.ctx.conn, OPEN_KEY, "0")
+        self.ctx.keep_state(OPEN_KEY, "0")
         self._full_screen_timer.stop()
         self._day_timer.stop()
         self._hover_timer.stop()
@@ -517,7 +517,7 @@ class TodayPanel(QWidget):
         fold.setIcon(icon("chevron-down" if is_open else "chevron-right"))
         fold.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         fold.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        fold.clicked.connect(lambda: (db.set_state(self.ctx.conn, key, "0" if is_open else "1"), self.refresh()))
+        fold.clicked.connect(lambda: (self.ctx.keep_state(key, "0" if is_open else "1"), self.refresh()))
         self.extras.append(fold)
         self._add(fold)
         return is_open
@@ -762,7 +762,7 @@ class TodayPanel(QWidget):
             return Place()
 
     def _save_place(self) -> None:
-        db.set_state(self.ctx.conn, PLACE_KEY, json.dumps(self.place_.to_json()))
+        self.ctx.keep_state(PLACE_KEY, json.dumps(self.place_.to_json()))
 
     def _screen(self):
         screens = QGuiApplication.screens()

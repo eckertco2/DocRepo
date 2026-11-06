@@ -11,6 +11,7 @@ from docrepo.config import Settings
 from docrepo.model import Model
 from docrepo.parse import ParseLabel, ParsePerson
 from docrepo.safe_fs import SafeFS
+from docrepo.ui.problems import ProblemLog
 
 
 @dataclass
@@ -33,6 +34,10 @@ class AppContext:
     #: Saves every notes page open with typing not yet saved: the capture window asks before Save, as a note that's no
     #: capture goes straight onto its page, which only a capture's block would otherwise be merged into (release 5.69).
     save_open_pages: Callable[[], None] = lambda: None
+    #: Shows a capture's page in the browse tool (release 5.93): the capture window's link to an email captured before.
+    open_capture_page: Callable[[str], None] = lambda capture_id: None
+    #: This session's saves that had problems (release 5.91), for the Problems lines of the capture and browse windows.
+    problem_log: ProblemLog = field(default_factory=ProblemLog)
     #: The Model last loaded, and the database's state when it was (``model``).
     _model: Model | None = field(default=None, init=False, repr=False)
     _model_at: tuple[int, int] | None = field(default=None, init=False, repr=False)
@@ -58,6 +63,15 @@ class AppContext:
         finally:
             if self._model_at == before and not self.conn.in_transaction:
                 self._model_at = (self.conn.total_changes, self.conn.execute("PRAGMA data_version").fetchone()[0])
+
+    def keep_state(self, key: str, value: str) -> None:
+        """A window's own state (a fold, a view's choices, where a panel is) kept in ``app_state`` (release 5.95). It's a
+        write to docs.db, but to nothing a Model reads, so the shared Model stays as it is: since release 5.90 the browse
+        window uses it too, and a fold or a Timeline shift would otherwise load every table again, and work out a
+        what-if's picture again."""
+        from docrepo import db
+
+        self.rolled_back(lambda: db.set_state(self.conn, key, value))
 
     def parse_people(self, model: Model) -> list[ParsePerson]:
         return [ParsePerson(p.id, p.name, tuple(p.aliases), p.status, p.id == self.settings.me) for p in model.people.values()]

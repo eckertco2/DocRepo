@@ -22,7 +22,7 @@ def run_look(script: str, platform: str) -> dict:
              "from docrepo.ui.style import apply_look\n"
              "app = QApplication([])\n"
              "apply_look(app, 'new', False)\n")
-    done = subprocess.run([sys.executable, "-c", start + script], cwd=REPO, env={**os.environ, "QT_QPA_PLATFORM": platform},
+    done = subprocess.run([sys.executable, "-c", start + script], cwd=REPO, env={**os.environ, "QT_QPA_PLATFORM": platform},  # noqa: S603 - this repo's own Python, with a fixed script
                           capture_output=True, text=True, timeout=120)
     assert done.returncode == 0, done.stderr
     return json.loads(done.stdout.strip().splitlines()[-1])

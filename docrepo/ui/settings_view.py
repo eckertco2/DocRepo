@@ -6,6 +6,7 @@ backup folder here, and they're kept in location.json and settings.json.
 from __future__ import annotations
 
 import logging
+from html import escape as esc
 from collections.abc import Callable
 from dataclasses import asdict
 from datetime import datetime
@@ -35,9 +36,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo import backup, capacity, db, diagnose, hotkey, outlook, prompts, search, startup, wheels_config
+from docrepo import __version__, backup, capacity, db, diagnose, hotkey, outlook, prompts, search, startup, wheels_config
 from docrepo.config import Settings, data_root_problem, init_data_root, make_safe_fs, resolve_data_root, save_location
-from docrepo.dates import WEEKDAYS, long_date
+from docrepo.dates import WEEKDAYS, long_date, stamp
 from docrepo.links import check_link_template
 from docrepo.model import Model
 from docrepo.pages import write_pages
@@ -185,14 +186,16 @@ def rebuild_everything(ctx: AppContext) -> str:
 
 
 class ReportDialog(QDialog):
-    """The troubleshooting report, to read through and copy."""
+    """The troubleshooting report, or the data root's check (release 5.89), to read through and copy."""
 
-    def __init__(self, parent: QWidget, text: str, path: Path | None, reveal: Callable[[Path], bool]) -> None:
+    def __init__(self, parent: QWidget, text: str, path: Path | None, reveal: Callable[[Path], bool], title: str = "Troubleshooting report",
+                 intro_text: str | None = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Troubleshooting report")
+        self.setWindowTitle(title)
         self.resize(820, 620)
         lay = QVBoxLayout(self)
-        intro = QLabel("Read it through before you send it on: it should hold no email text, names or company details. "
+        intro = QLabel(intro_text if intro_text is not None else
+                       "Read it through before you send it on: it should hold no email text, names or company details. "
                        + (f"It's saved as {path.name} in System\\diagnostics." if path else "It couldn't be saved, so copy it from here."))
         intro.setWordWrap(True)
         lay.addWidget(intro)
@@ -331,6 +334,26 @@ class SettingsView(QWidget):
                            "%LOCALAPPDATA%\\DocRepo\\location.json."))
 
         # ---- the data root and start-up ----
+        self._build_data_root(lay, open_import)
+        # ---- the look (decisions 7 and 15) ----
+        self._build_look(lay)
+        # ---- hotkeys ----
+        self._build_hotkeys(lay)
+        # ---- backups ----
+        self._build_backups(lay)
+        # ---- calendar and reminders ----
+        self._build_calendar(lay)
+        # ---- Parse and populate ----
+        self._build_parse(lay)
+        # ---- files and prompts ----
+        self._build_files(lay)
+        # ---- Outlook (release 5.33) ----
+        self._build_outlook(lay)
+        # ---- the troubleshooting report, to bring to the personal computer ----
+        self._build_troubleshooting(lay)
+
+    def _build_data_root(self, lay, open_import) -> None:
+        """The data root and start-up (part of ``__init__``, release 5.95)."""
         self.where = QLabel()
         self.where.setWordWrap(True)
         self.where.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -353,7 +376,8 @@ class SettingsView(QWidget):
             ("Import your project list", "A one-time import: each row of the Excel workbook becomes a top-level task.", _row(imp)),
         ])
 
-        # ---- the look (decisions 7 and 15) ----
+    def _build_look(self, lay) -> None:
+        """The look (decisions 7 and 15) (part of ``__init__``, release 5.95)."""
         self.look = QComboBox()
         self.look.addItem("New look", "new")
         self.look.addItem("Classic look (release 5.9)", "classic")
@@ -365,9 +389,12 @@ class SettingsView(QWidget):
             ("Look", "The new look, or release 5.9's while you get used to it. It changes when DocRepo next starts.", self.look),
             ("Hints", "Help text under fields, the ⓘ buttons and the keys beside controls. Hold Alt to see the letter keys, or Ctrl "
                       "for the Ctrl shortcuts, at any time.", self.hints),
+            ("Version", "The release of DocRepo running now. CHANGELOG.md, beside the code, says what each brought.",
+             QLabel(f"DocRepo {__version__}", objectName="version")),  # release 5.87, the review's F9
         ])
 
-        # ---- hotkeys ----
+    def _build_hotkeys(self, lay) -> None:
+        """Hotkeys (part of ``__init__``, release 5.95)."""
         self.me = QComboBox()
         self.me.setFixedWidth(240)
         self.hotkey = QLineEdit()
@@ -413,7 +440,8 @@ class SettingsView(QWidget):
             (None, None, more),
         ])
 
-        # ---- backups ----
+    def _build_backups(self, lay) -> None:
+        """Backups (part of ``__init__``, release 5.95)."""
         self.backup = QLineEdit()
         self.backup.setPlaceholderText("Not set: no backups are made")
         browse = QPushButton("Browse…")
@@ -443,7 +471,8 @@ class SettingsView(QWidget):
             (self.backup_status, "", _row(now)),
         ])
 
-        # ---- calendar and reminders ----
+    def _build_calendar(self, lay) -> None:
+        """Calendar and reminders (part of ``__init__``, release 5.95)."""
         self.reminder = QTimeEdit()
         self.reminder.setDisplayFormat("HH:mm")
         self.reminder.setFixedWidth(96)
@@ -458,7 +487,8 @@ class SettingsView(QWidget):
             ("Capacity horizon", "How far ahead routine tasks fill the capacity calendar.", self.horizon),
         ])
 
-        # ---- Parse and populate ----
+    def _build_parse(self, lay) -> None:
+        """Parse and populate (part of ``__init__``, release 5.95)."""
         self.events = QLineEdit()
         self.events.setPlaceholderText("Comma-separated")
         self.events.setMinimumWidth(380)
@@ -472,7 +502,8 @@ class SettingsView(QWidget):
             (None, "", self.references),
         ])
 
-        # ---- files and prompts ----
+    def _build_files(self, lay) -> None:
+        """Files and prompts (part of ``__init__``, release 5.95)."""
         self.cap = QSpinBox()
         self.cap.setRange(1_000, 5_000_000)
         self.cap.setSingleStep(10_000)
@@ -505,7 +536,8 @@ class SettingsView(QWidget):
             ("Copilot's folder", "Where Copilot leaves tree files and edit files for the Import window to offer. DocRepo only reads it. Outside the data root.", copilot_row),
         ])
 
-        # ---- Outlook (release 5.33) ----
+    def _build_outlook(self, lay) -> None:
+        """Outlook (release 5.33) (part of ``__init__``, release 5.95)."""
         self.categories = QCheckBox("Mark filed emails in Outlook with their task's name")
         self.categories.setToolTip("Each email a capture files on a task gets the task's name as a category in Outlook")
         self.colour = QComboBox()
@@ -520,16 +552,23 @@ class SettingsView(QWidget):
                                 "already on the list keeps its own colour.", self.colour),
         ])
 
-        # ---- the troubleshooting report, to bring to the personal computer ----
+    def _build_troubleshooting(self, lay) -> None:
+        """The troubleshooting report, to bring to the personal computer (part of ``__init__``, release 5.95)."""
         self.try_category = QCheckBox("Also try a test category on the selected email")
         self.try_category.setToolTip("Adds the category DocRepo test to the email selected in Outlook, then puts its categories back")
         report = QPushButton("Troubleshooting report…")
         report.setToolTip("Saved in System\\diagnostics in the data root, and shown here to copy")
         report.clicked.connect(self.troubleshooting_report)
+        check = QPushButton("Check the data root")
+        check.setToolTip("Lists what docs.db says is there and isn't, and checks the database. It changes nothing.")
+        check.clicked.connect(self.check_data_root)
         self._card(lay, "Troubleshooting", [
             ("Troubleshooting report", "DocRepo's versions, a check of reading the email selected in Outlook, recent drags and recent "
                                        "problems. It leaves out email text, names and addresses. Select an email in Outlook first.",
              _row(report, self.try_category)),
+            ("Check the data root", "Captures whose capture.md is missing, documents and saved copies whose files aren't there, the "
+                                    "search index, and SQLite's own check of docs.db. Nothing is changed: each line says what you can do.",
+             _row(check)),
         ])
 
         self.error = QLabel(objectName="error")
@@ -691,14 +730,17 @@ class SettingsView(QWidget):
             self.backup_status.setText("<b>Backups:</b> off. Choose a backup folder and save, to turn them on.")
             return
         last = backup.last_backup(self.ctx.conn)
+        trouble = backup.last_problem(self.ctx.conn)  # release 5.89: a copy that failed its check, or a backup that wasn't made
+        problem = (f'<br><span style="color:{C.critical}"><b>The last try, on {esc(long_date(datetime.fromisoformat(trouble[0]).date(), self.ctx.now().date()))}'
+                   f" at {esc(trouble[0][11:16])}:</b> {esc(trouble[1])}</span>") if trouble else ""
         if not last:
-            self.backup_status.setText("<b>Backups:</b> none yet. The first is made at DocRepo's next start, or with Back up now.")
+            self.backup_status.setText("<b>Backups:</b> none yet. The first is made at DocRepo's next start, or with Back up now." + problem)
             return
         when = datetime.fromisoformat(last)
         left = s.backup_every_days - (self.ctx.now().date() - when.date()).days
         nxt = "at DocRepo's next start" if left <= 0 else "tomorrow" if left == 1 else f"in {left} days"
         self.backup_status.setText(f"<b>Backups:</b> the last was on {long_date(when.date(), self.ctx.now().date())} at "
-                                   f"{last[11:16]}. The next is due {nxt}. Each one is listed in backup-log.md in the backup folder.")
+                                   f"{last[11:16]}. The next is due {nxt}. Each one is listed in backup-log.md in the backup folder." + problem)
 
     def backup_now(self) -> None:
         if (self.backup.text().strip() or None) != self.ctx.settings.backup_dir:
@@ -711,6 +753,8 @@ class SettingsView(QWidget):
         try:
             result = backup.run_backup(self.ctx.data_root, self.ctx.settings, self.ctx.now())
         except backup.BackupError as e:
+            backup.record_failure(self.ctx.conn, stamp(self.ctx.now()), f"The backup couldn't be made. {e}")
+            self.show_backup_status()
             self.message(str(e))
             return
         backup.record(self.ctx.conn, result)
@@ -751,6 +795,28 @@ class SettingsView(QWidget):
         self.message(f"Saved the troubleshooting report as {path.name} in System\\diagnostics." if path
                      else "Made the troubleshooting report, but couldn't save it. Copy it from the window.")
         ReportDialog(self, text, path, self.reveal).exec()
+
+    def check_data_root(self, show: bool = True) -> ReportDialog:
+        """Check the data root against docs.db (release 5.89), keep the list as System\\check-<date>.md, and show it."""
+        from docrepo.check import run_check, write_report
+
+        QGuiApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            result = run_check(self.ctx.conn, self.ctx.data_root, self.ctx.now())
+            try:
+                path: Path | None = write_report(self.ctx.fs, self.ctx.data_root, result)
+            except (OSError, WriteRefused) as e:
+                log.warning("data root check not saved: %s", e)
+                path = None
+        finally:
+            QGuiApplication.restoreOverrideCursor()
+        found = (f"{result.problems} thing{'s' if result.problems != 1 else ''} to look at." if result.problems else "Nothing needs doing.")
+        self.message(f"Checked the data root: {found}")
+        kept = f"It's kept as {path.name} in System." if path else "It couldn't be saved, so copy it from here."
+        dialog = ReportDialog(self, result.markdown(), path, self.reveal, "Data root check", f"{found} Nothing was changed. {kept}")
+        if show:
+            dialog.exec()
+        return dialog
 
     def _pick_copilot(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Copilot's folder", self.copilot.text())
