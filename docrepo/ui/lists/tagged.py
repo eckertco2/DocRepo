@@ -6,7 +6,7 @@ view is (``DocRepo/CLAUDE.md``); ``BrowseWindow`` only calls them.
   and how many items mention it. It draws at most ``ROWS``, as 20,000 rows took 8 s, and a bigger glossary starts with
   **Mentioned only** ticked; search finds the rest.
 - **A label's page** has Edit…, Import… and Export….
-- **On a capture's or document's page,** × removes a label from that item (with Undo), Put back undoes it, and Add puts one
+- **On a capture's or document's page,** × removes a label from that item (with Undo), Add back undoes it, and Add puts one
   on by hand, from the glossary or a new one added to it first. Each rewrites the Task.md of the item's tasks.
 """
 from __future__ import annotations
@@ -191,7 +191,7 @@ def _item_tasks(w: BrowseWindow, kind: str, item_id: str) -> list[str]:
 
 
 def on_link(w: BrowseWindow, kind: str, rest: str) -> None:
-    """× on a chip, Put back, or Add. Kept apart from what's found, so reading the text again never undoes them."""
+    """× on a chip, Add back, or Add. Kept apart from what's found, so reading the text again never undoes them."""
     if kind == "taggedadd":
         item_kind, item_id = rest.split(":", 1)
         add_to(w, item_kind, item_id)
@@ -213,7 +213,7 @@ def on_link(w: BrowseWindow, kind: str, rest: str) -> None:
             w.say_undo(f"Removed {lb.label} from this {what}. It stays removed when its text is read again.",
                        lambda: w._do(lambda: put(None), w.sel))
     elif w._do(lambda: put(None), w.sel) is not None:
-        w.say(f"Put {lb.label} back on this {what}.")
+        w.say(f"Added {lb.label} back to this {what}.")
 
 
 def add_to(w: BrowseWindow, item_kind: str, item_id: str) -> None:

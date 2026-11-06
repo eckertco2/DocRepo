@@ -1053,7 +1053,7 @@ class Pages:
         add = link(f"taggedadd:{kind}:{item_id}", "Add", "Add a tagged label by hand, from the glossary", "tq")
         removed = tg.removed(kind, item_id)
         back = ('<br><span class="sub">Removed by you: ' + ", ".join(
-            link(f"taggedback:{kind}:{item_id}:{quote(lb.key, safe='')}", lb.label, "Put it back") for lb in removed) + "</span>") if removed else ""
+            link(f"taggedback:{kind}:{item_id}:{quote(lb.key, safe='')}", lb.label, "Add it back") for lb in removed) + "</span>") if removed else ""
         return ("&nbsp;&nbsp;".join(chips) if chips else none_text("None found")) + f" &nbsp;{add}{back}"
 
     def tagged_rows(self, kind: str, item_id: str) -> list[tuple[str, str]]:
