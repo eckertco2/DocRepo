@@ -87,7 +87,7 @@ from docrepo.ui.keymap import KeyMapDialog
 from docrepo.timeline import bands as timeline_bands
 from docrepo.ui.tokens import C
 from docrepo.ui.state_menu import UNDO_MS, can_change, open_below, picked_line, state_menu
-from docrepo.ui.tree_view import DIM_ROLE, HTML_ROLE, KEY_ROLE, LINE_ROLE, Line, RowTree, edge, group_ground, state_icon, tint, with_actions
+from docrepo.ui.tree_view import DIM_ROLE, HTML_ROLE, KEY_ROLE, LINE_ROLE, Line, RowTree, group_ground, state_icon, tint, with_actions
 from docrepo.ui.widgets import SAVE_KEYS, CheckMenuButton, DateField, DropButton, FlowLayout, Option, ViewStack, ask, label_filter, label_options, people_filter, people_options
 from docrepo.views import (
     project_text,
@@ -183,6 +183,11 @@ def _row_word(word: str) -> str:
     """What stands in a row's State column in place of a task's state, such as Note. The new look has no State column: the
     word is the row's icon's tooltip (decision L7)."""
     return chip(word, "st-ns") if LOOK.classic else f'<span class="faint">{esc(word)}</span>'
+
+
+def priorities_of(m: Model) -> dict[str, str]:
+    """Each open, ranked task's priority bucket, by its ID: its row's left edge (release 5.81, decision L9)."""
+    return {t.id: t.priority for t in m.tasks.values() if t.priority and is_open(t)}
 
 
 def _shape(cells: list) -> list:
@@ -984,6 +989,7 @@ class BrowseWindow(QWidget):
         self.tree.stop_row_moves()  # the Templates view turns it back on
         self.tree.begin()
         self.tree.set_density(*ROW_DENSITY.get(self.view, (tokens.LIST_ROW, False)))
+        self.tree.priorities = priorities_of(self.model())
         try:
             if builder:
                 builder()
@@ -1143,12 +1149,12 @@ class BrowseWindow(QWidget):
                          chip("Link", "st-ns") if link else chip(d.status, "st-ns" if d.status == "Current" else "st-pk"),
                          f'<p align="right">{esc(short(date.fromisoformat(d.checked[:10]), self.today())) if d.checked else ""}</p>']
                 tip = f"{d.original} (double-click copies it)" if link else f"Last checked {d.checked or 'not yet'}"
-                item = self.tree.add_row(parent, ("doc", n.id), cells, tint(n.group, n.depth), tip=tip, edge=edge(n.group, n.depth))
+                item = self.tree.add_row(parent, ("doc", n.id), cells, tint(n.group, n.depth), tip=tip)
             else:
                 cells, tip = row(n) if row else (self._task_cells(n.id, n.depth, filtered and not n.match), full_path(m, n.id))
                 if isinstance(cells[0], Line) and n.children:  # a folded parent says how many open subtasks it holds (decision L8)
                     cells[0].count = sum(1 for c in n.children if c.kind == "task" and c.id in m.tasks and is_open(m.task(c.id)))
-                item = self.tree.add_row(parent, ("task", n.id), cells, tint(n.group, n.depth), tip=tip, edge=edge(n.group, n.depth))
+                item = self.tree.add_row(parent, ("task", n.id), cells, tint(n.group, n.depth), tip=tip)
                 if self.selecting and n.match and self.view in SELECT_VIEWS:
                     self.tree.add_tick(item, n.id in self.ticked)
             self._add_nodes(n.children, item, filtered, expand_all, row)
@@ -1902,7 +1908,7 @@ class BrowseWindow(QWidget):
             (f' <span class="sub">{esc(g.sub)}</span>' if g.sub else "") + f' <span class="sub">· {len(g.lines)}</span>'
         key = ("task", g.task) if g.task else ("person", g.person) if g.person else None
         top = self.tree.add_row(None, key, [head, ""], tip=f"{len(g.lines)} thing{'s' if len(g.lines) != 1 else ''} happened",
-                                selectable=key is not None, span=True, edge=edge(g.colour, 0) if g.colour is not None else None)
+                                selectable=key is not None, span=True)
         if select and g.task:
             self.tree.add_tick(top, f"t:{g.task}" in self.act["picked"])
         for h in g.headings:

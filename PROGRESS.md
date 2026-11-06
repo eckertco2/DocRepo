@@ -89,6 +89,7 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.76 | A task's state from its row (round 7's item 101, decisions 360 to 364): the State cell as a button that opens a menu of the four states, "Closed, with its n open subtasks", a State submenu on every task row's right-click menu and the Priorities and timeline cards, saved at once as "Browse tool", and Undo for ten seconds | Built 2026-11-05 in the `round7` worktree, from the approved mock, and merged to `main` the same day, before the owner's hand test; on GitHub the same day |
 | 5.77 | Every capture window fresh, and Drafts (round 7's item 94, decisions 333 to 338): closing with something unsaved files it in Drafts, a folder for each in `System\Drafts` with its files, so a restart keeps it whole; the footer's Drafts button and the tray's Drafts…; a saved or discarded draft moved to `Drafts\Done`; the draft set aside of 5.41 retired; the rules file changed | Built 2026-11-05 in the `round7` worktree, from the approved mock, and merged to `main` the same day, before the owner's hand test; on GitHub the same day |
 | 5.78 | List rows (the design workspace's list rows review, decisions L1 to L8): one line per row at one height per view, a painted first column cut with "…", no bold task rows, the state as an icon, Today's project as context, no IDs in rows, icon actions over the date on hover, no column headings where cells say what they are, and a folded parent's count | Built 2026-11-05 in the `list-rows` worktree, hand-tested by the owner and merged to `main` the same day (2583 passed, 1 skipped); on GitHub the same day |
+| 5.81 | A task's priority as its row's left edge (the list rows review's decision L9, the owner's idea): an open task's bucket in its colour on every task row at any depth, in the browse window's lists and the Today side panel, named in the row's tooltip; the edge no longer shows the top-level task's colour; Critical keeps its chip; `SPEC.md` brought up to date for 5.78 too | Built 2026-11-05 in the `row-priority` worktree, hand-tested by the owner and committed to its branch the same day; not merged |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
 ## Decisions
@@ -680,6 +681,23 @@ The owner asked for the review's next stages, and took its decisions V2, V3, V4,
 - **Pages' chips stay square-cornered.** Qt's rich text can't round them, and painting them as pictures would lose copying and Find. Chips in widgets take a small 4 px corner, so the two are close, rather than pills beside squares.
 - **Decision 18 changed:** Capacity's middle band is caution's tint, not the accent's.
 - **Priorities' columns are at least 216 px,** not the review's 260 to 300, so all five show at 1440 px. They reach 258 px at the 82% window on a 1920 px screen.
+
+
+
+## Release 5.81: a task's priority as its row's left edge (2026-11-05)
+
+Asked for in chat: tasks with a priority should show it in every task view. The owner chose, from a trial of three ways and their own idea, to colour the strip at the row's left edge by priority (the list rows review's decision L9, `docs/ui-design/list-rows.md` in the design workspace). It changes decision 77 (rows showed only Critical). 5.79 and 5.80 are the tagged labels plan's.
+
+- **The edge** (`RowTree.drawRow`, `row_priority`): an open task's bucket, in its colour, at any depth: Critical `pri_critical` (red), High `pri_high` (amber), Medium `pri_medium` (blue), Parking lot `pri_parking` (grey), new tokens each 3:1 or more on white and on the hover tint, with dark values. Not ranked and closed tasks have none. A row is a task's when its key is (`task`, ID), so Today's items, reminders, key dates, the lists, the Task tree, Agendas, Activity's task rows, Search and Documents' tasks all have it. The browse window works out every open, ranked task's bucket as it fills a list (`browse_window.priorities_of`, into `RowTree.priorities`), so drawing a row never reads the database: the first full run found a window left from an earlier test, painted after its database had closed, failing when an earlier version loaded the model to draw the edge. A row kept for context has it faded. The selected row keeps its accent bar: the trial's inset pill would have lain over a top-level row's chevron, and the page beside it names the priority.
+- **The top-level task's colour leaves the lists' rows** (`EDGE_ROLE` and `tree_view.edge` are gone): the edge means one thing. Projects keep their colours on the Timeline, the Priorities board's cards and the capture window's item cards (decision 9).
+- **Named on hover** (`HtmlDelegate.helpEvent`): over the edge, "Priority: High"; elsewhere on the row, its tooltip with that line added, as colour alone carries it on the row.
+- **Critical keeps its chip** beside Urgent: the rarest, most important bucket keeps words too.
+- **The Today side panel's rows** have the same edge (`today_panel.edge_of`, `_EdgeFrame`): Today's items, and the reminders and Due in the next 7 days rows.
+- **`SPEC.md`** now says what 5.78 changed in the lists (List rows, A row's actions, the state as an icon, People's aliases) and this release's edge; 5.78 had left it out.
+
+**Tests:** `tests/test_list_rows.py`, 9 more: a ranked subtask's row has each bucket's colour at its edge, read from the drawn pixels; an unranked top-level row has no edge and no project colour; the selected row keeps the accent bar; a closed or unranked task gives no priority; Today's rows and the side panel's have it; Critical keeps its chip; drawing a row reads nothing from the database. The full run: 2649 passed, 1 skipped, none failed.
+
+**Hand-tested by the owner and committed to the `row-priority` branch** (2026-11-05); not merged. **Not checked yet:** the corporate computer, with the design workspace's `handoff/docrepo/release-5-81-test.md`.
 
 
 

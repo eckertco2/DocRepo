@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QHBoxLayout, QHeaderView, QLab
                                QToolTip, QTreeWidget, QTreeWidgetItem, QWidget)
 
 from docrepo.detail import chip, esc
+from docrepo.model import PRIORITY_NAMES
 from docrepo.ui import tokens
 from docrepo.ui.icons import icon, icon_size, tinted
 from docrepo.ui.look import LOOK, paint_focus_ring
@@ -27,8 +28,9 @@ KEY_ROLE = Qt.ItemDataRole.UserRole
 HTML_ROLE = Qt.ItemDataRole.UserRole + 1
 #: A row kept only for context, drawn faded: a parent of what Find in this view found (mods log round 2, M0026).
 DIM_ROLE = Qt.ItemDataRole.UserRole + 2
-#: The new look's colour edge on a top-level task's row: its group's colour (decision 9), never a tint across its rows.
-EDGE_ROLE = Qt.ItemDataRole.UserRole + 3
+#: A task's priority as its row's left edge (release 5.81, decision L9): each bucket's colour token. An unranked or closed task
+#: has none. It took the edge from the top-level task's colour (release 5.57), which stays on the Timeline and the board.
+PRIORITY_EDGES = {"critical": "pri_critical", "high": "pri_high", "medium": "pri_medium", "parking": "pri_parking"}
 #: A row's actions, a ``RowActions`` (release 5.59).
 ACTIONS_ROLE = Qt.ItemDataRole.UserRole + 4
 #: The new look's first column, a ``Line`` (release 5.78).
@@ -146,11 +148,6 @@ def tint(group: int, depth: int) -> QColor | None:
 def group_ground() -> QColor:
     """Behind a group's heading in a list."""
     return QColor(GREY).lighter(135) if LOOK.classic else QColor(tokens.colour("base"))
-
-
-def edge(group: int, depth: int) -> str | None:
-    """The new look's colour edge for a row: its group's colour on a top-level row, nothing below it."""
-    return None if LOOK.classic or depth or group < 0 else tokens.group_colour(group)
 
 
 def with_actions(labels: list[str], widths: list[int], width: int) -> tuple[list[str], list[int]]:
@@ -407,6 +404,12 @@ class HtmlDelegate(QStyledItemDelegate):
                 tip = line.icon_tip + (". Click to change the state." if index.data(STATE_ROLE) else "")
                 QToolTip.showText(event.globalPos(), tip, view)
                 return True
+        bucket = "" if LOOK.classic else self.view.row_priority(index)
+        if bucket:  # the row's tooltip names its priority, as its edge shows it only by colour (decision L9)
+            said = f"Priority: {PRIORITY_NAMES.get(bucket, bucket)}"
+            tip = index.data(Qt.ItemDataRole.ToolTipRole) or index.siblingAtColumn(0).data(Qt.ItemDataRole.ToolTipRole) or ""
+            QToolTip.showText(event.globalPos(), said if event.pos().x() <= 8 or not tip else "\n".join((tip, said)), view)
+            return True
         return super().helpEvent(event, view, option, index)
 
     def sizeHint(self, option, index) -> QSize:  # noqa: N802
@@ -435,6 +438,9 @@ class RowTree(QTreeWidget):
         #: The new look's row height for the view shown, and whether its rows with a second line take two lines (``set_density``).
         self.row_height = tokens.TREE_ROW
         self.two_lines = False
+        #: Each open, ranked task's priority bucket, by its ID: its row's left edge (release 5.81). The browse window sets it as it
+        #: fills the list, so drawing a row never reads the database.
+        self.priorities: dict[str, str] = {}
         self.setItemDelegate(HtmlDelegate(self))
         self.setUniformRowHeights(not LOOK.classic)
         self.setWordWrap(LOOK.classic)
@@ -617,13 +623,11 @@ class RowTree(QTreeWidget):
             self._fit_columns()
 
     def add_row(self, parent: QTreeWidgetItem | None, key: object, cells: list, background: QColor | None = None,
-                tip: str = "", selectable: bool = True, span: bool = False, edge: str | None = None) -> QTreeWidgetItem:
+                tip: str = "", selectable: bool = True, span: bool = False) -> QTreeWidgetItem:
         """A row. Its first cell may be a ``Line`` (the new look paints it; its HTML is kept for Find and the Classic look), and
         the rest are HTML."""
         item = QTreeWidgetItem(parent) if parent is not None else QTreeWidgetItem(self)
         item.setData(0, KEY_ROLE, key)
-        if edge:
-            item.setData(0, EDGE_ROLE, edge)
         for i, html in enumerate(cells):
             if isinstance(html, Line):
                 item.setData(i, LINE_ROLE, html)
@@ -884,15 +888,27 @@ class RowTree(QTreeWidget):
     def keys(self) -> list[object]:
         return [item.data(0, KEY_ROLE) for item in self.items()]
 
+    def row_priority(self, index: QModelIndex) -> str:
+        """The priority bucket of the open task a row is, from its key, or "" (release 5.81)."""
+        key = index.siblingAtColumn(0).data(KEY_ROLE)
+        return self.priorities.get(key[1], "") if isinstance(key, tuple) and len(key) == 2 and key[0] == "task" else ""
+
     def drawRow(self, painter, option, index) -> None:  # noqa: N802 - Qt's name
-        """The new look's marks at a row's left edge: the accent bar on the selected row, else a top-level task's colour."""
+        """The new look's mark at a row's left edge: the accent bar on the selected row, else the task's priority in its
+        colour (release 5.81, decision L9), at any depth. Nothing on an unranked row. A row kept for context has it faded."""
         super().drawRow(painter, option, index)
         if LOOK.classic:
             return
         first = index.siblingAtColumn(0)
-        mark = tokens.colour("accent") if self.selectionModel().isSelected(first) else first.data(EDGE_ROLE)
+        selected = self.selectionModel().isSelected(first)
+        bucket = "" if selected else self.row_priority(first)
+        mark = tokens.colour("accent") if selected else tokens.colour(PRIORITY_EDGES[bucket]) if bucket in PRIORITY_EDGES else None
         if mark:
+            painter.save()
+            if not selected and first.data(DIM_ROLE):
+                painter.setOpacity(0.5)
             painter.fillRect(0, option.rect.top() + 2, 3, option.rect.height() - 4, QColor(mark))
+            painter.restore()
 
     def _item_changed(self, item: QTreeWidgetItem, column: int) -> None:
         if self._building or column != 0 or item.data(0, Qt.ItemDataRole.CheckStateRole) is None:

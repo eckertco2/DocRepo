@@ -50,6 +50,8 @@ LIGHT = {
     "ref_task": "#22706a", "ref_task_bg": "#d6eeea",
     # Categories: the top-level tasks' colours (decision 9), as marks, never as text.
     "g1": "#3b78c4", "g2": "#2e9483", "g3": "#c08419", "g4": "#8460c2",
+    # Priorities (release 5.81): a task row's left edge, as marks, never as text, each 3:1 or more on white and on hover.
+    "pri_critical": "#c42b1c", "pri_high": "#c27400", "pri_medium": "#3b78c4", "pri_parking": "#7f8b98",
     # File types (the Task view, release 5.34): their icons' colours only, never text's, each 3:1 or more on white.
     "type_doc": "#2b579a", "type_sheet": "#217346", "type_slides": "#c43e1c", "type_pdf": "#b30b00", "type_picture": "#8460c2",
     "type_mail": "#1d5e98", "type_drawing": "#2e9483", "type_link": "#5a6571", "type_other": "#5a6571",
@@ -72,6 +74,7 @@ DARK = {
     "caution": "#e8b85c", "caution_bg": "#3a2e13", "caution_line": "#5a4720", "critical": "#f3968e", "critical_bg": "#3e1f1c",
     "success": "#82d098", "success_bg": "#1b3323", "scroll": "#555555", "scroll_hover": "#777777",
     "g1": "#6fa6e8", "g2": "#56c2b0", "g3": "#dca64a", "g4": "#ad8ee8",
+    "pri_critical": "#f3968e", "pri_high": "#e8b85c", "pri_medium": "#6fa6e8", "pri_parking": "#8a949e",
     "type_doc": "#7fa7e6", "type_sheet": "#5cbf86", "type_slides": "#f08a69", "type_pdf": "#f3968e", "type_picture": "#ad8ee8",
     "type_mail": "#7cb0e2", "type_drawing": "#56c2b0", "type_link": "#a0aab4", "type_other": "#a0aab4",
 }
