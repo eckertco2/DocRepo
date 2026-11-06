@@ -291,10 +291,11 @@ def test_a_moved_card_s_change_goes_by_its_new_place(window):
 
 
 def test_what_a_card_shows_is_all_in_what_it_s_kept_by(window):
-    # Each thing a card draws, changed on its own line, must make that card again and leave its neighbour.
+    # Each thing a card draws, changed on its own line, must make that card again and leave its neighbour. "By today" is a
+    # Due; "today" alone isn't (release 5.82).
     window.set_task(TASK)
     base = "@Tom check the guards\n@Mike paint the rails"
-    for changed in ("@Tom check the guards today", "@Tom check the guards deadline Friday", "@Priya check the guards",
+    for changed in ("@Tom check the guards by today", "@Tom check the guards deadline Friday", "@Priya check the guards",
                     "@L.Tom check the guards", "@Tom check the rails"):
         fill(window, base)
         first, second = window.item_cards.cards

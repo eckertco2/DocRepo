@@ -1009,6 +1009,10 @@ STRONG = re.compile(r"\bdeadline\b|\bno later than\b|\bhard\s+(?:stop|date|cut-?
 WEAK = re.compile(r"\b(?:must|ahead of|in time for|prior to)\b|\bbefore\s+(?:the|our|a|an)\s+\w", I)
 REVISED = re.compile(r"\b(?:now|moved|pushed|slipped|changed|revised|rescheduled|delayed|postponed|extended|new\s+(?:due\s+)?date)\b", I)
 BREAK = re.compile(r"[,;]|\s(?:and|but|or|while|whereas)\s", I)
+#: "Today" or "tonight" alone is when something happened, not when it's due, without a word before it that makes it a date
+#: to meet (release 5.82).
+BARE_TODAY = re.compile(r"(?:today|tonight)", I)
+TODAY_CUE = re.compile(r"\bdue\b|\b(?:by|before|until|till)\s+\Z", I)
 REMIND = re.compile(r"\b(?:remind|reminder|ping|nudge|follow\s+up|check\s+in\s+with)\b", I)
 URGENT = re.compile(r"\b(?:urgent(?:ly)?|asap|immediately|right away|as soon as possible|critical(?!\s+path)|(?:high|top|highest)\s+priority)\b", I)
 NOT_URGENT = re.compile(r"\b(?:not|no|non|nothing|isn['’]t|wasn['’]t|never|less)\s*-?\s*(?:that\s+|very\s+|too\s+|so\s+)?\Z", I)
@@ -1163,6 +1167,14 @@ def parse_capture(
             d.tail_to = d.end + b.start() if b else d.end
         else:
             d.tail_to = s.end
+    # "Today" or "tonight" on its own is when something happened ("Spoke with Tom today"), not when the task is due
+    # (release 5.82): it counts only with words that make it a date to meet, "by today", "due today", "deadline today",
+    # "must … today". "EOD today" and "a week from today" are dates of their own.
+    def today_counts(d: DateHit) -> bool:
+        lead, tail = text[d.lead_from:d.start], text[d.end:d.tail_to]
+        return bool(STRONG.search(lead + " " + tail) or WEAK.search(lead) or TODAY_CUE.search(lead))
+
+    candidates = [d for d in candidates if not BARE_TODAY.fullmatch(d.text) or today_counts(d)]
     in_sentence: dict[int, int] = {}
     for d in candidates:
         in_sentence[id(d.s)] = in_sentence.get(id(d.s), 0) + 1

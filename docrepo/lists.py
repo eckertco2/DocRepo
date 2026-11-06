@@ -25,8 +25,10 @@ class TaskList:
 
 
 def _due_soon(t: Task, today: date, me: str | None) -> bool:
+    """Overdue or due in the next 7 days. A meeting isn't something to get done, whatever its dates, so it's left out
+    (release 5.82); the tasks under it count by their own dates."""
     due = due_of(t, today)
-    return not t.recurrence and due is not None and day_diff(today, due.date) <= 7
+    return not t.recurrence and not t.meeting and due is not None and day_diff(today, due.date) <= 7
 
 
 def _reminder_soon(t: Task, today: date, me: str | None) -> bool:
@@ -40,7 +42,7 @@ def _unplanned(t: Task, today: date, me: str | None) -> bool:
 
 
 LISTS = (
-    # Routine tasks are left out, or a weekly meeting would always be on it.
+    # Routine tasks are left out, or a weekly meeting would always be on it, and so are meetings (release 5.82).
     TaskList("due", "Overdue and next 7 days", _due_soon),
     TaskList("reminders", "Reminders", _reminder_soon, lambda t, today: to_date(t.reminder) if t.reminder else None),
     TaskList("waiting", "Waiting on others", lambda t, today, me: bool(t.assignees) and me not in t.assignees),
