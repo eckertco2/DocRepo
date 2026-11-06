@@ -223,3 +223,84 @@ def test_search_rows_show_no_ids_and_a_tasks_state(browse):
     assert lines and not any(key[1] in line.words() for key, line in lines)  # its ID is in the tooltip only
     task = dict(lines)[("task", "T000001")]
     assert task.icon == "state-ip" and task.icon_tip == "In progress"
+
+
+# ---- release 5.81: a task's priority as its row's left edge (decision L9) ----
+def rank(ctx, task_id: str, bucket: str) -> None:
+    edits.set_priority(ctx.conn, ctx.data_root, ctx.fs, task_id, bucket, None, NOW)
+
+
+def edge_pixel(browse, key) -> str:
+    """The colour at the left edge of a row, as drawn."""
+    item = next(i for i in browse.tree.items() if i.data(0, KEY_ROLE) == key)
+    browse.tree.scrollToItem(item)
+    QApplication.processEvents()
+    rect = browse.tree.visualItemRect(item)
+    return browse.tree.viewport().grab().toImage().pixelColor(1, rect.center().y()).name()
+
+
+@pytest.mark.parametrize(("bucket", "token"), [("critical", "pri_critical"), ("high", "pri_high"), ("medium", "pri_medium"), ("parking", "pri_parking")])
+def test_a_ranked_tasks_row_has_its_priority_down_its_edge(browse, ctx, bucket, token):
+    rank(ctx, "T000012", bucket)  # Rigging plan, a subtask two levels down
+    browse.refresh(render=False)
+    browse.set_view("tasks")
+    browse.open.update(Model(ctx.conn).tasks)
+    browse.render_list()
+    browse.select("task", "T000016")  # another row, so this one isn't selected
+    assert browse.tree.row_priority(browse.tree.indexFromItem(next(i for i in browse.tree.items() if i.data(0, KEY_ROLE) == ("task", "T000012")))) == bucket
+    assert edge_pixel(browse, ("task", "T000012")) == tokens.colour(token)
+
+
+def test_unranked_rows_have_no_edge_and_projects_no_colour(browse):
+    browse.set_view("tasks")
+    browse.select("task", "T000016")
+    background = browse.tree.viewport().grab().toImage().pixelColor(browse.tree.viewport().width() // 2, 2).name()
+    top = edge_pixel(browse, ("task", "T000001"))  # a top-level task, unranked: once its project's colour
+    assert top not in {tokens.colour(k) for k in tokens.GROUP_KEYS} and top in (background, tokens.colour("hover"), "#ffffff")
+
+
+def test_the_selected_row_keeps_the_accent_bar(browse, ctx):
+    rank(ctx, "T000012", "high")
+    browse.refresh(render=False)
+    browse.set_view("tasks")
+    browse.select("task", "T000012")
+    assert edge_pixel(browse, ("task", "T000012")) == tokens.colour("accent")
+
+
+def test_a_closed_or_unranked_task_gives_no_priority(browse, ctx):
+    from docrepo.ui.browse_window import priorities_of
+
+    rank(ctx, "T000012", "critical")
+    rank(ctx, "T000007", "high")  # Order spare mechanical seal, closed
+    assert priorities_of(Model(ctx.conn)) == {"T000012": "critical"}
+
+
+def test_drawing_a_row_never_reads_the_database(browse, ctx, monkeypatch):
+    """A window left over from an earlier list, painted after its database has closed, drew rows by loading the model: the
+    edge comes from what the list was filled with."""
+    rank(ctx, "T000012", "high")
+    browse.refresh(render=False)
+    browse.set_view("tasks")
+    assert browse.tree.priorities == {"T000012": "high"}
+    monkeypatch.setattr(type(browse), "model", lambda self: (_ for _ in ()).throw(AssertionError("read while drawing")))
+    browse.tree.viewport().grab()
+
+
+def test_todays_rows_and_the_side_panel_show_it_too(browse, ctx):
+    from docrepo.ui.today_panel import edge_of
+
+    put_on_today(ctx)
+    rank(ctx, "T000009", "medium")  # Vendor drawing package, carried over
+    browse.refresh(render=False)
+    browse.set_view("today")
+    browse.select("task", "T000016")
+    assert edge_pixel(browse, ("task", "T000009")) == tokens.colour("pri_medium")
+    m = Model(ctx.conn)
+    assert edge_of(m.task("T000009")) == tokens.colour("pri_medium") and edge_of(m.task("T000016")) == "" and edge_of(None) == ""
+
+
+def test_critical_keeps_its_chip_beside_its_edge(browse, ctx):
+    rank(ctx, "T000008", "critical")  # Installation
+    browse.refresh(render=False)
+    browse.set_view("tasks")
+    assert ("Critical", "pri-critical") in line_of(browse, ("task", "T000008")).chips

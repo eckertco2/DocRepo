@@ -348,7 +348,7 @@ def preview(rows: list[list[object]], plan: Plan, model: Model, today: date) -> 
     for offset, cells in enumerate(rows[plan.header_row + 1:]):
         line = plan.header_row + 2 + offset
 
-        def cell(c: Column) -> object:
+        def cell(c: Column, cells: list = cells) -> object:  # bound here: it's called within this row's turn only
             return cells[c.index] if c.index < len(cells) else None
 
         title_col = plan.column_for("title")

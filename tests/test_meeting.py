@@ -5,7 +5,7 @@ from datetime import datetime
 
 import pytest
 
-from docrepo import capacity, captures, db, edits
+from docrepo import capacity, captures, db
 from docrepo.config import Settings
 from docrepo.detail import Pages, PageState
 from docrepo.model import Model

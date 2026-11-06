@@ -4,7 +4,7 @@ set in Settings. F1 shows it in either window. Ported from the browse tool mocku
 from __future__ import annotations
 
 from PySide6.QtGui import QKeySequence, QShortcut
-from PySide6.QtWidgets import QDialog, QHBoxLayout, QPushButton, QTextBrowser, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QDialog, QHBoxLayout, QPushButton, QTabWidget, QTextBrowser, QVBoxLayout, QWidget
 
 from docrepo.detail import esc
 from docrepo.ui.style import page_css, style_sheet
@@ -37,7 +37,8 @@ OTHER_KEYS = (
     ("1 to 4, 0", "On the Priorities board: puts the selected card in Critical, High, Medium or Parking lot, or takes it out (0)"),
     ("Alt+Up, Alt+Down", "On the Priorities board: moves the selected card up or down in its bucket. The arrow keys move between cards; "
                          "Enter opens the task. In Templates: moves the selected row among those beside it"),
-    ("F1", "This list"),
+    ("Q", "On the Timeline: Quick edit for the selected row (release 5.91; a double-click is Edit task, as everywhere)"),
+    ("F1", "This list, and the Syntax tab: every ** name, with examples"),
 )
 #: The Task view's keys (releases 5.34 and 5.35). The letters above act on its task there too, with Alt from its box.
 TASK_VIEW_KEYS = (
@@ -124,20 +125,59 @@ def key_map_html(main_hotkey: str = "Ctrl+Shift+Space") -> str:
             f"<p><b>In the Today side panel</b></p><table cellspacing='0' cellpadding='4'>{panel}</table>")
 
 
-class KeyMapDialog(QDialog):
-    """Every key, in one list (F1)."""
+#: The Syntax tab's six worked lines (release 5.92): what you type, and what Save makes of it.
+WORKED = (
+    ("@Tom to book the crane by Fri", "A task for Tom, due Friday, under the capture's task"),
+    ("**decision, We hire the bigger crane", "A decision, kept on the task's notes page"),
+    ("**closed, The seals are fitted", "An update that closes the task"),
+    ("#Installation Crane booked for Tuesday", "A note on Installation, whatever task the capture is on"),
+    ("#Installation\nCrane booked\n#Rigging plan\nSlings ordered", "A note split in two: each part on its own task"),
+    ("**due, 5 Nov", "Fills the task's Due, when it has none yet"),
+)
 
-    def __init__(self, parent: QWidget | None, main_hotkey: str = "Ctrl+Shift+Space") -> None:
+
+def syntax_html(rows: list[tuple[str, str, str, str]] | None = None) -> str:
+    """The Syntax tab (release 5.92, the review's F6): the worked lines, then every ** name from ``items.OPERATORS`` (with
+    the reference fields when ``rows`` has them), then what Parse and populate reads with no **."""
+    from docrepo import items, parse
+
+    rows = rows if rows is not None else items.syntax_rows()
+    worked = "".join(f"<tr><td><code>{esc(line).replace(chr(10), '<br>')}</code></td><td>{esc(what)}</td></tr>" for line, what in WORKED)
+    names = "".join(f"<tr><td><b><code>{esc(n)}</code></b></td><td>{esc(also) or '–'}</td><td>{esc(what)}</td><td><code>{esc(ex)}</code></td></tr>"
+                    for n, also, what, ex in rows)
+    states = esc(", ".join(n for op in items.OPERATORS if op.state for n in op.names))
+    return ("<p class='note'>In any capture: <b>@</b> a person, <b>@L.</b> a lead, <b>@__</b> no one yet, <b>#</b> a task, and <b>**</b> a "
+            "name with its comma, which says what a line is or fills a field. Type @, # or ** for a list. A ** line that reads as nothing "
+            "gets an Unread line card; a new name after @ gets an Add … to people card, ticked.</p>"
+            f"<table cellspacing='0' cellpadding='4' width='100%'>{worked}</table>"
+            "<p><b>Every ** name</b> (the comma makes it one)</p>"
+            "<table cellspacing='0' cellpadding='4' width='100%'><tr><th align='left'>Name</th><th align='left'>Also</th>"
+            f"<th align='left'>Makes or fills</th><th align='left'>Example</th></tr>{names}</table>"
+            "<p><b>Read with no **</b>, by Parse and populate (Alt+P) and on a line with @ or #: dates in words (by Fri, 5 Nov, next week), "
+            f"people's names, hours (8 h, 2 h a day), and these states: {states}. These words mark a plant event: "
+            f"{esc(', '.join(parse.EVENT_WORDS))}.</p>")
+
+
+class KeyMapDialog(QDialog):
+    """Every key, in one list (F1), and the content text's syntax in a tab of its own (release 5.92)."""
+
+    def __init__(self, parent: QWidget | None, main_hotkey: str = "Ctrl+Shift+Space", syntax_rows: list | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Keys")
         self.setObjectName("capture")
         self.setStyleSheet(style_sheet())
         self.resize(760, 520)
         lay = QVBoxLayout(self)
+        self.tabs = QTabWidget()
         page = QTextBrowser()
         page.document().setDefaultStyleSheet(page_css())
         page.setHtml(key_map_html(main_hotkey))
-        lay.addWidget(page, 1)
+        self.tabs.addTab(page, "Keys")
+        self.syntax = QTextBrowser()
+        self.syntax.document().setDefaultStyleSheet(page_css())
+        self.syntax.setHtml(syntax_html(syntax_rows))
+        self.tabs.addTab(self.syntax, "Syntax")
+        lay.addWidget(self.tabs, 1)
         row = QHBoxLayout()
         row.addStretch()
         close = QPushButton("Close", objectName="primary")

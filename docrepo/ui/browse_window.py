@@ -12,26 +12,20 @@ Ported from the mockup's ``views.js`` and ``detail.js``; SPEC section 8 describe
 """
 from __future__ import annotations
 
-import html
 import json
-import logging
-import re
 import sqlite3
 from collections.abc import Callable
-from dataclasses import replace
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
-from urllib.parse import unquote
 
-from PySide6.QtCore import QPoint, Qt, QTimer, QUrl
-from PySide6.QtGui import QColor, QCursor, QGuiApplication, QKeySequence, QShortcut
+from PySide6.QtCore import QPoint, Qt, QTimer
+from PySide6.QtGui import QGuiApplication, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QComboBox,
     QDialog,
     QHBoxLayout,
-    QHeaderView,
     QInputDialog,
     QLabel,
     QLineEdit,
@@ -41,7 +35,6 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QSplitter,
     QTableWidget,
-    QTableWidgetItem,
     QTextBrowser,
     QTextEdit,
     QToolButton,
@@ -50,24 +43,23 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo import activity, bulk, capacity, db, edits, items, key_dates, notes_page, opener, people, pins, priorities, prompts, search, tagged, ties, whatif
-from docrepo.lists import key_dates_due, reminders_due
+from docrepo import activity, bulk, capacity, captures, db, edits, items, notes_page, opener, outlook, people, pins, prompts, search, whatif
 from docrepo.agenda import AgendaError
 from docrepo.captures import capture_folder, capture_md_path
-from docrepo.dates import long_date, short, to_date, workday_numbers
-from docrepo.detail import SCOPE_NAMES, PageState, Pages, chip, esc, row_state, state_chip
+from docrepo.dates import workday_numbers
+from docrepo.detail import PageState, Pages, esc
 from docrepo.links import is_folder, is_link
-from docrepo.overview import file_type
 from docrepo.model import TODAY, Model, is_person
 from docrepo.people import PeopleError
 from docrepo.safe_fs import WriteRefused
-from docrepo.save import SaveError, SaveResult, add_quick_task, note_to_task
-from docrepo.schedule import DueDate, due_of, is_open
+from docrepo.save import EmailItem, SaveError, SaveResult, add_quick_task, note_to_task
 from docrepo.tasks import TaskError
 from docrepo.ui.context import AppContext
-from docrepo.ui.dialogs import LabelDialog, PersonDialog, TaggedLabelDialog
-from docrepo.ui.rich_edit import FormatBar, RichEdit
+from docrepo.ui.dialogs import LabelDialog, PersonDialog
+from docrepo.ui.lists import tagged as tagged_list
+from docrepo.ui.rich_edit import RichEdit
 from docrepo.ui.explorer import show_in_explorer
+from docrepo.ui.problems import ProblemsLine
 from docrepo.ui.settings_view import SettingsView
 from docrepo.ui import tokens
 from docrepo.ui.icons import icon
@@ -75,146 +67,70 @@ from docrepo.ui.look import LOOK, Help, KeyTips, set_hints, tip, with_key
 from docrepo.ui.nav_pane import WIDTH as NAV_WIDTH, NavPane
 from docrepo.ui.page_view import PageView
 from docrepo.ui.task_pane import TaskPane
-from docrepo.ui.templates_view import PreviewDialog, PreviewEntry, TemplatesPane
+from docrepo.ui.templates_view import TemplatesPane
 from docrepo.ui.tree_import import TreeFilesPane
 from docrepo.ui.priorities_view import PrioritiesView
 from docrepo.ui.palette import Command, CommandPalette
 from docrepo.ui.style import CLASSIC_BROWSE, page_css, style_sheet
-from docrepo.ui.task_forms import BulkEditDialog, LabelMatchDialog, TaskEditDialog
+from docrepo.ui.task_forms import LabelMatchDialog, TaskEditDialog
 from docrepo.ui.task_picker import TaskPicker
 from docrepo.ui.timeline_view import TimelineView
-from docrepo.ui.keymap import KeyMapDialog
-from docrepo.timeline import bands as timeline_bands
-from docrepo.ui.tokens import C
 from docrepo.ui.state_menu import UNDO_MS, can_change, open_below, picked_line, state_menu
-from docrepo.ui.tree_view import DIM_ROLE, HTML_ROLE, KEY_ROLE, LINE_ROLE, Line, RowTree, edge, group_ground, state_icon, tint, with_actions
-from docrepo.ui.widgets import SAVE_KEYS, CheckMenuButton, DateField, DropButton, FlowLayout, Option, ViewStack, ask, label_filter, label_options, people_filter, people_options
+from docrepo.ui.tree_view import HTML_ROLE, KEY_ROLE, RowTree
+from docrepo.ui.widgets import SAVE_KEYS, DropButton, FlowLayout, Option, ViewStack, ask, label_options, people_options
 from docrepo.views import (
-    project_text,
     LIST_IDS,
-    SORTS,
     TASK_VIEWS,
-    TREE_GROUPS,
     VIEW_IDS,
     VIEWS,
-    CapacityRow,
-    Node,
-    TreeFilter,
-    agenda_groups,
-    capacity_grid,
-    capacity_weeks,
-    closed_items,
-    collapse_level,
     current_target,
     discarded_rows,
-    documents_tree,
-    due_cell,
-    today_due_entries,
-    key_date_cell,
-    find_text,
-    expand_level,
-    full_path,
-    list_date,
-    list_tree,
-    markers,
-    meetings_for_menu,
-    open_count,
-    since_text,
-    sort_tree,
-    task_tree,
-    today_groups,
-    tree_sections,
-    walk,
-    unfiled_rows,
     view_counts,
 )
+from docrepo.ui.lists.base import ListBasics
+from docrepo.ui.lists.tasks import TaskLists
+from docrepo.ui.lists.today import TodayList
+from docrepo.ui.lists.agendas import AgendaList
+from docrepo.ui.lists.people_labels import PeopleAndLabelLists
+from docrepo.ui.lists.documents import DocumentLists
+from docrepo.ui.lists.captures import CaptureLists
+from docrepo.ui.lists.activity import ActivityList
+from docrepo.ui.lists.planning import PlanningHooks
+from docrepo.ui.lists.page_commands import PageCommands
+from docrepo.ui.lists.notes_pages import NotesPages
+from docrepo.ui.lists.common import (  # noqa: F401 - the helpers, here as before
+    _answers,
+    _cols,
+    _due_css,
+    _due_html,
+    _empty,
+    _row_state,
+    _row_word,
+    _shape,
+    ACT_CHIPS,
+    ACT_ICONS,
+    CLASSIC_DEADLINE,
+    DETAIL_MIN,
+    log,
+    NAV_FOLDED_KEY,
+    NESTING_VIEWS,
+    NO_HEADINGS,
+    priorities_of,
+    ROW_DENSITY,
+    SELECT_VIEWS,
+    SOURCE_ICONS,
+    TIMELINE_OPEN_KEY,
+    TIMELINE_VIEW_KEY,
+    TODAY_MINE_KEY,
+    UNFILED_NOTE,
+    VIEWS_HIDDEN_KEY,
+    WINDOW_TITLE,
+)
 
-log = logging.getLogger(__name__)
+#: What other modules and the tests read from here (release 5.95): the window, and names that lived here before the move.
+__all__ = ["BrowseWindow", "DETAIL_MIN", "HTML_ROLE", "NAV_FOLDED_KEY", "TODAY_MINE_KEY", "_answers", "priorities_of"]
 
-WINDOW_TITLE = "DocRepo"
-VIEWS_HIDDEN_KEY = "browse_views_hidden"
-TODAY_MINE_KEY = "today_due_mine"  # Mine only, on Today's Due in the next 7 days (mods log round 2, M0050)
-NAV_FOLDED_KEY = "browse_nav_folded"  # the sidebar's folded groups (the visual overhaul's decision 10)
-TIMELINE_OPEN_KEY = "timeline_open"  # the timeline's rows whose subtasks are shown (mods log round 4, decision 133)
-TIMELINE_VIEW_KEY = "timeline_view"  # the timeline's range, Order by, bar colours, Hours and Show routine (release 5.29)
-#: The least width of the pane on the right: a task page's format bar on its own line, and its margins and scroll bar (release 5.58).
-DETAIL_MIN = 352
-#: The views with Select mode, where tasks can be ticked for Edit selected.
-SELECT_VIEWS = ("tasks", *LIST_IDS)
-#: The views but the task tree whose rows nest, so they have Collapse a level and Expand a level (release 5.24).
-NESTING_VIEWS = ("today", *LIST_IDS, "agenda", "activity", "docs", "labels", "templates")
-#: Activity's line chips, by what happened (release 5.23): the pages' chip classes.
-ACT_CHIPS = {"task": "multi", "update": "st-ip", "note": "lbl", "email": "lbl", "change": "routine", "doc": "st-pk", "agenda": "new"}
-#: Each view's rows in the new look (the list rows review, decision L1): its row height, and whether rows with a second line
-#: take two. Views whose rows nest are 28 px; Agendas, Documents, Activity and Search show a second line. Others are 32 px.
-ROW_DENSITY = {"tasks": (tokens.TREE_ROW, False), **{v: (tokens.TREE_ROW, False) for v in LIST_IDS}, "labels": (tokens.TREE_ROW, False),
-               "templates": (tokens.TREE_ROW, False), "docs": (tokens.TREE_ROW, True), "agenda": (tokens.LIST_ROW, True),
-               "activity": (tokens.LIST_ROW, True), "search": (tokens.LIST_ROW, True)}
-#: Views whose column headings say nothing their cells don't (decision L6). Search has one column, so none either.
-NO_HEADINGS = ("today", "tasks", "unfiled", "search", *LIST_IDS)
-#: Activity's kinds as icons (release 5.78), in place of their chips.
-ACT_ICONS = {"task": "task", "update": "update", "note": "note", "email": "type-mail", "change": "edit", "doc": "file", "agenda": "agenda"}
-#: Unfiled's sources as icons (release 5.78), in place of a Source column.
-SOURCE_ICONS = {"Email": ("type-mail", "type_mail"), "File path": ("file", "text2"), "Typed": ("note", "text2")}
-UNFILED_NOTE = ("Unfiled captures: saved without a task. Their folders are already in Captures. Filing one links it in docs.db and sets "
-                "the task in its capture.md; the folder doesn't move.")
-
-
-def _answers(title: str, text: str) -> tuple[str, str]:
-    """What a question's two buttons say: what each does, not Yes and No (release 5.61)."""
-    if "without saving" in text:
-        return "Close without saving", "Keep editing"
-    if "off the page" in text:
-        return "Take it off the page", "Leave it on the page"
-    return title, "Cancel"
-
-
-def _due_css(cls: str) -> str:
-    """A date's look in a list: red and bold when it's over, caution's colour and bold when it's soon."""
-    return {"over": f"color:{tokens.colour('critical')}; font-weight:600", "soon": f"color:{tokens.colour('caution')}; font-weight:600"}.get(cls, "")
-
-
-def _row_state(state: str) -> str:
-    """A task's state in a list's row: words for the usual ones, and a chip only for what's out of the ordinary (the review's decision V6)."""
-    return state_chip(state) if LOOK.classic else row_state(state)
-
-
-def _row_word(word: str) -> str:
-    """What stands in a row's State column in place of a task's state, such as Note. The new look has no State column: the
-    word is the row's icon's tooltip (decision L7)."""
-    return chip(word, "st-ns") if LOOK.classic else f'<span class="faint">{esc(word)}</span>'
-
-
-def _shape(cells: list) -> list:
-    """A row's cells, written as the Classic look's (title, State, then the rest), without the State cell in the new look,
-    where the state is an icon before the title (decision L7)."""
-    return cells if LOOK.classic else [cells[0], *cells[2:]]
-
-
-def _cols(labels: list[str], widths: list[int] | None = None) -> tuple[list[str], list[int] | None]:
-    """A list's columns, without State in the new look (decision L7)."""
-    if LOOK.classic or "State" not in labels:
-        return labels, widths
-    i = labels.index("State")
-    return labels[:i] + labels[i + 1:], (widths[:i] + widths[i + 1:] if widths else None)
-
-
-#: The Classic look's deadline: a small grey word under the date (release 5.9's colours).
-CLASSIC_DEADLINE = '<br><span style="color:#87919c; font-weight:400; font-size:8pt">deadline</span>'
-
-
-def _due_html(cell, deadline_line: bool = True) -> str:
-    """A row's date, at its right: red when it's late, caution's colour when it's soon. A deadline is a red ◆ before it in the
-    new look, rather than a line under it, so the row keeps one line."""
-    if cell is None:
-        return ""
-    if cell.deadline and not LOOK.classic:
-        return f'<p align="right" style="{_due_css(cell.cls)}"><span class="critical">◆</span> {esc(cell.text)}</p>'
-    mark = CLASSIC_DEADLINE if cell.deadline and deadline_line else ""
-    return f'<p align="right" style="{_due_css(cell.cls)}">{esc(cell.text)}{mark}</p>'
-
-
-class BrowseWindow(QWidget):
+class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelLists, DocumentLists, CaptureLists, ActivityList, PlanningHooks, PageCommands, NotesPages, QWidget):
     """The browse tool's window. ``capture`` is the capture window it opens for new captures and updates."""
 
     def __init__(self, ctx: AppContext, capture=None) -> None:
@@ -222,6 +138,7 @@ class BrowseWindow(QWidget):
         self.ctx = ctx
         self.capture = capture
         ctx.save_open_pages = self.save_open_notes  # before the capture window adds a note to a page (release 5.69)
+        ctx.open_capture_page = lambda cid: (self.show_browse(), self.go_capture(cid))  # an email captured before (release 5.93)
         self.setObjectName("browse")
         self.setWindowTitle(WINDOW_TITLE)
         self.setStyleSheet(CLASSIC_BROWSE if LOOK.classic else style_sheet())
@@ -236,8 +153,8 @@ class BrowseWindow(QWidget):
         #: Asks why something is discarded: the reason, or None to cancel. Tests replace it.
         self.ask_reason: Callable[[str, str], str | None] = self._ask_reason
         self.ask_text: Callable[[str, str, str], str | None] = self._ask_text
-        #: Picks a tagged label to add by hand (release 5.79), from the glossary's labels or typed: the text, or None. Tests replace it.
-        self.pick_tagged: Callable[[list[str]], str | None] = self._pick_tagged
+        #: Picks a tagged label to add by hand (release 5.79): from the glossary's labels or typed, or None. Tests replace it.
+        self.pick_tagged: Callable[[list[str]], str | None] = lambda names: tagged_list.pick(self, names)
         self.view = "tasks"
         self.sel: tuple[str, str] | None = None
         self.pin: str | None = None
@@ -269,12 +186,11 @@ class BrowseWindow(QWidget):
         self.tagged_mentioned: bool | None = None  # the Tagged labels view's Mentioned only (release 5.79); None: not set yet
         self.query = ""
         self.before_search = "tasks"
-        self.state = PageState()
+        self.state = PageState(order="new")  # the history reads newest first (release 5.84, R6)
         self.file_to: dict[str, str] = {}
         self.editing: str | None = None
         self._edit_start: tuple[str, str] = ("", "")  # the capture edit's text and summary as it opened
         self.dirty = True
-        self._model: Model | None = None
         self._contents: dict[str, tuple[int, str]] = {}
         self._placed = False
         #: The open Task views (releases 5.34 and 5.35): one window per task.
@@ -433,15 +349,16 @@ class BrowseWindow(QWidget):
         self.timeline.open_ids = set(filter(None, (db.get_state(self.ctx.conn, TIMELINE_OPEN_KEY) or "").split(",")))
         self.timeline.open_task.connect(lambda task_id: self.go_task(task_id))
         self.timeline.update_task.connect(lambda task_id: self.open_capture(task=task_id, mode="update"))
-        self.timeline.folds_changed.connect(lambda ids: db.set_state(self.ctx.conn, TIMELINE_OPEN_KEY, ",".join(ids)))
+        self.timeline.folds_changed.connect(lambda ids: self.ctx.keep_state(TIMELINE_OPEN_KEY, ",".join(ids)))
         try:  # its range, Order by, the bars' colour, Hours and Show routine, as left last time
             self.timeline.restore(json.loads(db.get_state(self.ctx.conn, TIMELINE_VIEW_KEY) or "{}"))
         except ValueError:
             pass
-        self.timeline.settings_changed.connect(lambda kept: db.set_state(self.ctx.conn, TIMELINE_VIEW_KEY, json.dumps(kept)))
+        self.timeline.settings_changed.connect(lambda kept: self.ctx.keep_state(TIMELINE_VIEW_KEY, json.dumps(kept)))
         self.timeline.set_dates.connect(self.set_timeline_dates)
         self.timeline.set_key_date.connect(self.set_timeline_key_date)
         self.timeline.quick_edit.connect(self.quick_edit)
+        self.timeline.edit_task.connect(self.edit_task)  # a double-click (release 5.91)
         self.timeline.load_cells = lambda weeks: capacity.week_cells(self.ctx.conn, weeks)
         self.timeline.load_unplaced = lambda m, today: capacity.unplaced(m, today, self.ctx.settings)
         self.timeline.add_person.connect(self.add_person)
@@ -489,9 +406,12 @@ class BrowseWindow(QWidget):
         self.detail_stack.addWidget(self._build_edit_form())
         # A task's page with its notes page (release 5.25): its facts, the notes and its history in one scroll.
         self.task_pane = TaskPane(page_css(), 14 if LOOK.classic else 16)
-        for view in (self.task_pane.top, self.task_pane.bottom):
+        for view in self.task_pane.views():
             view.anchorClicked.connect(self.on_link)
-        self.task_pane.top.layout_changed.connect(self._page_width_changed)
+        self.task_pane.layout_changed.connect(self._page_width_changed)
+        # Which groups are open on each task's page (release 5.84), kept in docs.db like the notes' folds.
+        self.task_pane.header.fold_changed.connect(self._save_page_fold)
+        self.task_pane.history.toggled.connect(self._save_page_fold)
         self.wire_notes(self.task_pane, self.say, self.open_ref)
         self.detail_stack.addWidget(self.task_pane)
         dl.addWidget(self.detail_stack, 1)
@@ -516,7 +436,13 @@ class BrowseWindow(QWidget):
         self._undo: Callable[[], None] | None = None
         self._status_timer.timeout.connect(lambda: setattr(self, "_undo", None))
         self.status.linkActivated.connect(self._status_link)
-        outer.addWidget(self.status)
+        # The status line, with the last save's problems after it until they're opened (release 5.91, the review's F12).
+        status_row = QHBoxLayout()
+        status_row.setContentsMargins(0, 0, 0, 0)
+        status_row.addWidget(self.status, 1)
+        self.problems_line = ProblemsLine(self.ctx.problem_log, lambda path: self.reveal(path))
+        status_row.addWidget(self.problems_line)
+        outer.addLayout(status_row)
 
     def _build_capacity(self) -> QWidget:
         page = QWidget()
@@ -663,9 +589,9 @@ class BrowseWindow(QWidget):
 
     # ================= data =================
     def model(self) -> Model:
-        if self._model is None:
-            self._model = Model(self.ctx.conn)
-        return self._model
+        """The shared Model (release 5.90): the context loads it again only once docs.db has changed, so nothing here
+        needs resetting by hand after a write."""
+        return self.ctx.model()
 
     @property
     def conn(self) -> sqlite3.Connection:
@@ -699,7 +625,6 @@ class BrowseWindow(QWidget):
 
     def refresh(self, render: bool = True) -> None:
         """Read docs.db again and show what's there now."""
-        self._model = None
         self.dirty = False
         if self.sel and not self._exists(self.sel):
             self.sel = None
@@ -854,7 +779,7 @@ class BrowseWindow(QWidget):
         """A group in the sidebar was folded or unfolded; the choice is kept in docs.db's app_state."""
         folded = set(filter(None, (db.get_state(self.ctx.conn, NAV_FOLDED_KEY) or "").split(",")))
         (folded.add if closed else folded.discard)(section)
-        db.set_state(self.ctx.conn, NAV_FOLDED_KEY, ",".join(sorted(folded)))
+        self.ctx.keep_state(NAV_FOLDED_KEY, ",".join(sorted(folded)))
 
     # ---- the command palette (the visual overhaul's O7) ----
     def palette_commands(self) -> list[Command]:
@@ -922,7 +847,7 @@ class BrowseWindow(QWidget):
         if self.views_button.isChecked() != on:
             self.views_button.setChecked(on)  # its toggled signal calls this again, which then finds nothing to do
         if db.get_state(self.ctx.conn, VIEWS_HIDDEN_KEY) != ("0" if on else "1"):
-            db.set_state(self.ctx.conn, VIEWS_HIDDEN_KEY, "0" if on else "1")
+            self.ctx.keep_state(VIEWS_HIDDEN_KEY, "0" if on else "1")
 
     # ================= the list pane =================
     def _set_head(self, title: str, note: str = "", total: str = "") -> None:
@@ -984,11 +909,12 @@ class BrowseWindow(QWidget):
         self.filters.setVisible(True)
         builder = {"today": self._today_view, "tasks": self._tasks_view, "unfiled": self._unfiled_view, "agenda": self._agenda_view,
                    "people": self._people_view, "templates": self.templates.render_list,
-                   "labels": self._labels_view, "tagged": self._tagged_view, "docs": self._docs_view, "search": self._search_view,
+                   "labels": self._labels_view, "tagged": lambda: tagged_list.view(self), "docs": self._docs_view, "search": self._search_view,
                    "discarded": self._discarded_view, "activity": self._activity_view}.get(self.view)
         self.tree.stop_row_moves()  # the Templates view turns it back on
         self.tree.begin()
         self.tree.set_density(*ROW_DENSITY.get(self.view, (tokens.LIST_ROW, False)))
+        self.tree.priorities = priorities_of(self.model())
         try:
             if builder:
                 builder()
@@ -1006,1320 +932,6 @@ class BrowseWindow(QWidget):
             self._sync_level_buttons()
         self.filters.setVisible(any(not self.filters_layout.itemAt(i).isEmpty() for i in range(self.filters_layout.count())))
         self._apply_find()
-
-    def _mark_states(self) -> None:
-        """Each task row's State cell becomes a button that opens the state menu (release 5.76, decisions 360 and 361): the
-        cells that show the row's task's own state, not a key date's, a reminder's or a context row's."""
-        m = self.model()
-        if not LOOK.classic:
-            # The new look has no State column: a task's state is the icon before its title (release 5.78, the list rows
-            # review's decision L7), and that icon is the menu's button, on rows whose icon is their task's own state.
-            for item in self.tree.items():
-                line = item.data(0, LINE_ROLE)
-                task_id = self.tree.row_task(item)
-                t = m.tasks.get(task_id) if task_id and line is not None else None
-                if t is not None and not t.discarded and line.icon_tip == t.state and line.icon == state_icon(t.state)[0]:
-                    self.tree.mark_state(item, 0, t.id, t.state)
-            return
-        header = self.tree.headerItem()
-        column = next((i for i in range(self.tree.columnCount()) if header.text(i) == "State"), None)
-        if column is None:
-            return
-        for item in self.tree.items():
-            task_id = self.tree.row_task(item)
-            t = m.tasks.get(task_id) if task_id else None
-            if t is not None and not t.discarded and item.data(column, HTML_ROLE) == _row_state(t.state):
-                self.tree.mark_state(item, column, t.id, t.state)
-
-    def _row_to_select(self):
-        """The row to show selected: the page on the right's, or in Activity the line clicked last, while it opens that page."""
-        line = self._act_lines.get(self.act["line"] or "") if self.view == "activity" else None
-        return ("actline", line.key) if line is not None and line.open == self.sel else self.sel
-
-    # ---- Find in this view (mods log round 2, M0026) ----
-    def open_find(self) -> None:
-        """Ctrl+F: a box above the list that narrows the view you're in as you type."""
-        if self.view == "priorities":  # release 5.24: the board has a box of its own
-            self.priorities.open_find()
-            return
-        if self.view in ("timeline", "capacity", "settings"):
-            self.say("The timeline and capacity have their own filters. Find in this view works on Today, the task tree, the lists, "
-                     "Unfiled, Agendas, Activity, Priorities, People, Labels, Templates, Documents and Discarded. Ctrl+Shift+F searches everything.")
-            return
-        self.find_bar.show()
-        self.find_box.setFocus()
-        self.find_box.selectAll()
-
-    def close_find(self) -> None:
-        """Esc in the box, or another view: clear it, and the list shows everything again."""
-        self.find_box.blockSignals(True)
-        self.find_box.clear()
-        self.find_box.blockSignals(False)
-        self.find_bar.hide()
-        self.find_count.clear()
-
-    def _apply_find(self) -> None:
-        """Keep the rows that hold every word typed, each with its parents, faded, for context; closed branches open while
-        finding. A task is found by its ID, title, description, current status, labels and people too."""
-        words = self.find_box.text().lower().split() if not self.find_bar.isHidden() else []
-        if not words:
-            self.find_count.clear()
-            return
-        m = self.model()
-
-        def text_of(item) -> str:
-            key = item.data(0, KEY_ROLE)
-            cells = " ".join(item.data(i, HTML_ROLE) or "" for i in range(self.tree.columnCount()))
-            text = html.unescape(re.sub(r"<[^>]+>", " ", cells)).lower()
-            if key and isinstance(key, tuple) and len(key) > 1 and isinstance(key[1], str):  # its ID, which rows no longer show (decision L4)
-                text += " " + key[1].lower()
-            return text + (" " + find_text(m, key[1]) if key and key[0] == "task" and key[1] in m.tasks else "")
-
-        hits = 0
-
-        def visit(item) -> bool:
-            nonlocal hits
-            hit = item.data(0, KEY_ROLE) is not None and all(w in text_of(item) for w in words)
-            hits += hit
-            kept = [visit(item.child(i)) for i in range(item.childCount())]
-            keep = hit or any(kept)
-            item.setHidden(not keep)
-            item.setData(0, DIM_ROLE, True if keep and not hit else None)
-            if any(kept):
-                item.setExpanded(True)
-            return keep
-
-        building, self.tree._building = self.tree._building, True  # opening branches here isn't remembered
-        try:
-            root = self.tree.invisibleRootItem()
-            for i in range(root.childCount()):
-                visit(root.child(i))
-            # A heading row (Today's groups) stays when a row under it does.
-            heading = None
-            for i in range(root.childCount()):
-                item = root.child(i)
-                if item.data(0, KEY_ROLE) is None and not item.childCount():
-                    heading = item
-                elif heading is not None and not item.isHidden():
-                    heading.setHidden(False)
-                    heading.setData(0, DIM_ROLE, None)
-        finally:
-            self.tree._building = building
-        self.find_count.setText(f"{hits} match{'es' if hits != 1 else ''}" if hits else "Nothing in this view matches")
-
-    def show_keys(self) -> None:
-        """F1: every key, in one list (mods log round 2, M0036)."""
-        self.run_dialog(KeyMapDialog(self, self.ctx.settings.hotkey))
-
-    # ---- rows ----
-    def _task_cells(self, task_id: str, depth: int, context: bool = False, muted: tuple[str, ...] = (), people: str = "",
-                    when: DueDate | None = None, use_due: bool = True) -> list:
-        """A task's row: a ``Line`` (its state's icon, its title, Urgent or Critical as chips, its other marks and ``muted`` as
-        quiet words, and ``people``), then its State in the Classic look, and its date. Regular weight in the new look
-        (decision L2); the Classic look's top-level tasks are bold."""
-        m, t = self.model(), self.model().task(task_id)
-        icon, colour = state_icon(t.state)
-        if context:
-            return _shape([Line(t.title, icon=icon, icon_tip=t.state, dim=True, strong=depth == 0), "", ""])
-        chips, quiet = [], []
-        for text, cls in markers(m, t):  # a chip only for an exception; the rest are quiet words (the review's recipe)
-            (chips if LOOK.classic or cls in ("urgent", "pri-critical") else quiet).append((text, cls))
-        line = Line(t.title, icon=icon, icon_colour=colour, icon_tip=t.state, chips=tuple(chips), muted=(*(x for x, _ in quiet), *muted),
-                    context=people, strong=depth == 0, closed=t.state == "Closed")
-        return _shape([line, _row_state(t.state), _due_html(due_cell(t, self.today(), when, use_due))])
-
-    def _label_words(self, task_id: str, skip: str = "") -> tuple[str, ...]:
-        """After a title in the task tree (item 76, decision 235): the task's own labels, as quiet words rather than chips.
-        Not the ones it inherits, or every subtask would repeat its parent's, nor ``skip``, which its section is named for."""
-        return tuple(name for name in self.model().task(task_id).labels if name != skip)
-
-    def _add_nodes(self, nodes: list[Node], parent=None, filtered: bool = False, expand_all: bool = True,
-                   row: Callable[[Node], tuple[list[str], str]] | None = None) -> None:
-        m = self.model()
-        for n in nodes:
-            if n.kind == "group":
-                item = self.tree.add_row(parent, None, [f"<b>{esc(n.label)}</b>"], group_ground(), selectable=False, span=True)
-            elif n.kind == "doc":
-                d = m.documents[n.id]
-                link = is_link(d.original)
-                kind = file_type(d.name, d.original)
-                cells = [Line(d.name, icon="folder" if kind == "folder" else f"type-{kind}", icon_colour=f"type_{kind}" if f"type_{kind}" in tokens.LIGHT else "type_other",
-                              icon_tip=kind.capitalize(), second=d.description or "No description yet"),
-                         chip("Link", "st-ns") if link else chip(d.status, "st-ns" if d.status == "Current" else "st-pk"),
-                         f'<p align="right">{esc(short(date.fromisoformat(d.checked[:10]), self.today())) if d.checked else ""}</p>']
-                tip = f"{d.original} (double-click copies it)" if link else f"Last checked {d.checked or 'not yet'}"
-                item = self.tree.add_row(parent, ("doc", n.id), cells, tint(n.group, n.depth), tip=tip, edge=edge(n.group, n.depth))
-            else:
-                cells, tip = row(n) if row else (self._task_cells(n.id, n.depth, filtered and not n.match), full_path(m, n.id))
-                if isinstance(cells[0], Line) and n.children:  # a folded parent says how many open subtasks it holds (decision L8)
-                    cells[0].count = sum(1 for c in n.children if c.kind == "task" and c.id in m.tasks and is_open(m.task(c.id)))
-                item = self.tree.add_row(parent, ("task", n.id), cells, tint(n.group, n.depth), tip=tip, edge=edge(n.group, n.depth))
-                if self.selecting and n.match and self.view in SELECT_VIEWS:
-                    self.tree.add_tick(item, n.id in self.ticked)
-            self._add_nodes(n.children, item, filtered, expand_all, row)
-            item.setExpanded(expand_all or n.id in self.open)
-
-    def _tasks_view(self) -> None:
-        f = self.tree_filter
-        filtered = bool(f["labels"] or f["people"] or f["priorities"])
-        m = self.model()
-        self._set_head("Task tree", "Dimmed rows don't match the filter. They're parents of tasks that do, shown for context." if filtered else "",
-                       f"{sum(1 for t in m.tasks.values() if is_open(t))} open")
-        self._check("Show parked", f["parked"], lambda on: self._set_filter("parked", on))
-        self._check("Show closed", f["closed"], lambda on: self._set_filter("closed", on))
-        self._check("Show routine", f["routine"], lambda on: self._set_filter("routine", on), "Recurring tasks, such as meetings, and their subtasks")
-        # Several labels and people at once (mods log round 1, M0018): a task matches with any of each.
-        # A parent label ticks its sublabels, and a group its people (release 5.9).
-        choices, sets = label_filter(m)
-        labels = CheckMenuButton("Labels", "any", choices, f["labels"], sets)
-        labels.chosen.connect(lambda values: self._set_filter("labels", values))
-        self._filter_widget(labels)
-        people_button = CheckMenuButton("People", "anyone", people_filter(m)[0], f["people"], people_filter(m)[1])
-        people_button.chosen.connect(lambda values: self._set_filter("people", values))
-        people_button.setToolTip(people_button.toolTip() or "Tasks any of the ticked people lead or are assigned")
-        self._filter_widget(people_button)
-        # Priority (release 5.23): tasks in any of the ticked buckets, Not ranked among them.
-        ranked = CheckMenuButton("Priority", "any", [(label, key) for key, label, _ in priorities.COLUMNS], f["priorities"])
-        ranked.chosen.connect(lambda values: self._set_filter("priorities", values))
-        self._filter_widget(ranked)
-        self._sort_box("tasks")
-        self._tree_group_box(m)
-        self._select_controls()
-        tf = TreeFilter(parked=f["parked"], closed=f["closed"], routine=f["routine"], labels=tuple(f["labels"]), people=tuple(f["people"]),
-                        pin=self.pin, priorities=tuple(f["priorities"]))
-        how = self.tree_group if self.tree_group in dict(TREE_GROUPS) or self.tree_group[3:] in {lb.name for lb in m.labels} else ""
-        sections = [replace(s, nodes=sort_tree(m, s.nodes, self.sorts.get("tasks", "default"), self.today()))
-                    for s in tree_sections(m, tf, how)] if how else []
-        nodes = [n for s in sections for n in s.nodes] if how else sort_tree(m, task_tree(m, tf), self.sorts.get("tasks", "default"), self.today())
-        can_fold, can_open = collapse_level(nodes, self.open) != self.open, expand_level(nodes, self.open) != self.open
-        collapse = self._level_button(False, lambda: self._level(nodes, "collapse"), can_fold)
-        expand = self._level_button(True, lambda: self._level(nodes, "expand"), can_open)
-        collapse.setVisible(can_fold or can_open or LOOK.classic)  # gone where nothing nests
-        expand.setVisible(can_fold or can_open or LOOK.classic)
-        self.tree.set_columns(*_cols(["Title", "State", "Due"]))
-
-        def row(n: Node, section: str = "") -> tuple[list, str]:
-            dimmed = bool(how or filtered) and not n.match
-            return self._task_cells(n.id, n.depth, dimmed, muted=self._label_words(n.id, section)), full_path(m, n.id)
-
-        if how:  # a section per group, each with its tasks in tree shape (release 5.24)
-            grey = group_ground()
-            for s in sections:
-                sub = f' <span class="sub">{esc(s.sub)}</span>' if s.sub else ""
-                head = self.tree.add_row(None, None, [f'<b>{esc(s.name)}</b>{sub} &nbsp;<span class="sub">{s.count}</span>'], grey,
-                                         selectable=False, span=True)
-                named = s.name if how == "label" or how.startswith("pl:") else ""  # its section says it already
-                self._add_nodes(s.nodes, head, filtered=True, expand_all=False, row=lambda n, x=named: row(n, x))
-                head.setExpanded(True)
-        else:
-            self._add_nodes(nodes, filtered=filtered, expand_all=False, row=row)
-        if not nodes and not LOOK.classic and not any(not t.discarded for t in m.tasks.values()):  # first use, not a filter's doing
-            self.tree.show_empty("No tasks yet.", "New task", lambda: self.open_capture(mode="new_task"))
-        elif not nodes:
-            self.tree.add_row(None, None, ['<span class="sub">No tasks match these filters.</span>'], selectable=False, span=True)
-
-    def _tree_group_box(self, m) -> None:
-        """The task tree's Group by (release 5.24): Group, Person or Label, or a parent label's sublabels."""
-        box = QComboBox()
-        box.setAccessibleName("Group by")
-        for key, label in TREE_GROUPS:
-            box.addItem("No grouping" if not key else f"Group by {label.lower()}", key)
-        for lb in m.active_labels():
-            if m.is_parent_label(lb.name):
-                box.addItem(f"Group by {lb.name}", "pl:" + lb.name)
-        box.setCurrentIndex(max(0, box.findData(self.tree_group)))
-        box.setToolTip("A section for each group, person or label, each with its tasks in tree shape. With People or Labels ticked, "
-                       "only those get a section.")
-        box.currentIndexChanged.connect(lambda _: self._set_tree_group(box.currentData()))
-        self._filter_widget(box)
-
-    def _set_tree_group(self, how: str) -> None:
-        """Group by, chosen: the branches open down to each section's tasks, so the groups show what's in them."""
-        self.tree_group = how
-        if how:
-            m, f = self.model(), self.tree_filter
-            tf = TreeFilter(parked=f["parked"], closed=f["closed"], routine=f["routine"], labels=tuple(f["labels"]),
-                            people=tuple(f["people"]), priorities=tuple(f["priorities"]))
-            for section in tree_sections(m, tf, how):
-                for n in walk(section.nodes):
-                    if n.match:
-                        self.open.update(m.ancestors_of(n.id))
-        self.render_list()
-
-    def _set_filter(self, key: str, value) -> None:
-        self.tree_filter[key] = value
-        self.render_list()
-
-    def _sort_box(self, view_id: str) -> None:
-        """The Sort list for the task tree or a list (mods log round 1, M0015)."""
-        box = QComboBox()
-        box.setAccessibleName("Sort")
-        for key, label in SORTS:
-            box.addItem(f"Sort: {label.lower() if key != 'default' else ('tree order' if view_id == 'tasks' else 'soonest first')}", key)
-        box.setCurrentIndex(max(0, box.findData(self.sorts.get(view_id, "default"))))
-        box.setToolTip("Sorts the tasks under each parent, so the tree keeps its shape")
-        box.currentIndexChanged.connect(lambda _: self._set_sort(view_id, box.currentData()))
-        self._filter_widget(box)
-
-    def _set_sort(self, view_id: str, how: str) -> None:
-        self.sorts[view_id] = how
-        self.render_list()
-
-    # ---- Select mode and Edit selected (mods log round 1, M0009) ----
-    def _select_controls(self) -> None:
-        self._check("Select", self.selecting, self.set_selecting, "Tick tasks in this list, then Edit selected changes them all at once")
-        if not self.selecting:
-            return
-        self._button("Select all shown", lambda: self.tick_shown(True), tip="Tick every task you can see in the list")
-        self.clear_ticks_button = self._button("Clear", lambda: self.tick_shown(False), tip="Untick them all")
-        self.edit_selected_button = self._button("", self.edit_selected, tip="Change the ticked tasks, after a preview")
-        self.apply_template_button = self._button("", self.apply_template_to_ticked, tip="Put a template into the ticked tasks, which keep all they have")
-        self._sync_edit_selected()
-
-    def set_selecting(self, on: bool) -> None:
-        self.selecting = on
-        if not on:
-            self.ticked.clear()
-        self.render_list()
-
-    def _tick(self, key, on: bool) -> None:
-        if self.view == "activity":  # Select in Activity (release 5.23): tasks and lines, for Add to agenda
-            pick = f"l:{key[1]}" if key[0] == "actline" else f"t:{key[1]}" if key[0] == "task" else None
-            if pick:
-                (self.act["picked"].add if on else self.act["picked"].discard)(pick)
-                self._sync_activity_bar()
-            return
-        if key[0] == "task":
-            (self.ticked.add if on else self.ticked.discard)(key[1])
-            self._sync_edit_selected()
-
-    def _sync_edit_selected(self) -> None:
-        n = len(self.ticked)
-        b = getattr(self, "edit_selected_button", None)
-        if b is not None and b.parent() is not None:
-            b.setText(f"Edit selected ({n})…" if n else "Edit selected…")
-            b.setEnabled(n > 0)
-        a = getattr(self, "apply_template_button", None)
-        if a is not None and a.parent() is not None:
-            a.setText(f"Apply template ({n})…" if n else "Apply template…")
-            a.setEnabled(n > 0)
-        clear = getattr(self, "clear_ticks_button", None)
-        if clear is not None and clear.parent() is not None:
-            clear.setEnabled(n > 0)
-
-    def tick_shown(self, on: bool) -> None:
-        """Select all shown, or Clear: every task row you can see, not those under a collapsed task."""
-        if on:
-            self.ticked |= {item.data(0, KEY_ROLE)[1] for item in self.tree.items()
-                            if item.data(0, Qt.ItemDataRole.CheckStateRole) is not None and self.tree.is_shown(item)}
-        else:
-            self.ticked.clear()
-        self.render_list()
-
-    def ticked_in_order(self) -> list[str]:
-        """The ticked tasks, as the list shows them."""
-        shown = [k[1] for k in self.tree.keys() if k and k[0] == "task" and k[1] in self.ticked]
-        return list(dict.fromkeys(shown + sorted(self.ticked - set(shown))))
-
-    def apply_template_to_ticked(self) -> None:
-        self.templates.apply(self.ticked_in_order())
-
-    def edit_selected(self) -> None:
-        ids = self.ticked_in_order()
-        if not ids:
-            self.say("Tick some tasks first.", error=True)
-            return
-        dialog = BulkEditDialog(self, self.model(), ids, self._label_options, self._people_options,
-                                lambda e: bulk.preview(self.conn, self.ctx.settings, ids, e, self._now(), edits.BROWSE),
-                                lambda anchor, picked: self._pick_task(anchor, picked, ("None", "Leave them where they are")))
-        if self.run_dialog(dialog):
-            edit = dialog.edit()
-            self._do(lambda: edits.bulk_edit(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, ids, edit, self._now()))
-
-    def _level(self, nodes: list[Node], direction: str) -> None:
-        self.open = collapse_level(nodes, self.open) if direction == "collapse" else expand_level(nodes, self.open)
-        self.render_list()
-
-    def _expanded(self, item, on: bool) -> None:
-        if self.tree._building:
-            return
-        key = item.data(0, KEY_ROLE)
-        if self.view != "tasks":  # release 5.24: a row folded by hand stays folded when the view is drawn again
-            (self.shut.setdefault(self.view, set()).discard if on else self.shut.setdefault(self.view, set()).add)(self._row_id(item))
-            self._sync_level_buttons()
-        elif key and key[0] == "task":
-            (self.open.add if on else self.open.discard)(key[1])
-
-    # ---- Collapse a level and Expand a level, on every view whose rows nest (release 5.24) ----
-    @staticmethod
-    def _row_id(item):
-        return item.data(0, KEY_ROLE) or ("row", item.data(0, HTML_ROLE))
-
-    def _level_button(self, expand: bool, clicked: Callable[[], None], enabled: bool = True) -> QPushButton:
-        """Collapse a level or Expand a level. Two icon buttons in the new look, which often were the reason a bar wrapped (release 5.59)."""
-        name, sign, tip_text = ("Expand a level", "+", "Open every branch one more level") if expand else ("Collapse a level", "−", "Fold every branch up one level")
-        if LOOK.classic:
-            return self._button(f"{sign} {name}", clicked, enabled, tip_text)
-        b = self._button("", clicked, enabled, f"{name}: {tip_text.lower()}")
-        b.setObjectName("iconOnly")
-        b.setIcon(icon("level-open" if expand else "level-fold"))
-        b.setAccessibleName(name)
-        return b
-
-    def _level_buttons(self) -> None:
-        self._lvl_collapse = self._level_button(False, lambda: self._tree_level(False))
-        self._lvl_expand = self._level_button(True, lambda: self._tree_level(True))
-
-    def _branches(self) -> list:
-        """The rows you can see that have rows under them."""
-        return [item for item in self.tree.items() if item.childCount() and not item.isHidden() and self.tree.is_shown(item)]
-
-    def _tree_level(self, expand: bool) -> None:
-        """As the task tree's: Collapse a level closes every open row none of whose rows is open, so each branch folds up one
-        step; Expand a level opens every folded row you can see."""
-        rows = self._branches()
-        if expand:
-            targets = [x for x in rows if not x.isExpanded()]
-        else:
-            targets = [x for x in rows if x.isExpanded() and not any(
-                x.child(i).childCount() and x.child(i).isExpanded() for i in range(x.childCount()))]
-        for item in targets:
-            item.setExpanded(expand)  # each one's signal keeps it in self.shut
-        self._sync_level_buttons()
-
-    def _sync_level_buttons(self) -> None:
-        for name in ("_lvl_collapse", "_lvl_expand"):
-            b = getattr(self, name, None)
-            if b is None or b.parent() is None:
-                return
-        rows = self._branches()
-        self._lvl_collapse.setEnabled(any(x.isExpanded() for x in rows))
-        self._lvl_expand.setEnabled(any(not x.isExpanded() for x in rows))
-        if not LOOK.classic:  # gone where nothing nests
-            self._lvl_collapse.setVisible(bool(rows))
-            self._lvl_expand.setVisible(bool(rows))
-
-    def _apply_shut(self) -> None:
-        """Fold again the rows folded by hand in this view."""
-        shut = self.shut.get(self.view)
-        if not shut:
-            return
-        building, self.tree._building = self.tree._building, True
-        try:
-            for item in self.tree.items():
-                if item.childCount() and self._row_id(item) in shut:
-                    item.setExpanded(False)
-        finally:
-            self.tree._building = building
-
-    def _list_view(self, view_id: str) -> None:
-        v, task_list, m = VIEW_IDS[view_id], LIST_IDS[view_id], self.model()
-        self._set_head(v.label, v.note + " Dimmed rows are their parents, shown for context.")
-        reminders = view_id == "reminders"
-        with_keys = view_id == "due"  # key dates have a row each, with Done (release 5.31, decision 150)
-        self.tree.set_columns(*_cols(*(with_actions(["Title", "State", "Reminder" if reminders else "Due"], [0, 96, 96], 56)
-                                       if reminders or with_keys else (["Title", "State", "Due"], None))))
-        self._sort_box(view_id)
-        grouped = self._group_box(view_id)
-        self._select_controls()
-        nodes = sort_tree(m, list_tree(m, task_list, self.today(), self.ctx.settings.me), self.sorts.get(view_id, "default"), self.today())
-        if grouped:  # under each sublabel's heading (release 5.9, M0051)
-            self._grouped_list(view_id, grouped, nodes)
-            if with_keys:
-                self._key_date_rows(None)
-            return
-
-        def row(n: Node) -> tuple[list[str], str]:
-            if not n.match:
-                return self._task_cells(n.id, n.depth, context=True), full_path(m, n.id)
-            t = m.task(n.id)
-            who = ", ".join(m.person_name(p) for p in t.assignees) if view_id == "waiting" else ""
-            when = list_date(task_list, t, self.today()) if reminders else None
-            return self._task_cells(n.id, n.depth, people=who, when=when, use_due=not reminders), full_path(m, n.id)
-
-        self._add_nodes(nodes, row=row)
-        if reminders:
-            for item in self.tree.items():
-                key = item.data(0, KEY_ROLE)
-                if key and key[0] == "task" and m.task(key[1]).reminder and key[1] in {t.id for t in self._matching(task_list)}:
-                    self.tree.set_actions(item, [("Clear", lambda tid=key[1]: self.clear_reminder(tid), "Clear this reminder. Its status log records it.")])
-        keyed = self._key_date_rows(None) if with_keys else 0
-        if not nodes and not keyed:
-            self.tree.add_row(None, None, ['<span class="sub">Nothing here right now.</span>'], selectable=False, span=True)
-
-    def _key_date_cells(self, d: key_dates.Due) -> list:
-        """A key date's row (release 5.31): its task's title, the key date's words after it in quiet text (under it in the
-        Classic look), its plant and deadline marks, a Key date icon (a chip in the Classic look), and its days until due, red
-        when it's overdue."""
-        today = self.today()
-        cell = key_date_cell(d, today)
-        marks = ((("⚑", "caution"),) if d.key_date.plant else ()) + ((("◆", "critical"),) if d.key_date.deadline else ())
-        line = Line(d.task.title, icon="calendar", icon_tip="Key date", chips=marks, context=d.text(today))
-        return _shape([line, _row_word("Key date"), f'<p align="right" style="{_due_css(cell.cls)}">{esc(cell.text)}</p>'])
-
-    def _key_date_actions(self, key_id: int) -> list[tuple[str, Callable[[], None], str]]:
-        return [("Done", lambda: self.key_date_done(key_id, True), "Mark this key date done: off Today and this list, and in its task's status log (decision 148)")]
-
-    def _key_date_rows(self, parent) -> int:
-        """The Overdue and next 7 days list's key dates (release 5.31, decision 150): under a Key dates heading, a row each,
-        soonest first, opening its task, with Done. Returns how many."""
-        dues = key_dates_due(self.model(), self.today())
-        if not dues:
-            return 0
-        head = self.tree.add_row(parent, None, [f'<b>Key dates</b> &nbsp;<span class="sub">{len(dues)}</span>'], group_ground(),
-                                 selectable=False, span=True)
-        for d in dues:
-            item = self.tree.add_row(head, ("task", d.task.id), self._key_date_cells(d),
-                                     tip=f"A key date of {d.task.title}: {key_dates.label(d.key_date, self.today())}")
-            self.tree.set_actions(item, self._key_date_actions(d.key_date.id))
-        head.setExpanded(True)
-        return len(dues)
-
-    def key_date_done(self, key_id: int, done: bool) -> None:
-        """A key date's Done tick, from the lists, Today or the task page (release 5.31, decision 148)."""
-        self._do(lambda: edits.set_key_date_done(self.conn, self.ctx.data_root, self.ctx.fs, key_id, done, self._now()))
-
-    def key_date_subtask(self, key_id: int) -> None:
-        """Make it a subtask (item 61), from the task page."""
-        self._do(lambda: edits.key_date_subtask(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, key_id, self._now()))
-
-    def _group_box(self, view_id: str) -> str | None:
-        """The lists' Group by (release 5.9, M0051): a parent label, putting each task under its sublabel's heading. Shown
-        when there's a parent label. Returns the parent label picked, if any."""
-        m = self.model()
-        parents = [lb.name for lb in m.active_labels() if m.is_parent_label(lb.name)]
-        if not parents:
-            return None
-        box = QComboBox()
-        box.setAccessibleName("Group by")
-        box.addItem("No grouping", "")
-        for name in parents:
-            box.addItem(f"Group by {name}", name)
-        picked = self.list_groups.get(view_id, "")
-        box.setCurrentIndex(max(0, box.findData(picked)))
-        box.setToolTip("Put each task under its sublabel's heading")
-        box.currentIndexChanged.connect(lambda _: self._set_list_group(view_id, box.currentData()))
-        self._filter_widget(box)
-        return picked if picked in parents else None
-
-    def _set_list_group(self, view_id: str, parent: str) -> None:
-        self.list_groups[view_id] = parent
-        self.render_list()
-
-    def _grouped_list(self, view_id: str, parent: str, nodes: list[Node]) -> None:
-        """A list grouped by a parent label: its matching tasks under each sublabel, then "No …" last."""
-        m = self.model()
-        order: list[str] = []
-
-        def walk(ns: list[Node]) -> None:
-            for n in ns:
-                if n.match and n.id not in order:
-                    order.append(n.id)
-                walk(n.children)
-
-        walk(nodes)
-        subs = m.sublabels(parent)
-        grey = group_ground()
-        for name, ids in [*((s, [x for x in order if any(n == s for n, _ in m.labels_of(x))]) for s in subs),
-                          (f"No {parent.lower()}", [x for x in order if not any(n in subs for n, _ in m.labels_of(x))])]:
-            if not ids:
-                continue
-            self.tree.add_row(None, None, [f"<b>{esc(name)}</b> &nbsp;<span class=\"sub\">{len(ids)}</span>"], grey, selectable=False, span=True)
-            for x in ids:
-                self.tree.add_row(None, ("task", x), self._task_cells(x, 0), tip=full_path(m, x))
-        if not order:
-            self.tree.add_row(None, None, ['<span class="sub">Nothing here right now.</span>'], selectable=False, span=True)
-
-    def _matching(self, task_list):
-        from docrepo.lists import list_tasks
-
-        return list_tasks(self.model(), task_list, self.today(), self.ctx.settings.me)
-
-    def _unfiled_view(self) -> None:
-        self._set_head("Unfiled", UNFILED_NOTE)
-        self.tree.set_columns(["Capture", "Source", "Saved"] if LOOK.classic else ["Capture", "Saved"])
-        rows = unfiled_rows(self.model(), self.today())
-        for r in rows:  # one line: its source's icon, its title and how many documents; no ID (decision L4)
-            name, colour = SOURCE_ICONS.get(r.source, ("note", "text2"))
-            line = Line(r.title, icon=name, icon_colour=colour, icon_tip=r.source, context=r.sub)
-            source = [chip(r.source, "st-ns")] if LOOK.classic else []
-            self.tree.add_row(None, ("capture", r.id), [line, *source, f'<p align="right">{esc(r.saved)}</p>'], tip=f"{r.id} · {r.source}")
-        if not rows:
-            self.tree.add_row(None, None, ['<span class="sub">No unfiled captures.</span>'], selectable=False, span=True)
-
-    def _today_view(self) -> None:
-        """Today (mods log round 1, M0016): the day's list, items carried over first, then what's been done today."""
-        m, today = self.model(), self.today()
-        self._set_head("Today", VIEW_IDS["today"].note)
-        # The box makes a quick task, or a note with the switch (mods log round 2, M0039).
-        for kind, label in (("task", "Task"), ("note", "Note")):
-            b = QPushButton(label)
-            b.setCheckable(True)
-            b.setChecked(self.today_kind == kind)
-            b.setToolTip("The box makes a quick task, under Quick tasks" if kind == "task" else "The box adds a note to Today")
-            b.clicked.connect(lambda _=False, k=kind: self.set_today_kind(k))
-            self._filter_widget(b)
-        self.today_note = QLineEdit()
-        self.today_note.setPlaceholderText("A quick task, such as Call the vendor about seals by Fri" if self.today_kind == "task"
-                                           else "A note for today, such as Sign the overtime sheets")
-        self.today_note.setMinimumWidth(320)
-        self.today_note.returnPressed.connect(self.add_today_item)
-        self._filter_widget(self.today_note)
-        self._button("Add", self.add_today_item)
-        asked = m.tasks.get(self.today_ask) if self.today_ask else None
-        if asked:
-            self._filter_widget(QLabel(f"<b>{esc(asked.title)}</b> is done for today. Update the task too?"))
-            self._button("Update…", lambda: self.answer_today("update"))
-            self._button("Close the task…", lambda: self.answer_today("close"))
-            self._button("No", lambda: self.answer_today(None))
-        self.tree.set_columns(*_cols(*with_actions(["Item", "State", "Due"], [0, 96, 96], 220)))
-        grey = group_ground()
-        for name, items in today_groups(m, today):  # each group's items under its heading, which folds (release 5.24)
-            head = self.tree.add_row(None, None, [f"<b>{esc(name)}</b>"], grey, selectable=False, span=True)
-            for a in items:
-                t = m.tasks.get(a.subject) if a.subject else None
-                key = ("task", t.id) if t else ("capture", a.added_by) if a.added_by in m.captures else None
-                # One line (decisions L1 and L3): the title, then its project and how long it's been carried, in quiet words.
-                since = f"since {since_text(a.added, today)}" if a.added[:10] < today.isoformat() else ""
-                context = " · ".join(x for x in (project_text(m, t.id) if t else "", a.note if t else "", since) if x)
-                icon, colour = state_icon(t.state) if t else ("note", "text2")
-                line = Line(t.title if t else a.note, icon=icon, icon_colour=colour, icon_tip=t.state if t else "Note", context=context)
-                tip = f"{full_path(m, t.id)}\n" if t else ""
-                item = self.tree.add_row(head, key, _shape([line, _row_state(t.state) if t else _row_word("Note"), _due_html(due_cell(t, today) if t else None, False)]),
-                                         tip=f"{tip}Added {long_date(date.fromisoformat(a.added[:10]), today)}")
-                self.tree.set_actions(item, self._today_actions(a.id, t.id if t else None))
-            head.setExpanded(True)
-        if not m.today_items():
-            self.tree.add_row(None, None, ['<span class="sub">Nothing on Today. Select a task and press D, or type a quick task above.</span>'],
-                              selectable=False, span=True)
-        self._today_reminder_rows(m, today, grey)
-        self._today_due_rows(m, today, grey)
-        done = m.done_on(today)
-        if done:
-            head = self.tree.add_row(None, None, ["<b>Done today</b>"], grey, selectable=False, span=True)
-            for a in done:
-                t = m.tasks.get(a.subject) if a.subject else None
-                line = Line(t.title if t else a.note, icon="state-cl", icon_tip="Done", context=f"Done at {(a.closed or '')[11:16]}", closed=True)
-                self.tree.add_row(head, ("task", t.id) if t else None, _shape([line, _row_state(t.state) if t else _row_word("Note"), ""]))
-            head.setExpanded(True)
-
-    def _today_reminder_rows(self, m: Model, today: date, grey: QColor) -> None:
-        """Reminders (item 77, decisions 236 to 238): each task whose reminder has come, under its own heading while there
-        are any, with Add to Today and Clear. Like key dates' rows, it stays until it's dealt with."""
-        due = reminders_due(m, today)
-        if not due:
-            return
-        on_today = {a.subject for a in m.today_items() if a.subject}
-        head = self.tree.add_row(None, None, ["<b>Reminders</b>"], grey, selectable=False, span=True)
-        for t in due:
-            cell = due_cell(t, today, DueDate(to_date(t.reminder), "Reminder"), use_due=False)
-            line = Line(t.title, icon="reminders", icon_tip="Reminder", context=project_text(m, t.id))
-            item = self.tree.add_row(head, ("task", t.id), _shape([line, _row_word("Reminder"), f'<p align="right" style="{_due_css(cell.cls)}">{esc(cell.text)}</p>']),
-                                     tip=f"{full_path(m, t.id)}\n{cell.tip}")
-            self.tree.set_actions(item, self._reminder_actions(t.id, t.id in on_today))
-        head.setExpanded(True)
-
-    def _reminder_actions(self, task_id: str, on_today: bool) -> list[tuple[str, Callable[[], None], str]]:
-        add = [("Add to Today", lambda: self.add_to_today(task_id), "Put it on Today (D); the reminder stays until it's cleared")]
-        return [*(() if on_today else add), ("Clear", lambda: self.clear_reminder(task_id, "Today"), "Clear this reminder. Its status log records it.")]
-
-    def _today_due_rows(self, m: Model, today: date, grey: QColor) -> None:
-        """Due in the next 7 days (mods log round 2, M0050): tasks overdue or due soon that aren't on Today, each with Add
-        to Today. Mine only, remembered in app_state, leaves those I neither lead nor am assigned to."""
-        mine = db.get_state(self.conn, TODAY_MINE_KEY) == "1"
-        box = QCheckBox("Mine only")
-        box.setToolTip("Only tasks you lead or are assigned to, in Due in the next 7 days")
-        box.setChecked(mine)
-        box.toggled.connect(self.set_today_mine)
-        self._filter_widget(box)
-        head = self.tree.add_row(None, None, ["<b>Due in the next 7 days</b>" + (" <span class=\"sub\">· yours</span>" if mine else "")],
-                                 grey, selectable=False, span=True)
-        entries = today_due_entries(m, today, self.ctx.settings.me, mine)  # shared with the Today side panel (release 5.43)
-        for t in entries:
-            if isinstance(t, key_dates.Due):
-                item = self.tree.add_row(head, ("task", t.task.id), self._key_date_cells(t),
-                                         tip=f"A key date of {t.task.title}: {key_dates.label(t.key_date, today)}")
-                self.tree.set_actions(item, self._key_date_actions(t.key_date.id))
-                continue
-            icon, colour = state_icon(t.state)
-            line = Line(t.title, icon=icon, icon_colour=colour, icon_tip=t.state, context=project_text(m, t.id))
-            item = self.tree.add_row(head, ("task", t.id), _shape([line, _row_state(t.state), _due_html(due_cell(t, today), False)]), tip=full_path(m, t.id))
-            self.tree.set_actions(item, [("Add to Today", lambda i=t.id: self.add_to_today(i), "Put it on Today (D)")])
-        if not entries:
-            self.tree.add_row(head, None, ['<span class="sub">Nothing else is due in the next 7 days' + (" for you." if mine else ".") + "</span>"],
-                              selectable=False, span=True)
-        head.setExpanded(True)
-
-    def set_today_mine(self, on: bool) -> None:
-        """Mine only, on Today's Due in the next 7 days. The choice is kept in docs.db's app_state."""
-        db.set_state(self.conn, TODAY_MINE_KEY, "1" if on else "0")
-        self.render_list()
-
-    def _today_actions(self, item_id: int, task_id: str | None) -> list[tuple[str, Callable[[], None], str]]:
-        """A Today item's actions. A task has Edit (Edit task, where Parents files a quick task) and Note; a note has Edit and
-        Make it a task (mods log round 2, M0040). Then Done and Remove."""
-        links = ((("Edit", lambda: self.edit_task(task_id), "Edit task, such as putting it under its real task (E)"),
-                  ("Note", lambda: self.open_capture(task=task_id, mode="note"), "Add a note, with files, to the task (N)")) if task_id else
-                 (("Edit", lambda: self.edit_today_note(item_id), "Change the note's text"),
-                  ("Make it a task", lambda: self.make_today_task(item_id), "Make it a quick task, under Quick tasks, in the note's place")))
-        return [*links, ("Done", lambda: self.close_today_item(item_id, "Done"), "Take it off Today as done"),
-                ("Remove", lambda: self.close_today_item(item_id, "Removed"), "Take it off Today")]
-
-    def _discarded_view(self) -> None:
-        """Tasks and captures discarded as made by mistake (mods log round 1, M0021), the latest first."""
-        self._set_head("Discarded", VIEW_IDS["discarded"].note)
-        self.tree.set_columns(["Item", "Why", "Discarded"], [0, 180, 80])
-        rows = discarded_rows(self.model(), self.today(), self.templates.discarded())
-        for r in rows:
-            line = Line(r.title, icon={"task": "task", "capture": "note"}.get(r.kind, "templates"), icon_tip=r.kind.capitalize(), context=r.sub)
-            self.tree.add_row(None, (r.kind, r.id), [line, esc(r.reason), f'<p align="right">{esc(r.when)}</p>'], tip=f"{r.id} · {r.reason}" if r.reason else r.id)
-        if not rows:
-            self.tree.add_row(None, None, ['<span class="sub">Nothing is discarded.</span>'], selectable=False, span=True)
-
-    def _agenda_view(self) -> None:
-        m = self.model()
-        target = current_target(m, self.target)
-        self.target = target
-        if not target:
-            self._set_head("Agendas", "No agendas yet. Check Meeting on a task to give it an agenda, or put something on an agenda with "
-                                      "Add to agenda in the capture window.")
-            self.tree.set_columns(*_cols(*with_actions(["Item", "State", "Added"], [0, 96, 70], 130)))
-            return
-        when = m.meeting_when(target, self.today())
-        when_text = f" {'Next meeting' if m.task(target).recurrence else 'Date'}: {when}." if when and when != "no date set" else ""
-        self._set_head("Agendas", "Open agenda items, grouped by the work they're about. Each stays open, carrying over, until you mark it "
-                                  f"Discussed or Remove it.{when_text}")
-        pick = QComboBox()
-        for x in [TODAY, *m.agenda_targets()]:  # Today first; picking it opens the Today view
-            pick.addItem(m.target_name(x) + (" (person)" if is_person(x) else ""), x)
-        pick.setCurrentIndex(max(0, pick.findData(target)))
-        pick.currentIndexChanged.connect(lambda _: self.show_agenda(pick.currentData()))
-        self._filter_widget(QLabel("Agenda for"))
-        self._filter_widget(pick)
-        self._button("Copy as Markdown", lambda: self.copy_agenda(target))
-        meeting = m.tasks.get(target)
-        if meeting and meeting.meeting and is_open(meeting):  # release 5.8
-            self._button("Meeting notes", lambda: self.open_capture(task=target, meeting=True))
-        self.tree.set_columns(*_cols(*with_actions(["Item", "State", "Added"], [0, 96, 70], 130)))
-        grey = group_ground()
-        for name, items in agenda_groups(m, target):  # each topic's items under its heading, which folds (release 5.24)
-            head = self.tree.add_row(None, None, [f"<b>{esc(name)}</b>"], grey, selectable=False, span=True)
-            for a in items:
-                t = m.tasks.get(a.subject) if a.subject else None
-                key = ("task", t.id) if t else ("capture", a.added_by) if a.added_by in m.captures else None
-                # Two lines (decision L1): the item, then its note. Its heading already names its project.
-                icon, colour = state_icon(t.state) if t else ("note", "text2")
-                line = Line(t.title if t else a.note, icon=icon, icon_colour=colour, icon_tip=t.state if t else "A note, with no task",
-                            second=a.note if t else "")
-                tip = f"{full_path(m, t.id)}\n" if t else ""
-                item = self.tree.add_row(head, key, _shape([line, _row_state(t.state) if t else _row_word("Note"),
-                                                            f'<p align="right">{esc(short(date.fromisoformat(a.added[:10]), self.today()))}</p>']),
-                                         tip=f"{tip}Added {long_date(date.fromisoformat(a.added[:10]), self.today())}")
-                self.tree.set_actions(item, self._agenda_actions(a.id))
-            head.setExpanded(True)
-        closed = closed_items(m, target)
-        if closed:
-            head = self.tree.add_row(None, None, ["<b>Closed recently</b>"], grey, selectable=False, span=True)
-            for a in closed:
-                t = m.tasks.get(a.subject) if a.subject else None
-                line = Line(t.title if t else a.note, icon="state-cl", icon_tip=a.how, closed=True,
-                            second=f"{a.how} {long_date(date.fromisoformat(a.closed[:10]), self.today())}")
-                self.tree.add_row(head, ("task", t.id) if t else None,
-                                  _shape([line, _row_state(t.state) if t else _row_word("Note"),
-                                          f'<p align="right">{esc(short(date.fromisoformat(a.closed[:10]), self.today()))}</p>']))
-            head.setExpanded(True)
-        if not agenda_groups(m, target):
-            self.tree.add_row(None, None, ['<span class="sub">No open agenda items.</span>'], selectable=False, span=True)
-
-    def _agenda_actions(self, item_id: int) -> list[tuple[str, Callable[[], None], str]]:
-        return [("Discussed", lambda: self.close_agenda_item(item_id, "Discussed"), "Close it as discussed, then note the outcome in an update"),
-                ("Remove", lambda: self.close_agenda_item(item_id, "Removed"), "Take it off the agenda")]
-
-    def _people_view(self) -> None:
-        m = self.model()
-        self._set_head("People", "Stored in docs.db. Tasks store a person's ID, so renaming someone changes nothing else.",
-                       f"{len(m.active_people())} active")
-        self._check("Show retired", self.retired["people"], lambda on: self._set_retired("people", on))
-        self._button("Add person", self.add_person)
-        # Group and role (mods log round 2, M0033, M0038): the aliases go under the name.
-        self.tree.set_columns(["Name", "Group", "Role", "Hours a week", "Open tasks"], [0, 120, 130, 90, 76])
-        for p in m.people.values():
-            if p.status != "active" and not self.retired["people"]:
-                continue
-            chips = ((("me", "st-ip"),) if p.id == self.ctx.settings.me else ()) + ((("retired", "st-cl"),) if p.status == "retired" else ()) + \
-                ((("new", "new"),) if p.added_note else ())
-            count = open_count(m, lambda t, pid=p.id: pid in (*t.leads, *t.assignees))
-            line = Line(p.name, chips=chips, context=", ".join(p.aliases))
-            self.tree.add_row(None, ("person", p.id), [line, esc(p.group or ""), esc(p.role or ""),
-                                                        f'<p align="right">{"–" if p.hours is None else f"{p.hours:g}"}</p>', f'<p align="right">{count}</p>'])
-
-    def _labels_view(self) -> None:
-        m = self.model()
-        self._set_head("Labels", "Stored in docs.db. Keywords let Parse and populate suggest the label.", f"{len(m.active_labels())} active")
-        self._check("Show retired", self.retired["labels"], lambda on: self._set_retired("labels", on))
-        self._button("Add label", self.add_label)
-        self.tree.set_columns(["Label", "Keywords", "Open tasks"], [0, 200, 76])
-
-        def add(lb, parent_item=None):
-            if lb.status != "active" and not self.retired["labels"]:
-                return
-            # A parent label (release 5.9, M0051) counts the open tasks with any of its sublabels.
-            names = {lb.name, *m.sublabels(lb.name, active=False)}
-            count = open_count(m, lambda t, ns=names: any(n in ns for n, _ in m.labels_of(t.id)))
-            retired = " " + chip("retired", "st-cl") if lb.status == "retired" else ""
-            item = self.tree.add_row(parent_item, ("label", lb.name), [esc(lb.name) + retired, esc(", ".join(lb.keywords)), f'<p align="right">{count}</p>'])
-            for sub in (x for x in m.labels if x.parent == lb.id):
-                add(sub, item)
-            item.setExpanded(True)
-
-        for lb in m.labels:
-            if lb.parent is None or not any(x.id == lb.parent for x in m.labels):
-                add(lb)
-
-    #: The most rows the Tagged labels view draws (release 5.79): 20,000 took 8 s to draw. Search finds the rest.
-    TAGGED_ROWS = 2000
-
-    def _tagged_rows(self) -> tuple[list, dict[int, int], int]:
-        """The labels the Tagged labels view lists, their counts, and how many more there are. A glossary bigger than the
-        view draws starts with Mentioned only ticked."""
-        m = self.model()
-        tg = m.tagged
-        counts = tagged.counts(m) if tg else {}
-        if self.tagged_mentioned is None:
-            self.tagged_mentioned = len(tg.labels) > self.TAGGED_ROWS
-        labels = [lb for lb in tg.sorted_labels() if not self.tagged_mentioned or counts.get(lb.id)]
-        return labels[:self.TAGGED_ROWS], counts, max(0, len(labels) - self.TAGGED_ROWS)
-
-    def _tagged_view(self) -> None:
-        """Tagged labels (release 5.79, the tagged labels plan, decision 379's list): the glossary, each label with its
-        description, aliases and how many items mention it. Import and Export are here and on a label's page."""
-        m = self.model()
-        tg = m.tagged
-        labels, counts, more = self._tagged_rows()
-        mentioned = sum(1 for n in counts.values() if n)
-        self._set_head("Tagged labels", "Plant tags found in every capture, email, document and notes page, however their parts are joined. "
-                       "The glossary is in docs.db.", f"{len(tg.labels):,} in the glossary, {mentioned:,} mentioned" if tg else "")
-        if tg:
-            self._check("Mentioned only", bool(self.tagged_mentioned), self._set_tagged_mentioned, "Only the labels something mentions")
-        self._button("Import…", self.import_tagged)
-        self._button("Export…", self.export_tagged, enabled=bool(tg), tip="Write the glossary as a CSV to Exports in the data root")
-        self._button("Add…", self.add_tagged, tip="Add a tagged label by hand")
-        self.tree.set_columns(["Tagged label", "Aliases", "Items"], [0, 180, 60])
-        if not tg:
-            self.tree.add_row(None, None, ['<span class="sub">No glossary yet. Import the plant&#8217;s tag list from Excel or CSV: a tagged '
-                                           'label, its description and its aliases in each row.</span>'], selectable=False)
-            return
-        for lb in labels:
-            # The row recipe (the list rows review): the label, its description quiet after it, as People's aliases are.
-            first = esc(lb.label) + (f' <span class="sub">{esc(lb.description)}</span>' if lb.description else "") if LOOK.classic else Line(
-                lb.label, icon="tagged", icon_tip="Tagged label", context=lb.description)
-            self.tree.add_row(None, ("tagged", lb.key), [first, esc("; ".join(lb.aliases)), f'<p align="right">{counts.get(lb.id, 0)}</p>'],
-                              tip=f"{lb.label}: {lb.description}" if lb.description else lb.label)
-        if more:
-            self.tree.add_row(None, None, [f'<span class="sub">And {more:,} more. Search finds any of them, however it&#8217;s typed.</span>'],
-                              selectable=False)
-        if not labels:
-            self.tree.add_row(None, None, [f'<span class="sub">Nothing mentions any of the glossary&#8217;s {len(tg.labels):,} labels yet. '
-                                           'Untick Mentioned only to list them.</span>'], selectable=False)
-
-    def _set_tagged_mentioned(self, on: bool) -> None:
-        self.tagged_mentioned = on
-        self.render_list()
-
-    def _set_retired(self, which: str, on: bool) -> None:
-        self.retired[which] = on
-        self.render_list()
-
-    def _docs_view(self) -> None:
-        m = self.model()
-        self._set_head("Documents", "Files DocRepo tracks, under the tasks they belong to. Originals stay where they are; their text is kept in Documents.",
-                       str(sum(1 for d in m.documents if not m.only_in_discarded(d))))
-        self._filter_widget(QLabel("Task"))
-        picker = DropButton(full_path(m, self.doc_task) if self.doc_task in m.tasks else "Any task")
-        picker.clicked.connect(lambda: self._pick_task(picker, self._set_doc_task, ("Any task", "Show every document")))
-        self._filter_widget(picker)
-        if self.doc_task:
-            self._check("Include subtasks", self.doc_subs, self._set_doc_subs)
-            self._button("Show all", lambda: self._set_doc_task(None))
-        self.tree.set_columns(["Document", "Status", "Checked"])
-        nodes = documents_tree(m, self.doc_task if self.doc_task in m.tasks else None, self.doc_subs)
-        # A task's row holds its documents: only its title, so nothing stands under Status and Checked but a document's.
-        self._add_nodes(nodes, filtered=True, row=lambda n: (self._task_cells(n.id, n.depth, context=not n.match)[:1], full_path(m, n.id)))
-        if not nodes:
-            self.tree.add_row(None, None, ['<span class="sub">No documents for this task.</span>'], selectable=False, span=True)
-
-    # ---- Activity (mods log round 2, M0032; release 5.23, decisions 70 to 73) ----
-    def _activity_view(self) -> None:
-        m, today, a = self.model(), self.today(), self.act
-        act = activity.Activity(m, today)
-        span = activity.window(a["win"], today, to_date(a["from"]) if a["from"] else None, to_date(a["to"]) if a["to"] else None)
-        f = activity.Filter(tuple(a["people"]), tuple(a["labels"]), tuple(a["kinds"]))
-        everything = act.lines(*span)
-        lines = [x for x in everything if act.passes(x, f)]
-        groups = act.groups(lines, a["group"], f)
-        self._act_lines = {x.key: x for x in everything}
-        self._act_shown = (act, span, groups)
-        self._set_head("Activity", VIEW_IDS["activity"].note, f"{len(lines)} thing{'s' if len(lines) != 1 else ''} happened, "
-                                                              f"{activity.window_text(span, today)}")
-        self._activity_controls(m, today, span)
-        self.tree.set_columns(["What happened", "When"], [0, 96])
-        if not lines:
-            filtered = a["people"] or a["labels"] or a["kinds"]
-            self.tree.add_row(None, None, [f'<span class="sub">Nothing happened {"that matches these filters " if filtered else ""}from '
-                                           f'{esc(activity.window_text(span, today))}.</span>'], selectable=False, span=True)
-        # The summary: how much happened on how many tasks, and of what kinds.
-        if lines:
-            tasks_n = len({x.task for x in lines if x.task})
-            loose = sum(1 for x in lines if not x.task)
-            kinds = [f"{n} {label.lower() if n != 1 else label.lower().rstrip('s')}" for k, label in activity.KINDS
-                     if (n := sum(1 for x in lines if x.kinds[0] == k))]
-            self.tree.add_row(None, None, [f'{len(lines)} thing{"s" if len(lines) != 1 else ""} happened on {tasks_n} task{"s" if tasks_n != 1 else ""}'
-                                           f'{f", and {loose} not filed yet" if loose else ""}. <span class="sub">{esc(" · ".join(kinds))}</span>'],
-                              selectable=False, span=True)
-        for t, first, last in act.plant_events(*span):
-            line = Line(t.title, chips=(("Plant event", "new"),), context=f"{long_date(first, today)} to {long_date(last, today)}", strong=True)
-            self.tree.add_row(None, ("task", t.id), [line, ""], span=True)
-        for g in groups:
-            self._activity_group(m, today, g)
-
-    def _activity_controls(self, m, today, span) -> None:
-        a = self.act
-        show = QComboBox()
-        show.setAccessibleName("Show")
-        for key, label in activity.WINDOWS:
-            show.addItem(f"Show: {label[0].lower()}{label[1:]}", key)
-        show.setCurrentIndex(max(0, show.findData(a["win"])))
-        show.currentIndexChanged.connect(lambda _: self._set_act_window(show.currentData()))
-        self._filter_widget(show)
-        if a["win"] == "range":
-            for key, label, value in (("from", "From", span[0]), ("to", "To", span[1])):
-                box = DateField()
-                box.setAccessibleName(label)
-                box.set_value(value.isoformat())
-                box.edited.connect(lambda k=key, b=box: self._set_act(k, b.value()) if b.is_valid() and b.value() else None)
-                self._filter_widget(QLabel(label))
-                self._filter_widget(box)
-        group = QComboBox()
-        group.setAccessibleName("Group by")
-        for key, label in activity.GROUPS:
-            group.addItem(f"Group by {label.lower() if key != 'top' else 'top-level task'}", key)
-        group.setCurrentIndex(max(0, group.findData(a["group"])))
-        group.currentIndexChanged.connect(lambda _: self._set_act("group", group.currentData()))
-        self._filter_widget(group)
-        choices, sets = people_filter(m)
-        who = CheckMenuButton("People", "anyone", choices, a["people"], sets)
-        who.chosen.connect(lambda values: self._set_act("people", values))
-        self._filter_widget(who)
-        choices, sets = label_filter(m)
-        labels = CheckMenuButton("Labels", "any", choices, a["labels"], sets)
-        labels.chosen.connect(lambda values: self._set_act("labels", values))
-        self._filter_widget(labels)
-        what = CheckMenuButton("What", "anything", [(label, key) for key, label in activity.KINDS], a["kinds"])
-        what.chosen.connect(lambda values: self._set_act("kinds", values))
-        self._filter_widget(what)
-        select = QPushButton("Done selecting" if a["select"] else "Select")
-        select.setCheckable(True)
-        select.setChecked(a["select"])
-        select.setToolTip("Tick tasks and lines to put on an agenda, for meeting prep")
-        select.clicked.connect(lambda: self._set_act_select(not a["select"]))
-        self._filter_widget(select)
-        self._button("Copy as Markdown", self.copy_activity, tip="Copy what's shown, as Markdown")
-        if not a["select"]:
-            return
-        # Select's bar: how many are ticked, the agenda to add them to, and Add to agenda (decision 72).
-        self._act_count = QLabel()
-        self._filter_widget(self._act_count)
-        target = QComboBox()
-        target.setAccessibleName("Add to")
-        for t in m.open_meetings():
-            when = m.meeting_when(t.id, today)
-            target.addItem(f"{t.title}{f', {when}' if when else ''}", t.id)
-        target.addItem("Today", TODAY)
-        for p in m.active_people():
-            if p.id != self.ctx.settings.me:
-                target.addItem(p.name, p.id)
-        if a["target"] is None or target.findData(a["target"]) < 0:
-            a["target"] = target.itemData(0)
-        target.setCurrentIndex(max(0, target.findData(a["target"])))
-        target.currentIndexChanged.connect(lambda _: a.__setitem__("target", target.currentData()))
-        self._filter_widget(target)
-        self._act_add = QPushButton("Add to agenda", objectName="primary" if LOOK.classic else "")
-        self._act_add.setToolTip("Each ticked task as an agenda item; a ticked line goes on as its task, with the line as the item's note")
-        self._act_add.clicked.connect(self.add_activity_to_agenda)
-        self._filter_widget(self._act_add)
-        self._act_clear = self._button("Clear ticks", lambda: self._set_act("picked", set()))
-        self._sync_activity_bar()
-
-    def _activity_group(self, m, today, g) -> None:
-        """A group's header row, then a row for each task under it and a row for each line."""
-        select = self.act["select"]
-        head = f'<b>{esc(g.name)}</b>' + (f" {_row_state(m.task(g.task).state)}" if g.task else "") + \
-            (f' <span class="sub">{esc(g.sub)}</span>' if g.sub else "") + f' <span class="sub">· {len(g.lines)}</span>'
-        key = ("task", g.task) if g.task else ("person", g.person) if g.person else None
-        top = self.tree.add_row(None, key, [head, ""], tip=f"{len(g.lines)} thing{'s' if len(g.lines) != 1 else ''} happened",
-                                selectable=key is not None, span=True, edge=edge(g.colour, 0) if g.colour is not None else None)
-        if select and g.task:
-            self.tree.add_tick(top, f"t:{g.task}" in self.act["picked"])
-        for h in g.headings:
-            parent = top
-            if h.task and h.task != g.task:
-                t = m.task(h.task)
-                chain = m.chains_of(t.id)[0]
-                above = " › ".join(m.task(x).title for x in chain[(1 if g.task else 0):-1])
-                icon, colour = state_icon(t.state)
-                cells = [Line(t.title, icon=icon, icon_colour=colour, icon_tip=t.state, lead=f"{above} ›" if above else "", strong=True,
-                              chips=tuple(markers(m, t))) if not LOOK.classic else
-                         (f'<span class="sub">{esc(above)} ›</span> ' if above else "") + f"<b>{esc(t.title)}</b> {_row_state(t.state)}"
-                         + "".join(" " + chip(text, cls) for text, cls in markers(m, t)), ""]
-                parent = self.tree.add_row(top, ("task", t.id), cells)
-                if select:
-                    self.tree.add_tick(parent, f"t:{t.id}" in self.act["picked"])
-            for line in h.lines:
-                facts = "".join(f'<br><span class="sub">{esc(x)}</span>' for x in line.facts)
-                # Two lines (decision L1): its kind's icon and its words, then what kind it is and its facts.
-                what = Line(line.text, icon=ACT_ICONS.get(line.kinds[0], "note"), icon_tip=line.chip, second=" · ".join((line.chip, *line.facts)))
-                when = (f'<p align="right">{esc(short(line.day, today))}<br><span class="sub">{esc(long_date(line.day, today)[:3])} {esc(line.at[11:16])}</span></p>'
-                        if LOOK.classic else f'<p align="right">{esc(short(line.day, today))} <span class="sub">{esc(line.at[11:16])}</span></p>')  # one line
-                row = self.tree.add_row(parent, ("actline", line.key), [f"{chip(line.chip, ACT_CHIPS.get(line.kinds[0], 'lbl'))} {esc(line.text)}{facts}"
-                                                                        if LOOK.classic else what, when],
-                                        tip=f"{long_date(line.day, today)}, {line.at[11:16]}")
-                if select:
-                    self.tree.add_tick(row, f"l:{line.key}" in self.act["picked"])
-            parent.setExpanded(True)
-        top.setExpanded(True)
-
-    def _set_act(self, key: str, value) -> None:
-        self.act[key] = value
-        self.render_list()
-
-    def _set_act_window(self, choice: str) -> None:
-        if choice == "range" and not self.act["from"]:
-            first, last = activity.window(self.act["win"], self.today())
-            self.act["from"], self.act["to"] = first.isoformat(), last.isoformat()
-        self._set_act("win", choice)
-
-    def _set_act_select(self, on: bool) -> None:
-        self.act["select"] = on
-        if not on:
-            self.act["picked"] = set()
-        self.render_list()
-
-    def _sync_activity_bar(self) -> None:
-        n = len(self.act["picked"])
-        for name in ("_act_count", "_act_add", "_act_clear"):
-            w = getattr(self, name, None)
-            if w is None or w.parent() is None:
-                return
-        self._act_count.setText(f"<b>{n} ticked</b>" if n else "Tick tasks or lines")
-        self._act_add.setEnabled(n > 0)
-        self._act_clear.setEnabled(n > 0)
-
-    def add_activity_to_agenda(self) -> None:
-        """Add to agenda: one item per ticked task, its ticked lines joined as the note (decision 72)."""
-        act, span, _ = self._act_shown
-        entries = act.agenda_items(list(self._act_lines.values()), self.act["picked"])
-        target = self.act["target"]
-        if not entries or not target:
-            return
-        out = self._do(lambda: edits.add_activity_to_agenda(self.conn, self.ctx.data_root, self.ctx.fs, target, entries, self._now()), self.sel)
-        if out is not None:
-            self.act["picked"], self.act["select"] = set(), False
-            self.render_list()
-
-    def copy_activity(self) -> None:
-        act, span, groups = self._act_shown
-        QGuiApplication.clipboard().setText(act.markdown(groups, span))
-        self.say("Copied what's shown, as Markdown.")
-
-    # ---- the Priorities board (mods log round 2, M0029, M0030; release 5.23) ----
-    def move_priority(self, task_id: str, bucket: str, before) -> None:
-        """A card dragged, or moved by its key or the buckets above the board."""
-        self._do(lambda: edits.set_priority(self.conn, self.ctx.data_root, self.ctx.fs, task_id, bucket, before, self._now()), ("task", task_id))
-
-    def set_timeline_key_date(self, task_id: str, key_id: int, start: str | None, end: str | None, said: str) -> None:
-        """A key date dragged in Plan mode, or put back by Ctrl+Z (release 5.31, decision 152): saved and logged."""
-        from docrepo import tasks
-
-        rows = tasks.key_date_rows(self.conn, task_id)
-        for row in rows:
-            if row.id == key_id:
-                row.start, row.end = start, end
-        leave = set() if said.endswith("back as it was.") else self._left_by_move(lambda: edits.key_dates_move(self.conn, self.ctx.settings, task_id, rows, self._now()), task_id)
-        if leave is None:
-            return self._move_taken_back()
-        out = self._do(lambda: edits.set_key_dates(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, task_id, rows, self._now(), leave), ("task", task_id))
-        if isinstance(out, edits.Outcome) and not out.problems and out.message != "Nothing changed.":
-            self.say(f"{said} {out.moved}".strip())
-        return None
-
-    def set_timeline_dates(self, task_id: str, start: str | None, due: str | None, said: str) -> None:
-        """A Plan mode drop on the timeline, or Ctrl+Z (release 5.30, decision 136): the dates saved and logged, as Edit
-        task's are. A task with a Duration keeps its days when it's moved, and takes the new length when it's stretched."""
-        leave = set() if said.endswith("back as they were.") else self._left_by_move(
-            lambda: edits.change_moves(self.conn, self.ctx.settings, task_id, self._now(), start=start, due=due, dragged=True), task_id)
-        if leave is None:
-            return self._move_taken_back()
-        out = self._do(lambda: edits.change_task(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, task_id, self._now(),
-                                                 start=start, due=due, dragged=True, leave=leave), ("task", task_id))
-        if isinstance(out, edits.Outcome) and not out.problems:
-            self.say(f"{said} {out.moved}".strip() if out.message != "Nothing changed." else out.message)
-        return None
-
-    # ---- what-ifs (release 5.64) ----
-    def whatif_picture(self, w: whatif.WhatIf) -> whatif.Picture:
-        """What a what-if would do, worked out again only when it or the database has changed, as each redraw asks."""
-        real = self.model()
-        key = (json.dumps([a.to_json() for a in w.actions]), w.name)
-        held = self._whatif_held
-        if held is not None and held[0] is real and held[1] == key:
-            return held[2]
-        pic = self.ctx.rolled_back(lambda: whatif.picture(self.conn, self.ctx.settings, w, self._now(), real))
-        self._whatif_held = (real, key, pic)
-        return pic
-
-    def apply_whatif(self, wid: str, skip: list) -> None:
-        """Review and apply's Apply (decision 226): the ticked changes made and logged, and the what-if gone."""
-        view = self.timeline
-        w = next((x for x in view.whatifs if x.id == wid), None)
-        if w is None:
-            return
-        view.cur = None  # drawn after it as the real plan, which now has the changes
-        out = self._do(lambda: edits.apply_whatif(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, w, skip, self._now()))
-        if out is None:
-            view.cur = wid
-            view.render(self.model(), self.today())
-            return
-        view.whatifs.remove(w)
-        view.wi_undo.pop(wid, None)
-        whatif.save_all(self.conn, view.whatifs)
-        view.render(self.model(), self.today())
-
-    # ---- a move that reaches another tree asks first (release 5.50, decision 249) ----
-    def ask_move(self, task_id: str, followed: list, parent: QWidget | None = None) -> set[str] | None:
-        """Every task a move would take with it, ticked, when any of them is outside the task's own tree. Returns those to leave, which
-        keep their dates, stay tied and take a new gap, or None for Back."""
-        m, today = self.model(), self.today()
-        mine = ties.tops(m.parents_of, task_id)
-        away = [f for f in followed if not ties.tops(m.parents_of, f.task) & mine]
-        if not away:
-            return set()
-
-        def shown(value: str | None) -> str:
-            return long_date(to_date(value), today) if value and value != "None" else "None"
-
-        def entry(f) -> PreviewEntry:
-            t, top = m.task(f.task), sorted(ties.tops(m.parents_of, f.task))[0]
-            return PreviewEntry(f.task, t.title if top == t.id else f"{t.title} · {m.task(top).title}",
-                                [f"{c.field}: {shown(c.from_value)} → {shown(c.to_value)}" for c in f.changes if c.field in ties.FIELDS.values()], state=t.state,
-                                off_lines=["Keeps its date, stays tied, and takes a new gap."])
-
-        n, far = len(followed), len(away)
-        dialog = PreviewDialog(parent or self, f"This move reaches {far} task{'' if far == 1 else 's'} in other trees",
-                               f"{m.task(task_id).title} moved. {n} task{' is' if n == 1 else 's are'} tied to it, near or far.", [entry(f) for f in followed],
-                               "An unticked task keeps its date, stays tied, and takes a new gap, and what's tied to it stays too. Each change goes in the "
-                               "task's status log. Back puts this move back.",
-                               lambda ticked: f"Move {len(ticked)} task{'' if len(ticked) == 1 else 's'}" if ticked else "Move only this one")
-        self._move_dialog = dialog  # kept, so tests can reach it
-        if not self.run_dialog(dialog):
-            return None
-        return {f.task for f in followed} - set(dialog.ticked())
-
-    def _left_by_move(self, moves: Callable[[], list], task_id: str) -> set[str] | None:
-        """What to leave behind, having asked if need be. A change that isn't allowed says why when it's made."""
-        try:
-            followed = moves()
-        except (TaskError, PeopleError, AgendaError, edits.EditError, ValueError):
-            return set()
-        return self.ask_move(task_id, followed)
-
-    def _move_taken_back(self) -> None:
-        """Back, from asking first after a drag on the timeline: as if it hadn't happened."""
-        if self.timeline.undo:
-            self.timeline.undo.pop()
-        self.refresh(render=False)
-        self.render_all()
-        self.say("Nothing moved.")
-
-    def quick_edit(self, task_id: str, near) -> None:
-        """Quick edit (release 5.30, item 55): the small window for one task's dates, people and hours, beside its bar."""
-        from docrepo.ui.quick_edit import QuickEdit
-
-        if self.quick_window is not None:  # one at a time: closing only hides it
-            self.quick_window.close()
-            self.quick_window.deleteLater()
-        self.quick_window = QuickEdit(self.ctx, task_id, self)
-        self.quick_window.ask_move = self.ask_move
-        self.quick_window.saved.connect(lambda x: (self.refresh(render=False), setattr(self, "sel", ("task", x)), self.render_all()))
-        self.quick_window.open_task.connect(self.go_task)
-        self.quick_window.show_near(near)
-
-    def nudge_priority(self, task_id: str, step: int, shown: list) -> None:
-        """Alt+Up and Alt+Down on the board: one place up or down in its bucket, not in the status log."""
-        self._do(lambda: priorities.nudge(self.conn, task_id, step, shown), ("task", task_id))
-
-    def _set_doc_task(self, task_id: str | None) -> None:
-        self.doc_task, self.doc_subs = task_id, True
-        self.render_list()
-
-    def _set_doc_subs(self, on: bool) -> None:
-        self.doc_subs = on
-        self.render_list()
-
-    def _search_view(self) -> None:
-        m = self.model()
-        results = search.search(self.conn, m, self.query)
-        self._set_head(f"Search: {self.query}", f"{len(results)} result{'s' if len(results) != 1 else ''}. Every word you type must be in the item.")
-        self.tree.set_columns(["Result"])
-        grey, group = group_ground(), ""
-        for r in results:
-            if r.group != group:
-                group = r.group
-                self.tree.add_row(None, None, [f"<b>{esc(group)}</b>"], grey, selectable=False)
-            if LOOK.classic:
-                snippet = f'<br><span class="sub">{esc(r.snippet)}</span>' if r.snippet else ""
-                self.tree.add_row(None, (r.kind, r.id), [f'{esc(r.title)}<br><span class="sub">{esc(r.sub)}</span>{snippet}'])
-                continue
-            kind = file_type(r.title) if r.kind == "doc" else ""
-            name = {"task": "task", "capture": "note", "person": "person", "label": "labels", "tagged": "tagged"}.get(r.kind, f"type-{kind}" if kind not in ("", "other") else "file")
-            colour, tip = "text2", r.kind.capitalize()
-            if r.kind == "task" and r.id in m.tasks:  # a task's state, as everywhere else (decision L7)
-                (name, colour), tip = state_icon(m.task(r.id).state), m.task(r.id).state
-            sub = re.sub(rf"^{re.escape(r.id)}( · )?", "", r.sub)  # no ID (decision L4): it's in the tooltip
-            line = Line(r.title, icon=name, icon_colour=colour, icon_tip=tip, context=sub if r.snippet else "", second=r.snippet or sub)
-            self.tree.add_row(None, (r.kind, r.id), [line], tip=f"{r.title}\n{r.sub}")
-        if not results:
-            self.tree.add_row(None, None, ['<span class="sub">No matches.</span>'], selectable=False)
-
-    # ---- capacity ----
-    def render_capacity(self) -> None:
-        m, today = self.model(), self.today()
-        weeks = capacity_weeks(today, self.cap_offset)
-        rows = capacity_grid(self.conn, m, weeks)
-        nobody = not rows and not LOOK.classic
-        for w in (self.cap_nav, self.cap_table, self.cap_legend, self.cap_detail):
-            w.setVisible(not nobody)
-        self.cap_empty.setVisible(nobody)
-        # Grouped (release 5.9): each group's people under its heading, then those with no group.
-        lines: list[CapacityRow | str] = list(rows)
-        if self.cap_by_group.isChecked():
-            group_of = {p.id: p.group or "" for p in m.people.values()}
-            lines = []
-            for g in [*m.groups(), ""]:
-                members = [r for r in rows if group_of.get(r.person, "") == g]
-                if members:
-                    lines += [g or "No group", *members]
-        t = self.cap_table
-        t.clear()
-        t.clearSpans()
-        t.setRowCount(len(lines))
-        t.setColumnCount(len(weeks) + 1)
-        # A week with a plant event names it under its date (M0028).
-        bands = timeline_bands(m, weeks[0], weeks[-1] + timedelta(days=7))
-        heads = []
-        for w in weeks:
-            names = [b.title for b in bands if b.start <= w + timedelta(days=6) and b.end >= w]
-            heads.append(short(w, today) + ("\n" + ", ".join(names) if names else ""))
-        t.setHorizontalHeaderLabels(["Person", *heads])
-        for i, w in enumerate(weeks):
-            if "\n" in heads[i]:
-                t.horizontalHeaderItem(i + 1).setBackground(QColor(C.event_bg))
-                t.horizontalHeaderItem(i + 1).setToolTip("A plant event this week: " + heads[i].split("\n", 1)[1])
-        # Neutral under 80%, caution's tint from 80% to 100%, red over 100% (the Classic look: green, amber, red). Decision 18 had the
-        # accent's tint in the middle, which was selection's, so a selected cell couldn't be told from a busy one (release 5.60).
-        colours = ({"u1": "#e2f2e6", "u2": "#fcefcf", "u3": "#fbe3e1"} if LOOK.classic else
-                   {"u2": tokens.colour("caution_bg"), "u3": tokens.colour("critical_bg")})
-        t.setShowGrid(LOOK.classic)
-        self._cap_line_rows = lines
-        for r, row in enumerate(lines):
-            if isinstance(row, str):  # a group's heading
-                head = QTableWidgetItem(row)
-                if LOOK.classic:
-                    f = head.font()
-                    f.setBold(True)
-                    head.setFont(f)
-                else:
-                    head.setFont(tokens.ui_font(semibold=True))  # from the helper: setBold on an item's font is lost under its style name
-                head.setBackground(group_ground())
-                head.setFlags(Qt.ItemFlag.ItemIsEnabled)
-                t.setItem(r, 0, head)
-                t.setSpan(r, 0, 1, len(weeks) + 1)
-                continue
-            head = QTableWidgetItem(f"{row.name}\n{'%g h a week' % row.hours_a_week if row.hours_a_week else 'Hours not set'}")
-            t.setItem(r, 0, head)
-            for i, c in enumerate(row.cells):
-                sep = "\n" if LOOK.classic else "  ·  "
-                text = f"{c.hours:.1f}" + (f"{sep}{round(c.use * 100)}%" if c.hours and c.use is not None else "") if c.hours else "–"
-                item = QTableWidgetItem(text)
-                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter if LOOK.classic else Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                if c.cls in colours:
-                    item.setBackground(QColor(colours[c.cls]))
-                if c.cls == "u3" and not LOOK.classic:  # over 100%: red and bold, so it never needs colour alone
-                    item.setForeground(QColor(tokens.colour("critical")))
-                    item.setFont(tokens.ui_font(semibold=True))
-                item.setToolTip(f"{row.name}, week of {long_date(weeks[i], today)}: {c.hours:.1f} h")
-                t.setItem(r, i + 1, item)
-        t.resizeRowsToContents()
-        if not LOOK.classic:
-            header = t.horizontalHeader()
-            header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-            for i in range(1, t.columnCount()):
-                header.setSectionResizeMode(i, QHeaderView.ResizeMode.Stretch)
-            # All its rows when there's room, with none cut by a scroll bar across it, and no gap under its last row.
-            t.setMaximumHeight(header.sizeHint().height() + sum(t.rowHeight(r) for r in range(t.rowCount())) + t.horizontalScrollBar().sizeHint().height() + 4)
-            if self.cap_cell:  # the cell clicked stays marked when the table is drawn again
-                person, week = self.cap_cell
-                for r, line in enumerate(lines):
-                    if not isinstance(line, str) and line.person == person and week + 1 < t.columnCount():
-                        t.setCurrentCell(r, week + 1)
-        t.resizeColumnToContents(0)
-        height = t.horizontalHeader().height() + sum(t.rowHeight(r) for r in range(t.rowCount())) + 2 * t.frameWidth() + 2
-        t.setFixedHeight(min(height, 420))
-        self._cap_rows, self._cap_weeks = rows, weeks
-        unestimated, unscheduled = capacity.unplaced(m, today, self.ctx.settings)
-        self.cap_detail.setHtml(self.pages().capacity_detail(rows, weeks, self.cap_cell, unestimated, unscheduled))
-
-    def _capacity_clicked(self, row: int, column: int) -> None:
-        lines = getattr(self, "_cap_line_rows", self._cap_rows)
-        if column == 0 or row >= len(lines) or isinstance(lines[row], str):
-            return
-        self.cap_cell = (lines[row].person, column - 1)
-        self.render_capacity()
-
-    def _move_capacity(self, step: int) -> None:
-        self.cap_offset = 0 if step == 0 else self.cap_offset + step
-        self.cap_cell = None
-        self.render_capacity()
-
-    # ================= the detail pane =================
-    def _clear_actions(self) -> None:
-        _empty(self.actions_layout)
-        self.keytips.clear("actions")
-
-    def _action(self, label: str, clicked: Callable[[], None] | None = None, tip: str = "", enabled: bool = True,
-                menu: QMenu | None = None, primary: bool = False, icon_name: str | None = None, key: str = "", drop: bool = False) -> QPushButton:
-        """A command on the detail pane's bar. In the new look it's a subtle button with an icon and its key in the tooltip
-        (and under Alt); in the Classic look the key is in its label. ``primary`` is the page's main command: neutral, not
-        subtle, as New capture is the window's one accent button (the review's decision V2). ``drop`` gives it a chevron."""
-        if LOOK.classic and key:
-            label = f"{label}   {key}"
-        name = "primary" if primary and LOOK.classic else "" if primary or LOOK.classic else "subtle"
-        b = DropButton(label) if drop else QPushButton(label)
-        b.setObjectName(name)
-        b.setToolTip(f"{tip} ({key})" if key and tip and not LOOK.classic else tip)
-        if icon_name and not LOOK.classic:
-            b.setIcon(icon(icon_name))
-        if menu is not None and not LOOK.classic:
-            b.setProperty("menu", True)
-        if key and not LOOK.classic:
-            self.keytips.add(b, key, group="actions")
-        b.setEnabled(enabled)
-        if menu is not None:
-            b.setMenu(menu)
-        elif clicked is not None:
-            b.clicked.connect(lambda _=False: clicked())
-        self.actions_layout.addWidget(b)
-        b.show()
-        return b
 
     def render_detail(self, keep_scroll: bool = False) -> None:
         scroll = self.page.verticalScrollBar().value() if keep_scroll else 0
@@ -2359,7 +971,7 @@ class BrowseWindow(QWidget):
             self.templates.actions(item)
             html = self.templates.page(item)
         elif kind == "tagged":  # release 5.79
-            self._tagged_actions(item)
+            tagged_list.actions(self, item)
             html = pages.tagged_page(item)
         else:
             self._label_actions(item)
@@ -2387,528 +999,6 @@ class BrowseWindow(QWidget):
             b.setEnabled(task is not None)
             b.setToolTip(f"{verb} {task.title}" if task else "Select a task first")
 
-    # ---- the task page's actions ----
-    def _task_actions(self, task_id: str) -> None:
-        """The task page's command bar (release 5.21, decision 68): Note, Update, Meeting notes for an open meeting, Add to
-        (Today and the agendas), Edit, and More at the row's end. The keys and the palette's commands are as they were."""
-        m, t = self.model(), self.model().task(task_id)
-        if t.discarded:
-            self._action("Bring back", lambda: self.bring_back_task(task_id), "Restore it as it was: back in the task tree, the lists and search",
-                         primary=True)
-            self._action("Open folder", lambda: self.reveal(self.ctx.data_root / "Tasks" / task_id), f"Open Tasks\\{task_id} in File Explorer")
-            return
-        menu_key = "   " if LOOK.classic else "\t"  # a menu's key column; the Classic look puts the key after the label
-        self._action("Note", lambda: self.open_capture(task=task_id, mode="note"), "Add a note to this task's raw text log", icon_name="note", key="N")
-        self._action("Update", lambda: self.open_capture(task=task_id, mode="update"), "Update this task: its state, status, dates and more",
-                     icon_name="update", key="U")
-        if t.meeting and is_open(t):  # release 5.8
-            self._action("Meeting notes", lambda: self.open_capture(task=task_id, meeting=True),
-                         "Take this meeting's notes, with its agenda beside them", icon_name="people", key="M")
-        add_to = QMenu(self)
-        if any(a.subject == task_id for a in m.today_items()):
-            add_to.addAction(icon("sun"), "On Today ✓   ·   open the Today view", lambda: self.show_agenda(TODAY))
-        else:
-            add_to.addAction(icon("sun"), f"Today   ·   your list for today, straight away{menu_key}D", lambda: self.add_to_today(task_id))
-        add_to.addSeparator()
-        for meeting in meetings_for_menu(m, task_id):
-            when = m.meeting_when(meeting.id, self.today())
-            act = add_to.addAction(f"{meeting.title}   ·   {meeting.recurrence + ', next ' + when if meeting.recurrence else 'One-off, ' + when}")
-            act.triggered.connect(lambda _=False, x=meeting.id: self.open_capture(task=task_id, mode="update", agenda=[x]))
-        other = add_to.addAction("Someone else or another task…")
-        other.triggered.connect(lambda: self.open_capture(task=task_id, mode="update", agenda_focus=True))
-        self._action("Add to", tip="Put it on Today (D) or an agenda", menu=add_to, icon_name="agenda", key="A")
-        edit = QMenu(self)
-        edit.addAction(f"Edit task…{menu_key}E", lambda: self.edit_task(task_id))
-        edit.addSeparator()
-        parents = m.parents_of(task_id)
-        for p in parents:
-            edit.addAction(f"Move from under {m.task(p).title}…", lambda x=p: self._pick_parent(task_id, x))
-        if not parents:
-            edit.addAction("Put under a task…", lambda: self._pick_parent(task_id, None))
-        edit.addAction("Also put under…", lambda: self._pick_parent(task_id, None, also=True)).setEnabled(bool(parents))
-        if len(parents) > 1:
-            for p in parents:
-                edit.addAction(f"Take out from under {m.task(p).title}", lambda x=p: self.move_task(task_id, x, None))
-        elif parents:
-            edit.addAction("Make it a top-level task", lambda: self.move_task(task_id, parents[0], None))
-        edit.addSeparator()
-        edit.addAction("Discard…", lambda: self.discard_task(task_id))
-        self._action("Edit", tip="Edit any of its fields, move it in the tree, or discard it if it was made by mistake", menu=edit, icon_name="edit")
-        self._action("Task view", lambda: self.open_task_view(task_id), "Its Task view: a window of its own for finding its files, emails and notes",
-                     icon_name="open", key="O")
-        # More: New subtask, the agenda, Copy (release 5.9: its people's email addresses, M0031, and each reference field,
-        # M0034), Copy prompt for each summary type, and the folder.
-        more = QMenu(self)
-        more.addAction(icon("add"), f"New subtask{menu_key}T", lambda: self.open_capture(task=task_id, mode="new_task"))
-        if self.pages().has_agenda(t):
-            more.addAction(icon("agenda"), "Open agenda", lambda: self.show_agenda(task_id))
-        copy = QMenu("Copy", more)
-        copy.setIcon(icon("copy"))
-        people_ids = [*t.leads, *t.assignees]
-        if any(m.people[p].email for p in people_ids if p in m.people):
-            copy.addAction("Emails of its lead and assignees", lambda: self.copy_emails(people_ids))
-        for name, value in t.references.items():
-            copy.addAction(f"{name} {value}", lambda n=name: self.copy_reference(task_id, n))
-        if copy.actions():
-            more.addMenu(copy)
-        self.summary_type = QComboBox()
-        self.summary_type.setAccessibleName("Summary type")
-        self._summary_types = prompts.load_summary_types(self.ctx.data_root)
-        self.summary_type.addItems([st.name for st in self._summary_types])
-        prompt = more.addMenu(icon("copy"), "Copy prompt")
-        for i, st in enumerate(self._summary_types):
-            prompt.addAction(st.name, lambda n=i: (self.summary_type.setCurrentIndex(n), self.copy_prompt(task_id)))
-        more.addAction(icon("templates"), "Save as template…", lambda: self.templates.save_as(task_id))
-        more.addAction(icon("templates"), "Apply template…", lambda: self.templates.apply([task_id]))
-        more.addAction("Export tree…", lambda: self.tree_files.export_task(task_id))
-        more.addAction("Bring back an edit file…", self.tree_files.import_tree)
-        if task_id in m.origins:
-            more.addAction("Detach from template…", lambda: self.templates.detach(task_id))
-        more.addAction(icon("folder"), "Open folder", lambda: self.reveal(self.ctx.data_root / "Tasks" / task_id))
-        b = self._action("More" if LOOK.classic else "", tip="More: New subtask, Open agenda, Copy, Copy prompt, Save as template, Export tree and Open folder", menu=more,
-                         icon_name="more")
-        b.setAccessibleName("More")
-        b.setProperty("flowEnd", True)  # at the row's end
-        if not LOOK.classic:
-            b.setObjectName("iconOnly")
-            b.setProperty("menu", False)
-            b.style().unpolish(b)
-            b.style().polish(b)
-
-    def _capture_actions(self, capture_id: str) -> None:
-        m = self.model()
-        c = m.captures[capture_id]
-        if c.discarded:
-            self._action("Bring back", lambda: self.bring_back_capture(capture_id), "Restore it to its tasks' logs and search", primary=True)
-            self._action("Show in File Explorer", lambda: self.reveal(capture_md_path(self.ctx.data_root, c)))
-            return
-        readable = self._capture_text(capture_id) is not None
-        self._action("Edit", lambda: self.start_capture_edit(capture_id), "Fix its title or summary", readable)
-        self._action("Show in File Explorer", lambda: self.reveal(capture_md_path(self.ctx.data_root, c)))
-        self._action("Discard…", lambda: self.discard_capture(capture_id), "Hide a capture saved by mistake. Its folder stays.")
-        if m.is_unfiled(c):
-            picked = self.file_to.get(capture_id)
-            text = full_path(m, picked) if picked in m.tasks else "Pick a task"
-            pick = self._action(text, tip="Pick the task to file this capture to", drop=True)
-            pick.clicked.connect(lambda: self._pick_task(pick, lambda tid: self._set_file_to(capture_id, tid), None))
-            self._action("File to task", lambda: self.file_capture(capture_id), "File this capture to the picked task", picked in m.tasks, primary=True)
-            self._action("Make it a task", lambda: self.open_capture(from_capture=capture_id), "Create a task from this capture, and file it there")
-
-    def _doc_actions(self, document_id: str) -> None:
-        m = self.model()
-        if is_link(m.documents[document_id].original):  # Open link since release 5.67 (decision 315)
-            self._action("Open link", lambda: self.open_document_link(document_id), "Open it in your default browser", primary=True)
-            self._action("Copy link", lambda: self.copy_link(document_id), "Copy the address")
-            return
-        if is_folder(m.documents[document_id].original):  # release 5.66
-            self._action("Show in File Explorer", lambda: self.open_document_link(document_id), "Open the folder in File Explorer", primary=True)
-            return
-        source = edits.source_of(self.ctx.data_root, m, document_id)
-        self._action("Show in File Explorer", lambda: self.reveal(source) if source else None, "Show the original", source is not None)
-        text = self.ctx.data_root / "Documents" / document_id / "extracted.txt"
-        self._action("Show extracted text", lambda: self.reveal(text), "Show its extracted.txt", text.exists())
-
-    def _person_actions(self, person_id: str) -> None:
-        p = self.model().people[person_id]
-        self._action("Edit…", lambda: self.edit_person(person_id))
-        if p.email:
-            self._action("Copy email", lambda: self.copy_emails([person_id]), "Copy their address. DocRepo never sends email.")
-        if p.status == "active":
-            self._action("Retire", lambda: self.set_person_status(person_id, "retired"), "Hide this person from pickers and lists. Nothing is deleted.",
-                         person_id != self.ctx.settings.me)
-        else:
-            self._action("Make active", lambda: self.set_person_status(person_id, "active"))
-        if self.model().open_items_for(person_id):
-            self._action("Open agenda", lambda: self.show_agenda(person_id))
-
-    def _label_actions(self, name: str) -> None:
-        label = next(lb for lb in self.model().labels if lb.name == name)
-        self._action("Edit…", lambda: self.edit_label(name))
-        self._action("Find matching tasks…", lambda: self.find_label_tasks(name),
-                     "List the open tasks that mention its keywords but don't have it, to add it to those you tick")
-        if label.status == "active":
-            self._action("Retire", lambda: self.set_label_status(name, "retired"), "Hide this label from pickers. Its tasks keep it.")
-        else:
-            self._action("Make active", lambda: self.set_label_status(name, "active"))
-
-    def _tagged_actions(self, key: str) -> None:
-        self._action("Edit…", lambda: self.edit_tagged(key), "Change its description and aliases", icon_name="edit")
-        self._action("Import…", self.import_tagged, "Import the glossary from Excel or CSV")
-        self._action("Export…", self.export_tagged, "Write the glossary as a CSV to Exports in the data root")
-
-    # ---- links on a page ----
-    def on_link(self, url: QUrl) -> None:
-        kind, _, rest = url.toString().partition(":")
-        st = self.state
-        if kind == "state":  # the task page's state (release 5.76, decision 361): its menu, at the pointer
-            self.popup_state_menu(rest, QCursor.pos())
-            return
-        if kind == "task":
-            self.go_task(rest)
-        elif kind == "capture":
-            self.go_capture(rest)
-        elif kind == "doc":
-            self.view = "docs"
-            self.select("doc", rest, update_list=True)
-        elif kind == "person":
-            self.select("person", rest, update_list=True)
-        elif kind == "label":
-            self.select("label", unquote(rest), update_list=True)
-        elif kind == "tagged":  # a tagged label (release 5.79): its page, in the Tagged labels view
-            self.view = "tagged"
-            self.select("tagged", unquote(rest), update_list=True)
-        elif kind in ("taggedrm", "taggedback", "taggedadd"):  # the owner's own changes on an item (decision 376)
-            self.tagged_link(kind, rest)
-        elif kind == "tplrow":  # release 5.44
-            self.templates.open_row(rest)
-        elif kind == "tpltiming":  # release 5.51
-            self.templates.timing(int(rest))
-        elif kind == "agenda":
-            self.show_agenda(rest)
-        elif kind == "show":
-            self.reveal_key(tuple(rest.split(":", 1)))
-        elif kind == "copylink":
-            self.copy_link(rest)
-        # Links open, on a click (release 5.67, round 6's decisions 314 to 316): a link or folder document, an address
-        # (a reference field's link, or one in a note's words), its Copy, the Task view's links, and Settings.
-        elif kind == "opendoc":
-            self.open_document_link(rest)
-        elif kind == "openurl":
-            self.open_address(unquote(rest))
-        elif kind == "copyaddr":
-            QGuiApplication.clipboard().setText(unquote(rest))
-            self.say("Copied the path." if is_folder(unquote(rest)) else "Copied the link.")
-        elif kind == "taskviewlinks":
-            self.open_task_view(rest, file_type="link")
-        elif kind == "settings":
-            self.set_view("settings")
-        elif kind == "taskview":  # the Files tab's Open in Task view (decision 166)
-            self.open_task_view(rest)
-        elif kind in ("tab", "scope", "order"):
-            setattr(st, kind, rest)
-            self.render_detail(keep_scroll=kind != "tab")
-        elif kind in ("chap", "more", "orig"):
-            group = {"chap": st.chapters, "more": st.expanded, "orig": st.originals}[kind]
-            group.symmetric_difference_update({rest})
-            self.render_detail(keep_scroll=True)
-        elif kind == "chapall":
-            st.chapters = set(self.model().tasks) if rest == "open" else set()
-            self.render_detail(keep_scroll=True)
-        # The task page's own (release 5.21): Details, the whole description and the closed subtasks, the history's scope
-        # and order menus, New subtask, Add one (an update), a reference field's Copy, and the task's folder.
-        elif kind == "fold" and rest in ("details", "desc", "closed"):
-            setattr(st, rest, not getattr(st, rest))
-            self.render_detail(keep_scroll=True)
-        elif kind == "menu":
-            self._page_menu(rest)
-        elif kind == "new":
-            self.open_capture(task=rest, mode="new_task")
-        elif kind == "update":
-            self.open_capture(task=rest, mode="update")
-        elif kind == "copyref" and self.sel and self.sel[0] == "task":
-            self.copy_reference(self.sel[1], unquote(rest))
-        elif kind == "folder" and rest in self.model().tasks:
-            self.reveal(self.ctx.data_root / "Tasks" / rest)
-        # The Captures tab (release 5.25): a capture's block on the notes page, or Add it again (decision 109).
-        elif kind == "kd" and ":" in rest:  # a key date on the task page (release 5.31)
-            action, _, key = rest.partition(":")
-            if action == "subtask":
-                self.key_date_subtask(int(key))
-            else:
-                self.key_date_done(int(key), action == "done")
-        elif kind in ("goto", "readd") and ":" in rest:
-            task_id, capture_id = rest.split(":", 1)
-            (self.go_to_block if kind == "goto" else self.add_again)(task_id, capture_id)
-
-    def _page_menu(self, which: str) -> None:
-        """The task page's history menus: which tasks' entries it shows, with Open all and Close all chapters, and the
-        order (release 5.21)."""
-        st, menu = self.state, QMenu(self)
-
-        def pick(name: str, value: str) -> Callable[[], None]:
-            return lambda: (setattr(st, name, value), self.render_detail(keep_scroll=True))
-
-        if which == "scope":
-            for key, label in SCOPE_NAMES.items():
-                act = menu.addAction(label, pick("scope", key))
-                act.setCheckable(True)
-                act.setChecked(st.scope == key)
-            menu.addSeparator()
-            menu.addAction("Open all chapters", lambda: self.on_link(QUrl("chapall:open")))
-            menu.addAction("Close all chapters", lambda: self.on_link(QUrl("chapall:close")))
-        elif which == "order":
-            for key, label in (("old", "Oldest first"), ("new", "Newest first")):
-                act = menu.addAction(label, pick("order", key))
-                act.setCheckable(True)
-                act.setChecked(st.order == key)
-        else:
-            return
-        self._menu = menu  # kept, so it stays open and tests can read it
-        menu.popup(QCursor.pos())
-
-    def _page_width_changed(self) -> None:
-        """The pane crossed a width at which a task page lays itself out differently: draw it again."""
-        if self.sel and self.sel[0] == "task" and self.detail_stack.currentIndex() == 2:
-            self.render_detail(keep_scroll=True)
-
-    # ---- the task page with its notes page (release 5.25) ----
-    def wire_notes(self, pane: TaskPane, say: Callable[..., None], open_ref: Callable[[str], None]) -> None:
-        """A notes page's signals: for the task page's pane, and a Task view's (release 5.37), which says things and opens
-        what's clicked in its own window."""
-        notes = pane.notes
-        pane.say = say
-        notes.changed.connect(lambda body: self._save_notes(body, pane))
-        notes.open_ref.connect(open_ref)
-        notes.open_link.connect(lambda href: self.on_link(QUrl(href)))  # Ctrl+click on a link (release 5.67)
-        notes.message.connect(say)
-        notes.folds_changed.connect(lambda: self._save_folds(pane))
-        # Pictures pasted and files dropped on the page (release 5.27, decisions 124 to 126), and where a picture's file is.
-        notes.picture_path = lambda doc: edits.source_of(self.ctx.data_root, self.model(), doc) if doc in self.model().documents else None
-        notes.image_pasted.connect(lambda image: self._picture_pasted(image, pane))
-        notes.files_dropped.connect(lambda paths: self._files_dropped(paths, pane))
-        pane.notes_menu.connect(lambda which: self._notes_menu(which, pane))
-        pane.summary.folded.connect(lambda folded: self._save_summary_folded(folded, pane))
-
-    def note_panes(self) -> list[TaskPane]:
-        """Every notes page that's been opened: the task page's, and those of the open Task views."""
-        return [self.task_pane, *(v.pane for v in self.task_views.values() if v.pane is not None)]
-
-    def save_open_notes(self) -> None:
-        for pane in self.note_panes():
-            pane.notes.save_now()
-
-    def _page_changed(self, task_id: str, saved_in: TaskPane) -> None:
-        """A page was saved in one window: any other showing it takes it at once, and the Task views read their records
-        again when they next need them, so a page being typed doesn't redraw them (decision 244)."""
-        for pane in self.note_panes():
-            if pane is not saved_in and pane.task_id == task_id:
-                self.load_notes(task_id, pane)
-        for view in self.task_views.values():
-            view.stale = True
-
-    def _show_task(self, task_id: str, keep_scroll: bool) -> None:
-        """Draw a task's page: its facts and history as HTML, and its notes page in the editor between them."""
-        pane = self.task_pane
-        scroll = pane.verticalScrollBar().value() if keep_scroll and pane.task_id == task_id else 0
-        pages = self.pages()
-        width = pane.viewport().width() - 2 * round(pane.top.document().documentMargin())
-        pane.top.setHtml(pages.task_page(task_id, self.state, width, "top"))
-        pane.bottom.setHtml(pages.task_page(task_id, self.state, width, "bottom"))
-        self.load_notes(task_id)
-        self.detail_stack.setCurrentIndex(2)
-        pane.verticalScrollBar().setValue(scroll)
-        if keep_scroll:
-            QTimer.singleShot(0, lambda: pane.verticalScrollBar().setValue(scroll))
-
-    def load_notes(self, task_id: str, pane: TaskPane | None = None) -> None:
-        """Put the task's notes page in the editor. The same task's page stays as it is unless docs.db holds another
-        version (a capture added to it, say): then it's shown again, or, with unsaved typing, merged into it."""
-        pane = pane or self.task_pane
-        notes, m = pane.notes, self.model()
-        body, day = m.pages.get(task_id, ""), m.uses_day_headings(task_id)
-        if pane.task_id == task_id:
-            notes.day_headings = day
-            if body == notes.saved_body:
-                return
-            if notes.dirty:  # two writers: the typing keeps, the new blocks come in
-                merged = notes_page.merge(notes.saved_body, notes.page(), body, day)
-                notes.set_page(merged, notes.folds(), day)
-                notes.saved_body = body
-                notes.save_now()
-                return
-            caret = notes.textCursor().position()
-            notes.set_page(body, notes.folds(), day)
-            from PySide6.QtGui import QTextCursor
-
-            c = notes.textCursor()
-            c.setPosition(min(caret, max(0, notes.document().characterCount() - 1)))
-            notes.setTextCursor(c)
-            return
-        if pane.task_id and notes.dirty:
-            notes.save_now()  # the page being left keeps its last words
-        pane.task_id = task_id
-        pane.saved.setText("")
-        notes.set_page(body, self._folds_of(task_id), day)
-        pane.summary.set_folded(db.get_state(self.conn, f"checklist_folded:{task_id}") == "1")
-
-    def _save_notes(self, body: str, pane: TaskPane | None = None) -> None:
-        """The notes page saves as it's typed (decision 103): docs.db, the day's version, search and Task.md."""
-        pane = pane or self.task_pane
-        task_id = pane.task_id
-        before = self.model().pages.get(task_id, "") if task_id else ""
-        if not task_id or task_id not in self.model().tasks:
-            return
-        try:
-            out = edits.save_page(self.conn, self.ctx.data_root, self.ctx.fs, task_id, body, self._now())
-        except (edits.EditError, sqlite3.Error, OSError) as e:
-            pane.say(f"The notes weren't saved: {e}", error=True)
-            return
-        self._model = None
-        pane.saved.setText(f"Saved {self._now():%H:%M}")
-        if out.problems:
-            pane.say(" ".join(out.problems), error=True)
-        if notes_page.capture_ids(before) != notes_page.capture_ids(body):
-            # The Captures tab says what's on the page: its history is drawn again, the editor left as it is.
-            self._history_again(task_id)
-        self._page_changed(task_id, pane)
-
-    def _history_again(self, task_id: str) -> None:
-        """The task page's history drawn again (its Captures tab says what's on the page), the editor left as it is."""
-        if self.sel == ("task", task_id):
-            width = self.task_pane.viewport().width() - 2 * round(self.task_pane.top.document().documentMargin())
-            self.task_pane.bottom.setHtml(self.pages().task_page(task_id, self.state, width, "bottom"))
-
-    def _picture_pasted(self, image, pane: TaskPane | None = None) -> None:
-        """A picture pasted on the notes page (decisions 124, 125 and 127): a PNG in the task's Files folder, kept as a
-        capture of the page's, and shown at the caret with an empty line under it for what it shows."""
-        from docrepo.ui.rich_edit import png_bytes
-
-        pane = pane or self.task_pane
-        task_id = pane.task_id
-        if not task_id:
-            return
-        try:
-            capture_id, doc, name = edits.add_page_picture(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, task_id,
-                                                           png_bytes(image), self._now())
-        except (edits.EditError, SaveError, WriteRefused, OSError, sqlite3.Error) as e:
-            pane.say(f"The picture wasn't kept: {e}", error=True)
-            return
-        self._model = None
-        pane.notes.insert_item("picture", name, doc)
-        pane.notes.save_now()
-        self._history_again(task_id)
-        pane.say(f"Kept {name} with the task's files, as {capture_id}. Type what it shows on the line under it.")
-
-    def _files_dropped(self, paths: list[str], pane: TaskPane | None = None) -> None:
-        """Files dropped on the notes page (decision 126): each kept as a capture of the page's, its original tracked where
-        it is, and shown at the caret, a picture as a picture."""
-        from docrepo import notes_page as np_
-
-        pane = pane or self.task_pane
-        task_id = pane.task_id
-        if not task_id:
-            return
-        kept = []
-        for path in paths:
-            try:
-                capture_id, doc, name = edits.add_page_file(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, task_id, path,
-                                                            self._now())
-            except (edits.EditError, SaveError, WriteRefused, OSError, sqlite3.Error) as e:
-                pane.say(f"{Path(path).name} wasn't kept: {e}", error=True)
-                continue
-            self._model = None
-            picture = name.lower().endswith(np_.PICTURES)
-            pane.notes.insert_item("picture" if picture else "attachment", name if picture else f"File: {name}", doc)
-            kept.append(name)
-        if kept:
-            pane.notes.save_now()
-            self._history_again(task_id)
-            pane.say(f"Added {', '.join(kept)} to the page, each a capture of its own. Type what each is on the line under it.")
-
-    def _folds_of(self, task_id: str) -> list[str]:
-        try:
-            return list(json.loads(db.get_state(self.conn, f"notes_folds:{task_id}") or "[]"))
-        except ValueError:
-            return []
-
-    def _save_folds(self, pane: TaskPane | None = None) -> None:
-        """Which headings are folded, kept for each task in docs.db (the data root), as the app writes nowhere else."""
-        pane = pane or self.task_pane
-        if pane.task_id:
-            db.set_state(self.conn, f"notes_folds:{pane.task_id}", json.dumps(pane.notes.folds()))
-
-    def _save_summary_folded(self, folded: bool, pane: TaskPane | None = None) -> None:
-        """Whether the Checklist summary is folded, kept for each task in docs.db (decision 121)."""
-        pane = pane or self.task_pane
-        if pane.task_id:
-            db.set_state(self.conn, f"checklist_folded:{pane.task_id}", "1" if folded else "0")
-
-    def open_ref(self, ref: str) -> None:
-        if ref in self.model().captures:
-            self.go_capture(ref)
-        elif ref in self.model().documents:
-            self.on_link(QUrl(f"doc:{ref}"))
-
-    def go_to_block(self, task_id: str, capture_id: str) -> None:
-        """The Captures tab's On the notes page: the capture's block, unfolded, with the caret on its caption."""
-        if self.sel != ("task", task_id):
-            self.go_task(task_id)
-        if self.task_pane.notes.go_to(capture_id):
-            QTimer.singleShot(0, self.task_pane.scroll_to_caret)
-        else:
-            self.say(f"{capture_id} isn't on the notes page.")
-
-    def add_again(self, task_id: str, capture_id: str) -> None:
-        self.save_open_notes()
-        self._do(lambda: edits.add_again(self.conn, self.ctx.data_root, self.ctx.fs, capture_id, task_id, self._now()))
-        if self.task_pane.task_id == task_id:
-            self.task_pane.notes.go_to(capture_id)
-            QTimer.singleShot(0, self.task_pane.scroll_to_caret)
-
-    def _notes_menu(self, which: str, pane: TaskPane | None = None) -> None:
-        pane = pane or self.task_pane
-        task_id, notes = pane.task_id, pane.notes
-        if not task_id:
-            return
-        if which in ("fold", "unfold"):
-            notes.fold_all(which == "fold")
-        elif which == "history":
-            self.page_history(task_id, pane)
-
-    def page_history(self, task_id: str, pane: TaskPane | None = None) -> None:
-        """Page history (decision 103): the page as it stood at the end of each day it changed, and Restore, which is an
-        edit like any other, so the page as it stands now is kept too."""
-        from PySide6.QtWidgets import QDialog, QDialogButtonBox, QListWidget, QListWidgetItem
-
-        from docrepo.ui.notes_edit import NotesEdit
-
-        pane = pane or self.task_pane
-        self.save_open_notes()
-        days = notes_page.versions(self.conn, task_id)
-        if not days:
-            pane.say("This page has no earlier versions yet.")
-            return
-        dlg = QDialog(pane.window())
-        dlg.setWindowTitle(f"Page history: {self.model().task(task_id).title}")
-        dlg.resize(820, 560)
-        lay = QHBoxLayout(dlg)
-        listing = QListWidget()
-        listing.setMaximumWidth(220)
-        for day, by_owner in days:
-            item = QListWidgetItem(f"{long_date(to_date(day), self.today())}" + ("" if by_owner else " · captures only"))
-            item.setData(Qt.ItemDataRole.UserRole, day)
-            listing.addItem(item)
-        right = QVBoxLayout()
-        shown = NotesEdit()
-        shown.setReadOnly(True)
-        shown.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        shown.setSizePolicy(shown.sizePolicy().horizontalPolicy(), shown.sizePolicy().Policy.Expanding)
-        shown.setMinimumHeight(360)
-        shown._fit = lambda: None  # the dialog's view scrolls
-        buttons = QDialogButtonBox()
-        restore = buttons.addButton("Restore this version", QDialogButtonBox.ButtonRole.AcceptRole)
-        buttons.addButton(QDialogButtonBox.StandardButton.Close).clicked.connect(dlg.reject)
-        right.addWidget(QLabel("The page as it stood at the end of the day. Restoring it is an edit: today's page is kept too."))
-        right.addWidget(shown, 1)
-        right.addWidget(buttons)
-        lay.addWidget(listing)
-        lay.addLayout(right, 1)
-
-        def show(row: int) -> None:
-            day = listing.item(row).data(Qt.ItemDataRole.UserRole)
-            shown.set_page(notes_page.version(self.conn, task_id, day) or "")
-
-        listing.currentRowChanged.connect(show)
-        listing.setCurrentRow(0)
-        restore.clicked.connect(dlg.accept)
-        self._history_dialog = dlg  # kept, so tests can reach it
-        if dlg.exec() != QDialog.DialogCode.Accepted:
-            return
-        day = listing.currentItem().data(Qt.ItemDataRole.UserRole)
-        body = notes_page.version(self.conn, task_id, day) or ""
-        if self._do(lambda: edits.save_page(self.conn, self.ctx.data_root, self.ctx.fs, task_id, body, self._now())):
-            pane.say(f"Restored the page as it stood on {long_date(to_date(day), self.today())}.")
-
     def double_click(self, item: QTreeWidgetItem) -> None:
         """Double-clicking a row opens its edit form (mods log round 3, M0056; decision 57): Edit task for a task, wherever
         it's listed, Edit for a capture (a note on Today edits the note), and Edit… for a person or a label. A document has
@@ -2934,6 +1024,8 @@ class BrowseWindow(QWidget):
             self.edit_person(ident)
         elif kind == "label":
             self.edit_label(ident)
+        elif kind == "tagged":  # release 5.79
+            tagged_list.edit(self, ident)
         elif kind == "tplrow":
             self.templates.edit_row(int(ident))
         else:
@@ -3076,8 +1168,7 @@ class BrowseWindow(QWidget):
         elif v == "labels":
             new = ("label", m.labels[0].name) if m.labels else None
         elif v == "tagged":  # release 5.79: the first label it lists
-            first = self._tagged_rows()[0][:1]
-            new = ("tagged", first[0].key) if first else None
+            new = tagged_list.first(self)
         elif v == "templates":
             new = self.templates.first()
         elif v == "discarded":
@@ -3156,138 +1247,6 @@ class BrowseWindow(QWidget):
             self.set_view("tasks")
             self.say(dialog.outcome)
 
-    # ================= tagged labels (release 5.79, the tagged labels plan) =================
-    def _tagged_pages(self, out: edits.Outcome, task_ids: list[str] | None = None) -> None:
-        """Write Task.md again, whose Tagged labels row a change to the glossary or an item's choices changes."""
-        from docrepo.pages import write_pages
-
-        now = self._now()
-        try:
-            write_pages(Model(self.conn), self.ctx.data_root, self.ctx.fs, now.date(), now, task_ids)
-        except OSError as e:
-            out.problems.append(f"The generated pages weren't all updated ({type(e).__name__}).")
-
-    def import_tagged(self) -> None:
-        """Import the glossary from Excel or CSV (decision 371)."""
-        from docrepo.ui.tagged_import_dialog import TaggedImportDialog
-
-        dialog = TaggedImportDialog(self, self.ctx)
-        if not (self.run_dialog(dialog) and dialog.outcome):
-            return
-        out = edits.Outcome(dialog.outcome)
-        self._tagged_pages(out)
-        self.refresh(render=False)
-        self.view = "tagged"
-        self.tagged_mentioned = None  # the glossary's size may have changed
-        first = self._tagged_rows()[0][:1]
-        self.sel = ("tagged", first[0].key) if first else None
-        self.render_all()
-        self.say(out.message + (" Problems: " + " ".join(out.problems) if out.problems else ""), bool(out.problems))
-
-    def export_tagged(self) -> None:
-        """Write the glossary as a CSV to Exports in the data root, and copy it (decision 371)."""
-        from docrepo import tagged_import
-
-        text = tagged_import.export_csv(self.conn)
-        rows = text.count("\n") - 1
-        QGuiApplication.clipboard().setText(text)
-        try:
-            path = tagged_import.save_export(self.ctx.fs, self.ctx.data_root, text, self._now())
-        except (OSError, WriteRefused) as e:
-            self.say(f"The export couldn't be saved in Exports ({type(e).__name__}), but it's copied: {rows} tagged labels.", error=True)
-            return
-        self.say(f"Saved {rows} tagged labels as Exports\\{path.name} in the data root, and copied them.")
-
-    def _alias_check(self, label_id: int | None):
-        return lambda _label, aliases: tagged.check_aliases(tagged.read_labels(self.conn), label_id, aliases)
-
-    def edit_tagged(self, key: str) -> None:
-        """A tagged label's description and aliases (decision 379)."""
-        lb = self.model().tagged.by_key[key]
-        dialog = TaggedLabelDialog(self, lb.label, lb.description, list(lb.aliases), check_aliases=self._alias_check(lb.id))
-        if not self.run_dialog(dialog):
-            return
-        _, description, aliases = dialog.values()
-
-        def change() -> edits.Outcome:
-            tagged.edit_label(self.conn, lb.id, description, aliases)
-            out = edits.Outcome(f"Saved {lb.label}. Everything is matched again, with its aliases.")
-            self._tagged_pages(out)
-            return out
-        self._do(change, ("tagged", key))
-
-    def add_tagged(self, label: str = "") -> str | None:
-        """Add a tagged label to the glossary by hand. Returns its key, or None."""
-        dialog = TaggedLabelDialog(self, label, new=True, check_aliases=self._alias_check(None))
-        if not self.run_dialog(dialog):
-            return None
-        name, description, aliases = dialog.values()
-
-        def change() -> edits.Outcome:
-            tagged.add_label(self.conn, name, self._now(), description, aliases)
-            out = edits.Outcome(f"Added {name} to the glossary, and matched everything again.")
-            self._tagged_pages(out)
-            return out
-        if self._do(change) is None:
-            return None
-        key = tagged.key_of(name)
-        if self.view == "tagged":
-            self.select("tagged", key, update_list=True)
-        return key
-
-    def _item_tasks(self, kind: str, item_id: str) -> list[str]:
-        m = self.model()
-        return m.capture_tasks(m.captures[item_id]) if kind == "capture" else m.document_holders(item_id)
-
-    def tagged_link(self, kind: str, rest: str) -> None:
-        """× on a chip, Put back, or Add, on a capture's or document's page (decision 376). Kept apart from what's found, so
-        reading the text again never undoes them."""
-        if kind == "taggedadd":
-            item_kind, item_id = rest.split(":", 1)
-            self.add_tagged_to(item_kind, item_id)
-            return
-        item_kind, item_id, key = rest.split(":", 2)
-        key = unquote(key)
-        lb = self.model().tagged.by_key.get(key)
-        if lb is None:
-            return
-        what = "capture" if item_kind == "capture" else "document"
-
-        def put(choice: str | None) -> edits.Outcome:
-            tagged.choose(self.conn, item_kind, item_id, key, choice, self._now())
-            out = edits.Outcome("")
-            self._tagged_pages(out, self._item_tasks(item_kind, item_id))
-            return out
-        if kind == "taggedrm":
-            if self._do(lambda: put("removed"), self.sel) is not None:
-                self.say_undo(f"Removed {lb.label} from this {what}. It stays removed when its text is read again.",
-                              lambda: self._do(lambda: put(None), self.sel))
-        else:
-            if self._do(lambda: put(None), self.sel) is not None:
-                self.say(f"Put {lb.label} back on this {what}.")
-
-    def add_tagged_to(self, item_kind: str, item_id: str) -> None:
-        """Add a tagged label to a capture or document by hand: one from the glossary, or a new one added to it first."""
-        tg = self.model().tagged
-        value = self.pick_tagged([lb.label for lb in tg.sorted_labels()])
-        if not value or not value.strip():
-            return
-        key = tagged.key_of(value)
-        if key not in tg.by_key:
-            if not self.confirm("Add to the glossary", f"{value.strip()} isn't in the glossary. Add it, then put it on this "
-                                                        f"{'capture' if item_kind == 'capture' else 'document'}?"):
-                return
-            key = self.add_tagged(value.strip())
-            if key is None:
-                return
-
-        def change() -> edits.Outcome:
-            tagged.choose(self.conn, item_kind, item_id, key, "added", self._now())
-            out = edits.Outcome(f"Added {self.model().tagged.by_key[key].label if key in self.model().tagged.by_key else value} by hand.")
-            self._tagged_pages(out, self._item_tasks(item_kind, item_id))
-            return out
-        self._do(change, (("capture" if item_kind == "capture" else "doc"), item_id))
-
     # ================= the capture window =================
     def open_capture(self, **options) -> None:
         """Open the capture window: on a task with one capture type checked, with an agenda, or to make a task from a capture."""
@@ -3316,9 +1275,10 @@ class BrowseWindow(QWidget):
             self.open_capture(task=self.sel[1], mode=mode)
 
     def capture_saved(self, result: SaveResult) -> None:
-        """After the capture window saves: show what it did, as the mockup does."""
-        self._model = None
+        """After the capture window saves: show what it did, as the mockup does, with the save's problems after the status
+        line until they're opened, and Undo when the save can be taken back (release 5.91)."""
         self.ctx.today_changed()  # the Today side panel reads it again (release 5.43)
+        self.problems_line.refresh()
         if not self.isVisible():
             self.dirty = True
             return
@@ -3335,7 +1295,12 @@ class BrowseWindow(QWidget):
             self.go_capture(result.capture_id)
         else:
             self.render_all()
-        self.say(result.message)
+        if result.undo is not None:
+            undo = result.undo
+            self.say_undo(result.message, lambda: undo() and (self.refresh(), self.say(f"{result.capture_id} is undone: it's discarded, "
+                                                                                       "and the capture is back in the window to save again.")))
+        else:
+            self.say(result.message)
 
     # ================= changes =================
     def _do(self, change: Callable[[], object], select: tuple[str, str] | None = None) -> object | None:
@@ -3361,7 +1326,26 @@ class BrowseWindow(QWidget):
         if not task_id:
             self.say("Pick a task first.", error=True)
             return
-        self._do(lambda: edits.file_capture(self.conn, self.ctx.data_root, self.ctx.fs, capture_id, task_id, self._now()), ("capture", capture_id))
+        out = self._do(lambda: edits.file_capture(self.conn, self.ctx.data_root, self.ctx.fs, capture_id, task_id, self._now()), ("capture", capture_id))
+        if out and self.ctx.settings.outlook_categories:  # release 5.93: filed later, marked as a save marks it
+            marked, trouble = self.mark_emails(capture_id, task_id)
+            if marked or trouble:
+                self.say(out.message + (f" Marked {marked} email{'s' if marked != 1 else ''} in Outlook with its task's name." if marked else "")
+                         + (" Problems: " + " ".join(trouble) if trouble else ""), bool(trouble))
+
+    def mark_emails(self, capture_id: str, task_id: str) -> tuple[int, list[str]]:
+        """Mark a filed capture's emails in Outlook with the task's name (release 5.93, the review's F14), from where the save
+        found them. Returns how many were marked, and the problems in words."""
+        m = self.model()
+        c = m.captures.get(capture_id)
+        if c is None or not c.emails:
+            return 0, []
+        places = captures.email_places(self.conn, capture_id)
+        filed = []
+        for e in c.emails:
+            entry, store = places[e.pos] if e.pos < len(places) else ("", "")
+            filed.append((EmailItem(e.subject, e.sender, e.sent, "", "", entry_id=entry, store_id=store), task_id))
+        return outlook.mark_filed(filed, m, self.ctx.settings.outlook_category_colour)
 
     def start_capture_edit(self, capture_id: str) -> None:
         c = self.model().captures[capture_id]
@@ -3419,9 +1403,25 @@ class BrowseWindow(QWidget):
         if item is None:
             return
         out = self._do(lambda: edits.close_agenda_item(self.conn, self.ctx.data_root, self.ctx.fs, item_id, how, self._now()))
-        if out and how == "Discussed" and item.subject:
-            self.open_capture(task=item.subject, mode="update", content=f"Discussed at {self.model().target_name(item.target)}: ")
-            self.say(f"{self.model().task(item.subject).title}: discussed. Type what was decided and save, or press Esc to skip.")
+        if not out:
+            return
+        opened = ""
+        if how == "Discussed" and item.subject:
+            opened = f"Discussed at {self.model().target_name(item.target)}: "
+            self.open_capture(task=item.subject, mode="update", content=opened)
+            words = f"{self.model().task(item.subject).title}: discussed. Type what was decided and save, or press Esc to skip."
+        else:
+            words = out.message
+
+        def undo() -> None:  # release 5.91: the item opens again, and the Update it opened goes if nothing was typed in it
+            if not self._do(lambda: edits.reopen_agenda_item(self.conn, self.ctx.data_root, self.ctx.fs, item_id, self._now())):
+                return
+            kept = ""
+            if opened:
+                kept = self.capture.drop_if_untouched(item.subject, opened)
+            self.say(f"Back on the agenda as it was.{kept}")
+
+        self.say_undo(words, undo)
 
     # ---- Today (mods log round 1, M0016) ----
     def add_to_today(self, task_id: str) -> None:
@@ -3497,9 +1497,18 @@ class BrowseWindow(QWidget):
         if item is None:
             return
         self.today_ask = item.subject if how == "Done" else None
-        if not self._do(lambda: edits.close_today_item(self.conn, self.ctx.data_root, self.ctx.fs, item_id, how, self._now())):
+        out = self._do(lambda: edits.close_today_item(self.conn, self.ctx.data_root, self.ctx.fs, item_id, how, self._now()))
+        if not out:
             self.today_ask = None
             self.render_list()
+            return
+
+        def undo() -> None:  # release 5.91: back on Today as it was, and no "Update the task too?"
+            self.today_ask = None
+            if self._do(lambda: edits.reopen_agenda_item(self.conn, self.ctx.data_root, self.ctx.fs, item_id, self._now()), self.sel):
+                self.say("Back on Today.")
+
+        self.say_undo(out.message, undo)
 
     def answer_today(self, answer: str | None) -> None:
         """The answer to "Update the task too?": an Update capture starting "Done today: " or "Closed. ", or nothing."""
@@ -3678,10 +1687,6 @@ class BrowseWindow(QWidget):
         self._do(lambda: edits.edit_task(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, task_id, self._now(), **values, leave=leave))
         return True
 
-    def _pick_tagged(self, names: list[str]) -> str | None:
-        value, ok = QInputDialog.getItem(self, "Add a tagged label", "A tagged label from the glossary, or a new one:", names, 0, True)
-        return value if ok else None
-
     def _ask_text(self, title: str, label: str, text: str) -> str | None:
         value, ok = QInputDialog.getText(self, title, label, text=text)
         return value if ok else None
@@ -3834,14 +1839,3 @@ class BrowseWindow(QWidget):
             people.update_label(self.conn, name, status=status)
             return edits.Outcome(f"{name} is {'retired: hidden from pickers' if status == 'retired' else 'active again'}.")
         self._do(change)
-
-
-def _empty(layout) -> None:
-    """Take every widget out of a layout at once, so none is left showing until Qt deletes it."""
-    while layout.count():
-        item = layout.takeAt(0)
-        w = item.widget() if item else None
-        if w is not None:
-            w.hide()
-            w.setParent(None)
-            w.deleteLater()

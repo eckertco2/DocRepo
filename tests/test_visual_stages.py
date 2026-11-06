@@ -11,7 +11,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest  # noqa: E402
 from PySide6.QtCore import QSize  # noqa: E402
-from PySide6.QtWidgets import QApplication, QFrame, QLabel, QMessageBox, QPushButton, QTableWidget, QTreeWidgetItem, QWidget  # noqa: E402
+from PySide6.QtWidgets import QApplication, QFrame, QLabel, QMessageBox, QPushButton, QTreeWidgetItem, QWidget  # noqa: E402
 
 from docrepo import db  # noqa: E402
 from docrepo.config import Settings  # noqa: E402
@@ -133,6 +133,7 @@ def test_priorities_scrolls_across_rather_than_holding_the_windows_width(browse)
 def test_the_task_pages_format_bar_drops_to_its_own_line_when_the_pane_is_narrow(qapp):
     pane = TaskPane("", 16)
     pane.show()
+    pane._card_focus(True)  # the bar shows while the caret is in the notes (release 5.83); its line is fitted then
 
     def at(width: int) -> None:
         pane.resize(width, 600)

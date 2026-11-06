@@ -1,0 +1,79 @@
+{
+ "v9": {
+  "commit": "248c6a4",
+  "counts": {
+   "tasks": 17,
+   "captures": 24
+  }
+ },
+ "v10": {
+  "commit": "a56516a",
+  "counts": {
+   "tasks": 17,
+   "captures": 24,
+   "task_pages": 17
+  }
+ },
+ "v11": {
+  "commit": "aa88de5",
+  "counts": {
+   "tasks": 17,
+   "captures": 24,
+   "task_pages": 17
+  }
+ },
+ "v12": {
+  "commit": "d6e54d9",
+  "counts": {
+   "tasks": 17,
+   "captures": 24,
+   "task_pages": 17,
+   "task_dates": 2
+  }
+ },
+ "v13": {
+  "commit": "724e80b",
+  "counts": {
+   "tasks": 17,
+   "captures": 24,
+   "task_pages": 17,
+   "task_dates": 2
+  }
+ },
+ "v17": {
+  "commit": "cbda5a7",
+  "counts": {
+   "tasks": 17,
+   "captures": 24,
+   "task_pages": 17,
+   "task_dates": 2
+  }
+ },
+ "v19": {
+  "commit": "d970832",
+  "counts": {
+   "tasks": 17,
+   "captures": 24,
+   "task_pages": 17,
+   "task_dates": 2
+  }
+ },
+ "v20": {
+  "commit": "bdc12e4",
+  "counts": {
+   "tasks": 17,
+   "captures": 24,
+   "task_pages": 17,
+   "task_dates": 2
+  }
+ },
+ "v21": {
+  "commit": "e3bc57d",
+  "counts": {
+   "tasks": 17,
+   "captures": 24,
+   "task_pages": 17,
+   "task_dates": 2
+  }
+ }
+}

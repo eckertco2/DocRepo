@@ -42,6 +42,14 @@ ENTRY, NAME_AT, NAME_BYTES = 592, 72, 520
 EMAIL_TEXT = "Drop here: DocRepo keeps the email whole, as Outlook hands it over"
 FILE_TEXT = "Drop here: DocRepo keeps the file as the program holding it hands it over"
 FD_ATTRIBUTES, FD_FILESIZE, DIRECTORY = 0x04, 0x40, 0x10
+#: The largest file or email a drag may hand over (release 5.93, the review's F14), as ``tree_files.MAX_FILE`` caps a tree
+#: file: it's read into memory whole, then written again. One that's bigger is refused, unread when its size is known.
+MAX_DROP = 200_000_000
+
+
+def too_big(name: str, size: int) -> str:
+    """The sentence for a file over ``MAX_DROP``."""
+    return f"{name} is {size / 1_000_000:.0f} MB, over DocRepo's 200 MB for a dropped file, so it wasn't taken"
 
 
 @dataclass
@@ -91,7 +99,7 @@ def _format_names(obj) -> list[str]:
                 names.append(win32clipboard.GetClipboardFormatName(fe[0]))
             except Exception:  # noqa: BLE001 - a standard format has no registered name
                 names.append(f"#{fe[0]}")
-    except Exception:  # noqa: BLE001 - a drag that won't list its formats
+    except Exception:  # noqa: BLE001, S110 - a drag that won't list its formats
         pass
     return names
 
@@ -138,6 +146,9 @@ def read(obj) -> DropRead:
     for index, (name, size, folder) in enumerate(descriptors(raw)):
         if folder:
             continue
+        if size is not None and size > MAX_DROP:  # its size is on the drag's list: it's never read
+            out.problems.append(too_big(name, size))
+            continue
         try:
             medium = obj.GetData((contents, None, pythoncom.DVASPECT_CONTENT, index,
                                   pythoncom.TYMED_ISTORAGE | pythoncom.TYMED_ISTREAM | pythoncom.TYMED_HGLOBAL))
@@ -151,6 +162,9 @@ def read(obj) -> DropRead:
                     data = data[:size]  # a block of memory can be longer than the file
         except Exception as e:  # noqa: BLE001 - pywin32 raises com_error, and Outlook can refuse one file
             out.problems.append(f"file {index + 1} couldn't be read ({type(e).__name__})")
+            continue
+        if len(data) > MAX_DROP:  # no size on the list: it's let go once its length is known
+            out.problems.append(too_big(name, len(data)))
             continue
         out.forms.append(form)
         out.items.append(Dropped(name, data, email=name.lower().endswith(".msg") and msg.is_msg(data)))
@@ -250,6 +264,6 @@ class DropOverlay(QLabel):
         if self.available:
             try:
                 pythoncom.RevokeDragDrop(self.hwnd)
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: BLE001, S110 - the handle may be gone already
                 pass
             self.available = False

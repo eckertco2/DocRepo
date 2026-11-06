@@ -147,7 +147,7 @@ class Activity:
                 who = ", ".join(m.person_name(p) for p in (*t.leads, *t.assignees))
                 when = f"due {short(to_date(t.due), self.today)}" if t.due else f"deadline {short(to_date(t.deadline), self.today)}" if t.deadline else ""
                 facts = ", ".join(x for x in (who, when, "urgent" if t.urgent else "") if x)
-                out.append(Line(f"c:{c.id}:new", at, under or t.id, t.id, ["task", *docs], "New subtask" if under else "New task", t.title,
+                out.append(Line(f"c:{c.id}:new", at, under or t.id, t.id, ["task", *docs], "New task under this one" if under else "New task", t.title,
                                 [x for x in (facts, *self._doc_fact(c)) if x], ("task", t.id)))
             if c.has("update") and c.task in m.tasks:
                 changes = [self.change_text(e.field, e.from_value, e.to_value) for e in m.status if e.via == c.id and e.task == c.task]
@@ -231,7 +231,7 @@ class Activity:
                 go(t.id)
         return order
 
-    def groups(self, lines: list[Line], how: str = "top", f: Filter = Filter()) -> list[Group]:
+    def groups(self, lines: list[Line], how: str = "top", f: Filter = Filter()) -> list[Group]:  # noqa: B008 - frozen, so one shared default is safe
         """The lines in groups: by top-level task (the tree's colours), or by person, group or label, where a line shows
         under each of its task's people, groups or labels. Within a group, a heading per task in tree order, each with its
         lines, oldest first; a top-level task's own lines come straight under its group's header."""

@@ -19,7 +19,7 @@ from docrepo.detail import Pages  # noqa: E402
 from docrepo.links import FOLDER_TEXT, file_url_path, folder_name, is_folder, link_of_line, read_address  # noqa: E402
 from docrepo.model import Model  # noqa: E402
 from docrepo.sample import load_sample  # noqa: E402
-from docrepo.save import FileRow, held_text  # noqa: E402
+from docrepo.save import held_text  # noqa: E402
 from docrepo.text import is_file_line, plain_text  # noqa: E402
 from docrepo.ui.capture_window import CaptureWindow, read_drop  # noqa: E402
 from docrepo.ui.context import AppContext  # noqa: E402

@@ -1725,8 +1725,8 @@ class BulkEditDialog(FormDialog):
         self._timer.start()
 
     def problem(self) -> str | None:
-        for key, (on, date) in self.dates.items():
-            if on.isChecked() and not date.is_valid():
+        for key, (on, box) in self.dates.items():
+            if on.isChecked() and not box.is_valid():
                 return f"{key.capitalize()} isn't a date. Use YYYY-MM-DD."
         return None
 
@@ -1739,9 +1739,9 @@ class BulkEditDialog(FormDialog):
             e.fields["plant_event"] = self.plant_event.currentIndex() == 1
         if self.priority.currentIndex():
             e.priority = self.priority.currentData()
-        for key, (on, date) in self.dates.items():
+        for key, (on, box) in self.dates.items():
             if on.isChecked():
-                e.fields[key] = date.value()
+                e.fields[key] = box.value()
         for key, (how, chips) in self.people.items():
             if how.currentIndex():
                 setattr(e, key, ("add" if how.currentIndex() == 1 else "set", chips.values()))

@@ -44,7 +44,7 @@ def _none(value: str | None) -> str | None:
 
 
 def is_empty(conn: sqlite3.Connection) -> bool:
-    return not any(conn.execute(f"SELECT 1 FROM {t} LIMIT 1").fetchone() for t in ("tasks", "people", "captures", "labels"))
+    return not any(conn.execute(f"SELECT 1 FROM {t} LIMIT 1").fetchone() for t in ("tasks", "people", "captures", "labels"))  # noqa: S608 - a column or table name of DocRepo's own; values are parameters
 
 
 def load_sample(conn: sqlite3.Connection, data: dict[str, Any] | None = None) -> None:

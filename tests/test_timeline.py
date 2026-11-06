@@ -12,7 +12,7 @@ from datetime import date, datetime  # noqa: E402
 import pytest  # noqa: E402
 from PySide6.QtCore import QDate, QPoint, Qt  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
-from PySide6.QtWidgets import QApplication, QComboBox  # noqa: E402
+from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from docrepo import people, tasks, timeline  # noqa: E402
 from docrepo.config import Settings  # noqa: E402
@@ -350,12 +350,17 @@ def test_the_boxes_survive_a_redraw_and_the_calendar_picks(browse):
     assert (view.start, view.typed_days) == (date(2026, 9, 28), 95)
 
 
-def test_double_click_asks_for_quick_edit(browse):
+def test_double_click_asks_for_edit_task_and_q_for_quick_edit(browse):
+    """Release 5.91: one double-click rule, Edit task, here as everywhere; Quick edit is Q."""
     view, chart = browse.timeline, browse.timeline.chart
-    asked = []
+    asked, edits_asked = [], []
     view.quick_edit.disconnect()
     view.quick_edit.connect(lambda task_id, rect: asked.append((task_id, rect.width() > 0)))
+    view.edit_task.disconnect()
+    view.edit_task.connect(edits_asked.append)
     QTest.mouseDClick(chart, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, _row_point(chart, "T000002", 120))
+    assert edits_asked == ["T000002"] and asked == []
+    QTest.keyClick(chart, Qt.Key.Key_Q)
     assert asked == [("T000002", True)]
 
 
@@ -396,14 +401,16 @@ def test_plan_mode_drags_save_log_and_undo(browse):
     assert (t.start, t.due) == (None, None)
     # Outside Plan mode nothing drags.
     QTest.keyClick(chart, Qt.Key.Key_P)
-    assert not view.plan and not chart._hit(target, grip.y())[1] in ("grip", "move", "start", "end")
+    assert not view.plan and chart._hit(target, grip.y())[1] not in ("grip", "move", "start", "end")
 
 
-def test_double_click_opens_quick_edit_and_its_save_redraws_the_chart(browse):
-    """Decision 138 with item 55: the browse window opens Quick edit beside the bar; what it saves shows on the chart."""
+def test_q_opens_quick_edit_and_its_save_redraws_the_chart(browse):
+    """Decision 138 with item 55: the browse window opens Quick edit beside the bar; what it saves shows on the chart. Its
+    key is Q since release 5.91, a double-click being Edit task."""
     w = browse
     chart = w.timeline.chart
-    QTest.mouseDClick(chart, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, _row_point(chart, "T000002", 120))
+    QTest.mouseClick(chart, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, _row_point(chart, "T000002", 120))
+    QTest.keyClick(chart, Qt.Key.Key_Q)
     qe = w.quick_window
     assert qe is not None and qe.isVisible() and qe.task.id == "T000002"
     QTest.keyClicks(qe.box, "due 20 Nov")
@@ -527,7 +534,6 @@ def test_plant_activities_are_plant_events(sample_conn):
 def test_plan_mode_drags_a_key_date_and_undoes_it(browse):
     """Decision 152: in Plan mode a key date's window moves, or its ends stretch, and a start alone moves; each drop is
     sent as set_key_date and saved, and Ctrl+Z puts it back. A done key date doesn't drag."""
-    from docrepo import edits, tasks
     from docrepo.tasks import KeyDateRow
 
     w = browse

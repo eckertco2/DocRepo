@@ -98,7 +98,7 @@ def test_the_list_shows_templates_and_their_rows(browse):
     assert buttons(browse)[:3] == ["Make tasks", "Add subtask", "Edit"] and "Discard…" in buttons(browse)
     assert "Changes" in browse.page.toPlainText() and "None yet" in browse.page.toPlainText()
     browse.select("tplrow", str(r["window"]))
-    assert buttons(browse)[0] == "Make tasks from here" and "Take out…" in buttons(browse) and "Move" in buttons(browse)
+    assert buttons(browse)[0] == "Make tasks from here" and "Remove…" in buttons(browse) and "Move" in buttons(browse)
     text = browse.page.toPlainText()
     assert "Trial execution window" in text and "Starting notes" in text and "Book the room" in text and "No tasks yet" in text
 

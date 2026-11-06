@@ -40,7 +40,6 @@ LIGHT = {
     # Hours a week on the Timeline's bars, light to dark, and the text on each.
     "hour1": "#86b6ef", "hour2": "#5598e7", "hour3": "#256abf", "hour4": "#184f95", "hour5": "#0d366b",
     "hour_ink1": "#0b1b2e", "hour_ink2": "#0b1b2e", "hour_ink3": "#ffffff", "hour_ink4": "#ffffff", "hour_ink5": "#ffffff",
-    "pri_high": "#d9622b",
     # The Timeline page (release 5.40): bars' one colour, the team chart's hours within capacity, and a week's load, a cell's
     # steps from under 40% to 125% or more, with the text on the last.
     "bar": "#64788c", "bar_soft": "#9fabb8",
@@ -50,6 +49,8 @@ LIGHT = {
     "ref_task": "#22706a", "ref_task_bg": "#d6eeea",
     # Categories: the top-level tasks' colours (decision 9), as marks, never as text.
     "g1": "#3b78c4", "g2": "#2e9483", "g3": "#c08419", "g4": "#8460c2",
+    # Priorities (release 5.81): a task row's left edge, as marks, never as text, each 3:1 or more on white and on hover.
+    "pri_critical": "#c42b1c", "pri_high": "#c27400", "pri_medium": "#3b78c4", "pri_parking": "#7f8b98",
     # File types (the Task view, release 5.34): their icons' colours only, never text's, each 3:1 or more on white.
     "type_doc": "#2b579a", "type_sheet": "#217346", "type_slides": "#c43e1c", "type_pdf": "#b30b00", "type_picture": "#8460c2",
     "type_mail": "#1d5e98", "type_drawing": "#2e9483", "type_link": "#5a6571", "type_other": "#5a6571",
@@ -64,7 +65,6 @@ DARK = {
     "lane1": "#6fa6e8", "lane2": "#f08a69", "lane3": "#56c2b0", "lane4": "#dca64a", "lane5": "#ee9fbd", "lane6": "#5cbf86", "lane7": "#ad8ee8", "lane8": "#f3968e",
     "hour1": "#1c3a5e", "hour2": "#25507f", "hour3": "#3a70ad", "hour4": "#6699d4", "hour5": "#9cc0ea",
     "hour_ink1": "#ffffff", "hour_ink2": "#ffffff", "hour_ink3": "#ffffff", "hour_ink4": "#0b1b2e", "hour_ink5": "#0b1b2e",
-    "pri_high": "#f08a69",
     "bar": "#8fa3b6", "bar_soft": "#5f6f7d",
     "load1": "#343434", "load2": "#454545", "load3": "#6b5220", "load4": "#8a3a32", "load5": "#e8776c", "load5_ink": "#1b1b1b",
     "item_task": "#1f3447", "item_note": "#1c3532", "item_update": "#3a2e13", "item_decision": "#2d2b3d", "item_date": "#26331c", "item_heading": "#333333",
@@ -72,6 +72,7 @@ DARK = {
     "caution": "#e8b85c", "caution_bg": "#3a2e13", "caution_line": "#5a4720", "critical": "#f3968e", "critical_bg": "#3e1f1c",
     "success": "#82d098", "success_bg": "#1b3323", "scroll": "#555555", "scroll_hover": "#777777",
     "g1": "#6fa6e8", "g2": "#56c2b0", "g3": "#dca64a", "g4": "#ad8ee8",
+    "pri_critical": "#f3968e", "pri_high": "#e8b85c", "pri_medium": "#6fa6e8", "pri_parking": "#8a949e",
     "type_doc": "#7fa7e6", "type_sheet": "#5cbf86", "type_slides": "#f08a69", "type_pdf": "#f3968e", "type_picture": "#ad8ee8",
     "type_mail": "#7cb0e2", "type_drawing": "#56c2b0", "type_link": "#a0aab4", "type_other": "#a0aab4",
 }
@@ -350,6 +351,10 @@ QWidget#checkRow:hover { background: $hover; }
 QTextEdit#checkText, QTextEdit#checkText:focus { border: none; border-radius: 0; background: transparent; padding: 0; }
 QLabel#checkCount, QLabel#checkHeading { color: $text2; }
 QLabel#checkHeading { padding-top: 6px; padding-left: 4px; }
+/* the sticky title line (release 5.86): the task's title once the header has scrolled off; opaque, over the page */
+QWidget#stickyTitle { background: $content; border-bottom: 1px solid $stroke_strong; }
+QToolButton#stickyButton { border: none; border-radius: 4px; background: transparent; padding: 1px 8px; color: $accent; }
+QToolButton#stickyButton:hover { background: $hover; }
 QToolButton#checkFold, QToolButton#rowAction { border: none; background: transparent; padding: 0 2px; }
 QFrame#popover, QFrame#capCard { background: $content; border: 1px solid $stroke_strong; border-radius: 8px; }
 QPushButton#filterChip { background: $info_bg; border: none; border-radius: 4px; padding: 2px 10px; min-height: 18px; max-height: 22px; }
@@ -456,7 +461,7 @@ body { color: $text; }
 a { color: $accent; text-decoration: none; }
 h2 { font-family: 'Segoe UI'; font-size: ${subtitle}pt; font-weight: 600; margin-top: 2px; margin-bottom: 4px; }
 .crumbs { color: $text2; font-size: ${caption}pt; margin: 0; }
-.sub { color: $text2; font-size: ${caption}pt; }
+.sub { color: $text2; font-size: ${caption}pt; font-weight: 400; }
 .faint { color: $text2; }
 .k { color: $text2; padding-right: 12px; }
 .fk { color: $text2; font-size: ${caption}pt; }
@@ -492,12 +497,15 @@ h2 { font-family: 'Segoe UI'; font-size: ${subtitle}pt; font-weight: 600; margin
 .anchor { color: $accent; background-color: $info_bg; }
 .inh { color: $text2; font-style: italic; }
 .sec { font-weight: 600; margin-top: 18px; margin-bottom: 4px; }
+.secx { font-weight: 400; }
+.factline { margin-top: 6px; margin-bottom: 0px; }
+.ttl { font-weight: 600; }
 .foldword { color: $text; }
 .dt { color: $text2; font-size: ${caption}pt; padding-right: 14px; }
-.rel { color: $text2; font-size: ${caption}pt; }
-.over { color: $critical; font-weight: 600; }
+.rel { color: $text2; font-size: ${caption}pt; font-weight: 400; }
+.over { color: $critical; }
 .stat { background-color: $base; }
-.sk { color: $text2; font-size: ${caption}pt; font-weight: 600; }
+.sk { color: $text2; font-size: ${caption}pt; }
 .desc { color: $text2; margin-top: 4px; }
 .lbli { color: $text2; }
 .rule { background-color: $stroke; }

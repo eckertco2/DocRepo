@@ -256,7 +256,7 @@ def _apply_columns(conn: sqlite3.Connection, task_id: str, columns: dict[str, An
     if columns:
         stored = {k: int(v) if k in FLAG_FIELDS else v for k, v in columns.items()}
         assignments = ", ".join(f"{k} = ?" for k in stored)
-        conn.execute(f"UPDATE tasks SET {assignments} WHERE id = ?", (*stored.values(), task_id))
+        conn.execute(f"UPDATE tasks SET {assignments} WHERE id = ?", (*stored.values(), task_id))  # noqa: S608 - a column or table name of DocRepo's own; values are parameters
 
 
 def _check_repeat(recurrence: str | None, repeat_until: str | None) -> None:
@@ -433,7 +433,7 @@ def _store_ties(conn: sqlite3.Connection, task_id: str, before: dict[str, Tie], 
 
 def _end_ties(conn: sqlite3.Connection, where: str, value: object, at: datetime, via: str) -> None:
     """Take off the ties to something that can't be a source any more. The dates stay, and each status log says so (decision 258)."""
-    for r in conn.execute(f"SELECT task, field FROM task_ties WHERE {where} = ?", (value,)).fetchall():
+    for r in conn.execute(f"SELECT task, field FROM task_ties WHERE {where} = ?", (value,)).fetchall():  # noqa: S608 - a column or table name of DocRepo's own; values are parameters
         tie = load_tasks(conn, [r["task"]])[r["task"]].ties[r["field"]]
         change = Change(f"{ties.FIELDS[r['field']]} tie", ties.said(conn, tie), None)
         conn.execute("DELETE FROM task_ties WHERE task = ? AND field = ?", (r["task"], r["field"]))
@@ -515,7 +515,7 @@ def create_task(
         columns = {**values, "id": task_id, "description": description.strip(), "created": today, "created_by": created_by,
                    "closed": today if values["state"] == "Closed" else None}
         columns = {k: int(v) if k in FLAG_FIELDS else v for k, v in columns.items()}
-        conn.execute(f"INSERT INTO tasks ({', '.join(columns)}) VALUES ({', '.join('?' * len(columns))})", tuple(columns.values()))
+        conn.execute(f"INSERT INTO tasks ({', '.join(columns)}) VALUES ({', '.join('?' * len(columns))})", tuple(columns.values()))  # noqa: S608 - a column or table name of DocRepo's own; values are parameters
         for key, ids in people.items():
             _apply_lists(conn, task_id, key, ids)
         _apply_involvement(conn, task_id, people, {}, shares_of(involvement))

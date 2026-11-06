@@ -17,6 +17,7 @@ from docrepo.config import Settings  # noqa: E402
 from docrepo.ui.browse_window import BrowseWindow  # noqa: E402
 from docrepo.ui.capture_window import CaptureWindow  # noqa: E402
 from docrepo.ui.context import AppContext  # noqa: E402
+from docrepo.ui.lists import tagged as tagged_list  # noqa: E402
 from docrepo.ui.tagged_import_dialog import TaggedImportDialog  # noqa: E402
 
 NOW = datetime(2026, 10, 8, 14, 10)
@@ -58,7 +59,7 @@ def import_through_the_form(w, tmp_path, text=TAGS):
             return True
         return False
     w.run_dialog = run
-    w.import_tagged()
+    tagged_list.import_glossary(w)
 
 
 def test_the_view_starts_empty_and_import_fills_it(browse, tmp_path, ctx):
@@ -112,7 +113,7 @@ def test_edit_a_label_and_a_chip_opens_its_page(browse, tmp_path):
         dialog.description.setText("Feed surge drum (vessel)")
         return True
     browse.run_dialog = run
-    browse.edit_tagged("V110")
+    tagged_list.edit(browse, "V110")
     lb = browse.model().tagged.by_key["V110"]
     assert lb.aliases == ("feed drum", "old drum") and lb.description == "Feed surge drum (vessel)"
     browse.set_view("tasks")
@@ -124,7 +125,7 @@ def test_a_bad_alias_is_said_and_saves_nothing(browse, tmp_path):
     import_through_the_form(browse, tmp_path)
     from docrepo.ui.dialogs import TaggedLabelDialog
 
-    dialog = TaggedLabelDialog(browse, "V-110", "", ["feed drum"], check_aliases=browse._alias_check(browse.model().tagged.by_key["V110"].id))
+    dialog = TaggedLabelDialog(browse, "V-110", "", ["feed drum"], check_aliases=tagged_list.alias_check(browse, browse.model().tagged.by_key["V110"].id))
     dialog.aliases.setText("R-101; 110")
     dialog.save()
     assert not dialog.result() and "R-101's already" in dialog.error.text() and "only digits" in dialog.error.text()
@@ -132,7 +133,7 @@ def test_a_bad_alias_is_said_and_saves_nothing(browse, tmp_path):
 
 def test_export_saves_in_exports_and_copies(browse, tmp_path, ctx):
     import_through_the_form(browse, tmp_path)
-    browse.export_tagged()
+    tagged_list.export(browse)
     (path,) = (ctx.data_root / "Exports").glob("*Tagged labels.csv")
     assert "R-101,Reactor 1,reactor one" in path.read_text(encoding="utf-8-sig")
     assert "Saved 3 tagged labels as Exports\\" in browse.status.text()
@@ -162,11 +163,11 @@ def test_the_task_views_tag_filter(ctx, tmp_path):
 
 
 def test_a_big_glossary_lists_what_is_mentioned_and_says_how_many_more(browse, tmp_path, monkeypatch):
-    monkeypatch.setattr(BrowseWindow, "TAGGED_ROWS", 2)
+    monkeypatch.setattr(tagged_list, "ROWS", 2)
     import_through_the_form(browse, tmp_path)
     assert browse.tagged_mentioned is True  # three labels, more than the view draws: Mentioned only starts ticked
     assert [k for k in browse.tree.keys() if k] == [("tagged", "R101")]  # the only one something mentions
-    browse._set_tagged_mentioned(False)
+    tagged_list.set_mentioned(browse, False)
     assert [k for k in browse.tree.keys() if k] == [("tagged", "P204A"), ("tagged", "R101")]
     from docrepo.ui.tree_view import HTML_ROLE
 

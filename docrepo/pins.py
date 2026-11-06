@@ -67,7 +67,7 @@ def uses_of(conn: sqlite3.Connection, document_ids: Iterable[str], limit: int = 
     for i in range(0, len(ids), 500):
         chunk = ids[i:i + 500]
         out += [(r["document"], r["at"], r["action"]) for r in conn.execute(
-            f"SELECT document, at, action FROM document_uses WHERE document IN ({','.join('?' * len(chunk))}) ORDER BY at DESC, id DESC LIMIT ?",
+            f"SELECT document, at, action FROM document_uses WHERE document IN ({','.join('?' * len(chunk))}) ORDER BY at DESC, id DESC LIMIT ?",  # noqa: S608 - a column or table name of DocRepo's own; values are parameters
             (*chunk, limit))]
     return sorted(out, key=lambda x: x[1], reverse=True)[:limit]
 

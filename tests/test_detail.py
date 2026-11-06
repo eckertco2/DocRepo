@@ -37,13 +37,16 @@ def test_a_task_page(pages):
     html = pages.task_page("T000008", PageState())
     words = text(html)
     assert words.startswith("Reactor impeller upgrade › Installation In progress Line 1 Strategic Plan Install and align")
-    order = ["Current status Mon 5 Oct · 3 days ago Procedure rev 2 approved. Waiting on the rigging plan.",
+    # Release 5.83 (the task pane review's R7): the status says its date, its age in the tooltip; a subtask row its date alone.
+    order = ["Current status Mon 5 Oct Procedure rev 2 approved. Waiting on the rigging plan.",
              "When Due Fri 30 Oct in 22 days Deadline too · Turnaround ends Starts Mon 19 Oct in 11 days",
-             "Who Lead Me 8 h Assignees Tom Becker 60 h Mike Ortiz 60 h", "Subtasks 3 of 3 open New subtask Rigging plan 14 Oct · 6 d",
+             "Who Lead Me 8 h Assignees Tom Becker 60 h Mike Ortiz 60 h", "Subtasks 3 of 3 open New task under this one Rigging plan Wed 14 Oct",
              "Details T000008 · Created Tue 22 Sep from C000005", "Captures 6 Status log 14 Summaries 1 Files 3 With subtasks ⇅ Oldest first",
              "This task September 2026", "Subtasks · 3"]
     at = [words.find(part) for part in order]
     assert -1 not in at and at == sorted(at), dict(zip(order, at))
+    assert 'title="The current status last changed 3 days ago"' in html and 'title="Due Wed 14 Oct, in 6 days"' in html
+    assert "3 days ago" not in words and "6 d" not in words and "<b>" not in html  # one rule for time, two weights (R7, R10)
     for gone in ("Reminder", "—", "Subtasks Summaries", "SUBTASKS", "Scope:", "Order:", "Top-level task"):  # empty fields, the old tab and lines
         assert gone not in words, gone
     assert {"task:T000001", "person:P003", "label:Line%201", "fold:details", "menu:scope", "menu:order", "new:T000008", "tab:log",
@@ -58,7 +61,8 @@ def test_the_page_shows_only_what_says_something(pages):
     is "ago"; a routine meeting counts to its next one, with hours per occurrence and its agenda before Details."""
     words = text(pages.task_page("T000002", PageState()))
     assert "When Deadline Sat 31 Oct in 23 days Verification walkthrough Who" in words and "No due date" not in words
-    assert "Current status Tue 1 Sep · 5 weeks ago" in words  # the Excel import's status: as old as the task
+    assert "Current status Tue 1 Sep " in words and "5 weeks ago" not in words  # the Excel import's status: as old as the task
+    assert "last changed 5 weeks ago" in pages.task_page("T000002", PageState())
     words = text(pages.task_page("T000016", PageState()))
     assert "When Due No due date Reminder Wed 7 Oct yesterday Agenda Business team meeting Tue 13 Oct" in words
     assert "No status yet. Add one" in words and "update:T000016" in pages.task_page("T000016", PageState())
@@ -98,7 +102,7 @@ def test_the_wide_page_has_its_facts_on_the_right(pages):
 
 def test_tabs_scopes_and_chapters(pages):
     log = text(pages.task_page("T000008", PageState(tab="log")))
-    assert "Work started" in log and "↳ New subtask: Rigging plan · Mike Ortiz, due 14 Oct" in log
+    assert "Work started" in log and "↳ New task under this one: Rigging plan · Mike Ortiz, due 14 Oct" in log
     closed = text(pages.task_page("T000008", PageState(tab="log", scope="self")))
     assert "Subtasks ·" not in closed and "This task" in closed  # the scope's name is its menu's
     assert log.count("Status log") == closed.count("Status log") and log.split("Status log ")[1][:2] != closed.split("Status log ")[1][:2]
@@ -215,3 +219,30 @@ def test_release_59_fields_on_the_pages(sample_root):
     parent = text(pages.label_page("Production line"))
     assert "Labels under it Line 1" in parent and "a heading: tasks get one of its labels, not it" in parent
     assert text(pages.label_page("Line 1")).startswith("Label › Production line Line 1 Under Production line")
+
+
+def test_the_page_in_parts(pages):
+    """Release 5.84 (the task pane review's T2): the header's parts, the fact line, each group's summary and body, the
+    history with Captures and Summaries only, the Files group, and the rail on a wide page."""
+    from docrepo.detail import split_section
+
+    assert split_section('<p class="sec">Subtasks<span class="secx"> <span class="rel">3 of 4</span></span></p><table>x</table>') == \
+        ('<span class="rel">3 of 4</span>', "<table>x</table>")
+    parts = pages.task_parts("T000008", PageState())
+    assert text(parts["head"]).startswith("Reactor impeller upgrade › Installation In progress Line 1 Strategic Plan "
+                                          "Due Fri 30 Oct in 22 days · deadline too · Lead Me , Tom Becker , Mike Ortiz Install and align")  # the links' commas
+    assert (parts["status_name"], parts["status_when"], parts["status_age"]) == ("Current status", "Mon 5 Oct", "3 days ago")
+    assert "Procedure rev 2 approved" in parts["status_body"]
+    assert parts["status_log_summary"] == f"{len(pages.stories.story('T000008'))} changes" and "Work started" in text(parts["status_log"])
+    assert text(parts["subtasks_summary"]) == "3 of 3 open New task under this one" and "Rigging plan" in text(parts["subtasks"]) and "Subtasks" not in text(parts["subtasks"])
+    assert "Starts" in parts["when_who_summary"] and "Due" not in parts["when_who_summary"] and "h" in parts["when_who_summary"]
+    assert "Deadline too" in text(parts["when_who"]) and "Who Lead Me 8 h" in text(parts["when_who"])
+    assert parts["details_summary"] == "" and "ID T000008" in text(parts["details"]) and "Folder" in text(parts["details"])
+    history = text(parts["history"])
+    assert history.startswith("Captures 6 Summaries 1 With subtasks") and "Status log" not in history and "Files 3" not in history  # the tabs
+    assert text(parts["history_summary"]) == "6 captures" and text(parts["files_summary"]) == "3" and "Open in Task view" in text(parts["files"])
+    assert "key_dates" not in parts or parts["key_dates"] == ""  # nothing in them
+    wide = pages.task_parts("T000008", PageState(), 900)
+    assert "when_who" not in wide and "details" not in wide and "Who Lead Me 8 h" in text(wide["rail"]) and "Folder" in text(wide["rail"])
+    done = next(t for t in pages.m.tasks.values() if t.state == "Closed")  # a closed task says so on its fact line
+    assert f"Closed {pages.long(done.closed)}" in text(pages.task_parts(done.id, PageState())["head"])

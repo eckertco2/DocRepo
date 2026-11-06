@@ -355,7 +355,7 @@ class Stories:
         for k in m.children_of(task_id):
             s = m.task(k)
             joined = self.joined_at(k, task_id)
-            verb = "New subtask" if m.parents_of(k)[0] == task_id and not joined else "Also under this task"
+            verb = "New task under this one" if m.parents_of(k)[0] == task_id and not joined else "Also under this task"
             asg = self.initial(k, "Assignees", self.names(s.assignees))
             due = self.initial(k, "Due", s.due or "")
             who = ", ".join("me" if self._is_me(n) else n for n in list_of(asg))

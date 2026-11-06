@@ -27,12 +27,12 @@ from __future__ import annotations
 
 import re
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 
 from docrepo import items, markup
-from docrepo.dates import stamp
+from docrepo.dates import long_date, stamp, to_date
 from docrepo.db import transaction
 from docrepo.model import Capture, Model
 from docrepo.text import is_file_line
@@ -41,7 +41,8 @@ WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 DAY = re.compile(r"(Mon|Tue|Wed|Thu|Fri|Sat|Sun) (\d{1,2}) (" + "|".join(MONTHS) + r") (\d{4})")
 HEADING = re.compile(r"^(#{1,3}) (.*)$")
-LINK = re.compile(r"^\[((?:[^\]\\]|\\.)*)\]\((capture|document):([A-Z]\d+)\)$")
+LINK = re.compile(r"^\[((?:[^\]\\]|\\.)*)\]\((capture|document|task):([A-Z]\d+)\)$")
+_LINK_KINDS = {"capture": "caption", "document": "file", "task": "task"}
 #: A picture or an attachment on the page (release 5.27): a list item that's one picture of, or link to, a document.
 ITEM = re.compile(r"^((?:  )*)- (!?)\[((?:[^\]\\]|\\.)*)\]\(document:(D\d+)\)$")
 #: The kinds of file a page shows as a picture.
@@ -54,13 +55,13 @@ _TASK_REF = re.compile(r"\]\((T\d+)\)")
 
 @dataclass(frozen=True)
 class Line:
-    """One line of a page, read: a "heading", a "caption", a "file" line, a "picture", an "attachment", a table's "row"
-    or a line of "text"."""
+    """One line of a page, read: a "heading", a "caption", a "file" line, a "task" line (one link to a task made from
+    the notes, release 5.83), a "picture", an "attachment", a table's "row" or a line of "text"."""
 
     kind: str
     text: str        # a heading's or a link's text, in words; a text line's markup; a row as it's kept
     level: int = 0   # a heading's level, 1 to 3; a picture's or attachment's list level, from 1
-    ref: str = ""    # a caption's capture, or a file line's, picture's or attachment's document
+    ref: str = ""    # a caption's capture, a task line's task, or a file line's, picture's or attachment's document
 
 
 # ---- reading and writing lines ----
@@ -70,7 +71,7 @@ def read_line(line: str) -> Line:
         return Line("heading", m.group(2), len(m.group(1)))
     m = LINK.match(line)
     if m:
-        return Line("caption" if m.group(2) == "capture" else "file", _UNESCAPE.sub(r"\1", m.group(1)), ref=m.group(3))
+        return Line(_LINK_KINDS[m.group(2)], _UNESCAPE.sub(r"\1", m.group(1)), ref=m.group(3))
     m = ITEM.match(line)
     if m:
         return Line("picture" if m.group(2) else "attachment", _UNESCAPE.sub(r"\1", m.group(3)), len(m.group(1)) // 2 + 1, m.group(4))
@@ -95,6 +96,40 @@ def _link_text(text: str) -> str:
 
 def caption_line(text: str, capture_id: str) -> str:
     return f"[{_link_text(text)}](capture:{capture_id})"
+
+
+def task_line(text: str, task_id: str) -> str:
+    """A task made from the notes, as one line on the page they came from (release 5.83, the task pane review's R4b)."""
+    return f"[{_link_text(text)}](task:{task_id})"
+
+
+def task_line_text(model: Model, task_id: str, today: date) -> str:
+    """"Task: Rigging plan · Mike Ortiz · due Wed 14 Oct": the task's title, its first lead or assignee, and its due date."""
+    t = model.tasks.get(task_id)
+    if t is None:
+        return f"Task: {task_id}"
+    who = next((model.person_name(p) for p in [*t.leads, *t.assignees]), "")
+    parts = [f"Task: {t.title}", *([who] if who else []), *([f"due {long_date(to_date(t.due), today)}"] if t.due else [])]
+    return " · ".join(parts)
+
+
+def task_lines(lines: list[str], made: list[tuple[str, list[str]]], model: Model, today: date) -> list[str]:
+    """``lines`` with each task made from them (``made``: the task and its item's own page lines) as one task line in
+    the item's place, its parameters kept in the item's capture (R4b): a meeting's page lists its follow-ups, not their
+    text. An item whose lines aren't found as written is left as it is."""
+    out = list(lines)
+    for task_id, item in made:
+        item = _trim_end(list(item))
+        while item and not item[0].strip():
+            item = item[1:]
+        n = len(item)
+        if not n:
+            continue
+        for i in range(len(out) - n + 1):
+            if out[i:i + n] == item:
+                out[i:i + n] = [task_line(task_line_text(model, task_id, today), task_id)]
+                break
+    return out
 
 
 def file_line(text: str, document_id: str) -> str:
@@ -238,11 +273,43 @@ def note_markup(content: str | None, formatted: bool, title: str = "", own: str 
     return [heading_line(h[1], h[0]) if (h := markup.heading_of(line)) else text_line(markup.text_of(line)) for line in lines]
 
 
+def _plain_words(line: str) -> str:
+    return " ".join(markup.to_plain(line).split()).rstrip(".").casefold()
+
+
+def captionless(c: Capture, label: str, text: list[str], model: Model) -> bool:
+    """Whether a capture's block has no caption (release 5.83, the task pane review's R4): one that was made on the page,
+    or one with no words of its own beyond its files, whose caption would only say "File" (or "Note", or "Update"
+    with nothing changed), which its day heading and file lines say already. A caption that names an email, a change
+    or where an item came from stays."""
+    if c.page_made:
+        return True
+    return not text and bool(c.document_ids) and label in ("File", "Note", "Update")
+
+
+def has_caption(lines: list[str]) -> bool:
+    return any(read_line(x).kind == "caption" for x in lines)
+
+
 def block(model: Model, stories, c: Capture, task_id: str, content: str | None) -> list[str]:
     """A capture's block on a task's page (decisions 96, 114, 115, 120): its caption, its note text in full, and a file
-    line for each of its files. ``content`` is its typed text: an email's own text stays with the email."""
-    out = [] if c.page_made else [caption_line(caption_text(c, caption_label(stories, c, task_id)), c.id)]
-    out += capture_markup(c, content, c.title if c.created_task == task_id else "", task_id)
+    line for each of its files. ``content`` is its typed text: an email's own text stays with the email. Since release
+    5.83 (the task pane review's R4 and R4b): text that only repeats a file's description isn't written, a block with no
+    words of its own beyond its files has no caption, and a task made from the notes is one task line where its
+    lines were."""
+    text = capture_markup(c, content, c.title if c.created_task == task_id else "", task_id)
+    docs = [model.documents[d] for d in c.document_ids if d in model.documents]
+    descriptions = {_plain_words(d.description) for d in docs if d.description and not made_up(d.description, d.name)}
+    words = [w for x in text if (w := _plain_words(x))]
+    if words and all(w in descriptions for w in words):
+        text = []
+    made = [(x.created_task, note_markup(stories.content_of(x.id), x.formatted, "", task_id))
+            for x in model.captures.values() if x.from_notes == c.id and x.item == "task" and x.created_task]
+    if made:
+        text = task_lines(text, made, model, stories.today)
+    label = caption_label(stories, c, task_id)
+    out = [] if captionless(c, label, text, model) else [caption_line(caption_text(c, label), c.id)]
+    out += text
     for d in c.document_ids:
         doc = model.documents.get(d)
         if doc is None:
@@ -329,13 +396,32 @@ def _same_words(a: str, b: str) -> bool:
     return " ".join(a.split()).casefold() == " ".join(b.split()).casefold()
 
 
+@dataclass(frozen=True)
+class Landing:
+    """Where one of a note's headings went (release 5.94): under the page's last heading, which has its words ("under"),
+    or at the page's end under its own heading ("end"), with whether a heading with its words is higher up."""
+
+    words: str
+    how: str
+    higher_up: bool = False
+
+
 def place_note(page: str, note: list[str], day: date) -> tuple[str, list[str]]:
+    """The page with a note from the capture window on it, which is no capture: ``place_note_where`` without the
+    landings. Returns the page and the headings the note went under, in order, for Save's message."""
+    out, under, _ = place_note_where(page, note, day)
+    return out, under
+
+
+def place_note_where(page: str, note: list[str], day: date) -> tuple[str, list[str], list[Landing]]:
     """The page with a note from the capture window on it, which is no capture (release 5.69, the notes workspace plan's
-    decision 345). Each of the note's headings goes under the page's heading with the same words (case and spacing
-    aside; the last on the page when it has two), at the end of that heading's section, or at the page's end, at the
-    level it was typed, when the page has none. The note's lines under none of its headings go under the day's heading,
-    at the end of the day's lines, as a capture's block does (``add_block``). Returns the page and the headings the
-    note went under, in order, for Save's message."""
+    decision 345, with release 5.94's simpler rule, the review of 2026-11-06, F13, taken 2026-11-06). New text goes at
+    the end of the page. Each of the note's headings goes under the page's heading with the same words (case and spacing
+    aside) only when that heading is the page's last heading; otherwise it goes at the page's end under its own heading,
+    at the level it was typed, even when a heading with its words is higher up (the footer says so). The note's lines
+    under none of its headings go under the day's heading, at the end of the day's lines, as a capture's block does
+    (``add_block``), which is the page's end unless a later day follows. Returns the page, the headings the note went
+    under, in order, for Save's message, and where each of its headings went, for the capture window's sentence."""
     loose: list[str] = []
     sections: list[tuple[int, str, list[str]]] = []  # each of the note's headings: its level, its words, its lines
     for x in note:
@@ -353,7 +439,7 @@ def place_note(page: str, note: list[str], day: date) -> tuple[str, list[str]]:
             lines = lines[1:]
         return lines
 
-    out, under = page, []
+    out, under, landed = page, [], []
     loose = trimmed(loose)
     if loose:
         out = add_block(out, loose, day, True)
@@ -362,35 +448,57 @@ def place_note(page: str, note: list[str], day: date) -> tuple[str, list[str]]:
         lines = trimmed(lines)
         raw = out.split("\n") if out else []
         read = [read_line(x) for x in raw]
-        match = max((i for i, x in enumerate(read) if x.kind == "heading" and _same_words(x.text, words)), default=None)
-        if match is None:
-            out = "\n".join(_trim_end(raw) + [heading_line(words, level)] + lines)
-            under.append(words)
+        heads = [i for i, x in enumerate(read) if x.kind == "heading"]
+        last = heads[-1] if heads else None
+        if last is not None and _same_words(read[last].text, words):  # the page's last heading: under it, at the page's end
+            end = len(raw)
+            while end > last + 1 and not raw[end - 1].strip():
+                end -= 1
+            out = "\n".join(raw[:end] + lines + raw[end:])
+            under.append(read[last].text)
+            landed.append(Landing(read[last].text, "under"))
             continue
-        end = next((i for i in range(match + 1, len(read)) if read[i].kind == "heading" and read[i].level <= read[match].level), len(raw))
-        while end > match + 1 and not raw[end - 1].strip():
-            end -= 1
-        out = "\n".join(raw[:end] + lines + raw[end:])
-        under.append(read[match].text)
-    return out, list(dict.fromkeys(under))
+        higher = any(_same_words(read[i].text, words) for i in heads)
+        out = "\n".join(_trim_end(raw) + [heading_line(words, level)] + lines)
+        under.append(words)
+        landed.append(Landing(words, "end", higher))
+    return out, list(dict.fromkeys(under)), landed
 
 
-def find_block(page: str, capture_id: str) -> tuple[int, int] | None:
-    """Where a capture's block is: from its caption to the next caption or heading."""
+def _file_run(lines: list[Line], start: int, refs: set[str]) -> int:
+    """The end of a run of file, picture and attachment lines of ``refs`` from ``start``, each with its description
+    list item under it."""
+    end = start
+    while end < len(lines):
+        x = lines[end]
+        if x.kind in ("file", "picture", "attachment") and x.ref in refs:
+            end += 1
+            if end < len(lines) and lines[end].kind == "text" and markup.LIST_LINE.match(lines[end].text) and x.kind != "file":
+                end += 1  # a picture's or attachment's description
+            continue
+        break
+    return end
+
+
+def find_block(page: str, capture_id: str, refs: Sequence[str] = ()) -> tuple[int, int] | None:
+    """Where a capture's block is: from its caption to the next caption or heading, or, for a capture with no caption
+    (release 5.83), its run of file lines for ``refs``, its documents."""
     lines = lines_of(page)
     start = next((i for i, x in enumerate(lines) if x.kind == "caption" and x.ref == capture_id), None)
     if start is None:
-        return None
+        wanted = set(refs)
+        start = next((i for i, x in enumerate(lines) if x.kind in ("file", "picture", "attachment") and x.ref in wanted), None)
+        return (start, _file_run(lines, start, wanted)) if start is not None else None
     end = start + 1
     while end < len(lines) and lines[end].kind not in ("caption", "heading"):
         end += 1
     return start, end
 
 
-def remove_block(page: str, capture_id: str, as_added: list[str], force: bool = False) -> tuple[str, str]:
+def remove_block(page: str, capture_id: str, as_added: list[str], force: bool = False, refs: Sequence[str] = ()) -> tuple[str, str]:
     """The page without a capture's block, and what happened: "removed", "edited" (left on the page, as the owner
     changed it there, unless ``force``) or "absent" (decision 106). A day heading left with nothing under it goes too."""
-    span = find_block(page, capture_id)
+    span = find_block(page, capture_id, refs)
     if span is None:
         return page, "absent"
     raw = page.split("\n")
@@ -415,12 +523,28 @@ def merge(base: str, ours: str, theirs: str, day_headings: bool) -> str:
     ours_ids = set(capture_ids(ours))
     out = ours
     raw = theirs.split("\n")
+    covered: set[int] = set()
     for cid in capture_ids(theirs):
+        start, end = find_block(theirs, cid)
+        covered.update(range(start, end))
         if cid in known or cid in ours_ids:
             continue
-        start, end = find_block(theirs, cid)
         when = day_of(read_line(raw[start]).text.split(" · ")[0]) or date.today()
         out = add_block(out, _trim_end(raw[start:end]), when, day_headings)
+    # A block with no caption (release 5.83): its file lines, new there, come in under the day they sit under there.
+    new_docs = document_ids(theirs) - document_ids(base) - document_ids(ours)
+    lines = lines_of(theirs)
+    i, day = 0, date.today()
+    while i < len(lines):
+        x = lines[i]
+        if x.kind == "heading" and (d := day_of(x.text)):
+            day = d
+        if i not in covered and x.kind in ("file", "picture", "attachment") and x.ref in new_docs:
+            end = _file_run(lines, i, new_docs)
+            out = add_block(out, _trim_end(raw[i:end]), day, day_headings)
+            i = end
+            continue
+        i += 1
     base_raw = base.split("\n")
     for cid in known - set(capture_ids(theirs)):
         span = find_block(base, cid)
@@ -429,12 +553,24 @@ def merge(base: str, ours: str, theirs: str, day_headings: bool) -> str:
     return out
 
 
-def on_page(model: Model, task_id: str, page: str) -> set[str]:
-    """The captures whose blocks are on a task's page: those with a caption there, and those made on the page (release
-    5.27) whose picture or attachment is there."""
+def on_page(model: Model, task_id: str, page: str, stories=None) -> set[str]:
+    """The captures whose blocks are on a task's page: those with a caption there, those made on the page (release
+    5.27) whose picture or attachment is there, and, given ``stories`` to read their text, those whose block has no
+    caption (release 5.83) and whose file lines are there."""
     docs = document_ids(page)
-    made = {c.id for c in model.notes_of(task_id) if c.page_made and set(c.document_ids) & docs}
-    return set(capture_ids(page)) | made
+    captions = set(capture_ids(page))
+    made = set()
+    for c in model.notes_of(task_id):
+        if c.id in captions or not set(c.document_ids) & docs:
+            continue
+        if c.page_made:
+            made.add(c.id)
+        elif stories is not None:
+            if not has_caption(block(model, stories, c, task_id, typed_content(c, stories.content_of(c.id)))):
+                made.add(c.id)
+        elif set(c.document_ids) <= docs:  # without its text to read (Task.md): every file line there, and no caption
+            made.add(c.id)
+    return captions | made
 
 
 def capture_ids(page: str) -> list[str]:
@@ -453,10 +589,12 @@ def words(page: str) -> str:
     return "\n".join(out)
 
 
-def task_md(page: str, capture_link: Callable[[str], str | None], document_link: Callable[[str], str | None] = lambda _: None) -> list[str]:
+def task_md(page: str, capture_link: Callable[[str], str | None], document_link: Callable[[str], str | None] = lambda _: None,
+            task_link: Callable[[str], str | None] = lambda _: None) -> list[str]:
     """The page as Task.md prints it, under "## Notes": headings two levels down, captions as links to the capture's
-    capture.md, pictures as pictures and attachments as links to their files (``document_link``), and the rest as
-    it's kept (its markup, and a table's rows, read as Markdown)."""
+    capture.md, task lines as links to the task's Task.md (``task_link``), pictures as pictures and attachments as
+    links to their files (``document_link``), and the rest as it's kept (its markup, and a table's rows, read as
+    Markdown)."""
     out = []
     for x in lines_of(page):
         if x.kind == "heading":
@@ -465,6 +603,10 @@ def task_md(page: str, capture_link: Callable[[str], str | None], document_link:
             target = capture_link(x.ref)
             text = markup.escape_inline(x.text).replace("[", "\\[").replace("]", "\\]")
             out.append(f"_[{text}]({target})_" if target else f"_{text}_")
+        elif x.kind == "task":
+            target = task_link(x.ref)
+            text = markup.escape_inline(x.text).replace("[", "\\[").replace("]", "\\]")
+            out.append(f"- [{text}]({target})" if target else f"- {text}")
         elif x.kind == "file":
             out.append(f"- {markup.escape_inline(x.text)}")
         elif x.kind in ("picture", "attachment"):
@@ -568,10 +710,10 @@ def add_capture(conn: sqlite3.Connection, model: Model, stories, capture_id: str
         if t is None or t.discarded:
             continue
         page = get(conn, task_id)
-        if capture_id in capture_ids(page) or (c.page_made and set(c.document_ids) & document_ids(page)):
+        lines = block(model, stories, c, task_id, content)
+        if capture_id in capture_ids(page) or (not has_caption(lines) and set(c.document_ids) & document_ids(page)):
             continue
-        new = add_block(page, block(model, stories, c, task_id, content), datetime.fromisoformat(c.saved).date(),
-                        model.uses_day_headings(task_id))
+        new = add_block(page, lines, datetime.fromisoformat(c.saved).date(), model.uses_day_headings(task_id))
         if put(conn, task_id, new, at):
             changed.append(task_id)
     return changed
@@ -588,7 +730,7 @@ def remove_capture(conn: sqlite3.Connection, model: Model, stories, capture_id: 
         if task_id not in model.tasks:
             continue
         page = get(conn, task_id)
-        new, what = remove_block(page, capture_id, block(model, stories, c, task_id, content), force)
+        new, what = remove_block(page, capture_id, block(model, stories, c, task_id, content), force, c.document_ids)
         if what == "removed":
             put(conn, task_id, new, at)
         out[task_id] = what
@@ -602,7 +744,7 @@ def edited_blocks(model: Model, stories, capture_id: str) -> list[str]:
     out = []
     for task_id in model.capture_tasks(c):
         page = model.pages.get(task_id, "")
-        if remove_block(page, capture_id, block(model, stories, c, task_id, content))[1] == "edited":
+        if remove_block(page, capture_id, block(model, stories, c, task_id, content), refs=c.document_ids)[1] == "edited":
             out.append(task_id)
     return out
 

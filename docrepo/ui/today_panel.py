@@ -22,7 +22,7 @@ from datetime import date
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QEasingCurve, QPoint, QRect, Qt, QTimer, QVariantAnimation
-from PySide6.QtGui import QCursor, QFontMetrics, QGuiApplication
+from PySide6.QtGui import QColor, QCursor, QFontMetrics, QGuiApplication, QPainter
 from PySide6.QtWidgets import (
     QCheckBox,
     QFrame,
@@ -43,14 +43,15 @@ from docrepo import db, key_dates, markup, notes_page, panel_rules, selection
 from docrepo.dates import to_date
 from docrepo.detail import Pages, PageState, esc
 from docrepo.lists import reminders_due
-from docrepo.model import Model
+from docrepo.model import Model, Task
 from docrepo.panel_rules import OPEN_KEY, Hover, Monitor, Place, Rect
-from docrepo.schedule import DueDate
+from docrepo.schedule import DueDate, is_open
 from docrepo.ui import tokens
 from docrepo.ui.browse_window import TODAY_MINE_KEY
 from docrepo.ui.context import AppContext
 from docrepo.ui.icons import icon, icon_size
 from docrepo.ui.page_view import PageView
+from docrepo.ui.tree_view import PRIORITY_EDGES
 from docrepo.ui.state_menu import UNDO_MS, UndoButton
 from docrepo.ui.style import page_css, style_sheet
 from docrepo.ui.wheel_window import animations_on
@@ -109,12 +110,32 @@ class _Elided(QLabel):
         self.setText(QFontMetrics(self.font()).elidedText(self.full, Qt.TextElideMode.ElideRight, max(0, self.width())))
 
 
-class _Row(QFrame):
+def edge_of(t: Task | None) -> str:
+    """An open task's priority, as the colour of its row's left edge (release 5.81, decision L9), or "" for none."""
+    return tokens.colour(PRIORITY_EDGES[t.priority]) if t is not None and is_open(t) and t.priority in PRIORITY_EDGES else ""
+
+
+class _EdgeFrame(QFrame):
+    """A row with its task's priority down its left edge, as the browse window's lists have it."""
+
+    edge = ""
+
+    def paintEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        super().paintEvent(event)
+        if self.edge:
+            p = QPainter(self)
+            p.fillRect(0, 2, 3, self.height() - 4, QColor(self.edge))
+            p.end()
+
+
+class _Row(_EdgeFrame):
     """One Today item: a tick box and its line at rest; widened, a second line, state and due date, and Done and Remove while
     the pointer is on it. Clicking opens its detail."""
 
-    def __init__(self, panel: TodayPanel, item_id: int, task_id: str | None, title: str, sub: str, due: str, state: str = "") -> None:
+    def __init__(self, panel: TodayPanel, item_id: int, task_id: str | None, title: str, sub: str, due: str, state: str = "",
+                 edge: str = "") -> None:
         super().__init__(objectName="tpRow")
+        self.edge = edge
         self.panel, self.item_id, self.task_id, self.title = panel, item_id, task_id, title
         self.setProperty("current", False)
         lay = QHBoxLayout(self)
@@ -374,7 +395,7 @@ class TodayPanel(QWidget):
     def open_panel(self) -> None:
         self.user_open = True
         self._hidden_for_full_screen = False
-        db.set_state(self.ctx.conn, OPEN_KEY, "1")
+        self.ctx.keep_state(OPEN_KEY, "1")
         self.hover.enabled = self.settings.hover
         self.hover.contract_ms = self.settings.contract_ms
         self.hover.hover_ms = self.settings.hover_ms if self.settings.hover_ms is not None else windows_hover_ms()
@@ -389,7 +410,7 @@ class TodayPanel(QWidget):
     def close_panel(self) -> None:
         self.user_open = False
         self._hidden_for_full_screen = False
-        db.set_state(self.ctx.conn, OPEN_KEY, "0")
+        self.ctx.keep_state(OPEN_KEY, "0")
         self._full_screen_timer.stop()
         self._day_timer.stop()
         self._hover_timer.stop()
@@ -466,7 +487,7 @@ class TodayPanel(QWidget):
                 # the list rows review joins quiet words (release 5.78).
                 state = "" if t is None or t.discarded else t.state
                 row = _Row(self, a.id, t.id if t else None, t.title if t else a.note, " · ".join(x for x in (since.rstrip(" ·"), where) if x),
-                           cell.text if cell else "", state)
+                           cell.text if cell else "", state, edge_of(t))
                 self.rows.append(row)
                 self._add(row)
         if not total:
@@ -496,14 +517,16 @@ class TodayPanel(QWidget):
         fold.setIcon(icon("chevron-down" if is_open else "chevron-right"))
         fold.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         fold.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        fold.clicked.connect(lambda: (db.set_state(self.ctx.conn, key, "0" if is_open else "1"), self.refresh()))
+        fold.clicked.connect(lambda: (self.ctx.keep_state(key, "0" if is_open else "1"), self.refresh()))
         self.extras.append(fold)
         self._add(fold)
         return is_open
 
-    def _add_line(self, text: str, when: str, links: list[tuple[str, str, Callable[[], object]]]) -> None:
-        """A row under a folded heading: its words, its date, and each link's name, tooltip and what it does."""
-        line = QFrame(objectName="tpRow")
+    def _add_line(self, text: str, when: str, links: list[tuple[str, str, Callable[[], object]]], edge: str = "") -> None:
+        """A row under a folded heading: its words, its date, each link's name, tooltip and what it does, and its task's
+        priority as its edge."""
+        line = _EdgeFrame(objectName="tpRow")
+        line.edge = edge
         lay = QHBoxLayout(line)
         lay.setContentsMargins(4, 2, 4, 2)
         lay.setSpacing(4)
@@ -528,7 +551,7 @@ class TodayPanel(QWidget):
         for t in due:
             links = [] if t.id in on_today else [("Add", "Put it on Today; the reminder stays until it's cleared", lambda i=t.id: self.browse.add_to_today(i))]
             links.append(("Clear", "Clear this reminder. Its status log records it.", lambda i=t.id: self.browse.clear_reminder(i, "Today")))
-            self._add_line(t.title, due_cell(t, today, DueDate(to_date(t.reminder), "Reminder"), use_due=False).text, links)
+            self._add_line(t.title, due_cell(t, today, DueDate(to_date(t.reminder), "Reminder"), use_due=False).text, links, edge_of(t))
 
     def _add_due_section(self, m: Model, today: date) -> None:
         mine = db.get_state(self.ctx.conn, TODAY_MINE_KEY) == "1"
@@ -541,7 +564,7 @@ class TodayPanel(QWidget):
             text = (key_dates.label(t.key_date, today) + " · " + task.title) if is_key_date else task.title
             cell = due_cell(task, today) if not is_key_date else None
             links = [] if is_key_date else [("Add", "Put it on Today", lambda i=task.id: self.browse.add_to_today(i))]
-            self._add_line(text, cell.text if cell else "", links)
+            self._add_line(text, cell.text if cell else "", links, edge_of(task))
 
     def _add_done_section(self, m: Model, today: date) -> None:
         done = m.done_on(today)
@@ -739,7 +762,7 @@ class TodayPanel(QWidget):
             return Place()
 
     def _save_place(self) -> None:
-        db.set_state(self.ctx.conn, PLACE_KEY, json.dumps(self.place_.to_json()))
+        self.ctx.keep_state(PLACE_KEY, json.dumps(self.place_.to_json()))
 
     def _screen(self):
         screens = QGuiApplication.screens()

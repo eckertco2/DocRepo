@@ -18,6 +18,74 @@ from docrepo.safe_fs import SafeFS
 from docrepo.sample import load_sample
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
+TESTS = Path(__file__).resolve().parent
+#: Each run's temporary folders go in a folder of its own here (release 5.88), so two runs at once don't clear each other's.
+TEMP_ROOT = TESTS.parent / ".pytest_tmp"
+#: The imports that mark a test module as one that uses Qt.
+GUI_IMPORTS = ("docrepo.ui", "PySide6")
+
+
+def is_gui_module(path: Path) -> bool:
+    """True when a test module uses Qt: it imports docrepo.ui or PySide6 (anywhere in it, read from its syntax tree, so
+    a sample in a string doesn't count), or sets QT_QPA_PLATFORM."""
+    import ast
+
+    try:
+        text = path.read_text(encoding="utf-8")
+        tree = ast.parse(text)
+    except (OSError, SyntaxError):
+        return False
+    if "QT_QPA_PLATFORM" in text:
+        return True
+    for node in ast.walk(tree):
+        names = ([a.name for a in node.names] if isinstance(node, ast.Import)
+                 else [node.module or ""] + [f"{node.module}.{a.name}" for a in node.names] if isinstance(node, ast.ImportFrom)
+                 else [])
+        if any(n == g or n.startswith(g + ".") for n in names for g in GUI_IMPORTS):
+            return True
+    return False
+
+
+def _without_gui(config: pytest.Config) -> bool:
+    """True when the run asks for no Qt tests (``-m "not gui"``), so their modules needn't even be imported."""
+    return " ".join((config.option.markexpr or "").split()) == "not gui"
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """A temporary folder per run, ``.pytest_tmp\\run-<process id>``, unless ``--basetemp`` names one. Runs' folders
+    older than a day are cleared, as pytest's own numbered folders are."""
+    if config.option.basetemp:
+        return
+    import os
+    import shutil
+    import time
+
+    TEMP_ROOT.mkdir(exist_ok=True)
+    for old in TEMP_ROOT.glob("run-*"):
+        try:
+            if time.time() - old.stat().st_mtime > 86400:
+                shutil.rmtree(old, ignore_errors=True)
+        except OSError:
+            pass
+    config.option.basetemp = str(TEMP_ROOT / f"run-{os.getpid()}")
+
+
+def pytest_ignore_collect(collection_path: Path, config: pytest.Config) -> bool | None:
+    """With ``-m "not gui"``, a module that uses Qt isn't collected, so Qt is never imported and the run is quick."""
+    if collection_path.suffix == ".py" and collection_path.name.startswith("test_") and _without_gui(config):
+        return True if is_gui_module(collection_path) else None
+    return None
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Mark each test in a module that uses Qt as ``gui``."""
+    seen: dict[Path, bool] = {}
+    for item in items:
+        path = Path(str(item.fspath))
+        if path not in seen:
+            seen[path] = is_gui_module(path)
+        if seen[path]:
+            item.add_marker(pytest.mark.gui)
 
 
 def example_block(name: str) -> str:

@@ -7,7 +7,8 @@ The rows come from ``docrepo/timeline.py``; this module paints them and handles 
 a row that folds (its arrow, Right and Left, or Collapse a level and Expand a level), with a summary bar over its
 subtasks. The scale and the plant events lane (``TimelineHead``) stay at the top while the rows scroll. Clicking a row
 shows its dates, hours and people, on a line under the chart so nothing moves (decision 292; a card above it in the Classic
-look); double-clicking a bar or a name asks for Quick edit (``quick_edit``); Enter or Open task opens the task. Plan mode (P) lets a one-time task's bar be moved, or its
+look); double-clicking a bar or a name asks for Edit task (``edit_task``), as a double-click does everywhere since release
+5.91, and Q for Quick edit (``quick_edit``); Enter or Open task opens the task. Plan mode (P) lets a one-time task's bar be moved, or its
 ends stretched, and an undated task's name be dragged onto the chart for a working week; each drop is sent as
 ``set_dates`` for the browse window to save and log, and Ctrl+Z sends the step back. It takes the middle and right panes
 together.
@@ -28,10 +29,10 @@ together (decision 232). Bars are one colour unless Display says otherwise, with
 line under the bar for its subtasks' span (decision 234).
 
 What-ifs (release 5.64, decisions 226 to 228 and 290; ``docrepo/whatif.py``) are on the page only. One is a named list of things
-done that changes no task: Take off, from the line under the chart or the spotlight's card, and the drags, which need no Plan
+done that changes no task: Remove (release 5.91's word for it), from the line under the chart or the spotlight's card, and the drags, which need no Plan
 mode in one, including a whole parent's subtasks' line, in whole weeks. The browse window works out what it would do
 (``picture_of``), and the chart and Capacity draw that: a moved bar outlined where it was, a task taken off as a dashed row with
-Put back, the team chart's real columns outlined behind, and the sentence beside the real plan's. A strip says which what-if is
+Add back, the team chart's real columns outlined behind, and the sentence beside the real plan's. A strip says which what-if is
 showing and that no task has changed, with Undo, Review and apply, and the way back. Quick edit and Update aren't offered in one,
 as they'd change the real task.
 """
@@ -405,12 +406,14 @@ class TimelineHead(QWidget):
 
 class TimelineChart(QWidget):
     """The rows: a name column, then a track per row with its bars placed by date. ``picked`` sends the task a click
-    selects; ``opened`` the one to open (Enter); ``fold`` a row whose subtasks open or close; ``quick_edit`` the task and
-    where its bar is, for a double-click (decision 138); ``dropped`` a Plan mode drag's task, Start and Due, and how."""
+    selects; ``opened`` the one to open (Enter); ``fold`` a row whose subtasks open or close; ``edit_asked`` the task a
+    double-click asks Edit task for (release 5.91); ``quick_edit`` the task and where its bar is, for Q (decision 138, on a
+    double-click until release 5.91); ``dropped`` a Plan mode drag's task, Start and Due, and how."""
 
     picked = Signal(str)
     opened = Signal(str)
     fold = Signal(str, bool)
+    edit_asked = Signal(str)
     quick_edit = Signal(str, QRect)
     dropped = Signal(str, object, object, str)
     #: A key date's drop in Plan mode (release 5.31): its task, its ID, its new first and last day, and its kind.
@@ -1053,14 +1056,26 @@ class TimelineChart(QWidget):
         r, what = self._hit(event.position().x(), event.position().y())
         if r is None or what == "fold":
             return
-        top = int(event.position().y() // self.ROW_H) * self.ROW_H
-        bar = self.bar_rect(r, top) or QRectF(0, top, self.scale.NAME_W, self.ROW_H)
         self.picked.emit(r.task)
-        self.quick_edit.emit(r.task, QRect(self.mapToGlobal(bar.topLeft().toPoint()), bar.size().toSize()))
+        self.edit_asked.emit(r.task)  # Edit task, as a double-click is everywhere (release 5.91); Q is Quick edit
+
+    def quick_rect(self, task_id: str) -> QRect | None:
+        """Where a row's bar is on the screen, or its name when it has none, for Quick edit to open beside."""
+        i = next((n for n, r in enumerate(self.rows) if r.task == task_id), None)
+        if i is None:
+            return None
+        top = i * self.ROW_H
+        bar = self.bar_rect(self.rows[i], top) or QRectF(0, top, self.scale.NAME_W, self.ROW_H)
+        return QRect(self.mapToGlobal(bar.topLeft().toPoint()), bar.size().toSize())
 
     def keyPressEvent(self, event) -> None:  # noqa: N802 - the arrows move and fold, Enter opens
         key = event.key()
         ids = [r.task for r in self.rows]
+        if key == Qt.Key.Key_Q and not event.modifiers() and self.sel in ids:  # Quick edit's key (release 5.91)
+            near = self.quick_rect(self.sel)
+            if near is not None:
+                self.quick_edit.emit(self.sel, near)
+            return
         if not ids or key not in (Qt.Key.Key_Up, Qt.Key.Key_Down, Qt.Key.Key_Left, Qt.Key.Key_Right, Qt.Key.Key_Return, Qt.Key.Key_Enter):
             super().keyPressEvent(event)
             return
@@ -1170,6 +1185,7 @@ class TimelineView(QWidget):
 
     open_task = Signal(str)
     update_task = Signal(str)
+    edit_task = Signal(str)
     quick_edit = Signal(str, QRect)
     set_dates = Signal(str, object, object, str)
     #: A key date's new dates (release 5.31, decision 152): its task, its ID, its Start and End (YYYY-MM-DD or None), and what
@@ -1247,7 +1263,7 @@ class TimelineView(QWidget):
         lay.addWidget(QLabel("Timeline", objectName="paneTitle"))
         lay.addWidget(Help("Open tasks over the coming weeks: a row per project, folded to start with, a bar from Start to Due, "
                            "a diamond for a deadline and a dot for each occurrence of a routine task. Parked and closed tasks are "
-                           "left out. Click a row to see its dates and people; double-click a bar or a name for Quick edit."
+                           "left out. Click a row to see its dates and people; double-click a bar or a name for Edit task, or press Q for Quick edit."
                            + ("" if LOOK.classic else " Under it, Capacity has each person's load on the same dates: click a week "
                               "to see which tasks fill it.")))
         self.head = TimelineHead(self.scale)
@@ -1257,6 +1273,7 @@ class TimelineView(QWidget):
         self.chart.opened.connect(self.open_task)
         self.chart.fold.connect(self.set_open)
         self.chart.quick_edit.connect(self._chart_quick_edit)
+        self.chart.edit_asked.connect(self._chart_edit)
         self.chart.dropped.connect(self._dropped)
         self.chart.dropped_key.connect(self._dropped_key)
         self.chart.dropped_parent.connect(self._dropped_parent)
@@ -1280,10 +1297,11 @@ class TimelineView(QWidget):
         self.open_button = QPushButton("Open task", objectName="primary" if LOOK.classic else "")
         self.open_button.clicked.connect(lambda: self.sel and self.open_task.emit(self.sel))
         self.quick_button = QPushButton("Quick edit")
+        self.quick_button.setToolTip("Its dates and people in a line of words (Q)")
         self.quick_button.clicked.connect(self._quick_from_card)
         self.update_button = QPushButton("Update")
         self.update_button.clicked.connect(lambda: self.sel and self.update_task.emit(self.sel))
-        self.off_button = QPushButton("Take off")  # the page's: in a what-if, or starting one (release 5.64)
+        self.off_button = QPushButton("Remove")  # the page's: in a what-if, or starting one (release 5.64)
         self.off_button.setToolTip("See the load without it and everything under it, in a what-if. Your tasks don't change.")
         self.off_button.clicked.connect(lambda: self.sel and (self.put_back if self.sel in self.chart.off else self.take_off)(self.sel))
         self.off_button.hide()
@@ -2206,8 +2224,15 @@ class TimelineView(QWidget):
         if self.real is not None or self.model is not None:
             self.render(self.real or self.model, self.today)
 
+    def _chart_edit(self, task_id: str) -> None:
+        """A double-click asks for Edit task (release 5.91), but not in a what-if, where it would change the real task."""
+        if self.cur is not None:
+            self.said.emit("Edit task changes the task itself, so it isn't offered in a what-if. Drag its bar instead.")
+            return
+        self.edit_task.emit(task_id)
+
     def _chart_quick_edit(self, task_id: str, near: QRect) -> None:
-        """A double-click asks for Quick edit, but not in a what-if, where it would change the real task (decision 292)."""
+        """Q asks for Quick edit, but not in a what-if, where it would change the real task (decision 292)."""
         if self.cur is not None:
             self.said.emit("Quick edit changes the task itself, so it isn't offered in a what-if. Drag its bar instead.")
             return
@@ -2624,7 +2649,7 @@ class TimelineView(QWidget):
             path = esc(" › ".join(m.task(x).title for x in chain))
             if len(chain) >= 2 and chain[-1] not in off:  # its trial, say, under the project: take the whole of it off (the mock's)
                 parent = m.task(chain[-1]).title
-                path += f' · <a href="off:{esc(chain[-1])}">Take off {esc(parent if len(parent) <= 28 else parent[:27] + "…")}</a>'
+                path += f' · <a href="off:{esc(chain[-1])}">Remove {esc(parent if len(parent) <= 28 else parent[:27] + "…")}</a>'
             words = m.task(task).title if task in m.tasks else task
             line = QLabel(f'<a href="task:{esc(task)}">{esc(words)}</a>' + (f'<br><span style="color:{MUTED}; font-size:{tokens.CAPTION}pt">{path}</span>' if path else ""))
             line.setTextFormat(Qt.TextFormat.RichText)
@@ -2634,7 +2659,7 @@ class TimelineView(QWidget):
             amount.setFont(tokens.numeric_font())
             grid.addWidget(amount, i, 1, Qt.AlignmentFlag.AlignRight)
             if task in m.tasks and (task in off or is_open(m.task(task))):  # decision 233: the card can take a task off
-                act = QLabel(f'<a href="back:{esc(task)}">Put back</a>' if task in off else f'<a href="off:{esc(task)}">Take off</a>')
+                act = QLabel(f'<a href="back:{esc(task)}">Add back</a>' if task in off else f'<a href="off:{esc(task)}">Remove</a>')
                 act.setTextFormat(Qt.TextFormat.RichText)
                 act.setToolTip("Put it back in this what-if" if task in off else "See the load without it and everything under it, in a what-if. Your tasks don't change.")
                 act.linkActivated.connect(self._card_link)
@@ -2824,7 +2849,7 @@ class TimelineView(QWidget):
         if not LOOK.classic:
             off = t is not None and t.id in self.chart.off
             self.off_button.setVisible(t is not None and (off or is_open(t)))
-            self.off_button.setText("Put back" if off else "Take off")
+            self.off_button.setText("Add back" if off else "Remove")
             self._foot(t)
             return
         self.card.setVisible(t is not None or LOOK.show_help)  # no card, and no sentence about it, until a row is picked

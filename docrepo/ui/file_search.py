@@ -22,7 +22,6 @@ from docrepo import task_view_pages as pages
 from docrepo.captures import capture_folder
 from docrepo.overview import Record
 from docrepo.search import extracted_text
-from docrepo.ui import tokens
 from docrepo.ui.result_list import ResultList, Row
 from docrepo.ui.style import page_css, style_sheet
 

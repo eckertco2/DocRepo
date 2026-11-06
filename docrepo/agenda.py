@@ -24,7 +24,7 @@ class AgendaError(ValueError):
 
 
 def _exists(conn: sqlite3.Connection, table: str, item_id: str) -> bool:
-    return conn.execute(f"SELECT 1 FROM {table} WHERE id = ?", (item_id,)).fetchone() is not None
+    return conn.execute(f"SELECT 1 FROM {table} WHERE id = ?", (item_id,)).fetchone() is not None  # noqa: S608 - a column or table name of DocRepo's own; values are parameters
 
 
 def add_item(conn: sqlite3.Connection, *, subject: str | None, target: str, note: str, added: str, added_by: str) -> int:
@@ -89,3 +89,15 @@ def close_item(conn: sqlite3.Connection, item_id: int, *, how: str, closed: str,
         if row["closed"]:
             raise AgendaError(f"Agenda item {item_id} is already closed.")
         conn.execute("UPDATE agenda_items SET closed = ?, how = ?, closed_by = ? WHERE id = ?", (closed, how, closed_by, item_id))
+
+
+def reopen_item(conn: sqlite3.Connection, item_id: int) -> None:
+    """Undo a close (release 5.91): the item is open again, as it was. Its task's status log reads the agenda's own rows, so
+    the closing line goes with it."""
+    with transaction(conn):
+        row = conn.execute("SELECT closed FROM agenda_items WHERE id = ?", (item_id,)).fetchone()
+        if row is None:
+            raise AgendaError(f"There's no agenda item {item_id}.")
+        if not row["closed"]:
+            raise AgendaError(f"Agenda item {item_id} is open already.")
+        conn.execute("UPDATE agenda_items SET closed = NULL, how = NULL, closed_by = NULL WHERE id = ?", (item_id,))

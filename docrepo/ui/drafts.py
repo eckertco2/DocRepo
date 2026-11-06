@@ -212,7 +212,7 @@ def restore_files(c: CaptureWindow, draft_id: str, data: dict[str, Any]) -> list
                 continue
             if p.get("pasted"):
                 fs = c.ctx.fs
-                a = Attachment(str(p.get("name") or record.get("name")), save=lambda target, d=raw: fs.write_picture(target, d), size=len(raw))
+                a = Attachment(str(p.get("name") or record.get("name")), save=lambda target, d=raw, fs=fs: fs.write_picture(target, d), size=len(raw))
             else:
                 a = Attachment(str(p.get("name") or record.get("name")), size=len(raw), data=raw)
             part = Part(str(p.get("kind") or "attachment"), str(p.get("name") or record.get("name")), attachment=a, size=len(raw), pasted=bool(p.get("pasted")))

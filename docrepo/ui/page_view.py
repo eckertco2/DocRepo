@@ -165,3 +165,32 @@ class PageView(QTextBrowser):
             self._layout = now
             self.layout_changed.emit()
         self._layout = now
+
+
+class FitPageView(PageView):
+    """A part of the task page as tall as its HTML, with no scroll bar of its own (release 5.25; here since 5.84, for
+    the header's parts too)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setObjectName("fitView")
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setOpenLinks(False)
+        self.setOpenExternalLinks(False)
+        self.document().documentLayout().documentSizeChanged.connect(lambda _: self._fit())
+
+    def set_margins(self, left: int, top: int, right: int, bottom: int, inner: int = 4) -> None:
+        """Margins round the HTML on each side, rather than the document's one margin for all four (release 5.84): the
+        header's parts keep the page's left edge without the document margin's height above and below each."""
+        self.document().setDocumentMargin(inner)
+        self.setViewportMargins(max(0, left - inner), max(0, top - inner), max(0, right - inner), max(0, bottom - inner))
+        self._fit()
+
+    def page_width(self) -> int:
+        return self.viewport().width() - 2 * round(self.document().documentMargin())
+
+    def _fit(self) -> None:
+        h = int(self.document().size().height()) + (self.height() - self.viewport().height())
+        if h != self.height():
+            self.setFixedHeight(max(h, 8))

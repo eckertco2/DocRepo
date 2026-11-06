@@ -16,17 +16,17 @@ import sys
 import threading
 from collections.abc import Callable
 from ctypes import wintypes
-from datetime import datetime, time
+from datetime import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QAbstractNativeEventFilter, QLockFile, QObject, QRectF, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QFont, QIcon, QPainter, QPixmap
-from PySide6.QtWidgets import QApplication, QInputDialog, QMenu, QSystemTrayIcon
+from PySide6.QtWidgets import QApplication, QInputDialog, QMenu, QMessageBox, QSystemTrayIcon
 
 from docrepo import backup, capacity, db, diagnose, edits, hotkey, notes_page, people, prompts, search
 from docrepo.config import Settings
-from docrepo.dates import long_date
+from docrepo.dates import long_date, stamp
 from docrepo.model import Model
 from docrepo.pages import write_pages
 from docrepo.panel_rules import OPEN_KEY
@@ -385,6 +385,7 @@ class CaptureApp(QObject):
             self.notify("Backup", result.message())
         else:
             log.warning("backup failed: %s", result)
+            backup.record_failure(self.ctx.conn, stamp(self.ctx.now()), f"The backup couldn't be made. {result}")  # for Settings (5.89)
             self.notify("Backup", f"The backup couldn't be made. {result}")
         self.browse.settings_view.show_backup_status()
 
@@ -440,7 +441,13 @@ def run(data_root: Path, settings: Settings, fs: SafeFS, browse: bool = False) -
             return 0
         print("DocRepo is already running, or its lock file is stuck:", data_root / LOCK_FILE, file=sys.stderr)
         return 1
-    conn = db.connect(fs, data_root)
+    try:
+        conn = db.connect(fs, data_root)
+    except db.DatabaseError as e:  # newer, not DocRepo's, or damaged (release 5.88): said in a window, as pythonw has no console
+        log.error("docs.db can't be used: %s", e)
+        QMessageBox.critical(None, "DocRepo can't start", str(e))
+        lock.unlock()
+        return 1
     prompts.write_defaults(fs, data_root)
     ctx = AppContext(conn, data_root, fs, settings)
     if not QSystemTrayIcon.isSystemTrayAvailable():

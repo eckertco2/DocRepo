@@ -34,7 +34,7 @@ def everything(conn) -> str:
     """All that a what-if must never change."""
     out = []
     for table in ("tasks", "work_calendar", "status_log", "task_dates", "task_ties", "task_parents", "app_state"):
-        out.append(json.dumps([tuple(r) for r in conn.execute(f"SELECT * FROM {table} ORDER BY 1, 2")], default=str))
+        out.append(json.dumps([tuple(r) for r in conn.execute(f"SELECT * FROM {table} ORDER BY 1, 2")], default=str))  # noqa: S608 - a column or table name of DocRepo's own; values are parameters
     return "\n".join(out)
 
 

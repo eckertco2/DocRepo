@@ -34,7 +34,7 @@ def conn():
     c.close()
 
 
-def board(conn, f: priorities.BoardFilter = priorities.BoardFilter()) -> dict[str, list[str]]:
+def board(conn, f: priorities.BoardFilter = priorities.BoardFilter()) -> dict[str, list[str]]:  # noqa: B008 - frozen
     return {col.name: col.ids for col in priorities.columns(Model(conn), TODAY, f)}
 
 

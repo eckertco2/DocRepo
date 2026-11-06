@@ -14,7 +14,7 @@ from PySide6.QtGui import QFontInfo, QTextCursor, QTextDocument  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from docrepo import captures, items, markup, notes_page  # noqa: E402
+from docrepo import items, markup, notes_page  # noqa: E402
 from docrepo.config import Settings  # noqa: E402
 from docrepo.model import Model  # noqa: E402
 from docrepo.notes_page import add_block, lines_of  # noqa: E402

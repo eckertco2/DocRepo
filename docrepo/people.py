@@ -33,8 +33,8 @@ def _check_hours(hours: float | None) -> float | None:
 
 
 def _set_list(conn: sqlite3.Connection, table: str, key: str, owner: object, column: str, values: Sequence[str]) -> None:
-    conn.execute(f"DELETE FROM {table} WHERE {key} = ?", (owner,))
-    conn.executemany(f"INSERT INTO {table} ({key}, pos, {column}) VALUES (?, ?, ?)",
+    conn.execute(f"DELETE FROM {table} WHERE {key} = ?", (owner,))  # noqa: S608 - a column or table name of DocRepo's own; values are parameters
+    conn.executemany(f"INSERT INTO {table} ({key}, pos, {column}) VALUES (?, ?, ?)",  # noqa: S608 - a column or table name of DocRepo's own; values are parameters
                      [(owner, i, v.strip()) for i, v in enumerate(values) if v.strip()])
 
 
@@ -88,7 +88,7 @@ def update_person(
             conn.execute("UPDATE people SET email = ? WHERE id = ?", (_check_email(email), person_id))  # type: ignore[arg-type]
         for column, value in (("person_group", group), ("role", role)):
             if value is not _UNSET:
-                conn.execute(f"UPDATE people SET {column} = ? WHERE id = ?", (str(value or "").strip() or None, person_id))
+                conn.execute(f"UPDATE people SET {column} = ? WHERE id = ?", (str(value or "").strip() or None, person_id))  # noqa: S608 - a column or table name of DocRepo's own; values are parameters
         if name is not None:
             conn.execute("UPDATE people SET name = ? WHERE id = ?", (_clean(name, "person"), person_id))
         if aliases is not None:

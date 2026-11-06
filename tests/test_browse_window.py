@@ -128,6 +128,9 @@ def test_each_view_selects_its_first_item(browse):
     assert browse.view == "timeline" and not browse.detail.isVisible() and len(browse.timeline.cap_rows.lines) == 6
     browse.set_view("settings")
     assert browse.middle.currentWidget() is browse.settings_view and browse.settings_view.hotkey.text() == "Ctrl+Shift+Space"
+    from docrepo import __version__
+
+    assert browse.settings_view.findChild(QLabel, "version").text() == f"DocRepo {__version__}"  # release 5.87
 
 
 def test_opening_a_hidden_task_turns_its_filter_on(browse):
@@ -587,8 +590,38 @@ def test_back_up_now_from_settings(browse, ctx, tmp_path):
     assert "backup_dir" in view.save()
     assert "Backups:</b> none yet" in view.backup_status.text()
     view.backup_now()
-    assert browse.status.text().startswith("Backed up the database (docs-1.db)")
+    assert browse.status.text().startswith("Backed up the database (docs-1.db, checked)")
     assert (tmp_path / "Backups" / "Database" / "docs-1.db").exists() and "the last was on" in view.backup_status.text()
+    assert "The last try" not in view.backup_status.text()
+
+
+def test_a_backup_problem_shows_in_settings(browse, ctx, tmp_path, monkeypatch):
+    """Release 5.89: a copy that fails its check is kept as the last try's problem, on the backup card, until a good one."""
+    from docrepo import backup
+
+    view = browse.settings_view
+    browse.set_view("settings")
+    view.backup.setText(str(tmp_path / "Backups"))
+    view.save()
+    monkeypatch.setattr(backup, "quick_check", lambda conn: "page 7 is never used")
+    view.backup_now()
+    assert "wasn't kept" in browse.status.text() and "The last try" in view.backup_status.text()
+    assert "failed SQLite&#x27;s check" in view.backup_status.text() or "failed SQLite's check" in view.backup_status.text()
+    monkeypatch.undo()
+    view.backup_now()
+    assert "The last try" not in view.backup_status.text()
+
+
+def test_check_the_data_root_from_settings(browse, ctx):
+    """Release 5.89: Settings' Check the data root lists what's missing, keeps the list in System, and changes nothing."""
+    browse.set_view("settings")
+    dialog = browse.settings_view.check_data_root(show=False)
+    try:
+        assert dialog.windowTitle() == "Data root check" and dialog.text.toPlainText().startswith("# Data root check")
+        assert next(ctx.data_root.glob("System/check-*.md")).exists()
+        assert browse.status.text().startswith("Checked the data root:")
+    finally:
+        dialog.deleteLater()
 
 
 def test_the_startup_shortcut_button(browse, ctx, tmp_path, monkeypatch):
@@ -809,7 +842,7 @@ def test_the_task_page_bar_and_its_links(browse, monkeypatch):
     browse.actions_layout.setGeometry(QRect(0, 0, 900, 40))  # the bar at a usual pane's width
     buttons = browse.actions.findChildren(QPushButton)
     more = buttons[-1]
-    assert more.accessibleName() == "More" and more.property("flowEnd") and more.menu().actions()[0].text() == "New subtask\tT"
+    assert more.accessibleName() == "More" and more.property("flowEnd") and more.menu().actions()[0].text() == "New task under this one\tT"
     assert len({b.geometry().center().y() for b in buttons}) == 1 and more.geometry().right() == 899 - 16  # one row, centred, More at its end
     add_to = next(b for b in buttons if b.text() == "Add to").menu().actions()
     assert add_to[0].text().startswith("Today") and add_to[-1].text() == "Someone else or another task…"
@@ -929,7 +962,8 @@ def test_a_capture_s_edit_shows_its_text_and_goes_to_its_block(browse, ctx):
     browse.edit_goto.click()
     notes = browse.task_pane.notes
     assert browse.editing is None and browse.sel == ("task", "T000012") and browse.detail_stack.currentIndex() == 2
-    assert notes.textCursor().block().text().endswith("· Note") and notes.kind(notes.textCursor().block()) == "caption"
+    at = notes.textCursor().block()  # at the block's first line, beside its mark (release 5.85)
+    assert at.text() == "Guard fitted." and notes.mark_of(at).text().endswith("· Note") and notes.ref_of(notes.mark_of(at)) == ("capture", r.capture_id)
 
 
 def test_release_59_people_labels_reference_fields_and_capacity(browse, ctx):
@@ -1034,3 +1068,34 @@ def test_the_page_view_draws_the_pages_pictures(qapp):
     view.setHtml('<img src="avatar:TB" width="20" height="20"> <img src="mark:cl" width="14" height="14">')
     assert view.document().resource(2, QUrl("avatar:TB")) is not None
     view.deleteLater()
+
+
+def test_the_header_s_groups_open_fold_and_are_remembered(browse):
+    """Release 5.84 (the task pane review's T2): closed groups share a row, an open one has its body, the status log is
+    behind the status card, the history folds after the notes, and what's open is kept per task."""
+    from docrepo import db
+
+    browse.go_task("T000001")
+    pane = browse.task_pane
+    header, g = pane.header, pane.header.groups
+    assert g["subtasks"].is_open and not g["when_who"].is_open and not g["files"].is_open and not g["details"].is_open
+    assert not g["key_dates"].present and not g["agenda"].present  # nothing in them
+    assert g["when_who"].head.parentWidget() is header.strip and g["subtasks"].head.parentWidget() is g["subtasks"]
+    assert "Installation" in header.text() and "Folder" not in header.text() and g["files"].label.text() == "5"
+    g["details"].toggle()
+    assert g["details"].is_open and g["details"].head.parentWidget() is g["details"] and "Folder" in header.text()
+    assert not header.log_open and "Imported from the Excel tracker" not in header.text()
+    header.status_fold.click()
+    assert header.log_open and "Imported from the Excel tracker" in header.text()
+    assert not pane.history.is_open and pane.history.label.text() == "16 captures"
+    pane.history.toggle()
+    assert pane.history.is_open and "On the notes page" in pane.bottom.toPlainText()
+    browse.go_task("T000008")
+    assert not g["details"].is_open and not pane.history.is_open and not header.log_open
+    browse.go_task("T000001")
+    assert g["details"].is_open and header.log_open and pane.history.is_open  # remembered per task
+    assert json.loads(db.get_state(browse.conn, "page_folds:T000001")) == {"details": True, "status_log": True, "history": True}
+    browse.on_link(QUrl("tab:files"))
+    assert g["files"].is_open and "Open in Task view" in header.text()
+    g["subtasks"].toggle()
+    assert g["subtasks"].head.parentWidget() is header.strip and "Rigging plan" not in header.text()

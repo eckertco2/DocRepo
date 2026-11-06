@@ -23,7 +23,7 @@ from docrepo.model import Model  # noqa: E402
 from docrepo.ui.browse_window import BrowseWindow  # noqa: E402
 from docrepo.ui.capture_window import CaptureWindow  # noqa: E402
 from docrepo.ui.context import AppContext  # noqa: E402
-from docrepo.ui.task_view import FOOT, PAGE, PAGE_FOOT  # noqa: E402
+from docrepo.ui.task_view import PAGE  # noqa: E402
 
 NOW = datetime(2026, 10, 8, 14, 10)
 TOP, SUB, LEAF = "T000001", "T000008", "T000012"  # Reactor impeller upgrade, its Installation, and that one's Rigging plan
@@ -286,7 +286,7 @@ def test_enter_on_a_note_opens_its_block_here(view, browse):
     QTest.keyClick(view.box, Qt.Key.Key_Return)
     notes = view.pane.notes
     assert view.kind == PAGE and view.pane.task_id == LEAF and view.scope == LEAF and view.query == "" and view.box.text() == ""
-    assert notes.textCursor().block() == caption(notes, "C000012") and browse.sel == before
+    assert notes.mark_of(notes.textCursor().block()) == caption(notes, "C000012") and browse.sel == before  # at the line under its mark (5.85)
 
 
 def test_a_note_taken_off_its_page_says_so(view):
@@ -314,16 +314,20 @@ def test_words_typed_on_the_page_open_the_page(view):
 # ---- what comes with it (decision 243) ----
 def test_the_whole_frame_comes_with_it(view):
     pane = view.page_pane()
-    assert pane.card.objectName() == "notesCard" and not pane.format_bar.isHidden() and not pane.table_button.isHidden() and not pane.menu_button.isHidden()
+    # The format bar shows while the caret is in the notes (release 5.83, R8); the menu is always there.
+    assert pane.card.objectName() == "notesCard" and pane.format_bar.isHidden() and pane.table_button.isHidden() and not pane.menu_button.isHidden()
+    pane._card_focus(True)
+    assert not pane.format_bar.isHidden() and not pane.table_button.isHidden()
     notes = on_page(view)
     new_line(notes, "[] Book the crane")
+    view.pane.summary.refresh()  # it reads the page a moment after typing; the first checklist line shows the summary (R8)
     assert "- [ ] Book the crane" in notes.page() and len(notes.checklist_blocks()) == 1 and view.pane.summary.isVisibleTo(view.pane)
 
 
 def test_the_notes_menu_in_this_window_has_no_day_headings_switch(view, browse):
     """Release 5.69: every page has day headings, so the switch is gone from the Notes menu here too."""
     on_page(view)
-    assert [a.text() for a in view.pane.menu_button.menu().actions() if a.text()] == ["Fold all headings", "Unfold all", "Page history…"]
+    assert [a.text() for a in view.pane.menu_button.menu().actions() if a.text()] == ["Fold all headings", "Unfold all", "Fold days older than two weeks", "Page history…"]
     assert Model(view.conn).uses_day_headings(TOP)
 
 

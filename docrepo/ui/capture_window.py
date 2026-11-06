@@ -22,6 +22,7 @@ Ported from the browse tool mockup's ``capture.js``; SPEC section 7 describes it
 from __future__ import annotations
 
 import json
+import sqlite3
 import logging
 import re
 from collections.abc import Callable
@@ -65,8 +66,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo import diagnose, drafts, items, key_dates, msg, notes_page, outlook, timeline
-from docrepo.dates import workday_numbers
+from docrepo import captures, diagnose, drafts, edits, items, key_dates, msg, notes_page, outlook, timeline
+from docrepo.dates import short, workday_numbers
 from docrepo.db import RECURRENCES, STATES
 from docrepo.extract import extract_text, to_unc
 from docrepo.layer0 import Part, size_text
@@ -76,12 +77,14 @@ from docrepo.model import TODAY, Model, is_person
 from docrepo.parse import Found, Known, Who, as_plant_event, parse_capture, quick_update
 from docrepo.prompts import capture_blocks, load_summary_types, prompt_text
 from docrepo.save import (
+    UNDONE,
     CaptureDraft,
     Attachment,
     EmailItem,
     FileRow,
     NewTaskFields,
     SaveError,
+    can_undo,
     default_description,
     email_layer0_line,
     email_rows,
@@ -104,7 +107,10 @@ from docrepo.ui.drop_target import DropOverlay, DropRead
 from docrepo.ui.icons import icon, icon_size, set_fold
 from docrepo.ui.items_panel import AgendaPanel, ItemCards, OperatorHighlighter, RefPopup, _drop, task_colour, where_text
 from docrepo.ui.keymap import KeyMapDialog
+from docrepo.ui.drop_target import MAX_DROP, too_big
+from docrepo.ui.explorer import show_in_explorer
 from docrepo.ui.look import LOOK, Help, KeyBadge, KeyTips, set_hints, tip
+from docrepo.ui.problems import Problems, ProblemsLine
 from docrepo.ui.mods_panel import ModsPanel
 from docrepo.ui.palette import Command, CommandPalette
 from docrepo.ui.rich_edit import KEYS as FORMAT_KEYS, FormatBar, RichEdit
@@ -115,7 +121,6 @@ from docrepo.ui.widgets import (
     Chip,
     ChipPicker,
     DateField,
-    FlowLayout,
     HoursField,
     InfoButton,
     Option,
@@ -154,8 +159,8 @@ DRAFT_NOTE = "The draft saves itself every 30 seconds."
 #: 300 ms, so that it isn't read in the middle of a word (release 5.52).
 ITEMS_WAIT_MS = 500
 #: The content text's placeholder: what to type, while the box is empty (decision 7).
-CONTENT_PLACEHOLDER = "Type a note. @name makes a task, #task files it on a task, ** says what a line is."
-MEETING_PLACEHOLDER = "Meeting notes. @name makes a task, #task files a line on a task, ** says what a line is."
+CONTENT_PLACEHOLDER = "Type a note. @name makes a task, #task files it on a task, ** says what a line is or fills a field: type ** for the list."
+MEETING_PLACEHOLDER = "Meeting notes. @name makes a task, #task files a line on a task, ** says what a line is: type ** for the list."
 #: The items' and the agenda's column, beside the content text.
 SIDE_WIDTH = 300
 #: The new look's shortest window: it grows with the content, up to most of the screen.
@@ -352,11 +357,11 @@ class _KeyDateLine(QFrame):
         bottom.addWidget(QLabel("to", objectName="hint"))
         bottom.addWidget(self.end)
         self.plant, self.deadline, self.done = QCheckBox("Plant activity"), QCheckBox("Deadline"), QCheckBox("Done")
-        for box, on, tip in ((self.plant, row.plant if row else False, "A major plant activity: a plant event of its own"),
+        for box, on, words in ((self.plant, row.plant if row else False, "A major plant activity: a plant event of its own"),
                              (self.deadline, row.deadline if row else False, "A hard deadline: a red diamond at its end"),
                              (self.done, row.done if row else False, "Done: off Today and the lists")):
             box.setChecked(on)
-            box.setToolTip(tip)
+            box.setToolTip(words)
             box.toggled.connect(lambda _: self.changed.emit())
             bottom.addWidget(box)
         bottom.addStretch()
@@ -567,8 +572,16 @@ class CaptureWindow(QWidget):
         self.mods.back.connect(lambda: self.show_mods(False))
         self.pages.addWidget(self.mods)
 
-        b = self.body
         # ---- row 1: what the capture is, Today and Agenda, then Meeting notes, Expand and the mods log ----
+        self._build_type_row()
+        # ---- row 2: the task picker, with State beside it for an update, or the meeting's name ----
+        self._build_task_row()
+        # ---- the title and the content text on the left; the agenda and the items beside them (M0042, release 5.8) ----
+        self._build_editor()
+
+    def _build_type_row(self) -> None:
+        """Row 1: what the capture is, Today and Agenda, then Meeting notes, Expand and the mods log (part of ``_build``, release 5.95)."""
+        b = self.body
         row1 = QHBoxLayout()
         row1.setSpacing(8)
         types_box = self.types_box = QWidget(objectName="typeStrip")
@@ -626,7 +639,10 @@ class CaptureWindow(QWidget):
         b.addLayout(row1)
         b.addWidget(types_note)
         b.addWidget(agenda_note)
-        # ---- row 2: the task picker, with State beside it for an update, or the meeting's name ----
+
+    def _build_task_row(self) -> None:
+        """Row 2: the task picker, with State beside it for an update, or the meeting's name (part of ``_build``, release 5.95)."""
+        b = self.body
         row2 = QHBoxLayout()
         row2.setSpacing(8)
         self.task_button = QPushButton()
@@ -668,7 +684,10 @@ class CaptureWindow(QWidget):
         b.addWidget(meet_note)
         self.meet_what.hide()
         self._meet_name_typed = False
-        # ---- the title and the content text on the left; the agenda and the items beside them (M0042, release 5.8) ----
+
+    def _build_editor(self) -> None:
+        """The title and the content text on the left; the agenda and the items beside them (M0042, release 5.8) (part of ``_build``, release 5.95)."""
+        b = self.body
         self.main = QWidget()
         self.main_layout = QBoxLayout(QBoxLayout.Direction.LeftToRight, self.main)
         self.main_layout.setContentsMargins(0, 0, 0, 0)
@@ -771,6 +790,7 @@ class CaptureWindow(QWidget):
         items_note = QLabel()
         self.item_cards.info_slot.insertWidget(1, InfoButton("items", items_note))
         self.item_cards.changed.connect(self._item_changed)
+        self.item_cards.open_capture.connect(lambda cid: self.ctx.open_capture_page(cid))  # release 5.93
         self.item_cards.go.connect(self._go_line)
         sl.addWidget(self.item_cards)
         sl.addWidget(items_note)
@@ -853,6 +873,9 @@ class CaptureWindow(QWidget):
         self.undo_clear.clicked.connect(self._undo_clear)
         self.undo_clear.hide()
         state.addWidget(self.undo_clear)
+        # The last save's problems, until they're opened (release 5.91, the review's F12).
+        self.problems_line = ProblemsLine(self.ctx.problem_log, show_in_explorer)
+        state.addWidget(self.problems_line)
         state.addStretch()
         status.addLayout(state)
         fl.addLayout(status, 1)
@@ -1436,13 +1459,23 @@ class CaptureWindow(QWidget):
             return
         self.agenda_panel.show_agenda(m, meeting, m.open_items_for(meeting) if meeting else [], self._discussed)
 
-    def _lands_under(self, m: Model) -> str:
-        """Where Save puts a note that's no capture on its task's page (release 5.69): the headings it goes under."""
+    def _lands_where(self, m: Model, name: str) -> str:
+        """Where Save puts a note that's no capture on its task's page (release 5.69; release 5.94's rule): the words after
+        "Save adds this". A heading of the note's that matches the page's last heading goes under it, and the sentence
+        says so; one that matches a heading higher up goes at the end, and the sentence says that too."""
         content, formatted = self.content.value()
         typed = items.store(content.strip(), self.names(), formatted)
         lines = notes_page.note_markup(typed, formatted, own=self.task)
-        _, under = notes_page.place_note(m.pages.get(self.task, ""), lines, self.ctx.now().date())
-        return and_list([f"<b>{esc(h)}</b>" for h in under]) or "today's heading"
+        _, under, landed = notes_page.place_note_where(m.pages.get(self.task, ""), lines, self.ctx.now().date())
+        if not landed:
+            return f"to the notes of {name}, under " + (and_list([f"<b>{esc(h)}</b>" for h in under]) or "today's heading")
+        last = [x for x in landed if x.how == "under"]
+        if last and len(last) == len(landed):
+            return f"to the notes of {name}, under {and_list([f'<b>{esc(x.words)}</b>' for x in last])}, the last heading there"
+        higher = [x for x in landed if x.how == "end" and x.higher_up]
+        aside = (f" ({and_list([f'a <b>{esc(x.words)}</b> heading' for x in higher])} {'is' if len(higher) == 1 else 'are'} higher up)"
+                 if higher else "")
+        return f"at the end of {name}'s notes{aside}"
 
     def _discussed(self, a: Any) -> bool:
         if a.id in self.agenda_ticks:
@@ -1504,7 +1537,9 @@ class CaptureWindow(QWidget):
             home = self._home_name()
             self.item_cards.show_items(self.reading, own, lambda it: where_text(it, home, self.names(), self.reading), self.names(),
                                        self._stripe)
-        self.item_cards.setVisible(not self.from_capture and (bool(self.item_cards.cards) or LOOK.show_help))
+        cards = self.item_cards
+        self.item_cards.setVisible(not self.from_capture and (bool(cards.cards or cards.unread_cards or cards.people_ticks or cards.before_notes)
+                                                              or LOOK.show_help))
         self._show_agenda()
         self.side.setVisible(not self.item_cards.isHidden() or not self.agenda_panel.isHidden())
         self.refresh()
@@ -1611,7 +1646,7 @@ class CaptureWindow(QWidget):
     def _item_changed(self, key: str, what: str, value: Any) -> None:
         """A card's change: it stays, even when its line is edited later."""
         self.item_ov.setdefault(key, {})[what] = value
-        if what == "off":
+        if what == "off" or key == items.PEOPLE_KEY:  # a new person's tick (release 5.92) changes who the items are for
             self.read_items()
         else:
             self.refresh()
@@ -1887,17 +1922,33 @@ class CaptureWindow(QWidget):
                 self.meet_name.setText(str(data["meeting_name"]))
                 self._meet_name_typed = True
 
-    def forget_draft(self) -> None:
-        """Once the capture is saved or cleared, its draft is done: its folder moves to System\\Drafts\\Done (decision 336)."""
+    def drop_if_untouched(self, task_id: str, opened_with: str) -> str:
+        """Discussed's Undo (release 5.91): the Update capture it opened goes, if it's still as it was opened, on that task,
+        with nothing typed or added. Returns "", or a sentence saying it stays because something was typed in it."""
+        if not self.isVisible() or self.task != task_id:
+            return ""
+        if self.content.toPlainText().strip() != opened_with.strip() or self.files or self.title.text().strip():
+            return " The update you started stays open in the capture window."
+        self.reset_draft()
+        self.forget_draft()
+        self._close_pin()
+        self.hide()
+        return ""
+
+    def forget_draft(self) -> str | None:
+        """Once the capture is saved or cleared, its draft is done: its folder moves to System\\Drafts\\Done (decision 336).
+        Returns its name in Done, for Save's Undo (release 5.91), or None when there was none."""
         self.draft_dirty = False
+        done = None
         if self.draft_id:
             try:
-                drafts.finish(self.ctx.fs, self.ctx.data_root, self.draft_id)
+                done = drafts.finish(self.ctx.fs, self.ctx.data_root, self.draft_id)
             except OSError as e:
                 log.warning("a finished draft's folder wasn't moved to Done: %s", type(e).__name__)
         self.draft_id, self._kept = None, None
         self.draft_label.setText(DRAFT_NOTE if LOOK.show_help else "")
         self._sync_drafts()
+        return done
 
     def clear(self) -> None:
         """Clear: a fresh capture, and no draft (decision 338). In the new look, Undo in the footer brings it back for ten
@@ -1935,7 +1986,7 @@ class CaptureWindow(QWidget):
 
     def show_keys(self) -> None:
         """F1: every key, in one list (mods log round 2, M0036)."""
-        KeyMapDialog(self, self.ctx.settings.hotkey).exec()
+        KeyMapDialog(self, self.ctx.settings.hotkey, items.syntax_rows(self.names())).exec()  # with Settings' reference fields
 
     # ---- Alt and the topic's letter (mods log round 2, M0036) ----
     def _alt_type(self, key: str) -> None:
@@ -2192,6 +2243,9 @@ class CaptureWindow(QWidget):
         # Items and meeting notes (release 5.8)
         self.ref_ids: dict[str, str] = {}  # names picked from the @ and # lists, with their IDs
         self.item_ov: dict[str, dict[str, Any]] = {}  # the cards' changes, by item key
+        self.captured_before: dict[int, tuple[str, str]] = {}  # an email a capture already holds (release 5.93), by the email
+        if hasattr(self, "item_cards"):
+            self.item_cards.show_captured_before([])
         self.agenda_ticks: dict[int, bool] = {}  # agenda items ticked or unticked by hand
         self._names = None
         self._meet_name_typed = False
@@ -2466,9 +2520,10 @@ class CaptureWindow(QWidget):
         targets = self._targets()
         if note and not new and t and not upd and not self.files and not self.summary.toPlainText().strip():
             # Text alone is no capture (release 5.69, the notes workspace plan's decision 345): it goes on the task's page.
-            parts.append(f"adds this to the notes of {name}, under {self._lands_under(m)}")
+            parts.append("adds this " + self._lands_where(m, name))
         elif note and not new:
-            parts.append(f"adds this to the raw text log of {name}" if t else "" if targets else "keeps this as an unfiled capture, to file later")
+            parts.append(f"keeps this as a capture on {name}, with its block on the notes page" if t else "" if targets
+                         else "keeps this as an unfiled capture, to file later")
         if note and new:
             parts.append("keeps this as reference information on the new task")
         if targets:
@@ -2590,6 +2645,13 @@ class CaptureWindow(QWidget):
         for p in paths:
             path = Path(p)
             if path.suffix.lower() == ".msg":
+                try:
+                    size = path.stat().st_size
+                except OSError:
+                    size = 0
+                if size > MAX_DROP:  # release 5.93: never read into memory
+                    self._fail(too_big(path.name, size) + ".", self.content)
+                    continue
                 self._read_emails(lambda path=path: [read_msg_file(path)], "reading a dropped .msg file")
                 continue
             try:
@@ -2695,9 +2757,33 @@ class CaptureWindow(QWidget):
         attachments or not: before, it went to the first kept part's, so an email with none had nothing to type in."""
         for row in email_rows(email):
             self._add_file(row, "outlook" if row.email else "email", focus=False)
+        self._note_captured_before(email)
         if focus:
             own = next((e for e in self.files if e.row.email is email), None)
             (own.email_desc if own and own.email_desc else self.content).setFocus()
+
+    def _note_captured_before(self, email: EmailItem) -> None:
+        """Release 5.93 (the review's F14): an email a capture already holds (the same sender, subject and sent minute) is
+        said in the Items panel, with a link to that capture. Nothing stops it: the owner may want it twice."""
+        found = captures.captured_before(self.ctx.conn, email.sender, email.subject, email.sent)
+        if not found:
+            return
+        cid, saved = found[-1]
+        m = self.ctx.model()
+        c = m.captures.get(cid)
+        on = m.tasks[t].title if c and (t := next(iter(m.capture_tasks(c)), None)) in m.tasks else "an unfiled capture"
+        day = short(date.fromisoformat(saved[:10]), self.ctx.now().date())
+        self.captured_before[id(email)] = (f"“{email.subject[:60]}” is already captured on {on}, {day}.", cid)
+        self._show_captured_before()
+
+    def _show_captured_before(self) -> None:
+        held = {id(e.row.email) for e in self.files if e.row.email}
+        self.captured_before = {k: v for k, v in self.captured_before.items() if k in held}
+        self.item_cards.show_captured_before(list(self.captured_before.values()))
+        cards = self.item_cards
+        cards.setVisible(not self.from_capture and (bool(cards.cards or cards.unread_cards or cards.people_ticks or cards.before_notes)
+                                                    or LOOK.show_help))
+        self.side.setVisible(not self.item_cards.isHidden() or not self.agenda_panel.isHidden())
 
     def _file_note(self, row: FileRow, doc_id: str | None, link: bool) -> str:
         """The line beside a row's name: where its file stays or goes, or what layer 0 made of it."""
@@ -3228,11 +3314,51 @@ class CaptureWindow(QWidget):
             found += trouble
         problems = (" Problems: " + " ".join(found)) if found else ""
         self.ctx.notify("Saved", message + problems)
+        if found:  # release 5.91: kept for the session, and shown until they're opened
+            folder = None
+            c = self.ctx.model().captures.get(result.capture_id) if result.capture_id else None
+            if c is not None:
+                folder = captures.capture_folder(self.ctx.data_root, c.id, c.saved)
+            self.ctx.problem_log.add(Problems(self.ctx.now(), message, found, folder))
+        self.problems_line.refresh()
+        # Save's Undo (release 5.91): for a capture that made or changed nothing else, its form is kept as a draft first, so
+        # Undo can discard the capture ("undone") and open the draft again. Nothing is deleted.
+        draft_id = self.draft_id if can_undo(result) and self.keep_draft(closing=True) else None
         self.reset_draft()
-        self.forget_draft()  # its draft, if it was one, is done: to System\Drafts\Done
+        done = self.forget_draft()  # its draft, if it was one, is done: to System\Drafts\Done
+        if draft_id and done:
+            result.undo = self._save_undo(result.capture_id, done, draft_id)
+            self._offer_undo(f"Saved {result.capture_id}.", result.undo)
         self._close_pin()
         self.hide()
         self.saved.emit(result)
+
+    def _save_undo(self, capture_id: str, done: str, draft_id: str) -> Callable[[], bool]:
+        """Save's Undo: the capture is discarded with the reason "undone", and its draft comes back from Done into the window.
+        Once only; False when it couldn't be undone, with why in the footer."""
+        used = []
+
+        def undo() -> bool:
+            if used:
+                return False
+            used.append(True)
+            try:
+                edits.discard_capture(self.ctx.conn, self.ctx.data_root, self.ctx.fs, capture_id, UNDONE, self.ctx.now(), off_edited_pages=True)
+            except (edits.EditError, OSError, sqlite3.Error) as e:
+                self.draft_label.setText(f"{capture_id} couldn't be undone: {e}")
+                return False
+            try:
+                drafts.bring_back(self.ctx.fs, self.ctx.data_root, done, draft_id)
+            except OSError as e:
+                self.draft_label.setText(f"{capture_id} is discarded, but its draft couldn't come back ({type(e).__name__}). "
+                                         "It's in System\\Drafts\\Done.")
+                return True
+            log.info("save undone: %s discarded, draft %s back", capture_id, draft_id)
+            self.open_draft(draft_id)
+            self.draft_label.setText(f"{capture_id} is undone: it's discarded, and your capture is back to save again.")
+            return True
+
+        return undo
 
 
 def read_msg_file(path: Path) -> EmailItem:

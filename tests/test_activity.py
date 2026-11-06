@@ -49,7 +49,7 @@ def test_what_this_week_shows(conn):
     assert all("2026-10-05" <= x.at[:10] <= "2026-10-08" for x in lines)
     by = {x.key: x for x in lines}
     # A new subtask is listed under its parent and is about itself.
-    rigging = next(x for x in lines if x.chip == "New subtask" and x.text == "Rigging plan")
+    rigging = next(x for x in lines if x.chip == "New task under this one" and x.text == "Rigging plan")
     assert (rigging.task, rigging.about, rigging.open) == ("T000008", "T000012", ("task", "T000012"))
     # An update says what it changed.
     vendor = next(x for x in lines if x.chip == "Update" and x.task == "T000009")
@@ -110,7 +110,7 @@ def test_markdown_and_agenda_notes(conn):
     assert md.startswith("## Activity, Mon 5 Oct to today\n\n### Reactor impeller upgrade\n")
     assert "- **Installation**\n  - 5 Oct, document: Installation procedure.docx changed." in md
     vendor = next(x for x in lines if x.chip == "Update" and x.task == "T000009")
-    rigging = next(x for x in lines if x.chip == "New subtask" and x.text == "Rigging plan")
+    rigging = next(x for x in lines if x.chip == "New task under this one" and x.text == "Rigging plan")
     unfiled = next(x for x in lines if x.task is None)
     items = dict(a.agenda_items(lines, {"l:" + vendor.key, "t:T000002", "l:" + rigging.key, "l:" + unfiled.key}))
     assert items["T000009"].startswith("Update, 7 Oct: Vendor drawings came in late") and "Due date moved to Fri 23 Oct." in items["T000009"]

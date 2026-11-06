@@ -148,6 +148,9 @@ class ChecklistSummary(QWidget):
     """The page's checklist lines, bound to them. ``folded`` says the summary folded or opened (by its arrow)."""
 
     folded = Signal(bool)
+    #: How many checklist lines the page has, each time the summary reads it (release 5.83: the task page shows the summary
+    #: only when there are some).
+    changed = Signal(int)
 
     def __init__(self, notes: NotesEdit, foldable: bool = True) -> None:
         super().__init__()
@@ -220,6 +223,7 @@ class ChecklistSummary(QWidget):
         total = len(items)
         self.total = total
         self.count.setText(f"{done} of {total} done" if total else "None yet: Ctrl+1 on the page, or Add item")
+        self.changed.emit(total)
         self.done_button.setText(("Hide done" if self.show_done else f"Show {done} done") if done else "")
         self.done_button.setVisible(bool(done) and not self.is_folded)
         shown = [(b, h) for b, h in items if self.show_done or b.blockFormat().marker() != MARKER.Checked]

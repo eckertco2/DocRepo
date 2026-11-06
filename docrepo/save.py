@@ -27,7 +27,7 @@ from docrepo.db import next_id, transaction
 from docrepo.extract import extract_text, file_info
 from docrepo.links import FOLDER_TEXT, NO_TEXT, is_folder, is_link, keeps_no_text
 from docrepo.model import TODAY, Model
-from docrepo.pages import write_pages
+from docrepo.pages import pages_touched, write_pages
 from docrepo.parse import ParseLabel, ParsePerson, Who, parse_capture
 from docrepo.safe_fs import SafeFS
 from docrepo.text import capture_title, first_sentence, plain_text
@@ -79,6 +79,8 @@ class EmailItem:
     #: Where Outlook keeps it (EntryID and the store's StoreID), to put its task's name on it as a category (release 5.33).
     entry_id: str = ""
     store_id: str = ""
+    #: Why it has no place, when matching it to Outlook's selection was refused as unsafe (release 5.93), for Save to say.
+    place_note: str = ""
 
     def text(self) -> str:
         """The email as it goes into the content text: its header lines, then its body."""
@@ -248,6 +250,22 @@ class SaveResult:
     #: the headings it went under (the day's, or the page's own with the note's headings' words).
     noted_on: str | None = None
     noted_under: list[str] = field(default_factory=list)
+    #: Save's Undo (release 5.91), set by the capture window when it can be undone (``can_undo``): it discards the capture
+    #: and opens its form again as a draft.
+    undo: Callable[[], bool] | None = field(default=None, repr=False)
+
+
+#: The reason a capture undone after its save is discarded with (release 5.91).
+UNDONE = "undone"
+
+
+def can_undo(r: SaveResult) -> bool:
+    """Whether Save's Undo can take a save back whole (release 5.91): a capture that made no task, changed no field, put
+    nothing on an agenda, made no items, wasn't split and discussed nothing. Discarding it then leaves nothing behind but
+    the capture in the Discarded view. A save that did more has no Undo: the owner's choice on what it should take back
+    is still to make."""
+    return bool(r.capture_id) and not (r.created_task or r.updated_task or r.changes or r.agenda_targets or r.items or r.parts
+                                       or r.discussed or r.noted_on or r.filed_capture or r.added_people)
 
 
 def meeting_case(model: Model, task_id: str | None) -> str:
@@ -395,6 +413,8 @@ def split_parts(draft: CaptureDraft, reading: items.Reading, read_part: Callable
                 it = next((x for x in reading.items if x.key == key), None)
                 if it is not None and it.line in moved and moved[it.line] - lead in mine:
                     out.item_overrides[mine[moved[it.line] - lead]] = dict(change)
+            if items.PEOPLE_KEY in draft.item_overrides:  # the new people unticked (release 5.92) hold for every part
+                out.item_overrides[items.PEOPLE_KEY] = dict(draft.item_overrides[items.PEOPLE_KEY])
         return out
 
     def empty(p: CaptureDraft) -> bool:  # only # headings, and no files: nothing to keep
@@ -599,6 +619,8 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
                 e = row.email
                 captures.add_email(conn, capture_id, position, file=msg_name(position) if e.msg_bytes is not None or e.save_msg else None,
                                    subject=e.subject, sender=e.sender, sent=e.sent, description=row.description.strip() or None)
+            # Where each is in Outlook (release 5.93), so filing the capture later can mark it with its task, as a save does.
+            captures.keep_email_places(conn, capture_id, [(f.email.entry_id, f.email.store_id) for f in draft.files if f.email])
             attachment_names: set[str] = set()
             for row in draft.files:
                 if not row.described:
@@ -618,7 +640,7 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
                     continue
                 link = is_link(row.path)  # a link is matched exactly; a path in any case, as Windows does
                 same = "original = ?" if link else "lower(original) = lower(?)"
-                existing = conn.execute(f"SELECT id FROM documents WHERE {same}", (row.path,)).fetchone()
+                existing = conn.execute(f"SELECT id FROM documents WHERE {same}", (row.path,)).fetchone()  # noqa: S608 - a column or table name of DocRepo's own; values are parameters
                 if existing:
                     doc = str(existing["id"])
                     conn.execute("UPDATE documents SET description = ? WHERE id = ?", (desc, doc))
@@ -652,7 +674,13 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
         if (capture_id or page_note) and reading:
             item_files, made, unused = _save_items(conn, settings, reading, names, content, formatted, via, capture_id, created or t, when, at,
                                                    person, home_is_new=bool(created or meeting_made))
-        noted_under = edits.add_note(conn, t, items.store(content, names, formatted), formatted, at) if page_note else []
+        noted_under = []
+        if page_note:
+            made_tasks = {r["id"]: r["created_task"] for r in conn.execute(
+                "SELECT id, created_task FROM captures WHERE id IN (%s)" % ",".join("?" * len(item_files)), [cid for cid, _, _ in item_files])  # noqa: S608 - a column or table name of DocRepo's own; values are parameters
+            } if item_files else {}
+            noted_under = edits.add_note(conn, t, items.store(content, names, formatted), formatted, at,
+                                         made=[(made_tasks[cid], items.store(text, names, f)) for cid, text, f in item_files if made_tasks.get(cid)])
         # Meeting notes: the agenda items the notes worked through close as Discussed.
         discussed = 0
         if agenda_task and capture_id:
@@ -660,6 +688,24 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
                 if draft.agenda_ticks.get(a.id, items.discussed(reading, a.subject) if reading else False):
                     agenda.close_item(conn, a.id, how="Discussed", closed=when, closed_by=capture_id)
                     discussed += 1
+        # capture.md is written before the transaction commits (release 5.89, the review's F3): it's the only place the
+        # content text is kept, so a write that fails rolls the whole save back, and the window keeps the capture.
+        if capture_id or item_files:
+            model = Model(conn)
+            if names.people != (now := _parse_people(model, settings)):  # someone was added: their @ is kept with their ID too
+                names = items.names_of(model, now, draft.refs)
+                full_content = "\n\n".join([items.store(content, names, formatted)] * bool(content)
+                                           + [markup.escape(e.text()) if formatted else e.text() for e in emails])
+            written = [(capture_id, full_content)] if capture_id else []
+            written += [(cid, items.store(block, names, block_formatted)) for cid, block, block_formatted in item_files]
+            for cid, text in written:
+                try:
+                    fs.makedirs(captures.capture_folder(data_root, cid, model.captures[cid].saved))
+                    captures.write_capture_md(fs, data_root, model, cid, text)
+                except OSError as e:
+                    log.warning("capture %s: capture.md not written (%s); the save is rolled back", cid, type(e).__name__)
+                    raise SaveError(f"capture.md couldn't be written ({type(e).__name__}), so nothing was saved. Your capture is "
+                                    "still here: try Save again in a moment.", "content") from e
 
     result = SaveResult(capture_id, created, t if is_upd else None, changes, added_people, "", agenda_targets=targets,
                         filed_capture=source_capture.id if source_capture else None, picked_task=draft.task,
@@ -667,20 +713,10 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
                         noted_on=t if page_note else None, noted_under=noted_under)
     if capture_id or item_files:
         model = Model(conn)
-        if names.people != (now := _parse_people(model, settings)):  # someone was added: their @ is kept with their ID too
-            names = items.names_of(model, now, draft.refs)
-            full_content = "\n\n".join([items.store(content, names, formatted)] * bool(content)
-                                       + [markup.escape(e.text()) if formatted else e.text() for e in emails])
         if capture_id:
-            _write_files(conn, data_root, fs, settings, capture_id, full_content, emails, documents, copies, created or t, result)
+            _write_files(conn, data_root, fs, settings, capture_id, emails, documents, copies, created or t, result)
             filed = model.capture_tasks(model.captures[capture_id])  # the task the capture's page is on, a new task first
             result.filed_emails = [(e, filed[0]) for e in emails] if filed else []
-        for cid, block, block_formatted in item_files:
-            try:
-                fs.makedirs(captures.capture_folder(data_root, cid, model.captures[cid].saved))
-                captures.write_capture_md(fs, data_root, model, cid, items.store(block, names, block_formatted))
-            except OSError as e:
-                result.problems.append(f"{cid}'s capture.md couldn't be written ({type(e).__name__}).")
         search.index_items(conn, data_root, captures=[*([capture_id] if capture_id else []), *result.items], documents=[d for d, _, _ in documents])
         # The notes page (release 5.25): the capture's block on its tasks' pages, and each item's on its own task's. A
         # note that's no capture is on its page already (release 5.69).
@@ -693,8 +729,15 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
         edits.copy_files(conn, data_root, fs, created, filed_copies, result.problems)
         search.index_items(conn, data_root, captures=[source_capture.id])
         edits.add_to_pages(conn, data_root, at, [(source_capture.id, None)], result.problems)
-    try:
-        write_pages(Model(conn), data_root, fs, at.date(), at)
+    try:  # only the pages this save can reach (release 5.90, the review's F5); the daily work rewrites them all
+        after = Model(conn)
+        touched = {x for x in (t, created, draft.task, *targets) if x}
+        for cid in [capture_id, *result.items]:
+            if cid and cid in after.captures:
+                touched.update(after.capture_tasks(after.captures[cid]))
+        if source_capture:
+            touched.update(model0.capture_tasks(source_capture))
+        write_pages(after, data_root, fs, at.date(), at, pages_touched(after, touched) | pages_touched(model0, touched))
     except OSError as e:
         result.problems.append(f"The generated pages weren't all updated ({type(e).__name__}).")
     result.message = _message(conn, draft, result, targets, bool(draft.new_task.title.strip()))
@@ -846,7 +889,8 @@ def note_to_task(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
     result = save_capture(conn, data_root, fs, settings, quick_task_draft(Model(conn), settings, a.note, at.date(), on_today=False), at)
     agenda.make_task(conn, item_id, result.created_task)
     try:
-        write_pages(Model(conn), data_root, fs, at.date(), at)
+        after = Model(conn)
+        write_pages(after, data_root, fs, at.date(), at, pages_touched(after, [result.created_task] if result.created_task else []))
     except OSError as e:
         result.problems.append(f"The generated pages weren't all updated ({type(e).__name__}).")
     result.message += " It's on Today in the note's place."
@@ -875,17 +919,13 @@ def _parse_labels(model: Model) -> list[ParseLabel]:
 
 
 def _write_files(
-    conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, capture_id: str, content: str, emails: list[EmailItem],
+    conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, capture_id: str, emails: list[EmailItem],
     documents: list[tuple[str, FileRow, Attachment | None]], copies: list[tuple[str, str]], holder: str | None, result: SaveResult,
 ) -> None:
-    """Write the capture's files. Each step that fails is noted in ``result.problems`` and the log, and the rest go on."""
+    """Write the capture's other files, after its capture.md and its commit: its emails, attachments, extracted text and
+    saved copies. Each step that fails is noted in ``result.problems`` and the log, and the rest go on."""
     model = Model(conn)
     folder = captures.capture_folder(data_root, capture_id, model.captures[capture_id].saved)
-    try:
-        fs.makedirs(folder)
-        captures.write_capture_md(fs, data_root, model, capture_id, content)
-    except OSError as e:
-        result.problems.append(f"capture.md couldn't be written ({type(e).__name__}).")
     # Outlook's SaveAs and SaveAsFile replace a file of the same name without asking, so each email and attachment has a
     # name of its own (release 5.26.1).
     for position, email in enumerate(emails):

@@ -42,7 +42,9 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Status log**: the dated list of changes to a task's state, current status and other fields.
 - **Raw text log**: the corpus of all reference information entered for a task, including the text of its status updates and the content text of all captures associated with that task. Since release 5.25 the browse tool lists it on the task page's **Captures** tab, and the notes page is where its words are read.
 - **Notes page**: a task's notes as one page (release 5.25), read, written and edited in place on its task page. Each capture saved on the task adds its block to it; the owner adds, rewords and reorganises it freely. It lives in the database, and Task.md prints it under Notes.
-- **Caption**: the small grey line that starts a capture's block on a notes page, with its date, time and what it is ("Thu 8 Oct 2026 · 10:42 am · Note"). It links to the capture; removing it unties the text under it from the capture.
+- **Caption**: the small grey line that starts a capture's block on a notes page, with its date, time and what it is ("Thu 8 Oct 2026 · 10:42 am · Note"). It links to the capture; removing it unties the text under it from the capture. A block with no words of its own beyond its files has none (release 5.83): its file lines are its block. Since release 5.85 a caption with a line under it is tucked away: the page shows its **mark** (an icon for its kind) in the gutter beside that line, with the caption's words in the mark's tooltip, and a click on the mark opens the capture; Backspace at the line's start takes the caption off. The caption is still a line of the page in docs.db and Task.md.
+- **Landmark**: a short line on the task page's scroll bar where a heading of the notes page sits in the scroll (release 5.86): the owner's headings in the accent, the day dividers in grey, with the heading's words in its tooltip. **Jump to** (the Notes header's button, the sticky title line or Ctrl+G) lists the same headings and days, with Top of the page and Latest, which goes to the end of the notes.
+- **Task line**: a line on a notes page that's one link to a task made from those notes (release 5.83): "Task: Rigging plan · Mike Ortiz · due Wed 14 Oct", in the item's place, with the item's text kept in its capture and on the task's own page.
 - **Checklist line**: a line with a box on a notes page or in a capture's content text (release 5.26), ticked with a click. It's kept as `- [ ]` or `- [x]`.
 - **Checklist summary**: every checklist line on a task's notes page, shown again at the top of its notes and in Edit task; each row is the line itself, so a change in either place changes both.
 - **Picture** and **attachment** (on a notes page): a list item that shows one of the task's files, as the picture itself or as a link to the file (release 5.27), with its description as the list item under it. Saving the page keeps that description as the file's.
@@ -67,7 +69,10 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Quick task**: a task made from one line and put on Today, from Today's box, the Today hotkey, or a new task with no task picked that goes on Today. It's an ordinary task.
 - **Quick tasks**: the built-in top-level task that quick tasks wait under until Edit task puts them under their real task. DocRepo makes it the first time it's needed.
 - **Today side panel**: the Today view as a floating strip beside the other windows (release 5.43). It has the same items as the Today view, not a list of its own.
-- **Discard**: hiding a task or capture made by mistake, with a reason. Nothing is deleted, and Bring back restores it. It's how DocRepo "deletes" anything.
+- **Discard**: hiding a task or capture made by mistake, with a reason. Nothing is deleted, and Bring back restores it. It's how DocRepo "deletes" anything. Since release 5.91 it's the one word for getting rid of a record: a task, a capture or a draft.
+- **Remove**: taking a link away (release 5.91): a person from a task, a file from a capture, an item from an agenda or Today, a task from under a parent, a row from a template, a task from a what-if's plan, or a row or column from a table on a notes page. What it linked stays. In a what-if, **Add back** undoes it.
+- **Clear**: emptying a field, or the content text (release 5.91).
+- **New task under this one**: the task page's, the Task view's and the Activity view's name for a new task made under the task you're on (release 5.91), in place of "New subtask".
 - **Scope**: which tasks a view or prompt draws on: this task, with ancestors, with subtasks, or family. Family is all ancestors plus all descendants.
 - **Event**: a dated happening, such as an audit or a turnaround, entered as a task's Deadline. "Event" means nothing else, except in "plant event".
 
@@ -107,7 +112,7 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Me**: the person marked as DocRepo's owner. "I" and "me" in a capture mean them.
 - **Lead hours, Assignee hours**: estimated hours for each person in that role: a total for a one-time task, per occurrence for a routine one.
 - **Capacity calendar**: hours per person, workday and task, built from task fields. It's a cache that can be rebuilt at any time.
-- **What-if**: a named change to the plan, made on the Timeline page, that changes no task until it's applied (release 5.64). Its things done are taking a task off, moving a bar or a whole parent, and moving a key date. **Take off** in a what-if means Parked once it's applied. The **real plan** is the tasks as they are.
+- **What-if**: a named change to the plan, made on the Timeline page, that changes no task until it's applied (release 5.64). Its things done are removing a task from the plan, moving a bar or a whole parent, and moving a key date. **Remove** in a what-if (Take off until release 5.91) means Parked once it's applied, and **Add back** undoes it. The **real plan** is the tasks as they are.
 
 ## 4. Files and documents
 
@@ -158,7 +163,8 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 
 - **Capture event**: say capture. It covers both the act and its record.
 - **Content type**: say capture type.
-- **New subtask**: as an option name, say New task. It's a subtask when it has a parent.
+- **New subtask**: as an option name, say New task. It's a subtask when it has a parent. On a task's own page and menus, say New task under this one (release 5.91).
+- **Delete**, **Take off**, **Take out** and **Put back** (in the windows, release 5.91): say Discard for a record, Remove for a link and Clear for a field. Bring back stays as Discard's opposite, and Add back as Remove's in a what-if. A what-if itself is still deleted, as it holds no record of the owner's: nothing changed until it was applied.
 - **File a copy**: say Save a copy, so "filing" only means linking an unfiled capture.
 - **Project notes**: say Note.
 - **Tag**: on its own, only a plant's tag (a tagged label, release 5.79), as in tag pattern. Never a capture's type, which is its capture type, or a task's category, which is a label.

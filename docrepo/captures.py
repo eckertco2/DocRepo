@@ -10,7 +10,7 @@ import sqlite3
 from pathlib import Path
 
 from docrepo import items, markup
-from docrepo.db import next_id, note_used_id, transaction
+from docrepo.db import get_state, next_id, note_used_id, set_state, transaction
 from docrepo.model import Capture, Model
 from docrepo.safe_fs import SafeFS
 
@@ -81,6 +81,37 @@ def add_email(conn: sqlite3.Connection, capture: str, pos: int, *, file: str | N
     with transaction(conn):
         conn.execute("INSERT INTO capture_emails (capture, pos, file, subject, sender, sent, description) VALUES (?, ?, ?, ?, ?, ?, ?)",
                      (capture, pos, file, subject or "", sender or "", sent or "", description or None))
+
+
+#: Where a capture's emails are in Outlook, by position (release 5.93), kept in ``app_state`` under this and the capture's
+#: ID. It moves to ``capture_emails`` at the next schema change, once release 5.79's schema version 22 is on ``main``.
+PLACES_KEY = "outlook_places:"
+
+
+def keep_email_places(conn: sqlite3.Connection, capture: str, places: list[tuple[str, str]]) -> None:
+    """Keep where each of a capture's emails is in Outlook (EntryID and StoreID), when any is known."""
+    if any(entry for entry, _ in places):
+        set_state(conn, PLACES_KEY + capture, json.dumps(places))
+
+
+def email_places(conn: sqlite3.Connection, capture: str) -> list[tuple[str, str]]:
+    """Where a capture's emails are in Outlook, by position: ("", "") for one never found."""
+    try:
+        kept = json.loads(get_state(conn, PLACES_KEY + capture) or "[]")
+    except ValueError:
+        return []
+    return [(str(e or ""), str(s or "")) for e, s in kept] if isinstance(kept, list) else []
+
+
+def captured_before(conn: sqlite3.Connection, sender: str, subject: str, sent: str) -> list[tuple[str, str]]:
+    """The live captures already holding an email from this sender, with this subject, sent this minute (release 5.93):
+    (capture ID, when it was saved). A dropped email's sent time is the minute, as DocRepo keeps it."""
+    if not (subject and sent):
+        return []
+    rows = conn.execute(
+        "SELECT c.id, c.saved FROM capture_emails e JOIN captures c ON c.id = e.capture WHERE e.subject = ? AND e.sender = ? "
+        "AND substr(e.sent, 1, 16) = ? AND c.discarded IS NULL ORDER BY c.saved", (subject, sender, sent[:16])).fetchall()
+    return [(r["id"], r["saved"]) for r in rows]
 
 
 def add_attachment(conn: sqlite3.Connection, capture: str, name: str) -> None:

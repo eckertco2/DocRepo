@@ -62,7 +62,7 @@ def test_a_version_1_database_is_brought_up_to_date(data_root, fs):
         assert conn.execute("SELECT count(*) FROM document_uses").fetchone()[0] == 0  # version 13: the Task view's uses and pins
         assert conn.execute("SELECT count(*) FROM task_pins").fetchone()[0] == 0
         for table in ("templates", "template_rows", "template_row_people", "template_row_labels", "task_template", "task_links"):  # version 14
-            assert conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0] == 0
+            assert conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0] == 0  # noqa: S608 - a column or table name of DocRepo's own; values are parameters
         assert conn.execute("SELECT count(*) FROM template_log").fetchone()[0] == 0  # version 15
         assert conn.execute("SELECT count(*) FROM tasks WHERE duration IS NOT NULL OR calendar_days <> 0 OR lead_per_day IS NOT NULL").fetchone()[0] == 0  # version 16
         assert conn.execute("SELECT count(*) FROM task_people WHERE involvement <> 100").fetchone()[0] == 0  # version 17

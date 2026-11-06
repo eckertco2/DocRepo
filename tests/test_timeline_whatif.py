@@ -107,7 +107,7 @@ def test_take_off_starts_a_what_if_and_changes_no_task(browse):
     view = browse.timeline
     before = hours_in(view, "2026-10-19")
     view._pick(top)
-    assert view.off_button.isVisible() and view.off_button.text() == "Take off"
+    assert view.off_button.isVisible() and view.off_button.text() == "Remove"
     assert not view.whatif_strip.isVisible() and not view.whatif_button.isChecked()
     view.off_button.click()
     QApplication.processEvents()
@@ -116,7 +116,7 @@ def test_take_off_starts_a_what_if_and_changes_no_task(browse):
     assert real(browse, a).state == "Not started" and real(browse, b).state == "Not started"
     assert hours_in(view, "2026-10-19") == pytest.approx(before - 40)
     assert {a, b, top} <= view.chart.off and view.chart.top_of(a) is not None  # still rows, to put back
-    assert view.off_button.text() == "Put back" and not view.quick_button.isVisible() and not view.update_button.isVisible()
+    assert view.off_button.text() == "Add back" and not view.quick_button.isVisible() and not view.update_button.isVisible()
     assert [w["name"] for w in kept(browse)] == ["What-if 1"]
     view.off_button.click()
     QApplication.processEvents()
@@ -186,17 +186,21 @@ def test_a_whole_parent_drags_in_whole_weeks_with_everything_under_it(browse):
     assert view.showing().actions[0].kind == "parent" and view.showing().actions[0].weeks == 2
 
 
-def test_a_double_click_doesnt_open_quick_edit_in_a_what_if(browse):
+def test_neither_edit_nor_quick_edit_opens_in_a_what_if(browse):
     top, a, b = trial(browse)
     view = browse.timeline
     asked = []
     view.quick_edit.connect(lambda *x: asked.append(x))
+    view.edit_task.connect(lambda *x: asked.append(x))
     view._new_whatif("x")
     QApplication.processEvents()
     bar = view.chart.bar_rect(next(r for r in view.chart.rows if r.task == a), row_top(view, a))
     QTest.mouseDClick(view.chart, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, bar.center().toPoint())
     QApplication.processEvents()
-    assert not asked and "isn't offered in a what-if" in browse.status.text()
+    assert not asked and "Edit task changes the task itself, so it isn't offered in a what-if" in browse.status.text()
+    QTest.keyClick(view.chart, Qt.Key.Key_Q)
+    QApplication.processEvents()
+    assert not asked and "Quick edit changes the task itself" in browse.status.text()
 
 
 def test_p_and_ctrl_z_work_on_the_what_if(browse):

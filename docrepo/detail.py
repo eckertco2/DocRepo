@@ -15,6 +15,7 @@ Nothing here touches Qt, so the pages are tested as text. Ported from the mockup
 from __future__ import annotations
 
 import html
+import re
 import sqlite3
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -29,14 +30,14 @@ from docrepo.pages import num
 from docrepo.schedule import due_of, is_open, start_of
 from docrepo.stories import Event, RawItem, Stories, clip
 from docrepo.task_links import SHOWN, all_documents, links_of
-from docrepo.views import CapacityRow, due_cell, label_tasks, markers, rem_text
+from docrepo.views import CapacityRow, label_tasks, markers
 
 CSS = """
 body { font-family: 'Segoe UI'; font-size: 10pt; color: #1a1f25; }
 a { color: #1d5e98; text-decoration: none; }
 h2 { font-size: 15pt; font-weight: 600; margin-top: 2px; margin-bottom: 4px; }
 .crumbs { color: #5a6571; font-size: 9pt; margin: 0; }
-.sub { color: #5a6571; font-size: 9pt; }
+.sub { color: #5a6571; font-size: 9pt; font-weight: 400; }
 .faint { color: #87919c; }
 .k { color: #5a6571; padding-right: 12px; }
 .fk { color: #5a6571; font-size: 9pt; }
@@ -75,11 +76,14 @@ h2 { font-size: 15pt; font-weight: 600; margin-top: 2px; margin-bottom: 4px; }
 .u2 { background-color: #fcefcf; }
 .u3 { background-color: #fbe3e1; }
 .sec { font-weight: 600; margin-top: 16px; margin-bottom: 4px; }
+.secx { font-weight: 400; }
+.factline { margin-top: 6px; margin-bottom: 0px; }
+.ttl { font-weight: 600; }
 .dt { color: #5a6571; font-size: 9pt; padding-right: 12px; }
-.rel { color: #5a6571; font-size: 9pt; }
-.over { color: #b0261e; font-weight: 600; }
+.rel { color: #5a6571; font-size: 9pt; font-weight: 400; }
+.over { color: #b0261e; }
 .stat { background-color: #f4f6f8; }
-.sk { color: #5a6571; font-size: 9pt; font-weight: 600; }
+.sk { color: #5a6571; font-size: 9pt; }
 .desc { color: #5a6571; margin-top: 4px; }
 .lbli { color: #5a6571; }
 .rule { background-color: #d6dce3; }
@@ -95,6 +99,11 @@ STATE_CLASS = {"Not started": "st-ns", "In progress": "st-ip", "Parked": "st-pk"
 #: The task page's history (release 5.21): its tabs, and the names of its scopes. Subtasks is a section of its own now.
 #: The history's tabs. The raw text log is Captures since the notes page (release 5.25, decision 104).
 TABS = (("notes", "Captures"), ("log", "Status log"), ("summaries", "Summaries"), ("files", "Files"))
+#: The History group's tabs since release 5.84 (the task pane review's R6): the status log is behind the status, the files are
+#: a group of their own.
+HISTORY_TABS = (("notes", "Captures"), ("summaries", "Summaries"))
+#: The most files the Files group lists before pointing at the Task view (release 5.84, decision P10).
+FILES_SHOWN = 8
 SCOPE_NAMES = {"self": "This task", "ancestors": "With parent tasks", "descendants": "With subtasks", "family": "Whole family"}
 SOURCE_NAMES = {"typed": "Typed", "outlook_email": "Email", "file_path": "File path"}
 MONTH_NAMES = ("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")
@@ -170,8 +179,9 @@ MARKS = {"Not started": "ns", "In progress": "ip", "Parked": "pk", "Closed": "cl
 
 
 def section(title: str, extra: str = "") -> str:
-    """A section's heading in Body Strong, with ``extra`` (a count, a link) after it."""
-    return f'<p class="sec">{esc(title)}{extra}</p>'
+    """A section's heading in Body Strong, with ``extra`` (a count, a link) after it, in the regular weight (release
+    5.83, the task pane review's R10: the page keeps to the playbook's two weights)."""
+    return f'<p class="sec">{esc(title)}<span class="secx">{extra}</span></p>'
 
 
 def fact_rows(rows: list[tuple[str, str]]) -> str:
@@ -182,6 +192,16 @@ def fact_rows(rows: list[tuple[str, str]]) -> str:
 
 def group(title: str, rows: list[tuple[str, str]]) -> str:
     return section(title) + fact_rows(rows) if rows else ""
+
+
+_SECTION = re.compile(r'^<p class="sec">(?:<a [^>]*>.*?</a> &nbsp;)?[^<]*<span class="secx">(.*?)</span></p>(.*)$', re.S)
+
+
+def split_section(html: str) -> tuple[str, str]:
+    """A section's heading split from its body (release 5.84): what followed its title (a count, a link), and the rest,
+    for the pane to show the section as an expander with the title on its button."""
+    m = _SECTION.match(html)
+    return (m.group(1).strip(), m.group(2)) if m else ("", html)
 
 
 def initials(name: str) -> str:
@@ -322,8 +342,87 @@ class Pages:
         return (head + self.status_block(t) + facts + links + self.agenda_section(t) + self.subtask_section(t, state) + self.details(t, state)
                 + (self.history(t, state) if history else ""))
 
-    def page_head(self, t: Task, state: PageState) -> str:
-        """The path (none for a top-level task), the title, the state, flags and labels, and the description in two lines."""
+    # ---- the page in parts (release 5.84, the task pane review's T2: R1, R2, R6 and decisions P1, P4, P10) ----
+    def fact_line(self, t: Task) -> str:
+        """One line of the facts acted on most, under the chips: when it's due (or closed, or next met) and who's on it.
+        The rest of When and Who is behind the "When and who" group."""
+        today, open_, parts = self.today, is_open(t), []
+
+        def dated(label: str, value: str | date) -> str:
+            d = to_date(value)
+            return f"{label} {esc(long_date(d, today))}" + (f' <span class="rel">{self.days(d)}</span>' if open_ else "")
+
+        if t.state == "Closed" and t.closed:
+            parts.append(f"Closed {esc(self.long(t.closed))}")
+        nxt = due_of(t, today) if t.recurrence and open_ else None
+        if nxt:
+            parts.append(dated("Next meeting" if t.meeting else "Next due", nxt.date))
+        elif t.due:
+            parts.append(dated("Due", t.due) + (' <span class="rel">· deadline too</span>' if t.deadline == t.due else ""))
+        elif t.deadline:
+            parts.append(dated("Deadline", t.deadline))
+        elif open_ and not t.recurrence:
+            parts.append('<span class="sub">No due date</span>')
+        people = [*t.leads, *t.assignees]
+        if people:
+            names = ", ".join(link(f"person:{p}", self.m.person_name(p)) for p in people[:3])
+            if len(people) > 3:
+                names += f' <span class="rel">and {len(people) - 3} more</span>'
+            parts.append(("Lead " if t.leads else "Assigned ") + names)
+        else:
+            parts.append('<span class="sub">No one yet</span>')
+        return f'<p class="factline">{" &nbsp;·&nbsp; ".join(parts)}</p>'
+
+    def when_who_summary(self, t: Task, when_rows: list[tuple[str, str]]) -> str:
+        """What the "When and who" group holds beyond the fact line: the other dates' names, and the hours."""
+        labels = [k for k, _ in when_rows if k not in ("Due", "Closed", "Next due", "Next meeting")]
+        hours = (t.lead_hours or 0) + (t.assignee_hours or 0)
+        if hours:
+            labels.append(f"{num(hours)} h")
+        return esc(", ".join(labels))
+
+    def task_parts(self, task_id: str, state: PageState, width: int = 600) -> dict[str, str]:
+        """The page as the browse window draws it since release 5.84: the header (the path, title, chips, fact line and
+        description), the status card's pieces with the status log behind it, each group's summary and body (an
+        expander on the pane), the history's, and, from WIDE_PAGE, the rail (When, Who, Links and Details open) in
+        place of their groups. Everything here is also in ``task_page``, which draws the page as one, for reading."""
+        t = self.m.task(task_id)
+        wide = width >= WIDE_PAGE
+        out: dict[str, str] = {}
+        out["head"] = (self.discarded_box(t.discarded, t.discard_reason, "the task tree, the lists, the pickers, search and the capacity calendar")
+                       if t.discarded else "") + self.page_head(t, state, self.fact_line(t))
+        out["title"] = t.title  # the sticky title line's words (release 5.86)
+        out["status_name"], out["status_when"], out["status_age"], out["status_body"] = self.status_parts(t)
+        log = self.stories.story(task_id)
+        out["status_log"] = self.story_list(log, lambda e: self.log_item(e), state) if log else '<p class="note">No changes yet.</p>'
+        out["status_log_summary"] = f"{len(log)} change{'s' if len(log) != 1 else ''}"
+        when_rows, who_rows = self.when_rows(t), self.who_rows(t)
+        when_html, who_html = group("When", when_rows), group("Who", who_rows)
+        kd = self.key_dates_block(t)
+        if wide:
+            out["rail"] = when_html + kd + who_html + self.links_group(t) + self.details(t, state, rail=True)
+        else:
+            out["when_who"] = (f'<table width="100%" cellspacing="0" cellpadding="0"><tr><td width="50%" valign="top">{when_html}</td>'
+                               f'<td width="50%" valign="top">{who_html}</td></tr></table>' if width >= SIDE_BY_SIDE else when_html + who_html)
+            out["when_who_summary"] = self.when_who_summary(t, when_rows)
+            out["links_summary"], out["links"] = split_section(self.links_group(t))
+            out["details"] = fact_rows(self.details_rows(t))
+            out["details_summary"] = esc(" · ".join(f"{k} {v}" for k, v in t.references.items()))
+            out["key_dates_summary"], out["key_dates"] = split_section(kd)
+        out["agenda_summary"], out["agenda"] = split_section(self.agenda_section(t))
+        out["subtasks_summary"], out["subtasks"] = split_section(self.subtask_section(t, state))
+        ids = self.m.scope_ids(t.id, state.scope)
+        files = self.files_in(ids)
+        out["files"] = self.files_body(t, files, FILES_SHOWN) if files else ""
+        out["files_summary"] = f'<span class="sub">{len(files)}</span>' if files else ""
+        out["history"] = self.history(t, state, HISTORY_TABS)
+        n = self.history_counts(ids)["notes"]
+        out["history_summary"] = f'<span class="sub">{n} capture{"s" if n != 1 else ""}</span>'
+        return out
+
+    def page_head(self, t: Task, state: PageState, fact: str = "") -> str:
+        """The path (none for a top-level task), the title, the state, flags and labels, ``fact`` (the fact line, release
+        5.84) and the description in two lines."""
         m = self.m
         chains = [c for c in m.chains_of(t.id) if len(c) > 1]
         crumbs = ""
@@ -348,7 +447,7 @@ class Pages:
         if origin:  # release 5.44: the template it came from
             gone = " (discarded)" if origin.discarded else ""
             made = f'<p class="rel">From template: {link(f"tplrow:{origin.row}", " › ".join(origin.path), "Open it in Templates")}{gone}</p>'
-        return f'{crumbs}<h2 title="{t.id}">{esc(t.title)}</h2><p class="tags">{tags}</p>{desc}{made}'
+        return f'{crumbs}<h2 title="{t.id}">{esc(t.title)}</h2><p class="tags">{tags}</p>{fact}{desc}{made}'
 
     def state_button(self, t: Task) -> str:
         """The task's state under its title: a link that opens the state menu, with its chevron, as a page has no hover to show
@@ -364,14 +463,21 @@ class Pages:
         changes = [e.at for e in self.m.status if e.task == t.id and e.field == "Current status"]
         return max(changes)[:10] if changes else t.created[:10] if t.current_status else None
 
-    def status_block(self, t: Task) -> str:
-        """The page's one tinted block: where the task stands, and how long ago that was written."""
+    def status_parts(self, t: Task) -> tuple[str, str, str, str]:
+        """The status card's pieces (release 5.84): its name, the date its text last changed, how long ago that was (the
+        date's tooltip, release 5.83's R7) and its body."""
         name = "Final status" if t.state == "Closed" else "Current status"
         since = self.status_since(t)
-        when = (f'<td align="right" class="rel" title="When the current status last changed">{esc(self.long(since))} · '
-                f'{ago(to_date(since), self.today)}</td>' if t.current_status and since else "")
+        when = self.long(since) if t.current_status and since else ""
+        age = ago(to_date(since), self.today) if when else ""
         body = (multiline(t.current_status) if t.current_status
                 else f'<span class="sub">No status yet.</span> {link(f"update:{t.id}", "Add one", "Update this task")}')
+        return name, when, age, body
+
+    def status_block(self, t: Task) -> str:
+        """The page's one tinted block: where the task stands, and the date that was written."""
+        name, date, age, body = self.status_parts(t)
+        when = f'<td align="right" class="rel" title="The current status last changed {age}">{esc(date)}</td>' if date else ""
         return (f'<table width="100%" cellspacing="0" cellpadding="12" style="margin-top: 12px"><tr><td class="stat">'
                 f'<table width="100%" cellspacing="0" cellpadding="0"><tr><td class="sk">{name}</td>{when}</tr></table>'
                 f'<p class="stext">{body}</p></td></tr></table>')
@@ -530,16 +636,24 @@ class Pages:
         shown = [k for k in kids if k.state != "Closed"] + (closed if state.closed else [])
         rows = []
         for k in shown:
-            cell = due_cell(k, self.today)
-            due = (f'<span class="over">{esc(cell.text)}</span>' if cell.cls == "over" else esc(cell.text)) if cell else ""
+            # The date alone, as the lists show it; how far off is in the tooltip, in Due's words (release 5.83, R7).
+            dd = due_of(k, self.today)
+            if dd:
+                day = to_date(dd.date)
+                due = esc(long_date(day, self.today))
+                tip = f"{dd.label} {long_date(day, self.today)}, {days_words(day, self.today)}"
+                if day < self.today and is_open(k):
+                    due = f'<span class="over">{due}</span>'
+            else:
+                due, tip = "", "No due date"
             who = ([*k.leads, *k.assignees] or [None])[0]
             rows.append(f'<tr><td width="18">{self.mark(k)}</td><td>{self.task_link(k.id, "tl")}{self.markers_html(k)}</td>'
-                        f'<td align="right" class="rel" title="{esc(cell.tip) if cell else "No due date"}">{due}</td>'
+                        f'<td align="right" class="rel" title="{esc(tip)}">{due}</td>'
                         f'<td width="24" align="right">{self.avatar(who) if who else ""}</td></tr>')
         count = f'{sum(is_open(k) for k in kids)} of {len(kids)} open'
         bar = f' <img src="progress:{len(closed)}:{len(kids)}" width="{PROGRESS_WIDTH}" height="4" title="{len(closed)} of {len(kids)} closed">'
         toggle = (f'<p class="more">{link("fold:closed", "Hide closed" if state.closed else f"Show {len(closed)} closed")}</p>' if closed else "")
-        return (section("Subtasks", f' <span class="rel">{count}</span>{bar} &nbsp;{link(f"new:{t.id}", "New subtask", "A new task under this one (T)")}')
+        return (section("Subtasks", f' <span class="rel">{count}</span>{bar} &nbsp;{link(f"new:{t.id}", "New task under this one", "A new task under this one (T)")}')
                 + f'<table width="100%" cellspacing="0" cellpadding="3">{"".join(rows)}</table>{toggle}')
 
     def reference_value(self, name: str, value: str) -> str:
@@ -573,9 +687,9 @@ class Pages:
             more = f'<p>{link(f"taskviewlinks:{t.id}", words, "The Task view, showing only links")}</p>'
         return section("Links", f' <span class="sub">{len(xs)}</span>') + f'<table cellspacing="0" cellpadding="2">{"".join(rows)}</table>' + more
 
-    def details(self, t: Task, state: PageState, rail: bool = False) -> str:
-        """The record: folded to one line that still shows the ID, the reference fields and when the task was made. In the
-        wide page's rail there's room, so it's open."""
+    def details_rows(self, t: Task) -> list[tuple[str, str]]:
+        """The record's rows: the ID, when and from what the task was made, a passed start, the recurrence, every parent
+        when there are several, each reference field, and the folder."""
         m = self.m
         rows = [("ID", t.id), ("Created", f"{esc(self.long(t.created))} from {self.ref_link(t.created_by)}")]
         start = start_of(t)
@@ -593,6 +707,12 @@ class Pages:
             rows.append(("Tagged labels", "&nbsp; ".join(self.tagged_chip(lb, n) for lb, n in tags) if tags
                          else none_text("None found in its fields, notes, captures or documents")))
         rows.append(("Folder", link(f"folder:{t.id}", f"Tasks\\{t.id}", "Open it in File Explorer")))
+        return rows
+
+    def details(self, t: Task, state: PageState, rail: bool = False) -> str:
+        """The record: folded to one line that still shows the ID, the reference fields and when the task was made. In the
+        wide page's rail there's room, so it's open."""
+        rows = self.details_rows(t)
         if rail:
             return group("Details", rows)
         if not state.details:
@@ -601,16 +721,20 @@ class Pages:
             return f'<p class="sec">{fold_link("fold:details", "Details", False)} &nbsp;<span class="rel">{esc(line)}</span></p>'
         return f'<p class="sec">{fold_link("fold:details", "Details", True)}</p>{fact_rows(rows)}'
 
-    def history(self, t: Task, state: PageState) -> str:
-        """The tabs with their counts for the scope, and the scope and order as two menus on the same line."""
-        tab = "notes" if state.tab == "subtasks" else state.tab  # Subtasks is a section of its own now
-        ids = self.m.scope_ids(t.id, state.scope)
+    def history_counts(self, ids: list[str]) -> dict[str, int]:
         raw = {r.capture or f"V{r.document}{r.at}" for x in ids for r in self.stories.raw_items(x)}
-        counts = {"notes": len(raw), "log": sum(len(self.stories.story(x)) for x in ids),
-                  "summaries": sum(len(self.m.summaries_of(x)) for x in ids), "files": len(self.files_in(ids))}
+        return {"notes": len(raw), "log": sum(len(self.stories.story(x)) for x in ids),
+                "summaries": sum(len(self.m.summaries_of(x)) for x in ids), "files": len(self.files_in(ids))}
+
+    def history(self, t: Task, state: PageState, tabs: tuple = TABS) -> str:
+        """The tabs with their counts for the scope, and the scope and order as two menus on the same line. ``tabs`` is
+        HISTORY_TABS on the pane since release 5.84; a tab that isn't there shows the captures."""
+        tab = "notes" if state.tab == "subtasks" or state.tab not in {k for k, _ in tabs} else state.tab
+        ids = self.m.scope_ids(t.id, state.scope)
+        counts = self.history_counts(ids)
         cells = "".join(f'<td class="tabon">{esc(label)} <span class="rel">{counts[key]}</span></td>' if key == tab
                         else f'<td><a href="tab:{key}"><span class="tab">{esc(label)}</span></a> <span class="rel">{counts[key]}</span></td>'
-                        for key, label in TABS)
+                        for key, label in tabs)
         controls = f'<a href="menu:scope" title="Which tasks\' entries to show">{esc(SCOPE_NAMES[state.scope])} {CHEVRON_DOWN}</a>'
         if tab in ("notes", "log"):
             controls += " &nbsp; " + link("menu:order", f"⇅ {'Newest' if state.order == 'new' else 'Oldest'} first", "Oldest or newest first")
@@ -642,8 +766,14 @@ class Pages:
                 rows.append(f'<tr><td class="day" valign="top" width="60">{self.day(s.at)}</td><td>{src}{self.from_chip(s.task, t.id)}'
                             f"<br>{multiline(s.text)}</td></tr>")
             return f'<table cellspacing="0" cellpadding="4">{"".join(rows)}</table>'
+        return self.files_body(t, self.files_in(ids))
+
+    def files_body(self, t: Task, files: list, limit: int | None = None) -> str:
+        """The files as rows, each opening in File Explorer (a link in the browser, a folder in File Explorer), with the
+        Task view for searching, previewing and opening them (decision 166). ``limit`` shows the first so many, with
+        the rest's count (the Files group, release 5.84)."""
         rows = []
-        for f in self.files_in(ids):
+        for f in files[:limit]:
             d = self.m.documents.get(f.document)
             original = d.original if d and d.original else ""
             if f.kind == "Link":  # it opens in the browser, on a click (release 5.67, decision 315)
@@ -657,7 +787,9 @@ class Pages:
             rows.append(f'<tr><td>{name} <span class="sub">{esc(f.kind)}</span>'
                         f'{self.from_chip(f.task, t.id)}{"<br><span class=sub>" + esc(d.description) + "</span>" if d and d.description else ""}</td></tr>')
         # Decision 166: the Task view is where a task's files are searched, previewed and opened.
-        more = f'<p>{link(f"taskview:{t.id}", "Open in Task view")} <span class="sub">to search, preview and open its files (O)</span></p>'
+        left = len(files) - len(rows)
+        more = f'<p>{link(f"taskview:{t.id}", f"All {len(files)} in the Task view" if left > 0 else "Open in Task view")} '
+        more += f'<span class="sub">{f"{left} more; " if left > 0 else ""}to search, preview and open its files (O)</span></p>'
         return more + (f'<table cellspacing="0" cellpadding="4">{"".join(rows)}</table>' if rows else '<p class="note">No files yet.</p>')
 
     def show_key(self, f) -> str:
@@ -688,7 +820,7 @@ class Pages:
         items = self.stories.raw_items(task_id)
         if not items:
             return '<p class="note">Nothing has come in yet.</p>'
-        on_page = notes_page.on_page(self.m, task_id, self.m.pages.get(task_id, ""))
+        on_page = notes_page.on_page(self.m, task_id, self.m.pages.get(task_id, ""), self.stories)
         return self.story_list(items, lambda r: self.raw_item(r, state, task_id, on_page), state)
 
     def story_list(self, items: list, render: Callable, state: PageState) -> str:
@@ -743,7 +875,7 @@ class Pages:
         title = self.capture_link(r.capture, r.title, "tl") if r.capture else link(f"doc:{r.document}", r.title, quiet="tl")
         # An item (release 5.8) says whose notes it came from.
         notes = f' <span class="lead">· from the notes of</span> {self.capture_link(r.from_notes, r.from_title)}' if r.from_notes else ""
-        out = f'<p><span class="lead">{esc(r.lead)}</span>{notes}<br><b>{title}</b>'
+        out = f'<p><span class="lead">{esc(r.lead)}</span>{notes}<br><span class="ttl">{title}</span>'
         if r.capture and on_page is not None:
             if r.capture in on_page:
                 out += f'<br>{link(f"goto:{task_id}:{r.capture}", "On the notes page", "Show its block on the notes page")}'
@@ -784,7 +916,7 @@ class Pages:
         dates = sorted(e.at for e in (self.stories.story(task_id) if kind == "log" else notes))
         summary = (k.current_status or "No status yet") if kind == "log" else "No entries" if empty else f"{len(notes)} entr{'ies' if len(notes) > 1 else 'y'}"
         caret = "" if empty else f'<a href="chap:{esc(task_id)}">{CHEVRON_DOWN if is_open_ else CHEVRON_RIGHT}</a>'
-        head = (f'<tr><td class="ch" width="{18 + 16 * depth}" align="right">{caret}</td><td class="ch"><b>{esc(k.title)}</b> {state_chip(k.state)} '
+        head = (f'<tr><td class="ch" width="{18 + 16 * depth}" align="right">{caret}</td><td class="ch"><span class="ttl">{esc(k.title)}</span> {state_chip(k.state)} '
                 f'<span class="sub">{esc(clip(summary, 90))}{" · " + self.day(dates[-1]) if dates else ""}</span>'
                 f' &nbsp;<a href="task:{esc(task_id)}" title="Open {esc(k.title)}"><span class="sub">Open ↗</span></a></td></tr>')
         body = f'<tr><td></td><td>{self.story_body(task_id, kind, state)}</td></tr>' if is_open_ and not empty else ""

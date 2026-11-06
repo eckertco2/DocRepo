@@ -76,7 +76,7 @@ class ResultModel(QAbstractListModel):
         self.rows = rows
         self.endResetModel()
 
-    def rowCount(self, parent=QModelIndex()) -> int:  # noqa: N802 - Qt's name
+    def rowCount(self, parent=QModelIndex()) -> int:  # noqa: N802, B008 - Qt's name and Qt's own default
         return 0 if parent.isValid() else len(self.rows)
 
     def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole):
@@ -209,7 +209,7 @@ class ResultDelegate(QStyledItemDelegate):
         right = rect.right() - 12
         show_actions = r.kind == "file" and (option.state & (QStyle.StateFlag.State_Selected | QStyle.StateFlag.State_MouseOver))
         if show_actions:
-            for name, icon, _ in self.actions_for(r):
+            for _name, icon, _ in self.actions_for(r):
                 right -= 28
                 p.drawPixmap(QPoint(right + 6, rect.top() + (rect.height() - 16) // 2), tinted(icon, tokens.LIGHT["text2"], 16, scale))
             right -= 6

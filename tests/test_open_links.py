@@ -14,7 +14,7 @@ from pathlib import Path  # noqa: E402
 from urllib.parse import quote  # noqa: E402
 
 import pytest  # noqa: E402
-from PySide6.QtCore import QEvent, QPoint, QPointF, Qt, QUrl  # noqa: E402
+from PySide6.QtCore import QEvent, QPointF, Qt, QUrl  # noqa: E402
 from PySide6.QtGui import QGuiApplication, QMouseEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication, QPushButton  # noqa: E402
 
@@ -142,7 +142,7 @@ def test_the_task_page_shows_them(linked):
     pages = DetailPages(m, datetime(2026, 10, 8).date(), lambda c: "", "P001", conn, reference_links=LINKS)
     for width in (600, 900):  # under When and Who, or in the rail
         page = pages.task_page(INSTALLATION, PageState(), width, "top")
-        assert '<p class="sec">Links <span class="sub">6</span></p>' in page
+        assert '<p class="sec">Links<span class="secx"> <span class="sub">6</span></span></p>' in page  # the count regular (5.83, R10)
         assert 'href="openurl:' + quote("https://changes.example.com/record/4471", safe="") + '"' in page
         lift = next(d.id for d in m.documents.values() if d.original == LIFT)
         assert f'href="opendoc:{lift}"' in page and 'src="lk:pin"' in page and 'title="Opens in your browser: ' + LIFT + '"' in page
@@ -238,7 +238,6 @@ def test_a_links_page_and_its_row_open_it(browse, linked):
 
 
 def test_the_task_views_enter_opens_a_link(browse, linked):
-    conn = linked[0]
     browse.open_task_view(INSTALLATION, file_type="link")
     view = browse.task_views[INSTALLATION]
     record = next(r for r in view.records if r.type == "link" and r.path == LIFT)

@@ -162,7 +162,7 @@ def _like(word: str) -> str:
 
 def _indexed(conn: sqlite3.Connection, kind: str, words: list[str]) -> list[tuple[str, str]]:
     where = " AND ".join("body LIKE ? ESCAPE '\\'" for _ in words)
-    rows = conn.execute(f"SELECT id, body FROM search_text WHERE kind = ? AND {where} ORDER BY id", (kind, *map(_like, words)))
+    rows = conn.execute(f"SELECT id, body FROM search_text WHERE kind = ? AND {where} ORDER BY id", (kind, *map(_like, words)))  # noqa: S608 - a column or table name of DocRepo's own; values are parameters
     return [(r["id"], r["body"]) for r in rows]
 
 
@@ -171,7 +171,8 @@ def _bodies(conn: sqlite3.Connection, kind: str, ids: set[str]) -> list[tuple[st
     if not ids:
         return []
     marks = ",".join("?" * len(ids))
-    return [(r["id"], r["body"]) for r in conn.execute(f"SELECT id, body FROM search_text WHERE kind = ? AND id IN ({marks}) ORDER BY id", (kind, *sorted(ids)))]
+    query = f"SELECT id, body FROM search_text WHERE kind = ? AND id IN ({marks}) ORDER BY id"  # noqa: S608 - only ? marks are joined in
+    return [(r["id"], r["body"]) for r in conn.execute(query, (kind, *sorted(ids)))]
 
 
 def search(conn: sqlite3.Connection, model: Model, query: str) -> list[Result]:

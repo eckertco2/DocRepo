@@ -180,6 +180,14 @@ def test_the_task_page_has_the_summary_and_the_format_bar(browse):
     browse.go_task("T000012")
     pane = browse.task_pane
     assert pane.summary.count.text() == "1 of 4 done" and "check" in pane.format_bar.buttons
+    # Release 5.83 (the task pane review's R8 and R11): the summary shows only with a checklist, the format bar only with the
+    # caret in the notes, and the notes' lines stop at NOTES_LINE characters.
+    from PySide6.QtGui import QFontMetrics
+
+    from docrepo.ui.task_pane import NOTES_LINE
+
+    line = round(QFontMetrics(pane.notes.font()).averageCharWidth() * NOTES_LINE) + 2 * round(pane.notes.document().documentMargin()) + 4
+    assert not pane.summary_box.isHidden() and pane.format_bar.isHidden() and pane.notes.maximumWidth() == line < 16777215
     pane.summary._rows[0].box.setChecked(True)
     pane.notes.save_now()
     assert "- [x] Book the **crane** for the 20th" in notes_page.get(conn, "T000012")
@@ -187,8 +195,9 @@ def test_the_task_page_has_the_summary_and_the_format_bar(browse):
     pane.summary.set_folded(True, emit=True)
     assert db.get_state(conn, "checklist_folded:T000012") == "1"
     browse.go_task("T000008")
+    assert pane.summary_box.isHidden()  # no checklist line on that page
     browse.go_task("T000012")
-    assert pane.summary.is_folded
+    assert pane.summary.is_folded and not pane.summary_box.isHidden()
 
 
 def test_edit_task_s_checklist_is_the_page_s_and_cancel_keeps_a_tick(browse):
