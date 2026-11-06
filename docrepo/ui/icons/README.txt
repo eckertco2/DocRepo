@@ -12,3 +12,5 @@ The Task view (release 5.34) marks each file's type: type-doc (Word and text), t
 painted in its type's colour from the tokens (type_doc and so on); the type is also in the file's name and the preview.
 Templates (release 5.44) adds templates, a small tree in dashed outlines, to the sidebar and to a task's More menu.
 The state menu (release 5.76) draws tick, in the accent, after the current state.
+Tagged labels (release 5.79) adds tagged, an equipment tag's plate with its hole and two lines of text, to the sidebar and
+to search's results.

@@ -13,7 +13,7 @@ from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import quote
 
-from docrepo import ties
+from docrepo import tagged, ties
 from docrepo.dates import day_diff, days_text, minutes, to_date
 from docrepo.links import reference_link
 from docrepo.model import PRIORITY_NAMES, TODAY, TYPE_NAMES, Capture, FileEntry, Model, StatusEntry, Task, is_person
@@ -127,6 +127,10 @@ class Pages:
             ("Due", f"{t.due} ({days_text(to_date(t.due), self.today)})" if t.due else "None"),
             ("Deadline", (f"{t.deadline}, {t.deadline_desc}" if t.deadline_desc else t.deadline) if t.deadline else "None"),
         ]
+        if self.m.tagged:  # release 5.79 (decision 367): once there's a glossary, after Labels
+            tags = tagged.task_tags(self.m, t.id)
+            at = next(i for i, (k, _) in enumerate(rows) if k == "Labels") + 1
+            rows.insert(at, ("Tagged labels", ", ".join(f"{lb.label} ({n})" for lb, n in tags) or "None found"))
         if t.duration:  # release 5.46
             rows.append(("Duration", f"{t.duration} day{'' if t.duration == 1 else 's'}, through weekends" if t.calendar_days else f"{t.duration} workday{'' if t.duration == 1 else 's'}"))
         for f, tie in t.ties.items():  # release 5.50

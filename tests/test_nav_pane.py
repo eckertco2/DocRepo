@@ -25,7 +25,7 @@ from docrepo.views import ASKS, LIST_IDS, view_counts  # noqa: E402
 NOW = datetime(2026, 10, 8, 14, 10)
 TOP = ["today", "unfiled", "tasks"]
 PLAN = ["agenda", "activity", "priorities", "timeline"]  # Capacity is on the Timeline's page (decision 229)
-MANAGE = ["people", "labels", "templates", "docs"]
+MANAGE = ["people", "labels", "tagged", "templates", "docs"]
 
 
 @pytest.fixture(scope="module")

@@ -163,3 +163,38 @@ class LabelDialog(_Form):
     def under(self) -> str | None:
         return self.parent_box.currentData() or None
 
+
+
+class TaggedLabelDialog(_Form):
+    """A tagged label's description and aliases (release 5.79, decision 379), or a new one added by hand. ``check_aliases``
+    says why aliases can't be used (only digits, or another label's)."""
+
+    def __init__(self, parent: QWidget | None, label: str = "", description: str = "", aliases: list[str] = (), new: bool = False,
+                 check_aliases: Callable[[str, list[str]], list[str]] | None = None) -> None:
+        super().__init__(parent, "Add tagged label" if new else f"Edit {label}",
+                         "A tagged label is found however its parts are joined (V-110, V110, V 110), with nothing to set. Aliases are "
+                         "anything else it's called: an old number, or words such as feed drum, found as whole words.")
+        self.label = QLineEdit(label)
+        self.label.setPlaceholderText("Such as V-110")
+        self.description = QLineEdit(description)
+        self.description.setPlaceholderText("What it is, such as Feed surge drum")
+        self.aliases = QLineEdit("; ".join(aliases))
+        self.aliases.setPlaceholderText("Separated by ;, such as feed drum; D-10")
+        if new:
+            self.form.addRow("Tagged label", self.label)
+        self.form.addRow("Description", self.description)
+        self.form.addRow("Aliases", self.aliases)
+
+        def check() -> str | None:
+            if new and not re.search(r"[A-Za-z0-9]", self.label.text()):
+                return "A tagged label needs a letter or a digit."
+            problems = check_aliases(self.label.text().strip(), self.values()[2]) if check_aliases else []
+            return " ".join(problems) or None
+        self.check = check
+        self.mark_clean()
+
+    def values(self) -> tuple[str, str, list[str]]:
+        from docrepo.tagged import split_aliases
+
+        # At ;, a comma or a new line, as the import splits them (decision 369).
+        return self.label.text().strip(), self.description.text().strip(), split_aliases(self.aliases.text())

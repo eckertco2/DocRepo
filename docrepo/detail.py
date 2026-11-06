@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from urllib.parse import quote
 
-from docrepo import capacity, items, markup, notes_page, ties
+from docrepo import capacity, items, markup, notes_page, tagged, ties
 from docrepo.dates import ago, days_words, long_date, monday_of, short, to_date
 from docrepo.links import FOLDER_TEXT, NO_TEXT, is_folder, is_link, reference_link
 from docrepo.model import PRIORITY_NAMES, TODAY, TYPE_NAMES, Capture, Model, Task, is_person
@@ -67,6 +67,7 @@ h2 { font-size: 15pt; font-weight: 600; margin-top: 2px; margin-bottom: 4px; }
 .routine { color: #1a1f25; background-color: #e9edf1; }
 .multi { color: #1d5e98; background-color: #e4eefa; }
 .lbl { color: #1a1f25; background-color: #e9edf1; }
+.tg { font-family: 'Cascadia Mono', 'Consolas'; color: #1a1f25; background-color: #f4f6f8; }
 .anchor { color: #1d5e98; background-color: #dbe8f5; }
 .inh { color: #5a6571; font-style: italic; }
 .new { color: #875700; background-color: #fcefcf; }
@@ -587,6 +588,10 @@ class Pages:
             rows.append(("Parents", "<br>".join(" › ".join(self.task_link(x) for x in c[:-1]) for c in chains)))
         for name, value in t.references.items():  # reference fields (release 5.9, M0034), with their links (release 5.67)
             rows.append((name, self.reference_value(name, value)))
+        if m.tagged:  # release 5.79, decision 367: from its fields, notes page, captures and documents
+            tags = tagged.task_tags(m, t.id)
+            rows.append(("Tagged labels", "&nbsp; ".join(self.tagged_chip(lb, n) for lb, n in tags) if tags
+                         else none_text("None found in its fields, notes, captures or documents")))
         rows.append(("Folder", link(f"folder:{t.id}", f"Tasks\\{t.id}", "Open it in File Explorer")))
         if rail:
             return group("Details", rows)
@@ -844,6 +849,8 @@ class Pages:
             rows.append(("Files", "<br>".join(files)))
         if c.summary:
             rows.append(("Summary", f'{multiline(c.summary)} <span class="sub">{esc(c.summary_type or "")}</span>'))
+        if self.m.tagged:  # release 5.79, decision 367: once there's a glossary
+            rows.append(("Tagged labels", self.tagged_row("capture", c.id)))
         if c.edited:
             kept = f' <span class="sub">{old_versions} earlier version{"s" if old_versions != 1 else ""} kept</span>' if old_versions else ""
             rows.append(("Edited", esc(f"{self.long(c.edited)} {c.edited[11:16]}") + kept))
@@ -873,14 +880,14 @@ class Pages:
             # A link (mods log round 1, M0001): only its address is kept, so it has no text, checks or saved copies.
             rows = [("File description", esc(d.description) if d.description else none_text("None yet")), ("ID", d.id),
                     ("Link", f"<span>{esc(d.original)}</span>"), ("Text", esc(f"No text: {NO_TEXT}")),
-                    ("Tasks", ", ".join(self.task_link(x) for x in tasks) or none_text("Not filed yet"))]
+                    ("Tasks", ", ".join(self.task_link(x) for x in tasks) or none_text("Not filed yet")), *self.tagged_rows("document", d.id)]
             return (f'<p class="crumbs">Link {d.id}</p><h2>{esc(d.name)}</h2>{fields_table(rows)}'
                     '<p class="note">Open link hands it to your default browser, only when you click it (release 5.67). Copy link puts the address on the clipboard. DocRepo never fetches it.</p>')
         if is_folder(d.original):
             # A folder (release 5.66, round 6's decision 318): kept by where it is, with no text, checks or saved copies.
             rows = [("File description", esc(d.description) if d.description else none_text("None yet")), ("ID", d.id),
                     ("Folder", f"<span>{esc(d.original)}</span>"), ("Text", esc(f"No text: {FOLDER_TEXT}")),
-                    ("Tasks", ", ".join(self.task_link(x) for x in tasks) or none_text("Not filed yet"))]
+                    ("Tasks", ", ".join(self.task_link(x) for x in tasks) or none_text("Not filed yet")), *self.tagged_rows("document", d.id)]
             return (f'<p class="crumbs">Folder {d.id}</p><h2>{esc(d.name)}</h2>{fields_table(rows)}'
                     '<p class="note">Show in File Explorer opens the folder.</p>')
         rows = [("File description", esc(d.description) if d.description else none_text("None yet")), ("ID", d.id),
@@ -892,7 +899,107 @@ class Pages:
                 ("Tasks", ", ".join(self.task_link(x) for x in tasks) or none_text("Not filed yet")),
                 ("Saved copies", "<br>".join(link(f"show:copy:{f.id}", f"Tasks\\{f.task}\\Files\\{'_old versions' + chr(92) if f.old else ''}{f.name}")
                                              for f in copies) or none_text())]
+        rows += self.tagged_rows("document", d.id)
         return f'<p class="crumbs">Document {d.id}</p><h2>{esc(d.name)}</h2>{fields_table(rows)}'
+
+    # ---- tagged labels (release 5.79, the tagged labels plan, decisions 367, 376 and 379) ----
+    def tagged_chip(self, lb: tagged.Label, n: int = 0, item: str = "") -> str:
+        """A tagged label as a small plate in the mono font, so it doesn't read as a task's label. It opens the label's
+        page; ``item`` ("capture:C000123") adds × to remove it from that item."""
+        out = f'<a href="tagged:{quote(lb.key, safe="")}" title="{esc(lb.description or "A tagged label")}"><span class="tg">&nbsp;{esc(lb.label)}&nbsp;</span></a>'
+        if n > 1:
+            out += f'<span class="tq">&nbsp;{n}</span>'
+        if item:
+            what = "capture" if item.startswith("capture:") else "document"
+            out += "&nbsp;" + link(f"taggedrm:{item}:{quote(lb.key, safe='')}", "×", f"Remove {lb.label} from this {what}. It stays removed.", "tq")
+        return out
+
+    def tagged_row(self, kind: str, item_id: str) -> str:
+        """A capture's or document's tagged labels, each with × (decision 376), then Add, and any removed by the owner."""
+        tg = self.m.tagged
+        chips = [self.tagged_chip(lb, m.n if m else 0, f"{kind}:{item_id}") for lb, m in tg.item(kind, item_id)]
+        add = link(f"taggedadd:{kind}:{item_id}", "Add", "Add a tagged label by hand, from the glossary", "tq")
+        removed = tg.removed(kind, item_id)
+        back = ('<br><span class="sub">Removed by you: ' + ", ".join(
+            link(f"taggedback:{kind}:{item_id}:{quote(lb.key, safe='')}", lb.label, "Put it back") for lb in removed) + "</span>") if removed else ""
+        return ("&nbsp;&nbsp;".join(chips) if chips else none_text("None found")) + f" &nbsp;{add}{back}"
+
+    def tagged_rows(self, kind: str, item_id: str) -> list[tuple[str, str]]:
+        return [("Tagged labels", self.tagged_row(kind, item_id))] if self.m.tagged else []
+
+    def _use_text(self, u: tagged.Use) -> str:
+        if u.kind == "task":
+            return tagged.task_text(self.m.task(u.id), self.m)
+        if u.kind == "page":
+            return tagged.page_text(self.m.pages.get(u.id, ""))
+        if self.conn is None:
+            return ""
+        row = self.conn.execute("SELECT body FROM search_text WHERE kind = ? AND id = ?", (u.kind, u.id)).fetchone()
+        return tagged.text_of_body(u.kind, row["body"]) if row else ""
+
+    def _use_snippet(self, u: tagged.Use, lb: tagged.Label) -> str:
+        """The words around the first mention, with the mention in bold."""
+        text = self._use_text(u)
+        hit = next((h for h in self.m.tagged.finder().find(text) if h.label == lb.id), None)
+        if hit is None:
+            return '<span class="sub">Added by you</span>' if u.how == "hand" else ""
+        a, b = max(0, hit.start - 60), min(len(text), hit.end + 80)
+
+        def one(part: str) -> str:
+            return esc(" ".join(part.split()))
+
+        return (f'<span class="sub">{"…" if a else ""}{one(text[a:hit.start])} </span><b>{one(text[hit.start:hit.end])}</b>'
+                f'<span class="sub"> {one(text[hit.end:b])}{"…" if b < len(text) else ""}</span>')
+
+    def _use_line(self, u: tagged.Use) -> tuple[str, str, list[str]]:
+        """A use's link and grey words, its date to sort by, and the tasks it belongs to."""
+        m = self.m
+        if u.kind == "capture":
+            c = m.captures[u.id]
+            kind = "Email" if c.source == "email" else "Capture"
+            return (f'{self.capture_link(c.id, c.title)} <span class="sub">{c.id} · {kind} · {esc(self.day(c.saved))}</span>', c.saved,
+                    m.capture_tasks(c))
+        if u.kind == "document":
+            d = m.documents[u.id]
+            when = min((c.saved for c in m.captures.values() if u.id in c.document_ids), default="")
+            return f'{link(f"doc:{d.id}", d.name)} <span class="sub">{d.id} · Document</span>', when, m.document_holders(d.id)
+        t = m.task(u.id)
+        if u.kind == "page":
+            return f'{link(f"task:{t.id}", f"Notes of {t.title}")} <span class="sub">{t.id} · its notes page</span>', "", [t.id]
+        return f'{self.task_link(t.id)} <span class="sub">{t.id} · the task&#8217;s own fields</span>', t.created or "", [t.id]
+
+    def tagged_page(self, key: str) -> str:
+        """A tagged label's page (decision 379): its description and aliases, how it's found, how it's written, and every
+        item that mentions it, newest first, under each top-level task, with the words around it."""
+        m, lb = self.m, self.m.tagged.by_key[key]
+        uses = tagged.uses_of(m, lb)
+        written: dict[str, int] = {}
+        for u in uses:
+            for w, n in u.written.items():
+                written[w] = written.get(w, 0) + n
+        source = f" from {esc(lb.source)}" if lb.source else ""
+        came = {"import": f"Imported{source}", "hand": "Added by hand", "pattern": f"Found by the {esc(lb.pattern or '')} pattern"}.get(lb.came, "")
+        rows = [("Description", esc(lb.description) or none_text("None")), ("Aliases", esc("; ".join(lb.aliases)) or none_text("None")),
+                ("How it's found", "In the glossary: " + (f"however its parts are joined ({esc(', '.join(tagged.spellings(lb.label)))})"
+                                                              if len(tagged.spellings(lb.label)) > 1 else "as it's written")
+                 + (", and by its aliases" if lb.aliases else "")),
+                ("Written as", ", ".join(f'<span class="tg">&nbsp;{esc(w)}&nbsp;</span> <span class="tq">{n}</span>'
+                                          for w, n in sorted(written.items(), key=lambda x: -x[1])) or none_text("Not found anywhere yet")),
+                ("Mentioned in", f"{len(uses)} item{'s' if len(uses) != 1 else ''}"),
+                ("Added", f"{esc(self.long(lb.added))} · {came}" if lb.added else came)]
+        groups: dict[str | None, list[tuple[str, str]]] = {}
+        for u in uses:
+            line, when, tasks = self._use_line(u)
+            tops = list(dict.fromkeys(m.chains_of(x)[0][0] for x in tasks if x in m.tasks)) or [None]
+            entry = (when, f'<p class="line">{line}<br>{self._use_snippet(u, lb)}</p>')
+            for top in tops:
+                groups.setdefault(top, []).append(entry)
+        order = sorted(groups, key=lambda g: (g is None, -len(groups[g]), m.task(g).title if g else ""))
+        body = "".join(f'<p class="sec">{self.task_link(g) if g else "Not filed yet"} <span class="sub">{len(groups[g])}</span></p>'
+                       + "".join(e for _, e in sorted(groups[g], key=lambda x: x[0], reverse=True)) for g in order)
+        crumbs = "Tagged label" if lb.status == "glossary" else "Tagged label · suggested"
+        return (f'<p class="crumbs">{crumbs}</p><h2><span class="tg">&nbsp;{esc(lb.label)}&nbsp;</span></h2>{fields_table(rows)}'
+                + (body if uses else '<p class="note">Nothing mentions it yet.</p>'))
 
     def scheduled(self, person_id: str) -> tuple[float, float]:
         """A person's scheduled hours this week and next."""

@@ -15,7 +15,7 @@ from pathlib import Path
 from docrepo.safe_fs import SafeFS
 
 DB_FILE = Path("System") / "docs.db"
-SCHEMA_VERSION = 21
+SCHEMA_VERSION = 22
 
 #: Each kind of ID: its letter and how many digits follow it.
 ID_FORMATS = {"T": 6, "C": 6, "D": 6, "P": 3}
@@ -499,6 +499,59 @@ CREATE TABLE capture_emails (
     sent        TEXT NOT NULL DEFAULT '',
     description TEXT,
     PRIMARY KEY (capture, pos)
+);
+""",
+    22: """
+-- Tagged labels (release 5.79, the tagged labels plan, decisions 365 to 381): plant tags found in everything DocRepo reads.
+-- The glossary: each tagged label, matched by its letters and digits in capitals (its key, so V-110 and V110 are one), with
+-- its description, how it came (an import, a pattern or by hand), the pattern's name for one a pattern found (release
+-- 5.80), and whether it's in the glossary or only suggested (release 5.80).
+CREATE TABLE tagged_labels (
+    id          INTEGER PRIMARY KEY,
+    label       TEXT NOT NULL,
+    key         TEXT NOT NULL UNIQUE,
+    description TEXT NOT NULL DEFAULT '',
+    status      TEXT NOT NULL DEFAULT 'glossary' CHECK (status IN ('glossary', 'suggested')),
+    came        TEXT NOT NULL DEFAULT 'import' CHECK (came IN ('import', 'pattern', 'hand')),
+    pattern     TEXT,
+    source      TEXT,
+    added       TEXT NOT NULL
+);
+CREATE TABLE tagged_aliases (
+    label INTEGER NOT NULL REFERENCES tagged_labels(id),
+    alias TEXT NOT NULL,
+    pos   INTEGER NOT NULL,
+    PRIMARY KEY (label, alias)
+);
+-- A cache, rebuilt from search_text: each capture's, document's and notes page's tag-like words as written (a letter and
+-- a digit, its parts joined by one mark each), so a change to the glossary is matched again without reading any text.
+CREATE TABLE tagged_words (
+    kind TEXT NOT NULL CHECK (kind IN ('capture', 'document', 'page')),
+    id   TEXT NOT NULL,
+    word TEXT NOT NULL,
+    n    INTEGER NOT NULL,
+    PRIMARY KEY (kind, id, word)
+);
+-- A cache too: what each item mentions, how it was found, how often, and as written (JSON: each spelling and its count).
+CREATE TABLE tagged_mentions (
+    kind    TEXT NOT NULL CHECK (kind IN ('capture', 'document', 'page')),
+    id      TEXT NOT NULL,
+    label   INTEGER NOT NULL REFERENCES tagged_labels(id),
+    how     TEXT NOT NULL,
+    n       INTEGER NOT NULL,
+    written TEXT NOT NULL,
+    PRIMARY KEY (kind, id, label)
+);
+CREATE INDEX tagged_mentions_by_label ON tagged_mentions (label);
+-- The owner's own changes on a capture or a document (decision 376): a tagged label removed, or added by hand. Kept apart
+-- from what's found, so reading the text again never undoes them. By key, so they outlive a respelling.
+CREATE TABLE tagged_choices (
+    kind   TEXT NOT NULL CHECK (kind IN ('capture', 'document')),
+    id     TEXT NOT NULL,
+    key    TEXT NOT NULL,
+    choice TEXT NOT NULL CHECK (choice IN ('added', 'removed')),
+    at     TEXT NOT NULL,
+    PRIMARY KEY (kind, id, key)
 );
 """,
 }

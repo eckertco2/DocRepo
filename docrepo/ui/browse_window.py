@@ -50,7 +50,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo import activity, bulk, capacity, db, edits, items, key_dates, notes_page, opener, people, pins, priorities, prompts, search, ties, whatif
+from docrepo import activity, bulk, capacity, db, edits, items, key_dates, notes_page, opener, people, pins, priorities, prompts, search, tagged, ties, whatif
 from docrepo.lists import key_dates_due, reminders_due
 from docrepo.agenda import AgendaError
 from docrepo.captures import capture_folder, capture_md_path
@@ -65,7 +65,7 @@ from docrepo.save import SaveError, SaveResult, add_quick_task, note_to_task
 from docrepo.schedule import DueDate, due_of, is_open
 from docrepo.tasks import TaskError
 from docrepo.ui.context import AppContext
-from docrepo.ui.dialogs import LabelDialog, PersonDialog
+from docrepo.ui.dialogs import LabelDialog, PersonDialog, TaggedLabelDialog
 from docrepo.ui.rich_edit import FormatBar, RichEdit
 from docrepo.ui.explorer import show_in_explorer
 from docrepo.ui.settings_view import SettingsView
@@ -236,6 +236,8 @@ class BrowseWindow(QWidget):
         #: Asks why something is discarded: the reason, or None to cancel. Tests replace it.
         self.ask_reason: Callable[[str, str], str | None] = self._ask_reason
         self.ask_text: Callable[[str, str, str], str | None] = self._ask_text
+        #: Picks a tagged label to add by hand (release 5.79), from the glossary's labels or typed: the text, or None. Tests replace it.
+        self.pick_tagged: Callable[[list[str]], str | None] = self._pick_tagged
         self.view = "tasks"
         self.sel: tuple[str, str] | None = None
         self.pin: str | None = None
@@ -264,6 +266,7 @@ class BrowseWindow(QWidget):
         self.cap_offset = 0
         self.cap_cell: tuple[str, int] | None = None
         self.retired = {"people": False, "labels": False}
+        self.tagged_mentioned: bool | None = None  # the Tagged labels view's Mentioned only (release 5.79); None: not set yet
         self.query = ""
         self.before_search = "tasks"
         self.state = PageState()
@@ -711,6 +714,8 @@ class BrowseWindow(QWidget):
         m = self.model()
         if kind == "label":
             return any(lb.name == item for lb in m.labels)
+        if kind == "tagged":  # release 5.79: a tagged label, by its key
+            return item in m.tagged.by_key
         if kind == "tplrow":
             return self.templates.exists(item)
         return item in {"task": m.tasks, "capture": m.captures, "doc": m.documents, "person": m.people}.get(kind, {})
@@ -979,7 +984,7 @@ class BrowseWindow(QWidget):
         self.filters.setVisible(True)
         builder = {"today": self._today_view, "tasks": self._tasks_view, "unfiled": self._unfiled_view, "agenda": self._agenda_view,
                    "people": self._people_view, "templates": self.templates.render_list,
-                   "labels": self._labels_view, "docs": self._docs_view, "search": self._search_view,
+                   "labels": self._labels_view, "tagged": self._tagged_view, "docs": self._docs_view, "search": self._search_view,
                    "discarded": self._discarded_view, "activity": self._activity_view}.get(self.view)
         self.tree.stop_row_moves()  # the Templates view turns it back on
         self.tree.begin()
@@ -1771,6 +1776,56 @@ class BrowseWindow(QWidget):
             if lb.parent is None or not any(x.id == lb.parent for x in m.labels):
                 add(lb)
 
+    #: The most rows the Tagged labels view draws (release 5.79): 20,000 took 8 s to draw. Search finds the rest.
+    TAGGED_ROWS = 2000
+
+    def _tagged_rows(self) -> tuple[list, dict[int, int], int]:
+        """The labels the Tagged labels view lists, their counts, and how many more there are. A glossary bigger than the
+        view draws starts with Mentioned only ticked."""
+        m = self.model()
+        tg = m.tagged
+        counts = tagged.counts(m) if tg else {}
+        if self.tagged_mentioned is None:
+            self.tagged_mentioned = len(tg.labels) > self.TAGGED_ROWS
+        labels = [lb for lb in tg.sorted_labels() if not self.tagged_mentioned or counts.get(lb.id)]
+        return labels[:self.TAGGED_ROWS], counts, max(0, len(labels) - self.TAGGED_ROWS)
+
+    def _tagged_view(self) -> None:
+        """Tagged labels (release 5.79, the tagged labels plan, decision 379's list): the glossary, each label with its
+        description, aliases and how many items mention it. Import and Export are here and on a label's page."""
+        m = self.model()
+        tg = m.tagged
+        labels, counts, more = self._tagged_rows()
+        mentioned = sum(1 for n in counts.values() if n)
+        self._set_head("Tagged labels", "Plant tags found in every capture, email, document and notes page, however their parts are joined. "
+                       "The glossary is in docs.db.", f"{len(tg.labels):,} in the glossary, {mentioned:,} mentioned" if tg else "")
+        if tg:
+            self._check("Mentioned only", bool(self.tagged_mentioned), self._set_tagged_mentioned, "Only the labels something mentions")
+        self._button("Import…", self.import_tagged)
+        self._button("Export…", self.export_tagged, enabled=bool(tg), tip="Write the glossary as a CSV to Exports in the data root")
+        self._button("Add…", self.add_tagged, tip="Add a tagged label by hand")
+        self.tree.set_columns(["Tagged label", "Aliases", "Items"], [0, 180, 60])
+        if not tg:
+            self.tree.add_row(None, None, ['<span class="sub">No glossary yet. Import the plant&#8217;s tag list from Excel or CSV: a tagged '
+                                           'label, its description and its aliases in each row.</span>'], selectable=False)
+            return
+        for lb in labels:
+            # The row recipe (the list rows review): the label, its description quiet after it, as People's aliases are.
+            first = esc(lb.label) + (f' <span class="sub">{esc(lb.description)}</span>' if lb.description else "") if LOOK.classic else Line(
+                lb.label, icon="tagged", icon_tip="Tagged label", context=lb.description)
+            self.tree.add_row(None, ("tagged", lb.key), [first, esc("; ".join(lb.aliases)), f'<p align="right">{counts.get(lb.id, 0)}</p>'],
+                              tip=f"{lb.label}: {lb.description}" if lb.description else lb.label)
+        if more:
+            self.tree.add_row(None, None, [f'<span class="sub">And {more:,} more. Search finds any of them, however it&#8217;s typed.</span>'],
+                              selectable=False)
+        if not labels:
+            self.tree.add_row(None, None, [f'<span class="sub">Nothing mentions any of the glossary&#8217;s {len(tg.labels):,} labels yet. '
+                                           'Untick Mentioned only to list them.</span>'], selectable=False)
+
+    def _set_tagged_mentioned(self, on: bool) -> None:
+        self.tagged_mentioned = on
+        self.render_list()
+
     def _set_retired(self, which: str, on: bool) -> None:
         self.retired[which] = on
         self.render_list()
@@ -2125,7 +2180,7 @@ class BrowseWindow(QWidget):
                 self.tree.add_row(None, (r.kind, r.id), [f'{esc(r.title)}<br><span class="sub">{esc(r.sub)}</span>{snippet}'])
                 continue
             kind = file_type(r.title) if r.kind == "doc" else ""
-            name = {"task": "task", "capture": "note", "person": "person", "label": "labels"}.get(r.kind, f"type-{kind}" if kind not in ("", "other") else "file")
+            name = {"task": "task", "capture": "note", "person": "person", "label": "labels", "tagged": "tagged"}.get(r.kind, f"type-{kind}" if kind not in ("", "other") else "file")
             colour, tip = "text2", r.kind.capitalize()
             if r.kind == "task" and r.id in m.tasks:  # a task's state, as everywhere else (decision L7)
                 (name, colour), tip = state_icon(m.task(r.id).state), m.task(r.id).state
@@ -2303,6 +2358,9 @@ class BrowseWindow(QWidget):
         elif kind == "tplrow":
             self.templates.actions(item)
             html = self.templates.page(item)
+        elif kind == "tagged":  # release 5.79
+            self._tagged_actions(item)
+            html = pages.tagged_page(item)
         else:
             self._label_actions(item)
             html = pages.label_page(item)
@@ -2473,6 +2531,11 @@ class BrowseWindow(QWidget):
         else:
             self._action("Make active", lambda: self.set_label_status(name, "active"))
 
+    def _tagged_actions(self, key: str) -> None:
+        self._action("Edit…", lambda: self.edit_tagged(key), "Change its description and aliases", icon_name="edit")
+        self._action("Import…", self.import_tagged, "Import the glossary from Excel or CSV")
+        self._action("Export…", self.export_tagged, "Write the glossary as a CSV to Exports in the data root")
+
     # ---- links on a page ----
     def on_link(self, url: QUrl) -> None:
         kind, _, rest = url.toString().partition(":")
@@ -2491,6 +2554,11 @@ class BrowseWindow(QWidget):
             self.select("person", rest, update_list=True)
         elif kind == "label":
             self.select("label", unquote(rest), update_list=True)
+        elif kind == "tagged":  # a tagged label (release 5.79): its page, in the Tagged labels view
+            self.view = "tagged"
+            self.select("tagged", unquote(rest), update_list=True)
+        elif kind in ("taggedrm", "taggedback", "taggedadd"):  # the owner's own changes on an item (decision 376)
+            self.tagged_link(kind, rest)
         elif kind == "tplrow":  # release 5.44
             self.templates.open_row(rest)
         elif kind == "tpltiming":  # release 5.51
@@ -3007,6 +3075,9 @@ class BrowseWindow(QWidget):
             new = ("person", me) if me in m.people else (("person", next(iter(m.people))) if m.people else None)
         elif v == "labels":
             new = ("label", m.labels[0].name) if m.labels else None
+        elif v == "tagged":  # release 5.79: the first label it lists
+            first = self._tagged_rows()[0][:1]
+            new = ("tagged", first[0].key) if first else None
         elif v == "templates":
             new = self.templates.first()
         elif v == "discarded":
@@ -3084,6 +3155,138 @@ class BrowseWindow(QWidget):
             self.refresh(render=False)
             self.set_view("tasks")
             self.say(dialog.outcome)
+
+    # ================= tagged labels (release 5.79, the tagged labels plan) =================
+    def _tagged_pages(self, out: edits.Outcome, task_ids: list[str] | None = None) -> None:
+        """Write Task.md again, whose Tagged labels row a change to the glossary or an item's choices changes."""
+        from docrepo.pages import write_pages
+
+        now = self._now()
+        try:
+            write_pages(Model(self.conn), self.ctx.data_root, self.ctx.fs, now.date(), now, task_ids)
+        except OSError as e:
+            out.problems.append(f"The generated pages weren't all updated ({type(e).__name__}).")
+
+    def import_tagged(self) -> None:
+        """Import the glossary from Excel or CSV (decision 371)."""
+        from docrepo.ui.tagged_import_dialog import TaggedImportDialog
+
+        dialog = TaggedImportDialog(self, self.ctx)
+        if not (self.run_dialog(dialog) and dialog.outcome):
+            return
+        out = edits.Outcome(dialog.outcome)
+        self._tagged_pages(out)
+        self.refresh(render=False)
+        self.view = "tagged"
+        self.tagged_mentioned = None  # the glossary's size may have changed
+        first = self._tagged_rows()[0][:1]
+        self.sel = ("tagged", first[0].key) if first else None
+        self.render_all()
+        self.say(out.message + (" Problems: " + " ".join(out.problems) if out.problems else ""), bool(out.problems))
+
+    def export_tagged(self) -> None:
+        """Write the glossary as a CSV to Exports in the data root, and copy it (decision 371)."""
+        from docrepo import tagged_import
+
+        text = tagged_import.export_csv(self.conn)
+        rows = text.count("\n") - 1
+        QGuiApplication.clipboard().setText(text)
+        try:
+            path = tagged_import.save_export(self.ctx.fs, self.ctx.data_root, text, self._now())
+        except (OSError, WriteRefused) as e:
+            self.say(f"The export couldn't be saved in Exports ({type(e).__name__}), but it's copied: {rows} tagged labels.", error=True)
+            return
+        self.say(f"Saved {rows} tagged labels as Exports\\{path.name} in the data root, and copied them.")
+
+    def _alias_check(self, label_id: int | None):
+        return lambda _label, aliases: tagged.check_aliases(tagged.read_labels(self.conn), label_id, aliases)
+
+    def edit_tagged(self, key: str) -> None:
+        """A tagged label's description and aliases (decision 379)."""
+        lb = self.model().tagged.by_key[key]
+        dialog = TaggedLabelDialog(self, lb.label, lb.description, list(lb.aliases), check_aliases=self._alias_check(lb.id))
+        if not self.run_dialog(dialog):
+            return
+        _, description, aliases = dialog.values()
+
+        def change() -> edits.Outcome:
+            tagged.edit_label(self.conn, lb.id, description, aliases)
+            out = edits.Outcome(f"Saved {lb.label}. Everything is matched again, with its aliases.")
+            self._tagged_pages(out)
+            return out
+        self._do(change, ("tagged", key))
+
+    def add_tagged(self, label: str = "") -> str | None:
+        """Add a tagged label to the glossary by hand. Returns its key, or None."""
+        dialog = TaggedLabelDialog(self, label, new=True, check_aliases=self._alias_check(None))
+        if not self.run_dialog(dialog):
+            return None
+        name, description, aliases = dialog.values()
+
+        def change() -> edits.Outcome:
+            tagged.add_label(self.conn, name, self._now(), description, aliases)
+            out = edits.Outcome(f"Added {name} to the glossary, and matched everything again.")
+            self._tagged_pages(out)
+            return out
+        if self._do(change) is None:
+            return None
+        key = tagged.key_of(name)
+        if self.view == "tagged":
+            self.select("tagged", key, update_list=True)
+        return key
+
+    def _item_tasks(self, kind: str, item_id: str) -> list[str]:
+        m = self.model()
+        return m.capture_tasks(m.captures[item_id]) if kind == "capture" else m.document_holders(item_id)
+
+    def tagged_link(self, kind: str, rest: str) -> None:
+        """× on a chip, Put back, or Add, on a capture's or document's page (decision 376). Kept apart from what's found, so
+        reading the text again never undoes them."""
+        if kind == "taggedadd":
+            item_kind, item_id = rest.split(":", 1)
+            self.add_tagged_to(item_kind, item_id)
+            return
+        item_kind, item_id, key = rest.split(":", 2)
+        key = unquote(key)
+        lb = self.model().tagged.by_key.get(key)
+        if lb is None:
+            return
+        what = "capture" if item_kind == "capture" else "document"
+
+        def put(choice: str | None) -> edits.Outcome:
+            tagged.choose(self.conn, item_kind, item_id, key, choice, self._now())
+            out = edits.Outcome("")
+            self._tagged_pages(out, self._item_tasks(item_kind, item_id))
+            return out
+        if kind == "taggedrm":
+            if self._do(lambda: put("removed"), self.sel) is not None:
+                self.say_undo(f"Removed {lb.label} from this {what}. It stays removed when its text is read again.",
+                              lambda: self._do(lambda: put(None), self.sel))
+        else:
+            if self._do(lambda: put(None), self.sel) is not None:
+                self.say(f"Put {lb.label} back on this {what}.")
+
+    def add_tagged_to(self, item_kind: str, item_id: str) -> None:
+        """Add a tagged label to a capture or document by hand: one from the glossary, or a new one added to it first."""
+        tg = self.model().tagged
+        value = self.pick_tagged([lb.label for lb in tg.sorted_labels()])
+        if not value or not value.strip():
+            return
+        key = tagged.key_of(value)
+        if key not in tg.by_key:
+            if not self.confirm("Add to the glossary", f"{value.strip()} isn't in the glossary. Add it, then put it on this "
+                                                        f"{'capture' if item_kind == 'capture' else 'document'}?"):
+                return
+            key = self.add_tagged(value.strip())
+            if key is None:
+                return
+
+        def change() -> edits.Outcome:
+            tagged.choose(self.conn, item_kind, item_id, key, "added", self._now())
+            out = edits.Outcome(f"Added {self.model().tagged.by_key[key].label if key in self.model().tagged.by_key else value} by hand.")
+            self._tagged_pages(out, self._item_tasks(item_kind, item_id))
+            return out
+        self._do(change, (("capture" if item_kind == "capture" else "doc"), item_id))
 
     # ================= the capture window =================
     def open_capture(self, **options) -> None:
@@ -3474,6 +3677,10 @@ class BrowseWindow(QWidget):
             return False
         self._do(lambda: edits.edit_task(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, task_id, self._now(), **values, leave=leave))
         return True
+
+    def _pick_tagged(self, names: list[str]) -> str | None:
+        value, ok = QInputDialog.getItem(self, "Add a tagged label", "A tagged label from the glossary, or a new one:", names, 0, True)
+        return value if ok else None
 
     def _ask_text(self, title: str, label: str, text: str) -> str | None:
         value, ok = QInputDialog.getText(self, title, label, text=text)

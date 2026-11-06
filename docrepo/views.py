@@ -71,6 +71,7 @@ VIEWS: tuple[ViewDef, ...] = (
     ViewDef("capacity", "Capacity", "Plan"),
     ViewDef("people", "People", "Manage"),
     ViewDef("labels", "Labels", "Manage"),
+    ViewDef("tagged", "Tagged labels", "Manage"),  # release 5.79: docrepo/tagged.py
     ViewDef("templates", "Templates", "Manage", TEMPLATES_NOTE),  # release 5.44: docrepo/templates.py
     ViewDef("docs", "Documents", "Manage"),
     ViewDef("discarded", "Discarded", "Manage", "Tasks and captures discarded as made by mistake, newest first. Nothing is deleted: "

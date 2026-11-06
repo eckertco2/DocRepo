@@ -474,7 +474,25 @@ class TaskView(QWidget):
         return [r for r in self.records if overview.in_scope(m, r, self.scope, self.task_id)]
 
     def keep(self, r: Record) -> bool:
-        return self.filters.keep(r, pinned=lambda d: d in self.pinned, missing=lambda d: d in self.missing)
+        return self.filters.keep(r, pinned=lambda d: d in self.pinned, missing=lambda d: d in self.missing, mentions=self._mentions)
+
+    def _mentions(self, key: str, r: Record) -> bool:
+        """Whether a record mentions a tagged label (``tag:``, release 5.79): a file, email, note or subtask by what's kept
+        for it, and a notes page's section by its own words."""
+        from docrepo import tagged
+
+        m = self.model()
+        lb = m.tagged.by_key.get(key)
+        if lb is None:
+            return False
+        if "#" in r.id:  # a notes page's section
+            return any(h.label == lb.id for h in m.tagged.finder().find(r.title + "\n" + r.text))
+        cached = self._tag_ids.get(key) if getattr(self, "_tag_model", None) is m else None
+        if cached is None:
+            if getattr(self, "_tag_model", None) is not m:
+                self._tag_model, self._tag_ids = m, {}
+            cached = self._tag_ids[key] = {u.id for u in tagged.uses_of(m, lb)}
+        return r.id in cached
 
     # ================= the header and the outline =================
     def render_head(self) -> None:
@@ -799,6 +817,8 @@ class TaskView(QWidget):
             chips.append(("Pinned", lambda: setattr(f, "pinned", False)))
         if f.missing:
             chips.append(("Missing", lambda: setattr(f, "missing", False)))
+        tg = self.model().tagged
+        chips += [(f"Tag: {tg.by_key[k].label if k in tg.by_key else k}", lambda k=k: f.tagged.discard(k)) for k in sorted(f.tagged)]
         if self.scope != self.task_id:
             chips.append((f"In: {self.model().task(self.scope).title}", lambda: setattr(self, "scope", self.task_id)))
         for label, undo in chips:
@@ -898,7 +918,10 @@ class TaskView(QWidget):
         m = self.model()
         subtasks = [(t, m.task(t).title) for t in overview.family(m, self.task_id)]
         senders = sorted({r.sender for r in self.records if r.sender})
-        typed = finder.take_filters(text, self.filters, subtasks, senders, self.today())
+        from docrepo import tagged
+
+        typed = finder.take_filters(text, self.filters, subtasks, senders, self.today(),
+                                    tag=lambda v: getattr(tagged.label_named(m.tagged, v), "key", None))
         if typed.changed:
             self.box.setText(typed.rest)
             if typed.scope:

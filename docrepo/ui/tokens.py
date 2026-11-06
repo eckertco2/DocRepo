@@ -488,6 +488,7 @@ h2 { font-family: 'Segoe UI'; font-size: ${subtitle}pt; font-weight: 600; margin
 .routine { color: $text; background-color: $hover; }
 .multi { color: $accent; background-color: $info_bg; }
 .lbl { color: $text; background-color: $hover; }
+.tg { font-family: 'Cascadia Mono', 'Consolas'; color: $text; background-color: $base; }
 .anchor { color: $accent; background-color: $info_bg; }
 .inh { color: $text2; font-style: italic; }
 .sec { font-weight: 600; margin-top: 18px; margin-bottom: 4px; }

@@ -81,7 +81,7 @@ def button(w, text):
 
 
 def test_the_view_is_under_manage_and_says_how_to_start(browse):
-    assert "templates" in browse.nav.rows and browse.nav.members["Manage"].index("templates") == 2
+    assert "templates" in browse.nav.rows and browse.nav.members["Manage"].index("templates") == 3  # after People, Labels and Tagged labels (release 5.79)
     browse.set_view("templates")
     assert browse.view == "templates" and browse.sel is None and not browse.detail.isVisible()
     assert browse.pane_title.text() == "Templates"
