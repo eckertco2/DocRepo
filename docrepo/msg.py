@@ -10,6 +10,11 @@ guard never refuses anything, and nothing is opened, run or written here: the by
 What's read: the subject, sender, recipients, the time it was sent, the plain text and the HTML body (when the file has
 one), and each attached file with its name, size, content ID and whether Outlook hides it, for email layer 0. An
 attached email or object is left out, as Outlook's own route leaves it out. A field the file lacks is left empty.
+
+Since release 5.101 (the knowledge base's stage K8), its Outlook identifiers too: the conversation index, ConversationID,
+topic and conversation index tracking flag, and the Message-ID, In-Reply-To and References headers. Those three come from
+their own properties, or else from the email's transport headers (``PR_TRANSPORT_MESSAGE_HEADERS``), parsed with the
+standard library's header parser.
 """
 from __future__ import annotations
 
@@ -38,6 +43,10 @@ ATTACH_DATA, ATTACH_LONG_FILENAME, ATTACH_FILENAME, DISPLAY_NAME = 0x3701, 0x370
 ATTACH_METHOD, ATTACH_SIZE, ATTACH_CONTENT_ID, ATTACHMENT_HIDDEN = 0x3705, 0x0E20, 0x3712, 0x7FFE
 #: PR_ENTRYID and PR_STORE_ENTRYID: where Outlook keeps the email, when the .msg carries them (release 5.93).
 ENTRY_ID, STORE_ENTRY_ID = 0x0FFF, 0x0FFB
+#: Outlook's identifiers (release 5.101, stage K8): PR_CONVERSATION_INDEX, PR_CONVERSATION_TOPIC, PR_CONVERSATION_ID,
+#: PR_CONVERSATION_INDEX_TRACKING, PR_INTERNET_MESSAGE_ID, PR_IN_REPLY_TO_ID, PR_INTERNET_REFERENCES, and the transport headers.
+CONVERSATION_INDEX, CONVERSATION_TOPIC, CONVERSATION_ID, CONVERSATION_TRACKING = 0x0071, 0x0070, 0x3013, 0x3016
+MESSAGE_ID, IN_REPLY_TO, REFERENCES, TRANSPORT_HEADERS = 0x1035, 0x1042, 0x1039, 0x007D
 PT_LONG, PT_BOOLEAN, PT_I8, PT_STRING8, PT_UNICODE, PT_SYSTIME, PT_BINARY = 0x0003, 0x000B, 0x0014, 0x001E, 0x001F, 0x0040, 0x0102
 ATTACH_BY_VALUE = 1
 #: The fixed-size properties stream's header: 32 bytes for the email itself, 8 for an attachment.
@@ -215,4 +224,34 @@ def read(data: bytes) -> EmailItem:
         msg_bytes=data,
         entry_id=entry.hex().upper() if isinstance(entry, bytes) and entry else "",
         store_id=store.hex().upper() if isinstance(store, bytes) and store else "",
+        **identifiers(props),
     )
+
+
+def header_ids(headers: str) -> tuple[str, str, str]:
+    """The Message-ID, In-Reply-To and References in an email's transport headers, each on one line ("" when missing)."""
+    if not headers:
+        return "", "", ""
+    from email.parser import HeaderParser
+
+    parsed = HeaderParser().parsestr(headers, headersonly=True)
+    return tuple(" ".join(str(parsed.get(name) or "").split()) for name in ("Message-ID", "In-Reply-To", "References"))  # type: ignore[return-value]
+
+
+def identifiers(props: _Props) -> dict[str, object]:
+    """The email's Outlook identifiers, as ``EmailItem`` holds them (release 5.101)."""
+    index, conv_id = props.streams.get(CONVERSATION_INDEX), props.streams.get(CONVERSATION_ID)
+    own = [_string(props, pid) for pid in (MESSAGE_ID, IN_REPLY_TO, REFERENCES)]
+    if not all(own):
+        found = header_ids(_string(props, TRANSPORT_HEADERS))
+        own = [mine or theirs for mine, theirs in zip(own, found)]
+    tracking = props.fixed.get(CONVERSATION_TRACKING)
+    return {
+        "conversation_index": index.hex().upper() if isinstance(index, bytes) else "",
+        "conversation_id": conv_id.hex().upper() if isinstance(conv_id, bytes) else "",
+        "conversation_topic": _string(props, CONVERSATION_TOPIC),
+        "conversation_tracking": None if tracking is None else bool(tracking),
+        "message_id": " ".join(own[0].split()),
+        "in_reply_to": " ".join(own[1].split()),
+        "refs": " ".join(own[2].split()),
+    }

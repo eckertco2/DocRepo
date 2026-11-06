@@ -173,6 +173,31 @@ class CaptureEmail:
     sender: str
     sent: str
     description: str | None
+    #: Outlook's identifiers, read from its .msg (the knowledge base's stage K8, release 5.101): the conversation's key (the
+    #: GUID in its conversation index, ``docrepo.conversations``), the whole index as hex, and its Message-ID. Where Outlook
+    #: keeps it (EntryID and StoreID, since release 5.93), to mark it or reply to it. "" for one not known.
+    conversation: str = ""
+    conversation_index: str = ""
+    message_id: str = ""
+    entry_id: str = ""
+    store_id: str = ""
+
+
+@dataclass(frozen=True)
+class TMail:
+    """An email DocRepo opened from a task (the knowledge base's stage K8; made from release B on): new, or a reply to one
+    of a capture's emails. Its conversation follows the task from the moment it's opened, and once it's sent, ``capture``
+    is the capture its sent copy became (release C)."""
+
+    id: int
+    task: str
+    kind: str  # "new" or "reply"
+    reply_capture: str | None
+    reply_pos: int | None
+    opened: str
+    conversation: str
+    conversation_index: str
+    capture: str | None
 
 
 @dataclass
@@ -416,7 +441,13 @@ class Model:
         for r in q("SELECT * FROM capture_emails ORDER BY capture, pos"):
             if r["capture"] in self.captures:
                 self.captures[r["capture"]].emails.append(
-                    CaptureEmail(r["pos"], r["file"], r["subject"], r["sender"], r["sent"], r["description"]))
+                    CaptureEmail(r["pos"], r["file"], r["subject"], r["sender"], r["sent"], r["description"],
+                                 *(r[k] or "" for k in ("conversation", "conversation_index", "message_id", "entry_id", "store_id"))))
+        self.t_mails: list[TMail] = [
+            TMail(r["id"], r["task"], r["kind"], r["reply_capture"], r["reply_pos"], r["opened"], r["conversation"] or "",
+                  r["conversation_index"] or "", r["capture"])
+            for r in q("SELECT * FROM t_mails ORDER BY id")
+        ]
         self.documents: dict[str, Document] = {r["id"]: Document(**{k: r[k] for k in r.keys()}) for r in q("SELECT * FROM documents ORDER BY id")}
         self.versions: list[Version] = [Version(**{k: r[k] for k in r.keys()}) for r in q("SELECT * FROM document_versions ORDER BY id")]
         self.copies: list[SavedCopy] = [

@@ -15,6 +15,7 @@ import logging
 import os
 import platform
 import re
+import sqlite3
 import struct
 import sys
 import traceback
@@ -24,8 +25,10 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import TracebackType
+from urllib.parse import quote
 
-from docrepo import __version__, layer0, outlook
+from docrepo import __version__, conversations, layer0, outlook
+from docrepo.db import db_path
 from docrepo.safe_fs import SafeFS
 
 log = logging.getLogger(__name__)
@@ -189,12 +192,16 @@ def _length(value: object) -> str:
     return f"{len(value)} characters" if isinstance(value, str) else "empty" if value is None else type(value).__name__
 
 
-def outlook_check(try_category: bool = False, scratch: Path | None = None, colour: str = "None") -> tuple[list[Step], str]:
+def outlook_check(try_category: bool = False, scratch: Path | None = None, colour: str = "None", try_t_mail: bool = False,
+                  reply_to: Path | None = None) -> tuple[list[Step], str]:
     """Each step DocRepo takes to read the selected email, and how it went. Also returns Outlook's version ("" if it
     wasn't reached). Values are described by their length or count only. ``try_category`` also adds a test category
     to the email and puts its categories back as they were (release 5.33), and with a ``colour``, puts it on Outlook's
     list and takes it off again (release 5.33.1). With ``scratch``, the email is copied whole there, as Add selected
-    Outlook email copies it (release 5.33.1)."""
+    Outlook email copies it (release 5.33.1). Its Outlook identifiers are said by their presence and layout only, and
+    the conversation's key by its first 8 characters (release 5.101); ``try_t_mail`` also makes a new email and replies
+    to the selected one and to ``reply_to`` (a saved .msg), reads each one's conversation index and closes it without
+    saving, for the knowledge base's checks C1, C3 and C4."""
     steps: list[Step] = []
     try:
         import win32com.client
@@ -295,17 +302,131 @@ def outlook_check(try_category: bool = False, scratch: Path | None = None, colou
             steps.append(Step(name, True, f"ok, {_length(read())}"))
         except Exception as e:  # noqa: BLE001
             steps.append(Step(name, False, outlook.describe(e)))
+    steps += identifier_steps(mail)
     if scratch is not None:
         try:
             whole = outlook.copy_whole(app, mail, scratch)
             steps.append(Step("Copy the email whole (attached to a new email, never saved)", True,
                               f"ok, {len(whole.msg_bytes or b'')} bytes; read without Outlook: text {_length(whole.body)}, "
-                              f"sender {_length(whole.sender)}, {len(whole.attachments)} attachments"))
+                              f"sender {_length(whole.sender)}, {len(whole.attachments)} attachments; "
+                              f"conversation index {_index_words(whole.conversation_index)}; Message-ID {'yes' if whole.message_id else 'no'}"))
         except Exception as e:  # noqa: BLE001
             steps.append(Step("Copy the email whole (attached to a new email, never saved)", False, outlook.describe(e)))
+    if try_t_mail:
+        steps += t_mail_steps(app, mail, reply_to)
     if try_category:
         steps += category_steps(mail, app.Session if colour != "None" else None, colour)
     return steps, version
+
+
+def _index_words(index: str) -> str:
+    """A conversation index in words for the report: its layout and the key's first 8 characters, never more."""
+    k = conversations.key(index)
+    return f"{conversations.layout(index)}, key {k[:8]}…" if k else conversations.layout(index)
+
+
+def identifier_steps(mail: object) -> list[Step]:
+    """The email's Outlook identifiers (the knowledge base's stage K8, release 5.101), each by whether it came and how, for
+    checks C1 and C2: the conversation index by its layout and its key's first 8 characters, so two emails can be compared
+    by eye; the rest by their presence only, since a Message-ID names its sender's mail server."""
+    try:
+        found, how = outlook.item_identifiers(mail)
+    except Exception as e:  # noqa: BLE001 - the report must still be made
+        return [Step("Read the email's Outlook identifiers", False, outlook.describe(e))]
+    index = str(found.get("conversation_index") or "")
+    tracking = found.get("conversation_tracking")
+    steps = [Step("Read the email's conversation index (ConversationIndex)", bool(conversations.key(index)),
+                  f"{how['conversation_index']}: {_index_words(index)}"),
+             Step("Read its ConversationID", bool(found.get("conversation_id")),
+                  f"{how['conversation_id']}: " + ("the same GUID as the index's key" if found.get("conversation_id") == conversations.key(index) and index
+                                                   else "another value (Outlook's subject fallback, or another layout)" if found.get("conversation_id")
+                                                   else "none")),
+             Step("Read its conversation index tracking flag", tracking is not None,
+                  "not set" if tracking is None else "on" if tracking else "off")]
+    for name, label in (("message_id", "Message-ID"), ("in_reply_to", "In-Reply-To"), ("refs", "References")):
+        steps.append(Step(f"Read its {label}", bool(found.get(name)), f"{how[name]}: {'yes' if found.get(name) else 'none'}"))
+    return steps
+
+
+def _close(item: object) -> None:
+    try:
+        item.Close(outlook.OL_DISCARD)  # type: ignore[attr-defined]
+    except Exception:  # noqa: BLE001, S110 - never saved, so nothing is left behind either way
+        pass
+
+
+def _reply_step(name: str, original: object, make: Callable[[], object]) -> Step:
+    """Reply to ``original`` (``make``), read the reply's conversation index, close it without saving, and say whether the
+    reply's index carries the original's whole index, as a reply in the same conversation does."""
+    try:
+        parent = conversations.clean_hex(getattr(original, "ConversationIndex", ""))
+        reply = make()
+    except Exception as e:  # noqa: BLE001
+        return Step(name, False, outlook.describe(e))
+    try:
+        index = conversations.clean_hex(getattr(reply, "ConversationIndex", ""))
+        same = conversations.within(index, parent)
+        return Step(name, same, f"the reply's index: {_index_words(index)}; "
+                                + ("it carries the original's, so it's in the same conversation" if same else
+                                   "it doesn't carry the original's" if index and parent else "an index is missing"))
+    except Exception as e:  # noqa: BLE001
+        return Step(name, False, outlook.describe(e))
+    finally:
+        _close(reply)
+
+
+def t_mail_steps(app: object, mail: object | None, reply_to: Path | None) -> list[Step]:
+    """The try-outs for T-mails (the knowledge base's checks C1, C3 and C4, release 5.101). Each email is made, read and
+    closed without saving, never shown, saved or sent, so nothing is left behind."""
+    steps: list[Step] = []
+    try:
+        new = app.CreateItem(outlook.OL_MAIL_ITEM)  # type: ignore[attr-defined]
+        try:
+            index = conversations.clean_hex(getattr(new, "ConversationIndex", ""))
+            steps.append(Step("Try a new email: its conversation index as soon as it's made (C1)", bool(conversations.key(index)),
+                              _index_words(index) + ("" if conversations.key(index) else ": DocRepo would give it one (decision 39)")))
+        finally:
+            _close(new)
+    except Exception as e:  # noqa: BLE001
+        steps.append(Step("Try a new email: its conversation index as soon as it's made (C1)", False, outlook.describe(e)))
+    if mail is not None:
+        steps.append(_reply_step("Try Reply all to the selected email (C1, C3)", mail, lambda: mail.ReplyAll()))  # type: ignore[attr-defined]
+    if reply_to is None:
+        steps.append(Step("Try Reply all to a saved email (C4)", False, "no saved email to try it on: capture an email first"))
+        return steps
+    try:
+        saved = app.Session.OpenSharedItem(str(reply_to))  # type: ignore[attr-defined]
+    except Exception as e:  # noqa: BLE001
+        steps.append(Step("Try Reply all to a saved email (C4)", False, outlook.describe(e)))
+        return steps
+    try:
+        steps.append(_reply_step("Try Reply all to a saved email (C4)", saved, lambda: saved.ReplyAll()))  # type: ignore[attr-defined]
+    finally:
+        _close(saved)
+    return steps
+
+
+def newest_saved_email(data_root: Path) -> Path | None:
+    """The newest capture's saved .msg, for the reply try-out (C4), or None. Read only: Outlook opens it and nothing is
+    written to it."""
+    from docrepo.captures import capture_folder
+
+    try:
+        conn = sqlite3.connect(f"file:{quote(db_path(data_root).as_posix(), safe='/:')}?mode=ro", uri=True)
+    except sqlite3.Error:
+        return None
+    try:
+        rows = conn.execute("SELECT c.id, c.saved, e.file FROM capture_emails e JOIN captures c ON c.id = e.capture "
+                            "WHERE e.file IS NOT NULL AND c.discarded IS NULL ORDER BY c.saved DESC, e.pos LIMIT 20").fetchall()
+    except sqlite3.Error:
+        return None
+    finally:
+        conn.close()
+    for cid, saved, file in rows:
+        path = capture_folder(data_root, cid, saved) / file
+        if path.is_file():
+            return path
+    return None
 
 
 TEST_CATEGORY = "DocRepo test"

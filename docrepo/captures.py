@@ -10,7 +10,7 @@ import sqlite3
 from pathlib import Path
 
 from docrepo import items, markup
-from docrepo.db import get_state, next_id, note_used_id, set_state, transaction
+from docrepo.db import next_id, note_used_id, transaction
 from docrepo.model import Capture, Model
 from docrepo.safe_fs import SafeFS
 
@@ -75,42 +75,39 @@ def link_document(conn: sqlite3.Connection, capture: str, document: str, *, save
 
 
 def add_email(conn: sqlite3.Connection, capture: str, pos: int, *, file: str | None, subject: str, sender: str, sent: str,
-              description: str | None) -> None:
+              description: str | None, identifiers: dict[str, object] | None = None, entry_id: str = "", store_id: str = "") -> None:
     """Record one of a capture's emails (round 7's item 93, release 5.74): its place among them, its .msg file, and the
-    description typed on its row, or None."""
+    description typed on its row, or None. ``identifiers`` are Outlook's, as ``conversations.identifier_values`` gives
+    them (the knowledge base's stage K8, release 5.101); ``entry_id`` and ``store_id`` are where Outlook keeps it (release
+    5.93), so filing the capture later can mark it with its task, as a save does."""
+    ids = identifiers or {}
+    columns = ("conversation", "conversation_index", "conversation_id", "conversation_topic", "conversation_tracking", "message_id",
+               "in_reply_to", "refs")
     with transaction(conn):
-        conn.execute("INSERT INTO capture_emails (capture, pos, file, subject, sender, sent, description) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                     (capture, pos, file, subject or "", sender or "", sent or "", description or None))
-
-
-#: Where a capture's emails are in Outlook, by position (release 5.93), kept in ``app_state`` under this and the capture's
-#: ID. It moves to ``capture_emails`` at the next schema change, once release 5.79's schema version 22 is on ``main``.
-PLACES_KEY = "outlook_places:"
-
-
-def keep_email_places(conn: sqlite3.Connection, capture: str, places: list[tuple[str, str]]) -> None:
-    """Keep where each of a capture's emails is in Outlook (EntryID and StoreID), when any is known."""
-    if any(entry for entry, _ in places):
-        set_state(conn, PLACES_KEY + capture, json.dumps(places))
+        conn.execute(f"INSERT INTO capture_emails (capture, pos, file, subject, sender, sent, description, entry_id, store_id, {', '.join(columns)}) "  # noqa: S608 - a column or table name of DocRepo's own; values are parameters
+                     f"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, {', '.join('?' for _ in columns)})",
+                     (capture, pos, file, subject or "", sender or "", sent or "", description or None, entry_id or None, store_id or None,
+                      *(ids.get(k) for k in columns)))
 
 
 def email_places(conn: sqlite3.Connection, capture: str) -> list[tuple[str, str]]:
-    """Where a capture's emails are in Outlook, by position: ("", "") for one never found."""
-    try:
-        kept = json.loads(get_state(conn, PLACES_KEY + capture) or "[]")
-    except ValueError:
-        return []
-    return [(str(e or ""), str(s or "")) for e, s in kept] if isinstance(kept, list) else []
+    """Where a capture's emails are in Outlook, by position (release 5.93; in ``capture_emails`` since release 5.101):
+    ("", "") for one never found."""
+    rows = conn.execute("SELECT entry_id, store_id FROM capture_emails WHERE capture = ? ORDER BY pos", (capture,)).fetchall()
+    return [(r["entry_id"] or "", r["store_id"] or "") for r in rows]
 
 
-def captured_before(conn: sqlite3.Connection, sender: str, subject: str, sent: str) -> list[tuple[str, str]]:
-    """The live captures already holding an email from this sender, with this subject, sent this minute (release 5.93):
-    (capture ID, when it was saved). A dropped email's sent time is the minute, as DocRepo keeps it."""
-    if not (subject and sent):
+def captured_before(conn: sqlite3.Connection, sender: str, subject: str, sent: str, message_id: str = "") -> list[tuple[str, str]]:
+    """The live captures already holding this email (release 5.93): (capture ID, when it was saved). From release 5.101 it's
+    matched on its Message-ID, exactly, when both emails have one; otherwise on the same sender and subject, sent the same
+    minute, as DocRepo keeps a sent time."""
+    if not (message_id or (subject and sent)):
         return []
     rows = conn.execute(
-        "SELECT c.id, c.saved FROM capture_emails e JOIN captures c ON c.id = e.capture WHERE e.subject = ? AND e.sender = ? "
-        "AND substr(e.sent, 1, 16) = ? AND c.discarded IS NULL ORDER BY c.saved", (subject, sender, sent[:16])).fetchall()
+        "SELECT DISTINCT c.id, c.saved FROM capture_emails e JOIN captures c ON c.id = e.capture WHERE c.discarded IS NULL AND ("
+        "(? <> '' AND e.message_id = ?) OR ((? = '' OR e.message_id IS NULL OR e.message_id = '') AND ? <> '' AND e.subject = ? "
+        "AND e.sender = ? AND substr(e.sent, 1, 16) = ?)) ORDER BY c.saved",
+        (message_id, message_id, message_id, sent, subject, sender, sent[:16])).fetchall()
     return [(r["id"], r["saved"]) for r in rows]
 
 
@@ -190,7 +187,10 @@ def capture_md(model: Model, capture_id: str, content: str) -> str:
         for d in c.documents
     ]
     if c.emails:  # each email, with the description typed on its row (round 7's item 93, release 5.74)
-        front["emails"] = [{"file": e.file, "subject": e.subject, "sender": e.sender, "sent": e.sent, "description": e.description}
+        front["emails"] = [{"file": e.file, "subject": e.subject, "sender": e.sender, "sent": e.sent, "description": e.description,
+                            # and its conversation's key and Message-ID, when Outlook gave them (stage K8, release 5.101)
+                            **({"conversation": e.conversation} if e.conversation else {}),
+                            **({"message_id": e.message_id} if e.message_id else {})}
                            for e in c.emails]
     if c.email_layer_0:  # what email layer 0 kept and left out (mods log round 1, M0024), for later layers
         front["email_layer_0"] = c.email_layer_0

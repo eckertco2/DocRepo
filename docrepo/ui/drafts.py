@@ -37,6 +37,8 @@ TICKS = ("n_urgent", "n_meeting", "n_plant", "u_urgent", "u_meeting", "u_plant",
 COMBOS = ("n_state", "n_recurrence", "u_state", "u_recurrence")
 #: The email's fields a draft keeps beside its .msg file, for an email that had none to keep.
 EMAIL_FIELDS = ("subject", "sender", "sent", "to", "body", "html", "entry_id", "store_id")
+#: Outlook's identifiers (stage K8, release 5.101), kept too, so a reopened draft's conversation fills its task picker again.
+ID_FIELDS = ("conversation_index", "conversation_id", "conversation_topic", "conversation_tracking", "message_id", "in_reply_to", "refs")
 
 
 def holds_draft(c: CaptureWindow) -> bool:
@@ -134,7 +136,7 @@ def snapshot(c: CaptureWindow) -> tuple[dict[str, Any], list[tuple[str, Callable
         rows.append(record)
     data["emails"] = []
     for i, email in enumerate(emails, 1):
-        record = {k: getattr(email, k) for k in EMAIL_FIELDS}
+        record = {k: getattr(email, k) for k in (*EMAIL_FIELDS, *ID_FIELDS)}
         record["refused"] = list(email.refused)
         record["stored"] = None
         if email.msg_bytes is not None:
@@ -176,6 +178,10 @@ def restore_files(c: CaptureWindow, draft_id: str, data: dict[str, Any]) -> list
                 lost.append(f"{email.subject or 'an email'}'s .msg file")
         email.entry_id = str(record.get("entry_id") or "")
         email.store_id = str(record.get("store_id") or "")
+        for k in ID_FIELDS:  # what the .msg didn't give, as the draft kept it
+            kept = record.get(k)
+            if kept is not None and not getattr(email, k):
+                setattr(email, k, bool(kept) if k == "conversation_tracking" else str(kept))
         emails[i] = email
     parts = [r for r in data.get("files") or [] if isinstance(r, dict) and r.get("kind") == "part"]
     for record in data.get("files") or []:

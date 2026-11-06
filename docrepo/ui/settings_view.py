@@ -556,6 +556,10 @@ class SettingsView(QWidget):
         """The troubleshooting report, to bring to the personal computer (part of ``__init__``, release 5.95)."""
         self.try_category = QCheckBox("Also try a test category on the selected email")
         self.try_category.setToolTip("Adds the category DocRepo test to the email selected in Outlook, then puts its categories back")
+        # The T-mail try-outs (the knowledge base's checks C1, C3 and C4, release 5.101)
+        self.try_t_mail = QCheckBox("Also try a new email and a reply")
+        self.try_t_mail.setToolTip("Makes a new email, and a reply to the selected email and to your newest saved one, reads each one's "
+                                   "conversation index, and closes it without saving. Nothing is shown, saved or sent")
         report = QPushButton("Troubleshooting report…")
         report.setToolTip("Saved in System\\diagnostics in the data root, and shown here to copy")
         report.clicked.connect(self.troubleshooting_report)
@@ -565,7 +569,7 @@ class SettingsView(QWidget):
         self._card(lay, "Troubleshooting", [
             ("Troubleshooting report", "DocRepo's versions, a check of reading the email selected in Outlook, recent drags and recent "
                                        "problems. It leaves out email text, names and addresses. Select an email in Outlook first.",
-             _row(report, self.try_category)),
+             _row(report, self.try_category, self.try_t_mail)),
             ("Check the data root", "Captures whose capture.md is missing, documents and saved copies whose files aren't there, the "
                                     "search index, and SQLite's own check of docs.db. Nothing is changed: each line says what you can do.",
              _row(check)),
@@ -782,9 +786,12 @@ class SettingsView(QWidget):
         QGuiApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
             trying, colour = self.try_category.isChecked(), self.ctx.settings.outlook_category_colour
+            t_mail = self.try_t_mail.isChecked()
             scratch = outlook.copy_path(self.ctx.fs, self.ctx.data_root)
+            reply_to = diagnose.newest_saved_email(self.ctx.data_root) if t_mail else None
             text = diagnose.build_report(self.ctx.data_root, now, list(diagnose.DRAGS), drops=list(diagnose.DROPS),
-                                         check_outlook=lambda: diagnose.outlook_check(try_category=trying, scratch=scratch, colour=colour))
+                                         check_outlook=lambda: diagnose.outlook_check(try_category=trying, scratch=scratch, colour=colour,
+                                                                                      try_t_mail=t_mail, reply_to=reply_to))
             try:
                 path: Path | None = diagnose.save_report(self.ctx.fs, self.ctx.data_root, text, now)
             except (OSError, WriteRefused) as e:

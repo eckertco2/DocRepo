@@ -34,6 +34,16 @@ class FakeEmail:
     sent: datetime = datetime(2026, 10, 7, 9, 15, tzinfo=timezone.utc)
     attachments: list[FakeAttachment] = field(default_factory=list)
     entry_id: bytes | None = None  # PR_ENTRYID, which a dragged .msg rarely carries (release 5.93)
+    # Outlook's identifiers (stage K8, release 5.101): the conversation index and ID, topic, tracking flag, the three
+    # headers as properties of their own, and the transport headers they can also come from.
+    conversation_index: bytes | None = None
+    conversation_id: bytes | None = None
+    conversation_topic: str | None = None
+    tracking: bool | None = None
+    message_id: str | None = None
+    in_reply_to: str | None = None
+    refs: str | None = None
+    headers: str | None = None
 
 
 def _filetime(moment: datetime) -> int:
@@ -60,6 +70,15 @@ def build(email: FakeEmail) -> bytes:
     fixed = [(msg.CLIENT_SUBMIT_TIME, msg.PT_SYSTIME, struct.pack("<q", _filetime(email.sent)))]
     if email.entry_id:
         _write(root, msg.ENTRY_ID, msg.PT_BINARY, email.entry_id)
+    for pid, data in ((msg.CONVERSATION_INDEX, email.conversation_index), (msg.CONVERSATION_ID, email.conversation_id)):
+        if data:
+            _write(root, pid, msg.PT_BINARY, data)
+    for pid, text in ((msg.CONVERSATION_TOPIC, email.conversation_topic), (msg.MESSAGE_ID, email.message_id),
+                      (msg.IN_REPLY_TO, email.in_reply_to), (msg.REFERENCES, email.refs), (msg.TRANSPORT_HEADERS, email.headers)):
+        if text is not None:
+            _write(root, pid, msg.PT_UNICODE, (text + "\0").encode("utf-16-le"))
+    if email.tracking is not None:
+        fixed.append((msg.CONVERSATION_TRACKING, msg.PT_BOOLEAN, struct.pack("<H", int(email.tracking))))
     if email.html is not None:
         _write(root, msg.HTML, msg.PT_BINARY, email.html.encode("utf-8"))
         fixed.append((msg.INTERNET_CPID, msg.PT_LONG, struct.pack("<i", 65001)))

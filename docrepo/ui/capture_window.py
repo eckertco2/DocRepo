@@ -66,7 +66,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo import captures, diagnose, drafts, edits, items, key_dates, msg, notes_page, outlook, timeline
+from docrepo import captures, conversations, diagnose, drafts, edits, items, key_dates, msg, notes_page, outlook, timeline
 from docrepo.dates import short, workday_numbers
 from docrepo.db import RECURRENCES, STATES
 from docrepo.extract import extract_text, to_unc
@@ -1527,6 +1527,8 @@ class CaptureWindow(QWidget):
             self.reading = self._read()
             if self._follow_hash():
                 self.reading = self._read()
+            if self._follow_conversation():
+                self.reading = self._read()
         self._highlighting = True
         try:
             self.highlighter.set_reading(self.reading)
@@ -1556,15 +1558,40 @@ class CaptureWindow(QWidget):
     def _follow_hash(self) -> bool:
         """One # task in the content text fills the task picker, until a task is picked by hand; the # going, or a second
         # task, empties it again (the knowledge base's decision 28, release 5.32). True when the task changed."""
-        if self.by_hand or self.meeting_on or self.from_capture or not self.reading or (self.task and not self.task_auto):
+        if self.by_hand or self.meeting_on or self.from_capture or not self.reading or (self.task and not self.task_auto and not self.task_conv):
             return False
         m = self.ctx.model()
         named = [t for t in items.named_tasks(self.reading) if t in m.tasks and not m.tasks[t].discarded]
         want = named[0] if len(named) == 1 else None
+        if want is None and self.task_conv:
+            return False  # no one # task: the emails' conversation keeps its task (stage K8, decision 33)
         if want == self.task:
+            if want and self.task_conv:  # the # names the conversation's own task: it's from the # now
+                self.task_auto, self.task_conv = True, False
+                return True
             return False
-        self.task, self.task_auto = want, bool(want)
+        self.task, self.task_auto, self.task_conv = want, bool(want), False
         if want and "update" in self.types:
+            self.prefill()
+        return True
+
+    def _follow_conversation(self) -> bool:
+        """An email whose conversation is filed to a task fills the task picker with that task, shown as "from
+        conversation" (the knowledge base's stage K8, release 5.101, decisions 32 and 33). A task picked by hand, or one #
+        task, wins over it; emails whose conversations follow different tasks fill nothing, and the picker names them. The
+        rule is ``conversations.pick``'s. True when the task changed."""
+        if self.by_hand or self.meeting_on or self.from_capture or self.task_auto or (self.task and not self.task_conv):
+            self.conv_mixed = ()
+            return False
+        m = self.ctx.model()
+        p = conversations.pick(m, conversations.email_keys([e.row.email for e in self.files if e.row.email is not None]))
+        self.conv_mixed = tuple(m.tasks[t].title for t in p.mixed)
+        self.conv_note = conversations.note(m, p)
+        self.conv_closed = p.closed
+        if p.task == self.task:
+            return False
+        self.task, self.task_conv = p.task, bool(p.task)
+        if p.task and "update" in self.types:
             self.prefill()
         return True
 
@@ -1741,7 +1768,7 @@ class CaptureWindow(QWidget):
         """The capture's words and what it's on, as a draft's draft.json keeps them (with the rest of the form and the
         files, ``draft_ui.snapshot``)."""
         content, formatted = self.content.value()
-        return {"saved": self.ctx.now().isoformat(timespec="seconds"), "task": self.task, "task_auto": self.task_auto, "by_hand": self.by_hand,
+        return {"saved": self.ctx.now().isoformat(timespec="seconds"), "task": self.task, "task_auto": self.task_auto, "task_conv": self.task_conv, "by_hand": self.by_hand,
                 "types": sorted(self.types), "title": self.title.text(),
                 "content": content, "formatted": formatted, "meeting": self.meeting_on,
                 "meeting_name": self.meet_name.text() if self._meet_name_typed else "", "refs": self.ref_ids}
@@ -1909,6 +1936,7 @@ class CaptureWindow(QWidget):
         task = data.get("task")
         self.task = task if task in m.tasks else None
         self.task_auto = bool(data.get("task_auto")) and self.task is not None
+        self.task_conv = bool(data.get("task_conv")) and self.task is not None and not self.task_auto
         self.by_hand = bool(data.get("by_hand"))
         self.types = {k for k in data.get("types") or [] if k in self.type_boxes} or {"note"}
         self.note_auto = self.types == {"note"}
@@ -2201,6 +2229,12 @@ class CaptureWindow(QWidget):
         # so the text no longer picks it (the knowledge base's decision 28, release 5.32).
         self.task_auto = False
         self.by_hand = False
+        # The task came from the emails' conversation (stage K8, release 5.101): its tooltip, whether it's closed, and the
+        # tasks named when the emails' conversations follow different ones.
+        self.task_conv = False
+        self.conv_note = ""
+        self.conv_closed = False
+        self.conv_mixed: tuple[str, ...] = ()
         self.from_capture: str | None = None
         self.today_on = False
         self.types: set[str] = {"note"}
@@ -2285,6 +2319,7 @@ class CaptureWindow(QWidget):
         was = self.task_auto
         self.task_auto = auto and bool(task_id)
         self.by_hand = self.by_hand or not auto
+        self.task_conv = False
         if task_id == self.task:
             if was != self.task_auto:
                 self.refresh()
@@ -2381,9 +2416,14 @@ class CaptureWindow(QWidget):
         self._setting = False
         self._show_during(m)
         parts = self.split()
-        self.task_button.setText(full_path(m, t.id) + ("  (from #)" if self.task_auto else "") if t else
+        self.task_button.setText(full_path(m, t.id) + ("  (from #)" if self.task_auto else
+                                                       "  (from conversation, closed)" if self.task_conv and self.conv_closed else
+                                                       "  (from conversation)" if self.task_conv else "") if t else
                                  ("None: a quick task, under Quick tasks" if self._quick() else "None: a new top-level task" if new
-                                  else "None: split by #task" if parts else "None: keep it unfiled"))
+                                  else "None: split by #task" if parts else
+                                  f"None: these emails belong to {' and '.join(self.conv_mixed)}, so pick the task" if self.conv_mixed
+                                  else "None: keep it unfiled"))
+        self.task_button.setToolTip(self.conv_note if t and self.task_conv else "The task this capture belongs to")
         self._show_goes(parts)
         self.title_field.setVisible(new)
         self.content_field.property("label").setText("Content text" + (f"  <span style='color:{C.text2}'>becomes the new task's description</span>" if new else ""))
@@ -2758,6 +2798,8 @@ class CaptureWindow(QWidget):
         for row in email_rows(email):
             self._add_file(row, "outlook" if row.email else "email", focus=False)
         self._note_captured_before(email)
+        if self._follow_conversation():  # its conversation may fill the task picker (stage K8, release 5.101)
+            self.read_items()
         if focus:
             own = next((e for e in self.files if e.row.email is email), None)
             (own.email_desc if own and own.email_desc else self.content).setFocus()
@@ -2765,7 +2807,7 @@ class CaptureWindow(QWidget):
     def _note_captured_before(self, email: EmailItem) -> None:
         """Release 5.93 (the review's F14): an email a capture already holds (the same sender, subject and sent minute) is
         said in the Items panel, with a link to that capture. Nothing stops it: the owner may want it twice."""
-        found = captures.captured_before(self.ctx.conn, email.sender, email.subject, email.sent)
+        found = captures.captured_before(self.ctx.conn, email.sender, email.subject, email.sent, email.message_id)
         if not found:
             return
         cid, saved = found[-1]
@@ -2936,6 +2978,8 @@ class CaptureWindow(QWidget):
             self._setting = False
         if sum(e.desc is not None for e in self.files) < 2:
             self.same_all.setChecked(False)
+        if entry.row.email is not None and self._follow_conversation():
+            self.read_items()
         self.refresh()
 
     def _apply_same_all(self) -> None:

@@ -20,7 +20,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
-from docrepo import agenda, captures, edits, items, layer0, markup, people, priorities, quick, search, tasks
+from docrepo import agenda, captures, conversations, edits, items, layer0, markup, people, priorities, quick, search, tasks
 from docrepo.config import Settings
 from docrepo.dates import long_date, short, stamp, workday_numbers
 from docrepo.db import next_id, transaction
@@ -81,6 +81,17 @@ class EmailItem:
     store_id: str = ""
     #: Why it has no place, when matching it to Outlook's selection was refused as unsafe (release 5.93), for Save to say.
     place_note: str = ""
+    #: Outlook's identifiers (the knowledge base's stage K8, release 5.101), read from its .msg or, field by field, from
+    #: Outlook: its conversation index (hex, whose GUID is the conversation's key, ``docrepo.conversations``), Outlook's
+    #: ConversationID (hex) and topic, the conversation index tracking flag (None when not known), and its Message-ID,
+    #: In-Reply-To and References headers. "" for one not known.
+    conversation_index: str = ""
+    conversation_id: str = ""
+    conversation_topic: str = ""
+    conversation_tracking: bool | None = None
+    message_id: str = ""
+    in_reply_to: str = ""
+    refs: str = ""
 
     def text(self) -> str:
         """The email as it goes into the content text: its header lines, then its body."""
@@ -617,10 +628,11 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
             # Each email, with what's typed on its row (round 7's item 93, release 5.74), named as the files below are written.
             for position, row in enumerate(f for f in draft.files if f.email):
                 e = row.email
+                # With Outlook's identifiers (stage K8, release 5.101), so its conversation follows this capture's task, and
+                # where it is in Outlook (release 5.93), so filing the capture later can mark it with its task, as a save does.
                 captures.add_email(conn, capture_id, position, file=msg_name(position) if e.msg_bytes is not None or e.save_msg else None,
-                                   subject=e.subject, sender=e.sender, sent=e.sent, description=row.description.strip() or None)
-            # Where each is in Outlook (release 5.93), so filing the capture later can mark it with its task, as a save does.
-            captures.keep_email_places(conn, capture_id, [(f.email.entry_id, f.email.store_id) for f in draft.files if f.email])
+                                   subject=e.subject, sender=e.sender, sent=e.sent, description=row.description.strip() or None,
+                                   identifiers=conversations.identifier_values(e), entry_id=e.entry_id, store_id=e.store_id)
             attachment_names: set[str] = set()
             for row in draft.files:
                 if not row.described:

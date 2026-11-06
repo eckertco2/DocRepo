@@ -87,6 +87,11 @@ def build_parser() -> argparse.ArgumentParser:
                                 help="check each step of reading the email selected in Outlook, and save a troubleshooting report to bring to the personal computer")
     check.add_argument("--try-category", action="store_true",
                        help="also add the category DocRepo test to the selected email, then put its categories back (release 5.33)")
+    check.add_argument("--try-t-mail", action="store_true",
+                       help="also make a new email and a reply, read their conversation index, and close them without saving (release 5.101)")
+    email_ids = commands.add_parser("email-ids", help="read each saved email's Outlook identifiers from its .msg file and record them, so its "
+                                                      "conversation follows its capture's task. It never changes a .msg file")
+    email_ids.add_argument("--dry-run", action="store_true", help="count what it would record, and record nothing")
     tree_check = commands.add_parser("tree-check", help="check a tree file or an edit file and print what's wrong with it. It changes nothing")
     tree_check.add_argument("file")
     tree_prompt = commands.add_parser("tree-prompt", help="print the prompt for an LLM to write a tree file, or with --edit, to change an exported tree. It changes nothing")
@@ -334,13 +339,31 @@ def cmd_outlook_check(args: argparse.Namespace) -> int:
     conn.close()
     now = datetime.now()
     trying = bool(getattr(args, "try_category", False))
+    t_mail = bool(getattr(args, "try_t_mail", False))
     scratch = outlook.copy_path(fs, root)  # where Outlook copies the email whole (release 5.33.1)
+    reply_to = diagnose.newest_saved_email(root) if t_mail else None  # the try-outs' saved email (release 5.101)
     text = diagnose.build_report(root, now, drags=None, check_outlook=lambda: diagnose.outlook_check(
-        try_category=trying, scratch=scratch, colour=_settings.outlook_category_colour))
+        try_category=trying, scratch=scratch, colour=_settings.outlook_category_colour, try_t_mail=t_mail, reply_to=reply_to))
     path = diagnose.save_report(fs, root, text, now)
     _utf8_stdout()
     print(text)
     print(f"Saved as {path.relative_to(root)} in the data root. Bring it, or the text above, to the personal computer.")
+    return 0
+
+
+def cmd_email_ids(args: argparse.Namespace) -> int:
+    """The backfill (the knowledge base's stage K8, release 5.101): each saved email's Outlook identifiers, read from its
+    .msg without Outlook and recorded in docs.db. 0 when it ran, whether or not anything needed doing."""
+    from docrepo import conversations
+
+    opened = _open(args)
+    if opened is None:
+        return 1
+    root, _settings, _fs, conn = opened
+    with closing(conn):
+        found = conversations.backfill(conn, root, dry_run=bool(args.dry_run))
+    _utf8_stdout()
+    print("\n".join(found.lines(bool(args.dry_run))))
     return 0
 
 
@@ -460,6 +483,7 @@ COMMANDS: dict[str, Callable[[argparse.Namespace], int]] = {
     "report": cmd_report,
     "outlook-check": cmd_outlook_check,
     "troubleshoot": cmd_outlook_check,
+    "email-ids": cmd_email_ids,
     "tree-check": cmd_tree_check,
     "tree-prompt": cmd_tree_prompt,
     "tree-export": cmd_tree_export,

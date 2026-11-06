@@ -233,7 +233,12 @@ class PinWindow(QWidget):
         t = capture.ctx.model().tasks.get(capture.task) if capture.task else None
         # A task from the text's one # task shows as "#Installation"; several # tasks split the note (release 5.32).
         name = (f"#{t.title}" if capture.task_auto else t.title) if t else "Split by #task" if capture.split() else "No task picked"
+        # A task from the emails' conversation (stage K8, release 5.101) says where it came from in the tooltip.
+        if not t and capture.conv_mixed and name == "No task picked":
+            name = "Emails of " + " and ".join(capture.conv_mixed)
         self.task_button.setToolTip(f"{t.title}, from the # in the text. The task this capture belongs to" if t and capture.task_auto else
+                                    f"{t.title}. {capture.conv_note}" if t and capture.task_conv else
+                                    "These emails' conversations belong to different tasks: pick the task" if not t and capture.conv_mixed else
                                     "Several #tasks in the text: Save makes a capture per task" if not t and name != "No task picked" else
                                     f"{name}. The task this capture belongs to")
         self.task_button.setText(self.task_button.fontMetrics().elidedText(name, Qt.TextElideMode.ElideRight, WIDTH - 120))

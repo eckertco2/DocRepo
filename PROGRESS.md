@@ -104,6 +104,7 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.94 | Where typed text lands (the review of 2026-11-06, F13, the rule taken 2026-11-06): at the end of the notes page; a note's heading under the page's heading with its words only when that's the last; the footer saying which | Built 2026-11-06 in the `review-fixes` worktree, with 5.87 to 5.93, committed as `1ba1690`, merged to `main` and on GitHub the same day, without a hand test (the owner's choice) |
 | 5.95 | The large UI classes (the review of 2026-11-06, F11), with no change in behaviour: `BrowseWindow`'s list views, page commands and notes wiring moved into mixins in `docrepo/ui/lists/` (3,745 lines to 1,828), `RowTree.building()`, `SettingsView.__init__` and `CaptureWindow._build` in named sections, the rule for new modules, and `AppContext.keep_state` for a view's own state | Built 2026-11-06 in the `review-fixes` worktree, with 5.87 to 5.94, committed as `1ba1690`, merged to `main` and on GitHub the same day, without a hand test (the owner's choice) |
 | 5.96 | The `usage` command (the review of 2026-11-06, F15): the wheels' commands and the Activity view's kinds, counted over 7 and 30 days, read-only | Built 2026-11-06 in the `review-fixes` worktree, with 5.87 to 5.95, committed as `1ba1690`, merged to `main` and on GitHub the same day, without a hand test (the owner's choice) |
+| 5.101 | Emails that find their task (the knowledge base's stage K8, release A, KB decisions 32 to 46): each email's Outlook identifiers kept with it, an email whose conversation is filed to a task filling the task picker ("from conversation"), `email-ids` for the emails captured before, release 5.93's places in `capture_emails`, and the report's identifiers and T-mail try-outs; schema version 22 | Built 2026-11-06 in the `k8-a` worktree |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
 ## Decisions
@@ -697,6 +698,21 @@ The owner asked for the review's next stages, and took its decisions V2, V3, V4,
 - **Priorities' columns are at least 216 px,** not the review's 260 to 300, so all five show at 1440 px. They reach 258 px at the 82% window on a 1920 px screen.
 
 
+
+## Release 5.101: emails that find their task (2026-11-06)
+
+The knowledge base's stage K8, release A (the design workspace's `docs/knowledge-base/email-conversations-plan.md`, KB decisions 32 to 46, taken 2026-11-06; 35 the owner's). The owner asked for an email from a conversation that's already captured to arrive with its task filled in, and for a button on a task that opens an Outlook email whose replies know their task (a T-mail, K8's release B), captured on its task when it's sent (release C). Release A is the part that needs no new Outlook action: the identifiers, the rule, the backfill and the checks. 5.97 to 5.100 are the consolidation plan's. Schema version 22; no new package.
+
+- **Outlook's identifiers, kept with each email** (`docrepo/msg.py`, `outlook.item_identifiers`, `capture_emails`): the conversation index, ConversationID, topic and tracking flag, and the Message-ID, In-Reply-To and References, read from the `.msg` without Outlook (from their own properties, else from the transport headers), or field by field through Outlook when the email couldn't be copied whole. Each email's row holds them, with its conversation's key, and capture.md's `emails` list names each one's conversation and Message-ID. Release 5.93's places (EntryID and StoreID) move from `app_state` into the same rows.
+- **A conversation follows its task** (`docrepo/conversations.py`, KB decisions 32 and 33): the key is the GUID in the conversation index's header (MS-OXOMSG 2.2.1.3), never Outlook's ConversationID, which can be a hash of the subject, and never the subject. A conversation follows the task it was last filed to, by a live capture or by a T-mail, a discarded task skipped. In the capture window and the pinned window, an email of such a conversation fills the task picker with it, "(from conversation)", with a tooltip saying where it came from. A task picked by hand, then one `#` task, win over it; emails of different tasks fill nothing and the picker names the tasks; taking the email off empties it. Drafts keep it.
+- **An email captured before** (release 5.93's line) is matched on its Message-ID when both have one.
+- **`email-ids [--dry-run]`** (KB decisions 27 and 34): reads each saved email's identifiers from its `.msg` and records them, and makes the rows of emails captured before release 5.74, so the conversations already captured teach their tasks. It never changes a `.msg`.
+- **The troubleshooting report**: the selected email's identifiers by presence and layout, its key by its first 8 characters only; and **Also try a new email and a reply** (`--try-t-mail`), which makes a new email, a Reply all to the selected email and one to the newest saved `.msg`, reads their conversation indexes and closes them without saving, for checks C1, C3 and C4 before release B.
+- **`t_mails`** is made, for releases B and C.
+
+**Tests:** `tests/test_conversations.py` (new): the key and the index's shape, identifiers from a `.msg` and from transport headers, a save keeping them and the place, the latest filing winning, File to task, discards, a closed task, mixed tasks, a T-mail's filing, captured before by Message-ID, the backfill (dry run, `.msg` files unchanged, rows made for old captures, the command), schema 22 moving the places, and the report's lines and try-outs with a fake Outlook. `tests/test_conversation_fill.py` (new): the capture window's and the pinned window's picker. `tests/msg_builder.py` writes the identifiers.
+
+**Built in the `k8-a` worktree** (2026-11-06), before the merges it waits for: 5.79 (schema 22 there; this release's version moves after it).
 
 ## Decisions (releases 5.87 to 5.96)
 

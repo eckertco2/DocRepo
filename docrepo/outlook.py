@@ -52,6 +52,13 @@ OL_MSG = 3  # olMSG: SaveAs as an Outlook .msg file
 OL_BY_VALUE = 1  # an attached file, not a link or an embedded item
 PR_ATTACHMENT_HIDDEN = "http://schemas.microsoft.com/mapi/proptag/0x7FFE000B"
 PR_ATTACH_CONTENT_ID = "http://schemas.microsoft.com/mapi/proptag/0x3712001F"  # how the HTML body shows a picture (cid:)
+#: An email's Message-ID, In-Reply-To and References, its transport headers, and its conversation index tracking flag,
+#: through PropertyAccessor (the knowledge base's stage K8, release 5.101).
+PR_INTERNET_MESSAGE_ID = "http://schemas.microsoft.com/mapi/proptag/0x1035001F"
+PR_IN_REPLY_TO_ID = "http://schemas.microsoft.com/mapi/proptag/0x1042001F"
+PR_INTERNET_REFERENCES = "http://schemas.microsoft.com/mapi/proptag/0x1039001F"
+PR_TRANSPORT_MESSAGE_HEADERS = "http://schemas.microsoft.com/mapi/proptag/0x007D001F"
+PR_CONVERSATION_INDEX_TRACKING = "http://schemas.microsoft.com/mapi/proptag/0x3016000B"
 OUTLOOK_WINDOW_CLASS = "rctrl_renwnd32"  # the class of Outlook's main window
 
 #: The well-known COM error codes, in words, for messages and the troubleshooting report.
@@ -238,7 +245,61 @@ def email_from_item(item: object) -> EmailItem:
         html=html if isinstance(html, str) else "",
         entry_id=entry_id,
         store_id=store_id,
+        **item_identifiers(i)[0],
     )
+
+
+def _prop(item: object, tag: str) -> object:
+    return item.PropertyAccessor.GetProperty(tag)  # type: ignore[attr-defined]
+
+
+def item_identifiers(item: object) -> tuple[dict[str, object], dict[str, str]]:
+    """An Outlook item's identifiers, as ``EmailItem`` holds them (release 5.101), and how each was got, for the
+    troubleshooting report: "field", "PropertyAccessor", "transport headers", or "refused" or "none". Each is read on its
+    own, and a refusal leaves only that one out; the guard doesn't cover the conversation's fields."""
+    from docrepo import conversations, msg
+
+    out: dict[str, object] = {}
+    how: dict[str, str] = {}
+    for name, field_name in (("conversation_index", "ConversationIndex"), ("conversation_id", "ConversationID"),
+                             ("conversation_topic", "ConversationTopic")):
+        try:
+            value = getattr(item, field_name)
+        except AttributeError:  # an item that has no such field: nothing to say
+            out[name], how[name] = "", "none"
+            continue
+        except Exception as e:  # noqa: BLE001 - COM raises its own errors
+            record_problem(f"reading the email's {field_name}", e)
+            out[name], how[name] = "", "refused"
+            continue
+        text = value.strip() if isinstance(value, str) else ""
+        out[name] = conversations.clean_hex(text) if name != "conversation_topic" else text
+        how[name] = "field" if out[name] else "none"
+    try:
+        out["conversation_tracking"] = bool(_prop(item, PR_CONVERSATION_INDEX_TRACKING))
+        how["conversation_tracking"] = "PropertyAccessor"
+    except Exception:  # noqa: BLE001 - often simply not set
+        out["conversation_tracking"], how["conversation_tracking"] = None, "none"
+    headers: tuple[str, str, str] | None = None
+    for n, (name, tag) in enumerate((("message_id", PR_INTERNET_MESSAGE_ID), ("in_reply_to", PR_IN_REPLY_TO_ID),
+                                     ("refs", PR_INTERNET_REFERENCES))):
+        try:
+            value = _prop(item, tag)
+            text = " ".join(value.split()) if isinstance(value, str) else ""
+        except Exception:  # noqa: BLE001 - missing on many emails, or refused
+            text = ""
+        if text:
+            out[name], how[name] = text, "PropertyAccessor"
+            continue
+        if headers is None:
+            try:
+                raw = _prop(item, PR_TRANSPORT_MESSAGE_HEADERS)
+                headers = msg.header_ids(raw if isinstance(raw, str) else "")
+            except Exception:  # noqa: BLE001 - a sent or draft email has no transport headers
+                headers = ("", "", "")
+        out[name] = headers[n]
+        how[name] = "transport headers" if headers[n] else "none"
+    return out, how
 
 
 def where_kept(item: object) -> tuple[str, str]:

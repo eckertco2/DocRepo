@@ -21,7 +21,7 @@ from docrepo.safe_fs import SafeFS
 log = logging.getLogger(__name__)
 
 DB_FILE = Path("System") / "docs.db"
-SCHEMA_VERSION = 21
+SCHEMA_VERSION = 22
 
 #: Each kind of ID: its letter and how many digits follow it.
 ID_FORMATS = {"T": 6, "C": 6, "D": 6, "P": 3}
@@ -505,6 +505,45 @@ CREATE TABLE capture_emails (
     description TEXT,
     PRIMARY KEY (capture, pos)
 );
+""",
+    22: """
+-- Each email's Outlook identifiers (the knowledge base's stage K8, release 5.101, KB decisions 32 to 34), read from its .msg
+-- without Outlook: the conversation's key (the GUID in its conversation index, as hex), the whole index, Outlook's
+-- ConversationID, topic and conversation index tracking flag, and its Message-ID, In-Reply-To and References. Where Outlook
+-- keeps it (EntryID and StoreID) moves here from app_state, where release 5.93 kept it until a schema change.
+ALTER TABLE capture_emails ADD COLUMN conversation TEXT;
+ALTER TABLE capture_emails ADD COLUMN conversation_index TEXT;
+ALTER TABLE capture_emails ADD COLUMN conversation_id TEXT;
+ALTER TABLE capture_emails ADD COLUMN conversation_topic TEXT;
+ALTER TABLE capture_emails ADD COLUMN conversation_tracking INTEGER;
+ALTER TABLE capture_emails ADD COLUMN message_id TEXT;
+ALTER TABLE capture_emails ADD COLUMN in_reply_to TEXT;
+ALTER TABLE capture_emails ADD COLUMN refs TEXT;
+ALTER TABLE capture_emails ADD COLUMN entry_id TEXT;
+ALTER TABLE capture_emails ADD COLUMN store_id TEXT;
+CREATE INDEX capture_emails_conversation ON capture_emails (conversation);
+CREATE INDEX capture_emails_message_id ON capture_emails (message_id);
+UPDATE capture_emails SET
+    entry_id = NULLIF((SELECT json_extract(a.value, '$[' || capture_emails.pos || '][0]') FROM app_state a
+                       WHERE a.key = 'outlook_places:' || capture_emails.capture AND json_valid(a.value)), ''),
+    store_id = NULLIF((SELECT json_extract(a.value, '$[' || capture_emails.pos || '][1]') FROM app_state a
+                       WHERE a.key = 'outlook_places:' || capture_emails.capture AND json_valid(a.value)), '')
+WHERE EXISTS (SELECT 1 FROM app_state a WHERE a.key = 'outlook_places:' || capture_emails.capture);
+DELETE FROM app_state WHERE substr(key, 1, 15) = 'outlook_places:';
+-- T-mails (KB decisions 35 to 46): an email DocRepo opens from a task, new or a reply to one of a capture's emails. Its
+-- conversation follows the task from when it's opened; ``capture`` is what its sent copy became. Used from release B on.
+CREATE TABLE t_mails (
+    id                 INTEGER PRIMARY KEY,
+    task               TEXT NOT NULL REFERENCES tasks(id),
+    kind               TEXT NOT NULL CHECK (kind IN ('new', 'reply')),
+    reply_capture      TEXT REFERENCES captures(id),
+    reply_pos          INTEGER,
+    opened             TEXT NOT NULL,
+    conversation       TEXT,
+    conversation_index TEXT,
+    capture            TEXT REFERENCES captures(id)
+);
+CREATE INDEX t_mails_conversation ON t_mails (conversation);
 """,
 }
 
