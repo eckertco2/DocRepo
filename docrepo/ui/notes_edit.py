@@ -46,10 +46,14 @@ from docrepo import markup, notes_page
 from docrepo.links import ADDRESS, read_address
 from docrepo.notes_page import Line
 from docrepo.ui import tokens
+from docrepo.ui.icons import icon
 from docrepo.ui.look import LOOK
 from docrepo.ui.rich_edit import FOLDED, HEADING_SIZES, MARKER, NUMBERED, RichEdit, block_markup
 
-LEFT = 28   # the gutter beside the page, where the fold arrows go
+LEFT = 28   # the gutter beside the page, where the fold arrows and the captures' marks go
+MARK = 14   # a capture's mark in the gutter (release 5.85, the task pane review's R3)
+#: The mark for each kind of caption, by the first word of what it says ("Email from …", "File", "Update: …").
+MARKS = {"Email": "mail", "File": "file", "Update": "update", "New": "task", "Decision": "decision", "Meeting": "agenda", "Note": "note"}
 PAGE_MIME = "application/x-docrepo-notes-page"
 PROPORTIONAL = QTextBlockFormat.LineHeightTypes.ProportionalHeight.value
 SAVE_AFTER_MS = 800
@@ -167,12 +171,12 @@ class NotesEdit(RichEdit):
         return last
 
     # ---- formats ----
-    def _block_format(self, kind: str, level: int = 0) -> QTextBlockFormat:
+    def _block_format(self, kind: str, level: int = 0, day: bool = False) -> QTextBlockFormat:
         f = QTextBlockFormat()
         if kind == "heading":
             f.setHeadingLevel(level)
-            f.setTopMargin({1: 16, 2: 10}.get(level, 8))
-            f.setBottomMargin(4)
+            f.setTopMargin(12 if day else {1: 16, 2: 10}.get(level, 8))
+            f.setBottomMargin(2 if day else 4)
             f.setLineHeight(115, PROPORTIONAL)
         elif kind == "caption":
             f.setTopMargin(10)
@@ -186,9 +190,13 @@ class NotesEdit(RichEdit):
             f.setLineHeight(130, PROPORTIONAL)
         return f
 
-    def _char_format(self, kind: str, level: int = 0, href: str = "") -> QTextCharFormat:
+    def _char_format(self, kind: str, level: int = 0, href: str = "", day: bool = False) -> QTextCharFormat:
         f = QTextCharFormat()
-        if kind == "heading":
+        if kind == "heading" and day:  # a day heading is a quiet divider (release 5.85, R5): Caption Strong, secondary
+            f.setFontPointSize(tokens.CAPTION)
+            f.setFontWeight(QFont.Weight.DemiBold)
+            f.setForeground(_grey())
+        elif kind == "heading":
             f.setFontPointSize(tokens.BODY + HEADING_SIZES.get(level, 0.5))
             f.setFontWeight(QFont.Weight.DemiBold)
         elif kind in ("caption", "file", "task"):
@@ -204,7 +212,8 @@ class NotesEdit(RichEdit):
     def style_block(self, block) -> None:
         """Give ``block`` its kind's spacing and look, keeping its words and their bold, italic and the like."""
         kind, bf = self.kind(block), block.blockFormat()
-        new = self._block_format(kind, bf.headingLevel())
+        day = kind == "heading" and notes_page.day_of(block.text()) is not None
+        new = self._block_format(kind, bf.headingLevel(), day)
         for prop in (QTextFormat.Property.BlockTopMargin, QTextFormat.Property.BlockBottomMargin,
                      QTextFormat.Property.LineHeight, QTextFormat.Property.LineHeightType):
             if new.hasProperty(prop):
@@ -218,7 +227,12 @@ class NotesEdit(RichEdit):
         if kind != "text":
             ref = self.ref_of(block)
             c.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
-            c.mergeCharFormat(self._char_format(kind, bf.headingLevel(), f"{ref[0]}:{ref[1]}" if ref else ""))
+            fmt = self._char_format(kind, bf.headingLevel(), f"{ref[0]}:{ref[1]}" if ref else "", day)
+            if kind == "heading" and not day:  # a heading that stops being a day heading gets its colour back
+                fmt.clearForeground()
+                c.setCharFormat(fmt)
+            else:
+                c.mergeCharFormat(fmt)
 
     # ---- the page in and out ----
     def _put(self, c: QTextCursor, line: Line, new_block: bool) -> None:
@@ -273,7 +287,8 @@ class NotesEdit(RichEdit):
             c.setCharFormat(QTextCharFormat())
             return
         href = f"{'capture' if line.kind == 'caption' else 'task' if line.kind == 'task' else 'document'}:{line.ref}" if line.kind != "heading" else ""
-        bf, cf = self._block_format(line.kind, line.level), self._char_format(line.kind, line.level, href)
+        day = line.kind == "heading" and notes_page.day_of(line.text) is not None
+        bf, cf = self._block_format(line.kind, line.level, day), self._char_format(line.kind, line.level, href, day)
         if new_block:
             c.insertBlock(bf, cf)
         else:
@@ -771,7 +786,7 @@ class NotesEdit(RichEdit):
             level = b.blockFormat().headingLevel()
             if hide_level is not None and level and level <= hide_level:
                 hide_level = None
-            visible = hide_level is None
+            visible = hide_level is None and not self.tucked(b)
             if b.isVisible() != visible:
                 b.setVisible(visible)
                 lo = b.position() if lo is None else lo
@@ -834,6 +849,47 @@ class NotesEdit(RichEdit):
     def caption_block(self, capture_id: str):
         return next((b for b in self.blocks() if self.ref_of(b) == ("capture", capture_id)), None)
 
+    # ---- captions as marks in the gutter (release 5.85, the task pane review's R3 and decision P2) ----
+    def tucked(self, block) -> bool:
+        """Whether a caption is tucked away: it has a line under it, so the page shows its mark beside that line, with
+        the caption's words in the mark's tooltip, instead of the caption as a line. A caption with nothing under it
+        stays a line, so it has somewhere to be."""
+        if self.kind(block) != "caption":
+            return False
+        n = block.next()
+        return n.isValid() and self.kind(n) not in ("caption", "heading")
+
+    def mark_of(self, block):
+        """The tucked caption a visible block carries the mark of: the one just above it."""
+        prev = block.previous()
+        return prev if prev.isValid() and self.tucked(prev) else None
+
+    @staticmethod
+    def mark_name(caption_text: str) -> str:
+        """The icon for a caption's words: "Thu 8 Oct 2026 · 10:42 am · Email from Tom Becker: …" is the mail mark."""
+        label = caption_text.split(" · ")[-1] if " · " in caption_text else caption_text
+        return MARKS.get(label.split(" ")[0].rstrip(":"), "note")
+
+    def mark_at(self, pos: QPoint):
+        """The tucked caption whose mark is under ``pos`` in the gutter, or None."""
+        if pos.x() >= LEFT:
+            return None
+        b = self.cursorForPosition(QPoint(LEFT + 4, pos.y())).block()
+        if not (b.isValid() and b.isVisible()):
+            return None
+        m = self.mark_of(b)
+        if m is None:
+            return None
+        r = self._row(b)
+        return m if r.top() - 2 <= pos.y() <= r.bottom() + 2 else None
+
+    def _paint_mark(self, p: QPainter, b, caption) -> None:
+        r = self._row(b)
+        hover = b.blockNumber() == self._hover
+        colour = tokens.colour("text2" if hover else "scroll") if not LOOK.classic else ("#444444" if hover else "#888888")
+        size = MARK
+        icon(self.mark_name(caption.text()), colour, size=size).paint(p, QRect(round((LEFT - size) / 2), round(r.center().y() - size / 2), size, size))
+
     def go_to(self, capture_id: str, refs: Sequence[str] = ()) -> bool:
         """Put the caret on a capture's caption, unfolding what hides it (the Captures tab's On the notes page), or, for a
         capture with no caption (release 5.83), on the first of its documents' lines (``refs``)."""
@@ -843,9 +899,13 @@ class NotesEdit(RichEdit):
             b = next((x for x in self.blocks() if (self.ref_of(x) or ("document", self._image_ref(x))) in wanted), None)
         if b is None:
             return False
+        marked = self.tucked(b)
+        if marked:  # its mark is beside the line under it (release 5.85): the caret goes to that line's start
+            b = b.next()
         self.reveal(b)
         c = QTextCursor(b)
-        c.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
+        if not marked:
+            c.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
         self.setFocus()
         self.setTextCursor(c)
         return True
@@ -935,6 +995,8 @@ class NotesEdit(RichEdit):
         if cursor.hasSelection() and end == last_block.position() and last > first:
             last -= 1
         first, last = self._unit(first, last)
+        if first > 0 and self.tucked(doc.findBlockByNumber(first - 1)):
+            first -= 1  # a block's tucked caption moves with it (release 5.85)
         count = doc.blockCount()
         if step < 0:
             if first == 0:
@@ -943,11 +1005,14 @@ class NotesEdit(RichEdit):
             while j > 0 and not doc.findBlockByNumber(j).isVisible():
                 j -= 1
             j = self._unit_start(j)
+            if j > 0 and self.tucked(doc.findBlockByNumber(j - 1)):
+                j -= 1
             other = (j, first - 1)
         else:
             if last >= count - 1:
                 return
-            other = self._unit(last + 1, last + 1)
+            nxt = last + 1
+            other = self._unit(nxt, nxt + 1 if nxt + 1 < count and self.tucked(doc.findBlockByNumber(nxt)) else nxt)
         lines = notes_page.lines_of(self.page_all())
         if len(lines) != count:
             self.message.emit("Lines don't move on a page with a table yet. Cut and paste them instead.")
@@ -1063,6 +1128,10 @@ class NotesEdit(RichEdit):
             return
         if kind in ("caption", "file", "task", "picture", "attachment") and not c.hasSelection() and key in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete):
             self._remove_line(b)
+            return
+        if key == Qt.Key.Key_Backspace and not c.hasSelection() and c.positionInBlock() == 0 and b.previous().isValid() \
+                and self.tucked(b.previous()) and kind != "cell":
+            self._remove_line(b.previous())  # Backspace at a block's start takes its tucked caption off: the text is untied
             return
         if key == Qt.Key.Key_Backspace and not c.hasSelection() and c.positionInBlock() == 0 and b.previous().isValid() \
                 and self.kind(b.previous()) not in ("text", "cell") and b.textList() is None and kind != "cell":
@@ -1304,6 +1373,12 @@ class NotesEdit(RichEdit):
             if h is not None:
                 self.toggle_fold(h)
                 return
+            m = self.mark_at(pos)
+            if m is not None:
+                ref = self.ref_of(m)
+                if ref:
+                    self.open_ref.emit(ref[1])
+                return
             scheme, _, ref = self.anchorAt(pos).partition(":")
             if event.modifiers() & Qt.KeyboardModifier.ControlModifier:  # Ctrl+click opens a link (release 5.67)
                 if scheme == "document" and ref:
@@ -1357,15 +1432,18 @@ class NotesEdit(RichEdit):
     def mouseMoveEvent(self, event) -> None:  # noqa: N802 - Qt's name
         pos = event.position().toPoint()
         row = self.heading_row_at(pos)
-        hover = row.blockNumber() if row is not None else -1
+        marked = self.mark_at(pos)
+        hover = row.blockNumber() if row is not None else marked.next().blockNumber() if marked is not None else -1
         if hover != self._hover:
             self._hover = hover
             self.viewport().update()
         scheme = self.anchorAt(pos).partition(":")[0]
         address = self.address_at(pos) if not scheme else None
-        hand = ((row is not None and pos.x() < LEFT) or scheme in ("capture", "document", "task") or self.checkbox_at(pos) is not None
-                or (address is not None and event.modifiers() & Qt.KeyboardModifier.ControlModifier))
-        self.viewport().setToolTip(f"Ctrl+click opens it in your browser: {address}" if address else "")
+        mark = self.mark_at(pos)
+        hand = ((row is not None and pos.x() < LEFT) or mark is not None or scheme in ("capture", "document", "task")
+                or self.checkbox_at(pos) is not None or (address is not None and event.modifiers() & Qt.KeyboardModifier.ControlModifier))
+        self.viewport().setToolTip(f"{mark.text()}. Click to open the capture." if mark is not None
+                                   else f"Ctrl+click opens it in your browser: {address}" if address else "")
         self.viewport().setCursor(Qt.CursorShape.PointingHandCursor if hand else Qt.CursorShape.IBeamCursor)
         QTextEdit.mouseMoveEvent(self, event)  # the cursor's shape is set here, for the arrows and links too
 
@@ -1391,6 +1469,10 @@ class NotesEdit(RichEdit):
                     break
                 if b.blockFormat().headingLevel():
                     self._paint_heading(p, b, small)
+                else:
+                    m = self.mark_of(b)
+                    if m is not None:
+                        self._paint_mark(p, b, m)
             b = b.next()
         p.end()
 

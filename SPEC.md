@@ -638,6 +638,17 @@ The task page reads top to bottom as the task's story (release 5.21, the visual 
     Backspace or Delete on one removes it with its line break (Ctrl+Z puts it back), and its capture is then no longer on
     the page. Enter on a heading, caption or file line starts a line of text under it; Backspace and Delete never join a
     line to one.
+  - **Captions as marks** (release 5.85, the task pane review's R3 and decision P2): a caption with a line under it is
+    tucked away (`NotesEdit.tucked`): the page shows its **mark** in the gutter beside that line, an icon for its kind
+    (a note, an email, a file, an update, a new task, a decision, meeting notes; `MARKS`), with the caption's words in
+    the mark's tooltip; a click on the mark opens the capture; the Captures tab's On the notes page lands the caret at
+    the start of that line; Backspace at the line's start takes the caption off (the text is untied, as before); a
+    block's tucked caption moves with it (Alt+Shift+Up and Down); the arrow keys pass over it. A caption with nothing
+    under it stays a line, so it has somewhere to be. The page in docs.db, `Task.md` and search are as before: the
+    caption is still a line of the page.
+  - **Day headings as dividers** (release 5.85, R5): a heading that reads as a date ("Thu 8 Oct 2026") is drawn in
+    Caption Strong, secondary text, with less space above it, so the owner's own headings are the page's outline and
+    the days sit between them; it still folds, and Alt+Shift+D still adds today's.
   - **Copy and paste** inside the page keep whole lines as they are (headings, captions, lists); a line's words go in at
     the caret. Text from elsewhere comes in as `RichEdit` takes it. **Alt+Shift+Up and Down** move a line with the list
     items under it, or a folded heading with its section, keeping what each line is; one Ctrl+Z puts it back.

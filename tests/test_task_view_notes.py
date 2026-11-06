@@ -286,7 +286,7 @@ def test_enter_on_a_note_opens_its_block_here(view, browse):
     QTest.keyClick(view.box, Qt.Key.Key_Return)
     notes = view.pane.notes
     assert view.kind == PAGE and view.pane.task_id == LEAF and view.scope == LEAF and view.query == "" and view.box.text() == ""
-    assert notes.textCursor().block() == caption(notes, "C000012") and browse.sel == before
+    assert notes.mark_of(notes.textCursor().block()) == caption(notes, "C000012") and browse.sel == before  # at the line under its mark (5.85)
 
 
 def test_a_note_taken_off_its_page_says_so(view):

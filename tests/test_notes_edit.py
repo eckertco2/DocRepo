@@ -149,9 +149,12 @@ def test_moving_lines_keeps_what_each_line_is(qapp):
     notes.set_page("\n".join(["# Two", "b", cap, "**a**"]))
     notes.setTextCursor(QTextCursor(notes.document().findBlockByNumber(3)))
     QTest.keyClick(notes, Qt.Key.Key_Up, ALT_SHIFT)
-    assert notes.page() == "\n".join(["# Two", "b", "**a**", cap])
+    assert notes.page() == "\n".join(["# Two", cap, "**a**", "b"])  # the block's tucked caption moves with it (release 5.85)
     notes.undo()
     assert notes.page() == "\n".join(["# Two", "b", cap, "**a**"])
+    notes.setTextCursor(QTextCursor(notes.document().findBlockByNumber(1)))
+    QTest.keyClick(notes, Qt.Key.Key_Down, ALT_SHIFT)  # and past a captioned block as one unit
+    assert notes.page() == "\n".join(["# Two", cap, "**a**", "b"])
 
 
 def test_whole_lines_paste_as_they_were(qapp):
@@ -252,13 +255,15 @@ def test_captures_tab_goes_to_a_block_and_adds_one_again(browse, ctx):
     browse.go_task("T000012")
     browse.on_link(QUrl("goto:T000012:C000012"))
     notes = browse.task_pane.notes
-    assert notes.kind(notes.textCursor().block()) == "caption" and notes.ref_of(notes.textCursor().block()) == ("capture", "C000012")
-    QTest.keyClick(notes, Qt.Key.Key_Backspace)  # the caption goes
+    # The caption is tucked behind its mark (release 5.85): the caret lands at the start of the line under it.
+    at = notes.textCursor().block()
+    assert notes.kind(at) == "text" and notes.ref_of(notes.mark_of(at)) == ("capture", "C000012") and notes.textCursor().positionInBlock() == 0
+    QTest.keyClick(notes, Qt.Key.Key_Backspace)  # Backspace at the block's start takes the caption off
     notes.save_now()
     assert "Not on the notes page" in browse.task_pane.bottom.toPlainText()
     browse.on_link(QUrl("readd:T000012:C000012"))
     assert "C000012" in notes_page.capture_ids(notes_page.get(ctx.conn, "T000012"))
-    assert notes.ref_of(notes.textCursor().block()) == ("capture", "C000012")
+    assert notes.ref_of(notes.mark_of(notes.textCursor().block())) == ("capture", "C000012")  # back, behind its mark
 
 
 def test_folds_are_kept_for_each_task(browse, ctx):
@@ -301,3 +306,44 @@ def test_page_history_restores_a_day_s_page(browse, ctx, monkeypatch):
     browse.page_history("T000012")
     assert notes_page.get(ctx.conn, "T000012") == "Older words" and "Restored the page" in browse.status.text()
     assert notes_page.version(ctx.conn, "T000012", "2026-10-08") == "Older words"  # the restore is today's edit
+
+
+def test_captions_tuck_behind_a_mark_and_day_headings_are_dividers(qapp):
+    """Release 5.85 (the task pane review's R3 and R5): a caption with a line under it is hidden and its mark is drawn in
+    the gutter beside that line (a click opens the capture, the Captures tab's jump lands on the line, Backspace at
+    its start takes the caption off, and the page is kept as it was); a caption with nothing under it stays a line;
+    a day heading is a quiet divider, the owner's headings as before."""
+    from PySide6.QtCore import QPoint
+
+    from docrepo.ui import tokens
+    from docrepo.ui.notes_edit import LEFT
+    from docrepo.ui.rich_edit import HEADING_SIZES
+
+    cap = notes_page.caption_line("Thu 8 Oct 2026 · 10:42 am · Email from Tom Becker: Re: seals", "C000101")
+    lone = notes_page.caption_line("Thu 8 Oct 2026 · 11:00 am · New task", "C000102")
+    body = "\n".join(["# Thu 8 Oct 2026", cap, "Seals are in.", "## Design", lone])
+    notes = NotesEdit()
+    notes.resize(600, 400)
+    notes.set_page(body)
+    notes.show()  # laid out, so the rows have places
+    QApplication.processEvents()
+    doc = notes.document()
+    day, c1, text, design, c2 = (doc.findBlockByNumber(i) for i in range(5))
+    assert notes.tucked(c1) and not c1.isVisible() and notes.mark_of(text) == c1 and notes.mark_name(c1.text()) == "mail"
+    assert not notes.tucked(c2) and c2.isVisible() and notes.mark_of(c2) is None and notes.mark_name(c2.text()) == "task"
+    assert notes.page() == body  # kept as docs.db has it
+    r = notes._row(text)
+    assert notes.mark_at(QPoint(LEFT // 2, r.center().y())) == c1 and notes.mark_at(QPoint(LEFT + 40, r.center().y())) is None
+    opened: list[str] = []
+    notes.open_ref.connect(opened.append)
+    QTest.mouseClick(notes.viewport(), Qt.MouseButton.LeftButton, pos=QPoint(LEFT // 2, r.center().y()))
+    assert opened == ["C000101"]
+    assert notes.go_to("C000101") and notes.textCursor().block() == text and notes.textCursor().positionInBlock() == 0
+    assert day.begin().fragment().charFormat().fontPointSize() == tokens.CAPTION  # a divider
+    assert design.begin().fragment().charFormat().fontPointSize() == tokens.BODY + HEADING_SIZES[2]
+    removed: list[str] = []
+    notes.message.connect(removed.append)
+    QTest.keyClick(notes, Qt.Key.Key_Backspace)
+    assert lines(notes)[1] == ("text", "Seals are in.") and "no longer tied to C000101" in removed[-1]
+    notes.undo()
+    assert notes.page() == body and notes.tucked(doc.findBlockByNumber(1))

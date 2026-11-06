@@ -929,7 +929,8 @@ def test_a_capture_s_edit_shows_its_text_and_goes_to_its_block(browse, ctx):
     browse.edit_goto.click()
     notes = browse.task_pane.notes
     assert browse.editing is None and browse.sel == ("task", "T000012") and browse.detail_stack.currentIndex() == 2
-    assert notes.textCursor().block().text().endswith("· Note") and notes.kind(notes.textCursor().block()) == "caption"
+    at = notes.textCursor().block()  # at the block's first line, beside its mark (release 5.85)
+    assert at.text() == "Guard fitted." and notes.mark_of(at).text().endswith("· Note") and notes.ref_of(notes.mark_of(at)) == ("capture", r.capture_id)
 
 
 def test_release_59_people_labels_reference_fields_and_capacity(browse, ctx):
