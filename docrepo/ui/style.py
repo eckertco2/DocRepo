@@ -74,6 +74,8 @@ QLabel#statusName, QLabel#statusWhen { color: #5a6571; }
 QToolButton#groupHead { border: none; background: transparent; padding: 2px 6px 2px 2px; color: #1a1f25; }
 QToolButton#groupHead:hover { background: #eef1f4; border-radius: 4px; }
 QToolButton#groupFold { border: none; background: transparent; }
+QWidget#stickyTitle { background: #ffffff; border-bottom: 1px solid #d6dce3; }
+QToolButton#stickyButton { border: none; background: transparent; padding: 1px 6px; color: #1d5e98; }
 """
 
 STYLE = FORMAT_BAR_STYLE + NOTES_STYLE + """

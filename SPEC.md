@@ -649,14 +649,25 @@ The task page reads top to bottom as the task's story (release 5.21, the visual 
   - **Day headings as dividers** (release 5.85, R5): a heading that reads as a date ("Thu 8 Oct 2026") is drawn in
     Caption Strong, secondary text, with less space above it, so the owner's own headings are the page's outline and
     the days sit between them; it still folds, and Alt+Shift+D still adds today's.
+  - **Ways down a long page** (release 5.86, the task pane review's R9 and decision P7): **Jump to**, a popover from the
+    Notes header's button, the sticky line or Ctrl+G, lists the page's headings and day dividers in the page's order
+    (the owner's headings in Semibold, indented by level), with Top of the page first and Latest last; a choice unfolds
+    what hides the heading, puts the caret at its end and scrolls it to the top of the pane. The **sticky title line**
+    shows the task's title over the page once the facts have scrolled off (small, opaque, no animation; not in the Task
+    view's tab), with Jump to and Latest, which goes to the end of the notes. The pane's scroll bar has a **landmark**
+    for each heading that shows, a short line where the heading sits in the scroll (the owner's headings in the accent,
+    the days in the handle's grey), with the heading's words in its tooltip. The Notes menu's **Fold days older than
+    two weeks** (off until asked for, per task, kept with the page's folds in `app_state`'s `page_folds:<task>` as
+    `old_days`) folds every day heading more than 14 days before today as the page opens; the fold arrow, Jump to or
+    the caret unfolds one, and turning it off unfolds them.
   - **Copy and paste** inside the page keep whole lines as they are (headings, captions, lists); a line's words go in at
     the caret. Text from elsewhere comes in as `RichEdit` takes it. **Alt+Shift+Up and Down** move a line with the list
     items under it, or a folded heading with its section, keeping what each line is; one Ctrl+Z puts it back.
   - **Saving** a moment after typing stops, and when the editor loses the caret ("Saved 14:10" beside Notes); the Captures
     tab is drawn again when the page's captions change. Page Up and Page Down move the scroll a screen; a wheel notch
     glides (not in the Classic look); the scroll keeps the caret in view.
-  - **The Notes menu:** Fold all headings, Unfold all, and **Page history…** (103; Day headings for new captures, 119,
-    went in release 5.69):
+  - **The Notes menu:** Fold all headings, Unfold all, Fold days older than two weeks (release 5.86), and **Page
+    history…** (103; Day headings for new captures, 119, went in release 5.69):
     the page as it stood at the end of each day it changed, read-only, and Restore, which is an edit like any other.
   - **The format bar** (release 5.26) is beside Notes, with the **Checklist** button and, since release 5.27, the
     **Table** button. Since release 5.83 (the task pane review's R8, decision P6) it shows while the caret is in the

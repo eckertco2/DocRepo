@@ -51,7 +51,10 @@ from docrepo.ui.look import LOOK
 from docrepo.ui.rich_edit import FOLDED, HEADING_SIZES, MARKER, NUMBERED, RichEdit, block_markup
 
 LEFT = 28   # the gutter beside the page, where the fold arrows and the captures' marks go
-MARK = 14   # a capture's mark in the gutter (release 5.85, the task pane review's R3)
+MARK = 14
+#: Days older than this many days fold as a page opens, with the Notes menu's "Fold days older than two weeks" on for the
+#: task (release 5.86, the task pane review's R9 and decision P7: off by default, since a folded day is hidden content).
+OLD_DAYS = 14   # a capture's mark in the gutter (release 5.85, the task pane review's R3)
 #: The mark for each kind of caption, by the first word of what it says ("Email from …", "File", "Update: …").
 MARKS = {"Email": "mail", "File": "file", "Update": "update", "New": "task", "Decision": "decision", "Meeting": "agenda", "Note": "note"}
 PAGE_MIME = "application/x-docrepo-notes-page"
@@ -848,6 +851,42 @@ class NotesEdit(RichEdit):
 
     def caption_block(self, capture_id: str):
         return next((b for b in self.blocks() if self.ref_of(b) == ("capture", capture_id)), None)
+
+    # ---- ways down a long page (release 5.86, the task pane review's R9 and decision P7) ----
+    def outline(self) -> list[tuple]:
+        """Every heading on the page in order, for Jump to: (block, level, whether it's a day), those under a fold too."""
+        out = []
+        for b in self.blocks():
+            level = b.blockFormat().headingLevel()
+            if level:
+                out.append((b, level, notes_page.day_of(b.text()) is not None))
+        return out
+
+    def landmarks(self) -> list[tuple[int, int, bool, str]]:
+        """Where the headings that show sit, for the scroll bar's marks: (top in the editor, level, whether it's a day, text)."""
+        layout = self.document().documentLayout()
+        return [(round(layout.blockBoundingRect(b).top()), level, day, " ".join(b.text().split()))
+                for b, level, day in self.outline() if b.isVisible()]
+
+    def fold_old_days(self, cutoff: date, fold: bool = True) -> int:
+        """Fold (or unfold) every day heading before ``cutoff``, and say how many changed. The Notes menu's option does
+        this as a page opens; it doesn't say the folds changed, so what's kept per task is the owner's own folding."""
+        n = 0
+        for b, _level, day in self.outline():
+            d = notes_page.day_of(b.text()) if day else None
+            if d is not None and d < cutoff and (b.userState() == FOLDED) != fold:
+                b.setUserState(FOLDED if fold else -1)
+                n += 1
+        if n:
+            self.refold()
+        return n
+
+    def go_to_end(self) -> None:
+        """Latest: the caret at the page's end, where the newest day is."""
+        c = self.textCursor()
+        c.movePosition(QTextCursor.MoveOperation.End)
+        self.setFocus()
+        self.setTextCursor(c)
 
     # ---- captions as marks in the gutter (release 5.85, the task pane review's R3 and decision P2) ----
     def tucked(self, block) -> bool:

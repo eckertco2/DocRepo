@@ -74,6 +74,7 @@ from docrepo.ui.icons import icon
 from docrepo.ui.look import LOOK, Help, KeyTips, set_hints, tip, with_key
 from docrepo.ui.nav_pane import WIDTH as NAV_WIDTH, NavPane
 from docrepo.ui.page_view import PageView
+from docrepo.ui.notes_edit import OLD_DAYS
 from docrepo.ui.task_pane import TaskPane
 from docrepo.ui.templates_view import PreviewDialog, PreviewEntry, TemplatesPane
 from docrepo.ui.tree_import import TreeFilesPane
@@ -2676,6 +2677,11 @@ class BrowseWindow(QWidget):
         pane.task_id = task_id
         pane.saved.setText("")
         notes.set_page(body, self._folds_of(task_id), day)
+        # Days older than a fortnight folded as the page opens, where the owner asked for it on this task (release 5.86).
+        old_days = bool(self._page_folds(task_id).get("old_days"))
+        pane.old_days_action.setChecked(old_days)
+        if old_days:
+            notes.fold_old_days(self.today() - timedelta(days=OLD_DAYS))
         pane.summary.set_folded(db.get_state(self.conn, f"checklist_folded:{task_id}") == "1")
 
     def _save_notes(self, body: str, pane: TaskPane | None = None) -> None:
@@ -2760,8 +2766,8 @@ class BrowseWindow(QWidget):
         except ValueError:
             return {}
 
-    def _save_page_fold(self, key: str, is_open: bool) -> None:
-        task_id = self.task_pane.task_id
+    def _save_page_fold(self, key: str, is_open: bool, pane: TaskPane | None = None) -> None:
+        task_id = (pane or self.task_pane).task_id
         if task_id:
             folds = self._page_folds(task_id)
             folds[key] = is_open
@@ -2821,6 +2827,14 @@ class BrowseWindow(QWidget):
             return
         if which in ("fold", "unfold"):
             notes.fold_all(which == "fold")
+        elif which == "old_days":
+            on = pane.old_days_action.isChecked()
+            self._save_page_fold("old_days", on, pane)
+            n = notes.fold_old_days(self.today() - timedelta(days=OLD_DAYS), on)
+            self._save_folds(pane)
+            days = f"{n} day{'s' if n != 1 else ''}"
+            pane.say(f"Days older than two weeks fold when this page opens: {days} folded now." if on
+                     else f"Days older than two weeks stay open on this page: {days} unfolded.")
         elif which == "history":
             self.page_history(task_id, pane)
 

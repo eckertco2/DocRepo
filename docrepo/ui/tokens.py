@@ -353,6 +353,10 @@ QWidget#checkRow:hover { background: $hover; }
 QTextEdit#checkText, QTextEdit#checkText:focus { border: none; border-radius: 0; background: transparent; padding: 0; }
 QLabel#checkCount, QLabel#checkHeading { color: $text2; }
 QLabel#checkHeading { padding-top: 6px; padding-left: 4px; }
+/* the sticky title line (release 5.86): the task's title once the header has scrolled off; opaque, over the page */
+QWidget#stickyTitle { background: $content; border-bottom: 1px solid $stroke_strong; }
+QToolButton#stickyButton { border: none; border-radius: 4px; background: transparent; padding: 1px 8px; color: $accent; }
+QToolButton#stickyButton:hover { background: $hover; }
 QToolButton#checkFold, QToolButton#rowAction { border: none; background: transparent; padding: 0 2px; }
 QFrame#popover, QFrame#capCard { background: $content; border: 1px solid $stroke_strong; border-radius: 8px; }
 QPushButton#filterChip { background: $info_bg; border: none; border-radius: 4px; padding: 2px 10px; min-height: 18px; max-height: 22px; }

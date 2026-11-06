@@ -327,7 +327,7 @@ def test_the_whole_frame_comes_with_it(view):
 def test_the_notes_menu_in_this_window_has_no_day_headings_switch(view, browse):
     """Release 5.69: every page has day headings, so the switch is gone from the Notes menu here too."""
     on_page(view)
-    assert [a.text() for a in view.pane.menu_button.menu().actions() if a.text()] == ["Fold all headings", "Unfold all", "Page history…"]
+    assert [a.text() for a in view.pane.menu_button.menu().actions() if a.text()] == ["Fold all headings", "Unfold all", "Fold days older than two weeks", "Page history…"]
     assert Model(view.conn).uses_day_headings(TOP)
 
 

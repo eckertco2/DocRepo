@@ -281,7 +281,7 @@ def test_day_headings_from_the_notes_menu(browse, ctx):
     browse.go_task("T000012")
     # Release 5.69: every page has day headings, so the Notes menu has no switch for them.
     menu = [a.text() for a in browse.task_pane.menu_button.menu().actions() if a.text()]
-    assert menu == ["Fold all headings", "Unfold all", "Page history…"]
+    assert menu == ["Fold all headings", "Unfold all", "Fold days older than two weeks", "Page history…"]  # the last option: release 5.86
     assert Model(ctx.conn).uses_day_headings("T000012") and browse.task_pane.notes.day_headings
 
 
@@ -347,3 +347,75 @@ def test_captions_tuck_behind_a_mark_and_day_headings_are_dividers(qapp):
     assert lines(notes)[1] == ("text", "Seals are in.") and "no longer tied to C000101" in removed[-1]
     notes.undo()
     assert notes.page() == body and notes.tucked(doc.findBlockByNumber(1))
+
+
+def test_the_outline_landmarks_latest_and_old_days_in_the_editor(qapp):
+    """Release 5.86 (the task pane review's R9 and decision P7): the outline lists every heading, the landmarks only those
+    that show, Latest goes to the end, and folding the days before a cutoff leaves the owner's own folds alone."""
+    from datetime import date
+
+    body = "\n".join(["# Mon 7 Sep 2026", "Old.", "## Design", "Lines.", "# Thu 8 Oct 2026", "New.", "## Site", "Here."])
+    notes = NotesEdit()
+    notes.resize(600, 400)
+    notes.set_page(body)
+    notes.show()
+    QApplication.processEvents()
+    assert [(b.text(), level, day) for b, level, day in notes.outline()] == \
+        [("Mon 7 Sep 2026", 1, True), ("Design", 2, False), ("Thu 8 Oct 2026", 1, True), ("Site", 2, False)]
+    marks = notes.landmarks()
+    assert [m[3] for m in marks] == ["Mon 7 Sep 2026", "Design", "Thu 8 Oct 2026", "Site"] and marks[0][0] < marks[1][0] < marks[2][0] < marks[3][0]
+    cutoff = date(2026, 9, 24)
+    assert notes.fold_old_days(cutoff) == 1 and notes.folds() == ["1:Mon 7 Sep 2026"]
+    assert [m[3] for m in notes.landmarks()] == ["Mon 7 Sep 2026", "Thu 8 Oct 2026", "Site"]  # Design is under the fold
+    assert notes.fold_old_days(cutoff) == 0  # already folded
+    site = notes.outline()[3][0]
+    notes.toggle_fold(site)  # the owner's own fold stays as the old days unfold
+    assert notes.fold_old_days(cutoff, False) == 1 and notes.folds() == ["2:Site"]
+    notes.go_to_end()
+    assert notes.textCursor().atEnd() and notes.textCursor().block().text() == "Here."
+
+
+def test_ways_down_a_long_page(browse, ctx):
+    """Release 5.86 (R9, decision P7): Jump to lists the page's headings and days and scrolls one to the top of the pane,
+    the sticky title line shows once the facts have scrolled off, Latest goes to the end, the scroll bar has a landmark
+    per heading, and Fold days older than two weeks folds them as the page opens, remembered per task."""
+    import json
+
+    body = "\n".join(["# Mon 7 Sep 2026", "Old.", "## Design", *["A line of notes."] * 60, "# Thu 8 Oct 2026", "New.", "## Site", "Here."])
+    notes_page.put(ctx.conn, "T000012", body, NOW)
+    browse.refresh()
+    browse.go_task("T000012")
+    pane = browse.task_pane
+    notes, bar = pane.notes, pane.verticalScrollBar()
+    QApplication.processEvents()
+    assert not pane.jump_button.isHidden() and not pane.sticky.isVisible()
+    pane.show_jump_menu()
+    assert [a.text() for a in pane._jump_menu.actions() if a.text()] == \
+        ["Top of the page", "Mon 7 Sep 2026", "\u2003Design", "Thu 8 Oct 2026", "\u2003Site", "Latest"]
+    pane._jump_menu.close()
+    site = notes.outline()[3][0]
+    pane.jump_to(site)
+    QApplication.processEvents()
+    assert notes.textCursor().block() == site and bar.value() > 0
+    assert pane.sticky.isVisible() and pane.sticky_name.text() and pane.sticky_name.toolTip() == Model(ctx.conn).task("T000012").title
+    bar.setValue(0)
+    assert not pane.sticky.isVisible()
+    pane.latest()
+    QApplication.processEvents()
+    assert notes.textCursor().atEnd() and bar.value() > 0
+    for _ in range(3):
+        QApplication.processEvents()  # the page's last resize, then the landmarks' timer
+    assert [m[3] for m in bar.marks] == ["Mon 7 Sep 2026", "Design", "Thu 8 Oct 2026", "Site"] and bar.total > 0  # the page's height as of its last layout
+    assert "Thu 8 Oct 2026" in bar.marks_near(bar.bar_y(bar.marks[2][0])) and bar.marks_near(bar.bar_y(bar.marks[1][0]) + 40) == []
+    # Days older than two weeks: off until asked for, then folded as the page opens, per task.
+    assert not pane.old_days_action.isChecked() and notes.folds() == []
+    pane.old_days_action.trigger()
+    assert notes.folds() == ["1:Mon 7 Sep 2026"] and json.loads(db.get_state(ctx.conn, "page_folds:T000012"))["old_days"] is True
+    browse.go_task("T000010")
+    assert not browse.task_pane.old_days_action.isChecked()
+    browse.go_task("T000012")
+    assert pane.old_days_action.isChecked() and notes.folds() == ["1:Mon 7 Sep 2026"]
+    pane.jump_to(notes.outline()[1][0])  # Design, under the folded day: Jump to opens it
+    assert notes.folds() == [] and notes.textCursor().block().text() == "Design"
+    pane.old_days_action.trigger()
+    assert not pane.old_days_action.isChecked() and json.loads(db.get_state(ctx.conn, "page_folds:T000012"))["old_days"] is False

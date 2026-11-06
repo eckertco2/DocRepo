@@ -390,6 +390,7 @@ class Pages:
         out: dict[str, str] = {}
         out["head"] = (self.discarded_box(t.discarded, t.discard_reason, "the task tree, the lists, the pickers, search and the capacity calendar")
                        if t.discarded else "") + self.page_head(t, state, self.fact_line(t))
+        out["title"] = t.title  # the sticky title line's words (release 5.86)
         out["status_name"], out["status_when"], out["status_age"], out["status_body"] = self.status_parts(t)
         log = self.stories.story(task_id)
         out["status_log"] = self.story_list(log, lambda e: self.log_item(e), state) if log else '<p class="note">No changes yet.</p>'
