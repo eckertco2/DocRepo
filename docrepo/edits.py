@@ -78,13 +78,19 @@ def add_to_pages(conn: sqlite3.Connection, data_root: Path, at: datetime, added:
     return changed
 
 
-def add_note(conn: sqlite3.Connection, task_id: str, typed: str, formatted: bool, at: datetime) -> list[str]:
+def add_note(conn: sqlite3.Connection, task_id: str, typed: str, formatted: bool, at: datetime,
+             made: list[tuple[str, str]] = ()) -> list[str]:
     """A note from the capture window on its task's page, as no capture (release 5.69, the notes workspace plan's
     decisions 341 and 345): under the page's headings with the same words as its own, or under the day's heading
     (``notes_page.place_note``). It's the owner's own edit, so the day's version counts in Activity's Notes edited, and
-    the page is indexed for search. ``typed`` is the text as capture.md would keep it. It joins the caller's
-    transaction, so a save that fails keeps nothing and the window keeps the text. Returns the headings it went under."""
+    the page is indexed for search. ``typed`` is the text as capture.md would keep it. ``made`` is each task its items
+    made, with the item's text as its capture keeps it: on the page each is one task line (release 5.83, R4b). It joins
+    the caller's transaction, so a save that fails keeps nothing and the window keeps the text. Returns the headings
+    it went under."""
     lines = notes_page.note_markup(typed, formatted, own=task_id)
+    if made and lines:
+        lines = notes_page.task_lines(lines, [(tid, notes_page.note_markup(text, formatted, "", task_id)) for tid, text in made],
+                                      Model(conn), at.date())
     if not lines:
         return []
     with transaction(conn):

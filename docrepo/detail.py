@@ -36,7 +36,7 @@ body { font-family: 'Segoe UI'; font-size: 10pt; color: #1a1f25; }
 a { color: #1d5e98; text-decoration: none; }
 h2 { font-size: 15pt; font-weight: 600; margin-top: 2px; margin-bottom: 4px; }
 .crumbs { color: #5a6571; font-size: 9pt; margin: 0; }
-.sub { color: #5a6571; font-size: 9pt; }
+.sub { color: #5a6571; font-size: 9pt; font-weight: 400; }
 .faint { color: #87919c; }
 .k { color: #5a6571; padding-right: 12px; }
 .fk { color: #5a6571; font-size: 9pt; }
@@ -74,11 +74,13 @@ h2 { font-size: 15pt; font-weight: 600; margin-top: 2px; margin-bottom: 4px; }
 .u2 { background-color: #fcefcf; }
 .u3 { background-color: #fbe3e1; }
 .sec { font-weight: 600; margin-top: 16px; margin-bottom: 4px; }
+.secx { font-weight: 400; }
+.ttl { font-weight: 600; }
 .dt { color: #5a6571; font-size: 9pt; padding-right: 12px; }
-.rel { color: #5a6571; font-size: 9pt; }
-.over { color: #b0261e; font-weight: 600; }
+.rel { color: #5a6571; font-size: 9pt; font-weight: 400; }
+.over { color: #b0261e; }
 .stat { background-color: #f4f6f8; }
-.sk { color: #5a6571; font-size: 9pt; font-weight: 600; }
+.sk { color: #5a6571; font-size: 9pt; }
 .desc { color: #5a6571; margin-top: 4px; }
 .lbli { color: #5a6571; }
 .rule { background-color: #d6dce3; }
@@ -169,8 +171,9 @@ MARKS = {"Not started": "ns", "In progress": "ip", "Parked": "pk", "Closed": "cl
 
 
 def section(title: str, extra: str = "") -> str:
-    """A section's heading in Body Strong, with ``extra`` (a count, a link) after it."""
-    return f'<p class="sec">{esc(title)}{extra}</p>'
+    """A section's heading in Body Strong, with ``extra`` (a count, a link) after it, in the regular weight (release
+    5.83, the task pane review's R10: the page keeps to the playbook's two weights)."""
+    return f'<p class="sec">{esc(title)}<span class="secx">{extra}</span></p>'
 
 
 def fact_rows(rows: list[tuple[str, str]]) -> str:
@@ -367,8 +370,9 @@ class Pages:
         """The page's one tinted block: where the task stands, and how long ago that was written."""
         name = "Final status" if t.state == "Closed" else "Current status"
         since = self.status_since(t)
-        when = (f'<td align="right" class="rel" title="When the current status last changed">{esc(self.long(since))} · '
-                f'{ago(to_date(since), self.today)}</td>' if t.current_status and since else "")
+        # The date it changed; how long ago is in the tooltip (release 5.83, the task pane review's R7: one rule for time).
+        when = (f'<td align="right" class="rel" title="The current status last changed {ago(to_date(since), self.today)}">'
+                f'{esc(self.long(since))}</td>' if t.current_status and since else "")
         body = (multiline(t.current_status) if t.current_status
                 else f'<span class="sub">No status yet.</span> {link(f"update:{t.id}", "Add one", "Update this task")}')
         return (f'<table width="100%" cellspacing="0" cellpadding="12" style="margin-top: 12px"><tr><td class="stat">'
@@ -529,11 +533,19 @@ class Pages:
         shown = [k for k in kids if k.state != "Closed"] + (closed if state.closed else [])
         rows = []
         for k in shown:
-            cell = due_cell(k, self.today)
-            due = (f'<span class="over">{esc(cell.text)}</span>' if cell.cls == "over" else esc(cell.text)) if cell else ""
+            # The date alone, as the lists show it; how far off is in the tooltip, in Due's words (release 5.83, R7).
+            dd = due_of(k, self.today)
+            if dd:
+                day = to_date(dd.date)
+                due = esc(long_date(day, self.today))
+                tip = f"{dd.label} {long_date(day, self.today)}, {days_words(day, self.today)}"
+                if day < self.today and is_open(k):
+                    due = f'<span class="over">{due}</span>'
+            else:
+                due, tip = "", "No due date"
             who = ([*k.leads, *k.assignees] or [None])[0]
             rows.append(f'<tr><td width="18">{self.mark(k)}</td><td>{self.task_link(k.id, "tl")}{self.markers_html(k)}</td>'
-                        f'<td align="right" class="rel" title="{esc(cell.tip) if cell else "No due date"}">{due}</td>'
+                        f'<td align="right" class="rel" title="{esc(tip)}">{due}</td>'
                         f'<td width="24" align="right">{self.avatar(who) if who else ""}</td></tr>')
         count = f'{sum(is_open(k) for k in kids)} of {len(kids)} open'
         bar = f' <img src="progress:{len(closed)}:{len(kids)}" width="{PROGRESS_WIDTH}" height="4" title="{len(closed)} of {len(kids)} closed">'
@@ -683,7 +695,7 @@ class Pages:
         items = self.stories.raw_items(task_id)
         if not items:
             return '<p class="note">Nothing has come in yet.</p>'
-        on_page = notes_page.on_page(self.m, task_id, self.m.pages.get(task_id, ""))
+        on_page = notes_page.on_page(self.m, task_id, self.m.pages.get(task_id, ""), self.stories)
         return self.story_list(items, lambda r: self.raw_item(r, state, task_id, on_page), state)
 
     def story_list(self, items: list, render: Callable, state: PageState) -> str:
@@ -738,7 +750,7 @@ class Pages:
         title = self.capture_link(r.capture, r.title, "tl") if r.capture else link(f"doc:{r.document}", r.title, quiet="tl")
         # An item (release 5.8) says whose notes it came from.
         notes = f' <span class="lead">· from the notes of</span> {self.capture_link(r.from_notes, r.from_title)}' if r.from_notes else ""
-        out = f'<p><span class="lead">{esc(r.lead)}</span>{notes}<br><b>{title}</b>'
+        out = f'<p><span class="lead">{esc(r.lead)}</span>{notes}<br><span class="ttl">{title}</span>'
         if r.capture and on_page is not None:
             if r.capture in on_page:
                 out += f'<br>{link(f"goto:{task_id}:{r.capture}", "On the notes page", "Show its block on the notes page")}'
@@ -779,7 +791,7 @@ class Pages:
         dates = sorted(e.at for e in (self.stories.story(task_id) if kind == "log" else notes))
         summary = (k.current_status or "No status yet") if kind == "log" else "No entries" if empty else f"{len(notes)} entr{'ies' if len(notes) > 1 else 'y'}"
         caret = "" if empty else f'<a href="chap:{esc(task_id)}">{CHEVRON_DOWN if is_open_ else CHEVRON_RIGHT}</a>'
-        head = (f'<tr><td class="ch" width="{18 + 16 * depth}" align="right">{caret}</td><td class="ch"><b>{esc(k.title)}</b> {state_chip(k.state)} '
+        head = (f'<tr><td class="ch" width="{18 + 16 * depth}" align="right">{caret}</td><td class="ch"><span class="ttl">{esc(k.title)}</span> {state_chip(k.state)} '
                 f'<span class="sub">{esc(clip(summary, 90))}{" · " + self.day(dates[-1]) if dates else ""}</span>'
                 f' &nbsp;<a href="task:{esc(task_id)}" title="Open {esc(k.title)}"><span class="sub">Open ↗</span></a></td></tr>')
         body = f'<tr><td></td><td>{self.story_body(task_id, kind, state)}</td></tr>' if is_open_ and not empty else ""

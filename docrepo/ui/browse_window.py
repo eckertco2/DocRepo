@@ -2766,12 +2766,19 @@ class BrowseWindow(QWidget):
             self.go_capture(ref)
         elif ref in self.model().documents:
             self.on_link(QUrl(f"doc:{ref}"))
+        elif ref in self.model().tasks:  # a task line on a notes page (release 5.83)
+            self.go_task(ref)
+
+    def _refs_of(self, capture_id: str) -> list[str]:
+        """A capture's documents: how its block is found on a page when it has no caption (release 5.83)."""
+        c = self.model().captures.get(capture_id)
+        return list(c.document_ids) if c else []
 
     def go_to_block(self, task_id: str, capture_id: str) -> None:
         """The Captures tab's On the notes page: the capture's block, unfolded, with the caret on its caption."""
         if self.sel != ("task", task_id):
             self.go_task(task_id)
-        if self.task_pane.notes.go_to(capture_id):
+        if self.task_pane.notes.go_to(capture_id, self._refs_of(capture_id)):
             QTimer.singleShot(0, self.task_pane.scroll_to_caret)
         else:
             self.say(f"{capture_id} isn't on the notes page.")
@@ -2780,7 +2787,7 @@ class BrowseWindow(QWidget):
         self.save_open_notes()
         self._do(lambda: edits.add_again(self.conn, self.ctx.data_root, self.ctx.fs, capture_id, task_id, self._now()))
         if self.task_pane.task_id == task_id:
-            self.task_pane.notes.go_to(capture_id)
+            self.task_pane.notes.go_to(capture_id, self._refs_of(capture_id))
             QTimer.singleShot(0, self.task_pane.scroll_to_caret)
 
     def _notes_menu(self, which: str, pane: TaskPane | None = None) -> None:

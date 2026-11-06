@@ -37,13 +37,16 @@ def test_a_task_page(pages):
     html = pages.task_page("T000008", PageState())
     words = text(html)
     assert words.startswith("Reactor impeller upgrade › Installation In progress Line 1 Strategic Plan Install and align")
-    order = ["Current status Mon 5 Oct · 3 days ago Procedure rev 2 approved. Waiting on the rigging plan.",
+    # Release 5.83 (the task pane review's R7): the status says its date, its age in the tooltip; a subtask row its date alone.
+    order = ["Current status Mon 5 Oct Procedure rev 2 approved. Waiting on the rigging plan.",
              "When Due Fri 30 Oct in 22 days Deadline too · Turnaround ends Starts Mon 19 Oct in 11 days",
-             "Who Lead Me 8 h Assignees Tom Becker 60 h Mike Ortiz 60 h", "Subtasks 3 of 3 open New subtask Rigging plan 14 Oct · 6 d",
+             "Who Lead Me 8 h Assignees Tom Becker 60 h Mike Ortiz 60 h", "Subtasks 3 of 3 open New subtask Rigging plan Wed 14 Oct",
              "Details T000008 · Created Tue 22 Sep from C000005", "Captures 6 Status log 14 Summaries 1 Files 3 With subtasks ⇅ Oldest first",
              "This task September 2026", "Subtasks · 3"]
     at = [words.find(part) for part in order]
     assert -1 not in at and at == sorted(at), dict(zip(order, at))
+    assert 'title="The current status last changed 3 days ago"' in html and 'title="Due Wed 14 Oct, in 6 days"' in html
+    assert "3 days ago" not in words and "6 d" not in words and "<b>" not in html  # one rule for time, two weights (R7, R10)
     for gone in ("Reminder", "—", "Subtasks Summaries", "SUBTASKS", "Scope:", "Order:", "Top-level task"):  # empty fields, the old tab and lines
         assert gone not in words, gone
     assert {"task:T000001", "person:P003", "label:Line%201", "fold:details", "menu:scope", "menu:order", "new:T000008", "tab:log",
@@ -58,7 +61,8 @@ def test_the_page_shows_only_what_says_something(pages):
     is "ago"; a routine meeting counts to its next one, with hours per occurrence and its agenda before Details."""
     words = text(pages.task_page("T000002", PageState()))
     assert "When Deadline Sat 31 Oct in 23 days Verification walkthrough Who" in words and "No due date" not in words
-    assert "Current status Tue 1 Sep · 5 weeks ago" in words  # the Excel import's status: as old as the task
+    assert "Current status Tue 1 Sep " in words and "5 weeks ago" not in words  # the Excel import's status: as old as the task
+    assert "last changed 5 weeks ago" in pages.task_page("T000002", PageState())
     words = text(pages.task_page("T000016", PageState()))
     assert "When Due No due date Reminder Wed 7 Oct yesterday Agenda Business team meeting Tue 13 Oct" in words
     assert "No status yet. Add one" in words and "update:T000016" in pages.task_page("T000016", PageState())

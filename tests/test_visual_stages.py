@@ -133,6 +133,7 @@ def test_priorities_scrolls_across_rather_than_holding_the_windows_width(browse)
 def test_the_task_pages_format_bar_drops_to_its_own_line_when_the_pane_is_narrow(qapp):
     pane = TaskPane("", 16)
     pane.show()
+    pane._card_focus(True)  # the bar shows while the caret is in the notes (release 5.83); its line is fitted then
 
     def at(width: int) -> None:
         pane.resize(width, 600)

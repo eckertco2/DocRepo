@@ -142,7 +142,7 @@ def test_the_task_page_shows_them(linked):
     pages = DetailPages(m, datetime(2026, 10, 8).date(), lambda c: "", "P001", conn, reference_links=LINKS)
     for width in (600, 900):  # under When and Who, or in the rail
         page = pages.task_page(INSTALLATION, PageState(), width, "top")
-        assert '<p class="sec">Links <span class="sub">6</span></p>' in page
+        assert '<p class="sec">Links<span class="secx"> <span class="sub">6</span></span></p>' in page  # the count regular (5.83, R10)
         assert 'href="openurl:' + quote("https://changes.example.com/record/4471", safe="") + '"' in page
         lift = next(d.id for d in m.documents.values() if d.original == LIFT)
         assert f'href="opendoc:{lift}"' in page and 'src="lk:pin"' in page and 'title="Opens in your browser: ' + LIFT + '"' in page

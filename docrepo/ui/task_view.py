@@ -1287,7 +1287,8 @@ class TaskView(QWidget):
         """A note or update on its task's notes page, here: at its block, or for words typed on the page, the page (decision 242)."""
         self.open_page(r.task)
         if r.type != "page" and r.capture:
-            if self.pane.notes.go_to(r.capture):
+            c = self.model().captures.get(r.capture)
+            if self.pane.notes.go_to(r.capture, list(c.document_ids) if c else []):
                 QTimer.singleShot(0, self.pane.scroll_to_caret)
             else:
                 self.say(f"{r.capture} isn't on the notes page.")

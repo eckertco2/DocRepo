@@ -166,7 +166,8 @@ def test_a_file_is_a_line_with_its_description(root, tmp_path):
     f.write_bytes(b"x")
     save(root, CaptureDraft(task="T000012", files=[FileRow("Pump spec.docx", str(f), "the vendor's datasheet")]))
     lines = lines_of(page(root, "T000012"))
-    assert [(x.kind, x.text) for x in lines][2:] == [("file", "File: Pump spec.docx, the vendor's datasheet")]
+    # A file with no words of its own has no caption (release 5.83, R4): its day heading and file line say it all.
+    assert [(x.kind, x.text) for x in lines] == [("heading", "Fri 16 Oct 2026"), ("file", "File: Pump spec.docx, the vendor's datasheet")]
 
 
 def test_meeting_notes_go_on_the_meeting_and_an_item_on_its_task(root):
@@ -272,3 +273,56 @@ def test_the_schema_upgrade_leaves_pages_to_be_built(data_root, fs):
     conn = db.connect(fs, data_root)
     assert notes_page.needs_build(conn) and conn.execute("SELECT count(*) FROM task_pages").fetchone()[0] == 0
     conn.close()
+
+
+# ---- release 5.83: the task pane review's R4 and R4b ----
+def test_a_file_s_text_that_only_repeats_its_description_isn_t_written_twice(root, tmp_path):
+    f = tmp_path / "Pump spec.docx"
+    f.write_bytes(b"x")
+    save(root, CaptureDraft(task="T000012", content="The vendor's datasheet.", files=[FileRow("Pump spec.docx", str(f), "the vendor's datasheet")]))
+    lines = lines_of(page(root, "T000012"))
+    assert [(x.kind, x.text) for x in lines] == [("heading", "Fri 16 Oct 2026"), ("file", "File: Pump spec.docx, the vendor's datasheet")]
+
+
+def test_a_block_with_no_caption_is_on_the_page_and_comes_off_with_its_capture(root, tmp_path):
+    conn, data_root, fs = root
+    f = tmp_path / "Pump spec.docx"
+    f.write_bytes(b"x")
+    r = save(root, CaptureDraft(task="T000012", files=[FileRow("Pump spec.docx", str(f), "the vendor's datasheet")]))
+    model, stories = edits.stories_for(conn, data_root, AT)
+    assert r.capture_id in notes_page.on_page(model, "T000012", page(root, "T000012"), stories)
+    assert r.capture_id in notes_page.on_page(model, "T000012", page(root, "T000012"))  # Task.md's reading, without the text
+    assert notes_page.edited_blocks(model, stories, r.capture_id) == []
+    edits.discard_capture(conn, data_root, fs, r.capture_id, "", AT)
+    assert "Pump spec.docx" not in page(root, "T000012")
+    edits.bring_back_capture(conn, data_root, fs, r.capture_id, AT)
+    assert "File: Pump spec.docx, the vendor's datasheet" in page(root, "T000012")
+    model, stories = edits.stories_for(conn, data_root, AT)
+    assert r.capture_id in notes_page.on_page(model, "T000012", page(root, "T000012"), stories)
+
+
+def test_a_note_with_words_of_its_own_keeps_its_caption(root):
+    r = save(root, linked(content="Typed with the link.", task="T000012"))
+    assert r.capture_id in notes_page.capture_ids(page(root, "T000012"))
+
+
+def test_a_task_made_from_meeting_notes_is_one_line_on_the_meeting_s_page(root):
+    conn, data_root, fs = root
+    r = save(root, CaptureDraft(content="Crane is booked.\n@Tom get the alignment report by Friday", task="T000010", meeting=True))
+    made = Model(conn).captures[r.items[0]]
+    p = page(root, r.meeting)
+    task = next(x for x in lines_of(p) if x.kind == "task")
+    assert task.ref == made.created_task and task.text.startswith("Task: ") and "alignment report" in task.text.lower() and "Tom Becker" in task.text
+    assert "get the alignment report by Friday" not in p and "Crane is booked." in p
+    assert "get the alignment report" in page(root, made.created_task).lower()  # the task's own page keeps the words
+    assert notes_page.read_line(notes_page.task_line(task.text, task.ref)).text == task.text
+    printed = notes_page.task_md(p, lambda _: None, task_link=lambda t: f"../{t}/Task.md")
+    assert any(line.startswith(f"- [Task: ") and f"](../{made.created_task}/Task.md)" in line for line in printed)
+
+
+def test_a_task_made_from_a_note_on_the_page_is_one_line_there(root):
+    conn, data_root, fs = root
+    r = save(root, CaptureDraft(content="Plan.\n@Tom get the alignment report by Friday", task="T000012"))
+    assert r.capture_id is None and r.items  # the note is no capture (release 5.69); its item made a task
+    lines = lines_of(page(root, "T000012"))
+    assert [x.kind for x in lines] == ["heading", "text", "task"] and lines[2].ref == Model(conn).captures[r.items[0]].created_task

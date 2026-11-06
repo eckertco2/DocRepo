@@ -8,7 +8,8 @@ glides there, and the scroll keeps the caret in view as you type (the Qt sample'
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QEasingCurve, QEvent, QPoint, QPropertyAnimation, Qt, Signal
+from PySide6.QtCore import QEasingCurve, QEvent, QPoint, QPropertyAnimation, Qt, QTimer, Signal
+from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import QApplication, QFrame, QHBoxLayout, QLabel, QLayout, QMenu, QScrollArea, QToolButton, QVBoxLayout, QWidget
 
 from docrepo.ui import tokens
@@ -19,8 +20,14 @@ from docrepo.ui.notes_edit import NotesEdit
 from docrepo.ui.page_view import PageView
 from docrepo.ui.rich_edit import FormatBar
 
-#: The widest the notes page's lines get, as the task page's HTML stops widening at 1040 px (release 5.21).
+#: The widest the Notes frame gets, as the task page's HTML stops widening at 1040 px (release 5.21).
 NOTES_MAX = 1040
+#: The most characters a line of notes holds (release 5.83, the task pane review's R11): the frame's chrome keeps its width,
+#: the text stops at about 90 characters, the top of Butterick's 45 to 90 (Segoe UI Variable's average character is 6 px
+#: at the Body size, so 90 is 552 px: narrower than the usual pane's 628 px of text, and far from the wide page's 1,000).
+NOTES_LINE = 90
+#: How long the format bar stays after the caret leaves the notes, so a click on one of its menus keeps it (release 5.83, R8).
+BAR_LINGER_MS = 200
 
 
 class FitPageView(PageView):
@@ -122,6 +129,10 @@ class TaskPane(QScrollArea):
         rl = QHBoxLayout(row)
         rl.setContentsMargins(0, 0, 14, 10)
         rl.addWidget(self.notes, 1)
+        rl.addStretch(0)
+        # The text stops at NOTES_LINE characters (R11), however wide the frame: the eye loses a longer line on the way back.
+        margin_px = 2 * round(self.notes.document().documentMargin())
+        self.notes.setMaximumWidth(round(QFontMetrics(self.notes.font()).averageCharWidth() * NOTES_LINE) + margin_px + 4)
         # Each layer of the frame holds at least what's in it, so the notes, as tall as their text, are never cut short.
         rl.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         self.summary = ChecklistSummary(self.notes)
@@ -129,6 +140,17 @@ class TaskPane(QScrollArea):
         bl = QHBoxLayout(box)
         bl.setContentsMargins(14, 10, 14, 6)
         bl.addWidget(self.summary, 1)
+        # The Checklist summary only when the page has a checklist line (R8): Ctrl+1 or the Checklist button makes the first.
+        self.summary_box = box
+        box.hide()
+        self.summary.changed.connect(lambda n: box.setVisible(n > 0))
+        # The format bar only while the caret is in the notes (R8, decision P6), kept a moment for a click on one of its menus.
+        self._bar_timer = QTimer(self)
+        self._bar_timer.setSingleShot(True)
+        self._bar_timer.setInterval(BAR_LINGER_MS)
+        self._bar_timer.timeout.connect(self._bar_check)
+        for w in (self.format_bar, self.table_button):
+            w.hide()
         # The frame round the notes (decision 130): the capture window's editor frame, by the UI playbook's grouping
         # ladder, so the one editable part of the page stands apart. Its bottom edge turns to the accent while you type.
         self.card = QFrame(objectName="notesCard")
@@ -158,7 +180,8 @@ class TaskPane(QScrollArea):
     def _fit_head(self) -> None:
         """The format bar beside the Notes heading while it fits there, or else on a line of its own under it."""
         spare = self.viewport().width() - 2 * self.head_margin - 22
-        need = sum(w.sizeHint().width() + 8 for w in (self.title, self.saved, self.format_bar, self.table_button, self.menu_button))
+        need = sum(w.sizeHint().width() + 8 for w in (self.title, self.saved, self.format_bar, self.table_button, self.menu_button)
+                   if not w.isHidden())
         narrow = need > spare
         if narrow == (self.bar_row is not None):
             return
@@ -186,6 +209,26 @@ class TaskPane(QScrollArea):
         self.card.setProperty("typing", on)  # not "focus": every widget has a read-only one
         self.card.style().unpolish(self.card)
         self.card.style().polish(self.card)
+        if on:
+            self._bar_timer.stop()
+            self._show_bar(True)
+        else:
+            self._bar_timer.start()
+
+    def _bar_check(self) -> None:
+        """The caret left the notes a moment ago: the bar goes unless one of its menus is open, or the caret came back."""
+        if QApplication.activePopupWidget() is not None:
+            self._bar_timer.start()
+            return
+        if not self.notes.hasFocus():
+            self._show_bar(False)
+
+    def _show_bar(self, on: bool) -> None:
+        if self.format_bar.isHidden() != on:
+            return
+        for w in (self.format_bar, self.table_button):
+            w.setVisible(on)
+        self._fit_head()
 
     # ---- the one scroll ----
     def wheel(self, event) -> None:

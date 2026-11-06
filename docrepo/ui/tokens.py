@@ -459,7 +459,7 @@ body { color: $text; }
 a { color: $accent; text-decoration: none; }
 h2 { font-family: 'Segoe UI'; font-size: ${subtitle}pt; font-weight: 600; margin-top: 2px; margin-bottom: 4px; }
 .crumbs { color: $text2; font-size: ${caption}pt; margin: 0; }
-.sub { color: $text2; font-size: ${caption}pt; }
+.sub { color: $text2; font-size: ${caption}pt; font-weight: 400; }
 .faint { color: $text2; }
 .k { color: $text2; padding-right: 12px; }
 .fk { color: $text2; font-size: ${caption}pt; }
@@ -494,12 +494,14 @@ h2 { font-family: 'Segoe UI'; font-size: ${subtitle}pt; font-weight: 600; margin
 .anchor { color: $accent; background-color: $info_bg; }
 .inh { color: $text2; font-style: italic; }
 .sec { font-weight: 600; margin-top: 18px; margin-bottom: 4px; }
+.secx { font-weight: 400; }
+.ttl { font-weight: 600; }
 .foldword { color: $text; }
 .dt { color: $text2; font-size: ${caption}pt; padding-right: 14px; }
-.rel { color: $text2; font-size: ${caption}pt; }
-.over { color: $critical; font-weight: 600; }
+.rel { color: $text2; font-size: ${caption}pt; font-weight: 400; }
+.over { color: $critical; }
 .stat { background-color: $base; }
-.sk { color: $text2; font-size: ${caption}pt; font-weight: 600; }
+.sk { color: $text2; font-size: ${caption}pt; }
 .desc { color: $text2; margin-top: 4px; }
 .lbli { color: $text2; }
 .rule { background-color: $stroke; }

@@ -30,6 +30,7 @@ the facts above and the history below (``task_pane``).
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import date
 
 from pathlib import Path
@@ -133,10 +134,11 @@ class NotesEdit(RichEdit):
             return None
         href = it.fragment().charFormat().anchorHref()
         scheme, _, ref = href.partition(":")
-        return (scheme, ref) if scheme in ("capture", "document") and ref else None
+        return (scheme, ref) if scheme in ("capture", "document", "task") and ref else None
 
     def kind(self, block) -> str:
-        """"heading", "caption", "file", "picture", "attachment", "cell" (in a table) or "text"."""
+        """"heading", "caption", "file", "task" (a line that's one link to a task, release 5.83), "picture", "attachment", "cell" (in a
+        table) or "text"."""
         if block.blockFormat().headingLevel():
             return "heading"
         if QTextCursor(block).currentTable() is not None:
@@ -148,7 +150,7 @@ class NotesEdit(RichEdit):
             it += 1
         ref = self.ref_of(block)
         if ref:
-            return "caption" if ref[0] == "capture" else "attachment" if block.textList() is not None else "file"
+            return "caption" if ref[0] == "capture" else "task" if ref[0] == "task" else "attachment" if block.textList() is not None else "file"
         return "text"
 
     def heading_of(self, block):
@@ -189,7 +191,7 @@ class NotesEdit(RichEdit):
         if kind == "heading":
             f.setFontPointSize(tokens.BODY + HEADING_SIZES.get(level, 0.5))
             f.setFontWeight(QFont.Weight.DemiBold)
-        elif kind in ("caption", "file"):
+        elif kind in ("caption", "file", "task"):
             f.setAnchor(True)
             f.setAnchorHref(href)
             if kind == "caption":
@@ -270,7 +272,7 @@ class NotesEdit(RichEdit):
                 c.insertText(line.text, cf)
             c.setCharFormat(QTextCharFormat())
             return
-        href = f"{'capture' if line.kind == 'caption' else 'document'}:{line.ref}" if line.kind != "heading" else ""
+        href = f"{'capture' if line.kind == 'caption' else 'task' if line.kind == 'task' else 'document'}:{line.ref}" if line.kind != "heading" else ""
         bf, cf = self._block_format(line.kind, line.level), self._char_format(line.kind, line.level, href)
         if new_block:
             c.insertBlock(bf, cf)
@@ -604,10 +606,11 @@ class NotesEdit(RichEdit):
                 continue
             if kind == "heading":
                 out.append(notes_page.heading_line(" ".join(b.text().split()), b.blockFormat().headingLevel()))
-            elif kind in ("caption", "file"):
+            elif kind in ("caption", "file", "task"):
                 ref = self.ref_of(b)
                 text = " ".join(b.text().split())
-                out.append(notes_page.caption_line(text, ref[1]) if kind == "caption" else notes_page.file_line(text, ref[1]))
+                out.append(notes_page.caption_line(text, ref[1]) if kind == "caption" else notes_page.task_line(text, ref[1]) if kind == "task"
+                           else notes_page.file_line(text, ref[1]))
             else:
                 out.append(notes_page.text_line(block_markup(b)[0]))
         return out
@@ -831,9 +834,13 @@ class NotesEdit(RichEdit):
     def caption_block(self, capture_id: str):
         return next((b for b in self.blocks() if self.ref_of(b) == ("capture", capture_id)), None)
 
-    def go_to(self, capture_id: str) -> bool:
-        """Put the caret on a capture's caption, unfolding what hides it (the Captures tab's On the notes page)."""
+    def go_to(self, capture_id: str, refs: Sequence[str] = ()) -> bool:
+        """Put the caret on a capture's caption, unfolding what hides it (the Captures tab's On the notes page), or, for a
+        capture with no caption (release 5.83), on the first of its documents' lines (``refs``)."""
         b = self.caption_block(capture_id)
+        if b is None and refs:
+            wanted = {("document", r) for r in refs}
+            b = next((x for x in self.blocks() if (self.ref_of(x) or ("document", self._image_ref(x))) in wanted), None)
         if b is None:
             return False
         self.reveal(b)
@@ -894,7 +901,7 @@ class NotesEdit(RichEdit):
         Ctrl+Alt+0 makes it text again. A caption, a file line and a list item are left as they are."""
         c = self.textCursor()
         b = c.block()
-        if self.kind(b) in ("caption", "file") or b.textList() is not None:
+        if self.kind(b) in ("caption", "file", "task") or b.textList() is not None:
             return
         c.beginEditBlock()
         bf = b.blockFormat()
@@ -1054,7 +1061,7 @@ class NotesEdit(RichEdit):
             c.endEditBlock()
             self.setTextCursor(c)
             return
-        if kind in ("caption", "file", "picture", "attachment") and not c.hasSelection() and key in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete):
+        if kind in ("caption", "file", "task", "picture", "attachment") and not c.hasSelection() and key in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete):
             self._remove_line(b)
             return
         if key == Qt.Key.Key_Backspace and not c.hasSelection() and c.positionInBlock() == 0 and b.previous().isValid() \
@@ -1073,7 +1080,7 @@ class NotesEdit(RichEdit):
             return
         if kind in ("picture", "attachment") and event.text() and event.text().isprintable() and not mods & Qt.KeyboardModifier.ControlModifier:
             self._to_description(b)  # typing on a picture or a file goes to its description
-        elif kind in ("caption", "file") and event.text() and event.text().isprintable() and not mods & Qt.KeyboardModifier.ControlModifier:
+        elif kind in ("caption", "file", "task") and event.text() and event.text().isprintable() and not mods & Qt.KeyboardModifier.ControlModifier:
             # Typing on a caption goes to the line below it: the caption stays the capture's (decision 109).
             nxt = b.next()
             if nxt.isValid() and self.kind(nxt) == "text" and nxt.isVisible():
@@ -1306,7 +1313,7 @@ class NotesEdit(RichEdit):
                 if address:
                     self.open_link.emit("openurl:" + quote(address, safe=""))
                     return
-            if scheme in ("capture", "document") and ref and not event.modifiers():
+            if scheme in ("capture", "document", "task") and ref and not event.modifiers():
                 self.open_ref.emit(ref)
                 return
         super().mousePressEvent(event)
@@ -1356,7 +1363,7 @@ class NotesEdit(RichEdit):
             self.viewport().update()
         scheme = self.anchorAt(pos).partition(":")[0]
         address = self.address_at(pos) if not scheme else None
-        hand = ((row is not None and pos.x() < LEFT) or scheme in ("capture", "document") or self.checkbox_at(pos) is not None
+        hand = ((row is not None and pos.x() < LEFT) or scheme in ("capture", "document", "task") or self.checkbox_at(pos) is not None
                 or (address is not None and event.modifiers() & Qt.KeyboardModifier.ControlModifier))
         self.viewport().setToolTip(f"Ctrl+click opens it in your browser: {address}" if address else "")
         self.viewport().setCursor(Qt.CursorShape.PointingHandCursor if hand else Qt.CursorShape.IBeamCursor)

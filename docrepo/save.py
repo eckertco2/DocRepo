@@ -652,7 +652,13 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
         if (capture_id or page_note) and reading:
             item_files, made, unused = _save_items(conn, settings, reading, names, content, formatted, via, capture_id, created or t, when, at,
                                                    person, home_is_new=bool(created or meeting_made))
-        noted_under = edits.add_note(conn, t, items.store(content, names, formatted), formatted, at) if page_note else []
+        noted_under = []
+        if page_note:
+            made_tasks = {r["id"]: r["created_task"] for r in conn.execute(
+                "SELECT id, created_task FROM captures WHERE id IN (%s)" % ",".join("?" * len(item_files)), [cid for cid, _, _ in item_files])
+            } if item_files else {}
+            noted_under = edits.add_note(conn, t, items.store(content, names, formatted), formatted, at,
+                                         made=[(made_tasks[cid], items.store(text, names, f)) for cid, text, f in item_files if made_tasks.get(cid)])
         # Meeting notes: the agenda items the notes worked through close as Discussed.
         discussed = 0
         if agenda_task and capture_id:

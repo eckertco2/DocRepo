@@ -314,9 +314,13 @@ def test_words_typed_on_the_page_open_the_page(view):
 # ---- what comes with it (decision 243) ----
 def test_the_whole_frame_comes_with_it(view):
     pane = view.page_pane()
-    assert pane.card.objectName() == "notesCard" and not pane.format_bar.isHidden() and not pane.table_button.isHidden() and not pane.menu_button.isHidden()
+    # The format bar shows while the caret is in the notes (release 5.83, R8); the menu is always there.
+    assert pane.card.objectName() == "notesCard" and pane.format_bar.isHidden() and pane.table_button.isHidden() and not pane.menu_button.isHidden()
+    pane._card_focus(True)
+    assert not pane.format_bar.isHidden() and not pane.table_button.isHidden()
     notes = on_page(view)
     new_line(notes, "[] Book the crane")
+    view.pane.summary.refresh()  # it reads the page a moment after typing; the first checklist line shows the summary (R8)
     assert "- [ ] Book the crane" in notes.page() and len(notes.checklist_blocks()) == 1 and view.pane.summary.isVisibleTo(view.pane)
 
 

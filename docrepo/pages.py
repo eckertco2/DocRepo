@@ -175,7 +175,10 @@ class Pages:
                 return rel_link(here, [*here, "Files", d.name])
             return None
 
-        out += ["## Notes", "", *(notes_page.task_md(page, capture_link, document_link) or ["_No notes yet._"]), ""]
+        def task_link(task_id: str) -> str | None:
+            return self._task_link(here, task_id) if task_id in self.m.tasks else None
+
+        out += ["## Notes", "", *(notes_page.task_md(page, capture_link, document_link, task_link) or ["_No notes yet._"]), ""]
         on_page = notes_page.on_page(self.m, t.id, page)
         kids = self.m.children_of(t.id)
         if kids:

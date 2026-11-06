@@ -238,6 +238,15 @@ The words used here are defined in `GLOSSARY.md`.
   typed text in full with names as written (`@Tom Becker`) and without file and link lines (96, 114), and a file line for
   each of its files. An email's own text stays with the email. A new task's text that's only its title isn't repeated.
   Its headings (release 5.28) are the page's headings, at the level they were typed (the mods log round 4's decision 132).
+  Since release 5.83 (the task pane review's R4 and R4b, in the parent workspace's `docs/ui-design/task-pane-review.md`):
+  typed text that only repeats a file's description isn't written; a block with no words of its own beyond its files,
+  whose caption would say only "File", "Note" or "Update", has **no caption** (its day heading and file lines say it
+  all; a caption that names an email, a change or where an item came from stays), and such a capture is on the page
+  while its file lines are (`notes_page.on_page`, `find_block` by its documents; the Captures tab, Discard and Add it
+  again find it the same way); and a task made from the notes (an item, 5.8) is a **task line** on the page it came
+  from, `[Task: Rigging plan · Mike Ortiz · due Wed 14 Oct](task:T000031)`, in its item's place, with the item's text
+  kept in its own capture and on the task's own page. A task line opens the task; it's written once, so a later change
+  to the task's title or date doesn't change it. A note that's no capture (5.69) gets its task lines the same way.
 - **Where it goes** (`notes_page.add_block`): at the end of its day's lines, which run to the next day heading whatever
   other headings come between (release 5.28), or under a new heading for its day, made in date order among the day
   headings (97, 113). Since release 5.69 every task's page has day headings (`Model.uses_day_headings`): decision 119's
@@ -592,10 +601,11 @@ A template put into tasks that already exist, instead of making new ones (decisi
 ### 8.4 The task page
 The task page reads top to bottom as the task's story (release 5.21, the visual overhaul's O9, decisions 64 to 69): where it sits and what it is, where it stands, what's next and who's on it, what it's made of, and how it got here. Only the fields that say something show; the record folds under one Details line.
 - **Header:** the path (the first chain of parents, with "+1 more path" naming the others in its tooltip; none for a top-level task), the title (its ID in the tooltip), then the state, the markers (Urgent, the recurrence, several parents), Meeting, Plant event (release 5.9) and the labels (inherited ones in secondary text; each opens its label), then the description, folded after 180 characters with More and Less.
-- **Current status** in the page's one tinted block ("Final status" for a closed task), with when it last changed and how long ago ("Mon 5 Oct · 3 days ago"): its latest status log entry, or the day the task was made for a status that came with it. With none: "No status yet" and Add one, which opens an Update capture.
+- **Current status** in the page's one tinted block ("Final status" for a closed task), with the date it last changed ("Mon 5 Oct"; how long ago in its tooltip, since release 5.83, the task pane review's R7): its latest status log entry, or the day the task was made for a status that came with it. With none: "No status yet" and Add one, which opens an Update capture.
 - **When and Who**, side by side from 540 px wide, each a short grey label beside its value. When: Closed (with its day), Next due or Next meeting (a routine task's next occurrence), Due ("in 22 days", "tomorrow", or "3 days overdue" in critical red; "Deadline too" under it when the deadline is the same day), Deadline (when it differs; with no Due it takes Due's place, as mods log round 1's M0003 asked; nothing changes in docs.db), Starts (only while still to come), Reminder ("yesterday" once passed), and Agenda (each agenda it's on, with a meeting's next date). A task with no Due, deadline or recurrence says "No due date"; nothing else shows empty. Parked and closed tasks show dates without counting. Who: each lead and assignee with initials in a circle (the owner, named Me, as a figure), name and hours ("per occurrence" for a routine task), or "No one yet".
 - **Agenda** (an agenda target, such as a meeting): its open items, each with its state, and Open agenda.
-- **Subtasks:** "3 of 4 open", a small bar of the closed share, and New subtask (`new:`, the T key's New task under it); then a row for each subtask not closed (its state mark, title, markers, days until due and the first lead or assignee), and the closed ones behind Show closed.
+- **Subtasks:** "3 of 4 open", a small bar of the closed share, and New subtask (`new:`, the T key's New task under it); then a row for each subtask not closed (its state mark, title, markers, its due date in red once passed, with "in 22 days" in the tooltip since release 5.83, and the first lead or assignee), and the closed ones behind Show closed.
+- **One rule for time** (release 5.83, R7) and **two weights** (R10): the facts print absolute dates ("Mon 5 Oct", the year only when it isn't this one) and count days only where a decision needs it (Due, Deadline, Starts, Reminder, key dates), in one form ("in 22 days", "3 days overdue"); ages and clock times are tooltips. Section headings' counts and links, the status block's heading and an overdue date are in the regular weight, so the page has one bold weight for headings and entry titles.
 - **Details**, folded to one line that shows the ID, the reference fields and when and from what the task was made: ID, Created, Start (once passed; "the day it was entered" when it's the created day), Repeats (the recurrence and its end), Parents (with several), each reference field with Copy, and Folder (Open folder). Since release 5.67 (decision 320) a reference field whose name has a link address in Settings is a link to its page, with Copy (the value) and Copy link; one with none has Add a link, which opens Settings.
 - **Links** (release 5.67, round 6's decisions 316, 317 and 323; `docrepo/task_links.py`): after When and Who, or in the rail on a wide page, the task's links in one place, each once: its reference fields' links (from Settings' link addresses), then its pinned link and folder documents, then the rest of them, newest first, then the web addresses in its notes page's words, five at most. Each row is a mark (a link, a folder, a note, or the accent link for a reference field; a pin when pinned), its name, which opens it (a web link in the default browser, a folder in File Explorer; the tooltip has the whole address first), its host ("In a note" for an address in the words, Folder for a folder), and Copy (Copy path for a folder). With more than five, **All n links** opens the Task view on its Link type, or **Show link files in the Task view** when some aren't documents, which the Task view doesn't list. A task with none has no group.
 - **From 760 px wide** (the list folded, or the splitter dragged), When, Who and Details (open) move into a column on the right, and the page stops widening at 1040 px. The page is drawn again when the pane's width crosses 540 or 760 px. The detail pane (`docrepo/ui/page_view.py`) draws the initials, state marks and bar the page names (`avatar:`, `mark:`, `progress:`); the page itself stays HTML from `docrepo/detail.py`.
@@ -630,8 +640,11 @@ The task page reads top to bottom as the task's story (release 5.21, the visual 
   - **The Notes menu:** Fold all headings, Unfold all, and **Page history…** (103; Day headings for new captures, 119,
     went in release 5.69):
     the page as it stood at the end of each day it changed, read-only, and Restore, which is an edit like any other.
-  - **The format bar** (release 5.26) is beside Notes, with the **Checklist** button; since release 5.27 it's always
-    shown, with the **Table** button.
+  - **The format bar** (release 5.26) is beside Notes, with the **Checklist** button and, since release 5.27, the
+    **Table** button. Since release 5.83 (the task pane review's R8, decision P6) it shows while the caret is in the
+    notes, staying a moment for a click on one of its menus; the ⋯ menu is always there.
+  - **The notes' lines stop at about 90 characters** (release 5.83, R11, `task_pane.NOTES_LINE`), however wide the
+    frame; the frame's header and summary keep its width.
   - **The frame** (release 5.27, decision 130, by the UI playbook's grouping ladder): Notes, its format bar, the
     Checklist summary and the page sit in one frame, the capture window's editor frame, so the one part of the task page
     that's typed in stands apart from the facts above it and the history below. Its header band is tinted, with a
@@ -654,7 +667,8 @@ The task page reads top to bottom as the task's story (release 5.21, the visual 
     file lines never become checklist lines. The new look draws its own tick box over Qt's.
   - **The Checklist summary** (release 5.26, `docrepo/ui/checklist_summary.py`, decisions 121 to 123): under the Notes
     heading, above the page, every checklist line on the page in page order, under the heading each sits under, with
-    the count ("1 of 4 done"). Each row is bound to its line (a `QTextBlock` of the editor): ticking, rewording (with the
+    the count ("1 of 4 done"). Since release 5.83 (R8) it's shown only when the page has a checklist line: Ctrl+1 or
+    the Checklist button makes the first, and the summary appears with it. Each row is bound to its line (a `QTextBlock` of the editor): ticking, rewording (with the
     formatting keys) or removing it in either place changes the one line at once, in the page's undo, and the page saves.
     Done lines hide behind **Show N done**. **Add item** puts a new line at the end of the page, under today's heading
     (every task's, since release 5.69). On a row's hover, **Go to** shows its line on the page and **Remove** takes it off.
