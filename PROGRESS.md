@@ -94,16 +94,16 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.84 | The task page's clean-up, stage T2: a short header of widgets (the fact line, the status card with the status log behind it, the groups as expanders with the closed ones on one row, a Files group), the notes within the first screen, and the history folded after them | Built 2026-11-05 in the `task-pane-t1` worktree, merged to `main` and on GitHub the same day, without a hand test (the owner's word) |
 | 5.85 | The task page's clean-up, stage T3: a capture's caption tucks behind a mark in the notes page's gutter (the page's data unchanged), and day headings are quiet dividers | Built 2026-11-05 in the `task-pane-t1` worktree, merged to `main` and on GitHub the same day, without a hand test (the owner's word) |
 | 5.86 | The task page's clean-up, stage T4: ways down a long notes page: Jump to (the page's headings and days, Top and Latest; Ctrl+G), the sticky title line, landmarks on the scroll bar, and Fold days older than two weeks as a per-task choice, off by default | Built 2026-11-06 in the `task-pane-t1` worktree, merged to `main` and on GitHub the same day, without a hand test (the owner's word) |
-| 5.87 | A release identity and guard rails (the design workspace's review of 2026-11-06, F9 and F7): `__version__` kept in step with each release, shown in Settings and `--version`, `CHANGELOG.md`, tags; a test that fails on any write or launch outside the allowed modules, File Explorer started from `opener.py` with a list of arguments, ruff's settings and its findings fixed, and the rule on legacy Office types | Built 2026-11-06 in the `review-fixes` worktree, before the owner's hand test. Not committed |
-| 5.88 | Safer upgrades and the test configuration (the review of 2026-11-06, F8 and F10): migrations split where SQLite says a statement ends, in one transaction; docs.db copied to the backup folder before an upgrade; a sample data root at nine schema versions, each upgraded in the tests; a damaged docs.db said in words at start-up; the `gui` mark and the fast run with no Qt, `--lf`, and a temporary folder per run | Built 2026-11-06 in the `review-fixes` worktree, with 5.87, before the owner's hand test. Not committed |
-| 5.89 | Data integrity (the review of 2026-11-06, F3): the `check` command and Settings' Check the data root; capture.md written before a save commits, so a failed write saves nothing; each backup's database copy checked before it's kept, with the trouble on Settings' backup card; `System\Drafts` in the backup; and a restore tested end to end | Built 2026-11-06 in the `review-fixes` worktree, with 5.87 and 5.88, before the owner's hand test. Not committed |
-| 5.90 | Quicker saves and edits (the review of 2026-11-06, F5): a save and the everyday edits make only the pages they can reach, the model's per-task indexes built once, and the browse tool on the shared model | Built 2026-11-06 in the `review-fixes` worktree, with 5.87 to 5.89, before the owner's hand test. Not committed |
-| 5.91 | Errors you can see, and Undo where it was missing (the review of 2026-11-06, F12): the Problems line in the capture window's footer and the browse window's status line; Undo on Today's Done and Remove, an agenda's Discussed and Remove, and Save; Discard, Remove and Clear as the one set of verbs; New task under this one; the Note tooltip; a double-click that's Edit task on the Timeline too, with Q for Quick edit | Built 2026-11-06 in the `review-fixes` worktree, with 5.87 to 5.90, before the owner's hand test. Not committed |
-| 5.92 | The `**` syntax, found and loud when it fails (the review of 2026-11-06, F6): the `**` list, the Unread line card, a ticked card for a new person, the keys' Syntax tab, the placeholder, and README's table of `**` names made from `items.OPERATORS` | Built 2026-11-06 in the `review-fixes` worktree, with 5.87 to 5.91, before the owner's hand test. Not committed |
-| 5.93 | The email path (the review of 2026-11-06, F14): a dragged email's place in Outlook from its own .msg, else by subject and sent minute, never by subject alone in a reply chain; its place kept, so filing an unfiled capture later marks it; an email captured before said on its drop; and a 200 MB cap on what a drag hands over | Built 2026-11-06 in the `review-fixes` worktree, with 5.87 to 5.92, before the owner's hand test. Not committed |
-| 5.94 | Where typed text lands (the review of 2026-11-06, F13, the rule taken 2026-11-06): at the end of the notes page; a note's heading under the page's heading with its words only when that's the last; the footer saying which | Built 2026-11-06 in the `review-fixes` worktree, with 5.87 to 5.93, before the owner's hand test. Not committed |
-| 5.95 | The large UI classes (the review of 2026-11-06, F11), with no change in behaviour: `BrowseWindow`'s list views, page commands and notes wiring moved into mixins in `docrepo/ui/lists/` (3,745 lines to 1,828), `RowTree.building()`, `SettingsView.__init__` and `CaptureWindow._build` in named sections, the rule for new modules, and `AppContext.keep_state` for a view's own state | Built 2026-11-06 in the `review-fixes` worktree, with 5.87 to 5.94, before the owner's hand test. Not committed |
-| 5.96 | The `usage` command (the review of 2026-11-06, F15): the wheels' commands and the Activity view's kinds, counted over 7 and 30 days, read-only | Built 2026-11-06 in the `review-fixes` worktree, with 5.87 to 5.95, before the owner's hand test. Not committed |
+| 5.87 | A release identity and guard rails (the design workspace's review of 2026-11-06, F9 and F7): `__version__` kept in step with each release, shown in Settings and `--version`, `CHANGELOG.md`, tags; a test that fails on any write or launch outside the allowed modules, File Explorer started from `opener.py` with a list of arguments, ruff's settings and its findings fixed, and the rule on legacy Office types | Built 2026-11-06 in the `review-fixes` worktree, committed as `1ba1690`, merged to `main` and on GitHub the same day, without a hand test (the owner's choice) |
+| 5.88 | Safer upgrades and the test configuration (the review of 2026-11-06, F8 and F10): migrations split where SQLite says a statement ends, in one transaction; docs.db copied to the backup folder before an upgrade; a sample data root at nine schema versions, each upgraded in the tests; a damaged docs.db said in words at start-up; the `gui` mark and the fast run with no Qt, `--lf`, and a temporary folder per run | Built 2026-11-06 in the `review-fixes` worktree, with 5.87, committed as `1ba1690`, merged to `main` and on GitHub the same day, without a hand test (the owner's choice) |
+| 5.89 | Data integrity (the review of 2026-11-06, F3): the `check` command and Settings' Check the data root; capture.md written before a save commits, so a failed write saves nothing; each backup's database copy checked before it's kept, with the trouble on Settings' backup card; `System\Drafts` in the backup; and a restore tested end to end | Built 2026-11-06 in the `review-fixes` worktree, with 5.87 and 5.88, committed as `1ba1690`, merged to `main` and on GitHub the same day, without a hand test (the owner's choice) |
+| 5.90 | Quicker saves and edits (the review of 2026-11-06, F5): a save and the everyday edits make only the pages they can reach, the model's per-task indexes built once, and the browse tool on the shared model | Built 2026-11-06 in the `review-fixes` worktree, with 5.87 to 5.89, committed as `1ba1690`, merged to `main` and on GitHub the same day, without a hand test (the owner's choice) |
+| 5.91 | Errors you can see, and Undo where it was missing (the review of 2026-11-06, F12): the Problems line in the capture window's footer and the browse window's status line; Undo on Today's Done and Remove, an agenda's Discussed and Remove, and Save; Discard, Remove and Clear as the one set of verbs; New task under this one; the Note tooltip; a double-click that's Edit task on the Timeline too, with Q for Quick edit | Built 2026-11-06 in the `review-fixes` worktree, with 5.87 to 5.90, committed as `1ba1690`, merged to `main` and on GitHub the same day, without a hand test (the owner's choice) |
+| 5.92 | The `**` syntax, found and loud when it fails (the review of 2026-11-06, F6): the `**` list, the Unread line card, a ticked card for a new person, the keys' Syntax tab, the placeholder, and README's table of `**` names made from `items.OPERATORS` | Built 2026-11-06 in the `review-fixes` worktree, with 5.87 to 5.91, committed as `1ba1690`, merged to `main` and on GitHub the same day, without a hand test (the owner's choice) |
+| 5.93 | The email path (the review of 2026-11-06, F14): a dragged email's place in Outlook from its own .msg, else by subject and sent minute, never by subject alone in a reply chain; its place kept, so filing an unfiled capture later marks it; an email captured before said on its drop; and a 200 MB cap on what a drag hands over | Built 2026-11-06 in the `review-fixes` worktree, with 5.87 to 5.92, committed as `1ba1690`, merged to `main` and on GitHub the same day, without a hand test (the owner's choice) |
+| 5.94 | Where typed text lands (the review of 2026-11-06, F13, the rule taken 2026-11-06): at the end of the notes page; a note's heading under the page's heading with its words only when that's the last; the footer saying which | Built 2026-11-06 in the `review-fixes` worktree, with 5.87 to 5.93, committed as `1ba1690`, merged to `main` and on GitHub the same day, without a hand test (the owner's choice) |
+| 5.95 | The large UI classes (the review of 2026-11-06, F11), with no change in behaviour: `BrowseWindow`'s list views, page commands and notes wiring moved into mixins in `docrepo/ui/lists/` (3,745 lines to 1,828), `RowTree.building()`, `SettingsView.__init__` and `CaptureWindow._build` in named sections, the rule for new modules, and `AppContext.keep_state` for a view's own state | Built 2026-11-06 in the `review-fixes` worktree, with 5.87 to 5.94, committed as `1ba1690`, merged to `main` and on GitHub the same day, without a hand test (the owner's choice) |
+| 5.96 | The `usage` command (the review of 2026-11-06, F15): the wheels' commands and the Activity view's kinds, counted over 7 and 30 days, read-only | Built 2026-11-06 in the `review-fixes` worktree, with 5.87 to 5.95, committed as `1ba1690`, merged to `main` and on GitHub the same day, without a hand test (the owner's choice) |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
 ## Decisions
@@ -717,7 +717,7 @@ From the review's agreed actions, item 14 (F15), its one part in DocRepo; the re
 
 **Tests:** `tests/test_usage.py` (new): the wheels' counts by week and month (a row too old, or with no time, left out), no log, the Activity view's kinds, and the command printing and writing nothing.
 
-**Built in the `review-fixes` worktree** (2026-11-06), with 5.87 to 5.95, before the owner's hand test. Not committed.
+**Built in the `review-fixes` worktree** (2026-11-06), with 5.87 to 5.95, committed as `1ba1690`, merged to `main` and on GitHub the same day, without a hand test (the owner's choice).
 
 ## Release 5.95: the large UI classes, in smaller parts (2026-11-06)
 
@@ -732,7 +732,7 @@ From the review's agreed actions, item 12 (F11). No change in what DocRepo does,
 
 **Tests:** no new tests: the move changes nothing they check. The browse window's, capture window's, Settings', Timeline's and Today panel's test files pass. One narrowed run (`-k` over five files) failed `test_a_n_and_u_open_the_capture_window_on_the_selected_task` here and on `main` alike: an ordering quirk of focus under the offscreen platform, not this release's.
 
-**Built in the `review-fixes` worktree** (2026-11-06), with 5.87 to 5.94, before the owner's hand test. Not committed.
+**Built in the `review-fixes` worktree** (2026-11-06), with 5.87 to 5.94, committed as `1ba1690`, merged to `main` and on GitHub the same day, without a hand test (the owner's choice).
 
 ## Release 5.94: where typed text lands (2026-11-06)
 
@@ -744,7 +744,7 @@ From the review's agreed actions, item 11 (F13). The owner agreed to leave the p
 
 **Tests:** `tests/test_notes_landing.py` (new): a heading matching one mid-page goes at the end, one matching the last goes under it, a new heading at the end, loose lines under the day, and the footer's three sentences. `test_notes_page.py`'s test of decision 345 now holds the new rule, and a second save under the last heading.
 
-**Built in the `review-fixes` worktree** (2026-11-06), with 5.87 to 5.93, before the owner's hand test. Not committed.
+**Built in the `review-fixes` worktree** (2026-11-06), with 5.87 to 5.93, committed as `1ba1690`, merged to `main` and on GitHub the same day, without a hand test (the owner's choice).
 
 ## Release 5.93: the email path (2026-11-06)
 
@@ -757,7 +757,7 @@ From the review's agreed actions, item 10 (F14). No schema change and no new pac
 
 **Tests:** `tests/test_email_path.py` (new): a reply chain matched by sent time and never guessed, a subject alone when only one has it, the place a .msg carries, the unplaced email said when marking, a save keeping its emails' places, filing an unfiled email capture marking it with its task (and not touching Outlook with the setting off), a second drop of one .msg saying where it is, a 201 MB drop refused unread, and a big .msg file refused unread. `tests/msg_builder.py` can give a .msg an EntryID.
 
-**Built in the `review-fixes` worktree** (2026-11-06), with 5.87 to 5.92, before the owner's hand test. Not committed.
+**Built in the `review-fixes` worktree** (2026-11-06), with 5.87 to 5.92, committed as `1ba1690`, merged to `main` and on GitHub the same day, without a hand test (the owner's choice).
 
 ## Release 5.92: the `**` syntax, found and loud when it fails (2026-11-06)
 
@@ -772,7 +772,7 @@ From the review's agreed actions, item 9 (F6). No schema change and no new packa
 
 **Tests:** `tests/test_star_syntax.py` (new): typing `**`, the list's order, narrowing and the reference field, every example read with no problem, unread lines and what isn't one, a name that isn't a field, a new person's tick and unticked saving no one, README's table. `tests/test_star_syntax_ui.py` (new): the list in the capture window and a pick putting in `**due, `, the Unread line card, the new person's tick, and the Syntax tab naming every operator.
 
-**Built in the `review-fixes` worktree** (2026-11-06), with 5.87 to 5.91, before the owner's hand test. Not committed.
+**Built in the `review-fixes` worktree** (2026-11-06), with 5.87 to 5.91, committed as `1ba1690`, merged to `main` and on GitHub the same day, without a hand test (the owner's choice).
 
 ## Release 5.91: errors you can see, and Undo where it was missing (2026-11-06)
 
@@ -788,7 +788,7 @@ From the review's agreed actions, item 8 (F12). No schema change and no new pack
 
 **Tests:** `tests/test_problems_undo.py` (new): a save with a problem keeps the line showing in both windows until it's opened, with its folder; none without; Undo after Done, after Discussed with the untouched Update gone, and with typed words kept; Save's Undo discarding the capture and opening it again, then saving; no Undo for a save that made a task; the footer's Undo. `tests/test_glossary_words.py` (new): no New subtask, Take off, Take out or Put back in `docrepo/ui/`, `activity.py`, `stories.py` or `detail.py`. `test_timeline.py` and `test_timeline_whatif.py`: the double-click and Q. Tests that named the old words updated.
 
-**Built in the `review-fixes` worktree** (2026-11-06), with 5.87 to 5.90, before the owner's hand test. Not committed.
+**Built in the `review-fixes` worktree** (2026-11-06), with 5.87 to 5.90, committed as `1ba1690`, merged to `main` and on GitHub the same day, without a hand test (the owner's choice).
 
 ## Release 5.90: quicker saves and edits (2026-11-06)
 
@@ -810,7 +810,7 @@ From the review's agreed actions, item 7 (F5). No schema change and no new packa
 
 **Tests:** `tests/test_touched_pages.py` (new). The oracle: after each of 15 kinds of change (a note, a new subtask, an update closing a task, an item made for another task, a quick task on Today, an agenda note, a parent renamed, a task moved, a label on a parent, states from a row, an agenda item closed, a task put on Today, a reminder cleared, an unfiled capture filed, a capture's title fixed) and a move along a chain of ties, a full rebuild finds no page left to write. A note on a 200-task project rewrites only its task's Task.md. A page is the same built alone or with all. The indexed helpers give what the old scans gave, with those scans kept in the test as the oracle for one release.
 
-**Built in the `review-fixes` worktree** (2026-11-06), with 5.87 to 5.89, before the owner's hand test. Not committed.
+**Built in the `review-fixes` worktree** (2026-11-06), with 5.87 to 5.89, committed as `1ba1690`, merged to `main` and on GitHub the same day, without a hand test (the owner's choice).
 
 ## Release 5.89: data integrity (2026-11-06)
 
@@ -824,7 +824,7 @@ From the review's agreed actions, item 6 (F3). No schema change and no new packa
 
 **Tests:** `tests/test_integrity.py` (new): a clean sample, a missing capture.md named with its draft, a missing extracted text and search entry, the command and its kept list, a save whose capture.md can't be written saving nothing and then saving, a checked backup, a copy that fails its check, the drafts in the backup, and the restore. `test_browse_window.py`: the backup card's problem line and Check the data root; `test_backup.py`'s message says "checked".
 
-**Built in the `review-fixes` worktree** (2026-11-06), with 5.87 and 5.88, before the owner's hand test. Not committed.
+**Built in the `review-fixes` worktree** (2026-11-06), with 5.87 and 5.88, committed as `1ba1690`, merged to `main` and on GitHub the same day, without a hand test (the owner's choice).
 
 ## Release 5.88: safer upgrades, and the test configuration (2026-11-06)
 
@@ -840,7 +840,7 @@ From the review's agreed actions, items 4 (F8) and 5 (F10). No schema change and
 
 **Measured:** the fast run, `pytest -m "not gui"`: 1026 passed in 129 s with the 5.79 suite running beside it.
 
-**Built in the `review-fixes` worktree** (2026-11-06), with 5.87, before the owner's hand test. Not committed.
+**Built in the `review-fixes` worktree** (2026-11-06), with 5.87, committed as `1ba1690`, merged to `main` and on GitHub the same day, without a hand test (the owner's choice).
 
 ## Release 5.87: a release identity and guard rails (2026-11-06)
 
@@ -859,7 +859,7 @@ From the design workspace's whole-app review of 2026-11-06 (`docs/docrepo-review
 
 **Not as the actions file said:** the version goes in the troubleshooting report, which is `docrepo/diagnose.py`, and it was there already; `docrepo/report.py` is the task model's report, compared line by line with the mockup's test vectors, so it's left as it is.
 
-**Built in the `review-fixes` worktree** (2026-11-06), from `main` at `e3bc57d`, before the owner's hand test. Not committed.
+**Built in the `review-fixes` worktree** (2026-11-06), from `main` at `e3bc57d`, committed as `1ba1690`, merged to `main` and on GitHub the same day, without a hand test (the owner's choice).
 
 ## Release 5.86: the task page's clean-up, stage T4 (2026-11-06)
 
