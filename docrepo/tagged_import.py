@@ -12,7 +12,9 @@ decision 371).
   its alias. A row that's another label's alias becomes a label of its own, and that label loses the alias: the list
   wins. An alias that's only digits, or that two labels share, is refused, and the preview names it.
 - **Export** writes the glossary as a CSV with the same three columns in ``Exports`` in the data root, as tree files'
-  Export does, since DocRepo writes nowhere else.
+  Export does, since DocRepo writes nowhere else. It has the suggestions the owner added to the glossary (release 5.80),
+  and not those still only suggested.
+- **A suggested label** (release 5.80) isn't in the glossary: a row with its key adds it, as the list's.
 
 The log records counts, never the file's contents.
 """
@@ -177,7 +179,8 @@ def preview(conn: sqlite3.Connection, rows: list[list[str]], plan: Plan) -> Prev
     body = rows[plan.header_row + 1:]
     if len(body) > MAX_ROWS:
         body, out.cut = body[:MAX_ROWS], True
-    drafts = {lb.key: Draft(lb.label, lb.description, list(lb.aliases), lb.id) for lb in tagged.read_labels(conn)}
+    # The glossary as it is. A suggested label (release 5.80) isn't in it yet: a row with its key adds it.
+    drafts = {lb.key: Draft(lb.label, lb.description, list(lb.aliases), lb.id) for lb in tagged.read_labels(conn) if lb.status == "glossary"}
     # Who has each alias, from the glossary and the file, so one two labels share is refused.
     owners: dict[str, set[str]] = {}
     for k, d in drafts.items():
@@ -254,7 +257,13 @@ def run_import(conn: sqlite3.Connection, found: Preview, source: str, at: dateti
         for k, d in found.drafts.items():
             if not d.changed:
                 continue
-            if d.id is None:
+            had = conn.execute("SELECT id FROM tagged_labels WHERE key = ? AND status = 'suggested'", (k,)).fetchone() if d.id is None else None
+            if had is not None:  # a suggested label (release 5.80) the list has: it's the list's now
+                d.id = int(had["id"])
+                conn.execute("UPDATE tagged_labels SET label = ?, description = ?, status = 'glossary', came = 'import', pattern = NULL, "
+                             "source = ?, added = ? WHERE id = ?", (d.label, d.description, source, stamp, d.id))
+                conn.execute("DELETE FROM tagged_aliases WHERE label = ?", (d.id,))
+            elif d.id is None:
                 cur = conn.execute("INSERT INTO tagged_labels (label, key, description, came, source, added) VALUES (?, ?, ?, 'import', ?, ?)",
                                    (d.label, k, d.description, source, stamp))
                 d.id = int(cur.lastrowid)
@@ -273,7 +282,9 @@ def run_import(conn: sqlite3.Connection, found: Preview, source: str, at: dateti
 
 # ---- export ----
 def export_csv(conn: sqlite3.Connection) -> str:
-    """The glossary as CSV: Tagged label, Tagged label description, Tagged label aliases (separated by "; ")."""
+    """The glossary as CSV: Tagged label, Tagged label description, Tagged label aliases (separated by "; "). With the
+    suggestions the owner added to it (release 5.80), so the master list can be brought up to date; without the ones
+    still only suggested."""
     buf = io.StringIO()
     w = csv.writer(buf, lineterminator="\n")
     w.writerow(["Tagged label", "Tagged label description", "Tagged label aliases"])

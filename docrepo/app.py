@@ -24,7 +24,7 @@ from PySide6.QtCore import QAbstractNativeEventFilter, QLockFile, QObject, QRect
 from PySide6.QtGui import QAction, QColor, QFont, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QInputDialog, QMenu, QMessageBox, QSystemTrayIcon
 
-from docrepo import backup, capacity, db, diagnose, edits, hotkey, notes_page, people, prompts, search
+from docrepo import backup, capacity, db, diagnose, edits, hotkey, notes_page, people, prompts, search, tagged
 from docrepo.config import Settings
 from docrepo.dates import long_date, stamp
 from docrepo.model import Model
@@ -460,6 +460,7 @@ def run(data_root: Path, settings: Settings, fs: SafeFS, browse: bool = False) -
     app.daily()
     if search.needs_rebuild(conn):
         search.rebuild(conn, data_root)
+    tagged.use_settings(conn, settings)  # release 5.80: docs.db's copy of the tag patterns, as settings.json has them
     if browse:
         app.show_browse()
     app.show_reminders()

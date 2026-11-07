@@ -23,6 +23,7 @@ One line per release, newest first: its number, the date it was built, and what 
 | 5.83 | 2026-11-05 | The task page's clean-up, stage T1. |
 | 5.82 | 2026-11-05 | No Due that wasn't given: a new meeting's day is its Start, with no Due; meetings left off the due lists whatever their dates; "today" or "tonight" alone in a capture's text no longer a date. |
 | 5.81 | 2026-11-05 | A task's priority as its row's left edge. |
+| 5.80 | 2026-11-06 | Tag patterns: masks in Settings that find plant tags not in the glossary, each put on what mentions it at once and marked new, a Suggested list with Add to glossary, Same as and Not a tag, Never a tag, a tester with Try on everything, and "P-204A/B/C" as each of its tags, from a pattern too. |
 | 5.79 | 2026-11-05 | Tagged labels: plant tags found in every capture, email, document and notes page however they're written, a glossary imported from Excel or CSV, a Tagged labels view and each tag's page, chips on captures, documents and tasks, search and the Task view's tag: filter. |
 | 5.78 | 2026-11-05 | List rows: one line per row at one height per view. |
 | 5.77 | 2026-11-05 | Every capture window fresh, and Drafts. |

@@ -35,7 +35,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo import __version__, backup, capacity, db, diagnose, hotkey, outlook, prompts, search, startup, wheels_config
+from docrepo import __version__, backup, capacity, db, diagnose, hotkey, outlook, prompts, search, startup, tagged, wheels_config
+from docrepo import tagged_masks as masks
 from docrepo.config import Settings, data_root_problem, init_data_root, make_safe_fs, resolve_data_root, save_location
 from docrepo.dates import WEEKDAYS, long_date, stamp
 from docrepo.links import check_link_template
@@ -138,7 +139,50 @@ def check_values(ctx: AppContext, values: dict[str, Any]) -> dict[str, Any]:
         raise SettingsProblem("The look is the new one or the Classic one.")
     if out.get("me") and out["me"] not in Model(ctx.conn).people:
         raise SettingsProblem(f"There's no person {out['me']}.")
+    if "tagged_patterns" in out or "tagged_never" in out:  # release 5.80
+        out.update(check_tagged(out.get("tagged_patterns", ctx.settings.tagged_patterns), out.get("tagged_never", ctx.settings.tagged_never)))
     return out
+
+
+def check_tagged(patterns: list[dict], never: list[str]) -> dict[str, Any]:
+    """The tag patterns and Never a tag (release 5.80, decisions 372 and 375), checked and tidied: each pattern with a mask
+    DocRepo can use and a name of its own (its mask when none is typed), and each Never a tag entry a tag or a start with
+    *. Raises SettingsProblem naming the first that's wrong."""
+    kept = []
+    for n, p in enumerate(patterns, 1):
+        name, mask = str(p.get("name") or "").strip(), str(p.get("mask") or "").strip()
+        if not name and not mask:
+            continue
+        try:
+            masks.parse(mask)
+        except masks.MaskError as e:
+            raise SettingsProblem(f"{name or f'Tag pattern {n}'}'s mask can't be used: {e}") from e
+        kept.append({"name": name or mask, "mask": mask, "space": bool(p.get("space"))})
+    names = [p["name"].lower() for p in kept]
+    if len(set(names)) < len(names):
+        raise SettingsProblem("Give each tag pattern its own name: it's what a new tagged label says it was found by.")
+    for entry in never:
+        why = masks.never_problem(entry)
+        if why:
+            raise SettingsProblem(f"Never a tag: {why}")
+    return {"tagged_patterns": kept, "tagged_never": masks.never_of(never)}
+
+
+def apply_tagged(ctx: AppContext) -> None:
+    """The tag patterns or Never a tag changed in settings.json: docs.db's copy is made the same, everything is matched
+    again from the kept words (decision 377), and Task.md's Tagged labels rows are written again."""
+    tagged.use_settings(ctx.conn, ctx.settings)
+    now = ctx.now()
+    write_pages(Model(ctx.conn), ctx.data_root, ctx.fs, now.date(), now)
+
+
+def save_never(ctx: AppContext, entries: list[str]) -> None:
+    """Never a tag as given (Not a tag on a suggested label, and its Undo, release 5.80), saved to settings.json and used."""
+    ctx.settings.tagged_never = masks.never_of(entries)
+    ctx.settings.save(ctx.fs, ctx.data_root)
+    apply_tagged(ctx)
+    log.info("settings changed: tagged_never")
+    ctx.settings_changed(["tagged_never"])
 
 
 def update_settings(ctx: AppContext, values: dict[str, Any]) -> list[str]:
@@ -157,6 +201,8 @@ def update_settings(ctx: AppContext, values: dict[str, Any]) -> list[str]:
         now = ctx.now()
         capacity.rebuild_all(ctx.conn, now.date(), ctx.settings)
         write_pages(Model(ctx.conn), ctx.data_root, ctx.fs, now.date(), now)
+    if "tagged_patterns" in changed or "tagged_never" in changed:  # release 5.80
+        apply_tagged(ctx)
     log.info("settings changed: %s", ", ".join(changed))
     ctx.settings_changed(changed)
     return changed
@@ -319,7 +365,7 @@ class SettingsView(QWidget):
         self.reveal = reveal
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
-        scroll = QScrollArea()
+        scroll = self.scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         body = QWidget()
@@ -352,6 +398,8 @@ class SettingsView(QWidget):
         self._build_calendar(lay)
         # ---- Parse and populate ----
         self._build_parse(lay)
+        # ---- tagged labels' patterns, Never a tag and the tester (release 5.80) ----
+        self._build_tagged(lay)
         # ---- files and prompts ----
         self._build_files(lay)
         # ---- Outlook (release 5.33) ----
@@ -509,6 +557,20 @@ class SettingsView(QWidget):
             (None, "", self.references),
         ])
 
+    def _build_tagged(self, lay) -> None:
+        """Tagged labels: the tag patterns, Never a tag, the tester and Try on everything (release 5.80, the tagged labels
+        plan's items 106 and 107), a form of its own (``ui/tagged_settings.py``)."""
+        from docrepo.ui.tagged_settings import TaggedSettings
+
+        self.tagged = TaggedSettings(lambda: tagged.read_labels(self.ctx.conn),
+                                     lambda patterns, never: tagged.try_everything(self.ctx.conn, Model(self.ctx.conn), patterns, never))
+        self.tagged_card = self._card(lay, "Tagged labels", [(None, None, self.tagged)])
+
+    def show_tagged(self) -> None:
+        """Scroll to the Tagged labels section (the Tagged labels view's Patterns…)."""
+        self.scroll.ensureWidgetVisible(self.tagged_card, 0, 0)
+        self.scroll.verticalScrollBar().setValue(self.tagged_card.y())
+
     def _build_files(self, lay) -> None:
         """Files and prompts (part of ``__init__``, release 5.95)."""
         self.cap = QSpinBox()
@@ -599,7 +661,7 @@ class SettingsView(QWidget):
         lay.addLayout(buttons)
         lay.addStretch()
 
-    def _card(self, lay: QVBoxLayout, title: str, rows: list) -> None:
+    def _card(self, lay: QVBoxLayout, title: str, rows: list) -> QWidget:
         """A group of settings: its heading, then a card with a row for each: its name and what it does, then its control."""
         lay.addSpacing(16)
         lay.addWidget(QLabel(title, objectName="heading"))
@@ -631,6 +693,7 @@ class SettingsView(QWidget):
                 line.setObjectName("divider")
                 grid.addWidget(line, 2 * i + 1, 0, 1, 2)
         lay.addWidget(card)
+        return card
 
     def _hints_toggled(self, on: bool) -> None:
         """Show hints applies at once, in every window (decision 7); Save settings keeps it."""
@@ -687,6 +750,7 @@ class SettingsView(QWidget):
         self.horizon.setValue(s.capacity_horizon_years)
         self.events.setText(", ".join(s.event_words))
         self.references.set(s.reference_fields, s.reference_links)
+        self.tagged.set(s.tagged_patterns, s.tagged_never)
         self.cap.setValue(s.extracted_text_cap_chars)
         self.warn.setValue(s.prompt_warn_chars)
         self.check.setValue(s.doc_check_minutes)
@@ -712,6 +776,7 @@ class SettingsView(QWidget):
             "reminder_time": self.reminder.time().toString("HH:mm"), "workdays": [d for d, box in self.workdays.items() if box.isChecked()],
             "capacity_horizon_years": self.horizon.value(), "event_words": [w for w in self.events.text().split(",")],
             "reference_fields": self.references.names(), "reference_links": self.references.links(),
+            "tagged_patterns": self.tagged.patterns(), "tagged_never": self.tagged.never(),
             "extracted_text_cap_chars": self.cap.value(), "prompt_warn_chars": self.warn.value(), "doc_check_minutes": self.check.value(),
             "backup_every_days": self.backup_days.value(), "backup_keep": self.backup_keep.value(),
             "look": self.look.currentData(), "show_hints": self.hints.isChecked(), "outlook_categories": self.categories.isChecked(),
@@ -734,6 +799,10 @@ class SettingsView(QWidget):
             n = sum(1 for k in changed if k in hotkey.HOTKEY_IDS or k == "wheel_hotkeys")
             later = f" The hotkey{'s work' if n > 1 else ' works'} from now on." if n else ""
             later += " The look changes the next time DocRepo starts." if "look" in changed else ""
+            if "tagged_patterns" in changed or "tagged_never" in changed:  # release 5.80
+                fresh = sum(1 for lb in tagged.read_labels(self.ctx.conn) if lb.status == "suggested")
+                later += (f" Everything is matched again: {fresh:,} new tagged label{'s are' if fresh != 1 else ' is'} on what mentions "
+                          f"{'them' if fresh != 1 else 'it'}, marked new, under Suggested in Tagged labels.")
             self.message(f"Saved {len(changed)} setting{'s' if len(changed) > 1 else ''} to settings.json.{later}")
         return changed
 

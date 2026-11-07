@@ -48,6 +48,7 @@ def test_a_tag_inside_a_longer_one_is_not_found():
 def test_a_pair_and_a_suffix():
     assert found("Seals for P-204A/B, and P204 B runs rough.") == ["P-204A=P-204A", "/B=P-204B", "P204 B=P-204B"]
     assert found("P-204 and P-204C") == []  # P-204A is its own label, not P-204
+    assert found("P-204A/C/B") == ["P-204A=P-204A", "/B=P-204B"]  # each letter after a slash; P-204C isn't a label
 
 
 def test_word_aliases_match_as_whole_words_in_any_case():
