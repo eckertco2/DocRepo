@@ -4,6 +4,7 @@ One line per release, newest first: its number, the date it was built, and what 
 
 | Release | Date | What |
 |---|---|---|
+| 5.103 | 2026-11-06 | Every task picker works as the `#` list does: the same rows, search and Right and Left into a task's subtasks, in the capture window's task picker, the browse tool's (Move, Put under, File to task, the Documents filter, templates, ties), the Task view's Ctrl+O, Task search and the Timeline's Focus on, with Recent, None and each place's own extras kept; the agenda picker finds tasks the same way. |
 | 5.101 | 2026-11-06 | Emails that find their task: each email's Outlook identifiers kept, an email whose conversation is already filed to a task filling the task picker with it, the `email-ids` command for emails captured before, and the troubleshooting report's identifiers and T-mail try-outs. Schema version 23. |
 | 5.96 | 2026-11-06 | The usage command: how often each wheel command and each kind of thing in the Activity view was used in the last 7 and 30 days. |
 | 5.95 | 2026-11-06 | The browse window in smaller parts, with no change in what it does: its list views, page commands and notes wiring in modules of their own, the long builders in named sections, and a view's own state kept without loading the model again. |

@@ -73,7 +73,7 @@ from docrepo.extract import extract_text, to_unc
 from docrepo.layer0 import Part, size_text
 from docrepo.links import folder_name, folder_original, is_folder, is_link, keeps_no_text, link_name, link_of_line, read_address, short_name
 from docrepo.text import typed_path
-from docrepo.model import TODAY, Model, is_person
+from docrepo.model import TODAY, Model, Task
 from docrepo.parse import Found, Known, Who, as_plant_event, parse_capture, quick_update
 from docrepo.prompts import capture_blocks, load_summary_types, prompt_text
 from docrepo.save import (
@@ -116,6 +116,7 @@ from docrepo.ui.palette import Command, CommandPalette
 from docrepo.ui.rich_edit import KEYS as FORMAT_KEYS, FormatBar, RichEdit
 from docrepo.ui.style import style_sheet
 from docrepo.ui.task_forms import BAD_DURATION, HoursRow, days_valid, typed_days
+from docrepo.ui.task_list import subtask_options, task_mark
 from docrepo.ui.task_picker import TaskPicker, full_path, path_text
 from docrepo.ui.widgets import (
     Chip,
@@ -1727,21 +1728,13 @@ class CaptureWindow(QWidget):
         popup.show_options(options, at, above)
 
     def _subtask_options(self, task_id: str) -> list[items.Option]:
-        """A task's open subtasks, in the tree's order, for the # list's Right (release 5.65, decision 311). They have no
-        grey path: the task they're under heads the list, and each one's tooltip has the whole path."""
-        m = self.ctx.model()
-        if task_id not in m.tasks:
-            return []
-        kids = (m.task(x) for x in m.children_of(task_id))
-        return [items.Option(k.title, k.title, ref=k.id) for k in kids if k.state != "Closed" and not k.discarded]
+        """A task's subtasks that aren't closed, in the tree's order, for the # list's Right (release 5.65, decision 311),
+        as the task list gives them (release 5.103). A parked one is there, as # finds parked tasks."""
+        return subtask_options(self.ctx.model(), task_id, lambda k: k.state != "Closed" and not k.discarded)
 
     def _task_mark(self, task_id: str) -> tuple[bool, str] | None:
-        """A task's mark in the # list (release 5.75, round 7's decisions 327 and 328): whether it's top-level, and its
-        top-level task's colour, as the task tree and the timeline give it."""
-        m = self.ctx.model()
-        if task_id not in m.tasks:
-            return None
-        return not m.parents_of(task_id), task_colour(m, task_id)
+        """A task's mark in the # list (release 5.75, round 7's decisions 327 and 328), as the task list gives it."""
+        return task_mark(self.ctx.model(), task_id)
 
     def _pick_ref(self, option: items.Option) -> None:
         """Put the picked name in, with a space after it; a picked one's ID is kept, ahead of names alike."""
@@ -2605,20 +2598,22 @@ class CaptureWindow(QWidget):
 
     def _agenda_options(self, text: str, picked: list[str]) -> list[Option]:
         """Open meetings and people; typing also finds any open task. The task going on the agenda is left out. Today has
-        its own button beside the capture types (mods log round 2, M0037)."""
+        its own button beside the capture types (mods log round 2, M0037). Since release 5.103 a meeting or a task is found
+        as the `#` list finds it (``items.task_matches``), and a person still by any part of a name or alias."""
         m = self.ctx.model()
-        q = text.strip().lower()
+        q = text.strip()
         subject = None if "new_task" in self.types else self.task
         today = self.ctx.now().date()
-        options = [Option(t.id, t.title, f"Meeting, next {m.meeting_when(t.id, today)}" if t.recurrence else "Meeting", ) for t in m.open_meetings()]
-        options += [Option(p.id, p.name, " · ".join(["Person", *p.aliases])) for p in m.active_people() if p.id != self.ctx.settings.me]
+
+        def found(tasks: list[Task]) -> list[Task]:
+            return [m.task(x) for x in items.task_matches(q, [(t.id, t.title) for t in tasks], lambda i: items.ancestor_titles(m, i))] if q else tasks
+
+        options = [Option(t.id, t.title, f"Meeting, next {m.meeting_when(t.id, today)}" if t.recurrence else "Meeting", ) for t in found(m.open_meetings())]
+        options += [Option(p.id, p.name, " · ".join(["Person", *p.aliases])) for p in m.active_people()
+                    if p.id != self.ctx.settings.me and (not q or any(q.lower() in n.lower() for n in (p.name, *p.aliases)))]
         if q:
-            options += [Option(t.id, t.title, path_text(m, t.id) or "Top-level task") for t in m.tasks.values() if is_open(t) and not t.meeting]
-
-        def names(o: Option) -> list[str]:
-            return [o.label, *(m.people[o.value].aliases if is_person(o.value) else [o.value])]
-
-        return [o for o in options if o.value != subject and o.value not in picked and (not q or any(q in n.lower() for n in names(o)))][:9]
+            options += [Option(t.id, t.title, path_text(m, t.id) or "Top-level task") for t in found([t for t in m.tasks.values() if is_open(t) and not t.meeting])]
+        return [o for o in options if o.value != subject and o.value not in picked][:9]
 
     # ================= content text and files =================
     def _set_plain(self, edit: QPlainTextEdit, text: str) -> None:

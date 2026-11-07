@@ -104,6 +104,9 @@ QFrame#itemCard[kind="param"] { border-left-color: #b07a12; }
 QFrame#itemCard QLabel { background: transparent; border: none; }
 QListWidget#refPopup { background: #ffffff; border: 1px solid #b8c1cb; border-radius: 4px; }
 QListWidget#refPopup::item:selected { background: #dbe8f5; color: #1a1f25; }
+QFrame#taskPicker { background: #ffffff; border: 1px solid #b8c1cb; }
+QListWidget#taskPickerList { background: #ffffff; border: none; }
+QListWidget#taskPickerList::item:selected { background: #dbe8f5; color: #1a1f25; }
 QFrame#divider { color: #d6dce3; }
 QPushButton#today { border: 1px solid #b8c1cb; border-radius: 11px; background: #ffffff; padding: 2px 10px; }
 QPushButton#today:checked { background: #1d5e98; border-color: #1d5e98; color: #ffffff; }

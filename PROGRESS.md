@@ -106,6 +106,7 @@ DocRepo is being rebuilt on the owner's personal computer, starting 2026-10-08. 
 | 5.95 | The large UI classes (the review of 2026-11-06, F11), with no change in behaviour: `BrowseWindow`'s list views, page commands and notes wiring moved into mixins in `docrepo/ui/lists/` (3,745 lines to 1,828), `RowTree.building()`, `SettingsView.__init__` and `CaptureWindow._build` in named sections, the rule for new modules, and `AppContext.keep_state` for a view's own state | Built 2026-11-06 in the `review-fixes` worktree, with 5.87 to 5.94, committed as `1ba1690`, merged to `main` and on GitHub the same day, without a hand test (the owner's choice) |
 | 5.96 | The `usage` command (the review of 2026-11-06, F15): the wheels' commands and the Activity view's kinds, counted over 7 and 30 days, read-only | Built 2026-11-06 in the `review-fixes` worktree, with 5.87 to 5.95, committed as `1ba1690`, merged to `main` and on GitHub the same day, without a hand test (the owner's choice) |
 | 5.101 | Emails that find their task (the knowledge base's stage K8, release A, KB decisions 32 to 46): each email's Outlook identifiers kept with it, an email whose conversation is filed to a task filling the task picker ("from conversation"), `email-ids` for the emails captured before, release 5.93's places in `capture_emails`, and the report's identifiers and T-mail try-outs; schema version 23 | Built 2026-11-06 in the `k8-a` worktree, with `main` (5.79) merged in, merged to `main` as `3882f3c` and on GitHub the same day, without a hand test (the owner's choice) |
+| 5.103 | Every task picker works as the `#` list does (the design workspace's task pickers plan, item 117, stage 35, decisions 398 to 404): one task list (`docrepo/ui/task_list.py`) with the `#` list's rows, matching and levels, in the capture window's task picker, the browse tool's, the Task view's Ctrl+O, Task search and the Timeline's Focus on, with Recent, None and each place's own extras kept; the agenda picker finds tasks as `#` does | Built 2026-11-06 (overnight) in the `task-pickers` worktree, not committed, before the owner's hand test |
 | 6 | Document tracking: change checks, diffs, replaced saved copies, and relinking moved files | Not started |
 
 ## Decisions
@@ -699,6 +700,57 @@ The owner asked for the review's next stages, and took its decisions V2, V3, V4,
 - **Priorities' columns are at least 216 px,** not the review's 260 to 300, so all five show at 1440 px. They reach 258 px at the 82% window on a 1920 px screen.
 
 
+
+## Release 5.103: every task picker works as the `#` list does (2026-11-06)
+
+The design workspace's task pickers plan (`docs/mods/task-pickers-plan.md`), item 117, stage 35, decisions 398 to 404, each a routine call the owner can change. The owner asked in chat on 2026-11-06: "I like the dropdown list navigation system we set for workflows where a task is selected using the # operator. Can you copy that system to all the other locations where navigating tasks with a dropdown selector is involved? (for example, any task search windows)". Built without a mock, as it copies a design already approved (releases 5.74 and 5.75). No schema change and no new package. 5.102 is another worktree's.
+
+- **One task list** (`docrepo/ui/task_list.py`, decision 398). The `#` list's rows, levels and keys moved out of `items_panel.py` into `TaskList` and `TaskRowDelegate`, as they were: the 8 px slot with a top-level task's dot and Semibold name or another task's ring, "3 ›" with the chevron's backplate, a level's header row with its back chevron and its subtasks indented 16 px, and Up, Down, Right, Left, Enter and Tab (`handle_key`). Two things are new, for the pickers:
+  - a row that can't be picked (`Words`: a section's heading, or a line such as "No open or parked task matches."), which Up and Down pass over and a click ignores;
+  - in a list of tasks, an entry that isn't a task (the picker's None) keeps the slot empty, so the names line up.
+
+  `task_colour`, `task_mark` and `subtask_options` moved there too. `RefPopup` (the `@` and `#` list) is now `TaskList` plus where it shows, at the text cursor, and Esc. Its old names (`_OPTION`, `_HEAD`, `REF_*`, `task_colour`) can still be imported from `items_panel`.
+- **One matcher** (`items.task_matches`, `items.ancestor_titles`, decision 398): the `#` list's matching, ranking and path. `items.options` calls it for `#`, and every picker's search uses it. A search box strips what's typed, so a space after a whole name doesn't empty its list, as it closes the `#` list (decision 401).
+- **The task picker** (`docrepo/ui/task_picker.py`, decisions 399, 400 and 404): a popup (a frame with Qt's Popup flag, as the Timeline's Display popover is) with the search box over a `TaskList`.
+  - **With nothing typed:** Recent (each with its path), the None entry, then Tasks (the open top-level tasks), under grey Caption headings. Right goes into a task's open subtasks (Not started or In progress), and Left comes back; Right and Left move the box's cursor when the list can't use them.
+  - **Typing** lists up to 12 matches with their paths, parked ones marked "(parked)" and, with `closed_too`, closed ones "(closed)". When nothing matches, a line says so, or Search everything is offered.
+  - **Keys:** Enter or Tab picks the current row (the first, until you move), a click picks a row, and Esc closes.
+  - **Size:** the caller's minimum width or its widest row, up to 560 px, and 14 rows before it scrolls.
+  - **Gone:** phase 3's cascading menus, and the ↻ after a recurring task's name.
+  - **Its API:** the constructor, `picked`, `aboutToShow`, `aboutToHide`, `popup`, `pick`, `closed_too`, `hint` and `no_match` are as they were, so no caller changed. New: `keep` (a test of a task's ID that leaves it out everywhere in the list), `modifiers` (the keys held with Enter) and `rows()`.
+
+  It's every place `TaskPicker` was: the capture window's task picker and the pinned window's; the browse tool's `_pick_task` (the task page's Move from under…, Put under a task… and Also put under…, File to task, the Documents view's Task filter, Edit task's and bulk edit's Put under, a tie's task, Make tasks and Apply template); and the Task view's Ctrl+O.
+- **Task search** (`docrepo/ui/task_search.py`, decision 400): the picker as before, with its hint ("Enter opens its page; Ctrl+Enter its Task view") as a line under the box, closed tasks marked, no None, and Search everything on Enter when nothing matches. Ctrl+Enter is read from the key itself (`picker.modifiers`) as well as from the keyboard's state.
+- **The Timeline's Focus on** (`docrepo/ui/timeline_view.py`, decision 402): the Display popover's combo box, and the Classic look's "Focus on …" in its toolbar, are a button naming the task focused on, with its path in the tooltip. It opens the task picker of the tasks Focus on can show (open tasks with open subtasks, `_focus_choices`), with All projects as its None.
+- **The agenda picker** (`CaptureWindow._agenda_options`, decision 403) finds a meeting or a task with `items.task_matches`, and a person still by any part of a name or alias. Its chips, rows and keys stay.
+- **The style:** `QFrame#taskPicker` (the popover's frame) and `QListWidget#taskPickerList` (no frame of its own, the `#` list's selection colour), in both looks.
+
+**Left as it was** (the plan says why):
+- Activity's Add to agenda target and the Agendas view's Agenda for: short lists of agenda targets (meetings, Today, people).
+- The tree import's Ties to settle: a few candidate tasks, in a form's grid.
+- A split note's file "goes with" menu: the note's own `#` tasks.
+- The label dialog's Under and the other combo boxes: labels, people, states and settings.
+- The command palette and file search: commands and files.
+- The Today side panel has no task dropdown.
+- Move from under… and Put under… pass no `keep`: the save still refuses a task under itself, and those calls are the consolidation release's to change.
+
+**Tests:**
+- `tests/test_task_matches.py` (new, in the fast run): the `#` list's pinned cases (`tests/test_hash_search.py`) give the same through `items.task_matches`, as a search box asks, and through the `#` list; the path, the ranking, a stripped box, IDs.
+- `tests/test_task_pickers.py` (new):
+  - each place is the task list: the capture window, the browse tool, the Task view's Ctrl+O, Task search, Focus on, and the `#` list;
+  - the `#` list and the picker mark a task alike;
+  - Recent, None and Tasks before typing, with the headings passed over;
+  - Right and Left before typing and in a search, in the picker and in Task search, and the box's cursor when they can't be used;
+  - typing goes back to the top; Enter, Tab, Esc, the chevrons and a click; a heading can't be clicked;
+  - parked tasks marked; a caller's `keep`; the width;
+  - Task search's hint, closed tasks, Ctrl+Enter from the key and Search everything;
+  - Focus on in both looks; the agenda picker.
+- `tests/test_selection_search.py` reads the picker's rows rather than its menu's actions.
+- `tests/test_ref_list.py`, `test_ref_marks.py` and `test_hash_search.py` (the `#` list's) pass unchanged.
+
+Looked at offscreen, with Windows' fonts, in both looks: the capture window's picker, a level, no match, Task search and Focus on. The full run: 2,870 passed and 2 skipped, with one failure, `test_wheel_window.py::test_an_arrow_runs_its_slot_as_it_comes_up` (the wheel still showing after an arrow key, which no picker touches), while other worktrees' suites ran at the same time; that file passed alone three times out of three. Ruff: no findings.
+
+**Built in the `task-pickers` worktree** (2026-11-06, overnight), from `main` at `cd75434` (5.101), not committed, before the owner's hand test. Its corporate test is the design workspace's `handoff/docrepo/release-5-103-test.md`. When it merges with the `small-items` branch, `items_panel.py`'s `RefPopup` block conflicts if that branch removed `RefPopup._current`: take this branch's side, as the method went with the move.
 
 ## Release 5.101: emails that find their task (2026-11-06)
 
