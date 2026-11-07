@@ -58,6 +58,7 @@ def header(model: Model, task: Task, records: list[Record], today: date, me: str
 
 
 def due_text(pages: Pages, task: Task, today: date) -> str:
+    """When a task is due, with the days to go; when it closed, for a closed one."""
     if task.state == "Closed":
         return esc(long_date(to_date(task.closed or task.created), today))
     day = task.due or task.deadline
@@ -126,10 +127,12 @@ def preview(model: Model, r: Record | None, today: date, words: list[str], slips
 
 
 def none(text: str = "None") -> str:
+    """A grey placeholder for a fact with nothing in it."""
     return f'<span class="sub">{esc(text)}</span>'
 
 
 def table(rows: list[tuple[str, str]]) -> str:
+    """The preview's facts: a name and its value a row; the values are HTML already."""
     cells = "".join(f'<tr><td class="dt" valign="top" width="64">{esc(k)}</td><td valign="top">{v}</td></tr>' for k, v in rows)
     return f'<table cellspacing="0" cellpadding="3" style="margin-top: 8px">{cells}</table>'
 
@@ -166,6 +169,7 @@ def nothing_found(scope_title: str, query: str, filters: int, narrowed: bool, su
 
 
 def still_searching() -> str:
+    """The list's line while the files' text is still being searched."""
     return '<p align="center" class="note">No names or notes match. Searching the files\' text…</p>'
 
 
@@ -175,13 +179,9 @@ def nothing_clicked() -> str:
 
 
 def nothing_of_kind(kind: str, scope_title: str, narrowed: bool) -> str:
+    """No records of this kind in the scope, with a way to the whole task when it's narrowed."""
     out = f'<p align="center"><b>No {esc(KIND_NAMES[kind].lower())} in {esc(scope_title)}.</b></p>'
     return out + (f'<p align="center">{link("do:whole", "Show the whole task")}</p>' if narrowed else "")
-
-
-def no_files(scope_title: str) -> str:
-    return (f'<p align="center"><b>No files yet.</b></p><p align="center">Drop files or Outlook emails on this window to add them to '
-            f'{esc(scope_title)} as a note, or press N.</p><p align="center">{link("do:note", "Add a note with files")}</p>')
 
 
 def count_line(kind: str, count: int, scope_title: str, searching: bool, overview: bool, busy: bool, more_in_text: int,
@@ -193,7 +193,3 @@ def count_line(kind: str, count: int, scope_title: str, searching: bool, overvie
         return "Overview" + where if overview else f"{count} {KIND_NAMES[kind].lower() if kind != 'all' else 'items'}{where}"
     extra = " · searching file text…" if busy else f" · {more_in_text} more in file text" if more_in_text else ""
     return f"{count} result{'s' * (count != 1)}{where}{extra}"
-
-
-def kind_label(kind: str, count: int) -> str:
-    return f"{KIND_NAMES[kind]}  {count}"

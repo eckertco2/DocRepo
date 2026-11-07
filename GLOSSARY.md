@@ -150,6 +150,7 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **DocRepo**: the Windows app: the capture window, the browse tool and the data root they write to.
 - **Browse tool**: DocRepo's main window for viewing and editing tasks, captures, lists and settings.
 - **Data root**: the folder holding all of DocRepo's data, with `docs.db` as the source of truth.
+- **Dump**: every table of `docs.db` written as JSON, a file each, in `System\export\<date>` (the `dump` command, release 5.102), for reading the database outside DocRepo. It's a copy made for reading; DocRepo never reads one back.
 - **Build phase**: a numbered step in building DocRepo, phases 1 to 6 in `PROGRESS.md`.
 - **Mods log**: DocRepo's own list of changes the owner wants made to it.
 - **IDs**: T task, C capture, D document, P person, M mod.

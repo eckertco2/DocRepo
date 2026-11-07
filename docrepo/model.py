@@ -109,6 +109,7 @@ class TemplateOrigin:
 
     @property
     def template(self) -> str:
+        """The template's name: its top row's title."""
         return self.path[0]
 
     def words(self) -> str:
@@ -234,10 +235,12 @@ class Capture:
     emails: list[CaptureEmail] = field(default_factory=list)
 
     def has(self, capture_type: str) -> bool:
+        """True when the capture is of this capture type."""
         return capture_type in self.types
 
     @property
     def document_ids(self) -> list[str]:
+        """The IDs of the capture's documents, in order."""
         return [d.document for d in self.documents]
 
 
@@ -339,6 +342,7 @@ PRIORITY_NAMES = {"critical": "Critical", "high": "High", "medium": "Medium", "p
 
 
 def is_person(item_id: str | None) -> bool:
+    """True when an ID is a person's (P001), as an agenda target can be."""
     return bool(item_id and re.match(r"P\d", item_id))
 
 
@@ -346,11 +350,14 @@ def _unique(items: Iterable[str]) -> list[str]:
     return list(dict.fromkeys(items))
 
 
-_TASK_COLUMNS = (
-    "id, title, state, closed, urgent, meeting, recurrence, repeat_until, start, due, deadline, deadline_desc, reminder, "
-    "lead_hours, assignee_hours, inherit_labels, description, current_status, created, created_by, discarded, discard_reason, plant_event, "
-    "priority, priority_rank, day_headings, duration, calendar_days, lead_per_day, assignee_per_day, lead_per_week, assignee_per_week"
+#: The tasks table's columns: what ``load_tasks`` reads, and the only names SQL built for the table may use (release 5.102).
+TASK_COLUMNS = (
+    "id", "title", "state", "closed", "urgent", "meeting", "recurrence", "repeat_until", "start", "due", "deadline", "deadline_desc",
+    "reminder", "lead_hours", "assignee_hours", "inherit_labels", "description", "current_status", "created", "created_by", "discarded",
+    "discard_reason", "plant_event", "priority", "priority_rank", "day_headings", "duration", "calendar_days", "lead_per_day",
+    "assignee_per_day", "lead_per_week", "assignee_per_week",
 )
+_TASK_COLUMNS = ", ".join(TASK_COLUMNS)
 
 
 def template_origins(conn: sqlite3.Connection) -> dict[str, TemplateOrigin]:
@@ -490,9 +497,11 @@ class Model:
         return task_id in self.tasks
 
     def task(self, task_id: str) -> Task:
+        """A task by its ID."""
         return self.tasks[task_id]
 
     def person_name(self, person_id: str) -> str:
+        """A person's name, or the ID itself for someone not on the list."""
         p = self.people.get(person_id)
         return p.name if p else person_id
 
@@ -505,9 +514,11 @@ class Model:
         return self.tasks[target].title if target in self.tasks else target
 
     def active_people(self) -> list[Person]:
+        """The people who aren't retired."""
         return [p for p in self.people.values() if p.status == "active"]
 
     def active_labels(self) -> list[Label]:
+        """The labels that aren't retired."""
         return [label for label in self.labels if label.status == "active"]
 
     # ---- groups, label nesting and plant events (release 5.9) ----
@@ -520,6 +531,7 @@ class Model:
         return [p.id for p in self.active_people() if p.group == group]
 
     def label(self, name: str) -> Label | None:
+        """A label by its name, in any case, or None."""
         return next((lb for lb in self.labels if lb.name.lower() == name.lower()), None)
 
     def parent_label(self, name: str) -> str | None:
@@ -561,12 +573,15 @@ class Model:
 
     # ---- the tree ----
     def parents_of(self, task_id: str) -> list[str]:
+        """A task's parents' IDs, oldest link first."""
         return self._parents.get(task_id, [])
 
     def children_of(self, task_id: str) -> list[str]:
+        """A task's subtasks' IDs."""
         return self._children.get(task_id, [])
 
     def top_level(self) -> list[Task]:
+        """The tasks with no parent."""
         return [t for t in self.tasks.values() if not self.parents_of(t.id)]
 
     def _walk(self, task_id: str, step: Callable[[str], list[str]]) -> list[str]:
@@ -584,9 +599,11 @@ class Model:
         return out
 
     def ancestors_of(self, task_id: str) -> list[str]:
+        """Every task above a task, at any depth."""
         return self._walk(task_id, self.parents_of)
 
     def descendants_of(self, task_id: str) -> list[str]:
+        """Every task under a task, at any depth."""
         return self._walk(task_id, self.children_of)
 
     def chains_of(self, task_id: str) -> list[list[str]]:
@@ -634,6 +651,7 @@ class Model:
         return not c.discarded and not self.capture_tasks(c) and not any(a.added_by == c.id for a in self.agenda)
 
     def unfiled_captures(self) -> list[Capture]:
+        """The captures with no task linked yet."""
         return [c for c in self.captures.values() if self.is_unfiled(c)]
 
     def live_captures(self) -> list[Capture]:
@@ -661,9 +679,11 @@ class Model:
 
     # ---- discarded tasks and captures (mods log round 1, M0021) ----
     def discarded_tasks(self) -> list[Task]:
+        """The discarded tasks, which Bring back can restore."""
         return [t for t in self.tasks.values() if t.discarded]
 
     def discarded_captures(self) -> list[Capture]:
+        """The discarded captures, which Bring back can restore."""
         return [c for c in self.captures.values() if c.discarded]
 
     def only_in_discarded(self, document_id: str) -> bool:
@@ -737,6 +757,7 @@ class Model:
 
     # ---- agendas ----
     def open_items_for(self, target: str) -> list[AgendaItem]:
+        """An agenda target's open agenda items."""
         return [a for a in self.agenda if a.target == target and not a.closed]
 
     def agendas_on(self, task_id: str) -> list[AgendaItem]:
@@ -744,6 +765,7 @@ class Model:
         return [a for a in self.agenda if a.subject == task_id and not a.closed]
 
     def open_meetings(self) -> list[Task]:
+        """The open tasks with Meeting ticked."""
         return [t for t in self.tasks.values() if t.meeting and is_open(t)]
 
     def agenda_targets(self) -> list[str]:

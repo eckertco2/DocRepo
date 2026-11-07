@@ -7,7 +7,6 @@ until Import, and the workbook is only read. ``docrepo/excel_import.py`` does th
 """
 from __future__ import annotations
 
-import html
 from datetime import datetime
 from pathlib import Path
 
@@ -32,6 +31,7 @@ from PySide6.QtWidgets import (
 
 from docrepo import excel_import as xi
 from docrepo.db import STATES
+from docrepo.markup import esc
 from docrepo.ui.look import LOOK
 from docrepo.ui.tokens import C
 from docrepo.ui.style import page_css
@@ -39,10 +39,6 @@ from docrepo.model import Model
 from docrepo.ui.context import AppContext
 
 PREVIEW_ROWS = 15
-
-
-def esc(text: object) -> str:
-    return html.escape(str(text))
 
 
 class ImportDialog(QDialog):
@@ -162,6 +158,7 @@ class ImportDialog(QDialog):
             self.set_workbook(Path(name))
 
     def set_workbook(self, path: Path) -> None:
+        """Read a workbook's sheets and show the first, or say why it can't be read."""
         self._fail("")
         try:
             sheets = xi.sheet_names(path)
@@ -311,6 +308,7 @@ class ImportDialog(QDialog):
 
     # ---- importing ----
     def import_now(self) -> None:
+        """Import what the preview shows, keep the outcome and close."""
         if not self.found or not self.found.to_import:
             return
         try:

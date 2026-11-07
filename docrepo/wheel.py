@@ -63,6 +63,7 @@ class Resolver:
             self.lit = direction(self.held)
 
     def down(self, key: str, t: int) -> Step:
+        """An arrow pressed at ``t`` (ms): what's lit now."""
         self._advance(t)
         if key not in self.held:  # a repeat changes nothing
             self.held.add(key)
@@ -71,6 +72,7 @@ class Resolver:
         return Step(self.lit)
 
     def up(self, key: str, t: int) -> Step:
+        """An arrow let go at ``t`` (ms): the pick when it was the last one up, else what's lit and how long to wait."""
         self._advance(t)
         if key not in self.held:
             return Step(self.lit)
@@ -86,11 +88,6 @@ class Resolver:
         """The grace may have run out."""
         self._advance(t)
         return Step(self.lit)
-
-    def reset(self) -> None:
-        self.held.clear()
-        self.lit = None
-        self._until = None
 
 
 class Session:
@@ -109,6 +106,7 @@ class Session:
 
     @property
     def lit(self) -> str | None:
+        """The direction lit now, if any."""
         return self.resolver.lit
 
     def hotkey_up(self, t: int) -> str:
@@ -124,12 +122,15 @@ class Session:
         return "stay" if quick else "cancel"
 
     def arrow_down(self, key: str, t: int) -> Step:
+        """An arrow pressed while the wheel is open."""
         return self.resolver.down(key, t)
 
     def arrow_up(self, key: str, t: int) -> Step:
+        """An arrow let go while the wheel is open."""
         return self.resolver.up(key, t)
 
     def tick(self, t: int) -> Step:
+        """Time passing with no key: a diagonal's grace may have run out."""
         return self.resolver.tick(t)
 
     def ended_with_nothing(self) -> bool:

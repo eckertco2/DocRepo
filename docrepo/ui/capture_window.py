@@ -71,6 +71,7 @@ from docrepo.dates import short, workday_numbers
 from docrepo.db import RECURRENCES, STATES
 from docrepo.extract import extract_text, to_unc
 from docrepo.layer0 import Part, size_text
+from docrepo.markup import esc
 from docrepo.links import folder_name, folder_original, is_folder, is_link, keeps_no_text, link_name, link_of_line, read_address, short_name
 from docrepo.text import typed_path
 from docrepo.model import TODAY, Model, is_person
@@ -185,10 +186,6 @@ def understood_html(found: list) -> str:
 
 def and_list(items: list[str]) -> str:
     return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1] if items else ""
-
-
-def esc(text: str) -> str:
-    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 @dataclass
@@ -2052,9 +2049,6 @@ class CaptureWindow(QWidget):
     def _quick(self) -> bool:
         """A new task with no task picked that goes on Today is a quick task, under Quick tasks (mods log round 2, M0039)."""
         return "new_task" in self.types and not self.task and not self.from_capture and TODAY in self._targets()
-
-    def hide_capture(self) -> None:
-        self.hide()
 
     # ---- pinned (mods log round 3, M0053, M0054) ----
     def toggle_pin(self) -> None:

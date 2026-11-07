@@ -180,6 +180,8 @@ A backup folder on the same drive as the data root doesn't protect you from that
 
 and start DocRepo.
 
+**To read the database outside DocRepo,** run `.venv\Scripts\python.exe -m docrepo dump`. It writes every table of `docs.db` as a JSON file (its columns, then each row) into `System\export\<date>` in your data root, with `_dump.json` saying when and how many rows each table had. It reads `docs.db` without changing it, even while DocRepo runs; a second dump on one day replaces the first. Templates, ties, pins and the notes pages' versions live only in the database, so this is their plain-file way out.
+
 ## Try it with the sample data
 
 DocRepo comes with made-up sample data: a few projects, people, captures and agendas, as of 8 October 2026. Load it into a separate, empty data root, never your real one:

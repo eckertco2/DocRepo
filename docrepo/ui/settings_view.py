@@ -6,7 +6,6 @@ backup folder here, and they're kept in location.json and settings.json.
 from __future__ import annotations
 
 import logging
-from html import escape as esc
 from collections.abc import Callable
 from dataclasses import asdict
 from datetime import datetime
@@ -40,6 +39,7 @@ from docrepo import __version__, backup, capacity, db, diagnose, hotkey, outlook
 from docrepo.config import Settings, data_root_problem, init_data_root, make_safe_fs, resolve_data_root, save_location
 from docrepo.dates import WEEKDAYS, long_date, stamp
 from docrepo.links import check_link_template
+from docrepo.markup import esc
 from docrepo.model import Model
 from docrepo.pages import write_pages
 from docrepo.safe_fs import WriteRefused
@@ -178,6 +178,7 @@ def set_up_data_root(path: Path) -> str:
 
 
 def rebuild_everything(ctx: AppContext) -> str:
+    """Rebuild the capacity calendar, every generated page and the search index, and say how many of each."""
     now = ctx.now()
     rows = capacity.rebuild_all(ctx.conn, now.date(), ctx.settings)
     pages = write_pages(Model(ctx.conn), ctx.data_root, ctx.fs, now.date(), now)
@@ -251,6 +252,7 @@ class ReferenceFields(QWidget):
         self.grid.addWidget(self.add_button, 999, 0, Qt.AlignmentFlag.AlignLeft)
 
     def set(self, names: list[str], links: dict[str, str]) -> None:
+        """Show these reference fields and their link addresses, a row each, in place of the rows there."""
         for row in self.rows:
             for w in row:
                 w.deleteLater()
@@ -259,6 +261,7 @@ class ReferenceFields(QWidget):
             self.add_row(name, links.get(name, ""))
 
     def add_row(self, name: str, link: str, focus: bool = False) -> None:
+        """Add a row for a reference field: its name, its link address and the link it makes."""
         n = len(self.rows) + 1
         name_box, link_box = QLineEdit(name), QLineEdit(link)
         name_box.setPlaceholderText("Such as Change #")
@@ -282,11 +285,13 @@ class ReferenceFields(QWidget):
             name_box.setFocus()
 
     def remove_row(self, row) -> None:
+        """Take a reference field's row away."""
         self.rows.remove(row)
         for w in row:
             w.deleteLater()
 
     def show_made(self, row) -> None:
+        """Under a row, the link its address makes from an example value, or what's wrong with the address."""
         from docrepo.links import check_link_template, reference_link
 
         template, made = row[1].text().strip(), row[2]
@@ -294,9 +299,11 @@ class ReferenceFields(QWidget):
         made.setText("No link: Copy only" if not template else f"Needs an address that {why}" if why else reference_link(template, self.SAMPLE))
 
     def names(self) -> list[str]:
+        """The reference fields' names, as typed, in order."""
         return [r[0].text() for r in self.rows]
 
     def links(self) -> dict[str, str]:
+        """Each named reference field's link address, for those that have one."""
         return {r[0].text().strip(): r[1].text().strip() for r in self.rows if r[0].text().strip() and r[1].text().strip()}
 
 
@@ -656,6 +663,7 @@ class SettingsView(QWidget):
 
     # ---- filling and reading the form ----
     def load(self) -> None:
+        """Show the saved settings and the data root's facts."""
         s, m = self.ctx.settings, Model(self.ctx.conn)
         choice = resolve_data_root(None)
         override = "" if choice.path and choice.path.resolve() == self.ctx.data_root.resolve() else (
@@ -695,6 +703,7 @@ class SettingsView(QWidget):
         self.error.hide()
 
     def values(self) -> dict[str, Any]:
+        """The settings as the view shows them, by field, ready to check and save."""
         return {
             "me": self.me.currentData(), "hotkey": self.hotkey.text(), **{k: box.text() for k, box in self.more_hotkeys.items()},
             "wheel_hotkeys": {**self.ctx.settings.wheel_hotkeys, **{k: box.text() for k, box in self.wheel_hotkeys.items()}},
@@ -710,6 +719,7 @@ class SettingsView(QWidget):
         }
 
     def save(self) -> list[str]:
+        """Save what changed, and say so. Returns the fields that changed: none when nothing did or a value is refused."""
         try:
             changed = update_settings(self.ctx, self.values())
         except SettingsProblem as e:
@@ -729,6 +739,7 @@ class SettingsView(QWidget):
 
     # ---- backups ----
     def show_backup_status(self) -> None:
+        """The backup card's line: off, when the last backup was, or what went wrong."""
         s = self.ctx.settings
         if not s.backup_dir:
             self.backup_status.setText("<b>Backups:</b> off. Choose a backup folder and save, to turn them on.")
@@ -747,6 +758,7 @@ class SettingsView(QWidget):
                                    f"{last[11:16]}. The next is due {nxt}. Each one is listed in backup-log.md in the backup folder." + problem)
 
     def backup_now(self) -> None:
+        """Start a backup now, once the backup folder shown is the one saved."""
         if (self.backup.text().strip() or None) != self.ctx.settings.backup_dir:
             self.message("Save the settings first, so the backup goes to the folder shown.")
             return
@@ -767,6 +779,7 @@ class SettingsView(QWidget):
 
     # ---- the Startup shortcut ----
     def make_shortcut(self) -> None:
+        """Make the Startup shortcut, and say where it is and where to move it."""
         try:
             path = startup.make_shortcut(self.ctx.fs)
         except (startup.StartupError, OSError) as e:
@@ -836,6 +849,7 @@ class SettingsView(QWidget):
             self.backup.setText(str(Path(folder)))
 
     def change_data_root(self) -> None:
+        """Choose another folder as the data root, set it up if it's new, and record it for DocRepo's next start."""
         folder = QFileDialog.getExistingDirectory(self, "Data root", str(self.ctx.data_root.parent))
         if not folder:
             return

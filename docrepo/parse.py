@@ -23,7 +23,8 @@ EVENT_WORDS = ("turnaround", "shutdown", "audit", "inspection", "outage", "walkt
 I = re.IGNORECASE  # noqa: E741
 
 
-def esc(s: str) -> str:
+def re_esc(s: str) -> str:
+    """``s`` as a regular expression that matches it literally."""
     return re.escape(s)
 
 
@@ -52,9 +53,11 @@ class Who:
 
     @property
     def is_new(self) -> bool:
+        """True for someone not on the people list yet."""
         return self.id is None
 
     def key(self) -> str:
+        """Who this is, for comparing: their ID, or their name for someone new."""
         return self.id or "new:" + self.name.lower()
 
 
@@ -96,18 +99,22 @@ class ParseResult:
 
 # ---- numbers, as JavaScript rounds and prints them ----
 def js_round(x: float) -> float:
+    """Round half up, as JavaScript's Math.round does, so the port matches the mockup."""
     return math.floor(x + 0.5)
 
 
 def js_num(x: float) -> str:
+    """A number as JavaScript writes it: no ``.0`` on a whole number."""
     return str(int(x)) if float(x).is_integer() else repr(float(x))
 
 
 def half_hours(x: float) -> float:
+    """Hours rounded to the nearest half hour, at least half an hour."""
     return max(0.5, js_round(x * 2) / 2)
 
 
 def one_decimal(x: float) -> str:
+    """A number rounded to one decimal place, written as JavaScript would."""
     return js_num(js_round(x * 10) / 10)
 
 
@@ -124,10 +131,12 @@ NUM_RE = r"\d+|an?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelv
 
 
 def month_no(s: str) -> int:
+    """A month's number from 0, from its name or its first three letters; -1 for none."""
     return MONTHS3.index(s[:3].lower()) if s[:3].lower() in MONTHS3 else -1
 
 
 def weekday_no(s: str) -> int:
+    """A weekday's number from 0 (Monday), from its name or its first three letters; -1 for none."""
     return DAYS3.index(s[:3].lower()) if s[:3].lower() in DAYS3 else -1
 
 
@@ -137,29 +146,35 @@ def js_dow(d: date) -> int:
 
 
 def count(s: str) -> float:
+    """A count in words or digits: "a couple" is 2, "three" 3, "1.5" 1.5."""
     return 2 if "couple" in s.lower() else COUNT.get(s.lower(), None) or float(s)
 
 
 def last_day(year: int, month0: int) -> date:
+    """The last day of a month, counted from 0, which may run past December into later years."""
     year, month0 = year + month0 // 12, month0 % 12
     nxt = date(year + (month0 == 11), (month0 + 1) % 12 + 1, 1)
     return nxt - timedelta(days=1)
 
 
 def ok_day(year: int, month0: int, day: int) -> bool:
+    """True when ``day`` is a day of that month (counted from 0)."""
     return 0 <= month0 < 12 and 1 <= day <= last_day(year, month0).day
 
 
 def ymd(year: int, month0: int, day: int) -> date:
+    """A date from a year, a month counted from 0 (which may run past December) and a day."""
     year, month0 = year + month0 // 12, month0 % 12
     return date(year, month0 + 1, day)
 
 
 def monday_of(d: date) -> date:
+    """The Monday of a date's week."""
     return d - timedelta(days=d.weekday())
 
 
 def friday_of(d: date) -> date:
+    """The Friday of a date's week."""
     return monday_of(d) + timedelta(days=4)
 
 
@@ -179,20 +194,24 @@ def coming(today: date, month0: int, day: int, year: str | None) -> date | None:
 
 
 def first_of_next_month(today: date) -> date:
+    """The first day of the month after today's."""
     return add_months(today.replace(day=1), 1)
 
 
 def coming_month_end(today: date, month0: int, year: str | None) -> date:
+    """The end of a month (counted from 0): in ``year`` when given, else the next one not yet past."""
     if year:
         return last_day(int(year), month0)
     return last_day(today.year if last_day(today.year, month0) >= today else today.year + 1, month0)
 
 
 def yy(s: str | None) -> str | None:
+    """A two-digit year as four ("26" is "2026"); any other as it is."""
     return "20" + s if s and len(s) == 2 else s
 
 
 def plus(today: date, n: str, unit: str) -> date:
+    """Today plus ``n`` days, weeks or months, as "in 2 weeks" says."""
     if unit[:1].lower() == "d":
         return today + timedelta(days=count(n))
     if unit[:1].lower() == "w":
@@ -477,6 +496,7 @@ OCCURRENCE_WEEKS = {"Daily": 0.2, "Weekly": 1, "Bi-weekly": 2, "Monthly": 52 / 1
 
 
 def h_num(s: str) -> float:
+    """Hours in words or digits: "a couple" is 2, "three" 3, "1.5" 1.5."""
     return 2 if "couple" in s.lower() else COUNT.get(s.lower(), None) or float(s)
 
 
@@ -571,6 +591,7 @@ def event_phrase(s: str, event_re: re.Pattern[str]) -> str:
 
 
 def deadline_text(sentence: str, date_texts: list[str], event_re: re.Pattern[str]) -> str:
+    """A deadline's description from its sentence, the dates taken out: what follows "deadline is" or "before"."""
     s = sentence
     for t in date_texts:
         s = " ".join(s.split(t))
@@ -615,7 +636,7 @@ _TRAIL_PUNCT = re.compile(r"[\s,;:–—-]+\Z")
 
 
 def _tokens_re(tokens: Sequence[str]) -> str:
-    return "|".join(esc(t) for t in tokens)
+    return "|".join(re_esc(t) for t in tokens)
 
 
 def drop_ask(s: str, tokens: Sequence[str]) -> str:
@@ -787,6 +808,7 @@ NOT_INITIALS = set("HR QA QC EHS HSE IT PM OPS PO PR RFQ RFI EOD COB EOW EOM EOY
 
 
 def is_name(w: str) -> bool:
+    """True when a word could be a person's name: a capital, then small letters, and not a common word."""
     return bool(re.match(r"[A-Z][a-z]", w)) and w.lower() not in COMMON_WORDS and w.lower() not in NOT_PEOPLE
 
 
@@ -846,7 +868,7 @@ def find_people(text: str, people: Sequence[ParsePerson]) -> PeopleFound:
     tokens.sort(key=lambda kv: -len(kv[0]))
     mentions: list[_Mention] = []
     if tokens:
-        for m in re.finditer(rf"(?<!\w)(?:{'|'.join(esc(t) for t, _ in tokens)})(?!\w)", text, I):
+        for m in re.finditer(rf"(?<!\w)(?:{'|'.join(re_esc(t) for t, _ in tokens)})(?!\w)", text, I):
             word = m.group(0)
             if word == word.lower() and word in WORD_NAMES:
                 continue
@@ -1228,7 +1250,7 @@ def parse_capture(
         as_plant_event(r, plant.group(0))
     for label in labels:
         for keyword in label.keywords or (label.name,):
-            m = re.search(rf"(?<!\w){esc(keyword)}(?:s|es|ing|ed)?(?!\w)", text, I)
+            m = re.search(rf"(?<!\w){re_esc(keyword)}(?:s|es|ing|ed)?(?!\w)", text, I)
             if m:
                 r.labels.append(label.name)
                 note("labels", "Label", label.name, m.group(0))
@@ -1237,7 +1259,7 @@ def parse_capture(
     # "work order 48213", "Work order #48213" and "work order no. 48213"; the first for each field counts.
     for name in refs:
         base = REF_SUFFIX.sub("", name).strip()
-        m = re.search(rf"(?<!\w){esc(base)}\s*(?:#|no\.?|number)?\s*[:#-]?\s*(\d(?:[\w-]*\w)?)", text, I) if base else None
+        m = re.search(rf"(?<!\w){re_esc(base)}\s*(?:#|no\.?|number)?\s*[:#-]?\s*(\d(?:[\w-]*\w)?)", text, I) if base else None
         if m:
             r.refs[name] = m.group(1)
             note("refs", name, m.group(1), m.group(0))
@@ -1311,7 +1333,7 @@ def _fill_hours(r: ParseResult, text: str, hours: list[HoursHit], people: Sequen
         return [n for n in out if n]
 
     def where(s: str, ws: list[Who]) -> list[int]:
-        return [m.start() for n in names_of(ws) for m in re.finditer(rf"(?<!\w){esc(n)}(?!\w)", s, 0 if n == "I" else I)]
+        return [m.start() for n in names_of(ws) for m in re.finditer(rf"(?<!\w){re_esc(n)}(?!\w)", s, 0 if n == "I" else I)]
 
     def role_for(s: str, at: int) -> str:
         if re.search(r"\bfor\s+(?:the\s+)?lead\b|\blead(?:'s)?\s+(?:hours|time|load|effort)\b|\bas\s+(?:the\s+)?lead\b", s, I):

@@ -9,9 +9,11 @@ import re
 import sqlite3
 from collections.abc import Sequence
 
-from docrepo.db import next_id, note_used_id, transaction
+from docrepo.db import check_names, next_id, note_used_id, transaction
 
 STATUSES = ("active", "retired")
+#: The lists ``_set_list`` keeps: each table, with its owner's column and its value's column (release 5.102 checks them).
+_LISTS = {"person_aliases": ("person", "alias"), "label_keywords": ("label", "keyword")}
 _UNSET: object = object()
 
 
@@ -33,6 +35,9 @@ def _check_hours(hours: float | None) -> float | None:
 
 
 def _set_list(conn: sqlite3.Connection, table: str, key: str, owner: object, column: str, values: Sequence[str]) -> None:
+    """Make ``owner``'s list in ``table`` these values, in order, blank ones left out."""
+    check_names(table, _LISTS)
+    check_names((key, column), _LISTS[table])
     conn.execute(f"DELETE FROM {table} WHERE {key} = ?", (owner,))  # noqa: S608 - a column or table name of DocRepo's own; values are parameters
     conn.executemany(f"INSERT INTO {table} ({key}, pos, {column}) VALUES (?, ?, ?)",  # noqa: S608 - a column or table name of DocRepo's own; values are parameters
                      [(owner, i, v.strip()) for i, v in enumerate(values) if v.strip()])
