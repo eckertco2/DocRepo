@@ -26,13 +26,14 @@ from __future__ import annotations
 import calendar
 import math
 from collections.abc import Collection
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 
-from docrepo import key_dates, quick
+from docrepo import capacity, key_dates, quick, tasks, ties
 from docrepo.dates import add_months, long_date, monday_of, to_date
 from docrepo.model import KeyDate, Model, Task
-from docrepo.schedule import due_of, is_open, start_of, windows
+from docrepo.pages import num
+from docrepo.schedule import days_in, due_of, is_open, start_of, week_of, windows
 from docrepo.stories import and_list
 
 #: What the rows can be ordered and their titles coloured by (decision 133), and "parent:" with a parent label's name.
@@ -234,15 +235,19 @@ def workdays(first: date, last: date) -> int:
 
 
 def hours(t: Task, today: date) -> tuple[float, float | None] | None:
-    """The task's whole work, as Capacity counts it (the lead hours for each lead, the assignee hours for each assignee),
-    and that a week: the total over its workdays, times five. A routine task's hours are each time, so it has no week."""
-    total = (t.lead_hours or 0) * len(t.leads) + (t.assignee_hours or 0) * len(t.assignees)
+    """The task's whole work, as Capacity counts it: each lead's and each assignee's share of their role's hours, by their
+    Involvement (``capacity.roles_of``; release 5.48, decision 196), and that a week: the total over its days, times the days
+    in a week. Its days are its workdays, or every day with Runs through weekends, as Capacity spreads its hours (decision
+    190). A routine task's hours are each time, so it has no week."""
+    total = sum(h for _, h in capacity.roles_of(t))
     if not total:
         return None
     if t.recurrence:
         return total, None
     w = windows(t, today + _FAR)
-    return total, (total * 5 / workdays(*w[0]) if w else None)
+    if not w:
+        return total, None
+    return total, total * week_of(_WORKDAYS, t.calendar_days) / max(1, days_in(*w[0], _WORKDAYS, t.calendar_days))
 
 
 def _h(x: float) -> str:
@@ -261,7 +266,8 @@ def hours_label(t: Task, today: date, a_week: bool) -> str:
 
 def hours_words(m: Model, t: Task, today: date) -> str:
     """The hours in words, for the tooltip and the card: "16 h: Tom Becker 4 h as lead, Sam and Ana 6 h each as assignees ·
-    about 4 h a week"."""
+    about 4 h a week". Each person's hours are their own, by their Involvement (release 5.48): "Priya Shah 12 h and Tom
+    Becker 3 h (25%) as assignees"."""
     h = hours(t, today)
     if not h:
         return "No hours yet"
@@ -270,7 +276,11 @@ def hours_words(m: Model, t: Task, today: date) -> str:
         if not ids or not x:
             return ""
         many = len(ids) > 1
-        return f"{and_list([m.person_name(p) for p in ids])} {_h(x)} h{' each' if many else ''} as {role}{'s' if many else ''}"
+        if all(t.share(role, p) == 100 for p in ids):
+            return f"{and_list([m.person_name(p) for p in ids])} {_h(x)} h{' each' if many else ''} as {role}{'s' if many else ''}"
+        own = [f"{m.person_name(p)} {_h(x * t.share(role, p) / 100)} h" + (f" ({t.share(role, p)}%)" if t.share(role, p) != 100 else "")
+               for p in ids]
+        return f"{and_list(own)} as {role}{'s' if many else ''}"
 
     parts = ", ".join(p for p in (part(t.leads, t.lead_hours, "lead"), part(t.assignees, t.assignee_hours, "assignee")) if p)
     if t.recurrence:
@@ -284,6 +294,133 @@ def hour_bin(t: Task, today: date) -> int:
     if not h or h[1] is None:
         return -1
     return next(i for i, (top, _) in enumerate(HOUR_BINS) if h[1] < top)
+
+
+# ---- Plan mode's drops (release 5.48; the task templates design's Plan mode, decisions 136, 137 and 191) ----
+def length_words(days: int, every_day: bool = False) -> str:
+    """A length as the task page says it: "5 workdays", or "5 days" for a task that runs through weekends."""
+    return f"{days} {'day' if every_day else 'workday'}{'' if days == 1 else 's'}"
+
+
+def drop_dates(t: Task, start: date, end: date, mode: str) -> tuple[str | None, str | None]:
+    """The Start and Due a drop on the chart sends, from the first and last day it was let go on: an end stretched leaves the
+    other as it was, and a bar that ends at its deadline gets a Due when it's moved."""
+    return (t.start if mode == "end" else start.isoformat()), (t.due if mode == "start" else end.isoformat())
+
+
+def dropped(t: Task, start: str | None, due: str | None, workdays: Collection[int]) -> Task:
+    """The task as a drop leaves it, worked out as ``tasks.update_task`` will make it for Plan mode (``tasks.worked_out``'s
+    ``dragged``): a bar with a Duration moved, or an undated one dropped, keeps its number of days, so one moved across a
+    weekend is wider but no more work; an end stretched takes the new length; and a rate's total follows the length."""
+    new, _ = tasks.worked_out(t, {"start": start, "due": due}, workdays, dragged=True)
+    return replace(t, **new)
+
+
+def drop_changes(before: Task, after: Task) -> list[str]:
+    """What a drop changes besides the dates, as the status log has it: "Duration 5 → 3 workdays", "assignee hours 30 → 18"."""
+    out = []
+    if before.duration is not None and after.duration is not None and before.duration != after.duration:
+        out.append(f"Duration {before.duration} → {length_words(after.duration, after.calendar_days)}")
+    for name, role in (("lead_hours", "lead"), ("assignee_hours", "assignee")):
+        was, now = getattr(before, name), getattr(after, name)
+        if was is not None and now is not None and round(was, 2) != round(now, 2):
+            out.append(f"{role} hours {num(round(was, 2))} → {num(round(now, 2))}")
+    return out
+
+
+def drop_said(before: Task, after: Task, mode: str, today: date) -> str:
+    """What a drop says it did (release 5.48), after the task's title: the dates it gave, as they'll be saved, and what else
+    changed with them. A bar with a Duration moved says it kept its days; an undated one dropped, that it took its own."""
+    def day(value: str | None) -> str:
+        return long_date(to_date(value), today) if value else "none"
+
+    keeps = before.duration is not None and after.duration == before.duration
+    length = length_words(after.duration, after.calendar_days) if after.duration is not None else ""
+    said = {"new": f"Start and Due set: {day(after.start)} to {day(after.due)}" + (f", its own {length}" if keeps else ""),
+            "start": f"Start moved to {day(after.start)}", "end": f"Due moved to {day(after.due)}",
+            "move": f"now {day(after.start)} to {day(after.due)}" + (f", still {length}" if keeps else "")}[mode]
+    return ", ".join([said, *drop_changes(before, after)])
+
+
+def drop_room(t: Task) -> str:
+    """What dropping an undated task's name gives it: "its 3 workdays" with a Duration, else "a week" (decision 136)."""
+    return f"its {length_words(t.duration, t.calendar_days)}" if t.duration else "a week"
+
+
+# ---- ties on the chart (release 5.48, decision 259) ----
+@dataclass(frozen=True)
+class TieLink:
+    """One tie as a selected bar's line shows it: from the date it counts from, ``source``'s start or end (``point``), or its key
+    date's when ``key_date`` is set, to ``task``'s tied date, its "start" or "due" (``field``)."""
+
+    source: str
+    key_date: int | None
+    point: str
+    task: str
+    field: str
+
+
+def tie_links(m: Model, task_id: str) -> list[TieLink]:
+    """The lines a selected bar draws (decision 259): to what its dates are tied to, and from it, or its key dates, to what's tied
+    to them. Nothing for a task with no ties, so the chart stays calm with many."""
+    t = m.tasks.get(task_id)
+    out = [TieLink(x.source, x.key_date, x.point, task_id, f) for f, x in sorted(t.ties.items())] if t is not None else []
+    for other in sorted(m.tied_to(task_id), key=lambda x: x.id):
+        out += [TieLink(x.source, x.key_date, x.point, other.id, f) for f, x in sorted(other.ties.items()) if x.source == task_id and other.id != task_id]
+    return out
+
+
+def tie_day(point: str, start: str | None, end: str | None, either: bool = False) -> date | None:
+    """The date a tie counts from: a start or an end. A key date with one date has it at both ends (``either``); a task's own
+    dates are as they are, so one with no Start has no start to count from yet."""
+    value = (start or (end if either else None)) if point == "start" else (end or (start if either else None))
+    return to_date(value) if value else None
+
+
+def follows(m: Model, moved: dict[str, Task], keys: dict[int, tuple[str | None, str | None]], workdays: Collection[int]) -> dict[str, Task]:
+    """What a move will take with it, before it's saved (decision 259): each task tied, near or far, to the tasks in ``moved`` (as
+    the move leaves them) or to the key dates in ``keys`` (their new start and end), with the dates ``tasks.follow`` will give it,
+    worked out by the same rules (``ties.placement``, then ``tasks.worked_out``), each after what it's tied to. A task's key dates
+    don't follow its dates. Closed and discarded tasks never move, and a discarded source moves nothing (decisions 185 and 258)."""
+    own: dict[str, list[str]] = {}
+    by_key: dict[int, list[str]] = {}
+    for t in m.tasks.values():
+        if t.discarded:
+            continue
+        for tie in t.ties.values():
+            if tie.key_date is None:
+                own.setdefault(tie.source, []).append(t.id)
+            else:
+                by_key.setdefault(tie.key_date, []).append(t.id)
+    now = dict(moved)
+
+    def ref(tie) -> date | None:
+        if tie.key_date is not None:
+            k = next((x for x in m.key_dates_of(tie.source) if x.id == tie.key_date), None)
+            start, end = keys[tie.key_date] if tie.key_date in keys else (k.start, k.end) if k is not None else (None, None)
+            return tie_day(tie.point, start, end, True)
+        src = now.get(tie.source) or m.tasks.get(tie.source)
+        return tie_day(tie.point, src.start, src.due) if src is not None else None
+
+    out: dict[str, Task] = {}
+    starts = [x for s in moved for x in own.get(s, [])] + [x for k in keys for x in by_key.get(k, [])]
+    for x in ties.chain(lambda y: sorted(set(own.get(y, []))), sorted(set(starts))):
+        t = m.tasks.get(x)
+        if x in moved or t is None or t.discarded or t.state == "Closed":
+            continue
+        lands = {}
+        for f, tie in t.ties.items():
+            if ties.counts_in(m, tie):
+                day = ref(tie)
+                lands[f] = ties.landing(day, tie, workdays).isoformat() if day else None
+        changes = ties.placement(t, lands, workdays)
+        if not changes:
+            continue
+        if len(t.ties) == 2:  # with both tied, the length comes from them (decision 251)
+            changes["duration"] = None
+        new, _ = tasks.worked_out(t, changes, workdays)
+        now[x] = out[x] = replace(t, **new)
+    return out
 
 
 # ---- Order by (decision 133) ----
@@ -461,7 +598,7 @@ def tooltip(m: Model, task_id: str, today: date, order: str = "top", plan: bool 
     t = m.task(task_id)
     lines = [t.title]
     if is_undated(t, today):
-        lines.append("No dates yet" + (": drag its name onto the chart to give it a week" if plan else ""))
+        lines.append("No dates yet" + (f": drag its name onto the chart to give it {drop_room(t)}" if plan else ""))
     elif t.recurrence:
         nxt = due_of(t, today)
         lines.append(f"{t.recurrence} from {long_date(start_of(t), today)}" + (f", next {long_date(nxt.date, today)}" if nxt else ""))

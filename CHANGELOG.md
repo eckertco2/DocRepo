@@ -46,6 +46,7 @@ One line per release, newest first: its number, the date it was built, and what 
 | 5.51 | 2026-11-01 | A template's timing, schema version 20. |
 | 5.50 | 2026-10-31 | Ties: a task's Start or Due set from another date, schema version 19. |
 | 5.49 | 2026-10-31 | Hours a week, reordering a template's rows, and Duplicate, schema version 18. |
+| 5.48 | 2026-11-07 | Plan mode by workdays: a bar with a Duration keeps its workdays while it's dragged, an undated task's name takes its own Duration, and the drop says what changed; the Timeline's hours count each person's Involvement, as Capacity does; and ties on the chart: a selected bar's lines to its ties, and what follows a dragged bar shown where it will go. |
 | 5.47 | 2026-10-30 | Involvement, schema version 17. |
 | 5.46 | 2026-10-30 | Duration and hours a day, schema version 16. |
 | 5.45 | 2026-10-30 | Linked fields and the preview, schema version 15. |

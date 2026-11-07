@@ -9,9 +9,16 @@ subtasks. The scale and the plant events lane (``TimelineHead``) stay at the top
 shows its dates, hours and people, on a line under the chart so nothing moves (decision 292; a card above it in the Classic
 look); double-clicking a bar or a name asks for Edit task (``edit_task``), as a double-click does everywhere since release
 5.91, and Q for Quick edit (``quick_edit``); Enter or Open task opens the task. Plan mode (P) lets a one-time task's bar be moved, or its
-ends stretched, and an undated task's name be dragged onto the chart for a working week; each drop is sent as
-``set_dates`` for the browse window to save and log, and Ctrl+Z sends the step back. It takes the middle and right panes
-together.
+ends stretched, and an undated task's name be dragged onto the chart for its own Duration or a working week; each drop is
+sent as ``set_dates`` for the browse window to save and log, and Ctrl+Z sends the step back. Since release 5.48 a bar with a
+Duration keeps its number of workdays while it's dragged (``timeline.dropped``, as the save will make it), so one moved across a
+weekend looks wider but isn't more work, and the drop says what changed: the dates, the Duration when an end was stretched,
+and a rate's total. It takes the middle and right panes together.
+
+Ties (release 5.48, decision 259): selecting a bar draws thin lines from where each of its ties counts from to the date it sets,
+and from it, or its key dates, to what's tied to them, and nothing otherwise. While a bar, a key date or a what-if's whole parent
+is dragged, what follows it, near or far, is drawn where the drop will put it (``timeline.follows``, the save's own rules), its
+lines with it.
 
 Key dates (release 5.31, the key dates plan) are marks on their task's row: a window a thin segment under the bar (or in
 the bar's place when the task has none in view), a start alone an opening bracket, an end alone a closing tick, a Deadline
@@ -68,7 +75,7 @@ from docrepo import key_dates, load, timeline, whatif
 from docrepo.dates import days_text, long_date, monday_of, short, to_date
 from docrepo.detail import esc
 from docrepo.model import KeyDate, Model, Task
-from docrepo.schedule import due_of, is_open, start_of, windows
+from docrepo.schedule import days_in, due_of, is_open, start_of, windows
 from docrepo.timeline import Band, KeyMark, Row, Timeline
 from docrepo.ui import tokens
 from docrepo.ui.capacity_strip import CapacityRows, CapacityTeam, Spot, StripData
@@ -449,6 +456,14 @@ class TimelineChart(QWidget):
         self.off: set[str] = set()
         self.was: dict[str, tuple[date, date]] = {}
         self.past: set[str] = set()
+        #: The workdays in Settings (release 5.48), which a Duration counts: the view sets them as it draws.
+        self.workdays: frozenset[int] = frozenset(range(5))
+        # While a drag is under way (release 5.48, decision 259): the tasks it moves as the drop will leave them, the key dates it
+        # moves, their new start and end, and what follows them, near or far, each with the dates the save will give it.
+        self.moved: dict[str, Task] = {}
+        self.moved_keys: dict[int, tuple[str | None, str | None]] = {}
+        self.preview: dict[str, Task] = {}
+        self._preview_for: tuple | None = None
 
     @property
     def tl(self) -> Timeline | None:
@@ -600,7 +615,118 @@ class TimelineChart(QWidget):
                 p.setPen(QPen(QColor(ACCENT), 1, Qt.PenStyle.DashLine))
                 p.setBrush(_mix(ACCENT, 0.45))
                 p.drawRoundedRect(rect, 4, 4)
+        if self.drag and self.drag.moved:  # what follows it, where the drop will put it (decision 259)
+            for task_id, t in self.preview.items():
+                top = self.top_of(task_id)
+                if top is None or not t.start or not t.due:
+                    continue
+                x0, x1 = self._x(to_date(t.start)), self._x(to_date(t.due) + timedelta(days=1))
+                p.setPen(QPen(QColor(ACCENT), 1, Qt.PenStyle.DashLine))
+                p.setBrush(_alpha(ACCENT, 60))
+                p.drawRoundedRect(QRectF(x0, top + self.BAR_TOP, max(3.0, x1 - x0), self.BAR_H), 4, 4)
+        self._paint_ties(p)
         p.end()
+
+    # ---- ties (release 5.48, decision 259) ----
+    def _dates_now(self, task_id: str) -> tuple[str | None, str | None]:
+        """A task's Start and Due as the chart shows them: where a drag under way will put it, or as they are."""
+        t = self.moved.get(task_id) or self.preview.get(task_id) or (self.model.tasks.get(task_id) if self.model is not None else None)
+        return (t.start, t.due) if t is not None else (None, None)
+
+    def _tie_from(self, link: timeline.TieLink) -> QPointF | None:
+        """Where a line starts: the source's start or end on its bar, or its key date's on the key dates' strip."""
+        top = self.top_of(link.source)
+        row = next((r for r in self.rows if r.task == link.source), None)
+        if top is None or row is None or self.model is None:
+            return None
+        if link.key_date is not None:
+            k = next((x for x in self.model.key_dates_of(link.source) if x.id == link.key_date), None)
+            start, end = self.moved_keys.get(link.key_date, (k.start, k.end) if k is not None else (None, None))
+            day, y = timeline.tie_day(link.point, start, end, True), self._key_strip(row, top)[0]
+        else:
+            day, y = timeline.tie_day(link.point, *self._dates_now(link.source)), top + self.ROW_H / 2
+        if day is None:
+            return None
+        return QPointF(self._x(day if link.point == "start" else day + timedelta(days=1)), y)
+
+    def _tie_to(self, link: timeline.TieLink) -> QPointF | None:
+        """Where a line ends: the tied task's Start or Due, at its bar's edge."""
+        top = self.top_of(link.task)
+        start, due = self._dates_now(link.task)
+        value = start if link.field == "start" else due
+        if top is None or not value:
+            return None
+        day = to_date(value)
+        return QPointF(self._x(day if link.field == "start" else day + timedelta(days=1)), top + self.ROW_H / 2)
+
+    def tie_lines(self) -> list[tuple[QPointF, QPointF]]:
+        """The selected bar's lines (decision 259), each from where a tie counts from to the date it sets: to what it's tied to, and
+        from it to what's tied to it. While it's dragged, they go where the drop will put things. Nothing is drawn for a bar with no
+        ties, or with nothing selected, and a line whose other end isn't on the chart (folded away, or filtered out) isn't drawn."""
+        m = self.model
+        sel = self.drag.task if self.drag is not None and self.drag.moved else self.sel
+        if m is None or sel is None or sel not in m.tasks:
+            return []
+        out = []
+        for link in timeline.tie_links(m, sel):
+            a, b = self._tie_from(link), self._tie_to(link)
+            if a is not None and b is not None:
+                out.append((a, b))
+        return out
+
+    def _paint_ties(self, p: QPainter) -> None:
+        """Each line: down (or up) from where it counts from, along the tied task's row, and an arrow into the date it sets, thin
+        and in the accent, with a dot where it starts."""
+        colour = _alpha(ACCENT, 215)
+        for a, b in self.tie_lines():
+            path = QPainterPath(a)
+            if abs(a.y() - b.y()) > 0.5:
+                path.lineTo(a.x(), b.y())
+            path.lineTo(b)
+            p.setPen(QPen(colour, 1.2))
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawPath(path)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(colour)
+            p.drawEllipse(a, 2.5, 2.5)
+            across, down = b.x() - a.x(), b.y() - a.y()
+            if abs(across) > 0.5:
+                sx = 1 if across > 0 else -1
+                tip = [b, QPointF(b.x() - 5 * sx, b.y() - 3), QPointF(b.x() - 5 * sx, b.y() + 3)]
+            elif abs(down) > 0.5:
+                sy = 1 if down > 0 else -1
+                tip = [b, QPointF(b.x() - 3, b.y() - 5 * sy), QPointF(b.x() + 3, b.y() - 5 * sy)]
+            else:
+                continue
+            p.drawPolygon(QPolygonF(tip))
+
+    def _follow(self, d: Drag) -> None:
+        """What a drag takes with it (decision 259), worked out again only when its days change: the tasks and key dates it
+        moves, as the drop will leave them, and each task tied to them, near or far, where the save will put it."""
+        key = (d.task, d.mode, d.key_id, d.start, d.end)
+        if key == self._preview_for:
+            return
+        self._preview_for = key
+        self.moved, self.moved_keys, self.preview = {}, {}, {}
+        m = self.model
+        if m is None or d.task not in m.tasks or d.start is None or d.end is None:
+            return
+        if d.key_id is not None:
+            self.moved_keys = {d.key_id: (None if d.kind == "by" else d.start.isoformat(), None if d.kind == "from" else d.end.isoformat())}
+        elif d.mode == "parent":
+            weeks = (d.start - d.start0).days // 7 if d.start0 is not None else 0
+            if not weeks:
+                return
+            a = whatif.move_parent(m, d.task, weeks, m)
+            self.moved = {x: timeline.dropped(m.task(x), v.get("start"), v.get("due"), self.workdays) for x, v in a.dates.items() if x in m.tasks}
+            self.moved_keys = dict(a.keys)
+        else:
+            t = m.task(d.task)
+            self.moved = {d.task: timeline.dropped(t, *timeline.drop_dates(t, d.start, d.end, d.mode), self.workdays)}
+        self.preview = timeline.follows(m, self.moved, self.moved_keys, self.workdays)
+
+    def _stop_following(self) -> None:
+        self.moved, self.moved_keys, self.preview, self._preview_for = {}, {}, {}, None
 
     def _paint_runs(self, p: QPainter, small: QFont) -> None:
         """The lane column: a band down each run of rows with the same key, a tint of its colour with a solid edge, and
@@ -777,7 +903,7 @@ class TimelineChart(QWidget):
                 p.drawRoundedRect(QRectF(x0, top + 10, max(2.0, x1 - x0), 8), 3, 3)
                 continue
             rect = QRectF(x0, top + self.BAR_TOP, max(3.0, x1 - x0), self.BAR_H)
-            if self.drag and self.drag.moved and self.drag.task == r.task:
+            if self.drag and self.drag.moved and (self.drag.task == r.task or r.task in self.preview):
                 p.setOpacity(0.35 * self._fade)
             p.setPen(QPen(edge, 1, Qt.PenStyle.DashLine if dashed else Qt.PenStyle.SolidLine) if edge is not None else Qt.PenStyle.NoPen)
             p.setBrush(fill if fill is not None else Qt.BrushStyle.NoBrush)
@@ -843,7 +969,7 @@ class TimelineChart(QWidget):
             p.drawRoundedRect(box, 4, 4)
             p.setFont(small)
             p.setPen(QColor(FAINT))
-            p.drawText(box.adjusted(8, 0, 0, 0), Qt.AlignmentFlag.AlignVCenter, "Drag the name onto the chart to give it a week")
+            p.drawText(box.adjusted(8, 0, 0, 0), Qt.AlignmentFlag.AlignVCenter, f"Drag the name onto the chart to give it {timeline.drop_room(t)}")
 
     def _key_strip(self, r: Row, top: float) -> tuple[float, float]:
         """Where a row's key dates go: the middle of a thin strip under the bar, or in the bar's place when the row has no
@@ -958,6 +1084,7 @@ class TimelineChart(QWidget):
         if event.button() != Qt.MouseButton.LeftButton:
             return
         x, y = event.position().x(), event.position().y()
+        self._stop_following()
         r, what = self._hit(x, y)
         if r is None:
             return
@@ -983,16 +1110,16 @@ class TimelineChart(QWidget):
                 return
             d.moved = True
             self._drag_to(d, x)
+            self._follow(d)
             if d.mode == "parent" and d.start and d.start0 and self.model is not None:
                 n = (d.start - d.start0).days // 7
                 words = f"{abs(n)} week{'' if abs(n) == 1 else 's'} {'later' if n > 0 else 'earlier'}, everything under it too" if n else "Where it is now"
-                QToolTip.showText(event.globalPosition().toPoint(), f"{self.model.task(d.task).title}: {words}", self)
+                QToolTip.showText(event.globalPosition().toPoint(), " · ".join([f"{self.model.task(d.task).title}: {words}", *self._following_words()]), self)
             elif d.start and d.end:
-                n = sum((d.start + timedelta(days=i)).weekday() < 5 for i in range((d.end - d.start).days + 1))
-                QToolTip.showText(event.globalPosition().toPoint(), f"{long_date(d.start, self.today)} → {long_date(d.end, self.today)} · "
-                                                                    f"{n} workday{'s' if n != 1 else ''}", self)
+                QToolTip.showText(event.globalPosition().toPoint(), self._drag_tip(d), self)
             else:
-                QToolTip.showText(event.globalPosition().toPoint(), "Let go over the chart to give it a week", self)
+                t = self.model.task(d.task) if self.model is not None and d.task in self.model.tasks else None
+                QToolTip.showText(event.globalPosition().toPoint(), f"Let go over the chart to give it {timeline.drop_room(t) if t else 'a week'}", self)
             self.update()
             return
         r, what = self._hit(x, y)
@@ -1006,12 +1133,20 @@ class TimelineChart(QWidget):
         self.setCursor(shape)
 
     def _drag_to(self, d: Drag, x: float) -> None:
-        """Where a drag puts the dates, snapping to days: a whole working week for a name, else the bar moved or stretched."""
+        """Where a drag puts the dates, snapping to days: a whole working week for a name, else the bar moved or stretched. A
+        task with a Duration (release 5.48) shows the dates its drop will be saved with: moved, or dropped as a name, it keeps
+        its number of days, counted in Settings' workdays or every day with Runs through weekends."""
+        t = self.model.task(d.task) if self.model is not None and d.task in self.model.tasks and d.key_id is None else None
         if d.mode == "new":
             if x < self.scale.NAME_W or x > self.scale.right(self):
                 d.start = d.end = None
                 return
-            d.start, d.end = week_from(self.scale.day_at(self, x))
+            day = self.scale.day_at(self, x)
+            d.start, d.end = week_from(day)
+            if t is not None and t.duration:  # from the day let go on, or the next workday in Settings, unless it runs through weekends
+                while not t.calendar_days and self.workdays and day.weekday() not in self.workdays:
+                    day += timedelta(days=1)
+                d.start, d.end = self._as_dropped(t, day, day, "new")
             return
         if d.start0 is None or d.end0 is None:
             return
@@ -1027,7 +1162,29 @@ class TimelineChart(QWidget):
             s = min(s + timedelta(days=n), e)
         else:
             e = max(e + timedelta(days=n), s)
-        d.start, d.end = s, e
+        d.start, d.end = self._as_dropped(t, s, e, mode) if t is not None and mode != "parent" else (s, e)
+
+    def _as_dropped(self, t: Task, start: date, end: date, mode: str) -> tuple[date, date]:
+        """The first and last day a drop on these days will save (``timeline.dropped``), so the bar is drawn as it will be."""
+        after = timeline.dropped(t, *timeline.drop_dates(t, start, end, mode), self.workdays)
+        return (to_date(after.start) if after.start else start), (to_date(after.due) if after.due else end)
+
+    def _drag_tip(self, d: Drag) -> str:
+        """The tooltip while a bar or a key date is dragged: its days, how many, and what else the drop changes."""
+        assert d.start is not None and d.end is not None
+        t = self.model.task(d.task) if self.model is not None and d.task in self.model.tasks and d.key_id is None else None
+        every = t is not None and t.calendar_days
+        n = days_in(d.start, d.end, self.workdays, every)
+        tip = f"{long_date(d.start, self.today)} → {long_date(d.end, self.today)} · {timeline.length_words(n, every)}"
+        if t is None or d.mode == "parent":
+            return " · ".join([tip, *self._following_words()])
+        changes = timeline.drop_changes(t, timeline.dropped(t, *timeline.drop_dates(t, d.start, d.end, d.mode), self.workdays))
+        return " · ".join([tip, *changes, *self._following_words()])
+
+    def _following_words(self) -> list[str]:
+        """How many tasks tied to it move with it, for the tooltip while dragging (decision 259)."""
+        n = len(self.preview)
+        return [f"{n} task{'' if n == 1 else 's'} tied to it move{'s' if n == 1 else ''} with it"] if n else []
 
     def leaveEvent(self, event) -> None:  # noqa: N802
         if self.hover != -1:
@@ -1037,6 +1194,7 @@ class TimelineChart(QWidget):
 
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
         d, self.drag = self.drag, None
+        self._stop_following()
         QToolTip.hideText()
         if d is None or not d.moved:
             return
@@ -1253,6 +1411,8 @@ class TimelineView(QWidget):
         self.wi_undo: dict[str, list[list[whatif.Action]]] = {}
         self.picture_of: Callable[[whatif.WhatIf], whatif.Picture] | None = None
         self.pic: whatif.Picture | None = None
+        #: The workdays in Settings (release 5.48), for a Duration's days in Plan mode: the browse window says.
+        self.workdays: Callable[[], frozenset[int]] = lambda: frozenset(range(5))
         self.real: Model | None = None
         self.real_cells: load.Cells = {}
         #: Asks before a what-if with changes in it is deleted; and runs Review and apply. The browse window sets both.
@@ -1287,8 +1447,8 @@ class TimelineView(QWidget):
         ps.setContentsMargins(10, 4, 6, 4)
         # It says what mode you're in. How it works is behind Show hints (decision 7, release 5.59).
         ps.addWidget(QLabel("<b>Plan mode</b>"))
-        ps.addWidget(Help("Drag a bar, or its ends, to change its dates; drag a ⋮⋮ name onto the chart for a working week. Saved and "
-                          "logged; Ctrl+Z undoes."), 1)
+        ps.addWidget(Help("Drag a bar, or its ends, to change its dates; drag a ⋮⋮ name onto the chart for its Duration, or a "
+                          "working week. Saved and logged; Ctrl+Z undoes."), 1)
         ps.addStretch()
         done = QPushButton("Done")
         done.clicked.connect(lambda: self.set_plan(False))
@@ -1732,6 +1892,7 @@ class TimelineView(QWidget):
         self._sync_inset()
         self.head.set_timeline(model, today, model.task(self.focus).title if self.focus else "", self.sel, field_names(self.order)[0])
         self._whatif_marks()
+        self.chart.workdays = self.workdays()
         self.chart.set_timeline(model, today, self.sel, drags, self.bars, self.a_week, self.order)
         if not LOOK.classic:  # gone where nothing nests
             for i, b in enumerate(self.level_buttons):
@@ -2720,12 +2881,10 @@ class TimelineView(QWidget):
         if m is None:
             return
         t = m.task(task_id)
-        # Stretching one end leaves the other as it was; moving a bar that ends at its deadline gives it a Due.
-        new_start = t.start if mode == "end" else start.isoformat()
-        new_due = t.due if mode == "start" else end.isoformat()
-        said = {"new": f"Start and Due set: {long_date(start, self.today)} to {long_date(end, self.today)}",
-                "start": f"Start moved to {long_date(start, self.today)}", "end": f"Due moved to {long_date(end, self.today)}",
-                "move": f"now {long_date(start, self.today)} to {long_date(end, self.today)}"}[mode]
+        # Stretching one end leaves the other as it was; moving a bar that ends at its deadline gives it a Due. What it says is
+        # what the save makes (release 5.48): a Duration's days kept, or the new length and a rate's total.
+        new_start, new_due = timeline.drop_dates(t, start, end, mode)
+        said = timeline.drop_said(t, timeline.dropped(t, new_start, new_due, self.chart.workdays), mode, self.today)
         w = self.showing()
         if w is not None and self.real is not None:  # a what-if keeps it, and no task changes
             self._in_whatif(w, whatif.move(self.real, task_id, new_start, new_due), f"{t.title}: {said}, in this what-if. Your tasks haven't changed.")
