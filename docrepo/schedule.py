@@ -47,6 +47,13 @@ def is_open(task: Dated) -> bool:
     return task.state in ("Not started", "In progress") and not getattr(task, "discarded", None)
 
 
+def held_on(task: Dated) -> date | None:
+    """A one-off meeting's day (release 5.82): its Start, when it has no Due, Deadline or recurrence. None for any other task."""
+    if getattr(task, "meeting", False) and task.start and not task.due and not task.deadline and not task.recurrence:
+        return to_date(task.start)
+    return None
+
+
 def start_of(task: Dated) -> date:
     """The task's Start, or the day it was created if Start isn't set. A plant event without a Start of its own is one
     day, its Due (or Deadline): an outage typed with only its date isn't a range from the day it was noted (release 5.30)."""
@@ -119,12 +126,14 @@ def length_of(start: str | None, due: str | None, days: int | None, workdays: Co
 def windows(task: Dated, until: date) -> list[tuple[date, date]]:
     """The task's working windows, first day and last day. A routine task's stop at ``until``. A task with a Duration and no
     Start or Due isn't placed, even with a Deadline, rather than spreading its hours from the day it was made (the design's
-    Dates)."""
+    Dates). A meeting with a Start and no Due or Deadline is that one day (release 5.82)."""
     start = start_of(task)
     if not task.recurrence:
         if getattr(task, "duration", None) and not task.start and not task.due:
             return []
         end = task.due or task.deadline
+        if not end and task.start and getattr(task, "meeting", False):  # a meeting is held on its Start (release 5.82)
+            end = task.start
         return [(start, to_date(end))] if end else []
     length = (to_date(task.due) - start).days if task.due else 0
     days, months = STEPS[task.recurrence]

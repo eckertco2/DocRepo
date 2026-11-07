@@ -16,7 +16,7 @@ from datetime import date
 
 from docrepo.dates import long_date
 from docrepo.links import is_folder, is_link
-from docrepo.schedule import due_of, is_open, start_of
+from docrepo.schedule import due_of, held_on, is_open, start_of
 from docrepo.tagged import load as tagged_load
 
 TYPE_NAMES = {"note": "Note", "new_task": "New task", "update": "Update"}
@@ -765,8 +765,13 @@ class Model:
         return sorted(done, key=lambda a: a.closed or "", reverse=True)
 
     def meeting_when(self, target: str, today: date) -> str:
-        """When a task target next happens, such as "Tue 13 Oct"; "" for a person or Today."""
+        """When a task target next happens, such as "Tue 13 Oct"; "" for a person or Today. A one-off meeting with no Due
+        happens on its Start (release 5.82)."""
         if is_person(target) or target == TODAY:
             return ""
-        due = due_of(self.tasks[target], today)
-        return long_date(due.date, today) if due else "no date set"
+        t = self.tasks[target]
+        due = due_of(t, today)
+        if due:
+            return long_date(due.date, today)
+        held = held_on(t)
+        return long_date(held, today) if held else "no date set"

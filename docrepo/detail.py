@@ -27,7 +27,7 @@ from docrepo.dates import ago, days_words, long_date, monday_of, short, to_date
 from docrepo.links import FOLDER_TEXT, NO_TEXT, is_folder, is_link, reference_link
 from docrepo.model import PRIORITY_NAMES, TODAY, TYPE_NAMES, Capture, Model, Task, is_person
 from docrepo.pages import num
-from docrepo.schedule import due_of, is_open, start_of
+from docrepo.schedule import due_of, held_on, is_open, start_of
 from docrepo.stories import Event, RawItem, Stories, clip
 from docrepo.task_links import SHOWN, all_documents, links_of
 from docrepo.views import CapacityRow, label_tasks, markers
@@ -539,11 +539,13 @@ class Pages:
         elif t.due:
             same = t.deadline == t.due
             rows.append(("Due", dated(t.due, note("Deadline too" + (f" · {t.deadline_desc}" if t.deadline_desc else "")) if same else "")))
+        elif held_on(t):  # a meeting's day, with no Due to count down to (release 5.82)
+            rows.append(("Meeting", esc(long_date(held_on(t), today))))
         elif t.state != "Closed" and not t.recurrence and not t.deadline:
             rows.append(("Due", '<span class="sub">No due date</span>'))
         if t.deadline and t.deadline != t.due:
             rows.append(("Deadline", dated(t.deadline, note(t.deadline_desc) if t.deadline_desc else "")))
-        if open_ and t.start and to_date(t.start) > today:
+        if open_ and t.start and to_date(t.start) > today and not held_on(t):
             rows.append(("Starts", dated(t.start)))
         if t.duration:  # release 5.46
             rows.append(("Duration", esc(f"{t.duration} day{'' if t.duration == 1 else 's'}, through weekends" if t.calendar_days

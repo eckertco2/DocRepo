@@ -590,12 +590,13 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
             if nt.key_dates:  # its key dates (release 5.31), logged as the capture's
                 tasks.add_key_dates(conn, created, nt.key_dates, at=at, via=via)
         # Meeting notes (release 5.8): this time's meeting of a regular meeting, or a new meeting, is made first, and
-        # the notes go on it. It stays In progress until it's closed by hand.
+        # the notes go on it. It stays In progress until it's closed by hand. Its day is its Start, and it has no Due
+        # (release 5.82): a meeting isn't something to get done, so it stays off Today and the due lists.
         agenda_task = t if draft.meeting and case != "new" else None  # the meeting whose agenda the notes worked through
         meeting_made = None
         if draft.meeting and case != "oneoff":
             meeting_made = tasks.create_task(
-                conn, settings, title=meet_name, at=at, created_by=via, parents=[t] if t else [], state="In progress", meeting=True, due=day,
+                conn, settings, title=meet_name, at=at, created_by=via, parents=[t] if t else [], state="In progress", meeting=True, start=day,
                 description=f"{task_row['title'] + ', ' if task_row else ''}{long_date(at.date(), at.date())}. Its notes are in its raw text log.")
             t = meeting_made
             holder_title = meet_name

@@ -61,8 +61,8 @@ def test_notes_of_a_regular_meeting(env):
     r = save(env, CaptureDraft(content=NOTES, task="T000010", meeting=True))
     m = Model(conn)
     meeting = m.task(r.meeting)
-    assert (meeting.title, meeting.meeting, meeting.state, meeting.due, m.parents_of(meeting.id)) == (
-        "Business team meeting 8 Oct", True, "In progress", "2026-10-08", ["T000010"])
+    assert (meeting.title, meeting.meeting, meeting.state, meeting.start, meeting.due, m.parents_of(meeting.id)) == (
+        "Business team meeting 8 Oct", True, "In progress", "2026-10-08", None, ["T000010"])  # its day, no Due (release 5.82)
     notes = m.captures[r.capture_id]
     assert (notes.task, notes.types, notes.title, notes.item, notes.meeting) == (meeting.id, ["note"], "Notes of Business team meeting 8 Oct", "notes", meeting.id)
     made = [m.captures[c] for c in r.items]
