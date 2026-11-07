@@ -1,8 +1,9 @@
 """Task search (release 5.42, decision 213): the task picker itself, opened on its own at the centre of the monitor, with the
-cursor in its box, so it's the same list as a parent's: Recent, the tree, then matches with their paths as you type.
+cursor in its box, so it's the same list as a parent's: Recent, the tree, then matches with their paths as you type. Since
+release 5.103 that's the `#` list's rows, matching and levels: Right goes into a task's subtasks and Left back out.
 
-A menu opened from no window can't take the keyboard, because Windows gives it to the active window of the program. So a
-tiny window of DocRepo's own is shown and activated first, and the menu opens from that: it's a host and nothing else.
+A popup opened from no window can't take the keyboard, because Windows gives it to the active window of the program. So a
+tiny window of DocRepo's own is shown and activated first, and the picker opens from that: it's a host and nothing else.
 Enter opens the task's Task view, and Ctrl+Enter its page in the browse tool (decision 213 as the owner changed it, release
 5.43.1). Unlike when picking a parent, it also finds closed tasks, marked as closed, since you browse those too.
 """
@@ -65,8 +66,8 @@ class TaskSearch(QWidget):
         if task_id is None:
             return
         self._chose = True
-        other = bool(QGuiApplication.keyboardModifiers() & Qt.KeyboardModifier.ControlModifier)
-        self.open_task(task_id, other)
+        held = self.picker.modifiers | QGuiApplication.keyboardModifiers()  # Ctrl with Enter, or with a click
+        self.open_task(task_id, bool(held & Qt.KeyboardModifier.ControlModifier))
 
     def open_task(self, task_id: str, other: bool = False) -> None:
         """The chosen task: as the wheel's slot says, or the other way with Ctrl."""

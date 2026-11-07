@@ -39,7 +39,7 @@ Ported from the mockup's ``items.js``; decisions 37 to 52 of the round 2 plan, a
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Any
@@ -1329,6 +1329,24 @@ def _ranked(q: str, candidates: Sequence[tuple[Any, Sequence[str], Sequence[str]
     return [c for _, _, c in sorted(ranks, key=lambda x: (x[0], x[1]))]
 
 
+def ancestor_titles(m: Any, task_id: str) -> list[str]:
+    """The names on a task's path, every parent's and theirs, which its words may match too (decision 325)."""
+    if m is None or task_id not in m.tasks:
+        return []
+    return [m.tasks[a].title for a in m.ancestors_of(task_id) if a in m.tasks]
+
+
+def task_matches(q: str, tasks: Iterable[tuple[str, str]], path: Callable[[str], Sequence[str]]) -> list[str]:
+    """The IDs of ``tasks`` (each its ID and title, in their own order) that match what's typed, best first: the # list's
+    matching (round 7's item 91, decisions 325 and 326), which every list a task is picked from shares since release 5.103.
+    Each word typed starts a word of the task's name or ID, in any order, or of a name on its ``path``; names that start
+    with what's typed come first, then names with every word, then those found through their path. A space after a whole
+    name that no other name goes on from finds nothing: in the content text, the name is finished. A search box strips
+    what's typed first, so that never happens there."""
+    typed = q.strip()
+    return _ranked(q, [(task_id, (title, task_id), path(task_id) if typed else ()) for task_id, title in tasks])
+
+
 def options(t: Typing, names: Names) -> list[Option]:
     """The list for what's being typed: open tasks for #; people for @ and @L., then @__ and "Add … to people". Words
     after a space go on narrowing it, matching the start of any word of a name, in any order; a task's words also match
@@ -1340,15 +1358,8 @@ def options(t: Typing, names: Names) -> list[Option]:
         if not q and names.model is not None:  # "#" alone: the top-level tasks, in the tree's order, to walk down from (decision 313)
             tops = [names.tasks[x.id] for x in names.model.top_level() if x.id in names.tasks]
             return [Option(x.title, x.title, ref=x.id) for x in tops if x.open]
-        m = names.model
-
-        def path(task_id: str) -> list[str]:
-            if m is None or task_id not in m.tasks:
-                return []
-            return [m.tasks[a].title for a in m.ancestors_of(task_id) if a in m.tasks]
-
-        found = _ranked(t.q, [(x, (x.title, x.id), path(x.id) if q.strip() else ()) for x in names.tasks.values() if x.open])
-        return [Option(x.title, x.title, ref=x.id) for x in found][:8]
+        found = task_matches(t.q, [(x.id, x.title) for x in names.tasks.values() if x.open], lambda i: ancestor_titles(names.model, i))
+        return [Option(names.tasks[i].title, names.tasks[i].title, ref=i) for i in found][:8]
     found = _ranked(t.q, [(p, (p.name, *p.aliases), ()) for p in names.active])
     out = [Option(p.name, p.name + (" (me)" if p.me else ""), ", ".join(p.aliases), p.id) for p in found][:7]
     if t.sigil == "@" and "__".startswith(q or "_"):

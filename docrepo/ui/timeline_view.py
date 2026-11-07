@@ -81,6 +81,7 @@ from docrepo.ui import tokens
 from docrepo.ui.capacity_strip import CapacityRows, CapacityTeam, Spot, StripData
 from docrepo.ui.icons import icon, set_fold
 from docrepo.ui.look import LOOK, Help
+from docrepo.ui.task_picker import TaskPicker, full_path
 from docrepo.ui.tokens import C
 from docrepo.ui.tree_view import GROUP_COLOURS
 from docrepo.ui.widgets import CheckMenuButton, DateField, DropButton, FlowLayout, label_filter, people_filter
@@ -1682,11 +1683,11 @@ class TimelineView(QWidget):
             grid.addWidget(QLabel(words, objectName="fieldLabel"), n, 0)
             grid.addWidget(widget, n, 1)
 
-        self.order_box, self.bars_box, self.focus_box = QComboBox(), QComboBox(), QComboBox()
-        for box, name, key in ((self.order_box, "Order by", "order"), (self.bars_box, "Colour bars by", "bars"), (self.focus_box, "Focus on", "focus")):
+        self.order_box, self.bars_box = QComboBox(), QComboBox()
+        for box, name, key in ((self.order_box, "Order by", "order"), (self.bars_box, "Colour bars by", "bars")):
             box.setAccessibleName(name)
             box.currentIndexChanged.connect(lambda _, box=box, key=key: self._box_changed(box, key))
-        self.focus_box.setMaximumWidth(280)
+        self.focus_box = self._focus_button("All projects")
         row(0, "Order by", self.order_box)
         row(1, "Colour bars by", self.bars_box)
         seg, self.hours_buttons = self._seg(((False, "Total"), (True, "A week")), lambda on: self._set("a_week", on),
@@ -2010,7 +2011,7 @@ class TimelineView(QWidget):
         self._fill(self.show_box, [*shows, (0, "Show these dates")] if self.typed_days else shows, 0 if self.typed_days else self.weeks)
         self._fill(self.order_box, [(k, label[0].upper() + label[1:]) for k, label in timeline.order_choices(m)], self.order)
         self._fill(self.bars_box, [(k, label) for k, label in timeline.BARS], self.bars)
-        self._fill(self.focus_box, [("", "All projects"), *self._focus_choices()], self.focus or "")
+        self._name_focus(self.focus_box, "All projects")
         self.hours_buttons[self.a_week].setChecked(True)
         self.routine_box.blockSignals(True)
         self.routine_box.setChecked(self.routine)
@@ -2128,9 +2129,7 @@ class TimelineView(QWidget):
         lay.addWidget(self.range_box)
         self.range_box.show()
         divider(lay)
-        focus = combo(lay, "Focus on", [("", "Focus on all projects"), *((x, "Focus on " + name) for x, name in self._focus_choices())],
-                      self.focus or "", "focus")
-        focus.setMaximumWidth(280)
+        lay.addWidget(self._name_focus(self._focus_button("Focus on all projects"), "Focus on all projects", "Focus on "))
         for text, n, name in (("Collapse a level", -1, "level-fold"), ("Expand a level", 1, "level-open")):
             b = QPushButton(text if LOOK.classic else "", objectName="" if LOOK.classic else "iconOnly")
             if not LOOK.classic:
@@ -2203,6 +2202,33 @@ class TimelineView(QWidget):
 
         walk([t.id for t in m.top_level()], 0)
         return out
+
+    def _focus_button(self, words: str) -> DropButton:
+        """Focus on (release 5.103): a button that opens the task picker, so it's the `#` list's rows, search and levels."""
+        button = DropButton(words)
+        button.setAccessibleName("Focus on")
+        button.setMaximumWidth(280)
+        button.clicked.connect(lambda _=False: self._pick_focus(button))
+        return button
+
+    def _name_focus(self, button: DropButton, every: str, before: str = "") -> DropButton:
+        """The button names the task focused on, its whole path in the tooltip, or ``every``."""
+        m = self.model
+        task = m.tasks.get(self.focus) if m is not None and self.focus else None
+        button.setText(before + task.title if task else every)
+        button.setToolTip(full_path(m, task.id) if task else "Show every project")
+        return button
+
+    def _pick_focus(self, anchor: QWidget) -> None:
+        """The task picker of the tasks Focus on can show (``_focus_choices``), with All projects as its None entry: Right goes
+        into a task's subtasks that have their own, and typing finds one."""
+        if self.model is None:
+            return
+        choices = {x for x, _ in self._focus_choices()}
+        self.focus_picker = TaskPicker(self, lambda: self.model, ("All projects", "Show every project"), keep=lambda x: x in choices)
+        self.focus_picker.picked.connect(lambda x: self._set("focus", x or ""))
+        self.focus_picker.setMinimumWidth(max(300, anchor.width()))
+        self.focus_picker.popup(anchor.mapToGlobal(anchor.rect().bottomLeft()))
 
     def _keys_legend(self) -> str:
         """What colours the bars, as small squares (Order by's keys are named in the lane column, so they need none)."""

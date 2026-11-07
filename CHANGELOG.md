@@ -4,6 +4,7 @@ One line per release, newest first: its number, the date it was built, and what 
 
 | Release | Date | What |
 |---|---|---|
+| 5.103 | 2026-11-06 | Every task picker works as the `#` list does: the same rows, search and Right and Left into a task's subtasks, in the capture window's task picker, the browse tool's (Move, Put under, File to task, the Documents filter, templates, ties), the Task view's Ctrl+O, Task search and the Timeline's Focus on, with Recent, None and each place's own extras kept; the agenda picker finds tasks the same way. |
 | 5.102 | 2026-11-06 | The review's smaller items: the `dump` command (every table of docs.db as JSON), a save made during a backup waiting for it, one HTML escape, checked names in built SQL, tests for four modules no test imported, six of the seven dead members gone (a test still uses the seventh), a size scale for new code, and the dependency upgrade procedure. |
 | 5.101 | 2026-11-06 | Emails that find their task: each email's Outlook identifiers kept, an email whose conversation is already filed to a task filling the task picker with it, the `email-ids` command for emails captured before, and the troubleshooting report's identifiers and T-mail try-outs. Schema version 23. |
 | 5.96 | 2026-11-06 | The usage command: how often each wheel command and each kind of thing in the Activity view was used in the last 7 and 30 days. |

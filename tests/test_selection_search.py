@@ -368,7 +368,7 @@ def test_task_search_opens_and_enter_opens_the_page(app, monkeypatch):
     s = app.wheels._task_search
     assert s.picker.isVisible() and "Enter opens its page" in s.picker.hint
     s.picker.search.setText("impeller")
-    assert any(a.data() for a in s.picker.actions())
+    assert any(o.ref for o in s.picker.rows())
     s.picker._pick_first()
     QApplication.processEvents()
     assert app.browse.isVisible() and app.browse.sel and app.browse.sel[0] == "task"
@@ -421,7 +421,7 @@ def test_it_finds_closed_tasks_marked_as_closed(app):
     app.wheels.task_search("page")
     s = app.wheels._task_search
     s.picker.search.setText(closed.title[:12])
-    texts = [a.text() for a in s.picker.actions() if a.data() == closed.id]
+    texts = [o.label for o in s.picker.rows() if o.ref == closed.id]
     assert texts and "(closed)" in texts[0]
     s.picker.close()
 
@@ -433,14 +433,14 @@ def test_a_parents_picker_still_hides_closed_tasks(app):
     p = TaskPicker(None, app.ctx.model)
     p._opening()
     p.search.setText(closed.title[:12])
-    assert not any(a.data() == closed.id for a in p.actions())
+    assert not any(o.ref == closed.id for o in p.rows())
 
 
 def test_no_match_offers_search_everything_with_what_was_typed(app):
     app.wheels.task_search("page")
     s = app.wheels._task_search
     s.picker.search.setText("zzzqqq")
-    assert any("Search everything for “zzzqqq”" in a.text() for a in s.picker.actions())
+    assert any("Search everything for “zzzqqq”" in o.label for o in s.picker.rows())
     s.picker._pick_first()
     assert app.browse.isVisible() and app.browse.search_box.text() == "zzzqqq"
 

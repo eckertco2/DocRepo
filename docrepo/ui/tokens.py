@@ -419,6 +419,9 @@ QFrame#itemCard QLabel#itemValue { background: $base; border: 1px solid $stroke;
 QFrame#itemCard QLabel#itemValue:disabled { color: $disabled; }
 QListWidget#refPopup, QListWidget#suggestions { background: $content; border: 1px solid $stroke_strong; border-radius: 4px; padding: 2px; }
 QListWidget#refPopup::item:selected, QListWidget#suggestions::item:selected { background: $hover; color: $text; }
+QFrame#taskPicker { background: $content; border: 1px solid $stroke_strong; border-radius: 8px; }
+QListWidget#taskPickerList { background: $content; border: none; padding: 0; }
+QListWidget#taskPickerList::item:selected { background: $hover; color: $text; }
 QFrame#divider { color: $stroke; }
 QPushButton#today { background: transparent; border: 1px solid transparent; }
 QPushButton#today:hover { background: $hover; }
