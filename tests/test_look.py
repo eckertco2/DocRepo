@@ -58,6 +58,17 @@ def test_the_tokens_meet_wcag_aa():
     assert set(tokens.DARK) == set(tokens.LIGHT)  # the dark theme's names are all reserved (decision 14)
 
 
+def test_the_size_scale_sits_on_the_grid_and_agrees_with_the_heights():
+    """Release 5.102: SIZE, for new code, holds the heights the code already names, on a 2 px grid as SPACE is."""
+    s = tokens.SIZE
+    assert (s["row_tree"], s["row_list"], s["control"], s["icon_button"]) == (tokens.TREE_ROW, tokens.LIST_ROW, tokens.CONTROL, tokens.ICON_BUTTON)
+    assert all(v % 2 == 0 for v in (*tokens.SPACE.values(), *s.values()))
+    assert s["icon_xs"] < s["icon_s"] < s["icon"] < s["icon_l"] < s["control_s"] < s["icon_button"] < s["control"]
+    from docrepo.ui import result_list
+
+    assert (result_list.HEAD_HEIGHT, result_list.ITEM_HEIGHT, result_list.COMPACT_HEIGHT) == (s["row_head"], s["row_two_line"], s["row_list"])
+
+
 def test_the_style_sheet_parses(qapp):
     problems = []
 

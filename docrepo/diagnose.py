@@ -25,10 +25,9 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import TracebackType
-from urllib.parse import quote
 
 from docrepo import __version__, conversations, layer0, outlook
-from docrepo.db import db_path
+from docrepo.db import connect_read_only
 from docrepo.safe_fs import SafeFS
 
 log = logging.getLogger(__name__)
@@ -87,12 +86,14 @@ DROPS: deque[DropNote] = deque(maxlen=12)
 
 
 def note_drop(formats: Sequence[str], from_outlook: bool, forms: Sequence[str], sizes: Sequence[int], problems: Sequence[str]) -> None:
+    """Remember a drop on the drop target for the troubleshooting report: its formats and sizes, never its content."""
     DROPS.append(DropNote(datetime.now().strftime("%Y-%m-%d %H:%M:%S"), tuple(formats), from_outlook, tuple(forms), tuple(sizes), tuple(problems)))
     log.info("drop on DocRepo's drop target: %d formats, %d files (%s)%s", len(formats), len(sizes), ", ".join(forms) or "none",
              f"; {len(problems)} not read" if problems else "")
 
 
 def note_drag(stage: str, formats: Sequence[str], urls: int, local_files: int, taken_as: str) -> None:
+    """Remember a drag over the capture window for the troubleshooting report: its formats and what it was taken as."""
     DRAGS.append(DragNote(datetime.now().strftime("%Y-%m-%d %H:%M:%S"), stage, tuple(formats), urls, local_files, taken_as))
     log.info("drag %s: %d formats, %d urls (%d local), taken as %s", stage, len(formats), urls, local_files, taken_as or "text")
 
@@ -116,6 +117,7 @@ def link_shape(text: str) -> str:
 
 
 def note_refused_link(text: str) -> None:
+    """Remember a link that wasn't kept, by its shape only, for the troubleshooting report."""
     shape = link_shape(text)
     REFUSED_LINKS.append((datetime.now().strftime("%Y-%m-%d %H:%M:%S"), shape))
     log.info("link not kept: %s", shape)
@@ -169,6 +171,7 @@ def _is_admin() -> str:
 
 
 def computer() -> list[tuple[str, str]]:
+    """The report's facts about this computer: DocRepo's release, Python, Windows, PySide6, pywin32 and Outlook's window."""
     exe = Path(sys.executable).name.lower()
     return [
         ("DocRepo", __version__),
@@ -412,7 +415,7 @@ def newest_saved_email(data_root: Path) -> Path | None:
     from docrepo.captures import capture_folder
 
     try:
-        conn = sqlite3.connect(f"file:{quote(db_path(data_root).as_posix(), safe='/:')}?mode=ro", uri=True)
+        conn = connect_read_only(data_root)
     except sqlite3.Error:
         return None
     try:

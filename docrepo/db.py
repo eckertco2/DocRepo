@@ -7,14 +7,19 @@ first. Connections run in autocommit mode; every change is made inside
 
 An older docs.db is brought up to date by ``MIGRATIONS``, in order, in one transaction. Before that, it's copied to the
 backup folder, when one is set, as ``Database\\docs-before-v<old version>.db`` (release 5.88, ``backup.copy_before_upgrade``).
+
+A connection waits up to ``BUSY_TIMEOUT`` for docs.db while another holds it (release 5.102), so a save made while a
+backup copies the database waits for the copy rather than failing. The journal stays SQLite's default rollback journal,
+not WAL: the data root may sit in a synced or network folder, where WAL's shared-memory file isn't safe.
 """
 from __future__ import annotations
 
 import contextlib
 import logging
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Collection, Iterable, Iterator
 from pathlib import Path
+from urllib.parse import quote
 
 from docrepo.safe_fs import SafeFS
 
@@ -22,6 +27,10 @@ log = logging.getLogger(__name__)
 
 DB_FILE = Path("System") / "docs.db"
 SCHEMA_VERSION = 23
+#: How long, in seconds, a statement waits for docs.db while another connection holds it (SQLite's busy timeout, release
+#: 5.102) before it gives up with "database is locked". A backup's copy holds it for as long as the copy takes. Python's
+#: own default is 5 seconds.
+BUSY_TIMEOUT = 30.0
 
 #: Each kind of ID: its letter and how many digits follow it.
 ID_FORMATS = {"T": 6, "C": 6, "D": 6, "P": 3}
@@ -610,6 +619,7 @@ DAMAGED = "docs.db is damaged; restore it from the backup folder. Its backup-log
 
 
 def db_path(data_root: Path) -> Path:
+    """Where docs.db is in a data root."""
     return data_root / DB_FILE
 
 
@@ -618,7 +628,7 @@ def connect(fs: SafeFS, data_root: Path) -> sqlite3.Connection:
     folder first (release 5.88), then brought up to date. A damaged one raises ``DatabaseError`` with ``DAMAGED``."""
     path = fs.checked_path(db_path(data_root))
     fs.makedirs(path.parent)
-    conn = sqlite3.connect(path, isolation_level=None)
+    conn = sqlite3.connect(path, isolation_level=None, timeout=BUSY_TIMEOUT)
     conn.row_factory = sqlite3.Row
     try:
         conn.execute("PRAGMA foreign_keys = ON")
@@ -630,6 +640,22 @@ def connect(fs: SafeFS, data_root: Path) -> sqlite3.Connection:
         conn.close()
         raise
     return conn
+
+
+def connect_read_only(data_root: Path) -> sqlite3.Connection:
+    """docs.db opened read-only (SQLite's ``mode=ro``), for what only reads it: a backup's copy, the dump and the
+    troubleshooting report. Nothing run on it can change the file; it makes no database and upgrades none, and it waits
+    ``BUSY_TIMEOUT`` for a writer, as ``connect`` does. Raises ``sqlite3.OperationalError`` when there's no docs.db."""
+    return sqlite3.connect(f"file:{quote(db_path(data_root).as_posix(), safe='/:')}?mode=ro", uri=True, timeout=BUSY_TIMEOUT)
+
+
+def check_names(names: str | Iterable[str], allowed: Collection[str]) -> None:
+    """Refuse, with ValueError, any table or column name that isn't in ``allowed`` (release 5.102). A helper that writes
+    names into the SQL it builds calls this first: values always go in as parameters, and only DocRepo's own names are
+    ever written into a statement."""
+    bad = [n for n in ((names,) if isinstance(names, str) else names) if n not in allowed]
+    if bad:
+        raise ValueError(f"Not a table or column DocRepo builds SQL with: {', '.join(map(repr, bad))}.")
 
 
 def schema_version(conn: sqlite3.Connection) -> int:
@@ -729,6 +755,7 @@ def get_state(conn: sqlite3.Connection, key: str) -> str | None:
 
 
 def set_state(conn: sqlite3.Connection, key: str, value: str) -> None:
+    """Keep a value between runs under ``key``, replacing the one kept there."""
     with transaction(conn):
         conn.execute("INSERT INTO app_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, value))
 
@@ -752,6 +779,7 @@ def transaction(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
 
 
 def format_id(prefix: str, number: int) -> str:
+    """An ID of a kind from its number, such as T000020."""
     return f"{prefix}{number:0{ID_FORMATS[prefix]}d}"
 
 

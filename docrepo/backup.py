@@ -31,7 +31,6 @@ import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import quote
 
 from docrepo import db
 from docrepo.config import Settings
@@ -80,6 +79,7 @@ class BackupResult:
     problems: list[str] = field(default_factory=list)
 
     def message(self) -> str:
+        """What the backup did, in a sentence or two for its notification, with any files it couldn't copy."""
         files = f"{self.copied} new or changed file{'s' if self.copied != 1 else ''} of {self.checked}, in {self.folder}."
         text = (f"Backed up the database ({self.database}, checked) and {files}" if self.database else
                 f"The new copy of the database failed SQLite's check, so it wasn't kept, and the last good copies stay. Backed up {files}")
@@ -132,7 +132,7 @@ def _copy_database(data_root: Path, fs: SafeFS, target: Path) -> None:
     is whole even while DocRepo writes. It's written beside ``target`` first, then put in its place."""
     tmp = fs.checked_path(target.with_name(f".{target.name}.tmp"))
     try:
-        source = sqlite3.connect(f"file:{quote(db.db_path(data_root).as_posix(), safe='/:')}?mode=ro", uri=True)
+        source = db.connect_read_only(data_root)
         source.execute("SELECT count(*) FROM sqlite_master").fetchone()
     except sqlite3.Error as e:
         raise BackupError(f"docs.db can't be read, so nothing was backed up ({e}).") from e

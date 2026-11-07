@@ -16,8 +16,8 @@ from typing import Any
 from docrepo import capacity, ties
 from docrepo.config import Settings
 from docrepo.dates import check_date, stamp, to_date, workday_numbers
-from docrepo.db import RECURRENCES, STATES, next_id, transaction
-from docrepo.model import Task, Tie, load_tasks
+from docrepo.db import RECURRENCES, STATES, check_names, next_id, transaction
+from docrepo.model import TASK_COLUMNS, Task, Tie, load_tasks
 from docrepo.pages import num
 from docrepo.schedule import days_in, due_after, length_of, placed, week_of
 
@@ -254,6 +254,7 @@ def _apply_references(conn: sqlite3.Connection, task_id: str, task_refs: dict[st
 def _apply_columns(conn: sqlite3.Connection, task_id: str, columns: dict[str, Any]) -> None:
     """Set a task's own fields in one statement, so the table's checks see them all changed together."""
     if columns:
+        check_names(columns, TASK_COLUMNS)
         stored = {k: int(v) if k in FLAG_FIELDS else v for k, v in columns.items()}
         assignments = ", ".join(f"{k} = ?" for k in stored)
         conn.execute(f"UPDATE tasks SET {assignments} WHERE id = ?", (*stored.values(), task_id))  # noqa: S608 - a column or table name of DocRepo's own; values are parameters
@@ -432,7 +433,9 @@ def _store_ties(conn: sqlite3.Connection, task_id: str, before: dict[str, Tie], 
 
 
 def _end_ties(conn: sqlite3.Connection, where: str, value: object, at: datetime, via: str) -> None:
-    """Take off the ties to something that can't be a source any more. The dates stay, and each status log says so (decision 258)."""
+    """Take off the ties to something that can't be a source any more. The dates stay, and each status log says so (decision 258).
+    ``where`` is the column that names it: ``key_date`` or ``source`` (a task)."""
+    check_names(where, ("key_date", "source"))
     for r in conn.execute(f"SELECT task, field FROM task_ties WHERE {where} = ?", (value,)).fetchall():  # noqa: S608 - a column or table name of DocRepo's own; values are parameters
         tie = load_tasks(conn, [r["task"]])[r["task"]].ties[r["field"]]
         change = Change(f"{ties.FIELDS[r['field']]} tie", ties.said(conn, tie), None)
@@ -515,6 +518,7 @@ def create_task(
         columns = {**values, "id": task_id, "description": description.strip(), "created": today, "created_by": created_by,
                    "closed": today if values["state"] == "Closed" else None}
         columns = {k: int(v) if k in FLAG_FIELDS else v for k, v in columns.items()}
+        check_names(columns, TASK_COLUMNS)
         conn.execute(f"INSERT INTO tasks ({', '.join(columns)}) VALUES ({', '.join('?' * len(columns))})", tuple(columns.values()))  # noqa: S608 - a column or table name of DocRepo's own; values are parameters
         for key, ids in people.items():
             _apply_lists(conn, task_id, key, ids)
@@ -528,6 +532,7 @@ def create_task(
 
 # ---- changing ----
 def get_task(conn: sqlite3.Connection, task_id: str) -> Task:
+    """One task, or TaskError when there's no such task."""
     task = load_tasks(conn, [task_id]).get(task_id)
     if task is None:
         raise TaskError(f"There's no task {task_id}.")
@@ -660,11 +665,13 @@ def _log(conn: sqlite3.Connection, task_id: str, at: datetime, via: str, changes
 
 # ---- parent links ----
 def parent_titles(conn: sqlite3.Connection, task_id: str) -> str | None:
+    """A task's parents' titles, joined with "; ", oldest first, or None for a top-level task."""
     rows = conn.execute("SELECT t.title FROM task_parents p JOIN tasks t ON t.id = p.parent WHERE p.child = ? ORDER BY p.id", (task_id,))
     return "; ".join(r["title"] for r in rows) or None
 
 
 def descendant_ids(conn: sqlite3.Connection, task_id: str) -> set[str]:
+    """The IDs of every task under a task, at any depth."""
     rows = conn.execute(
         "WITH RECURSIVE d(id) AS (SELECT child FROM task_parents WHERE parent = ?"
         " UNION SELECT p.child FROM task_parents p JOIN d ON p.parent = d.id) SELECT id FROM d",

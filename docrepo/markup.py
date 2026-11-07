@@ -45,6 +45,12 @@ MARKS = ("b", "i", "s", "u", "mark")
 _PAIRS = {"b": "**", "i": "*", "s": "~~"}
 
 
+def esc(text: object) -> str:
+    """Any value as HTML text, for a page or a Qt label: ``&``, ``<``, ``>`` and both quotes escaped, so it's safe
+    inside an attribute too; None is empty. DocRepo's one HTML escape (release 5.102)."""
+    return html.escape(str(text if text is not None else ""), quote=True)
+
+
 # ---- writing ----
 def escape_inline(text: str) -> str:
     """Text as markup that reads as the same text, within a line."""

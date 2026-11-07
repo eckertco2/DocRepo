@@ -6,7 +6,6 @@ read. ``docrepo/tagged_import.py`` does the work.
 """
 from __future__ import annotations
 
-import html
 from pathlib import Path
 
 from PySide6.QtWidgets import (
@@ -30,16 +29,13 @@ from PySide6.QtWidgets import (
 
 from docrepo import tagged_import as ti
 from docrepo.excel_import import WorkbookError
+from docrepo.markup import esc
 from docrepo.ui.context import AppContext
 from docrepo.ui.look import LOOK, Help
 from docrepo.ui.style import page_css
 from docrepo.ui.tokens import C
 
 SHOWN = 8  # each list in the preview shows this many, then "and n more"
-
-
-def esc(text: object) -> str:
-    return html.escape(str(text))
 
 
 class TaggedImportDialog(QDialog):
@@ -193,9 +189,11 @@ class TaggedImportDialog(QDialog):
         self._refresh()
 
     def fields(self) -> list[str]:
+        """What each column fills, in the columns' order."""
         return [self.table.cellWidget(i, 2).currentData() for i in range(self.table.rowCount())]
 
     def set_field(self, column: int, value: str) -> None:
+        """Make a column fill this field."""
         box = self.table.cellWidget(column, 2)
         box.setCurrentIndex(box.findData(value))
 
@@ -237,6 +235,7 @@ class TaggedImportDialog(QDialog):
         self._say(problem)
 
     def import_now(self) -> None:
+        """Import what the preview shows, keep the outcome and close."""
         if not self.found or self.found.error or self.path is None:
             return
         self.outcome = ti.run_import(self.ctx.conn, self.found, self.path.name, self.ctx.now())

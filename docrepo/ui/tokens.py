@@ -90,9 +90,28 @@ ICON_BUTTON = 28  # toolbar icon buttons, with a 16 px icon
 TREE_ROW = 28
 LIST_ROW = 32
 RADIUS = 4        # controls; windows, menus and dialogs use 8
+#: Sizes for new code, beside SPACE (release 5.102): row heights, icon sizes and control heights, as the code already uses
+#: them. New code names these rather than writing a number; the literals already in ``ui/`` stay as they are.
+SIZE = {
+    # rows
+    "row_tree": TREE_ROW,         # the task tree, and the lists drawn like it
+    "row_head": 30,               # a group's heading in a painted list (the Task view's)
+    "row_list": LIST_ROW,         # a one-line list row, such as an agenda's or a compact result
+    "row_two_line": 48,           # a row of two lines: a title, then a line of facts
+    # icons
+    "icon_xs": 10,                # a mark inside a small control
+    "icon_s": 14,                 # a chevron, a pin or a menu's mark
+    "icon": 16,                   # a toolbar's, a button's or a row's icon
+    "icon_l": 20,                 # an item's type in a two-line row
+    # controls
+    "control_s": 24,              # a small square button on a row or a card
+    "icon_button": ICON_BUTTON,   # a toolbar's icon button, holding a 16 px icon
+    "control": CONTROL,           # inputs and buttons
+}
 
 
 def colour(name: str) -> str:
+    """A colour token's value in the light theme, as #rrggbb."""
     return LIGHT[name]
 
 

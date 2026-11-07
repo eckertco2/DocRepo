@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from docrepo.db import transaction
+from docrepo.db import check_names, transaction
 from docrepo.model import TODAY, is_person
 
 HOW = ("Discussed", "Removed")
@@ -23,7 +23,13 @@ class AgendaError(ValueError):
     """An agenda item can't be added or closed as asked."""
 
 
+#: The tables an agenda item's subject or target can be in.
+_TARGET_TABLES = ("tasks", "people")
+
+
 def _exists(conn: sqlite3.Connection, table: str, item_id: str) -> bool:
+    """True when ``table`` (tasks or people) holds ``item_id``."""
+    check_names(table, _TARGET_TABLES)
     return conn.execute(f"SELECT 1 FROM {table} WHERE id = ?", (item_id,)).fetchone() is not None  # noqa: S608 - a column or table name of DocRepo's own; values are parameters
 
 

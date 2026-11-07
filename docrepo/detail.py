@@ -14,7 +14,6 @@ Nothing here touches Qt, so the pages are tested as text. Ported from the mockup
 """
 from __future__ import annotations
 
-import html
 import re
 import sqlite3
 from collections.abc import Callable, Mapping
@@ -24,6 +23,7 @@ from urllib.parse import quote
 
 from docrepo import capacity, items, markup, notes_page, tagged, ties
 from docrepo.dates import ago, days_words, long_date, monday_of, short, to_date
+from docrepo.markup import esc
 from docrepo.links import FOLDER_TEXT, NO_TEXT, is_folder, is_link, reference_link
 from docrepo.model import PRIORITY_NAMES, TODAY, TYPE_NAMES, Capture, Model, Task, is_person
 from docrepo.pages import num
@@ -111,11 +111,8 @@ MONTH_NAMES = ("January", "February", "March", "April", "May", "June", "July", "
 FOLD_CHARS = 360
 
 
-def esc(text: object) -> str:
-    return html.escape(str(text if text is not None else ""), quote=True)
-
-
 def multiline(text: str) -> str:
+    """Text as HTML, its line breaks kept as ``<br>``."""
     return esc(text).replace("\n", "<br>")
 
 
@@ -130,6 +127,7 @@ def fold_link(href: str, text: str, is_open: bool) -> str:
 
 
 def chip(text: str, cls: str) -> str:
+    """Words in a chip: a small tinted label of class ``cls``."""
     return f'<span class="{cls}">&nbsp;{esc(text)}&nbsp;</span>'
 
 
@@ -142,6 +140,7 @@ def row_state(state: str) -> str:
 
 
 def state_chip(state: str, text: str | None = None) -> str:
+    """A task's state as its coloured chip, with ``text`` in place of the state's name when given."""
     return chip(text or state, STATE_CLASS.get(state, "st-ns"))
 
 
@@ -154,14 +153,17 @@ def link(href: str, text: str, title: str = "", quiet: str = "") -> str:
 
 
 def label_href(name: str) -> str:
+    """The link that opens a label's page."""
     return "label:" + quote(name, safe="")
 
 
 def none_text(text: str = "None") -> str:
+    """A grey placeholder for a field with nothing in it."""
     return f'<span class="sub">{esc(text)}</span>'
 
 
 def fields_table(rows: list[tuple[str, str]]) -> str:
+    """Rows of a name and its value, as a two-column table; the values are HTML already."""
     cells = "".join(f'<tr><td class="k" width="118" valign="top">{esc(k)}</td><td valign="top">{v}</td></tr>' for k, v in rows)
     return f'<table cellspacing="0" cellpadding="3">{cells}</table>'
 
@@ -191,6 +193,7 @@ def fact_rows(rows: list[tuple[str, str]]) -> str:
 
 
 def group(title: str, rows: list[tuple[str, str]]) -> str:
+    """A titled section of fact rows, or nothing when there are no rows."""
     return section(title) + fact_rows(rows) if rows else ""
 
 
@@ -211,6 +214,7 @@ def initials(name: str) -> str:
 
 
 def box(inner: str, cls: str = "box") -> str:
+    """HTML inside a full-width box of class ``cls``."""
     return f'<table width="100%" cellspacing="0" cellpadding="7"><tr><td class="{cls}">{inner}</td></tr></table>'
 
 
@@ -247,18 +251,23 @@ class Pages:
 
     # ---- small pieces ----
     def day(self, at: str) -> str:
+        """A stored time's day, short, as the lists show one ("13 Oct")."""
         return short(to_date(at), self.today)
 
     def long(self, value: str) -> str:
+        """A stored date with its weekday, as the pages write one ("Tue 13 Oct")."""
         return long_date(to_date(value), self.today)
 
     def task_link(self, task_id: str, quiet: str = "") -> str:
+        """A link to a task's page, by its title; its ID alone when there's no such task."""
         return link(f"task:{task_id}", self.m.task(task_id).title, quiet=quiet) if task_id in self.m.tasks else esc(task_id)
 
     def capture_link(self, capture_id: str, text: str | None = None, quiet: str = "") -> str:
+        """A link that opens a capture, with ``text`` or its ID as its words."""
         return link(f"capture:{capture_id}", text or capture_id, f"Open capture {capture_id}", quiet)
 
     def target_link(self, target: str) -> str:
+        """A link to an agenda target: Today, a person or a task."""
         if target == TODAY:
             return link(f"agenda:{TODAY}", "Today")
         return link(f"person:{target}", self.m.person_name(target)) if is_person(target) else self.task_link(target)
@@ -277,6 +286,7 @@ class Pages:
         return f' <a href="task:{esc(task_id)}" title="From {esc(title)}. Click to open it."><span class="sub">↗ {esc(clip(title, 40))}</span></a>'
 
     def roles(self, person_ids: list[str], hours: float | None, routine: bool) -> str:
+        """Leads or assignees as links to their pages, each with their hours; per occurrence for a routine task."""
         if not person_ids:
             return none_text()
         per = ' <span class="sub">per occurrence</span>' if routine and hours else ""
@@ -284,6 +294,7 @@ class Pages:
                          for p in person_ids) + per
 
     def markers_html(self, t: Task, critical: bool = True) -> str:
+        """A task's markers (Critical, Urgent, routine, more than one parent) as chips, after a space each."""
         return "".join(" " + chip(text, cls) for text, cls in markers(self.m, t, critical))
 
     def priority_chip(self, t: Task) -> str:
@@ -291,6 +302,7 @@ class Pages:
         return f" {chip(PRIORITY_NAMES[t.priority], 'pri-' + t.priority)}" if t.priority in PRIORITY_NAMES else ""
 
     def agenda_block(self, target: str) -> str:
+        """A target's open agenda items, with a link to the agenda; empty when it has none."""
         items = self.m.open_items_for(target)
         if not items:
             return ""
@@ -308,6 +320,7 @@ class Pages:
 
     # ---- the task page (the visual overhaul's O9, release 5.21, decisions 64 to 69) ----
     def has_agenda(self, t: Task) -> bool:
+        """True when a task has open agenda items, or is an open meeting."""
         return bool(self.m.open_items_for(t.id)) or (t.meeting and is_open(t))
 
     def task_page(self, task_id: str, state: PageState, width: int = 600, part: str = "all") -> str:
@@ -612,6 +625,7 @@ class Pages:
         return rows or [("People", '<span class="sub">No one yet</span>')]
 
     def mark(self, t: Task) -> str:
+        """A task's state as its small mark, with the state's name as its tooltip."""
         return f'<img src="mark:{MARKS.get(t.state, "ns")}" width="14" height="14" style="vertical-align: middle" title="{esc(t.state)}">'
 
     def agenda_section(self, t: Task) -> str:
@@ -722,6 +736,7 @@ class Pages:
         return f'<p class="sec">{fold_link("fold:details", "Details", True)}</p>{fact_rows(rows)}'
 
     def history_counts(self, ids: list[str]) -> dict[str, int]:
+        """How many raw text log entries, status log entries, summaries and files these tasks have, for the tabs."""
         raw = {r.capture or f"V{r.document}{r.at}" for x in ids for r in self.stories.raw_items(x)}
         return {"notes": len(raw), "log": sum(len(self.stories.story(x)) for x in ids),
                 "summaries": sum(len(self.m.summaries_of(x)) for x in ids), "files": len(self.files_in(ids))}
@@ -745,6 +760,7 @@ class Pages:
         return strip + self.tab_body(t, state, tab, ids)
 
     def files_in(self, ids: list[str]) -> list:
+        """These tasks' files, each once, in the tasks' order."""
         seen, out = set(), []
         for tid in ids:
             for f in self.m.files_of(tid):
@@ -754,6 +770,7 @@ class Pages:
         return out
 
     def tab_body(self, t: Task, state: PageState, tab: str, ids: list[str]) -> str:
+        """The body of the task page's history tab ``tab`` over these tasks."""
         if tab in ("notes", "log"):
             return self.story_tab(t, state, ids, tab)
         if tab == "summaries":
@@ -793,6 +810,7 @@ class Pages:
         return more + (f'<table cellspacing="0" cellpadding="4">{"".join(rows)}</table>' if rows else '<p class="note">No files yet.</p>')
 
     def show_key(self, f) -> str:
+        """The address that shows a file in File Explorer: a saved copy's, else its document's."""
         if f.kind in ("Saved copy", "Old version"):
             copy = next((c for c in self.m.copies if c.task == f.task and c.name == f.name), None)
             return f"show:copy:{copy.id}" if copy else f"doc:{f.document}"
@@ -815,6 +833,7 @@ class Pages:
         return "".join(out)
 
     def story_body(self, task_id: str, kind: str, state: PageState) -> str:
+        """A task's status log or raw text log as a list, with the page's folding and order."""
         if kind == "log":
             return self.story_list(self.stories.story(task_id), lambda e: self.log_item(e), state)
         items = self.stories.raw_items(task_id)
@@ -844,6 +863,7 @@ class Pages:
         return f'<table width="100%" cellspacing="0" cellpadding="4">{"".join(rows)}</table>'
 
     def log_item(self, e: Event) -> str:
+        """One status log entry as a line, with a link to the capture that made it."""
         src = f' <a href="capture:{esc(e.via)}" title="Open the capture, {esc(e.via)}"><span class="sub">note</span></a>' if e.via in self.m.captures else ""
         if e.kind == "sub":
             what = self.task_link(e.task) if e.task else esc(e.text)
@@ -924,6 +944,7 @@ class Pages:
 
     # ---- the capture page ----
     def what_save_did(self, c: Capture) -> str:
+        """What saving a capture made and changed, in words with links."""
         out = []
         if c.created_task:
             out.append(f"Created {self.task_link(c.created_task)}" + (f" under {self.task_link(c.task)}" if c.task else " as a top-level task"))
@@ -956,6 +977,7 @@ class Pages:
         return "<br>".join(out)
 
     def capture_page(self, capture_id: str, content: str | None, old_versions: int = 0) -> str:
+        """A capture's page: its facts, what its save did, its files and its content text (``content``, read from capture.md)."""
         c = self.m.captures[capture_id]
         rows = [("Saved", esc(f"{self.long(c.saved)} {c.saved[11:16]}")), ("Source", esc(SOURCE_NAMES.get(c.source, c.source))),
                 ("Capture types", esc(", ".join(TYPE_NAMES[k] for k in c.types) or "None")), ("What Save did", self.what_save_did(c))]
@@ -1002,6 +1024,7 @@ class Pages:
 
     # ---- documents, people and labels ----
     def document_page(self, document_id: str) -> str:
+        """A document's page: its facts, the tasks it's on, its saved copies and its versions."""
         m, d = self.m, self.m.documents[document_id]
         tasks = m.document_holders(document_id)
         copies = [f for f in m.copies if f.document == document_id]
@@ -1057,6 +1080,7 @@ class Pages:
         return ("&nbsp;&nbsp;".join(chips) if chips else none_text("None found")) + f" &nbsp;{add}{back}"
 
     def tagged_rows(self, kind: str, item_id: str) -> list[tuple[str, str]]:
+        """The Tagged labels row for an item, when there's a glossary; else none."""
         return [("Tagged labels", self.tagged_row(kind, item_id))] if self.m.tagged else []
 
     def _use_text(self, u: tagged.Use) -> str:
@@ -1142,6 +1166,7 @@ class Pages:
         return capacity.week_total(cells, person_id, weeks[0]), capacity.week_total(cells, person_id, weeks[1])
 
     def person_page(self, person_id: str) -> str:
+        """A person's page: their open tasks as lead and assignee, their hours this week and next, and their agenda."""
         m, p = self.m, self.m.people[person_id]
         leads = [t.id for t in m.tasks.values() if is_open(t) and person_id in t.leads]
         assigned = [t.id for t in m.tasks.values() if is_open(t) and person_id in t.assignees]
@@ -1159,6 +1184,7 @@ class Pages:
         return f'<p class="crumbs">Person {p.id}</p><h2>{esc(p.name)}</h2>{tags}{added}{fields_table(rows)}{self.agenda_block(person_id)}'
 
     def label_page(self, name: str) -> str:
+        """A label's page: its tasks, or its sublabels' tasks under each sublabel."""
         label = next(lb for lb in self.m.labels if lb.name == name)
         subs = self.m.sublabels(name, active=False)
         # Nested labels (release 5.9, M0051): a parent label lists its sublabels' tasks, under each sublabel.

@@ -119,3 +119,92 @@ def test_a_closed_task_needs_its_close_date():
     conn = db.connect_memory()
     with pytest.raises(sqlite3.IntegrityError):
         conn.execute("INSERT INTO tasks (id, title, state, created, created_by) VALUES ('T000001', 'A', 'Closed', '2026-10-08', 'x')")
+
+
+# ---- release 5.102: a busy timeout, a read-only connection and checked names ----
+def test_a_connection_waits_for_a_busy_database(data_root, fs):
+    conn = db.connect(fs, data_root)
+    try:
+        assert conn.execute("PRAGMA busy_timeout").fetchone()[0] == int(db.BUSY_TIMEOUT * 1000) == 30000
+        assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "delete"  # not WAL: the data root may be in a synced folder
+    finally:
+        conn.close()
+
+
+def test_a_save_made_while_a_backup_reads_waits_and_then_succeeds(data_root, fs):
+    """A backup's copy holds docs.db with a read lock for as long as it takes. A save made then waits for it, rather
+    than failing after Python's default five seconds."""
+    import threading
+    import time
+
+    conn = db.connect(fs, data_root)
+    locked = threading.Event()
+
+    def backup_reading() -> None:
+        reader = db.connect_read_only(data_root)
+        reader.isolation_level = None
+        reader.execute("BEGIN")
+        reader.execute("SELECT count(*) FROM tasks").fetchone()  # the read lock a copy holds
+        locked.set()
+        time.sleep(1.0)
+        reader.execute("COMMIT")
+        reader.close()
+
+    thread = threading.Thread(target=backup_reading)
+    thread.start()
+    try:
+        assert locked.wait(10)
+        started = time.monotonic()
+        with db.transaction(conn):
+            conn.execute("INSERT INTO people (id, name) VALUES ('P001', 'Me')")
+        assert time.monotonic() - started >= 0.5  # it waited for the reader
+        assert conn.execute("SELECT name FROM people").fetchone()[0] == "Me"
+    finally:
+        thread.join()
+        conn.close()
+
+def test_the_read_only_connection_changes_nothing(data_root, fs):
+    with pytest.raises(sqlite3.OperationalError):
+        db.connect_read_only(data_root).execute("SELECT 1 FROM tasks")  # no docs.db yet, and none is made
+    assert not db.db_path(data_root).exists()
+    db.connect(fs, data_root).close()
+    reader = db.connect_read_only(data_root)
+    try:
+        with pytest.raises(sqlite3.OperationalError, match="readonly"):
+            reader.execute("INSERT INTO people (id, name) VALUES ('P001', 'Me')")
+    finally:
+        reader.close()
+
+
+def test_names_outside_the_allow_list_are_refused():
+    db.check_names("tasks", ("tasks", "people"))
+    db.check_names(["title", "due"], ("title", "due", "start"))
+    with pytest.raises(ValueError, match="'tasks; DROP TABLE people'"):
+        db.check_names("tasks; DROP TABLE people", ("tasks", "people"))
+    with pytest.raises(ValueError, match="'nope'"):
+        db.check_names({"title": 1, "nope": 2}, ("title",))
+
+
+def test_the_task_columns_are_the_tasks_tables():
+    from docrepo.model import TASK_COLUMNS
+
+    conn = db.connect_memory()
+    assert sorted(TASK_COLUMNS) == sorted(r["name"] for r in conn.execute("PRAGMA table_info(tasks)"))
+
+
+def test_the_helpers_that_build_sql_refuse_other_names(sample_conn):
+    from datetime import datetime
+
+    from docrepo import agenda, people, tasks
+
+    with pytest.raises(ValueError, match="DocRepo builds SQL with"):
+        agenda._exists(sample_conn, "captures", "C000001")
+    with pytest.raises(ValueError, match="DocRepo builds SQL with"):
+        people._set_list(sample_conn, "people", "id", "P001", "name", ["x"])
+    with pytest.raises(ValueError, match="DocRepo builds SQL with"):
+        people._set_list(sample_conn, "person_aliases", "person", "P001", "name", ["x"])
+    with pytest.raises(ValueError, match="DocRepo builds SQL with"):
+        tasks._apply_columns(sample_conn, "T000001", {"title": "x", "title = 'y' --": "z"})
+    with pytest.raises(ValueError, match="DocRepo builds SQL with"):
+        tasks._end_ties(sample_conn, "task", "T000001", datetime(2026, 10, 8, 9, 0), "test")
+    assert agenda._exists(sample_conn, "people", "P001")

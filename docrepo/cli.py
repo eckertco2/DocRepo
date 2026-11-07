@@ -47,6 +47,7 @@ def as_of(value: str) -> datetime:
 
 
 def a_date(value: str) -> date:
+    """``YYYY-MM-DD``, for --week."""
     try:
         return date.fromisoformat(value)
     except ValueError:
@@ -54,6 +55,7 @@ def a_date(value: str) -> date:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """The command line's commands and their options."""
     parser = argparse.ArgumentParser(prog="docrepo", description="Capture and organize work notes, tasks and documents.")
     parser.add_argument("--version", action="version", version=f"DocRepo {__version__}")
     parser.add_argument("--data-root", metavar="PATH", help="use this data root instead of the recorded one (for development and testing)")
@@ -80,6 +82,8 @@ def build_parser() -> argparse.ArgumentParser:
     usage.add_argument("--as-of", type=as_of, metavar="WHEN", help=as_of_help)
     commands.add_parser("check", help="check the data root against docs.db: missing capture.md files, extracted text and saved copies, "
                                       "the search index and SQLite's quick check. It changes nothing, and writes its list to System\\check-<date>.md")
+    commands.add_parser("dump", help="write every table of docs.db as JSON into System\\export\\<date>, for reading outside DocRepo. It reads docs.db "
+                                     "and changes nothing in it")
     commands.add_parser("make-shortcut", help="make DocRepo.lnk, to move into your Startup folder so DocRepo starts when you sign in")
     set_hotkey = commands.add_parser("set-hotkey", help="choose the capture window's hotkey, such as \"Ctrl+Alt+Space\"")
     set_hotkey.add_argument("keys")
@@ -102,6 +106,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Run one command. Its exit code: 0 when it worked, 1 when it couldn't (said on stderr)."""
     args = build_parser().parse_args(argv)
     try:
         return COMMANDS[args.command](args)
@@ -132,6 +137,7 @@ def _open(args: argparse.Namespace) -> tuple[Path, Settings, SafeFS, sqlite3.Con
 
 
 def cmd_where(args: argparse.Namespace) -> int:
+    """Say which data root DocRepo uses, what chose it, and whether it's set up."""
     choice = resolve_data_root(args.data_root)
     print(f"Location file: {location_file()}")
     if choice.path is None:
@@ -148,6 +154,7 @@ def cmd_where(args: argparse.Namespace) -> int:
 
 
 def cmd_set_data_root(args: argparse.Namespace) -> int:
+    """Record where the data root is, after checking it isn't in OneDrive or the code folder."""
     path = Path(args.path)
     problem = data_root_problem(path)
     if problem:
@@ -161,6 +168,7 @@ def cmd_set_data_root(args: argparse.Namespace) -> int:
 
 
 def cmd_init(args: argparse.Namespace) -> int:
+    """Make the data root's folders, default settings and database."""
     root = _data_root(args)
     if root is None:
         return 1
@@ -183,6 +191,7 @@ def cmd_init(args: argparse.Namespace) -> int:
 
 
 def cmd_try_write(args: argparse.Namespace) -> int:
+    """Write a small test file at a path if DocRepo may, to check the guard."""
     root = _data_root(args)
     if root is None:
         return 1
@@ -207,6 +216,7 @@ def _rebuild(conn: sqlite3.Connection, root: Path, settings: Settings, fs: SafeF
 
 
 def cmd_load_sample(args: argparse.Namespace) -> int:
+    """Fill a new, empty data root with the made-up sample data."""
     opened = _open(args)
     if opened is None:
         return 1
@@ -230,6 +240,7 @@ def cmd_load_sample(args: argparse.Namespace) -> int:
 
 
 def cmd_rebuild(args: argparse.Namespace) -> int:
+    """Rebuild the capacity calendar, every generated page and the search index."""
     opened = _open(args)
     if opened is None:
         return 1
@@ -244,6 +255,7 @@ def cmd_rebuild(args: argparse.Namespace) -> int:
 
 
 def cmd_report(args: argparse.Namespace) -> int:
+    """Print what DocRepo works out: capacity, days until due, lists, labels, raw text logs and agendas."""
     opened = _open(args)
     if opened is None:
         return 1
@@ -273,6 +285,7 @@ def _tree_of(conn: sqlite3.Connection, ident: str, when: datetime) -> dict:
 
 
 def cmd_tree_check(args: argparse.Namespace) -> int:
+    """Check a tree file or an edit file and print what's wrong with it. 1 when it has problems."""
     opened = _open(args)
     if opened is None:
         return 1
@@ -296,6 +309,7 @@ def cmd_tree_check(args: argparse.Namespace) -> int:
 
 
 def cmd_tree_prompt(args: argparse.Namespace) -> int:
+    """Print the prompt for an LLM to write a tree file, or to change one task's or template's tree."""
     opened = _open(args)
     if opened is None:
         return 1
@@ -316,6 +330,7 @@ def cmd_tree_prompt(args: argparse.Namespace) -> int:
 
 
 def cmd_tree_export(args: argparse.Namespace) -> int:
+    """Print a task's tree, or a template's, as a tree file."""
     opened = _open(args)
     if opened is None:
         return 1
@@ -332,6 +347,7 @@ def cmd_tree_export(args: argparse.Namespace) -> int:
 
 
 def cmd_outlook_check(args: argparse.Namespace) -> int:
+    """Make the troubleshooting report, print it and save it in System\\diagnostics."""
     opened = _open(args)
     if opened is None:
         return 1
@@ -397,7 +413,26 @@ def cmd_check(args: argparse.Namespace) -> int:
     return 2 if result.problems else 0
 
 
+def cmd_dump(args: argparse.Namespace) -> int:
+    """Dump docs.db (release 5.102): every table as JSON in System\\export\\<date>, read through a read-only connection,
+    so the database is neither upgraded nor changed."""
+    from docrepo.dump import dump
+
+    root = _data_root(args)
+    if root is None:
+        return 1
+    if not (root / SETTINGS_FILE).exists() or not db.db_path(root).exists():
+        print(f"{root} isn't set up yet, so there's no docs.db to dump. Run: python -m docrepo init", file=sys.stderr)
+        return 1
+    fs = make_safe_fs(root, Settings.load(root))
+    setup_logging(fs, root)
+    result = dump(root, fs, datetime.now())
+    print(f"Dumped {len(result.tables)} tables, {result.rows} rows, to {result.folder}")
+    return 0
+
+
 def cmd_backup(args: argparse.Namespace) -> int:
+    """Make a backup now, and say what it did."""
     opened = _open(args)
     if opened is None:
         return 1
@@ -416,6 +451,7 @@ def cmd_backup(args: argparse.Namespace) -> int:
 
 
 def cmd_make_shortcut(args: argparse.Namespace) -> int:
+    """Make DocRepo.lnk, the Startup shortcut, and say where to move it."""
     from docrepo import startup
 
     try:
@@ -431,10 +467,12 @@ def cmd_make_shortcut(args: argparse.Namespace) -> int:
 
 
 def cmd_browse(args: argparse.Namespace) -> int:
+    """Open the browse tool, starting the app first if it isn't running."""
     return cmd_app(args, browse=True)
 
 
 def cmd_app(args: argparse.Namespace, browse: bool = False) -> int:
+    """Start the capture app: the tray icon, the hotkeys and the capture window, and the browse tool with ``browse``."""
     root = _data_root(args)
     if root is None:
         return 1
@@ -450,6 +488,7 @@ def cmd_app(args: argparse.Namespace, browse: bool = False) -> int:
 
 
 def cmd_set_hotkey(args: argparse.Namespace) -> int:
+    """Set the capture window's hotkey, after checking it has Ctrl, Alt or Win."""
     root = _data_root(args)
     if root is None:
         return 1
@@ -471,6 +510,7 @@ COMMANDS: dict[str, Callable[[argparse.Namespace], int]] = {
     "browse": cmd_browse,
     "backup": cmd_backup,
     "check": cmd_check,
+    "dump": cmd_dump,
     "usage": cmd_usage,
     "make-shortcut": cmd_make_shortcut,
     "set-hotkey": cmd_set_hotkey,

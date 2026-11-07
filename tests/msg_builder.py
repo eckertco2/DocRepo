@@ -1,6 +1,7 @@
 """Made-up Outlook .msg files for the tests (release 5.33), laid out as MS-OXMSG says: a stream per variable-length
 property, a properties stream for the fixed-size ones, and a storage per attachment. Classic Outlook isn't installed
-on the personal computer, so these stand in for the emails it hands over in a drag."""
+on the personal computer, so these stand in for the emails it hands over in a drag. Since release 5.102 an attachment
+can be a forwarded email of its own, an embedded message, as Outlook writes one attached as an item."""
 from __future__ import annotations
 
 import struct
@@ -13,6 +14,10 @@ from win32com import storagecon as sc
 from docrepo import msg
 
 _NEW = sc.STGM_READWRITE | sc.STGM_SHARE_EXCLUSIVE | sc.STGM_CREATE
+#: An attachment that's an email of its own (afEmbeddedMessage, MS-OXCMSG): a forwarded email Outlook attached as an item.
+EMBEDDED_MESSAGE = 5
+#: The fixed-size properties stream's header in an embedded message's storage (MS-OXMSG): 24 bytes.
+EMBEDDED_HEADER = 24
 
 
 @dataclass
@@ -22,6 +27,9 @@ class FakeAttachment:
     content_id: str = ""
     hidden: bool = False
     method: int = msg.ATTACH_BY_VALUE
+    # A forwarded email attached as an item (release 5.102): written as a storage of its own, the attachment's
+    # PR_ATTACH_DATA_OBJ. Give it EMBEDDED_MESSAGE as its method.
+    email: FakeEmail | None = None
 
 
 @dataclass
@@ -65,6 +73,14 @@ def build(email: FakeEmail) -> bytes:
     """The email as a .msg's bytes."""
     lock = pythoncom.CreateILockBytesOnHGlobal(None, True)
     root = pythoncom.StgCreateDocfileOnILockBytes(lock, _NEW, 0)
+    _message(root, email, msg.TOP_HEADER)
+    root.Commit(0)
+    del root
+    return lock.ReadAt(0, lock.Stat(0)[2])
+
+
+def _message(root, email: FakeEmail, header: int) -> None:
+    """The email's properties and attachments, in ``root``: the .msg itself, or an embedded message's storage."""
     for pid, text in ((msg.SUBJECT, email.subject), (msg.SENDER_NAME, email.sender), (msg.DISPLAY_TO, email.to), (msg.BODY, email.body)):
         _write(root, pid, msg.PT_UNICODE, (text + "\0").encode("utf-16-le"))
     fixed = [(msg.CLIENT_SUBMIT_TIME, msg.PT_SYSTIME, struct.pack("<q", _filetime(email.sent)))]
@@ -82,18 +98,20 @@ def build(email: FakeEmail) -> bytes:
     if email.html is not None:
         _write(root, msg.HTML, msg.PT_BINARY, email.html.encode("utf-8"))
         fixed.append((msg.INTERNET_CPID, msg.PT_LONG, struct.pack("<i", 65001)))
-    _properties(root, msg.TOP_HEADER, fixed)
+    _properties(root, header, fixed)
     for n, a in enumerate(email.attachments):
         sub = root.CreateStorage(f"{msg.ATTACHMENT}{n:08X}", _NEW, 0, 0)
         _write(sub, msg.ATTACH_LONG_FILENAME, msg.PT_UNICODE, (a.name + "\0").encode("utf-16-le"))
         if a.method == msg.ATTACH_BY_VALUE:
             _write(sub, msg.ATTACH_DATA, msg.PT_BINARY, a.data)
+        if a.email is not None:
+            inner = sub.CreateStorage(f"__substg1.0_{msg.ATTACH_DATA:04X}000D", _NEW, 0, 0)  # PT_OBJECT
+            _message(inner, a.email, EMBEDDED_HEADER)
+            inner.Commit(0)
+            del inner
         if a.content_id:
             _write(sub, msg.ATTACH_CONTENT_ID, msg.PT_UNICODE, (a.content_id + "\0").encode("utf-16-le"))
         _properties(sub, msg.ATTACH_HEADER, [(msg.ATTACH_METHOD, msg.PT_LONG, struct.pack("<i", a.method)),
                                              (msg.ATTACHMENT_HIDDEN, msg.PT_BOOLEAN, struct.pack("<H", int(a.hidden)))])
         sub.Commit(0)
         del sub
-    root.Commit(0)
-    del root
-    return lock.ReadAt(0, lock.Stat(0)[2])

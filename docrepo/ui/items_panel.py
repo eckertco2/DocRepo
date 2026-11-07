@@ -15,7 +15,6 @@ import re
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import date
-from html import escape as esc
 
 from PySide6.QtCore import QPoint, QPointF, QRect, QSize, Qt, Signal
 from PySide6.QtGui import (
@@ -50,6 +49,7 @@ from PySide6.QtWidgets import (
 
 from docrepo import items
 from docrepo.dates import long_date, short
+from docrepo.markup import esc
 from docrepo.model import AgendaItem, Model
 from docrepo.ui import tokens
 from docrepo.ui.tokens import C
@@ -501,6 +501,7 @@ class AgendaPanel(QFrame):
         self.boxes: dict[int, QCheckBox] = {}
 
     def show_agenda(self, m: Model, meeting: str | None, open_items: list[AgendaItem], done: Callable[[AgendaItem], bool]) -> None:
+        """Show a meeting's open agenda items, each with a box ticked by ``done``; just the title with no meeting."""
         _drop(self.rows)
         self.boxes = {}
         if not meeting:
@@ -788,10 +789,6 @@ class RefPopup(QListWidget):
         self.move(x, max(area.top(), min(y, area.bottom() - self.height())))
 
     # ---- levels ----
-    def _current(self) -> tuple[items.Option | None, bool]:
-        item = self.currentItem()
-        return (item.data(_OPTION), bool(item.data(_HEAD))) if item is not None else (None, False)
-
     def go_into(self, row: int | None = None) -> bool:
         """List the subtasks of the task on ``row`` (the current one), under it; True when it has any."""
         item = self.item(self.currentRow() if row is None else row)
@@ -818,6 +815,7 @@ class RefPopup(QListWidget):
 
     @property
     def depth(self) -> int:
+        """How many levels down the list is: 0 at the top, one more for each task gone into."""
         return len(self._levels)
 
     def chevron_at(self, pos: QPoint) -> tuple[int, str] | None:

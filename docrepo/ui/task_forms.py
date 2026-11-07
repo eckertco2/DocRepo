@@ -208,10 +208,6 @@ class PeoplePicker(ChipPicker):
     def share(self, value: str) -> int:
         return self.shares.get(value, 100)
 
-    def set_shares(self, shares: dict[str, int]) -> None:
-        self.shares = {k: v for k, v in shares.items() if v != 100}
-        self._render()
-
     def stated(self) -> list[tuple[str, int]]:
         """The people as a template row's are compared: each with their Involvement."""
         return [(c.value, self.share(c.value)) for c in self.chips()]
