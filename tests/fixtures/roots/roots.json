@@ -75,5 +75,14 @@
    "task_pages": 17,
    "task_dates": 2
   }
+ },
+ "v22": {
+  "commit": "63b21e8",
+  "counts": {
+   "tasks": 17,
+   "captures": 24,
+   "task_pages": 17,
+   "task_dates": 2
+  }
  }
 }

@@ -17,6 +17,7 @@ from datetime import date
 from docrepo.dates import long_date
 from docrepo.links import is_folder, is_link
 from docrepo.schedule import due_of, is_open, start_of
+from docrepo.tagged import load as tagged_load
 
 TYPE_NAMES = {"note": "Note", "new_task": "New task", "update": "Update"}
 
@@ -478,6 +479,8 @@ class Model:
             "SELECT task, day, at FROM task_page_versions WHERE by_owner = 1 ORDER BY day, task")]
         #: The tasks made from a template, and where each came from (release 5.44).
         self.origins: dict[str, TemplateOrigin] = template_origins(conn)
+        #: Tagged labels (release 5.79): the glossary, what each item mentions, and the owner's own changes.
+        self.tagged = tagged_load(conn)
 
     # ---- names ----
     def uses_day_headings(self, task_id: str) -> bool:

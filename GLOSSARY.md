@@ -55,6 +55,11 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Parent label**: a label with labels under it (its **sublabels**), such as Production line over Line 1 and Line 2. It's a heading: tasks get its sublabels, not it. Labels nest one level only.
 - **Plant event**: a task with Plant event ticked, such as an outage or a turnaround, which the timeline shades from its Start to its Due so other work can be seen against it.
 - **Reference field**: a field every task has for a number from another system, such as a change record's. Its name is set in Settings.
+- **Tagged label**: a plant's tag, such as V-110 or FIC-2210, found in the text of every capture, email, document, notes page and task (release 5.79). It isn't a label: a label is a category the owner gives a task, and a tagged label is found in the words. It's found however its parts are joined (V-110, V110, V 110), and by its aliases. Captures, documents and tasks show theirs in a **Tagged labels** row.
+- **Glossary** (of tagged labels): the list of tagged labels, each with its description and aliases, imported from Excel or CSV in the Tagged labels view, or added by hand. Each is known by its **key**, its letters and digits in capitals.
+- **Alias** (of a tagged label): another name it's found by: one with a digit and no space (D-10) is matched like a label, and any other (feed drum) as whole words.
+- **Tag pattern**: a mask such as `XX-####` for a plant's tagging convention, which finds tags that aren't in the glossary yet (release 5.80).
+- **Mentioned**: said of an item whose text has a tagged label, and of the label. **Mentioned only** narrows the Tagged labels view to those.
 - **Routine task**: a task with Recurrence set. Its occurrences aren't checked off one by one, and closing the task ends the recurrence.
 - **Meeting**: any task with Meeting checked, one-off or routine.
 - **Agenda item**: a temporary link that puts a task, or a note with no task, on the agenda of a meeting, another task or a person. It's added with the capture window's Add to agenda option and stays open until it's closed by hand.
@@ -163,7 +168,7 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Delete**, **Take off**, **Take out** and **Put back** (in the windows, release 5.91): say Discard for a record, Remove for a link and Clear for a field. Bring back stays as Discard's opposite, and Add back as Remove's in a what-if. A what-if itself is still deleted, as it holds no record of the owner's: nothing changed until it was applied.
 - **File a copy**: say Save a copy, so "filing" only means linking an unfiled capture.
 - **Project notes**: say Note.
-- **Tag**: captures have a type, and tasks have labels.
+- **Tag**: on its own, only a plant's tag (a tagged label, release 5.79), as in tag pattern. Never a capture's type, which is its capture type, or a task's category, which is a label.
 - **option**: the field in `capture.md` becomes `capture_types`, a list, since one capture can be several types.
 - **Inbox**: for the browse tool's view and the `Contents.md` section, say Unfiled.
 - **Inbox capture**: say unfiled capture.

@@ -112,8 +112,8 @@ def _open(path: Path, load_workbook):
         raise WorkbookError(f"{path.name} can't be read as an Excel workbook ({type(e).__name__}).") from e
 
 
-def read_sheet(path: Path, sheet: str) -> list[list[object]]:
-    """The sheet's rows as lists of cell values, without trailing empty cells, at most MAX_ROWS."""
+def read_sheet(path: Path, sheet: str, limit: int = MAX_ROWS) -> list[list[object]]:
+    """The sheet's rows as lists of cell values, without trailing empty cells, at most ``limit`` (MAX_ROWS)."""
     from openpyxl import load_workbook
 
     book = _open(path, load_workbook)
@@ -126,7 +126,7 @@ def read_sheet(path: Path, sheet: str) -> list[list[object]]:
             while row and _blank(row[-1]):
                 row.pop()
             rows.append(row)
-            if len(rows) >= MAX_ROWS:
+            if len(rows) >= limit:
                 break
         while rows and not rows[-1]:
             rows.pop()

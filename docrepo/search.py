@@ -29,13 +29,14 @@ log = logging.getLogger(__name__)
 
 #: The most results shown for each kind of item.
 LIMIT = 40
-GROUPS = ("Task", "Notes", "Capture", "Document", "Saved copy", "Person", "Label")
+#: "Tagged label" comes first (release 5.79, decision 378): a tag typed however it's written names its label.
+GROUPS = ("Tagged label", "Task", "Notes", "Capture", "Document", "Saved copy", "Person", "Label")
 
 
 @dataclass(frozen=True)
 class Result:
     group: str  # one of GROUPS
-    kind: str  # what selecting it opens: task, capture, doc, person or label
+    kind: str  # what selecting it opens: task, capture, doc, person, label or tagged (a tagged label, by its key)
     id: str
     title: str
     sub: str
@@ -51,8 +52,12 @@ def extracted_text(data_root: Path, document_id: str) -> str:
 
 
 def _put(conn: sqlite3.Connection, kind: str, item_id: str, body: str) -> None:
+    from docrepo import tagged
+
     conn.execute("INSERT INTO search_text (kind, id, body) VALUES (?, ?, ?) ON CONFLICT(kind, id) DO UPDATE SET body = excluded.body",
                  (kind, item_id, body))
+    if kind != "page":  # its tagged labels, from the same text (release 5.79, decision 377); a page's from its own text
+        tagged.index(conn, kind, item_id, tagged.text_of_body(kind, body))
 
 
 def capture_body(model: Model, data_root: Path, capture_id: str) -> str:
@@ -90,9 +95,12 @@ def index_pages(conn: sqlite3.Connection, task_ids: list[str]) -> None:
         return
     model = Model(conn)
     with transaction(conn):
+        from docrepo import tagged
+
         for t in dict.fromkeys(task_ids):
             if t in model.tasks:
                 _put(conn, "page", t, page_body(model, t))
+                tagged.index(conn, "page", t, tagged.page_text(model.pages.get(t, "")))  # release 5.79
 
 
 def rebuild(conn: sqlite3.Connection, data_root: Path) -> int:
@@ -109,6 +117,9 @@ def rebuild(conn: sqlite3.Connection, data_root: Path) -> int:
                 _put(conn, "page", t, page_body(model, t))
     count = len(model.captures) + len(model.documents) + len(model.pages)
     log.info("search index rebuilt: %d items", count)
+    from docrepo import tagged
+
+    tagged.rebuild(conn)  # its caches are read from the index (release 5.79)
     return count
 
 
@@ -155,24 +166,47 @@ def _indexed(conn: sqlite3.Connection, kind: str, words: list[str]) -> list[tupl
     return [(r["id"], r["body"]) for r in rows]
 
 
+def _bodies(conn: sqlite3.Connection, kind: str, ids: set[str]) -> list[tuple[str, str]]:
+    """These items' indexed bodies, for what a tagged label's mentions add to a search."""
+    if not ids:
+        return []
+    marks = ",".join("?" * len(ids))
+    query = f"SELECT id, body FROM search_text WHERE kind = ? AND id IN ({marks}) ORDER BY id"  # noqa: S608 - only ? marks are joined in
+    return [(r["id"], r["body"]) for r in conn.execute(query, (kind, *sorted(ids)))]
+
+
 def search(conn: sqlite3.Connection, model: Model, query: str) -> list[Result]:
     """Everything that holds every word of ``query``, grouped as GROUPS lists them. Two letters at least."""
     words = words_of(query)
     if len("".join(words)) < 2:
         return []
     m, out = model, []
+    # Tagged labels (release 5.79, decision 378): one typed however it's written ("v110" finds V-110) is listed first, and
+    # what mentions it is found too, in its own group, even where it's written another way.
+    from docrepo import tagged
+
+    named = tagged.find_labels(m.tagged, query)
+    for lb in named[:LIMIT]:
+        uses = tagged.uses_of(m, lb)
+        out.append(Result("Tagged label", "tagged", lb.key, lb.label, " · ".join(x for x in (lb.description, f"mentioned in {len(uses)} item{'s' if len(uses) != 1 else ''}") if x)))
+    mentioned: dict[str, set[str]] = {}
+    if len(named) == 1:
+        for u in tagged.uses_of(m, named[0]):
+            mentioned.setdefault(u.kind, set()).add(u.id)
     # A task's reference fields (release 5.9, M0034) are found too, by their values: "work order 48213" finds Work order # 48213.
-    tasks = [t for t in m.tasks.values() if not t.discarded and _has_all(words, t.id, t.title, t.description, t.current_status, t.deadline_desc,
-                                                                          *(f"{k} {v}" for k, v in t.references.items()))]
+    tasks = [t for t in m.tasks.values() if not t.discarded and (t.id in mentioned.get("task", ()) or _has_all(
+        words, t.id, t.title, t.description, t.current_status, t.deadline_desc, *(f"{k} {v}" for k, v in t.references.items())))]
     for t in tasks[:LIMIT]:
         out.append(Result("Task", "task", t.id, t.title, f"{t.id} · {t.state}", snippet(f"{t.description}\n{t.current_status}", words)))
     found = [(i, b) for i, b in _indexed(conn, "capture", words) if i in m.captures and not m.captures[i].discarded]
+    found += _bodies(conn, "capture", mentioned.get("capture", set()) - {i for i, _ in found})
     # Notes pages (release 5.25): a page's hit, unless its task is listed already or a capture on it is found.
     from docrepo import notes_page
 
     listed, hit = {t.id for t in tasks}, {i for i, _ in found}
-    pages = [(i, b) for i, b in _indexed(conn, "page", words) if i in m.tasks and not m.tasks[i].discarded and i not in listed
-             and not hit & set(notes_page.capture_ids(m.pages.get(i, "")))]
+    pages = [(i, b) for i, b in [*_indexed(conn, "page", words), *_bodies(conn, "page", mentioned.get("page", set()))]
+             if i in m.tasks and not m.tasks[i].discarded and i not in listed and not hit & set(notes_page.capture_ids(m.pages.get(i, "")))]
+    pages = list(dict(pages).items())
     for tid, body in pages[:LIMIT]:
         t = m.tasks[tid]
         out.append(Result("Notes", "task", t.id, f"Notes of {t.title}", f"{t.id} · its notes page", snippet(_after_title(body), words)))
@@ -180,6 +214,7 @@ def search(conn: sqlite3.Connection, model: Model, query: str) -> list[Result]:
         c = m.captures[cid]
         out.append(Result("Capture", "capture", c.id, c.title, f"{c.id} · {c.saved[:16]}", snippet(_after_title(body), words)))
     docs = [(i, b) for i, b in _indexed(conn, "document", words) if i in m.documents]
+    docs += _bodies(conn, "document", mentioned.get("document", set()) - {i for i, _ in docs})
     for did, body in docs[:LIMIT]:
         d = m.documents[did]
         out.append(Result("Document", "doc", d.id, d.name, f"{d.id} · {d.description or d.status}", snippet(_after_title(body), words)))

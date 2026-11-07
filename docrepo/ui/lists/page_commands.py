@@ -193,6 +193,13 @@ class PageCommands:
             self.select("person", rest, update_list=True)
         elif kind == "label":
             self.select("label", unquote(rest), update_list=True)
+        elif kind == "tagged":  # a tagged label (release 5.79): its page, in the Tagged labels view
+            self.view = "tagged"
+            self.select("tagged", unquote(rest), update_list=True)
+        elif kind in ("taggedrm", "taggedback", "taggedadd"):  # the owner's own changes on an item (decision 376)
+            from docrepo.ui.lists import tagged as tagged_list
+
+            tagged_list.on_link(self, kind, rest)
         elif kind == "tplrow":  # release 5.44
             self.templates.open_row(rest)
         elif kind == "tpltiming":  # release 5.51

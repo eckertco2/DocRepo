@@ -66,7 +66,7 @@ class DocumentLists:
                 self.tree.add_row(None, (r.kind, r.id), [f'{esc(r.title)}<br><span class="sub">{esc(r.sub)}</span>{snippet}'])
                 continue
             kind = file_type(r.title) if r.kind == "doc" else ""
-            name = {"task": "task", "capture": "note", "person": "person", "label": "labels"}.get(r.kind, f"type-{kind}" if kind not in ("", "other") else "file")
+            name = {"task": "task", "capture": "note", "person": "person", "label": "labels", "tagged": "tagged"}.get(r.kind, f"type-{kind}" if kind not in ("", "other") else "file")
             colour, tip = "text2", r.kind.capitalize()
             if r.kind == "task" and r.id in m.tasks:  # a task's state, as everywhere else (decision L7)
                 (name, colour), tip = state_icon(m.task(r.id).state), m.task(r.id).state

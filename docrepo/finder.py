@@ -6,8 +6,8 @@ typed in its box, and finding the task's records that match, best first, fast en
 - **Where a word matched** sets its score: the start of the name, a word start in it, inside it, the description,
   where it came from (or its subtask), then, as the fallback, a slip in a name word (one letter missing, added, wrong
   or two swapped, keeping its first letter), then the text. Pins, use and age only break ties (``bonus``).
-- **Typed filters** (``type:pdf``, ``in:vendor``, ``from:tom``, ``after:``, ``before:``, ``since:``, ``is:``) become
-  filters, and leave the box, once a space follows them.
+- **Typed filters** (``type:pdf``, ``in:vendor``, ``from:tom``, ``after:``, ``before:``, ``since:``, ``is:``, and ``tag:V-110``
+  since release 5.79) become filters, and leave the box, once a space follows them.
 - **Two tiers:** the first searches what every record holds in memory, on every keystroke; the second searches files'
   extracted text, off the keystroke path (``find`` with ``texts``), and returns only the files only their text matched.
 
@@ -29,7 +29,7 @@ TYPE_WORDS = {
     "picture": "picture", "pictures": "picture", "photo": "picture", "photos": "picture", "image": "picture", "jpg": "picture", "png": "picture",
     "email": "mail", "emails": "mail", "msg": "mail", "drawing": "drawing", "vsdx": "drawing", "dwg": "drawing", "link": "link", "links": "link",
 }
-OPERATORS = ("type", "in", "from", "after", "since", "before", "is")
+OPERATORS = ("type", "in", "from", "after", "since", "before", "is", "tag")
 HINTS = {
     "type": "Type a type and a space: pdf, word, excel, powerpoint, picture, email, drawing or link.",
     "in": "Type part of a subtask's name and a space.",
@@ -38,6 +38,7 @@ HINTS = {
     "since": "Type a date and a space: 1 sep, sep, 2026-09-01, yesterday, last week or 30d.",
     "before": "Type a date and a space: 1 oct, oct, 2026-10-01 or last month.",
     "is": "Type pinned, missing, email, link, attachment or picture, and a space.",
+    "tag": "Type a tagged label and a space, such as V-110.",
 }
 #: ``from:`` values that name a file's source rather than a sender.
 SOURCE_WORDS = {"attachment": "Email attachment", "attachments": "Email attachment", "original": "Tracked original", "originals": "Tracked original",
@@ -47,11 +48,11 @@ SOURCE_WORDS = {"attachment": "Email attachment", "attachments": "Email attachme
 TITLE_START, WORD_START, IN_TITLE, IN_DESC, IN_SOURCE, SLIP, IN_TEXT, IN_FILE_TEXT = 12, 10, 7, 4, 3, 2.5, 2, 1
 
 #: A typed filter, followed by a space. A date's value may be two words ("since:1 sep", "before:last month").
-_OPERATOR = re.compile(r"(^|\s)(type|in|from|is):(?:\"([^\"]+)\"|(\S+))(?=\s)", re.I)
+_OPERATOR = re.compile(r"(^|\s)(type|in|from|is|tag):(?:\"([^\"]+)\"|(\S+))(?=\s)", re.I)
 _DATE_OPERATOR = re.compile(r"(^|\s)(after|since|before):(?:\"([^\"]+)\"|(\d{1,2}\s+[a-z]{3,9}|[a-z]{3,9}\s+\d{1,2}(?!\d)|(?:last|this)\s+(?:week|month)|\S+))(?=\s)",
                             re.I)
 _EXTENSION = re.compile(r"(^|\s)\.(docx|xlsx|pptx|pdf|jpg|png|csv|msg|vsdx|txt)(?=\s)", re.I)
-_UNFINISHED = re.compile(r"(?:^|\s)(type|in|from|after|since|before|is):\S*$", re.I)
+_UNFINISHED = re.compile(r"(?:^|\s)(type|in|from|after|since|before|is|tag):\S*$", re.I)
 _TERM = re.compile(r"(-?)\"([^\"]+)\"?|(-?)(\S+)")
 _MONTHS = ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec")
 
@@ -67,18 +68,24 @@ class Filters:
     before: date | None = None
     pinned: bool = False
     missing: bool = False
+    tagged: set[str] = field(default_factory=set)      # tagged labels' keys (release 5.79, decision 367)
 
     def count(self) -> int:
-        return len(self.types) + len(self.sources) + len(self.senders) + (self.since is not None) + (self.before is not None) + self.pinned + self.missing
+        return (len(self.types) + len(self.sources) + len(self.senders) + (self.since is not None) + (self.before is not None) + self.pinned
+                + self.missing + len(self.tagged))
 
     def clear(self) -> None:
-        self.types.clear(), self.sources.clear(), self.senders.clear()
+        self.types.clear(), self.sources.clear(), self.senders.clear(), self.tagged.clear()
         self.since = self.before = None
         self.pinned = self.missing = False
 
-    def keep(self, r: Record, pinned: Callable[[str], bool] = lambda _: False, missing: Callable[[str], bool] = lambda _: False) -> bool:
+    def keep(self, r: Record, pinned: Callable[[str], bool] = lambda _: False, missing: Callable[[str], bool] = lambda _: False,
+             mentions: Callable[[str, Record], bool] = lambda _k, _r: False) -> bool:
         """Whether a record passes the filters. A file filter (type, source, pinned, missing) keeps only files; a sender
-        keeps their emails and the files that came with them; the dates keep what came in that window."""
+        keeps their emails and the files that came with them; the dates keep what came in that window; a tagged label keeps
+        what mentions it."""
+        if self.tagged and not any(mentions(k, r) for k in self.tagged):
+            return False
         if self.types and not (r.kind == "file" and r.type in self.types or r.kind == "email" and "mail" in self.types):
             return False
         if self.sources and not (r.kind == "file" and r.source in self.sources):
@@ -146,9 +153,11 @@ def read_day(text: str, today: date) -> date | None:
     return found.replace(year=today.year - 1) if found > today else found
 
 
-def take_filters(text: str, filters: Filters, subtasks: list[tuple[str, str]], senders: Iterable[str], today: date) -> Typed:
+def take_filters(text: str, filters: Filters, subtasks: list[tuple[str, str]], senders: Iterable[str], today: date,
+                 tag: Callable[[str], str | None] = lambda _: None) -> Typed:
     """Turn each complete typed filter (one a space follows) into a filter, and take it out of the box's text.
-    ``subtasks`` are the (ID, title) pairs ``in:`` may name; ``senders`` the emails' senders ``from:`` may name."""
+    ``subtasks`` are the (ID, title) pairs ``in:`` may name; ``senders`` the emails' senders ``from:`` may name; ``tag``
+    gives the key of the tagged label ``tag:`` names, however it's typed."""
     out = Typed(text)
     senders = list(senders)
 
@@ -172,6 +181,11 @@ def take_filters(text: str, filters: Filters, subtasks: list[tuple[str, str]], s
                 if who:
                     filters.senders.add(who)
                     done = True
+        elif op == "tag":
+            key = tag(value)
+            if key:
+                filters.tagged.add(key)
+                done = True
         elif op in ("after", "since", "before"):
             day = read_day(value, today)
             if day:

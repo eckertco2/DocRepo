@@ -56,6 +56,7 @@ from docrepo.save import EmailItem, SaveError, SaveResult, add_quick_task, note_
 from docrepo.tasks import TaskError
 from docrepo.ui.context import AppContext
 from docrepo.ui.dialogs import LabelDialog, PersonDialog
+from docrepo.ui.lists import tagged as tagged_list
 from docrepo.ui.rich_edit import RichEdit
 from docrepo.ui.explorer import show_in_explorer
 from docrepo.ui.problems import ProblemsLine
@@ -152,6 +153,8 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         #: Asks why something is discarded: the reason, or None to cancel. Tests replace it.
         self.ask_reason: Callable[[str, str], str | None] = self._ask_reason
         self.ask_text: Callable[[str, str, str], str | None] = self._ask_text
+        #: Picks a tagged label to add by hand (release 5.79): from the glossary's labels or typed, or None. Tests replace it.
+        self.pick_tagged: Callable[[list[str]], str | None] = lambda names: tagged_list.pick(self, names)
         self.view = "tasks"
         self.sel: tuple[str, str] | None = None
         self.pin: str | None = None
@@ -180,6 +183,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         self.cap_offset = 0
         self.cap_cell: tuple[str, int] | None = None
         self.retired = {"people": False, "labels": False}
+        self.tagged_mentioned: bool | None = None  # the Tagged labels view's Mentioned only (release 5.79); None: not set yet
         self.query = ""
         self.before_search = "tasks"
         self.state = PageState(order="new")  # the history reads newest first (release 5.84, R6)
@@ -635,6 +639,8 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         m = self.model()
         if kind == "label":
             return any(lb.name == item for lb in m.labels)
+        if kind == "tagged":  # release 5.79: a tagged label, by its key
+            return item in m.tagged.by_key
         if kind == "tplrow":
             return self.templates.exists(item)
         return item in {"task": m.tasks, "capture": m.captures, "doc": m.documents, "person": m.people}.get(kind, {})
@@ -903,7 +909,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         self.filters.setVisible(True)
         builder = {"today": self._today_view, "tasks": self._tasks_view, "unfiled": self._unfiled_view, "agenda": self._agenda_view,
                    "people": self._people_view, "templates": self.templates.render_list,
-                   "labels": self._labels_view, "docs": self._docs_view, "search": self._search_view,
+                   "labels": self._labels_view, "tagged": lambda: tagged_list.view(self), "docs": self._docs_view, "search": self._search_view,
                    "discarded": self._discarded_view, "activity": self._activity_view}.get(self.view)
         self.tree.stop_row_moves()  # the Templates view turns it back on
         self.tree.begin()
@@ -964,6 +970,9 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         elif kind == "tplrow":
             self.templates.actions(item)
             html = self.templates.page(item)
+        elif kind == "tagged":  # release 5.79
+            tagged_list.actions(self, item)
+            html = pages.tagged_page(item)
         else:
             self._label_actions(item)
             html = pages.label_page(item)
@@ -1015,6 +1024,8 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
             self.edit_person(ident)
         elif kind == "label":
             self.edit_label(ident)
+        elif kind == "tagged":  # release 5.79
+            tagged_list.edit(self, ident)
         elif kind == "tplrow":
             self.templates.edit_row(int(ident))
         else:
@@ -1156,6 +1167,8 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
             new = ("person", me) if me in m.people else (("person", next(iter(m.people))) if m.people else None)
         elif v == "labels":
             new = ("label", m.labels[0].name) if m.labels else None
+        elif v == "tagged":  # release 5.79: the first label it lists
+            new = tagged_list.first(self)
         elif v == "templates":
             new = self.templates.first()
         elif v == "discarded":

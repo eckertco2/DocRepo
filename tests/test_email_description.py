@@ -74,7 +74,7 @@ def test_emails_captured_before_have_none(env):
     m = Model(conn)
     assert m.captures["C000003"].source == "outlook_email" and m.captures["C000003"].emails == []
     assert '"emails"' not in captures.capture_md(m, "C000003", "") and "\nemails:" not in captures.capture_md(m, "C000003", "")
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 21
+    assert conn.execute("PRAGMA user_version").fetchone()[0] >= 21  # 21 brought capture_emails; 22 (release 5.79) the tagged labels
 
 
 # ---- where it shows ----

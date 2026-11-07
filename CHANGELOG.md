@@ -4,7 +4,7 @@ One line per release, newest first: its number, the date it was built, and what 
 
 | Release | Date | What |
 |---|---|---|
-| 5.101 | 2026-11-06 | Emails that find their task: each email's Outlook identifiers kept, an email whose conversation is already filed to a task filling the task picker with it, the `email-ids` command for emails captured before, and the troubleshooting report's identifiers and T-mail try-outs. Schema version 22. |
+| 5.101 | 2026-11-06 | Emails that find their task: each email's Outlook identifiers kept, an email whose conversation is already filed to a task filling the task picker with it, the `email-ids` command for emails captured before, and the troubleshooting report's identifiers and T-mail try-outs. Schema version 23. |
 | 5.96 | 2026-11-06 | The usage command: how often each wheel command and each kind of thing in the Activity view was used in the last 7 and 30 days. |
 | 5.95 | 2026-11-06 | The browse window in smaller parts, with no change in what it does: its list views, page commands and notes wiring in modules of their own, the long builders in named sections, and a view's own state kept without loading the model again. |
 | 5.94 | 2026-11-06 | Where typed text lands: at the end of the notes page, under a heading with its words only when that's the page's last, with the footer saying which. |
@@ -20,6 +20,7 @@ One line per release, newest first: its number, the date it was built, and what 
 | 5.84 | 2026-11-05 | The task page's clean-up, stage T2: a short header of widgets. |
 | 5.83 | 2026-11-05 | The task page's clean-up, stage T1. |
 | 5.81 | 2026-11-05 | A task's priority as its row's left edge. |
+| 5.79 | 2026-11-05 | Tagged labels: plant tags found in every capture, email, document and notes page however they're written, a glossary imported from Excel or CSV, a Tagged labels view and each tag's page, chips on captures, documents and tasks, search and the Task view's tag: filter. |
 | 5.78 | 2026-11-05 | List rows: one line per row at one height per view. |
 | 5.77 | 2026-11-05 | Every capture window fresh, and Drafts. |
 | 5.76 | 2026-11-05 | A task's state from its row, with Undo. |

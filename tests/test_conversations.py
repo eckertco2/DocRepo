@@ -246,16 +246,16 @@ def test_the_email_ids_command_says_what_it_did(tmp_path, capsys):
     assert "Gave 1 email row" in capsys.readouterr().out
 
 
-# ---- schema 22: 5.93's places move into capture_emails ----
+# ---- schema 23: 5.93's places move into capture_emails ----
 def test_the_places_release_5_93_kept_move_into_capture_emails():
     import sqlite3
 
     conn = sqlite3.connect(":memory:", isolation_level=None)
     conn.row_factory = sqlite3.Row
     db._run(conn, db.SCHEMA)
-    for step in range(2, 22):
+    for step in range(2, 23):
         db._run(conn, db.MIGRATIONS[step])
-    conn.execute("PRAGMA user_version = 21")
+    conn.execute("PRAGMA user_version = 22")
     cid = captures.add_capture(conn, saved="2026-11-06 08:00:00", source="outlook_email", types=["note"], title="Crane booking")
     for pos in (0, 1):
         conn.execute("INSERT INTO capture_emails (capture, pos, file, subject, sender, sent) VALUES (?, ?, ?, 'Crane', 'Ann', '')",
