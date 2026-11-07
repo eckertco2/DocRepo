@@ -421,9 +421,13 @@ def lines(real: Model, w: WhatIf, pic: Picture, today: date) -> list[Line]:
             else:
                 says.append(f"Now {_span(s, e, today)}.")
             if t is not None and a.task in pic.model.tasks:
+                # What else it changes, as a drop says (release 5.48): the Duration when an end is stretched, and a rate's total.
+                extra = timeline.drop_changes(t, pic.model.task(a.task))
                 before, after = timeline.hours(t, today), timeline.hours(pic.model.task(a.task), today)
                 if before and after and round(before[0], 1) == round(after[0], 1):
-                    says[-1] = says[-1][:-1] + ", hours kept."
+                    extra.append("hours kept")
+                if extra:
+                    says[-1] = says[-1][:-1] + ", " + ", ".join(extra) + "."
         else:  # a key date
             key_id = next(iter(a.keys), None)
             kd = next((k for k in real.key_dates_of(a.task) if k.id == key_id), None)

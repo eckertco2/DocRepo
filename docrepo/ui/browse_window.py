@@ -361,6 +361,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         self.timeline.edit_task.connect(self.edit_task)  # a double-click (release 5.91)
         self.timeline.load_cells = lambda weeks: capacity.week_cells(self.ctx.conn, weeks)
         self.timeline.load_unplaced = lambda m, today: capacity.unplaced(m, today, self.ctx.settings)
+        self.timeline.workdays = self._workdays  # a Duration's days while it's dragged (release 5.48)
         self.timeline.add_person.connect(self.add_person)
         # What-ifs (release 5.64): kept in app_state; what one would do is worked out in a transaction always rolled back.
         self.timeline.whatifs = whatif.load_all(self.ctx.conn)
