@@ -255,9 +255,10 @@ def test_the_today_view_draws_the_same_due_rows_as_before(app):
     m, today = Model(app.ctx.conn), NOW.date()
     tasks = due_this_week(m, today, "P001", False)
     dues = key_dates_due(m, today, "P001", False)
-    entries = sorted([*((d.date if (d := due_of(t, today)) else date.max, 1, i, t) for i, t in enumerate(tasks)),
-                      *((d.day, 0, i, d) for i, d in enumerate(dues))], key=lambda e: e[:3])
-    assert today_due_entries(m, today, "P001", False) == [e[3] for e in entries]
+    # Urgent ones first since release 5.97 (decision 386), then soonest first, a key date before a task on the same day.
+    entries = sorted([*((not t.urgent, d.date if (d := due_of(t, today)) else date.max, 1, i, t) for i, t in enumerate(tasks)),
+                      *((not d.task.urgent, d.day, 0, i, d) for i, d in enumerate(dues))], key=lambda e: e[:4])
+    assert today_due_entries(m, today, "P001", False) == [e[4] for e in entries]
     app.show_browse("today")
     assert app.browse.view == "today"
 

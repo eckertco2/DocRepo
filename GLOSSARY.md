@@ -27,7 +27,6 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Parse and populate**: the window's rule-based filling of fields from the content text, with no LLM. It's the only feature called "parse".
 - **Navigation wheel**, or wheel: a small ring of actions on a hotkey, picked with the arrow keys (release 5.41). Each is in `Config\wheels.jsonc`.
 - **Slot**: one place on a wheel, under a direction from N round to NW, naming a command. A **held** slot keeps the place for later and does nothing.
-- **Set aside**: a draft moved out of the capture window so that it's truly blank (release 5.41). It comes back when the blank capture is saved, or closed with nothing typed.
 
 ## 2. Tasks
 
@@ -53,6 +52,8 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Task description**: the short "what it is" of a task. A task made from a capture takes the first line of its content text; the whole text goes on its notes page (release 5.25).
 - **Label**: a category on a task, such as Safety. A task can have several, and subtasks can inherit them.
 - **Parent label**: a label with labels under it (its **sublabels**), such as Production line over Line 1 and Line 2. It's a heading: tasks get its sublabels, not it. Labels nest one level only.
+- **Priority**: a task's bucket on the Priorities board (Critical, High, Medium or Parking lot) and its place in it, shown as its row's left edge (releases 5.23 and 5.81).
+- **Urgent**: a tick on a task. The task tree's **Urgent only** filter lists the urgent tasks, and Today's Due in the next 7 days puts them first; since release 5.97 there's no Urgent view. It isn't a priority bucket.
 - **Plant event**: a task with Plant event ticked, such as an outage or a turnaround, which the timeline shades from its Start to its Due so other work can be seen against it.
 - **Reference field**: a field every task has for a number from another system, such as a change record's. Its name is set in Settings.
 - **Tagged label**: a plant's tag, such as V-110 or FIC-2210, found in the text of every capture, email, document, notes page and task (release 5.79). It isn't a label: a label is a category the owner gives a task, and a tagged label is found in the words. It's found however its parts are joined (V-110, V110, V 110), and by its aliases. Captures, documents and tasks show theirs in a **Tagged labels** row.
@@ -66,13 +67,13 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Agenda target**: the meeting, task or person whose agenda an item is on.
 - **Agenda**: the open agenda items of one agenda target.
 - **Today**: the built-in agenda target that is the owner's to-do list for the day. Its items carry over until they're marked Done.
-- **Quick task**: a task made from one line and put on Today, from Today's box, the Today hotkey, or a new task with no task picked that goes on Today. It's an ordinary task.
-- **Quick tasks**: the built-in top-level task that quick tasks wait under until Edit task puts them under their real task. DocRepo makes it the first time it's needed.
+- **Quick task**: a task made from one line and put on Today, two ways (release 5.99): Today's box (the view's and the side panel's), and Ctrl+Shift+D, whose command the wheels' slots run. Make it a task turns a note on Today into one. It's an ordinary task. A New task with Today ticked in the capture window isn't one: it's an ordinary new task on Today. D on a row is **Add to Today**, which puts the task on Today as it is.
+- **Quick tasks**: the built-in top-level task that quick tasks wait under until **Put under…** on the row's menu (release 5.99), or Edit task, puts them under their real task. DocRepo makes it the first time it's needed.
 - **Today side panel**: the Today view as a floating strip beside the other windows (release 5.43). It has the same items as the Today view, not a list of its own.
 - **Discard**: hiding a task or capture made by mistake, with a reason. Nothing is deleted, and Bring back restores it. It's how DocRepo "deletes" anything. Since release 5.91 it's the one word for getting rid of a record: a task, a capture or a draft.
 - **Remove**: taking a link away (release 5.91): a person from a task, a file from a capture, an item from an agenda or Today, a task from under a parent, a row from a template, a task from a what-if's plan, or a row or column from a table on a notes page. What it linked stays. In a what-if, **Add back** undoes it.
 - **Clear**: emptying a field, or the content text (release 5.91).
-- **New task under this one**: the task page's, the Task view's and the Activity view's name for a new task made under the task you're on (release 5.91), in place of "New subtask".
+- **New task under this one**: the task page's and the Activity view's name for a new task made under the task you're on (release 5.91), in place of "New subtask".
 - **Scope**: which tasks a view or prompt draws on: this task, with ancestors, with subtasks, or family. Family is all ancestors plus all descendants.
 - **Event**: a dated happening, such as an audit or a turnaround, entered as a task's Deadline. "Event" means nothing else, except in "plant event".
 
@@ -84,6 +85,7 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Detach**: ending all of a task's links to its template, keeping its values.
 - **Duration**: a task's length in days, kept when its dates move once it's typed (release 5.46).
 - **Runs through weekends**: a tick saying a task's days are every day, not only workdays.
+- **Quick edit**: the small window for one task from the Timeline (Q), where its dates are typed in words, read as you type, with its people and hours (release 5.30). Since release 5.100 the rest of what shapes its dates, its Duration, Runs through weekends, ties and key dates, has one form, Edit task's **More options**, which Quick edit's More options… opens. No new date kind comes without a decision that retires one.
 - **Hours a day**: a role's hours stated as a rate (**h a day**), whose total (**h in all**) is the rate times the task's days. The total is what the lists, the timeline and Capacity read.
 - **Hours a week**: the same with **h a week**, whose total is the rate times the weeks in the task's days, part weeks included. A week is the workdays in Settings, or 7 days with Runs through weekends.
 - **Tie**: a task's Start or Due set from another date: a number of workdays or weeks, before or after another task's start or end, or a key date's. When the source moves, the date moves and keeps its gap. Changing the date by hand keeps the tie, with a new gap.
@@ -127,7 +129,7 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Conversation**: an Outlook email with its replies and forwards, known by the GUID in their conversation index, the same in each whatever its subject (release 5.101). A conversation follows the task it was last filed to, so an email of it added to a capture fills the task picker, "from conversation". A thread (5) holds one or more conversations.
 - **Outlook category**: the task's name DocRepo adds to an Outlook email it files on that task, with Mark filed emails in Outlook on in Settings (release 5.33), so Outlook's own search finds it. It isn't a label.
 - **Link**: a web or SharePoint address kept as a document, with a file description, in place of a file. Its original is the address. DocRepo never opens or fetches it, so it has no extracted text; Copy link puts it on the clipboard.
-- **Pinned file**: a file pinned on a task in its Task view (release 5.35): one of the task's key documents, first on its Overview and listed in its Task.md. Pins are per task.
+- **Pinned file**: a file pinned on a task in its Find files (release 5.35): one of the task's key documents, first on its Overview and listed in its Task.md. Pins are per task.
 - **Document version**: DocRepo's record that a tracked original has changed, with the difference. It isn't a capture; it becomes part of the raw text log of the tasks linked to that document.
 
 ## 5. Summaries and processing
@@ -156,7 +158,8 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Look**: how DocRepo's windows are drawn: the new look (from release 5.10), or the **Classic look**, release 5.9's colours, fonts and hints on the same layouts. Chosen in Settings.
 - **Show hints**: the setting that shows the help text, the **i** buttons and the key badges in every window. Off by default.
 - **Key tips**: the labels that show each control's key while Alt (letter keys) or Ctrl (Ctrl shortcuts) is held.
-- **Task view**: a window of its own for one task (releases 5.34 and 5.35), opened with O: its status at a glance, an outline of its subtasks, and a search that finds its files, emails, notes and updates as you type, with a preview, built for finding and opening its documents.
+- **Find files**: a window of its own for one task (releases 5.34 and 5.35, as the Task view; renamed in release 5.98), opened from the Files group on the task page, or with O: its status at a glance, an outline of its subtasks, and a search that finds its files, emails, notes and updates as you type, with a preview, built for finding and opening its documents. Its one command is Task page: the task page is a task's home.
+- **Edit** and **Add to** (a task's menus): Edit is Edit task… with the task's place in the tree and Discard…; Add to is Today, the open meetings and anyone else. Each is made from one list (release 5.98), the same on the task page, every task row's right-click menu and Find files' task rows.
 - **Command palette**: the box Ctrl+K opens, listing every action and view, narrowed as you type.
 - **Pinned window**: the capture window shrunk to a small window at the bottom right (Pin, F12), for dropping files, emails and links on. It's the same capture.
 
@@ -167,6 +170,8 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **New subtask**: as an option name, say New task. It's a subtask when it has a parent. On a task's own page and menus, say New task under this one (release 5.91).
 - **Delete**, **Take off**, **Take out** and **Put back** (in the windows, release 5.91): say Discard for a record, Remove for a link and Clear for a field. Bring back stays as Discard's opposite, and Add back as Remove's in a what-if. A what-if itself is still deleted, as it holds no record of the owner's: nothing changed until it was applied.
 - **File a copy**: say Save a copy, so "filing" only means linking an unfiled capture.
+- **Task view**: say Find files (release 5.98). Its Notes page tab went with the name: the notes are on the task page.
+- **Set aside**: retired with release 5.77, when the capture window opens fresh each time and a capture closed before it's saved goes to Drafts.
 - **Project notes**: say Note.
 - **Tag**: on its own, only a plant's tag (a tagged label, release 5.79), as in tag pattern. Never a capture's type, which is its capture type, or a task's category, which is a label.
 - **option**: the field in `capture.md` becomes `capture_types`, a list, since one capture can be several types.

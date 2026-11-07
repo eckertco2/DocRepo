@@ -394,7 +394,7 @@ def test_the_browse_wheels_task_search_opens_the_task_view_and_ctrl_its_page(app
     slot = app.wheels.config.wheel("browse").slots["E"]
     app.wheels.run(slot.command, slot.args)
     s = app.wheels._task_search
-    assert "Enter opens its Task view" in s.picker.hint
+    assert "Enter opens its Find files" in s.picker.hint
     s.picker.pick("T000008")
     QApplication.processEvents()
     view = app.browse.task_views["T000008"]
@@ -445,10 +445,10 @@ def test_no_match_offers_search_everything_with_what_was_typed(app):
     assert app.browse.isVisible() and app.browse.search_box.text() == "zzzqqq"
 
 
-def test_the_execution_wheels_task_view_with_nothing_current_opens_task_search(app):
+def test_the_execution_wheels_find_files_with_nothing_current_opens_task_search(app):
     app.browse.sel = None
-    app.wheels.run("task_view.current", {})
-    assert app.wheels._task_search.then == "task_view"
+    app.wheels.run("find_files.current", {})
+    assert app.wheels._task_search.then == "find_files"
     app.wheels._task_search.picker.pick("T000008")
     assert "T000008" in app.browse.task_views
     app.browse.task_views["T000008"].hide()

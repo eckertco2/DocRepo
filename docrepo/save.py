@@ -191,8 +191,9 @@ class CaptureDraft:
     update_key_dates: list[tasks.KeyDateRow] | None = None
     #: Make it a task: the unfiled capture the new task is made from. It's filed to the new task; no new capture is kept.
     from_capture: str | None = None
-    #: A quick task (mods log round 2, M0039): with no task picked, the new task goes under the built-in Quick tasks. A new
-    #: task with no task picked that goes on Today is one too.
+    #: A quick task (mods log round 2, M0039): with no task picked, the new task goes under the built-in Quick tasks. Since
+    #: release 5.99 (the consolidation plan's decision 393) only Today's box, Make it a task and Ctrl+Shift+D's command make
+    #: one: a New task with Today ticked is an ordinary new task on Today, a top-level task when no task is picked.
     quick: bool = False
     #: The content text is markup (mods log round 2, M0045; ``docrepo.markup``): it has formatting or lists.
     formatted: bool = False
@@ -543,7 +544,7 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
     copies: list[tuple[str, str]] = []  # (document ID, file name) for saved copies
     changes: list[tasks.Change] = []
     created = None
-    quick_task = is_new and not t and not draft.from_capture and (draft.quick or TODAY in targets)
+    quick_task = is_new and not t and not draft.from_capture and draft.quick  # decision 393: Today alone doesn't make one
     holder_title = task_row["title"] if task_row else None  # the task the files belong to, for descriptions left empty
     with transaction(conn):
         capture_id = next_id(conn, "C") if keep else None

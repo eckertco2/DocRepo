@@ -107,12 +107,22 @@ class TaskLists:
             self._add_nodes(n.children, item, filtered, expand_all, row)
             item.setExpanded(expand_all or n.id in self.open)
 
+    def _tree_filter(self, pin: bool = True) -> TreeFilter:
+        """The task tree's filters as they're ticked, with the task just saved pinned (``pin``)."""
+        f = self.tree_filter
+        return TreeFilter(parked=f["parked"], closed=f["closed"], routine=f["routine"], labels=tuple(f["labels"]), people=tuple(f["people"]),
+                          pin=self.pin if pin else None, priorities=tuple(f["priorities"]), urgent=bool(f.get("urgent")))
+
     def _tasks_view(self) -> None:
         f = self.tree_filter
-        filtered = bool(f["labels"] or f["people"] or f["priorities"])
+        filtered = bool(f["labels"] or f["people"] or f["priorities"] or f.get("urgent"))
         m = self.model()
         self._set_head("Task tree", "Dimmed rows don't match the filter. They're parents of tasks that do, shown for context." if filtered else "",
                        f"{sum(1 for t in m.tasks.values() if is_open(t))} open")
+        # Urgent only (release 5.97, the consolidation plan's decision 386): what the Urgent view listed, in the tree, first
+        # among the filters (the mock's place, the owner's choice of 2026-11-07).
+        self._check("Urgent only", bool(f.get("urgent")), lambda on: self._set_filter("urgent", on),
+                    "Only the tasks ticked Urgent, with their parents dimmed. Today's Due in the next 7 days puts them first too.")
         self._check("Show parked", f["parked"], lambda on: self._set_filter("parked", on))
         self._check("Show closed", f["closed"], lambda on: self._set_filter("closed", on))
         self._check("Show routine", f["routine"], lambda on: self._set_filter("routine", on), "Recurring tasks, such as meetings, and their subtasks")
@@ -133,8 +143,7 @@ class TaskLists:
         self._sort_box("tasks")
         self._tree_group_box(m)
         self._select_controls()
-        tf = TreeFilter(parked=f["parked"], closed=f["closed"], routine=f["routine"], labels=tuple(f["labels"]), people=tuple(f["people"]),
-                        pin=self.pin, priorities=tuple(f["priorities"]))
+        tf = self._tree_filter()
         how = self.tree_group if self.tree_group in dict(TREE_GROUPS) or self.tree_group[3:] in {lb.name for lb in m.labels} else ""
         sections = [replace(s, nodes=sort_tree(m, s.nodes, self.sorts.get("tasks", "default"), self.today()))
                     for s in tree_sections(m, tf, how)] if how else []
@@ -185,10 +194,8 @@ class TaskLists:
         """Group by, chosen: the branches open down to each section's tasks, so the groups show what's in them."""
         self.tree_group = how
         if how:
-            m, f = self.model(), self.tree_filter
-            tf = TreeFilter(parked=f["parked"], closed=f["closed"], routine=f["routine"], labels=tuple(f["labels"]),
-                            people=tuple(f["people"]), priorities=tuple(f["priorities"]))
-            for section in tree_sections(m, tf, how):
+            m = self.model()
+            for section in tree_sections(m, self._tree_filter(pin=False), how):
                 for n in walk(section.nodes):
                     if n.match:
                         self.open.update(m.ancestors_of(n.id))
@@ -196,7 +203,16 @@ class TaskLists:
 
     def _set_filter(self, key: str, value) -> None:
         self.tree_filter[key] = value
+        if key == "urgent" and value:
+            self.open_to_urgent()
         self.render_list()
+
+    def open_to_urgent(self) -> None:
+        """Urgent only, ticked: the branches open down to each urgent task, so the tree shows them (release 5.97)."""
+        m = self.model()
+        for t in m.tasks.values():
+            if t.urgent and is_open(t):
+                self.open.update(m.ancestors_of(t.id))
 
     def _sort_box(self, view_id: str) -> None:
         """The Sort list for the task tree or a list (mods log round 1, M0015)."""

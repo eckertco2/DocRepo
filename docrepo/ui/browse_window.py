@@ -77,9 +77,11 @@ from docrepo.ui.task_picker import TaskPicker
 from docrepo.ui.timeline_view import TimelineView
 from docrepo.ui.state_menu import UNDO_MS, can_change, open_below, picked_line, state_menu
 from docrepo.ui.tree_view import HTML_ROLE, KEY_ROLE, RowTree
+from docrepo.ui import task_menus
 from docrepo.ui.widgets import SAVE_KEYS, DropButton, FlowLayout, Option, ViewStack, ask, label_options, people_options
 from docrepo.views import (
     LIST_IDS,
+    RETIRED_VIEWS,
     TASK_VIEWS,
     VIEW_IDS,
     VIEWS,
@@ -158,7 +160,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         self.view = "tasks"
         self.sel: tuple[str, str] | None = None
         self.pin: str | None = None
-        self.tree_filter = {"parked": False, "closed": False, "routine": True, "labels": [], "people": [], "priorities": []}
+        self.tree_filter = {"parked": False, "closed": False, "routine": True, "labels": [], "people": [], "priorities": [], "urgent": False}
         #: Each task view's sort order (views.SORTS); "default" is its own order.
         self.sorts: dict[str, str] = {}
         self.list_groups: dict[str, str] = {}  # each list's Group by: a parent label (release 5.9)
@@ -204,7 +206,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         # M meeting notes (release 5.8).
         for keys, handler in (("N", lambda: self._key("note")), ("T", lambda: self._key("new_task")), ("U", lambda: self._key("update")),
                               ("A", lambda: self._key("agenda")), ("E", lambda: self._key("edit")), ("D", lambda: self._key("today")),
-                              ("M", lambda: self._key("meeting")), ("O", lambda: self._key("task_view")),
+                              ("M", lambda: self._key("meeting")), ("O", lambda: self._key("find_files")),
                               ("Ctrl+F", self.open_find), ("Ctrl+Shift+F", self.search_box.setFocus), ("F1", self.show_keys), ("F5", self.refresh),
                               ("Ctrl+B", lambda: self.show_views_pane(not self.views_button.isChecked())), ("Ctrl+K", self.open_palette)):
             QShortcut(QKeySequence(keys), self, handler)
@@ -337,6 +339,8 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         # right-click menu has it as a submenu.
         self.tree.state_clicked = self.popup_state_menu
         self.tree.state_menu = lambda task_id, parent: self.state_menu_for(task_id, parent)
+        # One Edit and one Add to (release 5.98, decision 392): a task row's menu has them too, from the task page's own lists.
+        self.tree.task_menus = lambda task_id, menu: task_menus.add_row_menus(self, task_id, menu, anchor=self.tree)
         lp.addWidget(self.tree, 1)
         self.middle.addWidget(list_page)
         if LOOK.classic:  # the new look has it on the Timeline's page (decision 229)
@@ -560,6 +564,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         if view == "capacity" and not LOOK.classic:  # one page for both (decision 229): a wheel's slice can still name it
             self.timeline.show_capacity()
             view = "timeline"
+        view = self._route_retired(view)
         if view:
             self.view = view
         if task:
@@ -796,13 +801,15 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
                     Command("Task", "Edit task", lambda: self.edit_task(tid), "E")]
             if task.meeting:
                 out.append(Command("Task", "Meeting notes", lambda: self.open_capture(task=tid, meeting=True), "M"))
-            out += [Command("Task", "Open its Task view", lambda: self.open_task_view(tid), "O"),
+            out += [Command("Task", "Find files", lambda: self.open_task_view(tid), "O"),
                     Command("Task", "Copy prompt", lambda: self.copy_prompt(tid)),
                     Command("Task", "Save as template", lambda: self.templates.save_as(tid)),
                     Command("Task", "Apply template", lambda: self.templates.apply([tid])),
                     Command("Task", "Export tree", lambda: self.tree_files.export_task(tid)),
                     Command("Task", "Open folder", lambda: self.reveal(self.ctx.data_root / "Tasks" / tid))]
         out += [Command("View", v.label, lambda v=v.id: self.set_view(v)) for v in VIEWS]
+        # The Urgent view's place in the palette (release 5.97, decision 386): the task tree, Urgent only.
+        out.append(Command("View", "Urgent tasks (the task tree, Urgent only)", self.show_urgent))
         out += [Command("", "New capture", lambda: self.open_capture(), self.ctx.settings.hotkey),
                 Command("", "Import a tree file", self.tree_files.import_tree),
                 Command("", "Search everything", self.search_box.setFocus, "Ctrl+Shift+F"),
@@ -1132,7 +1139,22 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         self.view, self.target = "agenda", target
         self.select("person" if is_person(target) else "task", target, update_list=True)
 
+    def _route_retired(self, view: str | None) -> str | None:
+        """A view that's gone (release 5.97): its name leads to the view that took it over, with its filter on. The Urgent
+        view is the task tree with Urgent only ticked (the consolidation plan's decision 386)."""
+        if view in RETIRED_VIEWS:
+            view, flag = RETIRED_VIEWS[view]
+            self.tree_filter[flag] = True
+            if flag == "urgent":
+                self.open_to_urgent()
+        return view
+
+    def show_urgent(self) -> None:
+        """The urgent tasks: the task tree with its Urgent filter on, where the Urgent view's keys and commands lead."""
+        self.set_view("urgent")
+
     def set_view(self, view: str) -> None:
+        view = self._route_retired(view) or ""
         if view not in VIEW_IDS:
             return
         if view == "capacity" and not LOOK.classic:  # one page for both (decision 229)
@@ -1263,7 +1285,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
             return
         if mode == "edit":
             self.edit_task(self.sel[1])
-        elif mode == "task_view":  # O: its Task view (decision 164)
+        elif mode in ("find_files", "task_view"):  # O: its Find files (decision 164; the Task view until release 5.98, decision 389)
             self.open_task_view(self.sel[1])
         elif mode == "today":
             self.add_to_today(self.sel[1])
@@ -1425,7 +1447,8 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
 
     # ---- Today (mods log round 1, M0016) ----
     def add_to_today(self, task_id: str) -> None:
-        """T, or Add to Today: the task goes on Today, and the window stays where it is."""
+        """D, or Add to Today: the task goes on Today, and the window stays where it is. It's no quick task: the task is as it
+        was (release 5.99, the consolidation plan's decision 393)."""
         self._do(lambda: edits.add_to_today(self.conn, self.ctx.data_root, self.ctx.fs, task_id, "", self._now()), self.sel)
 
     def set_today_kind(self, kind: str) -> None:
@@ -1587,11 +1610,12 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
 
     # ================= the Task view (releases 5.34 and 5.35) =================
     def open_task_view(self, task_id: str | None = None, file_type: str | None = None) -> None:
-        """A task's Task view: a window of its own (decision 156), one per task, brought forward when it's open.
-        ``file_type`` shows only that type of file, such as "link" from the Links group (release 5.67)."""
+        """A task's Find files (the Task view until release 5.98, decision 389): a window of its own (decision 156), one per
+        task, brought forward when it's open. ``file_type`` shows only that type of file, such as "link" from the Links
+        group (release 5.67)."""
         task_id = task_id or (self.sel[1] if self.sel and self.sel[0] == "task" else None)
         if not task_id or task_id not in self.model().tasks:
-            self.say("Select a task first. O opens the Task view of the task that's selected.")
+            self.say("Select a task first. O opens Find files for the task that's selected.")
             return
         from docrepo.ui.task_view import TaskView
 
@@ -1607,7 +1631,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         view.focus_box()
 
     def current_task_for_view(self) -> str | None:
-        """The Execution wheel's Task view (release 5.41): the task selected here, or else the last Task view opened."""
+        """The Execution wheel's Find files (release 5.41): the task selected here, or else the last Find files opened."""
         if self.sel and self.sel[0] == "task" and self.sel[1] in self.model().tasks:
             return self.sel[1]
         return self.last_task_view if self.last_task_view in self.model().tasks else None
@@ -1646,8 +1670,9 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
     def _people_options(self, text: str, picked: list[str]) -> list[Option]:
         return people_options(self.model(), self.ctx.settings.me, text, picked)
 
-    def edit_task(self, task_id: str) -> None:
-        """Edit task (E): every field on one page (mods log round 1, M0008, M0011)."""
+    def edit_task(self, task_id: str, more: bool = False) -> None:
+        """Edit task (E): every field on one page (mods log round 1, M0008, M0011). ``more`` opens it at More options, as
+        Quick edit's More options… does (release 5.100)."""
         if task_id not in self.model().tasks:
             return
         # Its checklist (release 5.26, decision 88 as redone): the Checklist summary, bound to the notes page's lines, so
@@ -1656,7 +1681,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
 
         if self.task_pane.task_id != task_id and self.sel == ("task", task_id):
             self.render_detail()
-        showing = next((p for p in self.note_panes() if p.task_id == task_id), None)  # the task page's, or a Task view's
+        showing = next((p for p in self.note_panes() if p.task_id == task_id), None)  # the task page's
         notes = showing.notes if showing else self.task_pane.notes
         checklist = ChecklistSummary(notes, foldable=False) if showing else None
         dialog = TaskEditDialog(self, self.model(), task_id, self._label_options, self._people_options,
@@ -1664,6 +1689,8 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
                                 reference_fields=self.ctx.settings.reference_fields, today=self.today(), checklist=checklist,
                                 link=self.templates.link_of(task_id), workdays=self._workdays(),
                                 reference_links=self.ctx.settings.reference_links, open_link=self.open_address)
+        if more:
+            dialog.show_more()
         self._edit_dialog = dialog  # kept, so tests can reach it
         while True:
             try:
@@ -1740,9 +1767,9 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
             self.go_capture(capture_id)
             self.say(message)
 
-    def _pick_parent(self, task_id: str, old_parent: str | None, also: bool = False) -> None:
-        anchor = self.actions
-        self._pick_task(anchor, lambda new: self.move_task(task_id, None if also else old_parent, new) if new else None, None)
+    def _pick_parent(self, task_id: str, old_parent: str | None, also: bool = False, anchor: QWidget | None = None) -> None:
+        """The task picker for Move, Put under and Also put under, under ``anchor`` (the command bar unless a menu says)."""
+        self._pick_task(anchor or self.actions, lambda new: self.move_task(task_id, None if also else old_parent, new) if new else None, None)
 
     def move_task(self, task_id: str, old_parent: str | None, new_parent: str | None) -> None:
         self._do(lambda: edits.move_task(self.conn, self.ctx.data_root, self.ctx.fs, task_id, old_parent, new_parent, self._now()))

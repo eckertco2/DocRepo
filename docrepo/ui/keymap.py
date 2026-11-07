@@ -15,13 +15,13 @@ KEY_MAP = (
     ("N", "Note", "Ctrl+Shift+N, on Note", "A note on the selected task", "Alt+N ticks Note"),
     ("U", "Update", "Ctrl+Shift+U, on Update (the task picker first)", "Update the selected task", "Alt+U ticks Update"),
     ("A", "Agenda", "Ctrl+Shift+A, in the agenda picker", "Put the selected task on an agenda", "Alt+A goes to the agenda picker"),
-    ("D", "Today (do)", "Ctrl+Shift+D, a quick task on Today", "Put the selected task on Today", "Alt+D puts it on Today, or takes it off"),
+    ("D", "Today (do)", "Ctrl+Shift+D, a quick task on Today", "Add to Today: the selected task", "Alt+D puts it on Today, or takes it off"),
     ("E", "Edit", "", "Edit task", ""),
     ("F", "Find", "", "Ctrl+F finds in this view; Ctrl+Shift+F searches everything", ""),
     ("B", "Browse tool", "Ctrl+Shift+B shows it", "", ""),
     ("P", "Parse, Plan", "", "On the timeline: Plan mode, to drag dates (Ctrl+Z undoes a drop)", "Alt+P runs Parse and populate"),
     ("M", "Meeting notes", "", "Meeting notes for the selected task: its meeting, or a new one under it", "Alt+M turns meeting notes on or off"),
-    ("O", "Open (Task view)", "", "The selected task's Task view: a window of its own for finding and opening its files", ""),
+    ("O", "Open (Find files)", "", "Find files for the selected task: a window of its own for finding and opening its files", ""),
 )
 OTHER_KEYS = (
     ("Ctrl+Shift+Space", "Opens the capture window (the main hotkey)"),
@@ -40,7 +40,8 @@ OTHER_KEYS = (
     ("Q", "On the Timeline: Quick edit for the selected row (release 5.91; a double-click is Edit task, as everywhere)"),
     ("F1", "This list, and the Syntax tab: every ** name, with examples"),
 )
-#: The Task view's keys (releases 5.34 and 5.35). The letters above act on its task there too, with Alt from its box.
+#: Find files' keys (releases 5.34 and 5.35, as the Task view). Since release 5.98 the task's letters aren't there: its
+#: commands are on its task page (the consolidation plan's decision 390), and typing in the list goes to the box.
 TASK_VIEW_KEYS = (
     ("Typing", "Searches the task's files, emails, notes and updates, and subtasks; the best match is chosen"),
     ("Up, Down, Page Up, Page Down", "Choose a row (the cursor stays in the box); Ctrl+Up and Ctrl+Down go by group"),
@@ -49,13 +50,13 @@ TASK_VIEW_KEYS = (
     ("Ctrl+Shift+C", "Copies its path (Ctrl+C in the list)"),
     ("P, Alt+P", "Pins or unpins it; Alt+Shift+Up and Alt+Shift+Down move a pinned file"),
     ("Space, Ctrl+Space", "Shows or hides the preview (Space in the list)"),
-    ("Ctrl+1 to Ctrl+6", "All, Files, Emails, Notes and updates, Subtasks, Notes page (in the page, Ctrl+1 is its checklist key)"),
+    ("Ctrl+1 to Ctrl+5", "All, Files, Emails, Notes and updates, Subtasks"),
     ("Ctrl+F, /", "Back to the search box"),
-    ("Ctrl+O", "Another task's Task view"),
-    ("Alt+Up", "The parent task's Task view"),
-    ("F6", "The next pane: the outline, the box, the list or the page, the preview"),
-    ("Esc", "Clears what's typed; again, the filters; it never closes the window. In the notes page, to the box; a search begun there, back to the page"),
-    ("Ctrl+W", "Closes the Task view"),
+    ("Ctrl+O", "Another task's Find files"),
+    ("Alt+Up", "The parent task's Find files"),
+    ("F6", "The next pane: the outline, the box, the list, the preview"),
+    ("Esc", "Clears what's typed; again, the filters; it never closes the window"),
+    ("Ctrl+W", "Closes Find files"),
 )
 #: The content text's keys, as OneNote's (mods log round 3, M0055).
 EDITOR_KEYS = (
@@ -93,7 +94,7 @@ PANEL_KEYS = (
 #: The wheels' task search and file search (release 5.42).
 SEARCH_KEYS = (
     ("Enter (task search)", "Opens the task's page in the browse tool"),
-    ("Ctrl+Enter (task search)", "Opens its Task view"),
+    ("Ctrl+Enter (task search)", "Opens its Find files"),
     ("Enter (file search)", "Opens the file in its own program (an attachment is shown in File Explorer; a link is copied)"),
     ("Ctrl+Enter (file search)", "Shows it in File Explorer"),
     ("Ctrl+Shift+C (file search)", "Copies its path"),
@@ -120,7 +121,7 @@ def key_map_html(main_hotkey: str = "Ctrl+Shift+Space") -> str:
             "<th align='left'>Global hotkey</th><th align='left'>Browse tool</th><th align='left'>Capture window</th></tr>"
             f"{rows}</table><p></p><table cellspacing='0' cellpadding='4'>{other}</table>"
             f"<p><b>In the content text</b>, as in OneNote</p><table cellspacing='0' cellpadding='4'>{editor}</table>"
-            f"<p><b>In the Task view</b> (O)</p><table cellspacing='0' cellpadding='4'>{task_view}</table>"
+            f"<p><b>In Find files</b> (O)</p><table cellspacing='0' cellpadding='4'>{task_view}</table>"
             f"<p><b>In a navigation wheel</b></p><table cellspacing='0' cellpadding='4'>{wheels}</table>"
             f"<p><b>In the Today side panel</b></p><table cellspacing='0' cellpadding='4'>{panel}</table>")
 

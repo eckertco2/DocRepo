@@ -36,8 +36,8 @@ class NotesPages:
 
     # ---- the task page with its notes page (release 5.25) ----
     def wire_notes(self, pane: TaskPane, say: Callable[..., None], open_ref: Callable[[str], None]) -> None:
-        """A notes page's signals: for the task page's pane, and a Task view's (release 5.37), which says things and opens
-        what's clicked in its own window."""
+        """A notes page's signals: for the task page's pane (and, from release 5.37 to 5.97, a Task view's Notes page tab),
+        which says things and opens what's clicked in its own window."""
         notes = pane.notes
         pane.say = say
         notes.changed.connect(lambda body: self._save_notes(body, pane))
@@ -53,16 +53,16 @@ class NotesPages:
         pane.summary.folded.connect(lambda folded: self._save_summary_folded(folded, pane))
 
     def note_panes(self) -> list[TaskPane]:
-        """Every notes page that's been opened: the task page's, and those of the open Task views."""
-        return [self.task_pane, *(v.pane for v in self.task_views.values() if v.pane is not None)]
+        """Every notes page that's open: the task page's. Until release 5.98 each Task view's Notes page tab had one too."""
+        return [self.task_pane]
 
     def save_open_notes(self) -> None:
         for pane in self.note_panes():
             pane.notes.save_now()
 
     def _page_changed(self, task_id: str, saved_in: TaskPane) -> None:
-        """A page was saved in one window: any other showing it takes it at once, and the Task views read their records
-        again when they next need them, so a page being typed doesn't redraw them (decision 244)."""
+        """A page was saved in one window: any other showing it takes it at once, and each Find files reads its records
+        again when it next needs them, so a page being typed doesn't redraw them (decision 244)."""
         for pane in self.note_panes():
             if pane is not saved_in and pane.task_id == task_id:
                 self.load_notes(task_id, pane)

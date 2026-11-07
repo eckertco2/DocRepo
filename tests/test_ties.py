@@ -1120,24 +1120,29 @@ def test_quick_edit_shows_a_tied_date_and_typing_gives_a_new_gap(ctx, browse):
     assert t.start == MON_16 and t.ties["start"] == Tie(outage, amount=6)
 
 
-def test_quick_edit_greys_duration_with_both_tied(ctx, browse):
+def test_quick_edit_names_the_ties_which_edit_task_sets(ctx, browse):
+    """Release 5.100 (decision 395): ties and the Duration are Edit task's More options'; Quick edit says they're there."""
     outage, report = outage_and_report(ctx.conn)
     change(ctx.conn, report, ties={"start": Tie(outage, amount=1), "due": Tie(outage, amount=2)})
     ctx.conn.commit()
     w = QuickEdit(ctx, report)
-    assert not w.duration.isEnabled()
+    assert "Start and Due tied" in w.more_line.text() and not hasattr(w, "duration")
 
 
-def test_quick_edit_duration_moves_the_start_of_a_due_tied_task(ctx, browse):
+def test_edit_task_duration_moves_the_start_of_a_due_tied_task(ctx, browse):
+    """What Quick edit's Duration did until release 5.100, in Edit task's More options, where the Duration is now."""
     outage, report = outage_and_report(ctx.conn, duration=2)
     change(ctx.conn, report, ties={"due": Tie(outage)})
     ctx.conn.commit()
-    w = QuickEdit(ctx, report)
-    w.duration.setText("5")
-    w._field_edited("duration")
-    w.save()
+    browse.refresh()
+    f = TaskEditDialog(browse, browse.model(), report, browse._label_options, browse._people_options)
+    assert f.more.isVisibleTo(f) or not f.more.isHidden()  # a tie or a Duration opens More options (release 5.100)
+    f.duration.setText("5")
+    f._date_edited("duration")
+    edits.edit_task(ctx.conn, ctx.data_root, ctx.fs, SETTINGS, report, NOW, **f.values())
     t = get(ctx.conn, report)
-    assert (t.start, t.due, t.duration) == (MON_2, FRI_6, 5) and t.ties["due"] == Tie(outage)
+    assert (t.duration, t.due) == (5, FRI_6) and t.ties["due"] == Tie(outage)
+    f.deleteLater()
 
 
 def test_quick_edit_asks_first_and_back_keeps_it_open(ctx, browse):

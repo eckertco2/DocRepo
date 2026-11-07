@@ -422,12 +422,12 @@ def test_quick_edit_has_the_unit(ctx):
     w = QuickEdit(ctx, t)
     assert w.units["assignee_hours"].currentIndex() == 2 and w.hours["assignee_hours"].text() == "3"
     assert w.total.text().startswith("18 h in all")
-    w.duration.setText("10")
-    w._field_edited("duration")
-    assert w.total.text().startswith("6 h in all")
+    w.hours["assignee_hours"].setText("2")  # the Duration is Edit task's since release 5.100; the rate is still here
+    w._field_edited("assignee_hours")
+    assert w.total.text().startswith("12 h in all")
     w.save()
     x = get(ctx.conn, t)
-    assert (x.assignee_per_week, x.assignee_hours, x.duration) == (3, 6, 10)
+    assert (x.assignee_per_week, x.assignee_hours, x.duration) == (2, 12, 30)
     w.deleteLater()
 
 

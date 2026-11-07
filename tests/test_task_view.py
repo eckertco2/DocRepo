@@ -14,7 +14,7 @@ import pytest  # noqa: E402
 from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtGui import QGuiApplication  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication, QPushButton  # noqa: E402
 
 from docrepo import db, pins, prompts, search  # noqa: E402
 from docrepo.config import Settings  # noqa: E402
@@ -97,7 +97,7 @@ def finish_jobs(qapp) -> None:
 
 # ---- opening it ----
 def test_it_opens_on_overview_with_the_status_and_the_key_documents(view):
-    assert view.windowTitle() == "Line 2 debottleneck – Task view"
+    assert view.windowTitle() == "Find files: Line 2 debottleneck"  # decision 389
     assert view.count.text() == "Overview"
     assert [view.kinds.tabText(i) for i in range(5)] == ["All  883", "Files  504", "Emails  75", "Notes and updates  288", "Subtasks  16"]
     rows = titles(view)
@@ -228,7 +228,7 @@ def test_the_kinds_keys(view):
     assert view.kind == "email" and view.kinds.currentIndex() == 2
     shortcut(view, "Ctrl+1").activated.emit()
     assert view.kind == "all"
-    assert {"Ctrl+F", "/", "Ctrl+O", "Alt+Up", "Ctrl+Space", "F6", "Ctrl+W", "P", "Alt+P", "N", "Alt+N", "Ctrl+K"} <= {
+    assert {"Ctrl+F", "/", "Ctrl+O", "Alt+Up", "Ctrl+Space", "F6", "Ctrl+W", "P", "Alt+P", "Ctrl+K"} <= {
         s.key().toString() for s in view.findChildren(__import__("PySide6.QtGui", fromlist=["QShortcut"]).QShortcut)}
 
 
@@ -275,13 +275,14 @@ def test_a_task_with_no_files(browse):
 
 
 # ---- the ways in ----
-def test_o_the_task_page_button_and_the_palette_open_it(browse):
+def test_o_the_files_group_and_the_palette_open_it(browse):
+    """Release 5.98 (decision 389): Find files opens from O and the Files group's link, not a button on the bar."""
     browse.select("task", "T000008")
-    browse._key("task_view")
+    browse._key("find_files")
     assert "T000008" in browse.task_views
-    labels = [browse.actions_layout.itemAt(i).widget().text() for i in range(browse.actions_layout.count()) if browse.actions_layout.itemAt(i).widget()]
-    assert "Task view" in labels
-    assert any(c.name == "Open its Task view" for c in browse.palette_commands())
+    labels = [b.text() for b in browse.actions.findChildren(QPushButton)]
+    assert "Task view" not in labels and "Find files" not in labels
+    assert any(c.name == "Find files" for c in browse.palette_commands())
     browse.open_task_view("T000008")
     assert len(browse.task_views) == 1  # one window per task
 

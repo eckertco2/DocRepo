@@ -44,11 +44,18 @@ def test_a_quick_task_from_todays_box(env):
         add_quick_task(conn, root, fs, SETTINGS, "  ", AT)
 
 
-def test_a_new_task_on_today_with_no_task_picked_is_a_quick_task(env):
+def test_ctrl_shift_ds_new_task_on_today_with_no_task_picked_is_a_quick_task(env):
+    """Ctrl+Shift+D's capture window says quick (release 5.99, decision 393); New task with Today ticked by hand doesn't."""
     conn, root, fs = env
-    r = save_capture(conn, root, fs, SETTINGS, CaptureDraft(types={"new_task"}, new_task=NewTaskFields(title="Order seal kits"), agenda=[TODAY]), AT)
+    r = save_capture(conn, root, fs, SETTINGS, CaptureDraft(types={"new_task"}, new_task=NewTaskFields(title="Order seal kits"), agenda=[TODAY],
+                                                            quick=True), AT)
     m = Model(conn)
     assert m.parents_of(r.created_task) == [quick.parent_id(conn)] and r.message.endswith("under Quick tasks. On Today.")
+    ordinary = save_capture(conn, root, fs, SETTINGS, CaptureDraft(types={"new_task"}, new_task=NewTaskFields(title="Order gasket kits"),
+                                                                   agenda=[TODAY]), AT)
+    m = Model(conn)
+    assert m.parents_of(ordinary.created_task) == [] and [a.subject for a in m.today_items()][-1] == ordinary.created_task
+    assert "Quick tasks" not in ordinary.message and ordinary.message.endswith("On Today.")
     # Without Today, or with a task picked, nothing changes.
     plain = save_capture(conn, root, fs, SETTINGS, CaptureDraft(types={"new_task"}, new_task=NewTaskFields(title="A new project")), AT)
     under = save_capture(conn, root, fs, SETTINGS, CaptureDraft(task="T000008", types={"new_task"}, new_task=NewTaskFields(title="Torque the bolts"),

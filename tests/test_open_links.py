@@ -148,7 +148,7 @@ def test_the_task_page_shows_them(linked):
         assert f'href="opendoc:{lift}"' in page and 'src="lk:pin"' in page and 'title="Opens in your browser: ' + LIFT + '"' in page
         assert page.count('src="lk:') == 6  # five rows' marks and a pin
         assert "Torque.aspx" not in page  # the sixth isn't shown
-        assert re.search(r'href="taskviewlinks:T000008"[^>]*>Show link files in the Task view</a>', page)  # decision 323: not all are files
+        assert re.search(r'href="taskviewlinks:T000008"[^>]*>Show link files in Find files</a>', page)  # decision 323: not all are files
     details = pages.task_page(INSTALLATION, PageState(details=True), 600, "top")
     assert ">4471</a>" in details and "Copy link" in details and "copyref:Change%20record" in details
     plain = DetailPages(m, datetime(2026, 10, 8).date(), lambda c: "", "P001", conn)

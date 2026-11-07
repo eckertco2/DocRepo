@@ -92,7 +92,9 @@ def test_a_pinned_task_shows_whatever_the_filters(m):
     ("unplanned", [("T000001", False), ("T000008", False), ("T000019", True), ("T000002", False), ("T000017", True), ("T000016", True)]),
 ])
 def test_lists_in_tree_form_match_the_mockup(m, list_id, rows):
-    nodes = views.list_tree(m, views.LIST_IDS[list_id], TODAY, "P001")
+    from docrepo.lists import LISTS
+
+    nodes = views.list_tree(m, next(x for x in LISTS if x.id == list_id), TODAY, "P001")  # Urgent too, a list with no view
     assert [(n.id, n.match) for n in views.walk(nodes)] == rows
 
 
@@ -106,7 +108,7 @@ def test_documents_in_tree_form(m):
 
 def test_view_counts(m):
     assert views.view_counts(m, TODAY, "P001") == {"unfiled": 3, "tasks": 13, "people": 6, "labels": 5, "docs": 4, "due": 2, "reminders": 3,
-                                                   "waiting": 8, "mine": 3, "urgent": 1, "unplanned": 3, "discarded": 0, "today": 0}
+                                                   "waiting": 8, "mine": 3, "unplanned": 3, "discarded": 0, "today": 0}
 
 
 def test_unfiled_rows_newest_first(m):
@@ -192,3 +194,36 @@ def test_due_in_the_next_7_days_on_today(m, sample_conn):
     assert [t.id for t in views.due_this_week(m, TODAY, "P001", mine_only=True)] == ["T000019"]  # I lead it
     agenda.add_item(sample_conn, subject="T000019", target=ON_TODAY, note="", added="2026-10-08 08:00:00", added_by="Browse tool")
     assert [t.id for t in views.due_this_week(Model(sample_conn), TODAY, "P001")] == ["T000012"]
+
+
+# ---- release 5.97: the Urgent view retired into the task tree's filter and Today's order (decisions 386 and 387) ----
+def test_the_urgent_view_is_gone_but_its_list_and_its_name_stay(m):
+    from docrepo.lists import LISTS
+
+    assert "urgent" not in views.VIEW_IDS and "urgent" not in views.LIST_IDS and "urgent" not in views.ASKS
+    assert any(x.id == "urgent" for x in LISTS)  # the report's lists still have it
+    assert views.RETIRED_VIEWS["urgent"] == ("tasks", "urgent")
+    assert [v.id for v in views.VIEWS if v.section == "Lists"] == ["due", "reminders", "waiting", "mine", "unplanned"]
+
+
+def test_the_task_trees_urgent_filter_lists_what_the_urgent_view_did(m):
+    from docrepo.lists import LISTS
+
+    urgent = next(x for x in LISTS if x.id == "urgent")
+    tree = views.task_tree(m, views.TreeFilter(urgent=True))
+    assert [(n.id, n.match) for n in views.walk(tree)] == [(n.id, n.match) for n in views.walk(views.list_tree(m, urgent, TODAY, "P001"))]
+    assert views.TreeFilter(urgent=True).filtered and not views.TreeFilter().filtered
+    both = views.task_tree(m, views.TreeFilter(urgent=True, labels=("Safety",)))  # with another filter, both must match
+    assert all(m.task(n.id).urgent and "Safety" in [x for x, _ in m.labels_of(n.id)] for n in views.walk(both) if n.match)
+
+
+def test_todays_due_puts_urgent_tasks_first(m, sample_conn):
+    """Decision 386: an urgent task comes first in Today's Due in the next 7 days, then the rest soonest first."""
+    before = [views.entry_task(e).id for e in views.today_due_entries(m, TODAY, "P001")]
+    assert before == ["T000019", "T000012"]  # T000019 is urgent and the soonest already
+    sample_conn.execute("UPDATE tasks SET urgent = 0 WHERE id = 'T000019'")
+    sample_conn.execute("UPDATE tasks SET urgent = 1 WHERE id = 'T000012'")
+    after = [views.entry_task(e).id for e in views.today_due_entries(Model(sample_conn), TODAY, "P001")]
+    assert after == ["T000012", "T000019"]
+    sample_conn.execute("UPDATE tasks SET urgent = 0 WHERE id = 'T000012'")
+    assert [views.entry_task(e).id for e in views.today_due_entries(Model(sample_conn), TODAY, "P001")] == ["T000019", "T000012"]

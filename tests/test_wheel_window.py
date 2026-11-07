@@ -519,7 +519,7 @@ def test_pause_covers_the_wheels(app):
 
 def test_the_palette_lists_each_slot_with_its_wheel_and_direction(app):
     labels = [c.label for c in app.wheels.palette_commands()]
-    assert "Capture wheel, up: Blank capture" in labels and "Execution wheel, left: Task view" in labels
+    assert "Capture wheel, up: Blank capture" in labels and "Execution wheel, left: Find files" in labels
     assert "Wheel: Open the Browse wheel" in labels
     assert not any("Agent window" in x for x in labels)  # a held slot does nothing
     assert any(c.label == "Capture wheel, up: Blank capture" for c in app.browse.palette_commands())

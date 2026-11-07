@@ -1,18 +1,20 @@
-"""The Task view (releases 5.34 and 5.35; the design workspace's task overview design, decisions 156 to 167): a window
-of its own for one task, built so any of its documents can be found and opened in seconds from the keyboard.
+"""Find files (the Task view of releases 5.34 and 5.35, renamed in release 5.98; the design workspace's task overview design,
+decisions 156 to 167, and the consolidation plan's decisions 389 to 391): a window of its own for one task, built so any of
+its documents can be found and opened in seconds from the keyboard. It opens from the task page's Files group, and O.
 
 - **The header:** the task's path, title, state, labels, due date, people and subtasks' progress, its current status
-  with its age, and the latest note, update or email. The command bar is the task page's.
+  with its age, and the latest note, update or email. Its bar has one button, **Task page**: the task's own commands
+  are on its page, a click away (decision 390). A task row's right-click menu has the task page's Add to and Edit.
 - **The outline (left):** Overview, then the task and its subtasks with how many files each holds. Picking one narrows
   everything to that branch.
 - **The list (middle):** the search box has the cursor; what's typed searches the task's files, emails, notes and
   updates, and subtasks as you type, with the best match already chosen, so Enter opens it. The kinds, with their
   counts, Type, Date, From, and View (group by, sort, density) narrow and arrange it; typed filters (``type:pdf``)
   turn into chips. With nothing typed, Overview shows Pinned, Recent and Latest updates.
-- **The preview (right):** the chosen record's facts and text, the lines that matched while searching, and its actions.
-- **The Notes page tab (release 5.37, decisions 239 to 244):** the page of the task picked in the outline, in the frame
-  it has on the task page (``TaskPane``, which the browse window's notes handlers serve), in place of the list. The
-  preview stays hidden until a caption or file line is clicked. What's typed in the box shows results, and Esc comes back.
+- **The preview (right):** the chosen record's facts and text, the lines that matched while searching, and its actions:
+  Open, Show in File Explorer, Copy path and Pin. A note opens at its block on its task page.
+
+Release 5.37's Notes page tab went in release 5.98 (decision 391): the notes are on the task page, beside this window.
 
 The words come from ``docrepo.task_view_pages`` and the search from ``docrepo.finder``, both without Qt. A file's
 extracted text, the search's second tier, is read once and searched on a worker thread after typing pauses; Open runs
@@ -28,7 +30,7 @@ from pathlib import Path
 from urllib.parse import unquote
 
 from PySide6.QtCore import QByteArray, QEvent, QObject, QRunnable, Qt, QThreadPool, QTimer, QUrl, Signal
-from PySide6.QtGui import QAction, QActionGroup, QColor, QFontMetrics, QGuiApplication, QKeySequence, QShortcut
+from PySide6.QtGui import QAction, QActionGroup, QColor, QGuiApplication, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QSizePolicy, QSplitter, QStackedWidget, QTabBar, QToolButton,
                                QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
@@ -43,21 +45,19 @@ from docrepo.ui.look import LOOK
 from docrepo.ui.page_view import PageView
 from docrepo.ui.result_list import ResultList, Row
 from docrepo.ui.state_menu import UndoButton, can_change, state_menu
+from docrepo.ui import task_menus
 from docrepo.ui.style import page_css
-from docrepo.ui.task_pane import TaskPane
 
 log = logging.getLogger(__name__)
 
 GEOMETRY_KEY = "task_view_geometry"
 FOOT = "Enter opens · Ctrl+Enter shows in File Explorer · Ctrl+Shift+C copies the path · P pins · Esc clears · Ctrl+O another task · F1 every key"
-PAGE_FOOT = "It saves as you type · Click a caption or file line to see it here · Ctrl+Space shows or hides the preview · Esc goes to the search box · F1 every key"
+#: Its title bar: "Find files: Installation" (decision 389).
+TITLE = "Find files: {}"
 KIND_ORDER = ("all", *KINDS)
-#: The tab that shows the notes page (decision 239): it's in ``kind`` like the others, and no search gets it.
-PAGE = "page"
-TABS = (*KIND_ORDER, PAGE)
-TAB_NAMES = {**KIND_NAMES, PAGE: "Notes page"}
-#: The most the Notes frame's heading takes up, in pixels, for a subtask's long title.
-PAGE_TITLE_WIDTH = 320
+#: The tabs: the kinds, with no Notes page since release 5.98 (decision 391).
+TABS = KIND_ORDER
+TAB_NAMES = dict(KIND_NAMES)
 #: Each kind's grouping when nothing is typed (decision 163: files by date added, newest first).
 DEFAULT_GROUP = {"file": "date", "email": "date", "note": "date"}
 GROUPS = (("date", "Date added"), ("task", "Subtask"), ("type", "Type"), ("source", "Source"), ("none", "None"))
@@ -116,7 +116,7 @@ def _page() -> PageView:
 
 
 class TaskView(QWidget):
-    """One task's Task view. ``browse`` is the browse window, whose model, commands and capture window it uses."""
+    """One task's Find files. ``browse`` is the browse window, whose model, commands and capture window it uses."""
 
     def __init__(self, browse, task_id: str) -> None:
         super().__init__(None, Qt.WindowType.Window)
@@ -140,12 +140,6 @@ class TaskView(QWidget):
         self.preview_on = True
         self.folded: set[str] = set()
         self.missing: set[str] = set()
-        # The Notes page tab: its pane (made the first time it's shown), what's clicked on it, whether its preview is on,
-        # and whether a search begun there comes back to it.
-        self.pane: TaskPane | None = None
-        self.page_record: Record | None = None
-        self.page_preview = False
-        self.back_to_page = False
         # What's known
         self.stale = False                            # a notes page was saved: the records are read again when next needed
         self.records: list[Record] = []
@@ -237,7 +231,7 @@ class TaskView(QWidget):
         self.preview_button.setToolTip("Show or hide the preview (Space in the list, Ctrl+Space anywhere)")
         self.preview_button.setAccessibleName("Preview")
         self.preview_button.toggled.connect(self.set_preview)
-        kinds.addWidget(self.preview_button)  # up here, so it's in the same place on the Notes page, which has no row below
+        kinds.addWidget(self.preview_button)
         self.filter_bar = QWidget()
         row = QHBoxLayout(self.filter_bar)
         row.setContentsMargins(0, 0, 0, 0)
@@ -318,7 +312,7 @@ class TaskView(QWidget):
     def _rest_foot(self) -> str:
         """The footer with nothing to say. Its keys show with Show hints; F1, the tooltips and Alt have them otherwise (the review's
         decision V7). The count stays above the list."""
-        return (PAGE_FOOT if self.kind == PAGE else FOOT) if LOOK.show_help else ""
+        return FOOT if LOOK.show_help else ""
 
     def _menu_button(self, label: str, menu: QMenu, tip: str) -> QPushButton:
         b = QPushButton(label, objectName="" if LOOK.classic else "subtle")
@@ -329,43 +323,19 @@ class TaskView(QWidget):
         return b
 
     def _commands(self) -> None:
-        """The task page's commands (release 5.21), plus Task page, which opens the task in the browse tool."""
+        """Its bar's one button, Task page (decision 390): the task's own commands (Note, Update, Add to, Edit and the rest)
+        are on its page in the browse tool, a click away."""
         while self.commands.count():
             w = self.commands.takeAt(0).widget()
             if w:
                 w.deleteLater()
-        b = self.browse
-        t = self.model().task(self.task_id)
-
-        def button(label: str, run: Callable[[], None] | None, tip: str, name: str, menu: QMenu | None = None) -> QPushButton:
-            btn = QPushButton(label if label else "", objectName="subtle" if not LOOK.classic else "")
-            btn.setIcon(icon(name))
-            btn.setToolTip(tip)
-            if menu is not None:
-                btn.setMenu(menu)
-            elif run is not None:
-                btn.clicked.connect(lambda _=False: run())
-            self.commands.addWidget(btn)
-            return btn
-
-        tid = self.task_id
-        button("Note", lambda: b.open_capture(task=tid, mode="note"), "A note on this task (N, or Alt+N from the search box)", "note")
-        button("Update", lambda: b.open_capture(task=tid, mode="update"), "Update its state, status or dates (U)", "update")
-        add_to = QMenu(self)
-        add_to.addAction(icon("sun"), "Today\tD", lambda: self.command("today"))
-        add_to.addAction("An agenda…\tA", lambda: self.command("agenda"))
-        button("Add to", None, "Put it on Today (D) or an agenda (A)", "agenda", add_to)
-        button("Edit", lambda: b.edit_task(tid), "Edit task (E)", "edit")
-        button("Task page", self.open_task_page, "Open it in the browse tool: its status log and Details, with its notes page", "open")
-        more = QMenu(self)
-        more.addAction(icon("add"), "New task under this one\tT", lambda: self.command("new_task"))
-        more.addAction(icon("copy"), "Copy prompt", lambda: b.copy_prompt(tid))
-        more.addAction(icon("folder"), "Open folder", lambda: b.reveal(self.ctx.data_root / "Tasks" / tid))
-        m = button("", None, "More: New task under this one, Copy prompt, Open folder", "more", more)
-        m.setAccessibleName("More")
-        if t.discarded:
-            for i in range(self.commands.count()):
-                self.commands.itemAt(i).widget().setEnabled(False)
+        btn = QPushButton("Task page", objectName="subtle" if not LOOK.classic else "")
+        btn.setIcon(icon("open"))
+        btn.setToolTip("Open it in the browse tool: its notes, status, commands and Details")
+        btn.clicked.connect(lambda _=False: self.open_task_page())
+        btn.setEnabled(not self.model().task(self.task_id).discarded)
+        self.commands.addWidget(btn)
+        self.task_page_button = btn
 
     def _keys(self) -> None:
         def key(seq: str, run: Callable[[], None]) -> None:
@@ -389,9 +359,8 @@ class TaskView(QWidget):
         key("Alt+P", lambda: self.act("pin"))
         key("Alt+Shift+Up", lambda: self.move_pin(-1))
         key("Alt+Shift+Down", lambda: self.move_pin(1))
-        for letter, mode in (("N", "note"), ("U", "update"), ("T", "new_task"), ("A", "agenda"), ("D", "today"), ("E", "edit"), ("M", "meeting")):
-            key(letter, lambda mode=mode: self.command(mode))
-            key(f"Alt+{letter}", lambda mode=mode: self.command(mode))
+        # The task's letters (N, U, T, A, D, E, M) went with its commands in release 5.98 (decision 390): in the list,
+        # typing goes to the search box.
 
     # ================= data =================
     def model(self):
@@ -415,13 +384,13 @@ class TaskView(QWidget):
         if self.scope not in overview.family(m, self.task_id):
             self.scope = self.task_id
         t = m.task(self.task_id)
-        self.setWindowTitle(f"{t.title} – Task view")
+        self.setWindowTitle(TITLE.format(t.title))
         self.box.setPlaceholderText(f"Search {t.title}: files, emails, notes and updates")
         self._commands()
         self.render_head()
         self.render_outline()
         self.refresh(keep=True)
-        log.info("task view %s: %d records in %.0f ms", self.task_id, len(self.records), (time.perf_counter() - start) * 1000)
+        log.info("find files %s: %d records in %.0f ms", self.task_id, len(self.records), (time.perf_counter() - start) * 1000)
 
     def read_records(self) -> None:
         m = self.model()
@@ -433,8 +402,6 @@ class TaskView(QWidget):
         self.used = pins.uses_of(self.conn, files)
         self.last_used = pins.last_uses(self.conn)
         self.texts, self.folded_texts, self.second, self.recent_snap = None, {}, None, None
-        if self.page_record is not None:
-            self.page_record = self.by_key.get((self.page_record.kind, self.page_record.id))
         self.stale = False
 
     def load_texts(self) -> None:
@@ -593,11 +560,8 @@ class TaskView(QWidget):
             self.scope, self.kind = self.task_id, "all"
             self.query = ""
             self.box.clear()
-            self.back_to_page = False
         elif key:
             self.set_scope(key)
-            if self.kind == PAGE:  # that task's page, ready to type in
-                self.pane.notes.setFocus()
             return
         self.refresh()
 
@@ -614,9 +578,9 @@ class TaskView(QWidget):
         return self.kind == "all" and not finder.terms(self.query)[0] and not self.filters.count()
 
     def refresh(self, keep: bool = False) -> None:
-        """Draw the list again for what's chosen: Overview, a kind's list, or what the search finds; or the Notes page.
-        ``keep`` keeps the chosen record and the scroll (the second tier's finds arrive below, so nothing on screen moves)."""
-        if self.stale and self.kind != PAGE:
+        """Draw the list again for what's chosen: Overview, a kind's list, or what the search finds. ``keep`` keeps the
+        chosen record and the scroll (the second tier's finds arrive below, so nothing on screen moves)."""
+        if self.stale:
             self.reload()
             return
         chosen = self.chosen_record() if keep else None
@@ -625,9 +589,8 @@ class TaskView(QWidget):
         self.kinds.blockSignals(True)
         self.kinds.setCurrentIndex(TABS.index(self.kind))
         for i, k in enumerate(TABS):
-            self.kinds.setTabText(i, TAB_NAMES[k] if k == PAGE else f"{KIND_NAMES[k]}  {self.counts.get(k, 0)}")
+            self.kinds.setTabText(i, f"{KIND_NAMES[k]}  {self.counts.get(k, 0)}")
         self.kinds.blockSignals(False)
-        self.filter_bar.setVisible(self.kind != PAGE)
         self.list.compact = self.compact
         index = next((i for i, r in enumerate(rows) if chosen is not None and r.record is chosen), None)
         if index is None:
@@ -663,8 +626,6 @@ class TaskView(QWidget):
             self.counts = overview.counts([h.record for h in [*hits, *second]])
             return self.result_rows(hits, second, words)
         self.counts = overview.counts(kept)
-        if self.kind == PAGE:
-            return []
         if self.is_overview():
             return self.overview_rows(scoped)
         kind = "file" if self.kind == "all" else self.kind
@@ -768,9 +729,6 @@ class TaskView(QWidget):
         return sorted(hits, key=lambda h: order[id(h.record)])
 
     def _empty_state(self, rows: list[Row]) -> None:
-        if self.kind == PAGE:
-            self._show_page()
-            return
         if rows:
             self.stack.setCurrentIndex(0)
             return
@@ -790,8 +748,6 @@ class TaskView(QWidget):
         self.stack.setCurrentIndex(1)
 
     def _count_line(self) -> None:
-        if self.kind == PAGE:
-            return
         words, _ = finder.terms(self.query)
         title = self.model().task(self.scope).title
         more = len(self.second[1]) if self.second and self.second[0] == self.query else 0
@@ -831,7 +787,7 @@ class TaskView(QWidget):
             clear.clicked.connect(self.clear_filters)
             self.chip_row.addWidget(clear)
         self.chip_row.addStretch(1)
-        self.chips.setVisible(bool(chips) and self.kind != PAGE)  # they narrow lists; the page says whose it is
+        self.chips.setVisible(bool(chips))
 
     def _buttons(self) -> None:
         f = self.filters
@@ -844,77 +800,8 @@ class TaskView(QWidget):
         (self.folded.discard if key in self.folded else self.folded.add)(key)
         self.refresh(keep=True)
 
-    # ================= the Notes page tab (decisions 239 to 244) =================
-    def page_pane(self) -> TaskPane:
-        if self.pane is None:
-            self.pane = TaskPane(page_css(), 0)
-            self.pane.notes_only()
-            self.pane.title.setTextFormat(Qt.TextFormat.PlainText)
-            self.browse.wire_notes(self.pane, self.say, self.page_ref)
-            self.pane.notes.installEventFilter(self)
-            self.pane.notes.viewport().installEventFilter(self)
-            self.stack.addWidget(self.pane)
-        return self.pane
-
-    def _show_page(self) -> None:
-        """The page of the task picked in the outline, in place of the list: the whole task's is the top task's own."""
-        pane = self.page_pane()
-        if pane.task_id != self.scope:
-            self.page_record, self.page_preview = None, False
-        self.browse.load_notes(self.scope, pane)
-        title = self.model().task(self.scope).title
-        whole = self.scope == self.task_id
-        pane.title.setText("Notes" if whole else QFontMetrics(pane.title.font()).elidedText(f"Notes: {title}", Qt.TextElideMode.ElideRight, PAGE_TITLE_WIDTH))
-        pane.title.setToolTip("" if whole else title)
-        self.stack.setCurrentWidget(pane)
-
-    def open_page(self, task_id: str | None = None) -> None:
-        """To the Notes page tab, on that task's page (or the one it was on), with the caret in the page."""
-        self.box.clear()
-        self.query, self.second, self.second_busy, self.back_to_page = "", None, False, False
-        self._second_timer.stop()
-        self.scope = task_id or self.scope
-        self.kind = PAGE
-        self.refresh()
-        self.pane.notes.setFocus()
-
-    def page_ref(self, ref: str) -> None:
-        """A caption, file line or picture clicked on the page: its preview beside the page, in this window. What isn't
-        this task's opens in the browse tool, as it does from the task page."""
-        if self.stale:
-            self.read_records()
-        r = self._record_of(ref)
-        if r is None:
-            self.browse.show_browse()
-            self.browse.open_ref(ref)
-            return
-        self.page_record = r
-        self.set_preview(True)
-
-    def _record_of(self, ref: str) -> Record | None:
-        """What a line on the page stands for: a file; a capture's note, update or email; or, for a capture with no words
-        of its own, its first file."""
-        r = next((self.by_key[(k, ref)] for k in ("file", "email", "note") if (k, ref) in self.by_key), None)
-        c = self.model().captures.get(ref)
-        return r or next((self.by_key[("file", d)] for d in (c.document_ids if c else ()) if ("file", d) in self.by_key), None)
-
-    def _page_drop(self, event) -> bool:
-        """Files dropped on the page go on the page (decision 126), which ``NotesEdit`` sees to. An email or a link goes to
-        the capture window, as it does anywhere else in this window, rather than coming in as text."""
-        from docrepo.ui.capture_window import read_drop
-
-        kinds = (QEvent.Type.DragEnter, QEvent.Type.DragMove, QEvent.Type.Drop)
-        if event.type() not in kinds or read_drop(event.mimeData(), links=True)[0] in ("", "files"):
-            return False
-        if event.type() == QEvent.Type.Drop:
-            self.dropEvent(event)
-        else:
-            event.acceptProposedAction()
-        return True
-
     # ================= typing =================
     def _typed(self, text: str) -> None:
-        from_page = self.kind == PAGE
         m = self.model()
         subtasks = [(t, m.task(t).title) for t in overview.family(m, self.task_id)]
         senders = sorted({r.sender for r in self.records if r.sender})
@@ -937,12 +824,6 @@ class TaskView(QWidget):
         else:
             self.second_busy = False
             self._second_timer.stop()
-        if from_page and (finder.terms(self.query)[0] or typed.changed):  # results show in place of the page (decision 242)
-            self.back_to_page = True
-            if self.kind == PAGE:
-                self.kind = "all"
-        elif self.back_to_page and not self.query.strip() and not self.filters.count():
-            self.kind, self.back_to_page = PAGE, False
         self.refresh()
 
     def _start_second(self) -> None:
@@ -964,7 +845,7 @@ class TaskView(QWidget):
         self._jobs = [j for j in self._jobs if j.token != token]
         if token != self._token or isinstance(result, Exception):
             if isinstance(result, Exception):
-                log.warning("task view: searching the files' text failed: %s", type(result).__name__)
+                log.warning("find files: searching the files' text failed: %s", type(result).__name__)
                 self.second_busy = False
             return
         query, hits = result
@@ -990,12 +871,7 @@ class TaskView(QWidget):
         self.box.selectAll()
 
     def escape(self) -> None:
-        """Esc: clears what's typed; then the filters, scope and kind; then goes back to the box. It never closes. A search
-        begun on the Notes page comes back to it."""
-        if self.back_to_page:
-            self.filters.clear()
-            self.open_page()
-            return
+        """Esc: clears what's typed; then the filters, scope and kind; then goes back to the box. It never closes."""
         if self.query:
             self.box.clear()
             self.query, self.second, self.second_busy = "", None, False
@@ -1011,23 +887,16 @@ class TaskView(QWidget):
         self.refresh()
 
     def set_kind(self, kind: str) -> None:
-        if kind == PAGE:
-            self.open_page()
-            return
         if kind == self.kind and self.kinds.currentIndex() == TABS.index(kind):
             return
         self.kind = kind
         self.refresh()
 
     def preview_wanted(self) -> bool:
-        """The Notes page has its own say: hidden until something on it is clicked (decision 241)."""
-        return self.page_preview if self.kind == PAGE else self.preview_on
+        return self.preview_on
 
     def set_preview(self, on: bool) -> None:
-        if self.kind == PAGE:
-            self.page_preview = on
-        else:
-            self.preview_on = on
+        self.preview_on = on
         self._sync_preview()
         self._layout()
         self.show_preview()
@@ -1042,22 +911,11 @@ class TaskView(QWidget):
 
     # ================= keys in the box and the list =================
     def eventFilter(self, watched, event) -> bool:  # noqa: N802 - Qt's name
-        if self.pane is not None:
-            if watched is self.pane.notes.viewport():
-                return self._page_drop(event)
-            if watched is self.pane.notes:  # the page keeps its keys; only Esc goes to the search box (decision 242)
-                if event.type() == QEvent.Type.KeyPress and event.key() == Qt.Key.Key_Escape:
-                    self.focus_box()
-                    return True
-                return False
         if event.type() != QEvent.Type.KeyPress:
             return super().eventFilter(watched, event)
         k, mods = event.key(), event.modifiers()
         ctrl = bool(mods & Qt.KeyboardModifier.ControlModifier)
         shift = bool(mods & Qt.KeyboardModifier.ShiftModifier)
-        if self.kind == PAGE and watched is self.box and not mods and k in (Qt.Key.Key_Down, Qt.Key.Key_Tab, Qt.Key.Key_Return, Qt.Key.Key_Enter):
-            self.pane.notes.setFocus()  # from the box into the page
-            return True
         if k in (Qt.Key.Key_Down, Qt.Key.Key_Up):
             self.list.step(("next group" if k == Qt.Key.Key_Down else "previous group") if ctrl else (1 if k == Qt.Key.Key_Down else -1))
             return True
@@ -1089,7 +947,8 @@ class TaskView(QWidget):
             self.act("copy")
             return True
         text = event.text()
-        if text and text.isprintable() and not ctrl and not (mods & Qt.KeyboardModifier.AltModifier) and not text.isalpha():
+        # Any other typing goes to the box, letters too since release 5.98, when the task's letter keys went (decision 390).
+        if text and text.isprintable() and not ctrl and not (mods & Qt.KeyboardModifier.AltModifier):
             self.box.setFocus()
             self.box.insert(text)
             self._typed(self.box.text())
@@ -1097,9 +956,8 @@ class TaskView(QWidget):
         return super().eventFilter(watched, event)
 
     def cycle_panes(self, step: int) -> None:
-        """F6: the outline, the search box, the list or the page, the preview's first action, as Windows' pane key does."""
-        notes = self.pane.notes if self.pane is not None else None
-        panes = [w for w in (self.outline, self.box, self.list, notes, self._first_action()) if w is not None and w.isVisible()]
+        """F6: the outline, the search box, the list, the preview's first action, as Windows' pane key does."""
+        panes = [w for w in (self.outline, self.box, self.list, self._first_action()) if w is not None and w.isVisible()]
         focus = QGuiApplication.focusObject()
         i = next((n for n, w in enumerate(panes) if w is focus or (isinstance(focus, QWidget) and w.isAncestorOf(focus))), -1)
         panes[(i + step) % len(panes)].setFocus()
@@ -1111,10 +969,10 @@ class TaskView(QWidget):
     def show_preview(self) -> None:
         i = self.list.current()
         row = self.list.rows[i] if 0 <= i < len(self.list.rows) else None
-        r = self.page_record if self.kind == PAGE else row.record if row else None
+        r = row.record if row else None
         words, _ = finder.terms(self.query)
         if r is None:
-            self.preview_page.setHtml(pages.nothing_clicked() if self.kind == PAGE else pages.preview(self.model(), None, self.today(), words))
+            self.preview_page.setHtml(pages.preview(self.model(), None, self.today(), words))
             self._preview_buttons([])
             return
         text = self.text_of(r) if r.kind == "file" else ""
@@ -1154,16 +1012,12 @@ class TaskView(QWidget):
         if r.kind == "email":
             return [("Open the email", "open", True, "Enter: in Outlook"), ("Open capture", "capture", False, "Its capture, in the browse tool")]
         if r.kind == "note":
-            on_page = [("Open on the notes page", "open", True, "Enter: here, on the Notes page tab")]
+            on_page = [("Open on the notes page", "open", True, "Enter: at its block, on its task page in the browse tool")]
             return on_page + ([("Open capture", "capture", False, "Its capture, in the browse tool")] if r.capture else [])
-        return [("Show what's in it", "open", True, "Enter: narrow this window to it"), ("Open its Task view", "taskview", False, "")]
+        return [("Show what's in it", "open", True, "Enter: narrow this window to it"), ("Find files", "taskview", False, "Its own Find files")]
 
     # ================= actions =================
     def act(self, name: str, index: int | None = None) -> None:
-        if self.kind == PAGE:  # the page has no list: it's what was clicked on it
-            if self.page_record is not None:
-                self._act_on(name, self.page_record)
-            return
         i = self.list.current() if index is None else index
         if not 0 <= i < len(self.list.rows):
             return
@@ -1284,7 +1138,7 @@ class TaskView(QWidget):
             pins.record_use(self.conn, r.id, self.task_id, action, self.ctx.now())
             self.last_used[r.id] = f"{self.ctx.now():%Y-%m-%d %H:%M:%S}"
         except Exception as e:  # noqa: BLE001 - a use that isn't kept never stops the action
-            log.warning("task view: a use of %s wasn't kept: %s", r.id, type(e).__name__)
+            log.warning("find files: a use of %s wasn't kept: %s", r.id, type(e).__name__)
 
     def toggle_pin(self, r: Record) -> None:
         if r.kind != "file":
@@ -1307,14 +1161,15 @@ class TaskView(QWidget):
             self.refresh(keep=True)
 
     def open_note(self, r: Record) -> None:
-        """A note or update on its task's notes page, here: at its block, or for words typed on the page, the page (decision 242)."""
-        self.open_page(r.task)
+        """A note or update on its task's notes page, on the task page in the browse tool: at its block, or for words typed
+        on the page, the page (since release 5.98, decision 391; before it, on this window's Notes page tab)."""
+        self.browse.show_browse()
         if r.type != "page" and r.capture:
-            c = self.model().captures.get(r.capture)
-            if self.pane.notes.go_to(r.capture, list(c.document_ids) if c else []):
-                QTimer.singleShot(0, self.pane.scroll_to_caret)
-            else:
-                self.say(f"{r.capture} isn't on the notes page.")
+            self.browse.go_to_block(r.task, r.capture)
+        else:
+            self.browse.go_task(r.task)
+        self.browse.raise_()
+        self.browse.activateWindow()
 
     def open_capture_page(self, capture_id: str) -> None:
         self.browse.show_browse()
@@ -1328,23 +1183,8 @@ class TaskView(QWidget):
         self.browse.raise_()
         self.browse.activateWindow()
 
-    def command(self, mode: str) -> None:
-        """The task's own commands, as the browse tool's letters: Note, Update, New task under this one, Agenda, Today, Edit, Meeting."""
-        b, tid = self.browse, self.task_id
-        if mode == "edit":
-            b.edit_task(tid)
-        elif mode == "today":
-            b.add_to_today(tid)
-            self.say("Added to Today.")
-        elif mode == "agenda":
-            b.open_capture(task=tid, mode="update", agenda_focus=True)
-        elif mode == "meeting":
-            b.open_capture(task=tid, meeting=True)
-        else:
-            b.open_capture(task=tid, mode=mode)
-
     def go_to_task(self) -> None:
-        """Ctrl+O: another task's Task view, from the task picker."""
+        """Ctrl+O: another task's Find files, from the task picker."""
         from docrepo.ui.task_picker import TaskPicker
 
         self._picker = TaskPicker(self, self.browse.model, None)
@@ -1386,8 +1226,7 @@ class TaskView(QWidget):
             self.box.setText(rest)
             self._typed(rest)
         elif scheme == "do":
-            {"update": lambda: self.command("update"), "note": lambda: self.command("note"), "clear": self.clear_filters,
-             "whole": lambda: self.set_scope(self.task_id), "everywhere": self.search_everywhere}.get(rest, lambda: None)()
+            {"clear": self.clear_filters, "whole": lambda: self.set_scope(self.task_id), "everywhere": self.search_everywhere}.get(rest, lambda: None)()
 
     def search_everywhere(self) -> None:
         words = self.query
@@ -1420,7 +1259,8 @@ class TaskView(QWidget):
             self.foot_undo.forget()
 
     def _row_menu(self, i: int, at) -> None:
-        """A row's right-click menu: what its buttons do, and a task row's State submenu (decision 361)."""
+        """A row's right-click menu: what its buttons do, a task row's Add to and Edit, the task page's own (release 5.98,
+        decision 392), and its State submenu (decision 361)."""
         row = self.list.rows[i] if 0 <= i < len(self.list.rows) else None
         if row is None or row.record is None:
             return
@@ -1432,6 +1272,8 @@ class TaskView(QWidget):
             action = menu.addAction(label, lambda n=name, k=i: self.act(n, k))
             if tip:
                 action.setToolTip(tip)
+        if r.kind == "task":
+            task_menus.add_row_menus(self.browse, r.id, menu, anchor=self.list)
         if r.kind == "task" and can_change(self.browse.model(), r.id):
             sub = state_menu(menu, self.browse.model(), r.id, lambda to, branch, t=r.id: self.browse.set_state(
                 t, to, branch, after=lambda: self.refresh(keep=True), tell=self._tell_state))
@@ -1528,10 +1370,8 @@ class TaskView(QWidget):
                 *(Command("View", f"Group by {label.lower()}", lambda key=key: (setattr(self, "group", key), self.refresh())) for key, label in GROUPS),
                 Command("View", "Clear the filters", self.clear_filters, "Ctrl+Backspace"),
                 *(Command("Go to", self.model().task(t).title, lambda t=t: self.set_scope(t)) for t in overview.family(self.model(), self.task_id)[1:]),
-                Command("Go to", "Another task's Task view", self.go_to_task, "Ctrl+O"), Command("Go to", "The parent task's Task view", self.go_to_parent, "Alt+Up"),
-                Command("Task", "Open task page", self.open_task_page), Command("Task", "Note", lambda: self.command("note"), "N"),
-                Command("Task", "Update", lambda: self.command("update"), "U"), Command("Task", "New task under this one", lambda: self.command("new_task"), "T"),
-                Command("Task", "Add to Today", lambda: self.command("today"), "D"), Command("Task", "Edit task", lambda: self.command("edit"), "E")]
+                Command("Go to", "Another task's Find files", self.go_to_task, "Ctrl+O"), Command("Go to", "The parent task's Find files", self.go_to_parent, "Alt+Up"),
+                Command("Task", "Open task page", self.open_task_page)]
         self._palette = CommandPalette(self, cmds)
         self._palette.open_over(self)
 
@@ -1563,12 +1403,10 @@ class TaskView(QWidget):
         self.outline.doItemsLayout()  # it was filled before its style sheet's row height applied, and nothing else measures it again
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt's name
-        if self.pane is not None:
-            self.pane.notes.save_now()
         try:
             db.set_state(self.conn, GEOMETRY_KEY, bytes(self.saveGeometry().toHex()).decode("ascii"))
         except Exception as e:  # noqa: BLE001 - a size that isn't kept never stops the window closing
-            log.warning("task view: its size wasn't kept: %s", type(e).__name__)
+            log.warning("find files: its size wasn't kept: %s", type(e).__name__)
         self.browse.task_view_closed(self.task_id)
         super().closeEvent(event)
 

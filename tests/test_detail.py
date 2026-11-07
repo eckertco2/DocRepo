@@ -240,7 +240,7 @@ def test_the_page_in_parts(pages):
     assert parts["details_summary"] == "" and "ID T000008" in text(parts["details"]) and "Folder" in text(parts["details"])
     history = text(parts["history"])
     assert history.startswith("Captures 6 Summaries 1 With subtasks") and "Status log" not in history and "Files 3" not in history  # the tabs
-    assert text(parts["history_summary"]) == "6 captures" and text(parts["files_summary"]) == "3" and "Open in Task view" in text(parts["files"])
+    assert text(parts["history_summary"]) == "6 captures" and text(parts["files_summary"]) == "3 Find files" and "Find files" in text(parts["files"])  # release 5.98
     assert "key_dates" not in parts or parts["key_dates"] == ""  # nothing in them
     wide = pages.task_parts("T000008", PageState(), 900)
     assert "when_who" not in wide and "details" not in wide and "Who Lead Me 8 h" in text(wide["rail"]) and "Folder" in text(wide["rail"])

@@ -25,6 +25,9 @@ from docrepo.wheel import DIAGONALS, DIRECTIONS
 CONFIG_FILE = Path("Config") / "wheels.jsonc"
 SCHEMA_FILE = Path("Config") / "wheels.schema.json"
 _WHEEL_ID = re.compile(r"[a-z0-9][a-z0-9_-]*\Z")
+#: Commands renamed since the file was first written, by their old ID: a slot that still names one runs the new one, so
+#: the owner's file keeps working as it is (release 5.98: the Task view became Find files).
+RENAMED = {"task_view.current": "find_files.current"}
 
 
 class ConfigError(Exception):
@@ -37,17 +40,23 @@ class ConfigError(Exception):
 
 @dataclass(frozen=True)
 class Arg:
-    """One argument a command takes: its choices, or ``kind`` "bool"; and its default."""
+    """One argument a command takes: its choices, or ``kind`` "bool"; and its default. ``renamed`` maps a choice's old name
+    to its new one (release 5.98), so a file that says the old one still works."""
 
     name: str
     default: Any
     choices: tuple[str, ...] = ()
     kind: str = "choice"  # "choice" or "bool"
+    renamed: tuple[tuple[str, str], ...] = ()
 
     def problem(self, value: Any) -> str | None:
         if self.kind == "bool":
             return None if isinstance(value, bool) else "is true or false"
-        return None if value in self.choices else f"is one of {', '.join(self.choices)}"
+        return None if value in self.choices or value in dict(self.renamed) else f"is one of {', '.join(self.choices)}"
+
+    def current(self, value: Any) -> Any:
+        """The value as it's called now: an old name becomes its new one."""
+        return dict(self.renamed).get(value, value) if isinstance(value, str) else value
 
 
 @dataclass(frozen=True)
@@ -186,6 +195,7 @@ def _check_slot(where: str, data: Any, registry: Mapping[str, CommandSpec], icon
     if not isinstance(command, str) or not command:
         problems.append(f"{where}.command: every slot needs a command, or \"held\": true to keep the place for later.")
         return None
+    command = RENAMED.get(command, command)
     spec = registry.get(command)
     if spec is None:
         problems.append(f"{where}.command: {command} isn't a command.{_did_you_mean(command, registry)}")
@@ -202,6 +212,7 @@ def _check_slot(where: str, data: Any, registry: Mapping[str, CommandSpec], icon
             problems.append(f"{where}.args.{name}: {command} {takes}.{_did_you_mean(name, known)}")
         elif (why := arg.problem(value)) is not None:
             problems.append(f"{where}.args.{name}: {value} isn't allowed; it {why}.{_did_you_mean(value, arg.choices)}")
+    args = {name: known[name].current(value) if name in known else value for name, value in args.items()}
     return Slot(str(label), str(icon), command, {**{a.name: a.default for a in spec.args}, **args}, data.get("confirm") is True)
 
 
@@ -309,7 +320,7 @@ def load(data_root: Path, registry: Mapping[str, CommandSpec], icons: Iterable[s
 def schema(registry: Mapping[str, CommandSpec], icons: Iterable[str]) -> dict[str, Any]:
     """The JSON schema VS Code checks the file against, from the same table DocRepo checks it with."""
     def slot_for(spec: CommandSpec) -> dict[str, Any]:
-        args = {a.name: {"type": "boolean"} if a.kind == "bool" else {"enum": list(a.choices)} for a in spec.args}
+        args = {a.name: {"type": "boolean"} if a.kind == "bool" else {"enum": [*a.choices, *(old for old, _ in a.renamed)]} for a in spec.args}
         return {"if": {"properties": {"command": {"const": spec.id}}, "required": ["command"]},
                 "then": {"properties": {"args": {"type": "object", "properties": args, "additionalProperties": False}}}}
 
@@ -318,7 +329,9 @@ def schema(registry: Mapping[str, CommandSpec], icons: Iterable[str]) -> dict[st
         "properties": {
             "label": {"type": "string", "minLength": 1, "description": "What the wheel shows."},
             "icon": {"enum": sorted(icons), "description": "One of DocRepo's own icons."},
-            "command": {"enum": sorted(registry), "markdownEnumDescriptions": [registry[k].title for k in sorted(registry)]},
+            # An old name still works (``RENAMED``), so the schema doesn't flag the owner's file for it.
+            "command": {"enum": [*sorted(registry), *RENAMED], "markdownEnumDescriptions": [
+                *(registry[k].title for k in sorted(registry)), *(f"Its old name: {new}" for new in RENAMED.values())]},
             "args": {"type": "object"},
             "confirm": {"type": "boolean", "description": "Only lights up, and asks for Enter before it runs."},
             "held": {"type": "boolean", "description": "Keeps the place for later: greyed, and doing nothing."},
@@ -374,7 +387,7 @@ DEFAULT_TEXT = """\
         "N": { "label": "Blank capture", "icon": "add", "command": "capture.new" },
         // capture.selection: the pinned window, with the email or file selected in the window you were in.
         "E": { "label": "Email or file", "icon": "mail", "command": "capture.selection" },
-        // today.new_item: a quick task on Today.
+        // today.new_item: a quick task on Today, as Ctrl+Shift+D makes one.
         "S": { "label": "Today item", "icon": "sun", "command": "today.new_item" },
         // capture.meeting: meeting notes.
         "W": { "label": "Meeting", "icon": "people", "command": "capture.meeting" }
@@ -388,7 +401,7 @@ DEFAULT_TEXT = """\
       "slots": {
         // browse.view: the browse tool on a view. "view" is any of its views: today, tasks, agenda, activity, priorities and so on.
         "N": { "label": "Task tree", "icon": "tasks", "command": "browse.view", "args": { "view": "tasks" } },
-        // search.tasks: task search. "then" is what Enter opens: task_view, or page (the task's page in the browse tool); Ctrl+Enter opens the other.
+        // search.tasks: task search. "then" is what Enter opens: find_files, or page (the task's page in the browse tool); Ctrl+Enter opens the other.
         "E": { "label": "Task search", "icon": "task", "command": "search.tasks" },
         // search.files: file search, across every task's files and saved emails.
         "S": { "label": "File search", "icon": "file", "command": "search.files" },
@@ -405,8 +418,8 @@ DEFAULT_TEXT = """\
         "E": { "label": "Today panel", "icon": "sidebar", "command": "today.panel" },
         // The agent window's place, for when it comes.
         "S": { "label": "Agent window", "held": true },
-        // task_view.current: the Task view of the task selected in the browse tool, or of the last Task view opened.
-        "W": { "label": "Task view", "icon": "open", "command": "task_view.current" }
+        // find_files.current: Find files for the task selected in the browse tool, or the last one opened.
+        "W": { "label": "Find files", "icon": "open", "command": "find_files.current" }
       }
     }
   ],

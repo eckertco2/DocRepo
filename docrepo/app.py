@@ -181,7 +181,7 @@ class CaptureApp(QObject):
             hotkey.HOTKEY_IDS["new_task_hotkey"]: lambda: self.window.open_with_hotkey("new_task"),
             hotkey.HOTKEY_IDS["update_hotkey"]: lambda: self.window.open_with_hotkey("update"),
             hotkey.HOTKEY_IDS["agenda_hotkey"]: lambda: self.window.open_with_hotkey("agenda"),
-            hotkey.HOTKEY_IDS["today_hotkey"]: lambda: self.window.open_with_hotkey("today"),
+            hotkey.HOTKEY_IDS["today_hotkey"]: lambda: self.window.open_quick_task(),  # the wheels' today.new_item runs it too (release 5.99)
             hotkey.HOTKEY_IDS["pin_hotkey"]: self.window.toggle_pin,
             hotkey.HOTKEY_IDS["outlook_hotkey"]: self.window.add_selected_email,
             hotkey.HOTKEY_IDS["today_panel_hotkey"]: lambda: self.today_panel_action("hotkey"),

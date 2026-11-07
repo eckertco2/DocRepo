@@ -1,7 +1,9 @@
 """Quick tasks (mods log round 2, M0039, M0040): one-line tasks put straight on Today.
 
 A quick task is an ordinary task. With no parent of its own it waits under the built-in top-level task Quick tasks,
-so it doesn't sit among the projects in the task tree, until Edit task puts it under its real task. Quick tasks is
+so it doesn't sit among the projects in the task tree, until Put under… on its row (release 5.99, the consolidation plan's
+decision 394) or Edit task puts it under its real task. It's made two ways (decision 393): Today's box, the view's and the
+side panel's, and Ctrl+Shift+D, whose command the wheels' slots run; Make it a task turns a note on Today into one. Quick tasks is
 made the first time it's needed. DocRepo knows it by its creator, ``CREATOR``, so renaming it changes nothing; if it's
 discarded, the next quick task makes a new one.
 """
@@ -17,7 +19,7 @@ from docrepo.model import Task
 
 TITLE = "Quick tasks"
 CREATOR = "DocRepo"
-DESCRIPTION = "Built in. Quick tasks made on Today wait here until you put them under their real task with Edit task."
+DESCRIPTION = "Built in. Quick tasks made on Today wait here until you put them under their real task: Put under… on its row, or Edit task."
 
 
 def is_parent(t: Task) -> bool:

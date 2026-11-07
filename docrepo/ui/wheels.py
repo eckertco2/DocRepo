@@ -234,7 +234,7 @@ class Wheels(QObject):
     def capture_selection(self) -> None:
         self.app.window.capture_selection(self.snapshot)
 
-    def task_search(self, then: str = "task_view") -> None:
+    def task_search(self, then: str = "find_files") -> None:
         from docrepo.ui.task_search import TaskSearch
 
         if self._task_search is None:

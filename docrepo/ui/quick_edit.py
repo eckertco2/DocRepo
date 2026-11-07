@@ -7,6 +7,9 @@ size, on top of other windows, beside the bar; its top line moves it. From the t
 - a one-line box Parse and populate reads as you type ("3 hours a week, Tom leads, Mike to help, due 20 Nov"), with a
   chip for each thing it read: a click on one leaves its field as it was, and again fills it;
 - Start, Due and Deadline, the deadline's description and Repeats, and the line naming a plant event they fall in;
+- a line naming what else shapes its dates (its Duration, Runs through weekends, ties and key dates), with **More
+  options…**, which opens Edit task with its More options open: since release 5.100 (the consolidation plan's decisions
+  395 and 396) Quick edit is where dates are typed in words, and Edit task's More options the one form for the rest;
 - the lead and the assignees, each with their hours, and the total;
 - Plant event, a line for a problem, and Save.
 
@@ -45,7 +48,7 @@ from docrepo.ui.icons import icon, icon_size
 from docrepo.ui.look import LOOK, tip
 from docrepo.ui.style import CLASSIC_QUICK_EDIT, style_sheet
 from docrepo.ui.task_picker import path_text
-from docrepo.ui.task_forms import BAD_DURATION, KeyDatesEditor, days_valid, key_date_rows, typed_days
+from docrepo.ui.task_forms import key_date_rows
 from docrepo.ui.widgets import DateField, FlowLayout, HoursField, set_filled
 
 #: Its width (decision 145: about the pinned capture window's size, a little larger for the chips and the during line).
@@ -138,6 +141,8 @@ class QuickEdit(QWidget):
 
     saved = Signal(str)
     open_task = Signal(str)
+    #: More options…: Edit task for its task, with More options open (release 5.100).
+    edit_more = Signal(str)
 
     def __init__(self, ctx: AppContext, task_id: str, parent: QWidget | None = None) -> None:
         super().__init__(parent, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
@@ -229,40 +234,29 @@ class QuickEdit(QWidget):
         dates.setColumnStretch(0, 1)
         dates.setColumnStretch(1, 1)
         lay.addLayout(dates)
-        # Its Duration (release 5.46, decision 191): with one typed, a date moves the block.
+        # Its Duration (release 5.46, decision 191) still moves the block when a date changes; since release 5.100 it's set in
+        # Edit task's More options, with the ties and key dates, and named on the line under the dates.
         self.workdays = workday_numbers(ctx.settings.workdays)
-        self.length_row = QWidget()
-        days = QHBoxLayout(self.length_row)
-        days.setContentsMargins(0, 0, 0, 0)
-        days.setSpacing(6)
-        days.addWidget(QLabel("Duration", objectName="qeField"))
-        self.duration = QLineEdit()
-        self.duration.setFixedWidth(48)
-        self.duration.setAccessibleName("Duration in days")
-        self.duration.textEdited.connect(lambda _: self._field_edited("duration"))
-        days.addWidget(self.duration)
-        days.addWidget(QLabel("days", objectName="qeField"))
-        days.addSpacing(8)
-        self.calendar = QCheckBox("Runs through weekends")
-        self.calendar.setToolTip("Count every day, for its Due and where its hours land, not only workdays")
-        self.calendar.clicked.connect(lambda _: self._field_edited("calendar_days"))
-        days.addWidget(self.calendar)
-        days.addStretch()
         self.desc = QLineEdit()
         self.desc.setPlaceholderText("Deadline description, such as Boiler restart")
         self.desc.setAccessibleName("Deadline description")
         self.desc.textEdited.connect(lambda _: self._field_edited("deadline_desc"))
         lay.addWidget(self.desc)
-        lay.addWidget(self.length_row)
         self.during = QLabel(objectName="hint")
         self.during.setWordWrap(True)
         lay.addWidget(self.during)
-        # ---- its key dates (release 5.31, the key dates plan): the same rows as Edit task's, compact ----
-        self.key_dates = KeyDatesEditor(self.base.key_dates, compact=True)
-        self.key_dates.add_button.setText("+ Key date")
-        self.key_dates.empty.hide()
-        self.key_dates.changed.connect(self._key_dates_edited)
-        lay.addWidget(self.key_dates)
+        # ---- the rest, in Edit task's More options (release 5.100, decision 395): what's set, and the way there ----
+        more = QHBoxLayout()
+        more.setSpacing(6)
+        self.more_line = QLabel(objectName="hint")
+        self.more_line.setWordWrap(True)
+        more.addWidget(self.more_line, 1)
+        self.more_button = QPushButton("More options…", objectName="link")
+        self.more_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.more_button.setToolTip("Edit task, with its More options open: Duration, Runs through weekends, ties and key dates")
+        self.more_button.clicked.connect(self.more_options)
+        more.addWidget(self.more_button, 0, Qt.AlignmentFlag.AlignTop)
+        lay.addLayout(more)
         # ---- the people and their hours ----
         who = QGridLayout()
         who.setHorizontalSpacing(4)
@@ -359,15 +353,7 @@ class QuickEdit(QWidget):
             self.units[key].setCurrentIndex(UNITS.index(planning.unit_of(v, key)))
             self.units[key].setVisible(not routine)  # a routine task's hours are for each time
             set_filled(h, key in filled)
-        self.length_row.setVisible(not routine)
-        if skip != "duration" and typed_days(self.duration) != v.duration:
-            self.duration.setText("" if v.duration is None else str(v.duration))
-        self.calendar.setChecked(v.calendar_days)
-        grey = None if v.duration is not None else planning.length(v, self.workdays)
-        self.duration.setPlaceholderText(str(grey) if grey else "")
-        both = len(self.task.ties) == 2
-        self.duration.setEnabled(not both)
-        self.duration.setToolTip("Both dates are tied, so the length comes from them." if both else "")
+        self.more_line.setText(planning.more_text(v, self.task, routine))
         self.plant_event.setChecked(v.plant_event)
         set_filled(self.plant_event, "plant_event" in filled)
         self._draw_chips()
@@ -421,12 +407,6 @@ class QuickEdit(QWidget):
             setattr(self.base, key, self.dates[key].value() or "")
             if key != "deadline" and self.dates[key].is_valid():
                 self._place(key)
-        elif key == "duration":
-            self.base.duration = typed_days(self.duration)  # one that isn't a number: Save says so
-            self._place("duration")
-        elif key == "calendar_days":
-            self.base.calendar_days = self.calendar.isChecked()
-            self._place("duration")
         elif key == "deadline_desc":
             self.base.deadline_desc = self.desc.text()
         elif key == "recurrence":
@@ -445,10 +425,8 @@ class QuickEdit(QWidget):
         self._changed_by_user(key if key not in self.rows else None)
 
     def _place(self, edited: str) -> None:
-        """With a Duration, a date moves the block, and the Duration moves Due, or Start if there's no Start (decision 191)."""
+        """With a Duration, a date moves the block (decision 191)."""
         b = self.base
-        if edited == "duration" and "due" in self.task.ties and "start" not in self.task.ties:
-            edited = "due"  # a tied Due stays where its tie has it, and the Start moves
         start, due = placed(b.start or None, b.due or None, b.duration, edited, self.workdays, b.calendar_days)
         b.start, b.due = start or "", due or ""
 
@@ -466,14 +444,6 @@ class QuickEdit(QWidget):
         self.off.add(key)
         self._changed_by_user(None)
 
-    def _key_dates_edited(self) -> None:
-        """A key date added, changed, moved or taken off: kept as it stands; Save says what's wrong with one."""
-        if self._setting:
-            return
-        self.key_dates.empty.hide()  # the window keeps its room: Edit task's sentence about key dates isn't shown here
-        self.base.key_dates = self.key_dates.rows()
-        self._changed_by_user(None)
-
     def toggle(self, key: str) -> None:
         """A chip's click: its field no longer filled by the box, or filled again."""
         if key in self.off:
@@ -488,10 +458,8 @@ class QuickEdit(QWidget):
         for key, h in self.hours.items():
             if not h.is_valid():
                 return self._say(f"{planning.NAMES[key]} isn't a number of hours.")
-        if not days_valid(self.duration):
-            return self._say(BAD_DURATION)
         v = self.values()
-        problem = planning.problem(v) or self.key_dates.problem()
+        problem = planning.problem(v)
         if problem:
             return self._say(problem)
         if v == self.orig:
@@ -531,6 +499,16 @@ class QuickEdit(QWidget):
     def _open(self) -> None:
         self.hide()
         self.open_task.emit(self.task_id)
+
+    def more_options(self) -> None:
+        """More options…: Edit task, with More options open (release 5.100). With something changed here, it asks once
+        first, as Esc does, so nothing typed is lost unseen."""
+        if self.changed() and not self.warned:
+            self.warned = True
+            self._say("You've changed something. Save first, or click More options… again to leave it.")
+            return
+        self.hide()
+        self.edit_more.emit(self.task_id)
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt's name: Alt+F4 asks as Esc does
         if self.changed() and not self.warned:

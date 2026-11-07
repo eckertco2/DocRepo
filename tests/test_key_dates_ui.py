@@ -103,22 +103,17 @@ def test_edit_task_adds_changes_orders_and_refuses_key_dates(browse, ctx):
 
 
 # ---- Quick edit (item 57) ----
-def test_quick_edit_has_the_same_rows(ctx):
+def test_quick_edit_names_them_and_leaves_them_as_they_are(ctx):
+    """Release 5.100 (decision 395): key dates are set in Edit task's More options; Quick edit says how many, and a save
+    there keeps them as they are."""
     put(ctx, rows=TRIAL[:1])
     qe = QuickEdit(ctx, "T000008")
-    assert [line.desc.text() for line in qe.key_dates.lines] == ["Trial planning period"] and qe.key_dates.compact
-    line = qe.key_dates.add_row()
-    line.desc.setText("Crane booked")
-    qe._key_dates_edited()
-    qe.save()
-    assert qe.message.text() == "Key date 2 needs a start, an end or both."
-    line.end.set_value("2026-10-12")
-    line.deadline.setChecked(True)
-    qe._key_dates_edited()
-    assert qe.changed()
+    assert "1 key date" in qe.more_line.text() and not hasattr(qe, "key_dates")
+    qe.dates["deadline"].set_value("2026-10-30")
+    qe._field_edited("deadline")
     qe.save()
     kds = Model(ctx.conn).key_dates_of("T000008")
-    assert [(kd.description, kd.end, kd.deadline) for kd in kds] == [("Trial planning period", None, False), ("Crane booked", "2026-10-12", True)]
+    assert [kd.description for kd in kds] == ["Trial planning period"] and Model(ctx.conn).task("T000008").deadline == "2026-10-30"
     assert qe.width() == 362  # kept to the window's width
 
 

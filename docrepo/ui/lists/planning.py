@@ -157,6 +157,7 @@ class PlanningHooks:
         self.quick_window.ask_move = self.ask_move
         self.quick_window.saved.connect(lambda x: (self.refresh(render=False), setattr(self, "sel", ("task", x)), self.render_all()))
         self.quick_window.open_task.connect(self.go_task)
+        self.quick_window.edit_more.connect(lambda x: self.edit_task(x, more=True))  # release 5.100: the rest is Edit task's
         self.quick_window.show_near(near)
 
     def nudge_priority(self, task_id: str, step: int, shown: list) -> None:

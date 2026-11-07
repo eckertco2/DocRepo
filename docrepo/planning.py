@@ -276,6 +276,25 @@ def total_text(v: Values, task: Task, workdays: Collection[int] = MON_TO_FRI) ->
     return f"{hours_text(total)} h in all"
 
 
+def more_text(v: Values, task: Task, routine: bool = False) -> str:
+    """Quick edit's line on what else shapes the task's dates, which Edit task's More options sets (release 5.100, the
+    consolidation plan's decision 395): its Duration, Runs through weekends, ties and key dates; or that they're there."""
+    bits = []
+    if v.duration is not None and not routine:
+        bits.append(f"Duration {v.duration} day{'s' if v.duration != 1 else ''}")
+    if v.calendar_days and not routine:
+        bits.append("runs through weekends")
+    tied = [NAMES[k] for k in ("start", "due") if k in task.ties]
+    if tied:
+        bits.append(f"{' and '.join(tied)} tied")
+    if v.key_dates:
+        bits.append(f"{len(v.key_dates)} key date{'s' if len(v.key_dates) != 1 else ''}")
+    if not bits:
+        return "Ties and key dates:" if routine else "Duration, ties and key dates:"
+    words = ", ".join(bits)
+    return words[:1].upper() + words[1:] + "."
+
+
 def during(model: Model, v: Values, today: date, task_id: str) -> str:
     """The line naming the plant events the dates fall in (release 5.9), the task's own left out."""
     return timeline.during_text(model, [("Start", v.start or None), ("Due", v.due or None), ("Deadline", v.deadline or None)], today, task_id)
