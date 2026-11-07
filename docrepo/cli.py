@@ -10,7 +10,7 @@ from contextlib import closing
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from docrepo import __version__, backup, capacity, db, diagnose, hotkey, outlook, prompts, search, tree_files
+from docrepo import __version__, backup, capacity, db, diagnose, hotkey, outlook, prompts, search, tagged, tree_files
 from docrepo.config import (
     SETTINGS_FILE,
     Settings,
@@ -202,6 +202,7 @@ def cmd_try_write(args: argparse.Namespace) -> int:
 def _rebuild(conn: sqlite3.Connection, root: Path, settings: Settings, fs: SafeFS, when: datetime) -> tuple[int, int]:
     rows = capacity.rebuild_all(conn, when.date(), settings)
     pages = write_pages(Model(conn), root, fs, when.date(), when)
+    tagged.use_settings(conn, settings, match=False)  # release 5.80: the tag patterns in settings.json; the rebuild matches them
     search.rebuild(conn, root)
     return rows, pages
 

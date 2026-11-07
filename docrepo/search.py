@@ -51,12 +51,12 @@ def extracted_text(data_root: Path, document_id: str) -> str:
         return ""
 
 
-def _put(conn: sqlite3.Connection, kind: str, item_id: str, body: str) -> None:
+def _put(conn: sqlite3.Connection, kind: str, item_id: str, body: str, tagged_too: bool = True) -> None:
     from docrepo import tagged
 
     conn.execute("INSERT INTO search_text (kind, id, body) VALUES (?, ?, ?) ON CONFLICT(kind, id) DO UPDATE SET body = excluded.body",
                  (kind, item_id, body))
-    if kind != "page":  # its tagged labels, from the same text (release 5.79, decision 377); a page's from its own text
+    if kind != "page" and tagged_too:  # its tagged labels, from the same text (release 5.79, decision 377); a page's from its own text
         tagged.index(conn, kind, item_id, tagged.text_of_body(kind, body))
 
 
@@ -73,8 +73,10 @@ def document_body(model: Model, data_root: Path, document_id: str) -> str:
 
 def index_items(conn: sqlite3.Connection, data_root: Path, captures: list[str] = (), documents: list[str] = ()) -> None:
     """Bring the index up to date for these captures and documents."""
+    from docrepo import tagged
+
     model = Model(conn)
-    with transaction(conn):
+    with transaction(conn), tagged.batch(conn):  # their tagged labels together (release 5.80)
         for c in captures:
             if c in model.captures:
                 _put(conn, "capture", c, capture_body(model, data_root, c))
@@ -94,9 +96,9 @@ def index_pages(conn: sqlite3.Connection, task_ids: list[str]) -> None:
     if not task_ids:
         return
     model = Model(conn)
-    with transaction(conn):
-        from docrepo import tagged
+    from docrepo import tagged
 
+    with transaction(conn), tagged.batch(conn):  # their tagged labels together (release 5.80)
         for t in dict.fromkeys(task_ids):
             if t in model.tasks:
                 _put(conn, "page", t, page_body(model, t))
@@ -108,13 +110,14 @@ def rebuild(conn: sqlite3.Connection, data_root: Path) -> int:
     model = Model(conn)
     with transaction(conn):
         conn.execute("DELETE FROM search_text")
+        # tagged.rebuild below reads every item's tagged labels from the index, so they aren't found item by item here too
         for c in model.captures:
-            _put(conn, "capture", c, capture_body(model, data_root, c))
+            _put(conn, "capture", c, capture_body(model, data_root, c), tagged_too=False)
         for d in model.documents:
-            _put(conn, "document", d, document_body(model, data_root, d))
+            _put(conn, "document", d, document_body(model, data_root, d), tagged_too=False)
         for t in model.pages:
             if t in model.tasks:
-                _put(conn, "page", t, page_body(model, t))
+                _put(conn, "page", t, page_body(model, t), tagged_too=False)
     count = len(model.captures) + len(model.documents) + len(model.pages)
     log.info("search index rebuilt: %d items", count)
     from docrepo import tagged
@@ -188,7 +191,8 @@ def search(conn: sqlite3.Connection, model: Model, query: str) -> list[Result]:
     named = tagged.find_labels(m.tagged, query)
     for lb in named[:LIMIT]:
         uses = tagged.uses_of(m, lb)
-        out.append(Result("Tagged label", "tagged", lb.key, lb.label, " · ".join(x for x in (lb.description, f"mentioned in {len(uses)} item{'s' if len(uses) != 1 else ''}") if x)))
+        what = f"New, from the {lb.pattern} pattern" if lb.status == "suggested" else lb.description  # release 5.80: suggested
+        out.append(Result("Tagged label", "tagged", lb.key, lb.label, " · ".join(x for x in (what, f"mentioned in {len(uses)} item{'s' if len(uses) != 1 else ''}") if x)))
     mentioned: dict[str, set[str]] = {}
     if len(named) == 1:
         for u in tagged.uses_of(m, named[0]):

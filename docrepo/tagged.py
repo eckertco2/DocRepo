@@ -8,7 +8,7 @@ V-110 or FIC-2210, found in everything DocRepo reads as text.
   however its parts are joined: a hyphen, an en dash, an underscore, nothing, or a space between capitals. So V-110 is
   found as V110, v-110 and V 110, and "page 101" isn't P-101. A label with fewer than four letters and digits (E-12) must
   be in capitals with no space. Any other alias ("feed drum", "CT fan 1") is found as whole words, in any case
-  (decision 369). P-204A is its own label, and "P-204A/B" mentions P-204A and P-204B (decision 370).
+  (decision 369). P-204A is its own label, and "P-204A/B" mentions P-204A and P-204B (decision 370), "P-204A/B/C" all three.
 - **What's read** (decision 366): the text the search index keeps for each capture, document and notes page
   (``search_text``), without its ID line, and without a capture's title or a page's task title when the rest has it;
   and a task's own fields (title, description, current status, deadline description, key dates' descriptions), read
@@ -19,22 +19,34 @@ V-110 or FIC-2210, found in everything DocRepo reads as text.
   Both tables are caches, rebuilt with the search index (``rebuild``).
 - **The owner's own changes** (decision 376, ``tagged_choices``): a label removed from a capture or document, or added by
   hand, applied when the mentions are read, so reading the text again never undoes them.
+- **Tag patterns** (release 5.80, items 106 and 107, decisions 372 to 375 and 377): masks (``docrepo.tagged_masks``) find
+  tags that aren't in the glossary. A match with no glossary label becomes a tagged label at once, a **suggested** row in
+  ``tagged_labels`` (status ``suggested``, how it came ``pattern``, the pattern's name), marked new where it shows, until
+  the owner adds it to the glossary (``accept``), makes it another label's alias (``same_as``) or puts it on Never a tag.
+  A glossary label is always found first; Never a tag applies to patterns only. "P-204A/B" a pattern finds is both tags,
+  as for a glossary label, when the mask allows the other letter where the first was. The patterns and Never a tag are the
+  owner's, in the data root's ``Config\\settings.json``; docs.db keeps a copy in ``app_state`` (``set_patterns``), made
+  again from settings.json at each start (``use_settings``), so a save matches without reading the settings. A pattern
+  change matches the kept words again, as a glossary change does. A suggested label nothing mentions any more is
+  dropped when everything is matched again.
 
 Nothing here touches Qt. Pure functions (``Finder``, ``words_of``) are tested on their own.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import re
 import sqlite3
 import uuid
 from collections import Counter
-from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
+from collections.abc import Callable, Iterable, Iterator, Mapping
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import TYPE_CHECKING
 
+from docrepo import tagged_masks as masks
 from docrepo.db import get_state, set_state, transaction
 
 if TYPE_CHECKING:
@@ -48,14 +60,29 @@ MARKS = "-–_ "
 SHORT = 4
 #: The most parts (runs of letters or digits) a label is matched across: "22-PT-101A" has four.
 MAX_PARTS = 4
+#: The most kept words a Finder remembers the hits of (``Finder.in_run``) before it starts again.
+RUNS_KEPT = 200_000
 #: The kinds of item that hold text, as the search index names them.
 KINDS = ("capture", "document", "page")
-VERSION_KEY = "tagged_glossary"  # app_state: a new token each time the glossary changes, so a kept Finder knows it's out of date
-WORDS_KEY = "tagged_words_built"  # app_state: every item's words have been kept (after the first rebuild)
+VERSION_KEY = "tagged_glossary"  # app_state: a new token each time the glossary or the patterns change, so a kept Finder knows
+WORDS_KEY = "tagged_words_built"  # app_state: every item's words have been kept, in the form WORDS_FORM
+#: The form of the kept words: "1" (release 5.79), "2" with runs joined across a / or a dot too (release 5.80), so a mask
+#: such as TK-##/# is found in them. Kept words in an older form are read again from the search index at the next match.
+WORDS_FORM = "2"
+PATTERNS_KEY = "tagged_patterns"  # app_state: docs.db's copy of the patterns and Never a tag in settings.json (release 5.80)
 
 _TOKEN = re.compile(r"[A-Za-z0-9]+")
 _PAIR = re.compile(r"/([A-Z])(?![A-Za-z0-9])")
+#: What joins two runs of letters and digits into one kept word besides the marks: a / or a dot (release 5.80).
+_JOINS = masks.JOINERS
 _LETTER, _DIGIT = re.compile(r"[A-Za-z]"), re.compile(r"[0-9]")
+
+
+def _pairs(text: str, end: int) -> Iterator[re.Match[str]]:
+    """The letters after a tag that ends at ``end``, each after a slash: "/B" in P-204A/B, "/B" and "/C" in P-204A/B/C."""
+    while (pair := _PAIR.match(text, end)) is not None:
+        yield pair
+        end = pair.end()
 
 
 def key_of(text: str) -> str:
@@ -104,13 +131,19 @@ class Label:
 
 @dataclass(frozen=True)
 class Hit:
-    """One place a label is mentioned: where in the text, as written, and how it was found (label, alias, word or pair)."""
+    """One place a label is mentioned: where in the text, as written, and how it was found (label, alias, word or pair;
+    since release 5.80 "new" for a label a pattern found that isn't in the glossary, and "never" for one on Never a tag).
+    A pattern's hit has its key, the pattern's name and the label as the mask spells it; ``label`` is 0 for a new one
+    with no row in docs.db yet."""
 
     start: int
     end: int
     written: str
     label: int
     how: str
+    key: str = ""
+    pattern: str = ""
+    spelled: str = ""
 
 
 @dataclass
@@ -132,17 +165,34 @@ def _spaced_ok(a: str, b: str) -> bool:
 
 
 class Finder:
-    """Finds a glossary's labels in text. Built once per version of the glossary."""
+    """Finds a glossary's labels in text, and what its tag patterns find (release 5.80). Built once per version of the
+    glossary and the patterns. Only glossary labels are matched however they're written; a suggested label is found
+    only by a pattern."""
 
-    def __init__(self, labels: Iterable[Label]) -> None:
+    def __init__(self, labels: Iterable[Label], patterns: Iterable[masks.Pattern] = (), never: Iterable[str] = ()) -> None:
         self.keys: dict[str, tuple[int, str]] = {}  # key -> (label id, how)
         phrases: dict[str, tuple[int, str]] = {}  # a word alias in lower case, its words one space apart -> (label id, how)
+        self.named: dict[str, tuple[int, str]] = {}  # every glossary name's key -> (label id, how), for what a pattern spells
+        self.suggested: dict[str, int] = {}  # a suggested label's key -> its id
         for lb in labels:
+            if lb.status != "glossary":
+                self.suggested.setdefault(lb.key, lb.id)
+                continue
             for name, how in ((lb.label, "label"), *((a, "alias") for a in lb.aliases)):
                 if tag_like(name):
                     self.keys.setdefault(key_of(name), (lb.id, how))
                 elif name.strip():
                     phrases.setdefault(" ".join(name.lower().split()), (lb.id, "label" if how == "label" else "word"))
+                if key_of(name):
+                    self.named.setdefault(key_of(name), (lb.id, how))
+        self.masks: list[tuple[masks.Pattern, masks.Compiled]] = []
+        for p in patterns:
+            try:
+                self.masks.append((p, masks.compile_mask(p.mask, p.space)))
+            except masks.MaskError as e:  # settings.json changed by hand: the other patterns still work
+                log.warning("tag pattern %r left out: %s", p.name, e)
+        self.never = masks.Never(never)
+        self._runs: dict[str, list[Hit]] = {}  # in_run's: what each kept word met mentions
         self.phrases = phrases
         self.words_re: re.Pattern[str] | None = None
         if phrases:
@@ -151,7 +201,7 @@ class Finder:
             self.words_re = re.compile(rf"(?<![A-Za-z0-9])(?:{body})(?![A-Za-z0-9])", re.IGNORECASE)
 
     def __bool__(self) -> bool:
-        return bool(self.keys or self.phrases)
+        return bool(self.keys or self.phrases or self.masks)
 
     def find_tags(self, text: str) -> list[Hit]:
         """Labels and tag-shaped aliases: runs of letters and digits joined by one mark each, the longest match first."""
@@ -181,13 +231,11 @@ class Finder:
                 continue
             j, label, end, how = best
             hits.append(Hit(toks[i].start(), end, text[toks[i].start():end], label, how))
-            pair = _PAIR.match(text, end)  # P-204A/B: the same tag with that letter (decision 370)
-            if pair:
-                k = key_of(text[toks[i].start():end])
-                if k[-1:].isalpha():
-                    other = self.keys.get(k[:-1] + pair.group(1))
-                    if other:
-                        hits.append(Hit(pair.start(), pair.end(), pair.group(), other[0], "pair"))
+            k = key_of(text[toks[i].start():end])
+            for pair in _pairs(text, end) if k[-1:].isalpha() else ():  # P-204A/B/C: the same tag with each letter (decision 370)
+                other = self.keys.get(k[:-1] + pair.group(1))
+                if other:
+                    hits.append(Hit(pair.start(), pair.end(), pair.group(), other[0], "pair"))
             i = j + 1
         return hits
 
@@ -201,17 +249,70 @@ class Finder:
             out.append(Hit(m.start(), m.end(), m.group(), label, how))
         return out
 
-    def find(self, text: str) -> list[Hit]:
-        """Every mention in ``text``, in order."""
+    def find_patterns(self, text: str, taken: Iterable[Hit] = ()) -> list[Hit]:
+        """What the patterns find where nothing in ``taken`` is, each pattern in turn (release 5.80, decisions 372, 374 and
+        375). Each match is spelled as its mask is. A glossary label with that key is that label (how "label" or "alias":
+        a glossary label is always found); else one on Never a tag is "never"; else it's "new", with its suggested label's
+        row, or label 0 for one with no row yet. "P-204A/B" is P-204A and P-204B, as it is for a glossary label (decision
+        370), when the mask allows the other letter too: its hit is the "/B", how "pair" if it's a glossary label."""
+        out: list[Hit] = []
+        if not self.masks:
+            return out
+        spans = [(h.start, h.end) for h in taken]
+        for p, c in self.masks:
+            for m in c.regex.finditer(text):
+                s, e = m.span()
+                if any(s < b and a < e for a, b in spans):
+                    continue
+                spans.append((s, e))
+                spelled = masks.spell(m, c)
+                out.append(self._pattern_hit(s, e, m.group(), spelled, p.name))
+                for pair in _pairs(text, e) if spelled[-1:].isalpha() else ():
+                    other = spelled[:-1] + pair.group(1)
+                    if c.regex.fullmatch(other) and not any(pair.start() < b and a < pair.end() for a, b in spans):
+                        spans.append(pair.span())
+                        h = self._pattern_hit(pair.start(), pair.end(), pair.group(), other, p.name)
+                        out.append(replace(h, how="pair") if h.how in ("label", "alias") else h)
+        return out
+
+    def _pattern_hit(self, s: int, e: int, written: str, spelled: str, pattern: str) -> Hit:
+        """What a pattern's match is: a glossary label with its key, one on Never a tag, or a new one."""
+        k = key_of(spelled)
+        g = self.named.get(k)
+        if g:
+            return Hit(s, e, written, g[0], "label" if g[1] == "label" else "alias", k, pattern, spelled)
+        if spelled in self.never:
+            return Hit(s, e, written, 0, "never", k, pattern, spelled)
+        return Hit(s, e, written, self.suggested.get(k, 0), "new", k, pattern, spelled)
+
+    def in_run(self, run: str) -> list[Hit]:
+        """What one kept word mentions (``words_of``): the glossary's tags, then what the patterns find, without what's on
+        Never a tag. Kept for each word met, as the same tags recur across a data root's items."""
+        hits = self._runs.get(run)
+        if hits is None:
+            if len(self._runs) > RUNS_KEPT:
+                self._runs.clear()
+            tags = self.find_tags(run)
+            hits = self._runs[run] = [*tags, *(h for h in self.find_patterns(run, tags) if h.how != "never")]
+        return hits
+
+    def find_all(self, text: str) -> list[Hit]:
+        """Every mention in ``text``, in order, with what the patterns find that has no row yet, and what's on Never a
+        tag: Settings' tester shows them all (decision 373)."""
         tags = self.find_tags(text)
         words = [h for h in self.find_words(text) if not any(h.start < t.end and t.start < h.end for t in tags)]
-        return sorted([*tags, *words], key=lambda h: h.start)
+        return sorted([*tags, *words, *self.find_patterns(text, [*tags, *words])], key=lambda h: h.start)
+
+    def find(self, text: str) -> list[Hit]:
+        """Every mention in ``text``, in order: the glossary's, and the suggested labels the patterns find."""
+        return [h for h in self.find_all(text) if h.label and h.how != "never"]
 
 
 def words_of(text: str) -> Counter[str]:
     """The text's tag-like words as written: runs of letters and digits joined by one mark each (a space only between
-    capitals), with a letter and a digit, and a pair's "/B" kept on (decision 377). Every tag a glossary could match lies
-    inside one of these, so they're all a glossary change needs."""
+    capitals), or by a / or a dot (release 5.80, so a pair's "/B" and a mask's own / are kept on), with a letter and a
+    digit (decision 377). Every tag a glossary or a pattern could match lies inside one of these, so they're all a change
+    to either needs."""
     out: Counter[str] = Counter()
     toks = list(_TOKEN.finditer(text))
     i = 0
@@ -219,20 +320,13 @@ def words_of(text: str) -> Counter[str]:
         j = i
         while j + 1 < len(toks):
             gap = text[toks[j].end():toks[j + 1].start()]
-            if len(gap) != 1 or gap not in MARKS or (gap == " " and not _spaced_ok(toks[j].group(), toks[j + 1].group())):
+            if len(gap) != 1 or gap not in MARKS + _JOINS or (gap == " " and not _spaced_ok(toks[j].group(), toks[j + 1].group())):
                 break
             j += 1
-        end = toks[j].end()
-        pair = _PAIR.match(text, end)
-        if pair:
-            end = pair.end()
-        run = text[toks[i].start():end]
+        run = text[toks[i].start():toks[j].end()]
         if _LETTER.search(run) and _DIGIT.search(run):
             out[run] += 1
         i = j + 1
-        if pair:  # the pair's letter is part of this run
-            while i < len(toks) and toks[i].start() < end:
-                i += 1
     return out
 
 
@@ -283,8 +377,24 @@ def task_text(t: Task, model: Model) -> str:
     return "\n".join(x for x in (t.title, t.description, t.current_status, t.deadline_desc or "", *dates) if x)
 
 
-def mentions_in(finder: Finder, kind: str, item_id: str, words: Mapping[str, int], text: str | None) -> dict[int, Mention]:
-    """What one item mentions, from its kept words (and its text, for word aliases)."""
+def task_texts(conn: sqlite3.Connection, task_id: str | None = None) -> Iterable[tuple[str, str]]:
+    """Each task's own fields as ``task_text`` reads them, from docs.db without the Model (release 5.80): (task ID, text),
+    for every task or one. Discarded tasks are left out."""
+    dates: dict[str, list[str]] = {}
+    for r in conn.execute("SELECT task, description FROM task_dates WHERE description != '' AND (? IS NULL OR task = ?) ORDER BY task, pos, id",
+                          (task_id, task_id)):
+        dates.setdefault(r["task"], []).append(r["description"])
+    for r in conn.execute("SELECT id, title, description, current_status, deadline_desc FROM tasks WHERE discarded IS NULL "
+                          "AND (? IS NULL OR id = ?) ORDER BY id", (task_id, task_id)):
+        yield r["id"], "\n".join(x for x in (r["title"], r["description"], r["current_status"], r["deadline_desc"] or "",
+                                             *dates.get(r["id"], ())) if x)
+
+
+def mentions_in(finder: Finder, kind: str, item_id: str, words: Mapping[str, int], text: str | None,
+                new: Callable[[Hit], int] | None = None) -> dict[int, Mention]:
+    """What one item mentions, from its kept words (and its text, for word aliases). What the patterns find in the words
+    is a glossary label or a new one (release 5.80): ``new`` gives a new one's row, making it if there's none; without
+    it, only a new one with a row counts."""
     out: dict[int, Mention] = {}
 
     def add(h: Hit, n: int) -> None:
@@ -295,8 +405,13 @@ def mentions_in(finder: Finder, kind: str, item_id: str, words: Mapping[str, int
         m.written[h.written] = m.written.get(h.written, 0) + n
 
     for run, n in words.items():
-        for h in finder.find_tags(run):
-            add(h, n)
+        for h in finder.in_run(run):
+            if h.how != "new":
+                add(h, n)
+                continue
+            label = new(h) if new is not None else h.label
+            if label:
+                add(replace(h, label=label) if label != h.label else h, n)
     if text and finder.words_re is not None:
         for h in finder.find_words(text):
             add(h, 1)
@@ -313,17 +428,32 @@ def read_labels(conn: sqlite3.Connection) -> list[Label]:
             for r in conn.execute("SELECT * FROM tagged_labels ORDER BY id")]
 
 
-class _Kept:
-    """One version of the glossary, read once: its labels, and its Finder when it's first needed. A save builds the Model
-    several times, and 20,000 labels took 0.1 s to read each time."""
+def patterns_state(conn: sqlite3.Connection) -> tuple[list[masks.Pattern], list[str]]:
+    """docs.db's copy of the tag patterns and Never a tag (release 5.80), as ``set_patterns`` kept them."""
+    raw = get_state(conn, PATTERNS_KEY)
+    if not raw:
+        return [], []
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        log.warning("docs.db's copy of the tag patterns can't be read; it's made again from settings.json at the next start")
+        return [], []
+    never = data.get("never") if isinstance(data, dict) else None
+    return masks.patterns_of(data.get("patterns") if isinstance(data, dict) else None), masks.never_of(never if isinstance(never, list) else [])
 
-    def __init__(self, labels: list[Label]) -> None:
+
+class _Kept:
+    """One version of the glossary and the patterns, read once: its labels, and its Finder when it's first needed. A
+    save builds the Model several times, and 20,000 labels took 0.1 s to read each time."""
+
+    def __init__(self, labels: list[Label], patterns: list[masks.Pattern] = (), never: list[str] = ()) -> None:
         self.labels = labels
+        self.patterns, self.never = list(patterns), list(never)
         self._finder: Finder | None = None
 
     def finder(self) -> Finder:
         if self._finder is None:
-            self._finder = Finder(self.labels)
+            self._finder = Finder(self.labels, self.patterns, self.never)
         return self._finder
 
 
@@ -331,25 +461,53 @@ _kept: dict[str, _Kept] = {}
 
 
 def _glossary(conn: sqlite3.Connection) -> _Kept:
-    """The glossary as it is: kept by its version's token, which every change to it makes new (``glossary_changed``)."""
+    """The glossary and patterns as they are: kept by their version's token, which every change to either makes new
+    (``glossary_changed``)."""
     token = get_state(conn, VERSION_KEY)
     if token is None:
-        return _Kept(read_labels(conn))
+        return _Kept(read_labels(conn), *patterns_state(conn))
     kept = _kept.get(token)
     if kept is None:
         if len(_kept) > 4:
             _kept.clear()
-        kept = _kept[token] = _Kept(read_labels(conn))
+        kept = _kept[token] = _Kept(read_labels(conn), *patterns_state(conn))
     return kept
 
 
 def finder(conn: sqlite3.Connection) -> Finder:
-    """The Finder for the glossary as it is, kept until the glossary changes."""
+    """The Finder for the glossary and patterns as they are, kept until either changes."""
     return _glossary(conn).finder()
 
 
 def glossary_changed(conn: sqlite3.Connection) -> None:
     set_state(conn, VERSION_KEY, uuid.uuid4().hex)
+
+
+class _Suggest:
+    """Gives a new tagged label a pattern found its row (decision 374): a suggested one, made the first time its key is
+    met, with the pattern's name. Remembers which pattern found each, and whether it made any."""
+
+    def __init__(self, conn: sqlite3.Connection, at: datetime | None = None) -> None:
+        self.conn = conn
+        self.at = (at or datetime.now()).isoformat(timespec="seconds")
+        self.ids: dict[str, int] = {}
+        self.found_by: dict[int, str] = {}  # label -> the pattern that found it first in this pass
+        self.made = 0
+
+    def __call__(self, h: Hit) -> int:
+        i = h.label or self.ids.get(h.key)
+        if not i:
+            row = self.conn.execute("SELECT id FROM tagged_labels WHERE key = ?", (h.key,)).fetchone()
+            if row is not None:
+                i = row["id"]
+            else:
+                cur = self.conn.execute("INSERT INTO tagged_labels (label, key, status, came, pattern, added) VALUES (?, ?, 'suggested', 'pattern', ?, ?)",
+                                        (h.spelled, h.key, h.pattern, self.at))
+                i = int(cur.lastrowid)
+                self.made += 1
+            self.ids[h.key] = i
+        self.found_by.setdefault(i, h.pattern)
+        return i
 
 
 # ---- keeping it current ----
@@ -365,12 +523,77 @@ def _insert_mentions(conn: sqlite3.Connection, ms: Iterable[Mention]) -> None:
                      [(m.kind, m.id, m.label, m.how, m.n, json.dumps(m.written, ensure_ascii=False)) for m in ms])
 
 
+_batches: dict[int, tuple[Finder, _Suggest]] = {}  # id(conn) -> the Finder and the new rows of the items indexed together
+
+
+@contextlib.contextmanager
+def batch(conn: sqlite3.Connection) -> Iterator[None]:
+    """Index several items together (the search index's calls, release 5.80): one Finder for them all, and the glossary's
+    version changed once at the end if a pattern gave any new label its row, rather than after each item, which would
+    read the glossary again for the next. Inside a transaction, so a rollback takes the new rows with it."""
+    if id(conn) in _batches:
+        yield
+        return
+    with transaction(conn):
+        _batches[id(conn)] = (finder(conn), _Suggest(conn))
+        try:
+            yield
+            made = _batches[id(conn)][1].made
+        finally:
+            del _batches[id(conn)]
+        if made:
+            glossary_changed(conn)
+
+
 def index(conn: sqlite3.Connection, kind: str, item_id: str, text: str) -> None:
     """Keep one item's words and mentions, from its text (``text_of_body``, ``page_text``). Called inside the search
-    index's transaction."""
+    index's transaction. A new tagged label a pattern finds gets its row at once (decision 374)."""
     words = words_of(text)
+    with batch(conn):
+        f, new = _batches[id(conn)]
+        _store(conn, kind, item_id, words, mentions_in(f, kind, item_id, words, text, new) if f else {})
+
+
+def index_task(conn: sqlite3.Connection, task_id: str) -> None:
+    """A task's own fields were written (release 5.80): a new tagged label a pattern finds in them gets its row at once,
+    as one in a capture does. They're read as they are wherever they show, so nothing else is kept."""
     f = finder(conn)
-    _store(conn, kind, item_id, words, mentions_in(f, kind, item_id, words, text) if f else {})
+    if not f.masks:
+        return
+    text = next((x for _, x in task_texts(conn, task_id)), "")
+    with transaction(conn):
+        new = _Suggest(conn)
+        for h in f.find_all(text):
+            if h.how == "new":
+                new(h)
+        if new.made:
+            glossary_changed(conn)
+
+
+def _task_suggestions(conn: sqlite3.Connection, f: Finder, new: _Suggest) -> set[int]:
+    """The suggested labels the tasks' own fields mention, given their rows."""
+    used: set[int] = set()
+    if f.masks:
+        for _, text in task_texts(conn):
+            used |= {new(h) for h in f.find_all(text) if h.how == "new"}
+    return used
+
+
+def _tidy(conn: sqlite3.Connection, used: set[int], new: _Suggest) -> bool:
+    """After everything is matched again: drop the suggested labels nothing mentions now (nor the owner added by hand),
+    and give the rest the name of the pattern that found them, which may have been renamed. True if anything changed."""
+    added = {r["key"] for r in conn.execute("SELECT DISTINCT key FROM tagged_choices WHERE choice = 'added'")}
+    gone, renamed = [], []
+    for r in conn.execute("SELECT id, key, pattern FROM tagged_labels WHERE status = 'suggested'").fetchall():
+        if r["id"] not in used and r["key"] not in added:
+            gone.append((r["id"],))
+        elif r["id"] in new.found_by and new.found_by[r["id"]] != r["pattern"]:
+            renamed.append((new.found_by[r["id"]], r["id"]))
+    conn.executemany("DELETE FROM tagged_aliases WHERE label = ?", gone)
+    conn.executemany("DELETE FROM tagged_mentions WHERE label = ?", gone)
+    conn.executemany("DELETE FROM tagged_labels WHERE id = ?", gone)
+    conn.executemany("UPDATE tagged_labels SET pattern = ? WHERE id = ?", renamed)
+    return bool(gone or renamed or new.made)
 
 
 def rebuild(conn: sqlite3.Connection) -> int:
@@ -379,47 +602,78 @@ def rebuild(conn: sqlite3.Connection) -> int:
     with transaction(conn):
         conn.execute("DELETE FROM tagged_words")
         conn.execute("DELETE FROM tagged_mentions")
+        new = _Suggest(conn)
         found: list[Mention] = []
         rows: list[tuple[str, str, str, int]] = []
         for kind, item_id, text in list(item_texts(conn)):
             words = words_of(text)
             rows += [(kind, item_id, w, n) for w, n in words.items()]
             if f:
-                found += mentions_in(f, kind, item_id, words, text).values()
+                found += mentions_in(f, kind, item_id, words, text, new).values()
         conn.executemany("INSERT INTO tagged_words (kind, id, word, n) VALUES (?, ?, ?, ?)", rows)
         _insert_mentions(conn, found)
-        conn.execute("INSERT INTO app_state (key, value) VALUES (?, '1') ON CONFLICT(key) DO UPDATE SET value = '1'", (WORDS_KEY,))
+        used = {m.label for m in found} | _task_suggestions(conn, f, new)
+        if _tidy(conn, used, new):
+            glossary_changed(conn)
+        conn.execute("INSERT INTO app_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", (WORDS_KEY, WORDS_FORM))
     items = len({(m.kind, m.id) for m in found})
     log.info("tagged labels rebuilt: %d words kept, %d items with a mention", len(rows), items)
     return items
 
 
 def rematch(conn: sqlite3.Connection) -> int:
-    """Match every item again after the glossary changed: its kept words, and its text for word aliases. Words not kept
-    yet (a data root from before release 5.79) are read first, from the search index. Returns the items with a mention."""
-    if get_state(conn, WORDS_KEY) != "1":
+    """Match every item again after the glossary or the patterns changed: its kept words, and its text for word aliases
+    (decision 377). Words not kept yet, or kept in an older form (a data root from before release 5.79 or 5.80), are read
+    first, from the search index. Returns the items with a mention."""
+    if get_state(conn, WORDS_KEY) != WORDS_FORM:
         return rebuild(conn)
     f = finder(conn)
     words: dict[tuple[str, str], dict[str, int]] = {}
     for r in conn.execute("SELECT kind, id, word, n FROM tagged_words"):
         words.setdefault((r["kind"], r["id"]), {})[r["word"]] = r["n"]
-    found: dict[tuple[str, str], dict[int, Mention]] = {}
-    if f:
-        for (kind, item_id), ws in words.items():
-            got = mentions_in(f, kind, item_id, ws, None)
-            if got:
-                found[(kind, item_id)] = got
-        if f.words_re is not None:
-            for kind, item_id, text in item_texts(conn):
-                for h in f.find_words(text):
-                    ms = found.setdefault((kind, item_id), {})
-                    m = ms.get(h.label) or ms.setdefault(h.label, Mention(kind, item_id, h.label, h.how, 0))
-                    m.n += 1
-                    m.written[h.written] = m.written.get(h.written, 0) + 1
     with transaction(conn):
+        new = _Suggest(conn)
+        found: dict[tuple[str, str], dict[int, Mention]] = {}
+        if f:
+            for (kind, item_id), ws in words.items():
+                got = mentions_in(f, kind, item_id, ws, None, new)
+                if got:
+                    found[(kind, item_id)] = got
+            if f.words_re is not None:
+                for kind, item_id, text in item_texts(conn):
+                    for h in f.find_words(text):
+                        ms = found.setdefault((kind, item_id), {})
+                        m = ms.get(h.label) or ms.setdefault(h.label, Mention(kind, item_id, h.label, h.how, 0))
+                        m.n += 1
+                        m.written[h.written] = m.written.get(h.written, 0) + 1
         conn.execute("DELETE FROM tagged_mentions")
         _insert_mentions(conn, (m for ms in found.values() for m in ms.values()))
+        used = {label for ms in found.values() for label in ms} | _task_suggestions(conn, f, new)
+        if _tidy(conn, used, new):
+            glossary_changed(conn)
     return len(found)
+
+
+# ---- the patterns (release 5.80) ----
+def set_patterns(conn: sqlite3.Connection, patterns: Iterable[masks.Pattern], never: Iterable[str], match: bool = True) -> int | None:
+    """Keep docs.db's copy of the tag patterns and Never a tag, and match everything again from the kept words (decision
+    377). Returns the items with a mention, or None when they're as kept already. ``match`` False leaves the matching to
+    a rebuild that follows."""
+    value = json.dumps({"patterns": [p.as_setting() for p in patterns], "never": masks.never_of(never)}, ensure_ascii=False, sort_keys=True)
+    empty = json.dumps({"patterns": [], "never": []}, sort_keys=True)
+    if (get_state(conn, PATTERNS_KEY) or empty) == value:
+        return None
+    with transaction(conn):
+        set_state(conn, PATTERNS_KEY, value)
+        glossary_changed(conn)
+    log.info("tag patterns set: %d patterns, %d on Never a tag", value.count('"mask"'), len(masks.never_of(never)))
+    return rematch(conn) if match else None
+
+
+def use_settings(conn: sqlite3.Connection, settings, match: bool = True) -> int | None:
+    """Make docs.db's copy of the patterns and Never a tag what settings.json says (at each start, and after Settings
+    saves them), matching everything again if they changed."""
+    return set_patterns(conn, masks.patterns_of(settings.tagged_patterns), settings.tagged_never, match)
 
 
 # ---- changing the glossary ----
@@ -428,10 +682,11 @@ class TaggedError(ValueError):
 
 
 def check_aliases(labels: Iterable[Label], label_id: int | None, aliases: Iterable[str]) -> list[str]:
-    """Why any of these aliases can't be used for this label: only digits, or another label's name or alias."""
+    """Why any of these aliases can't be used for this label: only digits, or another glossary label's name or alias. A
+    suggested label's name is free: Same as… makes it an alias."""
     taken: dict[str, str] = {}
     for lb in labels:
-        if lb.id == label_id:
+        if lb.id == label_id or lb.status != "glossary":
             continue
         for name in (lb.label, *lb.aliases):
             taken.setdefault(key_of(name) if tag_like(name) else " ".join(name.lower().split()), lb.label)
@@ -448,12 +703,16 @@ def check_aliases(labels: Iterable[Label], label_id: int | None, aliases: Iterab
 
 def add_label(conn: sqlite3.Connection, label: str, at: datetime, description: str = "", aliases: Iterable[str] = (),
               came: str = "hand", source: str | None = None) -> int:
-    """Add a label to the glossary. Raises TaggedError for one that's there already, or has no letter or digit."""
+    """Add a label to the glossary. Raises TaggedError for one that's there already, or has no letter or digit. One that's
+    suggested (release 5.80) is added to the glossary as it's typed here, as Add to glossary does."""
     label = label.strip()
     k = key_of(label)
     if not k:
         raise TaggedError("A tagged label needs a letter or a digit.")
-    have = conn.execute("SELECT label FROM tagged_labels WHERE key = ?", (k,)).fetchone()
+    have = conn.execute("SELECT id, label, status FROM tagged_labels WHERE key = ?", (k,)).fetchone()
+    if have and have["status"] == "suggested":
+        accept(conn, k, description, aliases, label)
+        return int(have["id"])
     if have:
         raise TaggedError(f"{have['label']} is in the glossary already" + ("." if have["label"] == label else f", and {label} is it written another way."))
     aliases = list(aliases)
@@ -483,6 +742,60 @@ def edit_label(conn: sqlite3.Connection, label_id: int, description: str, aliase
         conn.executemany("INSERT INTO tagged_aliases (label, alias, pos) VALUES (?, ?, ?)", [(label_id, a, i) for i, a in enumerate(aliases)])
         glossary_changed(conn)
     rematch(conn)
+
+
+def _suggested_row(conn: sqlite3.Connection, key: str) -> sqlite3.Row:
+    row = conn.execute("SELECT * FROM tagged_labels WHERE key = ? AND status = 'suggested'", (key,)).fetchone()
+    if row is None:
+        raise TaggedError("It isn't a suggested tagged label any more: the glossary or the patterns changed.")
+    return row
+
+
+def accept(conn: sqlite3.Connection, key: str, description: str = "", aliases: Iterable[str] = (), label: str | None = None) -> None:
+    """Add to glossary (release 5.80, item 107): a suggested label becomes an ordinary one, with a description and any
+    aliases, keeping how it came and its pattern's name; then it's found however it's written, and everything is matched
+    again. ``label`` respells it, as typed by the owner."""
+    row = _suggested_row(conn, key)
+    aliases = list(dict.fromkeys(a.strip() for a in aliases if a.strip()))
+    problems = check_aliases(read_labels(conn), row["id"], aliases)
+    if problems:
+        raise TaggedError(" ".join(problems))
+    with transaction(conn):
+        conn.execute("UPDATE tagged_labels SET status = 'glossary', description = ?, label = ? WHERE id = ?",
+                     (description.strip(), (label or "").strip() or row["label"], row["id"]))
+        conn.execute("DELETE FROM tagged_aliases WHERE label = ?", (row["id"],))
+        conn.executemany("INSERT INTO tagged_aliases (label, alias, pos) VALUES (?, ?, ?)", [(row["id"], a, i) for i, a in enumerate(aliases)])
+        glossary_changed(conn)
+    rematch(conn)
+
+
+def same_as(conn: sqlite3.Connection, key: str, label_id: int) -> Label:
+    """Same as… (release 5.80, item 107): a suggested label becomes an alias of a glossary label, and its mentions, and
+    the owner's own changes on it, move there. Returns the label it's an alias of now."""
+    row = _suggested_row(conn, key)
+    target = next((lb for lb in read_labels(conn) if lb.id == label_id and lb.status == "glossary"), None)
+    if target is None:
+        raise TaggedError("Pick a tagged label from the glossary.")
+    problems = check_aliases(read_labels(conn), target.id, [row["label"]])
+    if problems:
+        raise TaggedError(" ".join(problems))
+    with transaction(conn):
+        conn.execute("INSERT OR IGNORE INTO tagged_aliases (label, alias, pos) VALUES (?, ?, ?)", (target.id, row["label"], len(target.aliases)))
+        conn.execute("INSERT OR IGNORE INTO tagged_choices (kind, id, key, choice, at) SELECT kind, id, ?, choice, at FROM tagged_choices WHERE key = ?",
+                     (target.key, key))
+        conn.execute("DELETE FROM tagged_choices WHERE key = ?", (key,))
+        conn.execute("DELETE FROM tagged_mentions WHERE label = ?", (row["id"],))
+        conn.execute("DELETE FROM tagged_labels WHERE id = ?", (row["id"],))
+        glossary_changed(conn)
+    rematch(conn)
+    return target
+
+
+def forget(conn: sqlite3.Connection, key: str) -> None:
+    """Not a tag (release 5.80, decision 375), in docs.db: the owner's own changes on it go. The caller puts it on Never a
+    tag, in settings.json, whose matching again removes it everywhere."""
+    with transaction(conn):
+        conn.execute("DELETE FROM tagged_choices WHERE key = ?", (key,))
 
 
 def choose(conn: sqlite3.Connection, kind: str, item_id: str, key: str, choice: str | None, at: datetime) -> None:
@@ -524,6 +837,10 @@ class Tagged:
 
     def sorted_labels(self) -> list[Label]:
         return sorted(self.labels.values(), key=lambda lb: natural(lb.label))
+
+    def glossary(self) -> list[Label]:
+        """The glossary's labels, sorted, without the suggested ones (release 5.80)."""
+        return [lb for lb in self.sorted_labels() if lb.status == "glossary"]
 
     def item(self, kind: str, item_id: str) -> list[tuple[Label, Mention | None]]:
         """An item's tagged labels after the owner's own changes, each with what was found (None for one added by hand)."""
@@ -688,3 +1005,109 @@ def find_labels(tagged: Tagged, query: str) -> list[Label]:
             out = [lb for lb in tagged.sorted_labels() if any(not tag_like(a) and " ".join(a.lower().split()) == words for a in lb.aliases)
                    or (not tag_like(lb.label) and " ".join(lb.label.lower().split()) == words)]
     return list(dict.fromkeys(out))
+
+
+# ---- Suggested, the tester and Try on everything (release 5.80, decisions 373 and 374) ----
+@dataclass(frozen=True)
+class Suggestion:
+    """A new tagged label waiting in the Tagged labels view's Suggested list: how many items mention it, and where it's
+    seen, as top-level tasks, the most first, and how many items are on no task."""
+
+    label: Label
+    items: int
+    places: tuple[str, ...]
+    unfiled: int
+
+
+def _tasks_of(model: Model, kind: str, item_id: str) -> list[str]:
+    if kind == "capture":
+        return model.capture_tasks(model.captures[item_id])
+    if kind == "document":
+        return model.document_holders(item_id)
+    return [item_id]
+
+
+def suggestions(model: Model) -> list[Suggestion]:
+    """The suggested labels something mentions, the most mentioned first (decision 374), each with where it's seen."""
+    tg = model.tagged
+    wanted = {lb.id for lb in tg.labels.values() if lb.status == "suggested"}
+    if not wanted:
+        return []
+    n = counts(model)
+    places: dict[int, Counter[str]] = {i: Counter() for i in wanted}
+    unfiled: Counter[int] = Counter()
+
+    def seen(label: int, tasks: list[str]) -> None:
+        tops = {model.chains_of(t)[0][0] for t in tasks if t in model.tasks}
+        places[label].update(tops)
+        if not tops:
+            unfiled[label] += 1
+
+    for m in tg.mentions:
+        if m.label in wanted and live(model, m.kind, m.id) and tg.choices.get((m.kind, m.id), {}).get(tg.labels[m.label].key) != "removed":
+            seen(m.label, _tasks_of(model, m.kind, m.id))
+    f = tg.finder()
+    for t in model.tasks.values():
+        if not t.discarded:
+            for label in {h.label for h in f.find(task_text(t, model))} & wanted:
+                seen(label, [t.id])
+    out = [Suggestion(tg.labels[i], n.get(i, 0), tuple(t for t, _ in places[i].most_common()), unfiled[i]) for i in wanted if n.get(i)]
+    return sorted(out, key=lambda s: (-s.items, natural(s.label.label)))
+
+
+def tester(labels: Iterable[Label], patterns: Iterable[masks.Pattern], never: Iterable[str], text: str) -> list[Hit]:
+    """Settings' tester (decision 373): what the glossary and these patterns, as they stand in the form, find in text
+    pasted there, each with how: a glossary label, an alias, a word alias, a pair, new from a named pattern, or on Never
+    a tag. Nothing is kept."""
+    return Finder(labels, patterns, never).find_all(text)
+
+
+@dataclass
+class Tried:
+    """One new tagged label Try on everything would make: as the mask spells it, the pattern that found it, how many
+    items mention it, and how it's written there."""
+
+    label: str
+    key: str
+    pattern: str
+    items: int = 0
+    written: list[str] = field(default_factory=list)
+
+
+def try_everything(conn: sqlite3.Connection, model: Model, patterns: Iterable[masks.Pattern], never: Iterable[str]) -> tuple[list[Tried], int]:
+    """Try on everything (decision 373): run these patterns, before they're saved, over every capture, document, notes page
+    and task DocRepo holds, from the kept words, so nothing is read again. Returns the new tagged labels they'd make (not
+    in the glossary), the most frequent first, and how many items mention one. Nothing is changed."""
+    f = Finder(read_labels(conn), patterns, never)
+    if not f.masks:
+        return [], 0
+    if get_state(conn, WORDS_KEY) == WORDS_FORM:
+        words: dict[tuple[str, str], dict[str, int]] = {}
+        for r in conn.execute("SELECT kind, id, word, n FROM tagged_words"):
+            words.setdefault((r["kind"], r["id"]), {})[r["word"]] = r["n"]
+        runs = words.items()
+    else:  # kept in an older form: read from the search index, without keeping them
+        runs = (((kind, item_id), words_of(text)) for kind, item_id, text in item_texts(conn))
+    out: dict[str, Tried] = {}
+    items = 0
+
+    def note(hits: Iterable[Hit]) -> int:
+        """Count one item's new labels, each once. Returns how many it has."""
+        keys: set[str] = set()
+        for h in hits:
+            if h.how == "new":
+                t = out.get(h.key) or out.setdefault(h.key, Tried(h.spelled, h.key, h.pattern))
+                if h.written not in t.written:
+                    t.written.append(h.written)
+                keys.add(h.key)
+        for k in keys:
+            out[k].items += 1
+        return len(keys)
+
+    for (kind, item_id), ws in runs:
+        if not live(model, kind, item_id):  # a discarded capture or task, or a document only discarded captures brought
+            continue
+        items += bool(note(h for run in ws for h in f.in_run(run)))
+    for _, text in task_texts(conn):
+        items += bool(note(f.find_all(text)))
+    return sorted(out.values(), key=lambda t: (-t.items, natural(t.label))), items

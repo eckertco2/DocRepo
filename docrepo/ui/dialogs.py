@@ -170,8 +170,9 @@ class TaggedLabelDialog(_Form):
     says why aliases can't be used (only digits, or another label's)."""
 
     def __init__(self, parent: QWidget | None, label: str = "", description: str = "", aliases: list[str] = (), new: bool = False,
-                 check_aliases: Callable[[str, list[str]], list[str]] | None = None) -> None:
-        super().__init__(parent, "Add tagged label" if new else f"Edit {label}",
+                 check_aliases: Callable[[str, list[str]], list[str]] | None = None, title: str = "") -> None:
+        # ``title``: Add to glossary's own (release 5.80), for a suggested label
+        super().__init__(parent, title or ("Add tagged label" if new else f"Edit {label}"),
                          "A tagged label is found however its parts are joined (V-110, V110, V 110), with nothing to set. Aliases are "
                          "anything else it's called: an old number, or words such as feed drum, found as whole words.")
         self.label = QLineEdit(label)

@@ -157,6 +157,12 @@ class Settings:
     outlook_category_colour: str = "Teal"
     #: Where Copilot leaves files for DocRepo to read (release 5.56, the tree files plan's item 84). DocRepo only reads it, and it's outside the data root.
     copilot_folder: str | None = None
+    #: Tag patterns (release 5.80, the tagged labels plan's item 106, decision 372): each a name, a mask (``tagged_masks``)
+    #: and whether a space may stand between its parts, as {"name": ..., "mask": ..., "space": false}. They're the plant's
+    #: own conventions, so DocRepo ships none. docs.db keeps a copy for matching (``tagged.use_settings``).
+    tagged_patterns: list[dict] = field(default_factory=list)
+    #: Never a tag (decision 375): whole tags (ABC123) or starts with * (API*) that no pattern makes a tagged label.
+    tagged_never: list[str] = field(default_factory=list)
 
     @classmethod
     def load(cls, data_root: Path) -> Settings:
@@ -177,6 +183,20 @@ class Settings:
         if links is not None and not (isinstance(links, dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in links.items())):
             log.warning("Ignoring reference_links in %s: it isn't names and addresses", file)
             data = {k: v for k, v in data.items() if k != "reference_links"}
+        # The tagged labels' patterns and Never a tag (release 5.80): a list of patterns with masks, and a list of words.
+        patterns = data.get("tagged_patterns")
+        if patterns is not None:
+            from docrepo.tagged_masks import patterns_of
+
+            if not isinstance(patterns, list):
+                log.warning("Ignoring tagged_patterns in %s: it isn't a list", file)
+            data["tagged_patterns"] = [p.as_setting() for p in patterns_of(patterns)]
+        never = data.get("tagged_never")
+        if never is not None:
+            if not (isinstance(never, list) and all(isinstance(x, str) for x in never)):
+                log.warning("Ignoring tagged_never in %s: it isn't a list of words", file)
+                never = []
+            data["tagged_never"] = never
         return cls(**{k: v for k, v in data.items() if k in known})
 
     def reference_link(self, name: str, value: str | None) -> str:
@@ -188,7 +208,7 @@ class Settings:
 
     def save(self, fs: SafeFS, data_root: Path) -> Path:
         data = asdict(self)
-        for key in ("wheel_hotkeys", "today_panel_hotkey", "copilot_folder", "reference_links"):  # written once they're set, as they're optional (releases 5.41, 5.56 and 5.67)
+        for key in ("wheel_hotkeys", "today_panel_hotkey", "copilot_folder", "reference_links", "tagged_patterns", "tagged_never"):  # written once they're set, as they're optional (releases 5.41, 5.56, 5.67 and 5.80)
             if not data[key]:
                 del data[key]
         return fs.write_text(data_root / SETTINGS_FILE, json.dumps(data, indent=2) + "\n")

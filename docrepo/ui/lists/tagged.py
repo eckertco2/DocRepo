@@ -8,6 +8,11 @@ view is (``DocRepo/CLAUDE.md``); ``BrowseWindow`` only calls them.
 - **A label's page** has Edit…, Import… and Export….
 - **On a capture's or document's page,** × removes a label from that item (with Undo), Add back undoes it, and Add puts one
   on by hand, from the glossary or a new one added to it first. Each rewrites the Task.md of the item's tasks.
+- **Suggested** (release 5.80, item 107, decision 374): the new tagged labels the tag patterns found, above the glossary,
+  the most mentioned first, each with the pattern that found it and where it's seen. A suggested label's page has **Add
+  to glossary…** (with a description), **Same as…** (an alias of another label, its mentions moved there) and **Not a
+  tag** (removed everywhere and put on Never a tag in settings.json, with Undo). **Patterns…** opens Settings' Tagged
+  labels section.
 """
 from __future__ import annotations
 
@@ -23,7 +28,7 @@ from docrepo.model import Model
 from docrepo.safe_fs import WriteRefused
 from docrepo.ui.dialogs import TaggedLabelDialog
 from docrepo.ui.look import LOOK
-from docrepo.ui.tree_view import Line
+from docrepo.ui.tree_view import Line, group_ground
 
 if TYPE_CHECKING:
     from docrepo.ui.browse_window import BrowseWindow
@@ -35,40 +40,72 @@ LINKS = ("taggedrm", "taggedback", "taggedadd")
 
 # ---- the view ----
 def rows(w: BrowseWindow) -> tuple[list[tagged.Label], dict[int, int], int]:
-    """The labels the view lists, their counts, and how many more there are. A glossary bigger than the view draws starts
-    with Mentioned only ticked."""
+    """The glossary's labels the view lists, their counts, and how many more there are. A glossary bigger than the view
+    draws starts with Mentioned only ticked."""
     m = w.model()
     tg = m.tagged
     counts = tagged.counts(m) if tg else {}
+    glossary = tg.glossary()
     if w.tagged_mentioned is None:
-        w.tagged_mentioned = len(tg.labels) > ROWS
-    labels = [lb for lb in tg.sorted_labels() if not w.tagged_mentioned or counts.get(lb.id)]
+        w.tagged_mentioned = len(glossary) > ROWS
+    labels = [lb for lb in glossary if not w.tagged_mentioned or counts.get(lb.id)]
     return labels[:ROWS], counts, max(0, len(labels) - ROWS)
 
 
 def first(w: BrowseWindow) -> tuple[str, str] | None:
-    """The first label the view lists, to select when it opens."""
+    """The first label the view lists, to select when it opens: the most mentioned suggestion, else the glossary's first."""
+    m = w.model()
+    sug = tagged.suggestions(m)[:1] if m.tagged else []
+    if sug:
+        return "tagged", sug[0].label.key
     labels = rows(w)[0][:1]
     return ("tagged", labels[0].key) if labels else None
 
 
+def _places(w: BrowseWindow, s: tagged.Suggestion) -> str:
+    """Where a suggestion is seen, in a few words: its top-level tasks, the most first."""
+    m = w.model()
+    names = [m.task(t).title for t in s.places[:2]]
+    more = len(s.places) - len(names) + (1 if s.unfiled else 0)
+    seen = ", ".join(names) or ("not filed yet" if s.unfiled else "")
+    return f"in {seen}" + (f" and {more} more" if more and names else "")
+
+
 def view(w: BrowseWindow) -> None:
-    """The Tagged labels view (decision 379's list)."""
-    tg = w.model().tagged
+    """The Tagged labels view (decision 379's list), with Suggested first (decision 374)."""
+    m = w.model()
+    tg = m.tagged
     labels, counts, more = rows(w)
-    mentioned = sum(1 for n in counts.values() if n)
+    sug = tagged.suggestions(m) if tg else []
+    mentioned = sum(1 for lb in tg.glossary() if counts.get(lb.id))
+    total = f"{len(tg.glossary()):,} in the glossary, {mentioned:,} mentioned" + (f", {len(sug):,} suggested" if sug else "")
     w._set_head("Tagged labels", "Plant tags found in every capture, email, document and notes page, however their parts are joined. "
-                "The glossary is in docs.db.", f"{len(tg.labels):,} in the glossary, {mentioned:,} mentioned" if tg else "")
+                "The glossary is in docs.db.", total if tg else "")
     if tg:
         w._check("Mentioned only", bool(w.tagged_mentioned), lambda on: set_mentioned(w, on), "Only the labels something mentions")
     w._button("Import…", lambda: import_glossary(w))
-    w._button("Export…", lambda: export(w), enabled=bool(tg), tip="Write the glossary as a CSV to Exports in the data root")
+    w._button("Export…", lambda: export(w), enabled=bool(tg.glossary()), tip="Write the glossary as a CSV to Exports in the data root")
     w._button("Add…", lambda: add(w), tip="Add a tagged label by hand")
+    w._button("Patterns…", lambda: show_patterns(w), tip="Tag patterns, Never a tag and the tester, in Settings")
     w.tree.set_columns(["Tagged label", "Aliases", "Items"], [0, 180, 60])
     if not tg:
         w.tree.add_row(None, None, ['<span class="sub">No glossary yet. Import the plant&#8217;s tag list from Excel or CSV: a tagged '
-                                    'label, its description and its aliases in each row.</span>'], selectable=False)
+                                    'label, its description and its aliases in each row. Or add tag patterns in Settings, and the tags '
+                                    'they find are suggested here.</span>'], selectable=False)
         return
+    if sug:  # release 5.80: what the patterns found, waiting for the owner (decision 374)
+        w.tree.add_row(None, None, [f'<b>Suggested</b> <span class="sub">{len(sug):,} · found by a tag pattern, not in the glossary: '
+                                    'open one to add it, make it an alias or turn it down</span>'], group_ground(), selectable=False, span=True)
+        for s in sug[:ROWS]:
+            lb = s.label
+            context = " · ".join(x for x in (f"From {lb.pattern}", _places(w, s)) if x)
+            cell = (esc(lb.label) + ' <span class="new">&nbsp;new&nbsp;</span> ' + f'<span class="sub">{esc(context)}</span>' if LOOK.classic
+                    else Line(lb.label, icon="tagged", icon_tip="Tagged label, suggested", chips=(("new", "new"),), context=context))
+            w.tree.add_row(None, ("tagged", lb.key), [cell, "", f'<p align="right">{s.items}</p>'],
+                           tip=f"{lb.label}: new, found by the {lb.pattern} pattern")
+        if len(sug) > ROWS:
+            w.tree.add_row(None, None, [f'<span class="sub">And {len(sug) - ROWS:,} more suggested.</span>'], selectable=False)
+        w.tree.add_row(None, None, [f'<b>Glossary</b> <span class="sub">{len(tg.glossary()):,}</span>'], group_ground(), selectable=False, span=True)
     for lb in labels:
         # The row recipe (the list rows review): the label, its description quiet after it, as People's aliases are.
         cell = (esc(lb.label) + (f' <span class="sub">{esc(lb.description)}</span>' if lb.description else "") if LOOK.classic
@@ -78,9 +115,12 @@ def view(w: BrowseWindow) -> None:
     if more:
         w.tree.add_row(None, None, [f'<span class="sub">And {more:,} more. Search finds any of them, however it&#8217;s typed.</span>'],
                        selectable=False)
-    if not labels:
-        w.tree.add_row(None, None, [f'<span class="sub">Nothing mentions any of the glossary&#8217;s {len(tg.labels):,} labels yet. '
+    if not labels and tg.glossary():
+        w.tree.add_row(None, None, [f'<span class="sub">Nothing mentions any of the glossary&#8217;s {len(tg.glossary()):,} labels yet. '
                                     'Untick Mentioned only to list them.</span>'], selectable=False)
+    elif not labels:
+        w.tree.add_row(None, None, ['<span class="sub">No glossary yet: Add to glossary on a suggestion, or Import… the plant&#8217;s '
+                                    'tag list.</span>'], selectable=False)
 
 
 def set_mentioned(w: BrowseWindow, on: bool) -> None:
@@ -90,6 +130,13 @@ def set_mentioned(w: BrowseWindow, on: bool) -> None:
 
 # ---- a label's page ----
 def actions(w: BrowseWindow, key: str) -> None:
+    lb = w.model().tagged.by_key.get(key)
+    if lb is not None and lb.status == "suggested":  # release 5.80, item 107
+        w._action("Add to glossary…", lambda: accept(w, key), "Make it an ordinary tagged label, with a description", primary=True)
+        w._action("Same as…", lambda: same_as(w, key), "Make it an alias of another tagged label, and move its mentions there")
+        w._action("Not a tag", lambda: not_a_tag(w, key), "Remove it everywhere and put it on Never a tag, so no pattern suggests it again")
+        w._action("Patterns…", lambda: show_patterns(w), "Tag patterns, Never a tag and the tester, in Settings")
+        return
     w._action("Edit…", lambda: edit(w, key), "Change its description and aliases", icon_name="edit")
     w._action("Import…", lambda: import_glossary(w), "Import the glossary from Excel or CSV")
     w._action("Export…", lambda: export(w), "Write the glossary as a CSV to Exports in the data root")
@@ -156,6 +203,86 @@ def edit(w: BrowseWindow, key: str) -> None:
         write_pages(w, out)
         return out
     w._do(change, ("tagged", key))
+
+
+# ---- a suggested label (release 5.80, item 107, decisions 374 and 375) ----
+def choose_label(w: BrowseWindow, names: list[str], label: str) -> str | None:
+    """The glossary label a suggestion is the same as: picked or typed. Tests replace it."""
+    value, ok = QInputDialog.getItem(w, f"{label} is the same as", f"{label} becomes an alias of this tagged label, and its mentions "
+                                     "move there:", names, 0, True)
+    return value if ok else None
+
+
+def accept(w: BrowseWindow, key: str) -> None:
+    """Add to glossary: a suggestion becomes an ordinary tagged label, with a description and any aliases."""
+    lb = w.model().tagged.by_key[key]
+    dialog = TaggedLabelDialog(w, lb.label, "", [], check_aliases=alias_check(w, lb.id), title=f"Add {lb.label} to the glossary")
+    if not w.run_dialog(dialog):
+        return
+    _, description, aliases = dialog.values()
+
+    def change() -> edits.Outcome:
+        tagged.accept(w.conn, key, description, aliases)
+        out = edits.Outcome(f"{lb.label} is in the glossary now: it's found however it's written, and no longer marked new.")
+        write_pages(w, out)
+        return out
+    w._do(change, ("tagged", key))
+    if w.view == "tagged":
+        w.select("tagged", key, update_list=True)
+
+
+def same_as(w: BrowseWindow, key: str) -> None:
+    """Same as…: a suggestion becomes an alias of a glossary label, and its mentions move there."""
+    tg = w.model().tagged
+    lb = tg.by_key[key]
+    glossary = tg.glossary()
+    if not glossary:
+        w.say("There's no glossary label to make it an alias of yet. Import the glossary, or Add to glossary.", error=True)
+        return
+    value = choose_label(w, [x.label for x in glossary], lb.label)
+    if not value or not value.strip():
+        return
+    target = next((x for x in glossary if x.key == tagged.key_of(value)), None) or tagged.label_named(
+        tagged.Tagged({x.id: x for x in glossary}), value)
+    if target is None:
+        w.say(f"{value.strip()} isn't in the glossary. Pick a tagged label from it.", error=True)
+        return
+
+    def change() -> edits.Outcome:
+        tagged.same_as(w.conn, key, target.id)
+        out = edits.Outcome(f"{lb.label} is an alias of {target.label} now, and its mentions moved there.")
+        write_pages(w, out)
+        return out
+    if w._do(change, ("tagged", target.key)) is not None and w.view == "tagged":
+        w.select("tagged", target.key, update_list=True)
+
+
+def not_a_tag(w: BrowseWindow, key: str) -> None:
+    """Not a tag: removed everywhere, and put on Never a tag in settings.json, so no pattern suggests it again. Undo takes
+    it off the list, and the patterns find it again."""
+    from docrepo.ui.settings_view import save_never
+
+    lb = w.model().tagged.by_key[key]
+    before = list(w.ctx.settings.tagged_never)
+
+    def change() -> edits.Outcome:
+        tagged.forget(w.conn, key)
+        save_never(w.ctx, [*before, lb.label])
+        return edits.Outcome("")
+    if w._do(change) is None:
+        return
+    w.sel = first(w) if w.view == "tagged" else w.sel
+    w.render_all()
+
+    def undo() -> None:
+        w._do(lambda: (save_never(w.ctx, before), edits.Outcome(f"{lb.label} is off Never a tag, and found again."))[1])
+    w.say_undo(f"{lb.label} is on Never a tag: removed everywhere, and no pattern suggests it again.", undo)
+
+
+def show_patterns(w: BrowseWindow) -> None:
+    """Settings' Tagged labels section: the patterns, Never a tag and the tester."""
+    w.set_view("settings")
+    w.settings_view.show_tagged()
 
 
 def add(w: BrowseWindow, label: str = "") -> str | None:

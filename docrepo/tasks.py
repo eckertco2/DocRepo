@@ -523,6 +523,9 @@ def create_task(
         _apply_references(conn, task_id, {}, _references(references))
         conn.executemany("INSERT INTO task_parents (child, parent) VALUES (?, ?)", [(task_id, p) for p in dict.fromkeys(parents)])
         capacity.rebuild_task(conn, task_id, at.date(), settings)
+        from docrepo import tagged
+
+        tagged.index_task(conn, task_id)  # release 5.80: a new tagged label a tag pattern finds in its fields gets its row
     return task_id
 
 
@@ -595,6 +598,10 @@ def update_task(conn: sqlite3.Connection, settings: Settings, task_id: str, *, a
         if "state" in columns:
             columns["closed"] = at.date().isoformat() if columns["state"] == "Closed" else None
         _apply_columns(conn, task_id, columns)
+        if any(k in columns for k in ("title", "description", "current_status", "deadline_desc")):
+            from docrepo import tagged
+
+            tagged.index_task(conn, task_id)  # release 5.80: a new tagged label a tag pattern finds there gets its row
         if not following and new.get("state", task.state) != "Closed":  # a date changed by hand keeps its tie, with a new gap (decision 247)
             for f, tie in tied.items():
                 day, ref = new.get(f, getattr(task, f)), ties.ref_date(conn, tie)

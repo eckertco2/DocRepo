@@ -69,6 +69,8 @@ h2 { font-size: 15pt; font-weight: 600; margin-top: 2px; margin-bottom: 4px; }
 .multi { color: #1d5e98; background-color: #e4eefa; }
 .lbl { color: #1a1f25; background-color: #e9edf1; }
 .tg { font-family: 'Cascadia Mono', 'Consolas'; color: #1a1f25; background-color: #f4f6f8; }
+.tgn { font-family: 'Cascadia Mono', 'Consolas'; color: #875700; background-color: #fcefcf; }
+.tgw { color: #875700; font-size: 8pt; }
 .anchor { color: #1d5e98; background-color: #dbe8f5; }
 .inh { color: #5a6571; font-style: italic; }
 .new { color: #875700; background-color: #fcefcf; }
@@ -1037,8 +1039,14 @@ class Pages:
     # ---- tagged labels (release 5.79, the tagged labels plan, decisions 367, 376 and 379) ----
     def tagged_chip(self, lb: tagged.Label, n: int = 0, item: str = "") -> str:
         """A tagged label as a small plate in the mono font, so it doesn't read as a task's label. It opens the label's
-        page; ``item`` ("capture:C000123") adds × to remove it from that item."""
-        out = f'<a href="tagged:{quote(lb.key, safe="")}" title="{esc(lb.description or "A tagged label")}"><span class="tg">&nbsp;{esc(lb.label)}&nbsp;</span></a>'
+        page; ``item`` ("capture:C000123") adds × to remove it from that item. A suggested one, new from a pattern (release
+        5.80, decision 374), is marked new, with the pattern's name on hover."""
+        if lb.status == "suggested":
+            tip = f"New: found by the {lb.pattern or ''} pattern, and not in the glossary yet"
+            out = (f'<a href="tagged:{quote(lb.key, safe="")}" title="{esc(tip)}"><span class="tgn">&nbsp;{esc(lb.label)}&nbsp;</span></a>'
+                   '<span class="tgw">&nbsp;new</span>')
+        else:
+            out = f'<a href="tagged:{quote(lb.key, safe="")}" title="{esc(lb.description or "A tagged label")}"><span class="tg">&nbsp;{esc(lb.label)}&nbsp;</span></a>'
         if n > 1:
             out += f'<span class="tq">&nbsp;{n}</span>'
         if item:
@@ -1110,11 +1118,16 @@ class Pages:
             for w, n in u.written.items():
                 written[w] = written.get(w, 0) + n
         source = f" from {esc(lb.source)}" if lb.source else ""
-        came = {"import": f"Imported{source}", "hand": "Added by hand", "pattern": f"Found by the {esc(lb.pattern or '')} pattern"}.get(lb.came, "")
-        rows = [("Description", esc(lb.description) or none_text("None")), ("Aliases", esc("; ".join(lb.aliases)) or none_text("None")),
-                ("How it's found", "In the glossary: " + (f"however its parts are joined ({esc(', '.join(tagged.spellings(lb.label)))})"
-                                                              if len(tagged.spellings(lb.label)) > 1 else "as it's written")
-                 + (", and by its aliases" if lb.aliases else "")),
+        suggested = lb.status == "suggested"
+        came = {"import": f"Imported{source}", "hand": "Added by hand",
+                "pattern": f"Found by the {esc(lb.pattern or '')} pattern" + ("" if suggested else ", then added to the glossary")}.get(lb.came, "")
+        found = (f"New: found by the <b>{esc(lb.pattern or '')}</b> pattern, spelled as its mask is, and not in the glossary"
+                 if suggested else "In the glossary: " + (f"however its parts are joined ({esc(', '.join(tagged.spellings(lb.label)))})"
+                                                          if len(tagged.spellings(lb.label)) > 1 else "as it's written")
+                 + (", and by its aliases" if lb.aliases else ""))
+        rows = [*([] if suggested else [("Description", esc(lb.description) or none_text("None")),
+                                        ("Aliases", esc("; ".join(lb.aliases)) or none_text("None"))]),
+                ("How it's found", found),
                 ("Written as", ", ".join(f'<span class="tg">&nbsp;{esc(w)}&nbsp;</span> <span class="tq">{n}</span>'
                                           for w, n in sorted(written.items(), key=lambda x: -x[1])) or none_text("Not found anywhere yet")),
                 ("Mentioned in", f"{len(uses)} item{'s' if len(uses) != 1 else ''}"),
@@ -1130,7 +1143,13 @@ class Pages:
         body = "".join(f'<p class="sec">{self.task_link(g) if g else "Not filed yet"} <span class="sub">{len(groups[g])}</span></p>'
                        + "".join(e for _, e in sorted(groups[g], key=lambda x: x[0], reverse=True)) for g in order)
         crumbs = "Tagged label" if lb.status == "glossary" else "Tagged label · suggested"
-        return (f'<p class="crumbs">{crumbs}</p><h2><span class="tg">&nbsp;{esc(lb.label)}&nbsp;</span></h2>{fields_table(rows)}'
+        what = ('<p class="note">Suggested (decision 374): it&#8217;s on what mentions it already, marked new. <b>Add to glossary</b> '
+                'makes it an ordinary tagged label, with a description. <b>Same as…</b> makes it an alias of another label and moves '
+                'its mentions there. <b>Not a tag</b> removes it everywhere and puts it on Never a tag, so no pattern suggests it '
+                'again.</p>') if suggested else ""
+        plate = f'<span class="tgn">&nbsp;{esc(lb.label)}&nbsp;</span><span class="tgw">&nbsp;new</span>' if suggested else \
+            f'<span class="tg">&nbsp;{esc(lb.label)}&nbsp;</span>'
+        return (f'<p class="crumbs">{crumbs}</p><h2>{plate}</h2>{fields_table(rows)}{what}'
                 + (body if uses else '<p class="note">Nothing mentions it yet.</p>'))
 
     def scheduled(self, person_id: str) -> tuple[float, float]:
