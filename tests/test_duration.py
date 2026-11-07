@@ -682,19 +682,17 @@ def test_plan_mode_is_marked_as_a_drag(browse, ctx):
 
 
 def test_quick_edit_moves_the_block_and_saves(ctx, qapp):
+    """Its Duration still moves the block; since release 5.100 it's set in Edit task's More options and named here."""
     t = task(ctx.conn, start="2026-11-02", duration=5, assignees=["P002"], assignee_per_day=6)
     w = QuickEdit(ctx, t)
-    assert w.duration.text() == "5" and w.units["assignee_hours"].currentIndex() == 1 and w.hours["assignee_hours"].text() == "6"
+    assert w.more_line.text() == "Duration 5 days." and w.units["assignee_hours"].currentIndex() == 1 and w.hours["assignee_hours"].text() == "6"
     assert w.total.text().startswith("30 h in all")
     w.dates["start"].set_value("2026-11-05")
     w._field_edited("start")
     assert w.dates["due"].value() == "2026-11-11"
-    w.duration.setText("3")
-    w._field_edited("duration")
-    assert w.dates["due"].value() == "2026-11-09" and w.total.text().startswith("18 h in all")
     w.save()
     x = get(ctx.conn, t)
-    assert (x.start, x.due, x.duration, x.assignee_hours, x.assignee_per_day) == ("2026-11-05", "2026-11-09", 3, 18, 6)
+    assert (x.start, x.due, x.duration, x.assignee_hours, x.assignee_per_day) == ("2026-11-05", "2026-11-11", 5, 30, 6)
     w.deleteLater()
 
 
@@ -717,17 +715,25 @@ def test_quick_edit_switches_the_unit_keeping_the_total(ctx, qapp):
 def test_quick_edit_hides_them_for_a_routine_task(ctx, qapp):
     t = task(ctx.conn, recurrence="Weekly", start="2026-11-02", assignees=["P002"], assignee_hours=1.5)
     w = QuickEdit(ctx, t)
-    assert not w.length_row.isVisibleTo(w) and not w.units["assignee_hours"].isVisibleTo(w)
+    assert "Duration" not in w.more_line.text() and not w.units["assignee_hours"].isVisibleTo(w)
     w.deleteLater()
 
 
-def test_quick_edit_rejects_a_bad_duration(ctx, qapp):
+def test_quick_edit_has_no_duration_box_and_more_options_leads_to_edit_task(ctx, qapp):
+    """Release 5.100 (decision 395): Quick edit is where dates are typed in words; Duration, Runs through weekends, ties and
+    key dates are set in Edit task's More options, which More options… opens, asking once first when something changed."""
     t = task(ctx.conn, start="2026-11-02")
     w = QuickEdit(ctx, t)
-    w.duration.setText("soon")
-    w._field_edited("duration")
-    w.save()
-    assert "whole number" in w.message.text() and get(ctx.conn, t).duration is None
+    assert not hasattr(w, "duration") and not hasattr(w, "calendar") and not hasattr(w, "key_dates")
+    assert w.more_line.text() == "Duration, ties and key dates:" and w.more_button.text() == "More options…"
+    asked = []
+    w.edit_more.connect(asked.append)
+    w.dates["due"].set_value("2026-11-20")
+    w._field_edited("due")
+    w.more_options()
+    assert asked == [] and "Save first" in w.message.text()
+    w.more_options()
+    assert asked == [t] and get(ctx.conn, t).due is None  # left as it was
     w.deleteLater()
 
 

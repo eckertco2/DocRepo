@@ -69,7 +69,7 @@ def build_parser() -> argparse.ArgumentParser:
     as_of_help = "work as if it were this date (and time), YYYY-MM-DD or \"YYYY-MM-DD HH:MM\", for testing"
     sample = commands.add_parser("load-sample", help="fill a new, empty data root with the made-up sample data, for trying DocRepo")
     sample.add_argument("--as-of", type=as_of, metavar="WHEN", help=f"{as_of_help} (default: the sample's own date, 2026-10-08 07:58)")
-    sample.add_argument("--large", action="store_true", help="add a large made-up project, Line 2 debottleneck, for trying the Task view at scale")
+    sample.add_argument("--large", action="store_true", help="add a large made-up project, Line 2 debottleneck, for trying Find files at scale")
     rebuild = commands.add_parser("rebuild", help="rebuild the capacity calendar, every generated page and the search index")
     rebuild.add_argument("--as-of", type=as_of, metavar="WHEN", help=as_of_help)
     report = commands.add_parser("report", help="print capacity, days until due, lists, labels, raw text logs and agendas")

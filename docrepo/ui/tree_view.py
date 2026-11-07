@@ -462,6 +462,8 @@ class RowTree(QTreeWidget):
         self.state_clicked: Callable[[str, QPoint], None] | None = None
         #: The state menu for a task, as a submenu of ``parent``, for a task row's right-click menu; None when it has none.
         self.state_menu: Callable[[str, QWidget], QMenu | None] | None = None
+        #: Adds a task's Add to and Edit menus to its row's right-click menu (release 5.98, the consolidation plan's decision 392).
+        self.task_menus: Callable[[str, QMenu], None] | None = None
         self._state_hover: tuple[QTreeWidgetItem, int] | None = None  # the State cell under the mouse
         self._state_open: tuple[QTreeWidgetItem, int] | None = None  # the State cell whose menu is open
         self._relayout = QTimer(self)
@@ -842,18 +844,23 @@ class RowTree(QTreeWidget):
         menu.deleteLater()
 
     def row_menu(self, item: QTreeWidgetItem | None) -> QMenu | None:
-        """A row's right-click menu: its actions, then a task row's State submenu (release 5.76, decision 361), which is also
-        where the keyboard reaches a state, with the menu key. None for a row with neither."""
+        """A row's right-click menu: its actions, then a task row's Add to and Edit (release 5.98, decision 392), then its
+        State submenu (release 5.76, decision 361), which is also where the keyboard reaches a state, with the menu key. A
+        task row's own Edit action is left to the Edit menu, whose first line is Edit task. None for a row with nothing."""
         if item is None:
             return None
         row = item.data(0, ACTIONS_ROLE)
+        task = self.row_task(item) if self.state_menu is not None or self.task_menus is not None else None
         menu = QMenu(self)
         menu.setToolTipsVisible(True)
         for label, clicked, tip in row.actions if row is not None else ():
+            if task and self.task_menus is not None and label == "Edit":
+                continue
             action = menu.addAction(label, clicked)
             action.setToolTip(tip)
-        task = self.row_task(item) if self.state_menu is not None else None
-        sub = self.state_menu(task, menu) if task else None
+        if task and self.task_menus is not None:
+            self.task_menus(task, menu)
+        sub = self.state_menu(task, menu) if task and self.state_menu is not None else None
         if sub is not None:
             if not menu.isEmpty():
                 menu.addSeparator()

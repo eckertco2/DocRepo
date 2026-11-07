@@ -122,8 +122,8 @@ class TodayList:
         return [*(() if on_today else add), ("Clear", lambda: self.clear_reminder(task_id, "Today"), "Clear this reminder. Its status log records it.")]
 
     def _today_due_rows(self, m: Model, today: date, grey: QColor) -> None:
-        """Due in the next 7 days (mods log round 2, M0050): tasks overdue or due soon that aren't on Today, each with Add
-        to Today. Mine only, remembered in app_state, leaves those I neither lead nor am assigned to."""
+        """Due in the next 7 days (mods log round 2, M0050): tasks overdue or due soon that aren't on Today, urgent ones first
+        (release 5.97), each with Add to Today. Mine only, remembered in app_state, leaves those I neither lead nor am assigned to."""
         mine = db.get_state(self.conn, TODAY_MINE_KEY) == "1"
         box = QCheckBox("Mine only")
         box.setToolTip("Only tasks you lead or are assigned to, in Due in the next 7 days")
@@ -140,7 +140,9 @@ class TodayList:
                 self.tree.set_actions(item, self._key_date_actions(t.key_date.id))
                 continue
             icon, colour = state_icon(t.state)
-            line = Line(t.title, icon=icon, icon_colour=colour, icon_tip=t.state, context=project_text(m, t.id))
+            # Urgent ones first, with their chip, since the Urgent view went into the tree's filter (release 5.97, decision 386).
+            line = Line(t.title, icon=icon, icon_colour=colour, icon_tip=t.state, context=project_text(m, t.id),
+                        chips=(("Urgent", "urgent"),) if t.urgent else ())
             item = self.tree.add_row(head, ("task", t.id), _shape([line, _row_state(t.state), _due_html(due_cell(t, today), False)]), tip=full_path(m, t.id))
             self.tree.set_actions(item, [("Add to Today", lambda i=t.id: self.add_to_today(i), "Put it on Today (D)")])
         if not entries:
@@ -154,9 +156,9 @@ class TodayList:
         self.render_list()
 
     def _today_actions(self, item_id: int, task_id: str | None) -> list[tuple[str, Callable[[], None], str]]:
-        """A Today item's actions. A task has Edit (Edit task, where Parents files a quick task) and Note; a note has Edit and
-        Make it a task (mods log round 2, M0040). Then Done and Remove."""
-        links = ((("Edit", lambda: self.edit_task(task_id), "Edit task, such as putting it under its real task (E)"),
+        """A Today item's actions. A task has Edit (Edit task) and Note; a note has Edit and Make it a task (mods log round 2,
+        M0040). Then Done and Remove. A quick task's row menu has Put under… too (release 5.99, decision 394)."""
+        links = ((("Edit", lambda: self.edit_task(task_id), "Edit task (E). A quick task's right-click menu has Put under…, to file it"),
                   ("Note", lambda: self.open_capture(task=task_id, mode="note"), "Add a note, with files, to the task (N)")) if task_id else
                  (("Edit", lambda: self.edit_today_note(item_id), "Change the note's text"),
                   ("Make it a task", lambda: self.make_today_task(item_id), "Make it a quick task, under Quick tasks, in the note's place")))

@@ -4,8 +4,8 @@ release 5.103 that's the `#` list's rows, matching and levels: Right goes into a
 
 A popup opened from no window can't take the keyboard, because Windows gives it to the active window of the program. So a
 tiny window of DocRepo's own is shown and activated first, and the picker opens from that: it's a host and nothing else.
-Enter opens the task's Task view, and Ctrl+Enter its page in the browse tool (decision 213 as the owner changed it, release
-5.43.1). Unlike when picking a parent, it also finds closed tasks, marked as closed, since you browse those too.
+Enter opens the task's Find files (the Task view until release 5.98), and Ctrl+Enter its page in the browse tool (decision
+213 as the owner changed it, release 5.43.1). Unlike when picking a parent, it also finds closed tasks, marked as closed, since you browse those too.
 """
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from docrepo.app import CaptureApp
 
 WIDTH = 460
-HINT = {"page": "Enter opens its page; Ctrl+Enter its Task view", "task_view": "Enter opens its Task view; Ctrl+Enter its page"}
+HINT = {"page": "Enter opens its page; Ctrl+Enter its Find files", "find_files": "Enter opens its Find files; Ctrl+Enter its page"}
 
 
 class TaskSearch(QWidget):
@@ -31,7 +31,7 @@ class TaskSearch(QWidget):
     def __init__(self, app: CaptureApp) -> None:
         super().__init__(None, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.app = app
-        self.then = "task_view"
+        self.then = "find_files"
         self.setFixedSize(1, 1)
         self.setObjectName("capture")
         self.setStyleSheet(style_sheet())
@@ -44,8 +44,8 @@ class TaskSearch(QWidget):
         self._chose = False
 
     def open_it(self, then: str, screen) -> None:
-        self.then = then
-        self.picker.hint = HINT.get(then, HINT["task_view"])
+        self.then = "find_files" if then == "task_view" else then  # its old name (release 5.98)
+        self.picker.hint = HINT.get(self.then, HINT["find_files"])
         self._chose = False
         area = screen.availableGeometry()
         at = QPoint(area.x() + (area.width() - WIDTH) // 2, area.y() + area.height() // 6)
@@ -71,7 +71,7 @@ class TaskSearch(QWidget):
 
     def open_task(self, task_id: str, other: bool = False) -> None:
         """The chosen task: as the wheel's slot says, or the other way with Ctrl."""
-        if (self.then == "task_view") != other:
+        if (self.then == "find_files") != other:
             self.app.browse.open_task_view(task_id)
         else:
             self.app.show_browse(None, task_id)

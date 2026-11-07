@@ -1,4 +1,4 @@
-"""The Task view's pages as text (release 5.34, ``docrepo.task_view_pages``; its first test of its own in release 5.102):
+"""Find files' pages as text (release 5.34, ``docrepo.task_view_pages``; its first test of its own in release 5.102):
 the header, the crumbs, the preview of each kind of record, the matched lines while searching, and the list's empty
 states and count line. No Qt."""
 from __future__ import annotations
@@ -34,10 +34,11 @@ def test_the_header_has_the_title_state_dates_people_subtasks_and_latest(records
     assert 'href="pick:note:C000025"' in page  # the latest note or update, which picks it in the list
 
 
-def test_a_task_with_no_status_offers_to_add_one(records):
+def test_a_task_with_no_status_says_so(records):
     m, _recs = records
     page = tvp.header(m, replace(m.task("T000003"), current_status=""), [], TODAY, "P001")
-    assert "No status yet." in page and 'href="do:update"' in page and "Latest" not in page
+    assert "No status yet." in page and "Latest" not in page
+    assert 'href="do:update"' not in page  # no Add one since release 5.98 (decision 390): an update is the task page's
     assert "No due date" in page
 
 
@@ -92,4 +93,3 @@ def test_the_empty_states_and_the_count_line():
     assert tvp.count_line("all", 1, "Installation", True, False, True, 0) == "1 result in Installation · searching file text…"
     assert tvp.count_line("all", 2, "X", True, False, False, 4, narrowed=False) == "2 results · 4 more in file text"
     assert "Searching the files' text" in tvp.still_searching()
-    assert "Click a caption" in tvp.nothing_clicked()

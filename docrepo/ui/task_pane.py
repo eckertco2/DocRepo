@@ -389,13 +389,6 @@ class TaskPane(QScrollArea):
             self.bar_row = None
             self.head_row.insertWidget(self.head_row.count() - 2, self.format_bar)
 
-    def notes_only(self) -> None:
-        """Only the Notes frame, as the Task view's Notes page tab shows it (release 5.37, decision 243)."""
-        self.facts.hide()
-        self.history.hide()
-        self.wrap.layout().setContentsMargins(0, 0, 0, 12)
-        self.setFrameShape(QFrame.Shape.NoFrame)
-
     def _card_focus(self, on: bool) -> None:
         self.card.setProperty("typing", on)  # not "focus": every widget has a read-only one
         self.card.style().unpolish(self.card)

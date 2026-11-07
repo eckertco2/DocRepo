@@ -1,6 +1,6 @@
 """The task list (release 5.103): the `#` list's rows and levels as one component, so every place a task is picked from a list
 is the same code. The `@` and `#` list (``items_panel.RefPopup``) is one; the task picker (``task_picker.TaskPicker``, in the
-capture window, the browse window, the Task view, Task search and the Timeline's Focus on) holds another.
+capture window, the browse window, Find files, Task search and the Timeline's Focus on) holds another.
 
 - **Rows** (release 5.75, round 7's decisions 327 to 330): a leading 8 px slot, holding a top-level task's filled dot in its
   colour, with its name in Semibold, or a ring in its top-level task's colour for every other task. A task with open

@@ -9,8 +9,10 @@ from collections.abc import Callable
 
 from PySide6.QtWidgets import (
     QComboBox,
+    QHBoxLayout,
     QMenu,
     QPushButton,
+    QWidget,
 )
 
 from docrepo.detail import esc
@@ -292,3 +294,31 @@ class ListBasics:
         self.actions_layout.addWidget(b)
         b.show()
         return b
+
+    def _split_action(self, label: str, clicked: Callable[[], None], tip: str, menu: QMenu, menu_tip: str,
+                      icon_name: str | None = None, key: str = "") -> tuple[QPushButton, QPushButton]:
+        """A split button on the bar (the task page's Edit, decision 392): its words do the main command, and the chevron
+        beside them, its accessible name ``menu_tip``'s first words, opens ``menu``. The two sit together as one."""
+        box = QWidget(self.actions)
+        lay = QHBoxLayout(box)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        main = QPushButton(f"{label}   {key}" if LOOK.classic and key else label, box)
+        main.setObjectName("" if LOOK.classic else "subtle")
+        main.setToolTip(f"{tip} ({key})" if key and not LOOK.classic else tip)
+        if icon_name and not LOOK.classic:
+            main.setIcon(icon(icon_name))
+        if key and not LOOK.classic:
+            self.keytips.add(main, key, group="actions")
+        main.clicked.connect(lambda _=False: clicked())
+        chevron = QPushButton("", box)
+        chevron.setObjectName("" if LOOK.classic else "iconOnly")
+        chevron.setIcon(icon("chevron-down"))
+        chevron.setToolTip(menu_tip)
+        chevron.setAccessibleName(menu_tip.split(":")[0])
+        chevron.setMenu(menu)
+        lay.addWidget(main)
+        lay.addWidget(chevron)
+        self.actions_layout.addWidget(box)
+        box.show()
+        return main, chevron

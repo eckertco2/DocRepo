@@ -40,14 +40,13 @@ LIST_NOTES = {
                  "closes. On the day, DocRepo also shows a Windows notification.",
     "waiting": "Open tasks assigned to someone other than me.",
     "mine": "Open tasks where I'm an assignee.",
-    "urgent": "Open tasks with the urgent flag.",
     "unplanned": "Open tasks the capacity calendar can't place: people but no hours, or hours but no dates.",
 }
 
 TODAY_NOTE = ("Your list for today. Each item stays until you mark it Done, carrying over to the next day. Put a task on it with D "
-              "while browsing, or Add to Today on its page. The box makes a quick task (under Quick tasks until you file it), or a "
-              "note; Ctrl+Shift+D does the same from anywhere. Below it, reminders whose day has come, and the tasks due in the next "
-              "7 days that aren't on it yet.")
+              "while browsing, or Add to Today on its page. The box makes a quick task (under Quick tasks until Put under… on its "
+              "row files it), or a note; Ctrl+Shift+D makes a quick task from anywhere. Below it, reminders whose day has come, and the tasks due in the next "
+              "7 days that aren't on it yet, urgent ones first.")
 
 ACTIVITY_NOTE = ("What happened, under the tasks it happened to: captures, changes, document versions and agenda items. For meeting "
                  "prep, Select, tick tasks or lines, then Add to agenda: a ticked line goes on as its task, with the line as the "
@@ -59,11 +58,18 @@ PRIORITIES_NOTE = ("Open tasks by priority. Drag a card to another column or wit
 TEMPLATES_NOTE = ("Trees of tasks without dates. Nothing here shows on the task tree, the lists, the timeline or Capacity until you make "
                   "tasks from it.")
 
+#: The lists with a view of their own. Urgent is a list still (the report has it), but since release 5.97 (the consolidation
+#: plan's decision 386) it's the task tree's Urgent filter, not a view: its tasks are first in Today's Due in the next 7 days.
+VIEW_LISTS: tuple[TaskList, ...] = tuple(x for x in LISTS if x.id in LIST_NOTES)
+#: Views that are gone, and where their name leads instead: the view, and the task tree's filter it turns on. A wheel's
+#: slot, the palette or a link that still names one goes there rather than nowhere (release 5.97).
+RETIRED_VIEWS: dict[str, tuple[str, str]] = {"urgent": ("tasks", "urgent")}
+
 VIEWS: tuple[ViewDef, ...] = (
     ViewDef("today", "Today", note=TODAY_NOTE),  # mods log round 1, M0016
     ViewDef("unfiled", "Unfiled"),
     ViewDef("tasks", "Task tree"),
-    *(ViewDef(x.id, x.label, "Lists", LIST_NOTES[x.id]) for x in LISTS),
+    *(ViewDef(x.id, x.label, "Lists", LIST_NOTES[x.id]) for x in VIEW_LISTS),
     ViewDef("agenda", "Agendas", "Plan"),
     ViewDef("activity", "Activity", "Plan", ACTIVITY_NOTE),  # mods log round 2, M0032 (release 5.23): docrepo/activity.py
     ViewDef("priorities", "Priorities", "Plan", PRIORITIES_NOTE),  # M0029, M0030 (release 5.23): docrepo/priorities.py
@@ -80,7 +86,7 @@ VIEWS: tuple[ViewDef, ...] = (
     ViewDef("settings", "Settings", "Manage"),
 )
 VIEW_IDS = {v.id: v for v in VIEWS}
-LIST_IDS = {x.id: x for x in LISTS}
+LIST_IDS = {x.id: x for x in VIEW_LISTS}
 #: The views whose counts ask for something: what's on Today, the captures waiting to be filed, and each list. The new
 #: look's sidebar counts only these (the visual overhaul's stage O10, decision 81).
 ASKS = frozenset({"today", "unfiled", *LIST_IDS})
@@ -99,7 +105,7 @@ def view_counts(m: Model, today: date, me: str | None) -> dict[str, int]:
         "docs": sum(1 for d in m.documents if not m.only_in_discarded(d)),
         "discarded": len(m.discarded_tasks()) + len(m.discarded_captures()),
     }
-    counts.update({x.id: len(list_tasks(m, x, today, me)) for x in LISTS})
+    counts.update({x.id: len(list_tasks(m, x, today, me)) for x in VIEW_LISTS})
     counts["due"] += len(key_dates_due(m, today))  # each key date due is a row of its own (release 5.31, decision 150)
     return counts
 
@@ -223,10 +229,12 @@ class TreeFilter:
     priorities: tuple[str, ...] = ()
     #: Only these tasks match (release 5.24): a section of the grouped task tree.
     only: frozenset[str] | None = None
+    #: Only urgent tasks match (release 5.97, the consolidation plan's decision 386): the Urgent view's tasks, in the tree.
+    urgent: bool = False
 
     @property
     def filtered(self) -> bool:
-        return bool(self.labels or self.people or self.priorities) or self.only is not None
+        return bool(self.labels or self.people or self.priorities or self.urgent) or self.only is not None
 
 
 def task_tree(m: Model, f: TreeFilter) -> list[Node]:
@@ -244,6 +252,7 @@ def task_tree(m: Model, f: TreeFilter) -> list[Node]:
         return ((not f.labels or any(name in f.labels for name, _ in m.labels_of(t.id)))
                 and (not f.people or any(p in f.people for p in (*t.leads, *t.assignees)))
                 and (not f.priorities or (t.priority or "") in f.priorities)
+                and (not f.urgent or t.urgent)
                 and (f.only is None or t.id in f.only))
 
     pinned = {f.pin, *m.ancestors_of(f.pin)} if f.pin and f.pin in m.tasks else set()
@@ -546,12 +555,18 @@ def today_groups(m: Model, today: date) -> list[tuple[str, list[AgendaItem]]]:
 
 def today_due_entries(m: Model, today: date, me: str | None, mine_only: bool = False) -> list:
     """Today's Due in the next 7 days, for the Today view and the Today side panel (release 5.43): tasks and key dates
-    together, soonest first; on the same day, a key date before a task."""
+    together, those of urgent tasks first (release 5.97, the consolidation plan's decision 386, as the Urgent view is gone),
+    then soonest first; on the same day, a key date before a task."""
     tasks = due_this_week(m, today, me, mine_only)
     dues = key_dates_due(m, today, me, mine_only)  # each key date a row of its own (release 5.31, decision 150)
-    entries = sorted([*((d.date if (d := due_of(t, today)) else date.max, 1, i, t) for i, t in enumerate(tasks)),
-                      *((d.day, 0, i, d) for i, d in enumerate(dues))], key=lambda e: e[:3])
-    return [e[3] for e in entries]
+    entries = sorted([*((not t.urgent, d.date if (d := due_of(t, today)) else date.max, 1, i, t) for i, t in enumerate(tasks)),
+                      *((not d.task.urgent, d.day, 0, i, d) for i, d in enumerate(dues))], key=lambda e: e[:4])
+    return [e[4] for e in entries]
+
+
+def entry_task(entry: object) -> Task:
+    """The task a row of Today's Due in the next 7 days is about: the task itself, or a key date's."""
+    return entry if isinstance(entry, Task) else entry.task  # type: ignore[attr-defined]
 
 
 def find_text(m: Model, task_id: str) -> str:

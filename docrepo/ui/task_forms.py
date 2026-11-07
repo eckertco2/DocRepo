@@ -89,7 +89,11 @@ def days_valid(box: QLineEdit) -> bool:
 
 
 #: Edit task's fold: what's under it, so nothing there is lost from sight (the review's stage V6).
-MORE_OPTIONS = "More options: hours, labels, key dates, reminder, recurrence and parents"
+MORE_OPTIONS = "More options: hours, Duration, ties, key dates, reminder, recurrence, parents and labels"
+#: Edit task's When, since release 5.100 (the consolidation plan's decisions 395 and 396): dates typed in words are Quick
+#: edit's, and the rest of what shapes a task's dates is under More options.
+WHEN_HINT = ("Dates in words, such as “due Fri” or “every Monday”, go in Quick edit: Q or a right-click on the Timeline. "
+             "Duration, ties and key dates are under More options.")
 
 
 class ShareSpin(QSpinBox):
@@ -1058,38 +1062,48 @@ class TaskEditDialog(FormDialog):
         when.setSpacing(16)
         for box in (self.start, self.due):
             box.setMinimumWidth(DateField.WIDTH)  # room for a date in words, in a row that doesn't stretch them
-        for w in (start_field, duration_field, due_field):
+        for w in (start_field, due_field):  # Duration is under More options since release 5.100 (decision 395)
             when.addWidget(w)
         when.addStretch()
         g.addLayout(when)
-        # Ties (release 5.50, decision 254): Tie… beside Start and Due, and a line for each tied date.
-        self.tie_panel = TiePanel(m, task_id, t.ties, pick_task, link)
-        self.tie_buttons: dict[str, QToolButton] = {}
-        for name, box in (("start", start_field), ("due", due_field)):
-            button = QToolButton(objectName="linkMark")
-            button.setText("Tie…")
-            button.setToolTip("Set this date from another task's or a key date's start or end")
-            button.clicked.connect(lambda _=False, name=name: self.tie_panel.open(name))
-            top = box.layout().itemAt(0).layout()
-            top.insertWidget(top.count() - 1, button)
-            self.tie_buttons[name] = button
-        g.addWidget(self.tie_panel)
-        self.tie_panel.changed.connect(self._tie_changed)
-        self.tie_panel.opened.connect(self._sync_ties)
+        # Where dates are typed in words, and where the rest is (release 5.100, decisions 395 and 396): a line, no control.
+        self.when_hint = QLabel(WHEN_HINT, objectName="hint")
+        self.when_hint.setWordWrap(True)
+        g.addWidget(self.when_hint)
+        self.date_warn = QLabel(objectName="linkLeaving")
+        self.date_warn.setWordWrap(True)
+        g.addWidget(self.date_warn)
+        self.tied_note = QLabel(objectName="hint")  # the tasks tied to its dates, which move with them: said by the dates
+        self.tied_note.setWordWrap(True)
+        g.addWidget(self.tied_note)
+        # Duration and Runs through weekends, then the ties (release 5.50, decision 254): under More options since release
+        # 5.100, with Tie Start… and Tie Due…, and a line for each tied date.
         calendar_row = QHBoxLayout()
-        calendar_row.addWidget(self.calendar)
+        calendar_row.setSpacing(16)
+        calendar_row.addWidget(duration_field)
+        calendar_row.addWidget(self.calendar, 0, Qt.AlignmentFlag.AlignBottom)
         calendar_row.addStretch()
         ml.addLayout(calendar_row)
         self.date_hint = QLabel("With a Duration, changing Start or Due moves the block, and only the Duration changes its length. Clear a date to take "
                                 "it off the calendar, keeping its size.", objectName="hint")
         self.date_hint.setWordWrap(True)
-        g.addWidget(self.date_hint)
-        self.date_warn = QLabel(objectName="linkLeaving")
-        self.date_warn.setWordWrap(True)
-        g.addWidget(self.date_warn)
-        self.tied_note = QLabel(objectName="hint")
-        self.tied_note.setWordWrap(True)
-        g.addWidget(self.tied_note)
+        ml.addWidget(self.date_hint)
+        self.tie_panel = TiePanel(m, task_id, t.ties, pick_task, link)
+        self.tie_buttons: dict[str, QToolButton] = {}
+        ties_row = QHBoxLayout()
+        ties_row.setSpacing(12)
+        for name, words in (("start", "Tie Start…"), ("due", "Tie Due…")):
+            button = QToolButton(objectName="linkMark")
+            button.setText(words)
+            button.setToolTip(f"Set {'Start' if name == 'start' else 'Due'} from another task's or a key date's start or end")
+            button.clicked.connect(lambda _=False, name=name: self.tie_panel.open(name))
+            ties_row.addWidget(button)
+            self.tie_buttons[name] = button
+        ties_row.addStretch()
+        ml.addLayout(ties_row)
+        ml.addWidget(self.tie_panel)
+        self.tie_panel.changed.connect(self._tie_changed)
+        self.tie_panel.opened.connect(self._sync_ties)
         dates = QGridLayout()
         dates.setHorizontalSpacing(16)
         dates.setVerticalSpacing(16)
@@ -1202,9 +1216,10 @@ class TaskEditDialog(FormDialog):
             ml.addLayout(refs)
         g.addWidget(self.more)
         # Open when anything is set in it but a task's place, which nearly every task has and its page shows, and for a task made from a
-        # template, since its hours and labels carry marks saying whether they follow the template.
+        # template, since its hours and labels carry marks saying whether they follow the template. A Duration or a tie opens it
+        # too since release 5.100, when they moved in (decision 395).
         open_more = bool(link or t.plant_event or t.reminder or t.recurrence or t.calendar_days or m.key_dates_of(task_id)
-                         or any(t.references.get(n) for n in reference_fields))
+                         or t.duration is not None or t.ties or any(t.references.get(n) for n in reference_fields))
         self.more.setVisible(open_more)
         set_fold(self.more_button, MORE_OPTIONS, open_more)
         self.more_button.clicked.connect(self._toggle_more)
@@ -1311,6 +1326,11 @@ class TaskEditDialog(FormDialog):
         for mark in self.marks.values():
             mark.show()
 
+    def show_more(self) -> None:
+        """More options, open: where Quick edit's More options… leads (release 5.100)."""
+        self.more.setVisible(True)
+        set_fold(self.more_button, MORE_OPTIONS, True)
+
     def _toggle_more(self) -> None:
         on = self.more.isHidden()
         self.more.setVisible(on)
@@ -1341,12 +1361,15 @@ class TaskEditDialog(FormDialog):
             self._worked.discard(what)
             days = typed_days(self.duration)
             box = {"start": self.start, "due": self.due}.get(what)
+            # A tied Due stays where its tie has it, and a new Duration moves the Start, as Quick edit's did until release
+            # 5.100 brought the Duration here (decision 395).
+            edge = "due" if what == "duration" and "due" in self.tie_panel.ties and "start" not in self.tie_panel.ties else what
             if days is not None and (box is None or box.is_valid()):
-                if self.start.value() == self._default_start and what != "start":
+                if self.start.value() == self._default_start and edge != "start":
                     self.start.set_value(None)  # the day it was made is no Start to count from
-                start, due = placed(self._start_value(), self._due_value(), days, what, self.workdays, self.calendar.isChecked())
-                self._put_date(self.start, "start", start, what)
-                self._put_date(self.due, "due", due, what)
+                start, due = placed(self._start_value(), self._due_value(), days, edge, self.workdays, self.calendar.isChecked())
+                self._put_date(self.start, "start", start, edge)
+                self._put_date(self.due, "due", due, edge)
             self._keep_ties(what)
         finally:
             self._moving = False

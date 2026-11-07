@@ -359,7 +359,7 @@ def test_task_edits(browse, monkeypatch):
     from docrepo.ui.widgets import Chip
 
     browse.go_task("T000012")
-    edit_menu = next(b for b in browse.actions.findChildren(QPushButton) if b.text() == "Edit").menu()
+    edit_menu = next(b for b in browse.actions.findChildren(QPushButton) if b.accessibleName() == "More ways to edit").menu()
     assert edit_menu.actions()[0].text() == "Edit task…	E"  # its key in the menu's key column (the visual overhaul's O2)
     dialog = TaskEditDialog(browse, browse.model(), "T000012", browse._label_options, browse._people_options)
     assert (dialog.title.text(), dialog.state.currentText(), dialog.assignees.values(), dialog.start.value()) == (
@@ -466,7 +466,7 @@ def test_discard_and_bring_back(browse):
     asked = []
     browse.ask_reason = lambda title, text: asked.append(title) or "Typed twice"
     browse.go_task("T000017")
-    edit_menu = next(b for b in browse.actions.findChildren(QPushButton) if b.text() == "Edit").menu()
+    edit_menu = next(b for b in browse.actions.findChildren(QPushButton) if b.accessibleName() == "More ways to edit").menu()
     assert edit_menu.actions()[-1].text() == "Discard…"
     browse.discard_task("T000017")
     assert asked == ["Discard task"] and ("task", "T000017") not in rows(browse) and browse.sel == ("task", "T000002")
@@ -829,8 +829,9 @@ def test_one_letter_per_topic(browse, monkeypatch):
     keys["F1"].activated.emit()
     keys["E"].activated.emit()
     assert shown == ["Keys", "Edit task T000012"]
-    labels = [b.text() for b in browse.actions.findChildren(QPushButton)]
-    assert labels == ["Note", "Update", "Add to", "Edit", "Task view", ""]  # More is an icon at the row's end (release 5.21); Task view, 5.34
+    labels = [b.text() or b.accessibleName() for b in browse.actions.findChildren(QPushButton)]
+    # More is an icon at the row's end (release 5.21); Find files is the Files group's (5.98); Edit a split button (5.98)
+    assert labels == ["Note", "Update", "Add to", "Edit", "More ways to edit", "More"]
 
 
 def test_the_task_page_bar_and_its_links(browse, monkeypatch):
@@ -843,9 +844,10 @@ def test_the_task_page_bar_and_its_links(browse, monkeypatch):
     buttons = browse.actions.findChildren(QPushButton)
     more = buttons[-1]
     assert more.accessibleName() == "More" and more.property("flowEnd") and more.menu().actions()[0].text() == "New task under this one\tT"
-    assert len({b.geometry().center().y() for b in buttons}) == 1 and more.geometry().right() == 899 - 16  # one row, centred, More at its end
+    centres = {b.mapTo(browse.actions, b.rect().center()).y() for b in buttons}  # Edit's two sit in a box of their own
+    assert len(centres) == 1 and more.geometry().right() == 899 - 16  # one row, centred, More at its end
     add_to = next(b for b in buttons if b.text() == "Add to").menu().actions()
-    assert add_to[0].text().startswith("Today") and add_to[-1].text() == "Someone else or another task…"
+    assert add_to[0].text().startswith("Today") and add_to[-1].text() == "An agenda…	A"  # its key since 5.98
     opened = []
     monkeypatch.setattr(browse, "open_capture", lambda **options: opened.append(options))
     browse.on_link(QUrl("new:T000008"))
@@ -1081,7 +1083,7 @@ def test_the_header_s_groups_open_fold_and_are_remembered(browse):
     assert g["subtasks"].is_open and not g["when_who"].is_open and not g["files"].is_open and not g["details"].is_open
     assert not g["key_dates"].present and not g["agenda"].present  # nothing in them
     assert g["when_who"].head.parentWidget() is header.strip and g["subtasks"].head.parentWidget() is g["subtasks"]
-    assert "Installation" in header.text() and "Folder" not in header.text() and g["files"].label.text() == "5"
+    assert "Installation" in header.text() and "Folder" not in header.text() and g["files"].label.text() == "5 Find files"
     g["details"].toggle()
     assert g["details"].is_open and g["details"].head.parentWidget() is g["details"] and "Folder" in header.text()
     assert not header.log_open and "Imported from the Excel tracker" not in header.text()
@@ -1096,6 +1098,6 @@ def test_the_header_s_groups_open_fold_and_are_remembered(browse):
     assert g["details"].is_open and header.log_open and pane.history.is_open  # remembered per task
     assert json.loads(db.get_state(browse.conn, "page_folds:T000001")) == {"details": True, "status_log": True, "history": True}
     browse.on_link(QUrl("tab:files"))
-    assert g["files"].is_open and "Open in Task view" in header.text()
+    assert g["files"].is_open and "Find files" in header.text()
     g["subtasks"].toggle()
     assert g["subtasks"].head.parentWidget() is header.strip and "Rigging plan" not in header.text()

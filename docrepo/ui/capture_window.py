@@ -375,8 +375,10 @@ class _KeyDateLine(QFrame):
 
 class KeyDatesEditor(QWidget):
     """Key dates (release 5.31, the key dates plan, item 57) in New task and Update: any number of rows, each a start, an
-    end, a description and the Plant activity, Deadline and Done ticks, with ✕, and Add key date. Folded under its link
-    until there's one. A ``**key date,`` line's card adds its key date only when the capture is saved, not here."""
+    end, a description and the Plant activity, Deadline and Done ticks, with ✕, and Add key date. Since release 5.100 (the
+    consolidation plan's decision 395) they sit straight inside More fields, as Edit task's are inside More options, under
+    a heading with their count and no fold of their own. A ``**key date,`` line's card adds its key date only when the
+    capture is saved, not here."""
 
     changed = Signal()
 
@@ -385,10 +387,8 @@ class KeyDatesEditor(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(4)
-        self.toggle = QPushButton("Key dates", objectName="moreLink")
-        self.toggle.setIcon(icon("chevron-right"))
+        self.toggle = QLabel("Key dates", objectName="fieldLabel")  # a heading, no longer a fold (release 5.100)
         self.toggle.setToolTip("Dates on the task beside its own: a start, an end or both, with a description")
-        self.toggle.clicked.connect(lambda: self._fold(not self.body.isHidden()))
         lay.addWidget(self.toggle, 0, Qt.AlignmentFlag.AlignLeft)
         self.body = QWidget()
         bl = QVBoxLayout(self.body)
@@ -400,19 +400,12 @@ class KeyDatesEditor(QWidget):
         add = QPushButton("+ Add key date", objectName="link")
         add.clicked.connect(lambda: self.add_row(focus=True))
         bl.addWidget(add, 0, Qt.AlignmentFlag.AlignLeft)
-        self.body.hide()
         lay.addWidget(self.body)
         self.lines: list[_KeyDateLine] = []
 
-    def _fold(self, folded: bool) -> None:
-        self.body.setVisible(not folded)
-        if not folded and not self.lines:
-            self.add_row(focus=True)
-        self._sync()
-
     def _sync(self) -> None:
         n = sum(not x.blank() for x in self.lines)
-        set_fold(self.toggle, f"Key dates{f' ({n})' if n else ''}", not self.body.isHidden())
+        self.toggle.setText(f"Key dates{f' ({n})' if n else ''}")
 
     def add_row(self, row: KeyDateRow | None = None, focus: bool = False) -> None:
         line = _KeyDateLine(row)
@@ -445,7 +438,6 @@ class KeyDatesEditor(QWidget):
         self.lines = []
         for row in rows:
             self.add_row(row)
-        self.body.setVisible(bool(rows))
         self._sync()
 
     def rows(self) -> list[KeyDateRow]:
@@ -1313,7 +1305,7 @@ class CaptureWindow(QWidget):
             self.show_capture(mode=kind, keep=True)
             return
         if kind == "today":  # a quick task on Today (mods log round 2, M0039): New task, Today on, the cursor in Title
-            self.show_capture(mode="new_task", agenda=[TODAY, *self.agenda.values()], keep=True)
+            self.open_quick_task()
             return
         agenda = kind == "agenda"
         if self.task:
@@ -1322,6 +1314,15 @@ class CaptureWindow(QWidget):
         self.show_capture(keep=True)
         self._after_pick = kind
         QTimer.singleShot(0, self._open_picker)  # once the window is placed, so the picker opens under the task button
+
+    def open_quick_task(self) -> None:
+        """Ctrl+Shift+D's command, the keyboard way to a quick task (release 5.99, the consolidation plan's decision 393),
+        which the wheels' quick-task slots run too: New task with Today on and the cursor in Title, in quick-task mode, so
+        with no task picked Save makes a quick task, under Quick tasks. The window says so where the task picker is. Ticking
+        New task and Today by hand makes an ordinary new task on Today instead."""
+        self.show_capture(mode="new_task", agenda=[TODAY, *self.agenda.values()], keep=True)
+        self.quick_mode = True
+        self.refresh()
 
     def open_blank(self, mode: str | None = None) -> None:
         """The Capture wheel's blank capture window (release 5.41, decision 215), an ordinary open since release 5.77
@@ -1761,7 +1762,8 @@ class CaptureWindow(QWidget):
         return {"saved": self.ctx.now().isoformat(timespec="seconds"), "task": self.task, "task_auto": self.task_auto, "task_conv": self.task_conv, "by_hand": self.by_hand,
                 "types": sorted(self.types), "title": self.title.text(),
                 "content": content, "formatted": formatted, "meeting": self.meeting_on,
-                "meeting_name": self.meet_name.text() if self._meet_name_typed else "", "refs": self.ref_ids}
+                "meeting_name": self.meet_name.text() if self._meet_name_typed else "", "refs": self.ref_ids,
+                "quick": self.quick_mode}
 
     def holds_draft(self) -> bool:
         """Whether the window holds something worth keeping as a draft (decision 333): a picked task alone isn't."""
@@ -1886,6 +1888,8 @@ class CaptureWindow(QWidget):
         self.item_ov = dict(data.get("item_ov") or {})
         self.agenda_ticks = {int(k): bool(v) for k, v in (data.get("agenda_ticks") or {}).items()}
         self.from_capture = data.get("from_capture")
+        # A draft from before release 5.99 kept no "quick": then a new task on Today was a quick task, as it'd have saved.
+        self.quick_mode = bool(data.get("quick", bool(data.get("today")) and "new_task" in (data.get("types") or [])))
         self._setting = False
 
     def discard_draft(self, draft_id: str) -> None:
@@ -2040,8 +2044,11 @@ class CaptureWindow(QWidget):
         return [TODAY] * self.today_on + [x for x in self.agenda.values() if x != TODAY]
 
     def _quick(self) -> bool:
-        """A new task with no task picked that goes on Today is a quick task, under Quick tasks (mods log round 2, M0039)."""
-        return "new_task" in self.types and not self.task and not self.from_capture and TODAY in self._targets()
+        """A quick task, under Quick tasks (mods log round 2, M0039): since release 5.99 (decision 393) only from Ctrl+Shift+D's
+        command (``quick_mode``), still a new task with no task picked that goes on Today. New task with Today ticked by
+        hand is an ordinary new task on Today."""
+        return (self.quick_mode and "new_task" in self.types and not self.task and not self.from_capture
+                and TODAY in self._targets())
 
     # ---- pinned (mods log round 3, M0053, M0054) ----
     def toggle_pin(self) -> None:
@@ -2224,6 +2231,8 @@ class CaptureWindow(QWidget):
         self.conv_mixed: tuple[str, ...] = ()
         self.from_capture: str | None = None
         self.today_on = False
+        # Opened by Ctrl+Shift+D's command (release 5.99, decision 393): a new task on Today with no task picked is a quick task.
+        self.quick_mode = False
         self.types: set[str] = {"note"}
         self.note_auto = True
         self.touched: set[str] = set()

@@ -104,8 +104,10 @@ TABS = (("notes", "Captures"), ("log", "Status log"), ("summaries", "Summaries")
 #: The History group's tabs since release 5.84 (the task pane review's R6): the status log is behind the status, the files are
 #: a group of their own.
 HISTORY_TABS = (("notes", "Captures"), ("summaries", "Summaries"))
-#: The most files the Files group lists before pointing at the Task view (release 5.84, decision P10).
+#: The most files the Files group lists before pointing at Find files (release 5.84, decision P10).
 FILES_SHOWN = 8
+#: Find files' link in the Files group (release 5.98, the consolidation plan's decision 389: the Task view, renamed).
+FIND_FILES_TIP = "Find files (O): a window of its own for searching, previewing and opening its files, emails and notes"
 SCOPE_NAMES = {"self": "This task", "ancestors": "With parent tasks", "descendants": "With subtasks", "family": "Whole family"}
 SOURCE_NAMES = {"typed": "Typed", "outlook_email": "Email", "file_path": "File path"}
 MONTH_NAMES = ("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")
@@ -428,8 +430,10 @@ class Pages:
         out["subtasks_summary"], out["subtasks"] = split_section(self.subtask_section(t, state))
         ids = self.m.scope_ids(t.id, state.scope)
         files = self.files_in(ids)
-        out["files"] = self.files_body(t, files, FILES_SHOWN) if files else ""
-        out["files_summary"] = f'<span class="sub">{len(files)}</span>' if files else ""
+        # Find files opens from here (release 5.98, the consolidation plan's decision 389), and with O; so the group shows
+        # with no files too, as the mock has it, and Find files always has a way in by the mouse.
+        out["files"] = self.files_body(t, files, FILES_SHOWN)
+        out["files_summary"] = f'<span class="sub">{len(files) if files else "none yet"}</span> &nbsp;{link(f"taskview:{t.id}", "Find files", FIND_FILES_TIP)}'
         out["history"] = self.history(t, state, HISTORY_TABS)
         n = self.history_counts(ids)["notes"]
         out["history_summary"] = f'<span class="sub">{n} capture{"s" if n != 1 else ""}</span>'
@@ -687,7 +691,7 @@ class Pages:
     def links_group(self, t: Task) -> str:
         """The task's links in one place (release 5.67, round 6's decision 316): its reference fields' links, then its
         pinned links, then the newest, SHOWN at most; each name opens it (a folder in File Explorer), with its host and
-        Copy. With more, a link to the Task view's Link type, named for what it lists (decision 323)."""
+        Copy. With more, a link to Find files' Link type, named for what it lists (decision 323)."""
         xs = links_of(self.m, t.id, self.reference_links)
         if not xs:
             return ""
@@ -701,8 +705,8 @@ class Pages:
                         f'<td valign="top">{link(href, x.name, x.opens)}{pin} <span class="sub">{esc(x.where)}</span> &nbsp;{copy}</td></tr>')
         more = ""
         if len(xs) > SHOWN:
-            words = f"All {len(xs)} links" if all_documents(xs) else "Show link files in the Task view"
-            more = f'<p>{link(f"taskviewlinks:{t.id}", words, "The Task view, showing only links")}</p>'
+            words = f"All {len(xs)} links" if all_documents(xs) else "Show link files in Find files"
+            more = f'<p>{link(f"taskviewlinks:{t.id}", words, "Find files, showing only links")}</p>'
         return section("Links", f' <span class="sub">{len(xs)}</span>') + f'<table cellspacing="0" cellpadding="2">{"".join(rows)}</table>' + more
 
     def details_rows(self, t: Task) -> list[tuple[str, str]]:
@@ -790,9 +794,9 @@ class Pages:
         return self.files_body(t, self.files_in(ids))
 
     def files_body(self, t: Task, files: list, limit: int | None = None) -> str:
-        """The files as rows, each opening in File Explorer (a link in the browser, a folder in File Explorer), with the
-        Task view for searching, previewing and opening them (decision 166). ``limit`` shows the first so many, with
-        the rest's count (the Files group, release 5.84)."""
+        """The files as rows, each opening in File Explorer (a link in the browser, a folder in File Explorer), with Find
+        files for searching, previewing and opening them (decision 166; the Task view until release 5.98, decision 389).
+        ``limit`` shows the first so many, with the rest's count (the Files group, release 5.84)."""
         rows = []
         for f in files[:limit]:
             d = self.m.documents.get(f.document)
@@ -807,9 +811,9 @@ class Pages:
                 name = link(self.show_key(f), f.name, "Show it in File Explorer")
             rows.append(f'<tr><td>{name} <span class="sub">{esc(f.kind)}</span>'
                         f'{self.from_chip(f.task, t.id)}{"<br><span class=sub>" + esc(d.description) + "</span>" if d and d.description else ""}</td></tr>')
-        # Decision 166: the Task view is where a task's files are searched, previewed and opened.
+        # Decision 166: Find files is where a task's files are searched, previewed and opened.
         left = len(files) - len(rows)
-        more = f'<p>{link(f"taskview:{t.id}", f"All {len(files)} in the Task view" if left > 0 else "Open in Task view")} '
+        more = f'<p>{link(f"taskview:{t.id}", f"All {len(files)} in Find files" if left > 0 else "Find files", FIND_FILES_TIP)} '
         more += f'<span class="sub">{f"{left} more; " if left > 0 else ""}to search, preview and open its files (O)</span></p>'
         return more + (f'<table cellspacing="0" cellpadding="4">{"".join(rows)}</table>' if rows else '<p class="note">No files yet.</p>')
 

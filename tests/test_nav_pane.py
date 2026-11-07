@@ -112,7 +112,7 @@ def test_folding_stays_and_keeps_the_open_view_in_sight(browse, ctx):
         again.hide()
         again.deleteLater()
     nav.headings["Lists"].click()
-    assert db.get_state(ctx.conn, NAV_FOLDED_KEY) == "Manage" and not nav.rows["urgent"].isHidden()
+    assert db.get_state(ctx.conn, NAV_FOLDED_KEY) == "Manage" and not nav.rows["unplanned"].isHidden()
 
 
 def test_the_keys(browse):

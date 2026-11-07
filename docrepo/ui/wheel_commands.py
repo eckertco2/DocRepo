@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from docrepo.views import VIEWS
+from docrepo.views import RETIRED_VIEWS, VIEWS
 from docrepo.wheels_config import Arg, CommandSpec
 
 if TYPE_CHECKING:
@@ -57,7 +57,8 @@ def _capture_meeting(app: CaptureApp, _args: Mapping[str, Any]) -> None:
 
 
 def _today_new_item(app: CaptureApp, _args: Mapping[str, Any]) -> None:
-    app.window.open_with_hotkey("today")
+    """Ctrl+Shift+D's command, not a way of its own (release 5.99, the consolidation plan's decision 393)."""
+    app.window.open_quick_task()
 
 
 def _today_panel(app: CaptureApp, args: Mapping[str, Any]) -> None:
@@ -82,14 +83,14 @@ def _search_everything(app: CaptureApp, _args: Mapping[str, Any]) -> None:
     app.browse.search_box.selectAll()
 
 
-def _task_view_current(app: CaptureApp, _args: Mapping[str, Any]) -> None:
-    """The task selected in the browse tool, or else the last Task view opened; with neither, task search, and picking a
-    task opens its Task view."""
+def _find_files_current(app: CaptureApp, _args: Mapping[str, Any]) -> None:
+    """Find files for the task selected in the browse tool, or else the last one opened; with neither, task search, and
+    picking a task opens its Find files. Its old name, task_view.current, still works (``wheels_config.RENAMED``)."""
     task = app.browse.current_task_for_view()
     if task:
         app.browse.open_task_view(task)
     else:
-        app.wheels.task_search("task_view")
+        app.wheels.task_search("find_files")
 
 
 _ROWS = (
@@ -97,13 +98,15 @@ _ROWS = (
     Registered(CommandSpec("capture.pin", "The pinned window"), _capture_pin),
     Registered(CommandSpec("capture.selection", "The pinned window with the current email or file"), _capture_selection),
     Registered(CommandSpec("capture.meeting", "Meeting notes"), _capture_meeting),
-    Registered(CommandSpec("today.new_item", "A quick task on Today"), _today_new_item),
+    Registered(CommandSpec("today.new_item", "A quick task on Today (Ctrl+Shift+D's command)"), _today_new_item),
     Registered(CommandSpec("today.panel", "The Today side panel", (Arg("do", "toggle", ("toggle", "open", "close")),)), _today_panel, gives_back=True),
-    Registered(CommandSpec("browse.view", "The browse tool on a view", (Arg("view", "tasks", tuple(v.id for v in VIEWS)),)), _browse_view),
-    Registered(CommandSpec("search.tasks", "Task search", (Arg("then", "task_view", ("task_view", "page")),)), _search_tasks),
+    # A view that's gone (release 5.97: urgent) is still allowed, and leads where it went: the task tree, Urgent only.
+    Registered(CommandSpec("browse.view", "The browse tool on a view", (Arg("view", "tasks", (*(v.id for v in VIEWS), *RETIRED_VIEWS)),)), _browse_view),
+    Registered(CommandSpec("search.tasks", "Task search", (Arg("then", "find_files", ("find_files", "page"), renamed=(("task_view", "find_files"),)),)),
+               _search_tasks),
     Registered(CommandSpec("search.files", "File search"), _search_files),
     Registered(CommandSpec("search.everything", "Search everything"), _search_everything),
-    Registered(CommandSpec("task_view.current", "The current task's Task view"), _task_view_current),
+    Registered(CommandSpec("find_files.current", "Find files for the current task"), _find_files_current),
 )
 REGISTRY: dict[str, Registered] = {r.spec.id: r for r in _ROWS}
 SPECS: dict[str, CommandSpec] = {r.spec.id: r.spec for r in _ROWS}

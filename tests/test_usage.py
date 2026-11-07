@@ -27,6 +27,14 @@ def test_the_wheels_commands_are_counted_by_week_and_month(sample_root):
     assert usage.wheel_counts(root, TODAY) == {"capture.note": [2, 2], "today.panel": [0, 1]}
 
 
+def test_a_renamed_command_counts_under_its_new_name(sample_root):
+    """Release 5.98: the Task view's command became Find files'; the log's old rows count with the new ones."""
+    root = sample_root[1]
+    write_log(root, ["2026-10-08 09:00,execution,W,task_view.current,key,1,40,300",
+                     "2026-10-07 09:00,execution,W,find_files.current,key,1,40,300"])
+    assert usage.wheel_counts(root, TODAY) == {"find_files.current": [2, 2]}
+
+
 def test_no_log_is_no_wheels(sample_root):
     assert usage.wheel_counts(sample_root[1], TODAY) == {}
 

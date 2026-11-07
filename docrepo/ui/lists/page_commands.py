@@ -13,18 +13,15 @@ from PySide6.QtWidgets import (
     QMenu,
 )
 
-from docrepo import edits, prompts
+from docrepo import edits, prompts, task_commands
 from docrepo.captures import capture_md_path
 from docrepo.detail import SCOPE_NAMES
 from docrepo.links import is_folder, is_link
-from docrepo.model import TODAY
 from docrepo.schedule import is_open
+from docrepo.ui import task_menus
 from docrepo.ui.icons import icon
 from docrepo.ui.look import LOOK
-from docrepo.views import (
-    full_path,
-    meetings_for_menu,
-)
+from docrepo.views import full_path
 
 
 class PageCommands:
@@ -34,7 +31,8 @@ class PageCommands:
     # ---- the task page's actions ----
     def _task_actions(self, task_id: str) -> None:
         """The task page's command bar (release 5.21, decision 68): Note, Update, Meeting notes for an open meeting, Add to
-        (Today and the agendas), Edit, and More at the row's end. The keys and the palette's commands are as they were."""
+        (Today and the agendas), Edit, and More at the row's end. Add to and Edit are the menus every task row has too, from
+        one list each (release 5.98, decision 392); Find files opens from the Files group and O (decision 389)."""
         m, t = self.model(), self.model().task(task_id)
         if t.discarded:
             self._action("Bring back", lambda: self.bring_back_task(task_id), "Restore it as it was: back in the task tree, the lists and search",
@@ -48,38 +46,13 @@ class PageCommands:
         if t.meeting and is_open(t):  # release 5.8
             self._action("Meeting notes", lambda: self.open_capture(task=task_id, meeting=True),
                          "Take this meeting's notes, with its agenda beside them", icon_name="people", key="M")
-        add_to = QMenu(self)
-        if any(a.subject == task_id for a in m.today_items()):
-            add_to.addAction(icon("sun"), "On Today ✓   ·   open the Today view", lambda: self.show_agenda(TODAY))
-        else:
-            add_to.addAction(icon("sun"), f"Today   ·   your list for today, straight away{menu_key}D", lambda: self.add_to_today(task_id))
-        add_to.addSeparator()
-        for meeting in meetings_for_menu(m, task_id):
-            when = m.meeting_when(meeting.id, self.today())
-            act = add_to.addAction(f"{meeting.title}   ·   {meeting.recurrence + ', next ' + when if meeting.recurrence else 'One-off, ' + when}")
-            act.triggered.connect(lambda _=False, x=meeting.id: self.open_capture(task=task_id, mode="update", agenda=[x]))
-        other = add_to.addAction("Someone else or another task…")
-        other.triggered.connect(lambda: self.open_capture(task=task_id, mode="update", agenda_focus=True))
-        self._action("Add to", tip="Put it on Today (D) or an agenda", menu=add_to, icon_name="agenda", key="A")
-        edit = QMenu(self)
-        edit.addAction(f"Edit task…{menu_key}E", lambda: self.edit_task(task_id))
-        edit.addSeparator()
-        parents = m.parents_of(task_id)
-        for p in parents:
-            edit.addAction(f"Move from under {m.task(p).title}…", lambda x=p: self._pick_parent(task_id, x))
-        if not parents:
-            edit.addAction("Put under a task…", lambda: self._pick_parent(task_id, None))
-        edit.addAction("Also put under…", lambda: self._pick_parent(task_id, None, also=True)).setEnabled(bool(parents))
-        if len(parents) > 1:
-            for p in parents:
-                edit.addAction(f"Remove from under {m.task(p).title}", lambda x=p: self.move_task(task_id, x, None))
-        elif parents:
-            edit.addAction("Make it a top-level task", lambda: self.move_task(task_id, parents[0], None))
-        edit.addSeparator()
-        edit.addAction("Discard…", lambda: self.discard_task(task_id))
-        self._action("Edit", tip="Edit any of its fields, move it in the tree, or discard it if it was made by mistake", menu=edit, icon_name="edit")
-        self._action("Task view", lambda: self.open_task_view(task_id), "Its Task view: a window of its own for finding its files, emails and notes",
-                     icon_name="open", key="O")
+        self._action(task_commands.ADD_TO, tip="Put it on Today (D) or an agenda", menu=task_menus.add_to_menu(self, task_id, self),
+                     icon_name="agenda", key="A")
+        # Edit is a split button (decision 392, the mock's, the owner's choice of 2026-11-07): Edit task, and a chevron
+        # for the rest of the Edit menu.
+        self._split_action(task_commands.EDIT, lambda: self.edit_task(task_id), "Edit task: every field on one page",
+                           task_menus.edit_menu(self, task_id, self), "More ways to edit: Move…, Put under…, Also put under…, Remove from under… and Discard…",
+                           icon_name="edit", key="E")
         # More: New task under this one, the agenda, Copy (release 5.9: its people's email addresses, M0031, and each reference field,
         # M0034), Copy prompt for each summary type, and the folder.
         more = QMenu(self)
@@ -211,7 +184,7 @@ class PageCommands:
         elif kind == "copylink":
             self.copy_link(rest)
         # Links open, on a click (release 5.67, round 6's decisions 314 to 316): a link or folder document, an address
-        # (a reference field's link, or one in a note's words), its Copy, the Task view's links, and Settings.
+        # (a reference field's link, or one in a note's words), its Copy, Find files' links, and Settings.
         elif kind == "opendoc":
             self.open_document_link(rest)
         elif kind == "openurl":
@@ -223,7 +196,7 @@ class PageCommands:
             self.open_task_view(rest, file_type="link")
         elif kind == "settings":
             self.set_view("settings")
-        elif kind == "taskview":  # the Files tab's Open in Task view (decision 166)
+        elif kind == "taskview":  # the Files group's Find files (decision 166; the Task view until release 5.98)
             self.open_task_view(rest)
         elif kind in ("tab", "scope", "order"):
             setattr(st, kind, rest)

@@ -53,7 +53,7 @@ def test_the_default_file_is_the_decided_wheels():
         "N": "browse.view", "E": "search.tasks", "S": "search.files", "W": "search.everything"}
     execution = config.wheel("execution").slots
     assert execution["N"].args == {"view": "today"} and execution["E"].command == "today.panel"
-    assert execution["S"].held and not execution["S"].command and execution["W"].command == "task_view.current"
+    assert execution["S"].held and not execution["S"].command and execution["W"].command == "find_files.current"
     assert not any(w.eight_way for w in config.wheels)
 
 
@@ -70,7 +70,7 @@ def test_timing_defaults_match_the_research_and_the_wheel_draws_at_once():
 
 def test_task_search_opens_the_task_view_unless_a_slot_says_otherwise():
     """Decision 213 as the owner changed it (release 5.43.1)."""
-    assert wc.parse(wc.DEFAULT_TEXT, SPECS, ICONS).wheel("browse").slots["E"].args == {"then": "task_view"}
+    assert wc.parse(wc.DEFAULT_TEXT, SPECS, ICONS).wheel("browse").slots["E"].args == {"then": "find_files"}
     slot = wc.check(wheel({"E": {"label": "A", "command": "search.tasks", "args": {"then": "page"}}}), SPECS, ICONS).wheels[0].slots["E"]
     assert slot.args == {"then": "page"}
 
@@ -214,7 +214,7 @@ def test_the_schema_lists_the_commands_and_directions():
     schema = wc.schema(SPECS, ICONS)
     item = schema["properties"]["wheels"]["items"]["properties"]["slots"]
     assert sorted(item["properties"]) == sorted(["N", "NE", "E", "SE", "S", "SW", "W", "NW"])
-    assert set(item["properties"]["N"]["properties"]["command"]["enum"]) == set(SPECS)
+    assert set(item["properties"]["N"]["properties"]["command"]["enum"]) == set(SPECS) | set(wc.RENAMED)  # old names load too (5.98)
 
 
 def test_settings_rows_fall_back_on_the_default(data_root, fs):
@@ -233,3 +233,22 @@ def test_safe_fs_writes_the_new_kinds_and_only_inside_the_data_root(data_root, t
         fs.append_text(tmp_path / "outside.csv", "x")
     with pytest.raises(WriteRefused):
         fs.append_text(data_root / "a.exe", "x")
+
+
+def test_the_old_names_of_release_5_98_still_work():
+    """The Task view became Find files (release 5.98): a file that still says task_view.current, or "then": "task_view",
+    loads, and runs the new command."""
+    config = wc.check(wheel({"W": {"label": "Task view", "command": "task_view.current"},
+                             "E": {"label": "Search", "command": "search.tasks", "args": {"then": "task_view"}}}), SPECS, ICONS)
+    slots = config.wheels[0].slots
+    assert slots["W"].command == "find_files.current" and slots["W"].command in REGISTRY and slots["W"].label == "Task view"
+    assert slots["E"].args == {"then": "find_files"}
+    schema = wc.schema(SPECS, ICONS)
+    assert "task_view.current" in schema["properties"]["wheels"]["items"]["properties"]["slots"]["properties"]["N"]["properties"]["command"]["enum"]
+    assert "find_files.current" in wc.DEFAULT_TEXT and "task_view.current" not in wc.DEFAULT_TEXT
+
+
+def test_the_urgent_view_s_name_still_works_in_a_slot():
+    """Release 5.97: the Urgent view is the task tree's filter, and a slot that names it still loads."""
+    slot = wc.check(wheel({"N": {"label": "U", "command": "browse.view", "args": {"view": "urgent"}}}), SPECS, ICONS).wheels[0].slots["N"]
+    assert slot.args == {"view": "urgent"}

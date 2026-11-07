@@ -217,8 +217,8 @@ def test_a_branch_closes_every_open_level_and_one_undo_takes_it_back(browse):
 def test_every_task_rows_right_click_menu_has_state(browse):
     item = row(browse, INSTALLATION)
     menu = browse.tree.row_menu(item)
-    assert labels(menu) == ["State"]  # the task tree's rows have no other commands
-    assert labels(next(a.menu() for a in menu.actions() if a.menu()))[:4] == ["Not started", "In progress", "Parked", "Closed"]
+    assert labels(menu) == ["Add to", "Edit", "State"]  # the task page's menus since release 5.98 (decision 392), then State
+    assert labels(next(a.menu() for a in menu.actions() if a.menu() and a.text() == "State"))[:4] == ["Not started", "In progress", "Parked", "Closed"]
     edits.add_to_today(browse.conn, browse.ctx.data_root, browse.ctx.fs, INSTALLATION, "", NOW)
     browse.refresh(render=False)
     browse.show_browse(view="today")

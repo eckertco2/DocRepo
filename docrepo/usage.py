@@ -16,6 +16,7 @@ from pathlib import Path
 
 from docrepo.activity import Activity
 from docrepo.model import Model
+from docrepo.wheels_config import RENAMED
 
 #: The wheels' usage log, in the data root (``ui.wheels.USAGE_LOG``, named here so this needs no Qt).
 USAGE_LOG = Path("System") / "logs" / "wheel-usage.csv"
@@ -36,6 +37,7 @@ def wheel_counts(data_root: Path, today: date) -> dict[str, list[int]]:
         except ValueError:
             continue
         command = str(row.get("command") or "").strip() or "(none)"
+        command = RENAMED.get(command, command)  # a command since renamed counts under its new name (release 5.98)
         counts = out.setdefault(command, [0] * len(SPANS))
         for i, n in enumerate(SPANS):
             if today - timedelta(days=n - 1) <= day <= today:

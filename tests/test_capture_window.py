@@ -312,6 +312,14 @@ def test_the_other_hotkeys_are_registered_when_set_and_do_their_own_thing(ctx, m
         for setting in ("browse_hotkey", "note_hotkey", "new_task_hotkey", "update_hotkey", "agenda_hotkey"):
             capture_app.hotkey_actions[hotkey.HOTKEY_IDS[setting]]()
         assert opened == ["browse", "note", "new_task", "update", "agenda"]
+        # Ctrl+Shift+D and the wheels' today.new_item run one command (release 5.99, decision 393).
+        from docrepo.ui.wheel_commands import REGISTRY
+
+        quick = []
+        monkeypatch.setattr(capture_app.window, "open_quick_task", lambda: quick.append("quick"))
+        capture_app.hotkey_actions[hotkey.HOTKEY_IDS["today_hotkey"]]()
+        REGISTRY["today.new_item"].run(capture_app, {})
+        assert quick == ["quick", "quick"]
     finally:
         capture_app.quit()
 
@@ -565,6 +573,40 @@ def test_a_quick_task_from_the_capture_window(window, ctx):
     t = next(x for x in m.tasks.values() if x.title == "Order seal kits")
     assert m.parents_of(t.id) == [quick.parent_id(ctx.conn)] and [a.subject for a in m.today_items()] == [t.id]
     assert ctx.messages[-1][1].endswith("under Quick tasks. On Today.")
+
+
+def test_new_task_with_today_ticked_by_hand_is_an_ordinary_task_on_today(window, ctx):
+    """Release 5.99 (the consolidation plan's decision 393): only Ctrl+Shift+D's command makes a quick task here; New task
+    with Today ticked by hand makes an ordinary new task on Today, a top-level one with no task picked."""
+    window.show_capture(mode="new_task")
+    window._alt_today()
+    assert window.types == {"new_task"} and window.today_on and not window._quick()
+    assert window.task_button.text() == "None: a new top-level task" and "a top-level task" in window.does.text()
+    window.title.setText("Order gasket kits")
+    window.save()
+    m = Model(ctx.conn)
+    t = next(x for x in m.tasks.values() if x.title == "Order gasket kits")
+    assert m.parents_of(t.id) == [] and [a.subject for a in m.today_items()] == [t.id]
+    assert "Quick tasks" not in ctx.messages[-1][1] and ctx.messages[-1][1].endswith("On Today.")
+
+
+def test_ctrl_shift_ds_quick_mode_is_kept_with_its_draft(window, ctx):
+    """The quick-task mode that tells Ctrl+Shift+D's window from a New task ticked by hand goes into its draft, and a draft
+    from before release 5.99, which kept none, comes back as it would have saved."""
+    window.open_quick_task()
+    window.title.setText("Ring the crane company")
+    data = window._draft_data()
+    assert data["quick"] is True
+    window.reset_draft()
+    assert not window.quick_mode
+    window._restore_state({**data, "today": True})
+    assert window.quick_mode
+    window.reset_draft()
+    window._restore_state({**{k: v for k, v in data.items() if k != "quick"}, "today": True})  # an older draft
+    assert window.quick_mode
+    window.reset_draft()
+    window._restore_state({**{k: v for k, v in data.items() if k != "quick"}, "today": False})
+    assert not window.quick_mode
 
 
 def test_formatted_content_text(window, ctx, tmp_path):

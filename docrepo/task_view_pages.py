@@ -1,8 +1,8 @@
-"""The Task view's pages as HTML (release 5.34; the task overview design, sections 3 to 8): its header, the preview of
+"""Find files' pages as HTML (release 5.34, as the Task view; renamed in 5.98; the task overview design, sections 3 to 8): its header, the preview of
 the chosen record and the list's empty states. Like ``docrepo.detail``, there's no Qt here, so the words are tested as
 text; the window shows them in page views, which draw the pictures they name (``avatar:``, ``progress:``).
 
-Links say what to do: ``task:T…`` opens that task's Task view, ``scope:T…`` narrows the window to a subtask,
+Links say what to do: ``task:T…`` opens that task's Find files, ``scope:T…`` narrows the window to a subtask,
 ``pick:kind:id`` chooses a record in the list, ``capture:C…`` opens a capture, ``do:…`` runs one of the window's
 commands, and ``q:…`` searches for its words.
 """
@@ -32,9 +32,9 @@ def marked(text: str, words: list[str], slips: tuple[str, ...] = ()) -> str:
 
 # ---- the header ----
 def crumbs(model: Model, task: Task) -> str:
-    """The task's path, its parents as links that open their Task views; empty for a top-level task."""
+    """The task's path, its parents as links that open their Find files; empty for a top-level task."""
     chain = next(iter(c for c in model.chains_of(task.id) if len(c) > 1), [])
-    return (" › ".join(link(f"task:{x}", model.task(x).title, "Open its Task view", "tq") for x in chain[:-1]) + " ›") if chain else ""
+    return (" › ".join(link(f"task:{x}", model.task(x).title, "Open its Find files", "tq") for x in chain[:-1]) + " ›") if chain else ""
 
 
 def header(model: Model, task: Task, records: list[Record], today: date, me: str | None) -> str:
@@ -74,7 +74,8 @@ def status_and_latest(pages: Pages, task: Task, records: list[Record], today: da
     name = "Final status" if task.state == "Closed" else "Current status"
     since = pages.status_since(task)
     when = f' <span class="rel">{esc(pages.long(since))} · {ago(since, today)}</span>' if task.current_status and since else ""
-    body = multiline(task.current_status) if task.current_status else f'<span class="sub">No status yet.</span> {link("do:update", "Add one")}'
+    # No Add one here since release 5.98 (decision 390): an update is the task page's, a click away.
+    body = multiline(task.current_status) if task.current_status else '<span class="sub">No status yet.</span>'
     status = f'<span class="sk">{name}</span>{when}<br>{body}'
     newest = next(iter(sorted((r for r in records if r.kind in ("note", "email") and r.type != "page"), key=lambda r: r.at, reverse=True)), None)
     if newest is None:
@@ -171,11 +172,6 @@ def nothing_found(scope_title: str, query: str, filters: int, narrowed: bool, su
 def still_searching() -> str:
     """The list's line while the files' text is still being searched."""
     return '<p align="center" class="note">No names or notes match. Searching the files\' text…</p>'
-
-
-def nothing_clicked() -> str:
-    """The preview on the Notes page tab, before anything on the page has been clicked."""
-    return '<p class="note">Click a caption or a file line on the page to see it here.</p>'
 
 
 def nothing_of_kind(kind: str, scope_title: str, narrowed: bool) -> str:

@@ -97,9 +97,10 @@ def test_new_task_s_rows_in_the_window(window):
     window.set_type("new_task", True)
     window.title.setText("New product trial 1")
     ed = window.n_keydates
-    assert ed.body.isHidden() and ed.rows() == []  # folded until there's one
-    ed.toggle.click()
-    assert not ed.body.isHidden() and len(ed.lines) == 1
+    # Since release 5.100 they sit straight inside More fields, with no fold of their own (decision 395).
+    assert not ed.body.isHidden() and ed.rows() == [] and window.n_more.isAncestorOf(ed)
+    ed.add_row(focus=True)
+    assert len(ed.lines) == 1
     line = ed.lines[0]
     line.description.setText("Trial execution window")
     line.start.set_value("2026-12-01")
