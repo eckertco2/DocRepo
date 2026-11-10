@@ -8,6 +8,10 @@ It never takes the keyboard from the window you're in, except when you click in 
 something off and carry on typing in Outlook. Answering WM_MOUSEACTIVATE with "don't activate" isn't enough for that: tried with
 real clicks, it leaves no window in front at all, and typing goes nowhere. So the window has WS_EX_NOACTIVATE, lifted only while
 its box or its hotkey has the keyboard.
+
+Release 5.106 (``docs/mods/today-panel-plan.md`` in the design workspace): its inner edge can be dragged to set its width at
+rest, which it remembers (decision 406), and a file, a link or an email dropped on one of its tasks opens the capture window
+as an Update on that task, with what was dropped in it (decisions 407 and 408).
 """
 from __future__ import annotations
 
@@ -22,7 +26,7 @@ from datetime import date
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QEasingCurve, QPoint, QRect, Qt, QTimer, QVariantAnimation
-from PySide6.QtGui import QColor, QCursor, QFontMetrics, QGuiApplication, QPainter
+from PySide6.QtGui import QColor, QCursor, QFontMetrics, QGuiApplication, QPainter, QPen
 from PySide6.QtWidgets import (
     QCheckBox,
     QFrame,
@@ -44,16 +48,19 @@ from docrepo.dates import to_date
 from docrepo.detail import Pages, PageState, esc
 from docrepo.lists import reminders_due
 from docrepo.model import Model, Task
-from docrepo.panel_rules import OPEN_KEY, Hover, Monitor, Place, Rect
+from docrepo.panel_rules import OPEN_KEY, REST_WIDTH_KEY, Hover, Monitor, Place, Rect
 from docrepo.schedule import DueDate, is_open
 from docrepo.ui import tokens
 from docrepo.ui.browse_window import TODAY_MINE_KEY
+from docrepo.ui.capture_window import note_drag, read_drop
 from docrepo.ui.context import AppContext
+from docrepo.ui.drop_target import DropOverlay, DropRead
 from docrepo.ui.icons import icon, icon_size
 from docrepo.ui.page_view import PageView
 from docrepo.ui.tree_view import PRIORITY_EDGES
 from docrepo.ui.state_menu import UNDO_MS, UndoButton
 from docrepo.ui.style import page_css, style_sheet
+from docrepo.ui.tokens import C
 from docrepo.ui.wheel_window import animations_on
 from docrepo.views import due_cell, project_text, since_text, today_due_entries, today_groups
 
@@ -76,6 +83,11 @@ WDA_NONE, WDA_EXCLUDEFROMCAPTURE = 0, 0x11
 #: PowerPoint's slide show window, which isn't in front while Presenter View has the keyboard on another monitor.
 SLIDE_SHOW_CLASS = "screenClass"
 NEWLINE = chr(10)
+#: The grip on the inner edge, in pixels (decision 406).
+GRIP_WIDTH = 5
+#: What the cover says while an email, or a file only a program holds, is dragged over the panel (decision 408).
+COVER_EMAIL = "Drop on a task: DocRepo keeps the email whole"
+COVER_FILE = "Drop on a task: DocRepo keeps the file as it's handed over"
 
 QSS = """
 QWidget#todayPanel {{ background: {content}; border: 1px solid {stroke_strong}; }}
@@ -83,6 +95,7 @@ QWidget#tpTop {{ background: {base}; border-bottom: 1px solid {stroke}; }}
 QFrame#tpRow {{ background: transparent; border-radius: 4px; }}
 QFrame#tpRow:hover {{ background: {hover}; }}
 QFrame#tpRow[current="true"] {{ background: {selected}; }}
+QFrame#tpRow[drop="true"] {{ background: {selected}; border: 1px solid {accent}; }}
 QLabel#tpTitle {{ color: {text}; }}
 QLabel#tpSub {{ color: {text2}; font-size: {caption}pt; }}
 QLabel#tpGroup {{ color: {text2}; font-size: {caption}pt; font-weight: 600; }}
@@ -119,6 +132,9 @@ class _EdgeFrame(QFrame):
     """A row with its task's priority down its left edge, as the browse window's lists have it."""
 
     edge = ""
+    #: The task a drop on this row goes to (decision 407), and its title; None for a note on Today.
+    task_id: str | None = None
+    title = ""
 
     def paintEvent(self, event) -> None:  # noqa: N802 - Qt's name
         super().paintEvent(event)
@@ -207,6 +223,112 @@ class _Row(_EdgeFrame):
             self.panel.open_detail(self.item_id)
 
 
+class _Grip(QWidget):
+    """The panel's inner edge at rest (decision 406): drag it to set the width at rest. The pointer on it doesn't widen
+    the panel, so it can be dragged narrow."""
+
+    def __init__(self, panel: TodayPanel) -> None:
+        super().__init__(panel)
+        self.panel = panel
+        self.setCursor(Qt.CursorShape.SizeHorCursor)
+        self.setToolTip("Drag to set its width at rest. Right-click the top line to reset it")
+        self.setMouseTracking(True)
+        self._from: int | None = None
+        self._start = 0
+
+    def dragging(self) -> bool:
+        return self._from is not None
+
+    def paintEvent(self, event) -> None:  # noqa: N802 - a line on the edge while it's under the pointer
+        if self.underMouse() or self.dragging():
+            p = QPainter(self)
+            x = 0 if self.panel.place_.side == "right" else self.width() - 2
+            p.fillRect(x, 0, 2, self.height(), QColor(C.accent))
+            p.end()
+
+    def enterEvent(self, event) -> None:  # noqa: N802
+        super().enterEvent(event)
+        self.panel.on_grip(True)
+        self.update()
+
+    def leaveEvent(self, event) -> None:  # noqa: N802
+        super().leaveEvent(event)
+        if not self.dragging():
+            self.panel.on_grip(False)
+        self.update()
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._from = event.globalPosition().toPoint().x()
+            self._start = self.panel.width()
+            event.accept()
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802
+        if self._from is not None:
+            self.panel.size_rest(self._start, event.globalPosition().toPoint().x() - self._from)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        if self._from is not None:
+            self._from = None
+            self.panel.keep_rest()
+            if not self.rect().contains(event.position().toPoint()):
+                self.panel.on_grip(False)
+            self.update()
+
+
+class _DropCover(DropOverlay):
+    """DocRepo's own drop target over the panel (decision 408), while an email from Outlook, or a file only a program
+    holds, is dragged over it. It draws the panel's tasks where they are, marks the one under the pointer, and takes a
+    drop only on a task."""
+
+    def __init__(self, panel: TodayPanel) -> None:
+        super().__init__(panel, panel.cover_dropped, panel.cover_allows)
+        self.panel = panel
+        self.email = True
+
+    def cover(self, email: bool = True) -> None:
+        self.email = email
+        self.panel._cover_target = None
+        super().cover(email)
+
+    def uncover(self) -> None:
+        super().uncover()
+        self.panel.drag_over()
+
+    def paintEvent(self, event) -> None:  # noqa: N802 - drawn here, so the rows show through as targets
+        panel = self.panel
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.fillRect(self.rect(), QColor(C.info_bg))
+        font = p.font()
+        font.setBold(True)
+        p.setFont(font)
+        p.setPen(QColor(C.accent))
+        top = QRect(8, 0, self.width() - 16, panel.top.height())
+        hint = COVER_EMAIL if self.email else COVER_FILE
+        p.drawText(top, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                   QFontMetrics(font).elidedText(hint, Qt.TextElideMode.ElideRight, top.width()))
+        font.setBold(False)
+        p.setFont(font)
+        viewport = panel.scroll.viewport()
+        p.setClipRect(QRect(viewport.mapTo(panel, QPoint(0, 0)), viewport.size()))
+        for w in panel.drop_targets():
+            r = QRect(w.mapTo(panel, QPoint(0, 0)), w.size()).adjusted(1, 1, -1, -1)
+            hot = w is panel._cover_target
+            p.setPen(QPen(QColor(C.accent), 2 if hot else 1, Qt.PenStyle.SolidLine if hot else Qt.PenStyle.DashLine))
+            p.setBrush(QColor(tokens.LIGHT["selected" if hot else "content"]))
+            p.drawRoundedRect(r, 4, 4)
+            p.setPen(QColor(tokens.LIGHT["text"]))
+            words = r.adjusted(8, 0, -8, 0)
+            p.drawText(words, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                       QFontMetrics(font).elidedText(w.title, Qt.TextElideMode.ElideRight, words.width()))
+        p.setClipping(False)
+        p.setPen(QPen(QColor(C.accent), 2, Qt.PenStyle.DashLine))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 6, 6)
+        p.end()
+
+
 class TodayPanel(QWidget):
     """One panel per DocRepo, made the first time it opens."""
 
@@ -236,10 +358,18 @@ class TodayPanel(QWidget):
         self.user_open = False
         self._built_for: date | None = None
         self._width_now = settings.rest_width
+        self._rest = db.get_state(self.ctx.conn, REST_WIDTH_KEY)  # the width at rest, dragged and kept (decision 406)
+        self._dragging = False  # a drag of files, links or an email is over the panel (decision 407)
+        self._drop_at: _EdgeFrame | None = None  # the row a drop would go to, marked
+        self._cover_target: _EdgeFrame | None = None  # the same, under the cover
         self._grow = QVariantAnimation(self)
         self._grow.setEasingCurve(QEasingCurve.Type.OutCubic)
         self._grow.valueChanged.connect(self._grown)
         self._build()
+        self.grip = _Grip(self)
+        self.grip.hide()
+        self.setAcceptDrops(True)
+        self.drop_cover = _DropCover(self)
         self._hover_timer = QTimer(self, interval=HOVER_TICK_MS, timeout=self._hover_tick)
         self._full_screen_timer = QTimer(self, interval=FULL_SCREEN_CHECK_MS, timeout=self._check_full_screen)
         self._day_timer = QTimer(self, interval=60_000, timeout=self._new_day)
@@ -272,6 +402,7 @@ class TodayPanel(QWidget):
         tl = QHBoxLayout(top)
         tl.setContentsMargins(8, 4, 4, 4)
         self.count = QLabel(objectName="tpGroup")
+        self.count.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)  # dragged narrow, the width decides (decision 406)
         tl.addWidget(self.count, 1)
         close = QToolButton()
         close.setIcon(icon("close"))
@@ -466,6 +597,8 @@ class TodayPanel(QWidget):
         m, today = self._model(), self._today()
         self._built_for = today
         was = self.rows[self.cursor].item_id if 0 <= self.cursor < len(self.rows) else None
+        self._mark_drop(None)
+        self._cover_target = None
         while self.list_lay.count():
             w = self.list_lay.takeAt(0).widget()
             if w is not None:
@@ -522,11 +655,13 @@ class TodayPanel(QWidget):
         self._add(fold)
         return is_open
 
-    def _add_line(self, text: str, when: str, links: list[tuple[str, str, Callable[[], object]]], edge: str = "") -> None:
-        """A row under a folded heading: its words, its date, each link's name, tooltip and what it does, and its task's
-        priority as its edge."""
+    def _add_line(self, text: str, when: str, links: list[tuple[str, str, Callable[[], object]]], edge: str = "",
+                  task_id: str | None = None) -> None:
+        """A row under a folded heading: its words, its date, each link's name, tooltip and what it does, its task's
+        priority as its edge, and its task, where a drop on it goes."""
         line = _EdgeFrame(objectName="tpRow")
         line.edge = edge
+        line.task_id, line.title = task_id, text
         lay = QHBoxLayout(line)
         lay.setContentsMargins(4, 2, 4, 2)
         lay.setSpacing(4)
@@ -551,7 +686,7 @@ class TodayPanel(QWidget):
         for t in due:
             links = [] if t.id in on_today else [("Add", "Put it on Today; the reminder stays until it's cleared", lambda i=t.id: self.browse.add_to_today(i))]
             links.append(("Clear", "Clear this reminder. Its status log records it.", lambda i=t.id: self.browse.clear_reminder(i, "Today")))
-            self._add_line(t.title, due_cell(t, today, DueDate(to_date(t.reminder), "Reminder"), use_due=False).text, links, edge_of(t))
+            self._add_line(t.title, due_cell(t, today, DueDate(to_date(t.reminder), "Reminder"), use_due=False).text, links, edge_of(t), t.id)
 
     def _add_due_section(self, m: Model, today: date) -> None:
         mine = db.get_state(self.ctx.conn, TODAY_MINE_KEY) == "1"
@@ -564,7 +699,7 @@ class TodayPanel(QWidget):
             text = (key_dates.label(t.key_date, today) + " · " + task.title) if is_key_date else task.title
             cell = due_cell(task, today) if not is_key_date else None
             links = [] if is_key_date else [("Add", "Put it on Today", lambda i=task.id: self.browse.add_to_today(i))]
-            self._add_line(text, cell.text if cell else "", links, edge_of(task))
+            self._add_line(text, cell.text if cell else "", links, edge_of(task), task.id)
 
     def _add_done_section(self, m: Model, today: date) -> None:
         done = m.done_on(today)
@@ -705,7 +840,8 @@ class TodayPanel(QWidget):
     # ================= hovering =================
     def _holding(self) -> bool:
         """What keeps it wide after the pointer leaves: the box has the cursor, a menu is open, or a detail is showing."""
-        return self.box.hasFocus() or self._menu_open or self._detail is not None or self.ask_row.isVisible() or self.isActiveWindow()
+        return (self.box.hasFocus() or self._menu_open or self._detail is not None or self.ask_row.isVisible() or self.isActiveWindow()
+                or self._dragging)
 
     def _hover_ms(self) -> int | None:
         return self.settings.inner_edge_hover_ms if self._on_inner_edge() else None
@@ -748,7 +884,166 @@ class TodayPanel(QWidget):
 
     def target_width(self) -> int:
         s = self.settings
-        return s.detail_width if self._detail else s.hover_width if self.hover.wide else s.rest_width
+        return s.detail_width if self._detail else s.hover_width if self.hover.wide else self.rest_width()
+
+    def rest_width(self) -> int:
+        """The width at rest: dragged and kept (decision 406), or else the wheels config's."""
+        return panel_rules.rest_width(self._rest, self.settings.rest_width, self.settings.hover_width)
+
+    # ================= the width at rest (release 5.106, decision 406) =================
+    def on_grip(self, on: bool) -> None:
+        """The pointer on the grip counts as off the panel, so it doesn't widen while the edge is dragged."""
+        at = QCursor.pos()
+        if on:
+            self.hover.pointer_out(self.clock())
+        elif self.rect().contains(self.mapFromGlobal(at)):
+            self.hover.pointer_in(self.clock(), (at.x(), at.y()))
+        self._hover_timer.start()
+
+    def size_rest(self, start: int, dx: int) -> None:
+        """The inner edge dragged ``dx`` pixels from where it was, at ``start`` wide: the panel follows at once."""
+        self._rest = str(panel_rules.dragged_width(self.place_.side, start, dx, self.settings.hover_width))
+        self.place_window(animate=False)
+
+    def keep_rest(self) -> None:
+        self.ctx.keep_state(REST_WIDTH_KEY, self._rest or "")
+
+    def reset_rest(self) -> None:
+        """Back to the wheels config's width at rest."""
+        self._rest = None
+        self.ctx.keep_state(REST_WIDTH_KEY, "")
+        self.place_window()
+
+    def _place_grip(self) -> None:
+        """The grip on the inner edge, below the top line, and only at rest."""
+        grip = getattr(self, "grip", None)
+        if grip is None:
+            return
+        top = self.top.height()
+        x = 0 if self.place_.side == "right" else self.width() - GRIP_WIDTH
+        grip.setGeometry(x, top, GRIP_WIDTH, max(0, self.height() - top))
+        at_rest = not self.hover.wide and self._detail is None and not self._dragging
+        grip.setVisible(at_rest or grip.dragging())
+        grip.raise_()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        super().resizeEvent(event)
+        self._place_grip()
+        cover = getattr(self, "drop_cover", None)
+        if cover is not None and cover.isVisible():
+            cover.setGeometry(self.rect())
+
+    # ================= drops on a task (release 5.106, decisions 407 and 408) =================
+    def drop_targets(self) -> list[_EdgeFrame]:
+        """The rows a drop can go to: Today's tasks, and the tasks under Reminders and Due in the next 7 days, as shown."""
+        rows = [*self.rows, *getattr(self, "extras", [])]
+        return [w for w in rows if isinstance(w, _EdgeFrame) and w.task_id and w.isVisibleTo(self)]
+
+    def target_at(self, at: QPoint) -> _EdgeFrame | None:
+        """The task row under ``at``, a point on the screen, in the list as it shows."""
+        if self.stack.currentIndex() != 0:
+            return None
+        viewport = self.scroll.viewport()
+        if not viewport.rect().contains(viewport.mapFromGlobal(at)):
+            return None
+        return next((w for w in self.drop_targets() if w.rect().contains(w.mapFromGlobal(at))), None)
+
+    def _mark_drop(self, target: _EdgeFrame | None) -> None:
+        old, self._drop_at = self._drop_at, target
+        if old is target:
+            return
+        for w, on in ((old, False), (target, True)):
+            if w is not None:
+                w.setProperty("drop", on)
+                w.style().unpolish(w)
+                w.style().polish(w)
+
+    def drag_in(self) -> None:
+        """A drag came over the panel: it widens and shows its list, so the tasks can be read, until the drag is over."""
+        self._dragging = True
+        if self._detail:
+            self._detail = None
+            self.stack.setCurrentIndex(0)
+        self.hover.open_wide()
+        self._apply_wide()
+        self.place_window(animate=False)
+
+    def drag_over(self) -> None:
+        """The drag left, or dropped: the panel goes back to hovering's rules."""
+        if not self._dragging:
+            return
+        self._dragging = False
+        self._mark_drop(None)
+        at = QCursor.pos()
+        if self.rect().contains(self.mapFromGlobal(at)):
+            self.hover.pointer_in(self.clock(), (at.x(), at.y()))
+        else:
+            self.hover.pointer_out(self.clock())
+        self._update_state()
+        self._hover_timer.start()
+
+    def dragEnterEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        kind = note_drag("enter", event.mimeData(), links=True)
+        if not kind:
+            event.ignore()
+            return
+        event.setDropAction(Qt.DropAction.CopyAction)
+        event.accept()
+        self.drag_in()
+        if kind in ("outlook", "virtual") and self.drop_cover.available:
+            self.drop_cover.cover(email=kind == "outlook")
+
+    def dragMoveEvent(self, event) -> None:  # noqa: N802
+        target = self.target_at(self.mapToGlobal(event.position().toPoint())) if read_drop(event.mimeData(), links=True)[0] else None
+        self._mark_drop(target)
+        if target is not None:
+            event.setDropAction(Qt.DropAction.CopyAction)
+            event.accept()
+        else:
+            event.ignore()
+
+    def dragLeaveEvent(self, event) -> None:  # noqa: N802 - the cover taking the drag over isn't the drag leaving
+        if not self.drop_cover.isVisible():
+            self.drag_over()
+
+    def dropEvent(self, event) -> None:  # noqa: N802
+        note_drag("drop", event.mimeData(), links=True)
+        kind, paths = read_drop(event.mimeData(), links=True)
+        target = self.target_at(self.mapToGlobal(event.position().toPoint())) if kind else None
+        self.drag_over()
+        if target is None or not target.task_id:
+            event.ignore()
+            return
+        event.setDropAction(Qt.DropAction.CopyAction)
+        event.accept()
+        task_id = target.task_id
+        QTimer.singleShot(0, lambda: self.drop_on(task_id, kind, paths))  # after the drop, so the program dragging is let go
+
+    def cover_allows(self) -> bool:
+        """The cover's question while an email or a file is dragged over it: is the pointer on a task? Kept, for the drop."""
+        target = self.target_at(QCursor.pos())
+        if target is not self._cover_target:
+            self._cover_target = target
+            self.drop_cover.update()
+        return target is not None
+
+    def cover_dropped(self, found: DropRead) -> None:
+        """What the cover took, after the drop, for the task it was dropped on."""
+        target, self._cover_target = self._cover_target, None
+        if target is not None and target.task_id and (found.items or found.problems):
+            self.drop_on(target.task_id, found=found)
+
+    def drop_on(self, task_id: str, kind: str = "", paths: list[str] | None = None, found: DropRead | None = None) -> None:
+        """Decision 407: the capture window, opened as an Update on the task, with what was dropped in it, as if it had
+        been dropped there. A capture it was holding goes to Drafts first, as any open for a task does."""
+        self.browse.open_capture(task=task_id, mode="update")
+        capture = self.browse.capture
+        if capture is None:
+            return
+        if found is not None:
+            capture.take_drop(found)
+        elif kind:
+            capture.dropped(kind, list(paths or []))
 
     def _update_state(self) -> None:
         self._apply_wide()
@@ -781,7 +1076,7 @@ class TodayPanel(QWidget):
                 wanted += w.sizeHint().height()
         return max(120, min(most, wanted))
 
-    def place_window(self) -> None:
+    def place_window(self, animate: bool = True) -> None:
         """On its side of its monitor, at its height, growing away from the edge."""
         screen = self._screen()
         area = screen.availableGeometry()
@@ -789,9 +1084,10 @@ class TodayPanel(QWidget):
         height = self._wanted_height(area)
         top = min(self.place_.top, max(0, area.height() - height))
         self._to = QRect(panel_rules.edge_x(self.place_.side, _rect(area), width), area.y() + top, width, height)
-        if not self.isVisible() or self.width() == width or self.wheels.config.timing.animation_ms <= 0 or not animations_on():
+        if not animate or not self.isVisible() or self.width() == width or self.wheels.config.timing.animation_ms <= 0 or not animations_on():
             self._grow.stop()
             self.setGeometry(self._to)
+            self._place_grip()
             return
         self._grow.stop()
         self._grow.setDuration(min(100, self.wheels.config.timing.animation_ms))
@@ -843,6 +1139,8 @@ class TodayPanel(QWidget):
     def _top_menu(self, at: QPoint) -> None:
         menu = QMenu(self)
         menu.addAction("Move to next screen", self.move_to_next_screen)
+        reset = menu.addAction("Reset the width at rest", self.reset_rest)
+        reset.setEnabled(bool(self._rest))
         menu.addAction("Hide", lambda: self.action("close"))
         menu.addSeparator()
         menu.addAction("Open wheels config", self.wheels.open_config)

@@ -156,6 +156,35 @@ def test_the_drop_target_takes_the_drop_after_it(qapp):
     assert "## Drops on DocRepo's own drop target" in report and "| yes | storage " in report and "Crane" not in report
 
 
+
+def test_a_drop_target_can_take_drops_only_where_its_told(qapp):
+    """The Today side panel's cover (release 5.106, decision 408): off a task the pointer says no, and a drop there
+    takes nothing, unread."""
+    got, left, here = [], [], [False]
+    target = wrap(drop_target.DropTarget(got.append, lambda: left.append(True), lambda: here[0]), pythoncom.IID_IDropTarget)
+    obj = drag([("Crane booking.msg", crane_email())])
+    assert target.DragEnter(obj, 0, (10, 10), drop_target.DROPEFFECT_COPY) == drop_target.DROPEFFECT_NONE
+    here[0] = True
+    assert target.DragOver(0, (12, 12), drop_target.DROPEFFECT_COPY) == drop_target.DROPEFFECT_COPY
+    here[0] = False
+    assert target.Drop(obj, 0, (12, 12), drop_target.DROPEFFECT_COPY) == drop_target.DROPEFFECT_NONE
+    QApplication.processEvents()
+    assert got == [] and left == [True]  # the cover went, and nothing was read
+    here[0] = True
+    target.DragEnter(obj, 0, (10, 10), drop_target.DROPEFFECT_COPY)
+    assert target.Drop(obj, 0, (12, 12), drop_target.DROPEFFECT_COPY) == drop_target.DROPEFFECT_COPY
+    QApplication.processEvents()
+    assert [x.name for x in got[0].items] == ["Crane booking.msg"]
+
+
+def test_a_question_that_fails_says_no(qapp):
+    def broken() -> bool:
+        raise RuntimeError("made up")
+
+    target = wrap(drop_target.DropTarget(lambda _found: None, lambda: None, broken), pythoncom.IID_IDropTarget)
+    assert target.DragEnter(drag([("a.txt", b"x")]), 0, (1, 1), drop_target.DROPEFFECT_COPY) == drop_target.DROPEFFECT_NONE
+
+
 # ---- saving ----
 @pytest.fixture
 def env(data_root, fs):

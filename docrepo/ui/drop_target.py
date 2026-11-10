@@ -172,31 +172,46 @@ def read(obj) -> DropRead:
 
 
 class DropTarget:
-    """The OLE drop target (``IDropTarget``), as a pywin32 COM object. ``dropped`` gets what a drop held, after the drop."""
+    """The OLE drop target (``IDropTarget``), as a pywin32 COM object. ``dropped`` gets what a drop held, after the drop.
+    ``allowed``, when given, says whether the pointer is somewhere a drop can go (the Today side panel's tasks, release
+    5.106): elsewhere the pointer says no, and a drop there takes nothing."""
 
     _com_interfaces_ = [pythoncom.IID_IDropTarget] if pythoncom else []
     _public_methods_ = ["DragEnter", "DragOver", "DragLeave", "Drop"]
 
-    def __init__(self, dropped: Callable[[DropRead], None], left: Callable[[], None]) -> None:
+    def __init__(self, dropped: Callable[[DropRead], None], left: Callable[[], None], allowed: Callable[[], bool] | None = None) -> None:
         self.dropped = dropped
         self.left = left
+        self.allowed = allowed
         self.ok = False
+
+    def _here(self) -> bool:
+        """Whether a drop where the pointer is now would be taken."""
+        if not self.ok:
+            return False
+        try:
+            return self.allowed is None or bool(self.allowed())
+        except Exception:  # noqa: BLE001 - an exception must never reach OLE
+            return False
 
     def DragEnter(self, obj, keys, point, effect) -> int:  # noqa: N802 - OLE's names
         try:
             self.ok = can_take(obj)
         except Exception:  # noqa: BLE001 - an exception must never reach OLE
             self.ok = False
-        return DROPEFFECT_COPY if self.ok else DROPEFFECT_NONE
+        return DROPEFFECT_COPY if self._here() else DROPEFFECT_NONE
 
     def DragOver(self, keys, point, effect) -> int:  # noqa: N802
-        return DROPEFFECT_COPY if self.ok else DROPEFFECT_NONE
+        return DROPEFFECT_COPY if self._here() else DROPEFFECT_NONE
 
     def DragLeave(self) -> None:  # noqa: N802
         self.left()
 
     def Drop(self, obj, keys, point, effect) -> int:  # noqa: N802
+        taken = self._here()  # before the cover goes, while it still knows what's under the pointer
         self.left()
+        if not taken:
+            return DROPEFFECT_NONE
         try:
             found = read(obj)
         except Exception as e:  # noqa: BLE001
@@ -211,7 +226,7 @@ class DropOverlay(QLabel):
     Outlook email, an attachment, a file in a zip folder) is over the window. ``available`` is False when the drop
     target couldn't be set up (not Windows, or no pywin32): the window then takes such drags as before."""
 
-    def __init__(self, parent: QWidget, dropped: Callable[[DropRead], None]) -> None:
+    def __init__(self, parent: QWidget, dropped: Callable[[DropRead], None], allowed: Callable[[], bool] | None = None) -> None:
         super().__init__(EMAIL_TEXT, parent)
         self.setObjectName("dropOverlay")
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -231,7 +246,7 @@ class DropOverlay(QLabel):
             # Only this cover gets a window handle of its own; the widgets beside it stay drawn by their window.
             QCoreApplication.setAttribute(Qt.ApplicationAttribute.AA_DontCreateNativeWidgetSiblings)
             self.setAttribute(Qt.WidgetAttribute.WA_NativeWindow)
-            self.target = wrap(DropTarget(dropped, self.uncover), pythoncom.IID_IDropTarget)
+            self.target = wrap(DropTarget(dropped, self.uncover, allowed), pythoncom.IID_IDropTarget)
             self.hwnd = int(self.winId())
             pythoncom.RegisterDragDrop(self.hwnd, self.target)
             self.available = True

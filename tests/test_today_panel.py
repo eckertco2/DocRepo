@@ -1,4 +1,5 @@
-"""The Today side panel (release 5.43): its rules, without Qt, and the panel, driven offscreen over the sample data."""
+"""The Today side panel (release 5.43): its rules, without Qt, and the panel, driven offscreen over the sample data. Since
+release 5.106, its width at rest, dragged and kept, and drops on its tasks."""
 from __future__ import annotations
 
 import os
@@ -8,8 +9,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from datetime import datetime  # noqa: E402
 
 import pytest  # noqa: E402
-from PySide6.QtCore import QEvent, QPoint, Qt  # noqa: E402
-from PySide6.QtGui import QKeyEvent  # noqa: E402
+from PySide6.QtCore import QEvent, QMimeData, QPoint, QPointF, Qt, QUrl  # noqa: E402
+from PySide6.QtGui import QDragEnterEvent, QDragLeaveEvent, QDragMoveEvent, QDropEvent, QKeyEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication, QPushButton, QSystemTrayIcon  # noqa: E402
 
 from docrepo import capacity, db, edits, hotkey, panel_rules, prompts, wheels_config as wc  # noqa: E402
@@ -21,6 +22,7 @@ from docrepo.panel_rules import Hover, Monitor, Place, Rect  # noqa: E402
 from docrepo.sample import load_sample  # noqa: E402
 from docrepo.ui import today_panel  # noqa: E402
 from docrepo.ui.context import AppContext  # noqa: E402
+from docrepo.ui.drop_target import DropRead, Dropped  # noqa: E402
 from docrepo.views import today_due_entries, today_groups  # noqa: E402
 
 NOW = datetime(2026, 10, 8, 14, 10)
@@ -521,3 +523,245 @@ def test_a_reminder_in_the_panel_can_be_added_and_cleared(app, panel):
     _click(panel, 0, "Clear")
     assert Model(conn).task(second.id).reminder is None
     assert _reminder_fold(panel) is None  # only while there are any
+
+
+# ---- the width at rest (release 5.106, decision 406) ----
+def test_dragging_the_inner_edge_follows_the_side_and_stays_in_bounds():
+    least = panel_rules.MIN_REST_WIDTH
+    assert panel_rules.dragged_width("left", 180, -50, 320) == 130  # on the left, the inner edge is the right one
+    assert panel_rules.dragged_width("right", 180, -50, 320) == 230  # on the right, dragging left widens it
+    assert panel_rules.dragged_width("left", 180, -500, 320) == least
+    assert panel_rules.dragged_width("right", 180, -500, 320) == 320  # never wider than it widens to on hover
+    assert panel_rules.dragged_width("left", 180, 0, 60) == least  # a hover width under the least doesn't squeeze it
+
+
+def test_the_width_at_rest_is_the_kept_one_or_the_configs():
+    assert panel_rules.rest_width(None, 180, 320) == 180
+    assert panel_rules.rest_width("", 180, 320) == 180  # reset
+    assert panel_rules.rest_width("rubbish", 180, 320) == 180
+    assert panel_rules.rest_width("120", 180, 320) == 120
+    assert panel_rules.rest_width("40", 180, 320) == panel_rules.MIN_REST_WIDTH
+    assert panel_rules.rest_width("900", 180, 320) == 320
+
+
+def test_the_grip_is_on_the_inner_edge_and_only_at_rest(app, panel):
+    put_on_today(app)
+    assert panel.place_.side == "left" and panel.grip.isVisibleTo(panel)
+    assert panel.grip.geometry().right() == panel.width() - 1 and panel.grip.geometry().top() == panel.top.height()
+    screen = QApplication.primaryScreen().geometry()
+    panel.dropped(QPoint(screen.right() - 10, screen.y() + 200))  # moved to the right side: the grip goes to its left edge
+    assert panel.place_.side == "right" and panel.grip.geometry().x() == 0
+    panel.hover.open_wide()
+    panel._update_state()
+    assert not panel.grip.isVisibleTo(panel)
+    panel.hover.contract()
+    panel._update_state()
+    assert panel.grip.isVisibleTo(panel)
+
+
+def test_dragging_the_grip_sets_the_width_at_rest_and_its_kept(app, panel):
+    put_on_today(app)
+    panel.size_rest(180, -500)
+    assert panel.geometry().width() == panel_rules.MIN_REST_WIDTH  # nothing in it holds it wider, not even the count
+    panel.size_rest(180, -60)
+    assert panel.target_width() == 120 and panel.geometry().width() == 120
+    assert panel.geometry().x() == QApplication.primaryScreen().availableGeometry().x()  # still against its edge
+    panel.keep_rest()
+    assert db.get_state(app.ctx.conn, panel_rules.REST_WIDTH_KEY) == "120"
+    again = today_panel.TodayPanel(app.ctx, app.browse, app.wheels)  # as after a restart
+    try:
+        assert again.target_width() == 120
+    finally:
+        again.drop_cover.release()
+        again.deleteLater()
+    panel.hover.open_wide()
+    panel._update_state()
+    assert panel.target_width() == 320  # it widens on hover as before
+    panel.hover.contract()
+    panel.reset_rest()
+    assert panel.target_width() == 180 and not db.get_state(app.ctx.conn, panel_rules.REST_WIDTH_KEY)
+
+
+def test_the_pointer_on_the_grip_doesnt_widen_it(app, panel):
+    clock = [0]
+    panel.clock = lambda: clock[0]
+    panel.hover.pointer_in(0)
+    panel.on_grip(True)
+    clock[0] = 5000
+    panel._hover_tick()
+    assert not panel.hover.wide
+
+
+def test_a_width_at_rest_from_the_config_still_counts_until_one_is_dragged(app, panel, data_root, fs):
+    fs.write_text(data_root / wc.CONFIG_FILE, wc.DEFAULT_TEXT.replace('"rest_width": 180', '"rest_width": 150'))
+    assert app.wheels.reload()
+    assert panel.target_width() == 150
+    panel.size_rest(150, 20)
+    assert panel.target_width() == 170
+
+
+# ---- drops on a task (release 5.106, decisions 407 and 408) ----
+def _dropped_file(tmp_path, name="Pump curve.txt"):
+    folder = tmp_path / "Inbox"
+    folder.mkdir(exist_ok=True)
+    path = folder / name
+    path.write_text("Made up for the test", encoding="utf-8")
+    return path
+
+
+def _files(path):
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile(str(path))])
+    return mime
+
+
+def _at(panel, row):
+    return row.mapTo(panel, row.rect().center())
+
+
+def _drag(panel, mime, at: QPoint, drop: bool = True):
+    """A drag of ``mime`` coming over the panel, moving to ``at``, and dropped there."""
+    buttons, keys, copy = Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, Qt.DropAction.CopyAction
+    enter = QDragEnterEvent(QPoint(2, 2), copy, mime, buttons, keys)
+    QApplication.sendEvent(panel, enter)
+    QApplication.processEvents()
+    move = QDragMoveEvent(at, copy, mime, buttons, keys)
+    QApplication.sendEvent(panel, move)
+    if not drop:
+        return enter, move, None
+    dropped = QDropEvent(QPointF(at), copy, mime, buttons, keys)
+    QApplication.sendEvent(panel, dropped)
+    QApplication.processEvents()
+    return enter, move, dropped
+
+
+def test_the_tasks_are_the_drop_targets_and_a_note_isnt(app, panel):
+    put_on_today(app)
+    note_on_today(app)
+    panel.drag_in()
+    targets = panel.drop_targets()
+    assert [w.task_id for w in targets if w in panel.rows] == [r.task_id for r in panel.rows if r.task_id]
+    assert all(w.task_id for w in targets) and any(r.task_id is None for r in panel.rows)
+    panel.drag_over()
+
+
+def test_a_file_dropped_on_a_task_opens_an_update_with_it(app, panel, tmp_path):
+    put_on_today(app)
+    path = _dropped_file(tmp_path)
+    mime = _files(path)
+    enter = QDragEnterEvent(QPoint(2, 2), Qt.DropAction.CopyAction, mime, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    QApplication.sendEvent(panel, enter)
+    assert enter.isAccepted() and panel.hover.wide and panel.target_width() == 320  # it widens, so the tasks can be read
+    QApplication.processEvents()
+    row = next(r for r in panel.rows if r.task_id == "T000008")
+    _enter, move, dropped = _drag(panel, mime, _at(panel, row))
+    assert move.isAccepted() and dropped.isAccepted()
+    w = app.window
+    assert w.isVisible() and w.task == "T000008" and w.types == {"update"}
+    assert [e.row.path for e in w.files] == [str(path)] and w.files[0].src == "dropped"
+    assert not panel._dragging and panel._drop_at is None
+
+
+def test_the_row_under_a_drag_is_marked(app, panel, tmp_path):
+    put_on_today(app)
+    mime = _files(_dropped_file(tmp_path))
+    QApplication.sendEvent(panel, QDragEnterEvent(QPoint(2, 2), Qt.DropAction.CopyAction, mime, Qt.MouseButton.LeftButton,
+                                                  Qt.KeyboardModifier.NoModifier))
+    QApplication.processEvents()
+    row = next(r for r in panel.rows if r.task_id == "T000008")
+    _drag(panel, mime, _at(panel, row), drop=False)
+    assert panel._drop_at is row and row.property("drop") is True
+    QApplication.sendEvent(panel, QDragLeaveEvent())
+    assert row.property("drop") is False and not panel._dragging
+
+
+def test_a_drop_on_a_note_or_off_the_tasks_is_refused(app, panel, tmp_path):
+    put_on_today(app)
+    note_on_today(app)
+    mime = _files(_dropped_file(tmp_path))
+    QApplication.sendEvent(panel, QDragEnterEvent(QPoint(2, 2), Qt.DropAction.CopyAction, mime, Qt.MouseButton.LeftButton,
+                                                  Qt.KeyboardModifier.NoModifier))
+    QApplication.processEvents()
+    note = next(r for r in panel.rows if r.task_id is None)
+    _enter, move, dropped = _drag(panel, mime, _at(panel, note))
+    assert not move.isAccepted() and not dropped.isAccepted()
+    _enter, move, dropped = _drag(panel, mime, QPoint(panel.width() // 2, 2))  # on the top line
+    assert not move.isAccepted() and not dropped.isAccepted()
+    assert not app.window.isVisible()
+
+
+def test_a_drag_closes_a_task_page_to_show_the_list(app, panel):
+    put_on_today(app)
+    panel.open_detail(next(r for r in panel.rows if r.task_id == "T000008").item_id)
+    assert panel.stack.currentIndex() == 1
+    panel.drag_in()
+    assert panel.stack.currentIndex() == 0 and panel.detail_id() is None
+    panel.drag_over()
+
+
+def test_a_web_link_dropped_on_a_task_is_added_as_a_link(app, panel):
+    put_on_today(app)
+    mime = QMimeData()
+    mime.setUrls([QUrl("https://example.com/pump-curves")])
+    QApplication.sendEvent(panel, QDragEnterEvent(QPoint(2, 2), Qt.DropAction.CopyAction, mime, Qt.MouseButton.LeftButton,
+                                                  Qt.KeyboardModifier.NoModifier))
+    QApplication.processEvents()
+    row = next(r for r in panel.rows if r.task_id == "T000008")
+    _drag(panel, mime, _at(panel, row))
+    assert app.window.task == "T000008" and app.window.types == {"update"}
+    assert any("example.com/pump-curves" in (e.row.path or "") for e in app.window.files)
+
+
+def test_a_drop_on_a_due_task_goes_to_it(app, panel, tmp_path):
+    db.set_state(app.ctx.conn, today_panel.DUE_OPEN_KEY, "1")
+    panel.refresh()
+    panel.drag_in()
+    QApplication.processEvents()
+    due = [w for w in panel.drop_targets() if w not in panel.rows]
+    assert due, "the sample has tasks due in the next 7 days"
+    path = _dropped_file(tmp_path)
+    _drag(panel, _files(path), _at(panel, due[0]))
+    assert app.window.task == due[0].task_id and [e.row.path for e in app.window.files] == [str(path)]
+
+
+class _Pointer:
+    """Where the cover asks the pointer is: a point on the screen the test sets."""
+
+    at = QPoint(0, 0)
+
+    @classmethod
+    def pos(cls):
+        return cls.at
+
+
+def test_an_email_dropped_on_the_cover_goes_to_the_task_under_it(app, panel, monkeypatch):
+    put_on_today(app)
+    note_on_today(app)
+    monkeypatch.setattr(today_panel, "QCursor", _Pointer)
+    panel.drag_in()
+    QApplication.processEvents()
+    row = next(r for r in panel.rows if r.task_id == "T000008")
+    _Pointer.at = row.mapToGlobal(row.rect().center())
+    assert panel.cover_allows() and panel._cover_target is row
+    note = next(r for r in panel.rows if r.task_id is None)
+    _Pointer.at = note.mapToGlobal(note.rect().center())
+    assert not panel.cover_allows()  # a note isn't a task: the pointer says no
+    _Pointer.at = row.mapToGlobal(row.rect().center())
+    assert panel.cover_allows()
+    panel.drop_cover.uncover()  # the drop: the cover goes first, then what it took arrives
+    assert not panel._dragging
+    panel.cover_dropped(DropRead(items=[Dropped("Lift plan.txt", b"Lift plan, made up")]))
+    w = app.window
+    assert w.isVisible() and w.task == "T000008" and w.types == {"update"}
+    assert [e.row.name for e in w.files] == ["Lift plan.txt"]
+
+
+def test_the_cover_takes_nothing_off_a_task(app, panel, monkeypatch):
+    put_on_today(app)
+    monkeypatch.setattr(today_panel, "QCursor", _Pointer)
+    panel.drag_in()
+    QApplication.processEvents()
+    _Pointer.at = panel.mapToGlobal(QPoint(panel.width() // 2, 2))
+    assert not panel.cover_allows()
+    panel.cover_dropped(DropRead(items=[Dropped("Lift plan.txt", b"x")]))
+    assert not app.window.isVisible()

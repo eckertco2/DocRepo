@@ -22,6 +22,7 @@ from docrepo import task_view_pages as pages
 from docrepo.captures import capture_folder
 from docrepo.overview import Record
 from docrepo.search import extracted_text
+from docrepo.ui.front import bring_to_front
 from docrepo.ui.result_list import ResultList, Row
 from docrepo.ui.style import page_css, style_sheet
 
@@ -124,9 +125,7 @@ class FileSearch(QWidget):
         self.load()
         area = screen.availableGeometry()
         self.move(area.x() + (area.width() - self.width()) // 2, area.y() + (area.height() - self.height()) // 3)
-        self.show()
-        self.raise_()
-        self.activateWindow()
+        bring_to_front(self)  # restored if it was minimized (release 5.106, decision 405)
         self.box.setFocus()
         self.box.selectAll()
 

@@ -9,6 +9,28 @@ from dataclasses import asdict, dataclass
 OPEN_KEY = "today_panel_open"
 #: How far the pointer may drift, in pixels, and still count as resting on the panel: one crossing on its way past does nothing.
 STILL_PX = 6
+#: The width at rest set by dragging the panel's inner edge (release 5.106, decision 406), in docs.db's app_state.
+REST_WIDTH_KEY = "today_panel_rest_width"
+#: The narrowest it can be dragged at rest: a tick box and the start of each title.
+MIN_REST_WIDTH = 100
+
+
+def dragged_width(side: str, start: int, dx: int, most: int) -> int:
+    """Decision 406: the width at rest while its inner edge is dragged ``dx`` pixels, from ``start``. The inner edge is the
+    one away from the screen's edge, so on the right side dragging left widens it. It stays between ``MIN_REST_WIDTH``
+    and ``most``, the width it widens to on hover."""
+    width = start - dx if side == "right" else start + dx
+    return max(MIN_REST_WIDTH, min(max(MIN_REST_WIDTH, most), width))
+
+
+def rest_width(saved: str | None, default: int, most: int) -> int:
+    """The width at rest: the one dragged and kept, kept between ``MIN_REST_WIDTH`` and ``most``, or else the wheels
+    config's ``rest_width``."""
+    try:
+        width = int(saved or "")
+    except ValueError:
+        return default
+    return max(MIN_REST_WIDTH, min(max(MIN_REST_WIDTH, most), width))
 
 
 @dataclass(frozen=True)

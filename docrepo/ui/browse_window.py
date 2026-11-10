@@ -59,6 +59,7 @@ from docrepo.ui.dialogs import LabelDialog, PersonDialog
 from docrepo.ui.lists import tagged as tagged_list
 from docrepo.ui.rich_edit import RichEdit
 from docrepo.ui.explorer import show_in_explorer
+from docrepo.ui.front import bring_to_front
 from docrepo.ui.problems import ProblemsLine
 from docrepo.ui.settings_view import SettingsView
 from docrepo.ui import tokens
@@ -580,9 +581,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
             if self.sel is None:
                 self._select_first()
             self.render_all()
-        self.show()
-        self.raise_()
-        self.activateWindow()
+        bring_to_front(self)  # restored if it was minimized (release 5.106, decision 405)
 
     def showEvent(self, event) -> None:  # noqa: N802 - Qt's name
         super().showEvent(event)
@@ -1626,9 +1625,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         if view is None:
             view = self.task_views[task_id] = TaskView(self, task_id)
         self.last_task_view = task_id
-        view.show()
-        view.raise_()
-        view.activateWindow()
+        bring_to_front(view)
         if file_type:
             view.show_type(file_type)
         view.focus_box()
