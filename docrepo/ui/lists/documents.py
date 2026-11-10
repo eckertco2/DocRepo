@@ -54,7 +54,16 @@ class DocumentLists:
     def _search_view(self) -> None:
         m = self.model()
         results = search.search(self.conn, m, self.query)
-        self._set_head(f"Search: {self.query}", f"{len(results)} result{'s' if len(results) != 1 else ''}. Every word you type must be in the item.")
+        scope, rest = search.read(self.query, m)  # "search excel files …", "search #task …" (release 5.108): the heading says where
+        count = f"{len(results)} result{'s' if len(results) != 1 else ''}"
+        if scope and scope.tasks is not None and not scope.tasks:
+            self._set_head(f"Search: {self.query}", "No task matches what follows the #. Pick one from the list # opens.")
+        elif scope:
+            self._set_head(f"Search {scope.name}: {rest}" if rest else f"Search {scope.name}",
+                           f"{count}, only there. " + ("Every word you type after it must be in the item." if rest else "Type words to narrow it."))
+        else:
+            self._set_head(f"Search: {self.query}", f"{count}. Every word you type must be in the item. "
+                           "To look in one place, start with “search excel files”, “search links”, “search notes” or “search #” and a task.")
         self.tree.set_columns(["Result"])
         grey, group = group_ground(), ""
         for r in results:
