@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from docrepo import search, tasks
+from docrepo import overview, search, tasks
 from docrepo.config import Settings
 from docrepo.model import Model
 from docrepo.save import CaptureDraft, FileRow, save_capture
@@ -77,3 +77,106 @@ def test_it_finds_reference_fields_and_people_by_email_group_and_role(sample_roo
     assert found(conn, "millwright") == [("Person", "P004")]
     assert found(conn, "tom.becker@example") == [("Person", "P003")]
     assert [r.sub for r in search.search(conn, Model(conn), "Purchasing")] == ["Tyler, Tyler N. · Purchasing · Buyer"]
+
+
+def test_read_takes_where_to_look_off_the_front(sample_root):
+    """Release 5.108: "search excel files …" names a place, "#…" a task; anything else is words to find, as before."""
+    conn, _, _ = sample_root
+    m = Model(conn)
+
+    def read(q):
+        scope, rest = search.read(q, m)
+        return (scope.name if scope else None, rest)
+
+    assert read("search excel files pump curve data") == ("Excel files", "pump curve data")
+    assert read("Search links approval forms") == ("Links", "approval forms")
+    assert read("search notes V-110") == ("Notes", "V-110")
+    assert read("search excel files for pump curve") == ("Excel files", "pump curve")  # "for" is passed over
+    assert read("search my PDFs datasheet") == ("PDF files", "datasheet")
+    assert read("search all spreadsheets for pump") == ("Excel files", "pump")
+    assert read("search saved copies rev") == ("Saved copies", "rev")
+    assert read("search people buyer") == ("People", "buyer")
+    assert read("search emails") == ("Emails", "")  # the place alone
+    # A task after "#": its whole title as the # list writes it, its ID, or its first word.
+    title = m.task("T000012").title
+    assert read(f"search #{title} crane") == (title, "crane")
+    assert read(f"#{title} crane") == (title, "crane")
+    assert read(f"search links #{title}") == (f"Links in {title}", "")
+    assert read(f"search #{title} excel files pump") == (f"Excel files in {title}", "pump")
+    assert read(f"search notes in #{title.upper()} for crane") == (f"Notes in {title}", "crane")
+    assert read("search #T000012 crane") == (title, "crane")
+    scope, rest = search.read(f"search #{title.split()[0]} crane", m)
+    assert "T000012" in scope.tasks and rest == "crane"
+    scope, rest = search.read("search #zzzqqq crane", m)
+    assert scope.tasks == frozenset() and rest == "crane"
+    scope, _ = search.read(f"search #{m.task('T000001').title}", m)
+    assert scope.tasks == {"T000001", *m.descendants_of("T000001")}
+    # No place or task it knows: the whole of it is searched for.
+    assert read("search for the pump") == (None, "search for the pump")
+    assert read("search vendors for seals") == (None, "search vendors for seals")
+    assert read("notes V-110") == (None, "notes V-110")
+    assert read("find links pump") == (None, "find links pump")
+    assert read("crane booking") == (None, "crane booking")
+
+
+def _with_a_link(sample_root):
+    conn, root, fs = sample_root
+    save_capture(conn, root, fs, Settings(me="P001"), CaptureDraft(content="Gasket facts.", task="T000008", files=[
+        FileRow("Zircon spec sheet", "https://example.com/spec", "the zircon spec")]), datetime(2026, 10, 8, 15, 0))
+    return conn, next(i for g, i in found(conn, "zircon") if g == "Document")
+
+
+def test_a_scope_lists_only_its_own(sample_root):
+    conn, _, _ = sample_root
+    assert found(conn, "search tasks crane") == [("Task", "T000012")]
+    assert found(conn, "search captures for crane") == [("Capture", "C000013"), ("Capture", "C000012")]
+    assert found(conn, "search people crane") == []
+    assert found(conn, "search people Thomas") == [("Person", "P003")]
+    m = Model(conn)
+    # A place alone lists everything in it.
+    assert found(conn, "search people") == [("Person", p) for p in m.people]
+    assert {i for _, i in found(conn, "search tasks")} == {t.id for t in m.tasks.values() if not t.discarded}
+    # Files by type: a link is found under links, and under no other type.
+    conn, link = _with_a_link(sample_root)
+    assert found(conn, "search links zircon") == [("Document", link)]
+    assert found(conn, "search excel files zircon") == []
+    assert found(conn, "search files zircon") == [("Document", link)]
+    assert found(conn, "search notes zircon") == [("Notes", "T000008")]  # its row on the task's notes page
+    assert found(conn, "search notes crane") == [("Capture", "C000013"), ("Capture", "C000012")]
+    assert ("Document", link) in found(conn, "search links")
+    # Every result of a file type's scope is of that type.
+    m = Model(conn)
+    for scope, kind in (("pdfs", "pdf"), ("excel files", "sheet"), ("word documents", "doc"), ("links", "link")):
+        for g, i in found(conn, f"search {scope}"):
+            assert g in ("Document", "Saved copy")
+            if g == "Document":
+                assert overview.file_type(m.documents[i].name, m.documents[i].original) == kind
+    # Notes leave emails out; emails keep only them.
+    for g, i in found(conn, "search notes"):
+        assert g == "Notes" or not m.captures[i].emails
+    for g, i in found(conn, "search emails"):
+        assert g != "Capture" or m.captures[i].emails
+
+
+def test_a_task_scope_keeps_to_the_task_and_what_is_under_it(sample_root):
+    conn, link = _with_a_link(sample_root)
+    m = Model(conn)
+    family = {"T000008", *m.descendants_of("T000008")}
+    here = m.task("T000008").title
+    above = [m.task(a).title for a in m.ancestors_of("T000008")]
+    other = next(t.title for t in m.tasks.values() if not t.discarded and t.id not in family and "T000008" not in m.descendants_of(t.id))
+    assert found(conn, f"search links #{here} zircon") == [("Document", link)]
+    assert found(conn, f"search links #{here}") == [("Document", link)]
+    for title in above:  # a task above it holds it too
+        assert ("Document", link) in found(conn, f"search #{title} zircon")
+    assert found(conn, f"search #{other} zircon") == []
+    assert found(conn, "search #zzzqqq zircon") == []
+    # Everything listed in a task is the task's: never a person or a label.
+    listed = found(conn, f"search #{here}")
+    assert ("Task", "T000008") in listed and ("Document", link) in listed
+    for g, i in listed:
+        assert g in ("Task", "Notes", "Capture", "Document", "Saved copy")
+        if g == "Capture":
+            assert m.captures[i].task in family
+        if g in ("Task", "Notes", "Saved copy"):
+            assert i in family
