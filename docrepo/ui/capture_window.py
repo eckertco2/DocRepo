@@ -1578,12 +1578,13 @@ class CaptureWindow(QWidget):
         """An email whose conversation is filed to a task fills the task picker with that task, shown as "from
         conversation" (the knowledge base's stage K8, release 5.101, decisions 32 and 33). A task picked by hand, or one #
         task, wins over it; emails whose conversations follow different tasks fill nothing, and the picker names them. The
-        rule is ``conversations.pick``'s. True when the task changed."""
+        rule is ``conversations.pick_emails``'s: since release 5.105 an email that's already captured counts with its own
+        capture's task, and a reply whose conversation isn't known follows the email it answers. True when the task changed."""
         if self.by_hand or self.meeting_on or self.from_capture or self.task_auto or (self.task and not self.task_conv):
             self.conv_mixed = ()
             return False
         m = self.ctx.model()
-        p = conversations.pick(m, conversations.email_keys([e.row.email for e in self.files if e.row.email is not None]))
+        p = conversations.pick_emails(m, [e.row.email for e in self.files if e.row.email is not None])
         self.conv_mixed = tuple(m.tasks[t].title for t in p.mixed)
         self.conv_note = conversations.note(m, p)
         self.conv_closed = p.closed

@@ -995,8 +995,12 @@ class Pages:
         if changes:
             rows.append(("Changes", "<br>".join(esc(f"{e.field}: {e.from_value or 'None'} → {e.to_value or 'None'}") for e in changes)))
         if c.emails:  # each email, its .msg file and what it's about (round 7's item 93, release 5.74)
+            # Reply all beside each email DocRepo can find (release 5.105, the knowledge base's stage K8, release B).
+            tip = "Reply all in Outlook, as a T-mail: its replies come back to its task"
+            reply = {e.pos: f' &nbsp;{link(f"replyall:{c.id}:{e.pos}", "Reply all", tip)}' for e in c.emails
+                     if (e.entry_id or e.file) and not c.discarded}
             rows.append(("Emails", "<br>".join(
-                f'{esc(e.subject or "(no subject)")} <span class="sub">{esc(e.file or "not saved as a file")}</span>'
+                f'{esc(e.subject or "(no subject)")} <span class="sub">{esc(e.file or "not saved as a file")}</span>{reply.get(e.pos, "")}'
                 + (f"<br>{esc(e.description)}" if e.description else "") for e in c.emails)))
         if c.email_layer_0:
             rows.append(("Email layer 0", esc(c.email_layer_0)))

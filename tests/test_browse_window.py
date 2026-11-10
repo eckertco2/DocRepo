@@ -830,8 +830,9 @@ def test_one_letter_per_topic(browse, monkeypatch):
     keys["E"].activated.emit()
     assert shown == ["Keys", "Edit task T000012"]
     labels = [b.text() or b.accessibleName() for b in browse.actions.findChildren(QPushButton)]
-    # More is an icon at the row's end (release 5.21); Find files is the Files group's (5.98); Edit a split button (5.98)
-    assert labels == ["Note", "Update", "Add to", "Edit", "More ways to edit", "More"]
+    # More is an icon at the row's end (release 5.21); Find files is the Files group's (5.98); Edit a split button (5.98);
+    # New T-mail a split button, Reply all on its arrow (5.105)
+    assert labels == ["Note", "Update", "New T-mail", "Reply all", "Add to", "Edit", "More ways to edit", "More"]
 
 
 def test_the_task_page_bar_and_its_links(browse, monkeypatch):

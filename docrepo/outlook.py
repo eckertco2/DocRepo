@@ -19,6 +19,13 @@ it also adds that category to Outlook's list of categories, in the colour chosen
 in Settings, when it isn't there yet, so it shows; a category already on the
 list keeps its colour, and the colour None leaves the list alone.
 
+On the owner's click (the knowledge base's stage K8, release B, as release
+5.105) it makes a T-mail: a new email (``new_t_mail``), or a Reply all to an
+email the owner filed (``reply_all``), and opens it for the owner to write and
+send. A new email Outlook gives no conversation index is saved to Drafts first,
+as Outlook's AutoSave would, and if it still has none, DocRepo gives it one in
+MS-OXOMSG's shape (KB decision 39). It never sends one.
+
 Each field is read on its own, so a field Outlook refuses (its security guard
 can refuse the sender, the recipients or the body) leaves only that field out.
 Every problem is logged and kept for the troubleshooting report
@@ -59,6 +66,7 @@ PR_IN_REPLY_TO_ID = "http://schemas.microsoft.com/mapi/proptag/0x1042001F"
 PR_INTERNET_REFERENCES = "http://schemas.microsoft.com/mapi/proptag/0x1039001F"
 PR_TRANSPORT_MESSAGE_HEADERS = "http://schemas.microsoft.com/mapi/proptag/0x007D001F"
 PR_CONVERSATION_INDEX_TRACKING = "http://schemas.microsoft.com/mapi/proptag/0x3016000B"
+PR_CONVERSATION_INDEX = "http://schemas.microsoft.com/mapi/proptag/0x00710102"  # binary: written only on a new T-mail with none
 OUTLOOK_WINDOW_CLASS = "rctrl_renwnd32"  # the class of Outlook's main window
 
 #: The well-known COM error codes, in words, for messages and the troubleshooting report.
@@ -347,6 +355,131 @@ def copy_whole(app: object, item: object, scratch: Path) -> EmailItem:
     email = msg.read(scratch.read_bytes())
     email.entry_id, email.store_id = where_kept(item)
     return email
+
+
+# ---- T-mails (the knowledge base's stage K8, release B, as release 5.105) ----
+@dataclass(frozen=True)
+class Opened:
+    """A T-mail Outlook opened: its whole conversation index as hex ("" when Outlook gave none), and how DocRepo got it.
+    A new email's: "made" (Outlook gave one at once), "saved" (once saved to Drafts) or "written" (DocRepo gave it one,
+    KB decision 39). A reply's route to the original: "place" (where Outlook keeps it) or "msg" (its saved .msg)."""
+
+    index: str
+    how: str
+
+
+def index_of(item: object) -> str:
+    """An item's conversation index as hex: its ConversationIndex field, else the property itself. "" for none."""
+    from docrepo import conversations
+
+    try:
+        found = conversations.clean_hex(getattr(item, "ConversationIndex", ""))
+    except Exception:  # noqa: BLE001 - COM raises its own errors
+        found = ""
+    if conversations.key(found):
+        return found
+    try:
+        return conversations.clean_hex(_prop(item, PR_CONVERSATION_INDEX))
+    except Exception:  # noqa: BLE001 - not there yet
+        return found
+
+
+def _close_unsaved(item: object) -> None:
+    try:
+        item.Close(OL_DISCARD)  # type: ignore[attr-defined]
+    except Exception:  # noqa: BLE001, S110 - never saved, so nothing is left behind either way
+        pass
+
+
+def give_index(item: object, now: datetime) -> str:
+    """Write a new conversation's index on an email that has none (KB decision 39), with the conversation index tracking
+    flag on so Outlook's ConversationID is the same GUID, and read it back. Returns the index the email now has."""
+    from docrepo import conversations
+
+    written = conversations.new_index(now)
+    accessor = item.PropertyAccessor  # type: ignore[attr-defined]
+    accessor.SetProperty(PR_CONVERSATION_INDEX, accessor.StringToBinary(written))
+    try:
+        accessor.SetProperty(PR_CONVERSATION_INDEX_TRACKING, True)
+    except Exception as e:  # noqa: BLE001 - the index is what counts; the flag only makes Outlook's ID agree with it
+        record_problem("setting the new email's conversation index tracking flag", e)
+    back = index_of(item)
+    return back if conversations.key(back) else written
+
+
+def new_t_mail(now: datetime) -> Opened:
+    """Make a new email and open it for the owner (New T-mail, KB decisions 35, 36 and 39): empty, no subject and no To,
+    tagged only by its conversation index. Outlook gives a new email none when it's made (check C1), so DocRepo saves it
+    to Drafts, as AutoSave would, and reads it then; if it still has none, DocRepo writes one. Never sent."""
+    from docrepo import conversations
+
+    app, _how = connect()
+    try:
+        item = app.CreateItem(OL_MAIL_ITEM)  # type: ignore[attr-defined]
+    except Exception as e:  # noqa: BLE001
+        detail = record_problem("making a new email (CreateItem)", e)
+        raise OutlookError(f"Outlook didn't make a new email ({detail}).", "making a new email", detail) from e
+    index, how = index_of(item), "made"
+    if not conversations.key(index):
+        try:
+            item.Save()
+            index, how = index_of(item), "saved"
+        except Exception as e:  # noqa: BLE001 - then DocRepo gives it one
+            record_problem("saving the new email to Drafts", e)
+    if not conversations.key(index):
+        try:
+            index, how = give_index(item, now), "written"
+        except Exception as e:  # noqa: BLE001 - it's still opened, untagged, and the owner is told
+            record_problem("giving the new email a conversation index", e)
+            index, how = "", "none"
+    try:
+        item.Display()
+    except Exception as e:  # noqa: BLE001
+        detail = record_problem("opening the new email (Display)", e)
+        if how != "saved":
+            _close_unsaved(item)
+        raise OutlookError(f"Outlook didn't open the new email ({detail}).", "opening the new email", detail) from e
+    log.info("Outlook: opened a new T-mail, its conversation index %s", how)
+    return Opened(index if conversations.key(index) else "", how)
+
+
+def reply_all(entry_id: str, store_id: str, saved: Path | None) -> Opened:
+    """Reply all to a captured email and open the reply for the owner (KB decisions 37 and 38): found by its place in
+    Outlook (EntryID and StoreID, kept since release 5.93), else from its saved .msg, which Outlook opens without changing
+    it (C4 showed the reply keeps the conversation that way). The reply is Outlook's own, in the same conversation. Never
+    sent."""
+    app, _how = connect()
+    session = app.Session  # type: ignore[attr-defined]
+    original, route = None, ""
+    if entry_id:
+        try:
+            original = session.GetItemFromID(entry_id, store_id) if store_id else session.GetItemFromID(entry_id)
+            route = "place"
+        except Exception as e:  # noqa: BLE001 - moved to another mailbox or deleted: the .msg route is next
+            record_problem("finding the email in Outlook (GetItemFromID)", e)
+    if original is None and saved is not None and saved.is_file():
+        try:
+            original, route = session.OpenSharedItem(str(saved)), "msg"
+        except Exception as e:  # noqa: BLE001
+            detail = record_problem("opening the saved email (OpenSharedItem)", e)
+            raise OutlookError(f"Outlook couldn't open the saved email ({detail}).", "opening the saved email", detail) from e
+    if original is None:
+        raise OutlookError("DocRepo couldn't find the email in Outlook, and its saved .msg isn't there.", "finding the email", "no place, no .msg")
+    reply = None
+    try:
+        reply = original.ReplyAll()  # type: ignore[attr-defined]
+        index = index_of(reply)
+        reply.Display()
+    except Exception as e:  # noqa: BLE001
+        if reply is not None:
+            _close_unsaved(reply)
+        detail = record_problem("making the reply (ReplyAll)", e)
+        raise OutlookError(f"Outlook didn't make the reply ({detail}).", "making the reply", detail) from e
+    finally:
+        if route == "msg":
+            _close_unsaved(original)  # the saved .msg, opened only to reply to it: closed without saving, so it's unchanged
+    log.info("Outlook: opened a Reply all T-mail, the original found by its %s", "place in Outlook" if route == "place" else "saved .msg")
+    return Opened(index, route)
 
 
 def selected_emails(scratch: Path | None = None) -> list[EmailItem]:
