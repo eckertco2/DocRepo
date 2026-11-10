@@ -8,7 +8,9 @@ no group headers: Order by (top-level task, label, person, group, or a parent la
 a parent by their key, then by their first date, and colours each title by its key. Bars are one colour, or coloured by
 project, hours a week or priority (``BARS``; decision 234), and show their hours. The Labels and People filters work as the task tree's do. Parked,
 closed and discarded tasks are left out, and open tasks with no dates are named under the chart; in Plan mode (release
-5.30) they're rows of their own, to be dragged onto it. Focus shows one task and everything under it.
+5.30) they're rows of their own, to be dragged onto it. A task with a Duration and no Start or Due (release 5.104) has no
+window to drag, only its deadline's diamond or its key dates, so in Plan mode its name has the same grip. Focus shows one
+task and everything under it.
 
 Key dates (release 5.31, the key dates plan) are marks on their task's row (``KeyMark``): a window a thin segment, a start
 alone an opening bracket, an end alone a closing tick, a Deadline end a red diamond, a done one grey. A task whose only dates
@@ -106,11 +108,18 @@ class Row:
     key: int | None = None  # its Order by key's place in ``Timeline.keys``, which colours its title
     plant_event: bool = False
     key_dates: tuple[KeyMark, ...] = ()  # its key dates that reach into view (release 5.31)
+    unplaced: bool = False  # a Duration with no Start or Due (release 5.104): its deadline or key dates in view, and no bar
 
     @property
     def ctx(self) -> bool:
         """A parent here only for its subtasks, its name dimmed."""
         return not self.own and not self.undated
+
+    @property
+    def grip(self) -> bool:
+        """In Plan mode, a grip to drag the name onto the chart: a task with no dates at all, or one whose Duration has no Start
+        or Due to place it (5.48's open point, the owner's yes of 2026-11-07)."""
+        return self.undated or self.unplaced
 
 
 @dataclass(frozen=True)
@@ -206,6 +215,12 @@ def marks(t: Task, start: date, end: date) -> tuple[tuple[tuple[date, date], ...
 def is_undated(t: Task, today: date, m: Model | None = None) -> bool:
     """No deadline, no window and (given the model) no key date at all: nothing to put on the chart."""
     return not t.deadline and not windows(t, today + _FAR) and not (m is not None and m.key_dates_of(t.id))
+
+
+def is_unplaced(t: Task) -> bool:
+    """A one-time task with a Duration and no Start or Due (release 5.104): ``schedule.windows`` gives it no window, so with a
+    Deadline or key dates its row is those marks alone, and in Plan mode its name gets the grip an undated task's has."""
+    return bool(t.duration) and not t.start and not t.due and not t.recurrence
 
 
 def own_span(t: Task, today: date, m: Model | None = None) -> tuple[date, date] | None:
@@ -330,7 +345,8 @@ def drop_changes(before: Task, after: Task) -> list[str]:
 
 def drop_said(before: Task, after: Task, mode: str, today: date) -> str:
     """What a drop says it did (release 5.48), after the task's title: the dates it gave, as they'll be saved, and what else
-    changed with them. A bar with a Duration moved says it kept its days; an undated one dropped, that it took its own."""
+    changed with them. A bar with a Duration moved says it kept its days; an undated one dropped, that it took its own. A Due
+    that lands past the task's Deadline is said last (release 5.104), as Edit task warns; the Deadline itself never moves."""
     def day(value: str | None) -> str:
         return long_date(to_date(value), today) if value else "none"
 
@@ -339,7 +355,8 @@ def drop_said(before: Task, after: Task, mode: str, today: date) -> str:
     said = {"new": f"Start and Due set: {day(after.start)} to {day(after.due)}" + (f", its own {length}" if keeps else ""),
             "start": f"Start moved to {day(after.start)}", "end": f"Due moved to {day(after.due)}",
             "move": f"now {day(after.start)} to {day(after.due)}" + (f", still {length}" if keeps else "")}[mode]
-    return ", ".join([said, *drop_changes(before, after)])
+    past = [f"past its Deadline {day(after.deadline)}"] if after.due and after.deadline and to_date(after.due) > to_date(after.deadline) else []
+    return ", ".join([said, *drop_changes(before, after), *past])
 
 
 def drop_room(t: Task) -> str:
@@ -526,7 +543,7 @@ def build(m: Model, today: date, start: date, weeks: int, order: str = "top", la
                             colours.get(m.chains_of(task_id)[0][0], 0), len(kids), bool(kids) and task_id in open_ids,
                             span if span and span[0] < end and span[1] >= start else None, subs,
                             task_id in shown and not own, key_of(m, task_id, order, keys), t.plant_event,
-                            key_marks(m, task_id, start, end) if own else ()))
+                            key_marks(m, task_id, start, end) if own else (), unplaced=own and is_unplaced(t)))
             if kids and task_id in open_ids:
                 walk(kids, depth + 1)
 
@@ -599,13 +616,15 @@ def tooltip(m: Model, task_id: str, today: date, order: str = "top", plan: bool 
     lines = [t.title]
     if is_undated(t, today):
         lines.append("No dates yet" + (f": drag its name onto the chart to give it {drop_room(t)}" if plan else ""))
+    elif is_unplaced(t):  # release 5.104: its Duration has nothing to count from, so its Deadline or key dates are all it shows
+        lines.append("No Start or Due yet" + (f": drag its name onto the chart to give it {drop_room(t)}" if plan else ""))
     elif t.recurrence:
         nxt = due_of(t, today)
         lines.append(f"{t.recurrence} from {long_date(start_of(t), today)}" + (f", next {long_date(nxt.date, today)}" if nxt else ""))
     else:
         end = f" → Due {long_date(to_date(t.due), today)}" if t.due else f" → Deadline {long_date(to_date(t.deadline), today)}" if t.deadline else ""
         lines.append(f"Start {long_date(start_of(t), today)}{end}")
-    if t.deadline and (t.due or t.recurrence):
+    if t.deadline and (t.due or t.recurrence or is_unplaced(t)):
         lines.append(f"Deadline {long_date(to_date(t.deadline), today)}" + (f", {t.deadline_desc}" if t.deadline_desc else ""))
     lines.append(hours_words(m, t, today))
     for label, ids in (("Lead", t.leads), ("Assignees", t.assignees)):

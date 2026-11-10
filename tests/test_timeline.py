@@ -505,7 +505,36 @@ def test_key_dates_are_marks_on_their_task_s_row(sample_conn):
     assert "Key dates:\n  Planning period, from Thu 1 Oct" in tip and "◆ Rota signed off, by Tue 20 Oct" in tip
     assert "Old draft, by Wed 7 Oct (done)" in tip
     # In Plan mode a task with key dates but no dates of its own isn't an undated row with a grip.
-    assert not next(r for r in timeline.build(m, TODAY, START, 9, plan=True).rows if r.task == "T000016").undated
+    row16 = next(r for r in timeline.build(m, TODAY, START, 9, plan=True).rows if r.task == "T000016")
+    assert not row16.undated and not row16.unplaced and not row16.grip
+
+
+def test_a_duration_with_only_a_deadline_gets_the_grip(sample_conn):
+    """Release 5.104 (5.48's open point, the owner's yes of 2026-11-07): a task with a Duration and a Deadline but no Start or Due
+    has no window, so its row is its deadline's diamond alone; in Plan mode its name has the grip, its words say it has no Start
+    or Due yet, and a drop takes its own workdays, leaves the Deadline and says when the Due lands past it."""
+    t = tasks.create_task(sample_conn, Settings(me="P001"), title="Bypass scope sheet", at=datetime(2026, 10, 8, 9, 0), created_by="Test",
+                          duration=3, deadline="2026-10-23")
+    m = Model(sample_conn)
+    assert timeline.is_unplaced(m.task(t)) and not timeline.is_undated(m.task(t), TODAY, m)
+    row = next(r for r in timeline.build(m, TODAY, START, 9, plan=True).rows if r.task == t)
+    assert row.own and row.windows == () and row.deadline == date(2026, 10, 23)
+    assert row.unplaced and row.grip and not row.undated and not row.ctx
+    assert t not in timeline.build(m, TODAY, START, 9).undated  # it has a date, so it isn't listed with the tasks that have none
+    tip = timeline.tooltip(m, t, TODAY, plan=True)
+    assert "No Start or Due yet: drag its name onto the chart to give it its 3 workdays" in tip and "Deadline Fri 23 Oct" in tip
+    assert "No Start or Due yet\n" in timeline.tooltip(m, t, TODAY)
+    # Dropped on a Monday it runs three workdays and keeps its Deadline; dropped on the Thursday, its Due lands past it.
+    before, workdays = m.task(t), frozenset(range(5))
+    after = timeline.dropped(before, "2026-10-19", "2026-10-19", workdays)
+    assert (after.start, after.due, after.deadline, after.duration) == ("2026-10-19", "2026-10-21", "2026-10-23", 3)
+    assert timeline.drop_said(before, after, "new", TODAY) == "Start and Due set: Mon 19 Oct to Wed 21 Oct, its own 3 workdays"
+    late = timeline.dropped(before, "2026-10-22", "2026-10-22", workdays)
+    assert (late.due, late.deadline) == ("2026-10-26", "2026-10-23")
+    assert timeline.drop_said(before, late, "new", TODAY) == "Start and Due set: Thu 22 Oct to Mon 26 Oct, its own 3 workdays, past its Deadline Fri 23 Oct"
+    # A bar moved past its Deadline says so too, whatever the mode.
+    moved = timeline.dropped(after, "2026-10-22", "2026-10-26", workdays)
+    assert timeline.drop_said(after, moved, "move", TODAY) == "now Thu 22 Oct to Mon 26 Oct, still 3 workdays, past its Deadline Fri 23 Oct"
 
 
 def test_plant_activities_are_plant_events(sample_conn):
