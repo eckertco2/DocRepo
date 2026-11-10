@@ -40,6 +40,7 @@ from docrepo.captures import capture_folder
 from docrepo.overview import KIND_NAMES, KINDS, SOURCE_NAMES, SOURCES, TYPE_NAMES, TYPE_ORDER, Record
 from docrepo.search import extracted_text
 from docrepo.ui import tokens
+from docrepo.ui.front import bring_to_front
 from docrepo.ui.icons import icon
 from docrepo.ui.look import LOOK
 from docrepo.ui.page_view import PageView
@@ -1177,20 +1178,17 @@ class TaskView(QWidget):
             self.browse.go_to_block(r.task, r.capture)
         else:
             self.browse.go_task(r.task)
-        self.browse.raise_()
-        self.browse.activateWindow()
+        bring_to_front(self.browse)
 
     def open_capture_page(self, capture_id: str) -> None:
         self.browse.show_browse()
         self.browse.go_capture(capture_id)
-        self.browse.raise_()
-        self.browse.activateWindow()
+        bring_to_front(self.browse)
 
     def open_task_page(self) -> None:
         self.browse.show_browse()
         self.browse.go_task(self.task_id)
-        self.browse.raise_()
-        self.browse.activateWindow()
+        bring_to_front(self.browse)
 
     def go_to_task(self) -> None:
         """Ctrl+O: another task's Find files, from the task picker."""
@@ -1242,8 +1240,7 @@ class TaskView(QWidget):
         self.browse.show_browse()
         self.browse.search_box.setText(words)
         self.browse.search_box.setFocus()
-        self.browse.raise_()
-        self.browse.activateWindow()
+        bring_to_front(self.browse)
 
     def say(self, text: str, error: bool = False) -> None:
         self.foot.setText(text or self._rest_foot())

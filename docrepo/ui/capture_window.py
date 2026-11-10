@@ -110,6 +110,7 @@ from docrepo.ui.items_panel import AgendaPanel, ItemCards, OperatorHighlighter, 
 from docrepo.ui.keymap import KeyMapDialog
 from docrepo.ui.drop_target import MAX_DROP, too_big
 from docrepo.ui.explorer import show_in_explorer
+from docrepo.ui.front import bring_to_front
 from docrepo.ui.look import LOOK, Help, KeyBadge, KeyTips, set_hints, tip
 from docrepo.ui.problems import Problems, ProblemsLine
 from docrepo.ui.mods_panel import ModsPanel
@@ -1283,9 +1284,7 @@ class CaptureWindow(QWidget):
         self.refresh()
         self.show_mods(mods)
         self._place()
-        self.show()
-        self.raise_()
-        self.activateWindow()
+        bring_to_front(self)  # restored if it was minimized (release 5.106, decision 405)
         target = (self.mods.text if mods else self.agenda.edit if agenda_focus else self.meet_name if self.meeting_on and not self.meet_name.text()
                   else self.title if "new_task" in self.types and not self.title.text() else self.content)
         target.setFocus()
@@ -2175,8 +2174,7 @@ class CaptureWindow(QWidget):
         drop on Windows leaves the keyboard in the program the drag came from (round 7's decision 331, release 5.74)."""
         w = self.pin_window if self.pinned and self.pin_window is not None else self
         if w.isVisible():
-            w.raise_()
-            w.activateWindow()
+            bring_to_front(w)
 
     def _drag_entered(self, kind: str) -> None:
         """A drag of an email from Outlook, or of a file only a program holds, puts up the cover with DocRepo's own drop
