@@ -272,13 +272,21 @@ def test_the_places_release_5_93_kept_move_into_capture_emails():
 
 # ---- the troubleshooting report, with a fake Outlook ----
 class FakeAccessor:
-    def __init__(self, props: dict[str, object]) -> None:
-        self.props = props
+    def __init__(self, props: dict[str, object], owner: FakeMail | None = None) -> None:
+        self.props, self.owner = props, owner
 
     def GetProperty(self, tag):  # noqa: N802 - Outlook's name
         if tag not in self.props:
             raise RuntimeError("property not found")
         return self.props[tag]
+
+    def SetProperty(self, tag, value):  # noqa: N802
+        self.props[tag] = value
+        if tag == outlook.PR_CONVERSATION_INDEX and self.owner is not None:  # as Outlook shows a written index at once
+            self.owner.ConversationIndex = bytes(value).hex().upper()
+
+    def StringToBinary(self, text):  # noqa: N802
+        return bytes.fromhex(text)
 
 
 class FakeMail:
@@ -286,7 +294,7 @@ class FakeMail:
         self.ConversationIndex = conversation_index  # noqa: N815 - Outlook's names
         self.ConversationID = key_of() if conversation_index else ""  # noqa: N815
         self.ConversationTopic = "Crane booking"  # noqa: N815
-        self.PropertyAccessor = FakeAccessor(props or {})  # noqa: N815
+        self.PropertyAccessor = FakeAccessor(props or {}, self)  # noqa: N815
         self.closed: list[int] = []
 
     def ReplyAll(self):  # noqa: N802
@@ -334,12 +342,15 @@ def test_the_t_mail_try_outs_close_everything_without_saving(tmp_path):
     new, selected, saved = FakeMail(index(OTHER_GUID).hex().upper()), FakeMail(index(replies=1).hex().upper()), FakeMail(index().hex().upper())
     app = FakeApp(new, saved)
     steps = diagnose.t_mail_steps(app, selected, tmp_path / "email.msg")
-    assert [s.ok for s in steps] == [True, True, True]
-    assert "in the same conversation" in steps[1].result and "in the same conversation" in steps[2].result
-    assert new.closed == [outlook.OL_DISCARD] and saved.closed == [outlook.OL_DISCARD]
+    assert [s.ok for s in steps] == [True, True, True, True]
+    assert "written; Outlook reads back" in steps[1].result
+    assert "in the same conversation" in steps[2].result and "in the same conversation" in steps[3].result
+    assert new.closed == [outlook.OL_DISCARD, outlook.OL_DISCARD] and saved.closed == [outlook.OL_DISCARD]
     assert app.Session.opened == [str(tmp_path / "email.msg")]
     blank = diagnose.t_mail_steps(FakeApp(FakeMail(), saved), None, None)
-    assert not blank[0].ok and "DocRepo would give it one (decision 39)" in blank[0].result
+    # No index as soon as it's made is what Outlook does: a finding, not a fault (release 5.105).
+    assert blank[0].info and "New T-mail saves it to Drafts, or gives it one (decision 39)" in blank[0].line()
+    assert "FAILED" not in blank[0].line() and blank[1].ok
     assert "no saved email to try it on" in blank[-1].result
 
 

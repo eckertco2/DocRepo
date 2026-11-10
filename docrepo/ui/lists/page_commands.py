@@ -18,7 +18,7 @@ from docrepo.captures import capture_md_path
 from docrepo.detail import SCOPE_NAMES
 from docrepo.links import is_folder, is_link
 from docrepo.schedule import is_open
-from docrepo.ui import task_menus
+from docrepo.ui import t_mails, task_menus
 from docrepo.ui.icons import icon
 from docrepo.ui.look import LOOK
 from docrepo.views import full_path
@@ -30,8 +30,9 @@ class PageCommands:
 
     # ---- the task page's actions ----
     def _task_actions(self, task_id: str) -> None:
-        """The task page's command bar (release 5.21, decision 68): Note, Update, Meeting notes for an open meeting, Add to
-        (Today and the agendas), Edit, and More at the row's end. Add to and Edit are the menus every task row has too, from
+        """The task page's command bar (release 5.21, decision 68): Note, Update, Meeting notes for an open meeting, New
+        T-mail with Reply all to the latest email on its arrow (release 5.105), Add to (Today and the agendas), Edit, and
+        More at the row's end. Add to and Edit are the menus every task row has too, from
         one list each (release 5.98, decision 392); Find files opens from the Files group and O (decision 389)."""
         m, t = self.model(), self.model().task(task_id)
         if t.discarded:
@@ -46,6 +47,13 @@ class PageCommands:
         if t.meeting and is_open(t):  # release 5.8
             self._action("Meeting notes", lambda: self.open_capture(task=task_id, meeting=True),
                          "Take this meeting's notes, with its agenda beside them", icon_name="people", key="M")
+        # New T-mail (the knowledge base's stage K8, release B, as release 5.105, decision 36): one click opens a new email
+        # in Outlook tagged for this task; its arrow has Reply all to the task's latest email.
+        self._split_action("New T-mail", lambda: t_mails.new_t_mail(self, task_id),
+                           "A new email in Outlook, empty, tagged so its replies come back to this task when you capture them. "
+                           "You write and send it; DocRepo never sends email.",
+                           t_mails.latest_menu(self, task_id, self), "Reply all: to the latest email filed to this task, as a T-mail",
+                           icon_name="mail")
         self._action(task_commands.ADD_TO, tip="Put it on Today (D) or an agenda", menu=task_menus.add_to_menu(self, task_id, self),
                      icon_name="agenda", key="A")
         # Edit is a split button (decision 392, the mock's, the owner's choice of 2026-11-07): Edit task, and a chevron
@@ -159,6 +167,10 @@ class PageCommands:
             self.go_task(rest)
         elif kind == "capture":
             self.go_capture(rest)
+        elif kind == "replyall":  # an email's Reply all on its capture's page (release 5.105)
+            capture_id, _, pos = rest.rpartition(":")
+            if capture_id and pos.isdigit():
+                t_mails.reply_all(self, capture_id, int(pos))
         elif kind == "doc":
             self.view = "docs"
             self.select("doc", rest, update_list=True)

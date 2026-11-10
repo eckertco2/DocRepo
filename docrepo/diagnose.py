@@ -29,6 +29,7 @@ from types import TracebackType
 from docrepo import __version__, conversations, layer0, outlook
 from docrepo.db import connect_read_only
 from docrepo.safe_fs import SafeFS
+from docrepo.save import EmailItem
 
 log = logging.getLogger(__name__)
 
@@ -189,6 +190,12 @@ class Step:
     name: str
     ok: bool
     result: str
+    #: A finding, neither ok nor a fault (release 5.105): a flag that isn't set, a header Outlook doesn't give. The report
+    #: shows its result alone, without "ok" or "FAILED".
+    info: bool = False
+
+    def line(self) -> str:
+        return self.result if self.info else f"{'ok' if self.ok else 'FAILED'}: {self.result}"
 
 
 def _length(value: object) -> str:
@@ -309,10 +316,7 @@ def outlook_check(try_category: bool = False, scratch: Path | None = None, colou
     if scratch is not None:
         try:
             whole = outlook.copy_whole(app, mail, scratch)
-            steps.append(Step("Copy the email whole (attached to a new email, never saved)", True,
-                              f"ok, {len(whole.msg_bytes or b'')} bytes; read without Outlook: text {_length(whole.body)}, "
-                              f"sender {_length(whole.sender)}, {len(whole.attachments)} attachments; "
-                              f"conversation index {_index_words(whole.conversation_index)}; Message-ID {'yes' if whole.message_id else 'no'}"))
+            steps.append(Step("Copy the email whole (attached to a new email, never saved)", True, copy_words(whole)))
         except Exception as e:  # noqa: BLE001
             steps.append(Step("Copy the email whole (attached to a new email, never saved)", False, outlook.describe(e)))
     if try_t_mail:
@@ -320,6 +324,16 @@ def outlook_check(try_category: bool = False, scratch: Path | None = None, colou
     if try_category:
         steps += category_steps(mail, app.Session if colour != "None" else None, colour)
     return steps, version
+
+
+def copy_words(whole: EmailItem) -> str:
+    """The copy's line: its size, what reading it without Outlook found, by length or count, its conversation index in
+    words, and whether it holds a Message-ID, an In-Reply-To and References (the last two since release 5.105: a reply
+    whose subject was changed finds its task by them)."""
+    return (f"ok, {len(whole.msg_bytes or b'')} bytes; read without Outlook: text {_length(whole.body)}, "
+            f"sender {_length(whole.sender)}, {len(whole.attachments)} attachments; "
+            f"conversation index {_index_words(whole.conversation_index)}; Message-ID {'yes' if whole.message_id else 'no'}; "
+            f"In-Reply-To {'yes' if whole.in_reply_to else 'no'}; References {'yes' if whole.refs else 'no'}")
 
 
 def _index_words(index: str) -> str:
@@ -345,9 +359,13 @@ def identifier_steps(mail: object) -> list[Step]:
                                                    else "another value (Outlook's subject fallback, or another layout)" if found.get("conversation_id")
                                                    else "none")),
              Step("Read its conversation index tracking flag", tracking is not None,
-                  "not set" if tracking is None else "on" if tracking else "off")]
+                  "not set" if tracking is None else "on" if tracking else "off", info=tracking is None)]
+    # Outlook often gives none of these three (the corporate computer's first report, 2026-11-09): not a fault, since the
+    # .msg copy is the route DocRepo reads them by, and its line says which it holds (release 5.105).
     for name, label in (("message_id", "Message-ID"), ("in_reply_to", "In-Reply-To"), ("refs", "References")):
-        steps.append(Step(f"Read its {label}", bool(found.get(name)), f"{how[name]}: {'yes' if found.get(name) else 'none'}"))
+        got = bool(found.get(name))
+        steps.append(Step(f"Read its {label}", got, f"{how[name]}: yes" if got else "none through Outlook (the copy's line below says whether the .msg has it)",
+                          info=not got))
     return steps
 
 
@@ -378,20 +396,26 @@ def _reply_step(name: str, original: object, make: Callable[[], object]) -> Step
         _close(reply)
 
 
-def t_mail_steps(app: object, mail: object | None, reply_to: Path | None) -> list[Step]:
+def t_mail_steps(app: object, mail: object | None, reply_to: Path | None, now: datetime | None = None) -> list[Step]:
     """The try-outs for T-mails (the knowledge base's checks C1, C3 and C4, release 5.101). Each email is made, read and
-    closed without saving, never shown, saved or sent, so nothing is left behind."""
+    closed without saving, never shown, saved or sent, so nothing is left behind. Since release 5.105 a second new email
+    is given a conversation index by DocRepo, as New T-mail gives one when saving to Drafts doesn't (KB decision 39), and
+    read back."""
     steps: list[Step] = []
     try:
         new = app.CreateItem(outlook.OL_MAIL_ITEM)  # type: ignore[attr-defined]
         try:
             index = conversations.clean_hex(getattr(new, "ConversationIndex", ""))
-            steps.append(Step("Try a new email: its conversation index as soon as it's made (C1)", bool(conversations.key(index)),
-                              _index_words(index) + ("" if conversations.key(index) else ": DocRepo would give it one (decision 39)")))
+            has = bool(conversations.key(index))
+            # None is what Outlook does (the first corporate report): not a fault, New T-mail saves it or gives it one.
+            steps.append(Step("Try a new email: its conversation index as soon as it's made (C1)", has,
+                              _index_words(index) + ("" if has else ": New T-mail saves it to Drafts, or gives it one (decision 39)"),
+                              info=not has))
         finally:
             _close(new)
     except Exception as e:  # noqa: BLE001
         steps.append(Step("Try a new email: its conversation index as soon as it's made (C1)", False, outlook.describe(e)))
+    steps.append(_written_step(app, now or datetime.now()))
     if mail is not None:
         steps.append(_reply_step("Try Reply all to the selected email (C1, C3)", mail, lambda: mail.ReplyAll()))  # type: ignore[attr-defined]
     if reply_to is None:
@@ -407,6 +431,26 @@ def t_mail_steps(app: object, mail: object | None, reply_to: Path | None) -> lis
     finally:
         _close(saved)
     return steps
+
+
+def _written_step(app: object, now: datetime) -> Step:
+    """A new email given a conversation index by DocRepo (``outlook.give_index``, KB decision 39), read back, and closed
+    without saving: whether Outlook takes the index DocRepo writes."""
+    name = "Try a new email with an index DocRepo writes (decision 39)"
+    try:
+        new = app.CreateItem(outlook.OL_MAIL_ITEM)  # type: ignore[attr-defined]
+    except Exception as e:  # noqa: BLE001
+        return Step(name, False, outlook.describe(e))
+    try:
+        back = outlook.give_index(new, now)
+        read = conversations.clean_hex(getattr(new, "ConversationIndex", ""))
+        ok = bool(conversations.key(read)) and conversations.key(read) == conversations.key(back)
+        return Step(name, ok, f"written; Outlook reads back {_index_words(read)}" if read else
+                    "written, but Outlook's ConversationIndex reads back none until it's saved")
+    except Exception as e:  # noqa: BLE001
+        return Step(name, False, outlook.describe(e))
+    finally:
+        _close(new)
 
 
 def newest_saved_email(data_root: Path) -> Path | None:
@@ -602,7 +646,7 @@ def build_report(data_root: Path | None, now: datetime, drags: Sequence[DragNote
         steps, version = check_outlook()
     except Exception as e:  # noqa: BLE001 - the report must still be made
         steps, version = [Step("The check itself", False, outlook.describe(e))], ""
-    lines += [f"| {s.name} | {'ok' if s.ok else 'FAILED'}: {_cell(s.result)} |" for s in steps]
+    lines += [f"| {s.name} | {_cell(s.line())} |" for s in steps]
     settings = security_settings(version)
     lines += ["", "## Outlook's programmatic access settings", ""]
     lines += (["| Where | Value |", "|---|---|", *[f"| {a} | {_cell(b)} |" for a, b in settings]] if settings

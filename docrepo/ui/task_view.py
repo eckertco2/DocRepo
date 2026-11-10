@@ -45,7 +45,7 @@ from docrepo.ui.look import LOOK
 from docrepo.ui.page_view import PageView
 from docrepo.ui.result_list import ResultList, Row
 from docrepo.ui.state_menu import UndoButton, can_change, state_menu
-from docrepo.ui import task_menus
+from docrepo.ui import t_mails, task_menus
 from docrepo.ui.style import page_css
 
 log = logging.getLogger(__name__)
@@ -1009,8 +1009,10 @@ class TaskView(QWidget):
                 out.append(("Copy path", "copy", False, "Ctrl+Shift+C"))
             out.append(("Unpin" if r.id in self.pinned else "Pin", "pin", False, "P, or Alt+P from the search box"))
             return out
-        if r.kind == "email":
-            return [("Open the email", "open", True, "Enter: in Outlook"), ("Open capture", "capture", False, "Its capture, in the browse tool")]
+        if r.kind == "email":  # Reply all since release 5.105 (the knowledge base's stage K8, release B, decision 36)
+            return [("Open the email", "open", True, "Enter: in Outlook"),
+                    ("Reply all", "replyall", False, "In Outlook, as a T-mail: when you capture its replies, they come back to this task"),
+                    ("Open capture", "capture", False, "Its capture, in the browse tool")]
         if r.kind == "note":
             on_page = [("Open on the notes page", "open", True, "Enter: at its block, on its task page in the browse tool")]
             return on_page + ([("Open capture", "capture", False, "Its capture, in the browse tool")] if r.capture else [])
@@ -1053,6 +1055,13 @@ class TaskView(QWidget):
         if r.kind == "email":
             if name == "capture" or name == "show":
                 self.open_capture_page(r.capture)
+            elif name == "replyall":
+                c = self.model().captures.get(r.capture)
+                e = t_mails.first_email(c) if c is not None else None
+                if e is None:
+                    self.say("Reply all: DocRepo has neither this email's place in Outlook nor its saved .msg.", True)
+                else:
+                    t_mails.reply_all(self.browse, c.id, e.pos, r.task, say=self.say)
             elif name == "open":
                 p = opener.plan(r, self.email_file)
                 if p.action == "open":
