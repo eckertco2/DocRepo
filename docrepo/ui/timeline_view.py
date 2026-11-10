@@ -789,7 +789,7 @@ class TimelineChart(QWidget):
             p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawPath(path)
         x += 20
-        if self.plan and r.undated:  # the grip, to drag the name onto the chart
+        if self.plan and r.grip:  # the grip, to drag the name onto the chart (a task with no dates, or a Duration with no Start or Due)
             g = self._grip_rect(r, top)
             p.setPen(QPen(QColor(LINE_STRONG), 1, Qt.PenStyle.DashLine))
             p.setBrush(Qt.BrushStyle.NoBrush)
@@ -963,14 +963,29 @@ class TimelineChart(QWidget):
                 self._diamond(p, self._mid(d), y + h / 2, 4.0, QColor(CONTENT), QColor(BAD if d < self.today else FG))
         for k in r.key_dates:  # release 5.31
             self._paint_key(p, top, r, t, k)
-        if self.plan and r.undated:
-            box = QRectF(self.scale.NAME_W + 6, top + 4, self.scale.width_of(self) - 12, self.ROW_H - 8)
-            p.setPen(QPen(QColor(LINE_STRONG), 1, Qt.PenStyle.DashLine))
-            p.setBrush(Qt.BrushStyle.NoBrush)
-            p.drawRoundedRect(box, 4, 4)
-            p.setFont(small)
-            p.setPen(QColor(FAINT))
-            p.drawText(box.adjusted(8, 0, 0, 0), Qt.AlignmentFlag.AlignVCenter, f"Drag the name onto the chart to give it {timeline.drop_room(t)}")
+        if self.plan and r.grip:
+            self._paint_grip_hint(p, top, r, t, small)
+
+    def _paint_grip_hint(self, p: QPainter, top: float, r: Row, t: Task, font) -> None:
+        """The dashed hint beside a grip: across the chart for a task with no dates; for one whose Duration has only a Deadline
+        or key dates to show (release 5.104), in the room left of its marks or right of them, whichever is wider, and not at
+        all when the words don't fit there (the tooltip has them)."""
+        left, right = self.scale.NAME_W + 6, self.scale.NAME_W + self.scale.width_of(self) - 6
+        marks = [self._mid(r.deadline)] if r.deadline else []
+        marks += [x for k in r.key_dates for x in (self._x(k.first), self._x(k.last + timedelta(days=1)))]
+        p.setFont(font)
+        words = f"Drag the name onto the chart to give it {timeline.drop_room(t)}"
+        if marks:
+            a, b = min(marks) - 10, max(marks) + 10
+            left, right = (left, a) if a - left >= right - b else (b, right)
+            if right - left < p.fontMetrics().horizontalAdvance(words) + 16:
+                return
+        box = QRectF(left, top + 4, right - left, self.ROW_H - 8)
+        p.setPen(QPen(QColor(LINE_STRONG), 1, Qt.PenStyle.DashLine))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRoundedRect(box, 4, 4)
+        p.setPen(QColor(FAINT))
+        p.drawText(box.adjusted(8, 0, 0, 0), Qt.AlignmentFlag.AlignVCenter, words)
 
     def _key_strip(self, r: Row, top: float) -> tuple[float, float]:
         """Where a row's key dates go: the middle of a thin strip under the bar, or in the bar's place when the row has no
@@ -1063,7 +1078,7 @@ class TimelineChart(QWidget):
             return r, "fold"
         if r.task in self.off:  # taken off: put back before it moves
             return r, "row"
-        if self.plan and r.undated and self._grip_rect(r, top).adjusted(-2, -4, 2, 4).contains(QPointF(x, y)):
+        if self.plan and r.grip and self._grip_rect(r, top).adjusted(-2, -4, 2, 4).contains(QPointF(x, y)):
             return r, "grip"
         key = self._key_at(r, top, x, y) if self.plan and x >= self.scale.NAME_W else None
         if key is not None:
@@ -2988,13 +3003,15 @@ class TimelineView(QWidget):
             dates = f"Its subtasks: {short(row.span[0], today)} to {short(row.span[1], today)}"
         elif timeline.is_undated(t, today):
             dates = "No dates of its own" if m.key_dates_of(t.id) else "No dates yet"
+        elif timeline.is_unplaced(t):  # release 5.104: a Duration with nothing to count from
+            dates = "No Start or Due yet"
         elif t.recurrence:
             due = due_of(t, today)
             dates = t.recurrence + (f", next {short(due.date, today)}" if due else "")
         else:
             end = to_date(t.due or t.deadline) if (t.due or t.deadline) else None
             dates = f"{short(start_of(t), today)} to {short(end, today) if end else 'no end date'}"
-        if t.deadline and (t.due or t.recurrence):
+        if t.deadline and (t.due or t.recurrence or timeline.is_unplaced(t)):
             dates += f" · Deadline {short(to_date(t.deadline), today)}"
 
         def people(ids: list[str]) -> str:
@@ -3047,6 +3064,8 @@ class TimelineView(QWidget):
         due = due_of(t, today)
         if timeline.is_undated(t, today):  # none of its own: its key dates (release 5.31) are on the line below, if any
             dates = f'<span style="color:{MUTED}">{"No dates of its own" if m.key_dates_of(t.id) else "No dates yet"}</span>'
+        elif timeline.is_unplaced(t):  # release 5.104
+            dates = f'<span style="color:{MUTED}">No Start or Due yet</span>'
         elif t.recurrence:
             dates = f"{esc(t.recurrence)} from {esc(long_date(start_of(t), today))}" + (f", next {esc(long_date(due.date, today))}" if due else "")
         else:
@@ -3054,7 +3073,7 @@ class TimelineView(QWidget):
                    else "no end date")
             dates = esc(f"{long_date(start_of(t), today)} → {end}") + (
                 f' <span style="color:{MUTED}">{esc(days_text(due.date, today))}</span>' if due else "")
-        if t.deadline and (t.due or t.recurrence):
+        if t.deadline and (t.due or t.recurrence or timeline.is_unplaced(t)):
             dates += esc(f" · Deadline {long_date(to_date(t.deadline), today)}" + (f", {t.deadline_desc}" if t.deadline_desc else ""))
 
         def people(ids: list[str]) -> str:

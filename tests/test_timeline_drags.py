@@ -159,6 +159,37 @@ def test_an_undated_tasks_name_takes_its_own_duration(browse):
     assert "Start and Due set: Mon 9 Nov to Wed 11 Nov, its own 3 workdays." in browse.status.text()
 
 
+def test_a_duration_with_only_a_deadline_has_the_grip_too(browse):
+    """Release 5.104 (5.48's open point): a task with a Duration and a Deadline but no Start or Due is on the chart as its deadline's
+    diamond, with a grip in Plan mode; its name dropped takes its own workdays and the Deadline stays. Moved past the Deadline, the
+    drop says so."""
+    t = make(browse, duration=3, deadline="2026-11-20")
+    plan(browse)
+    chart = browse.timeline.chart
+    row = next(r for r in chart.rows if r.task == t)  # on the chart already, fold or no fold: its deadline is in view
+    assert row.grip and row.unplaced and not row.undated and row.deadline == date(2026, 11, 20) and row.windows == ()
+    assert chart._hit(*chart._grip_rect(row, chart.top_of(t)).center().toTuple())[1] == "grip"
+    grip = chart._grip_rect(row, chart.top_of(t)).center()
+    target = QPointF(chart.scale.x(chart, date(2026, 11, 9)) + 2, grip.y())  # a Monday
+    drag_to(chart, grip, target)
+    assert (chart.drag.start, chart.drag.end) == (date(2026, 11, 9), date(2026, 11, 11))
+    let_go(chart, target)
+    x = saved(browse, t)
+    assert (x.start, x.due, x.deadline, x.duration) == ("2026-11-09", "2026-11-11", "2026-11-20", 3)
+    assert "Start and Due set: Mon 9 Nov to Wed 11 Nov, its own 3 workdays. Ctrl+Z undoes it." in browse.status.text()
+    # Now a bar: no grip, and moved ten days on its Due lands past the Deadline, which stays put.
+    row = next(r for r in chart.rows if r.task == t)
+    assert not row.grip and row.windows
+    a = bar_of(chart, t).center()
+    b = a + QPointF(10 * chart.scale.px_per_day(chart), 0)
+    drag_to(chart, a, b)
+    assert (chart.drag.start, chart.drag.end) == (date(2026, 11, 19), date(2026, 11, 23))
+    let_go(chart, b)
+    x = saved(browse, t)
+    assert (x.start, x.due, x.deadline) == ("2026-11-19", "2026-11-23", "2026-11-20")
+    assert "now Thu 19 Nov to Mon 23 Nov, still 3 workdays, past its Deadline Fri 20 Nov. Ctrl+Z undoes it." in browse.status.text()
+
+
 def test_a_name_with_no_duration_still_gets_a_working_week(browse):
     t = make(browse)
     plan(browse)
