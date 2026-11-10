@@ -102,6 +102,18 @@ def build_parser() -> argparse.ArgumentParser:
     tree_prompt.add_argument("--edit", metavar="ID", help="a task's ID, or a template's number: print the edit prompt for it, holding the tree as it stands")
     tree_export = commands.add_parser("tree-export", help="print a task tree or a template as a tree file. It changes nothing")
     tree_export.add_argument("id", metavar="ID", help="a task's ID, or a template's number")
+    make = commands.add_parser("consultant-make", help="make a consultant from a task: the text of every document on it and the tasks under it, "
+                                                       "by section, with an index and the files VS Code needs to offer it as an agent, in "
+                                                       "Consultants\\<name>. Run again, it makes it again")
+    make.add_argument("task", metavar="TASK", help="the task's ID, such as T000012")
+    make.add_argument("--name", required=True, help="the consultant's name, such as \"Pump manuals consultant\"")
+    make.add_argument("--pdf-layout", action="store_true", help="read each PDF page with its columns kept in place, which can keep a table's rows together")
+    status = commands.add_parser("consultant-status", help="say what changed since a consultant was made (every consultant, with no name). It changes nothing")
+    status.add_argument("name", nargs="?", help="the consultant's name")
+    check = commands.add_parser("consultant-check", help="check the map an LLM wrote for a consultant in Copilot's folder (its catalogue, vocabulary, "
+                                                         "topics and exam) against its documents. With --keep, the pages with no problems are kept in its map folder")
+    check.add_argument("name", help="the consultant's name")
+    check.add_argument("--keep", action="store_true", help="keep each page that has no problems")
     return parser
 
 
@@ -347,6 +359,82 @@ def cmd_tree_export(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_consultant_make(args: argparse.Namespace) -> int:
+    """Make a consultant from a task (release 5.107), or make it again."""
+    from docrepo import consultants
+
+    opened = _open(args)
+    if opened is None:
+        return 1
+    root, settings, fs, conn = opened
+    with closing(conn):
+        try:
+            built = consultants.build(Model(conn), root, fs, settings.copilot_folder, args.task.strip().upper(), args.name,
+                                      datetime.now(), pdf_layout=bool(args.pdf_layout))
+        except consultants.ConsultantError as e:
+            print(e, file=sys.stderr)
+            return 1
+    _utf8_stdout()
+    print("\n".join(built.lines()))
+    print(f"Next: open {built.folder.name}.code-workspace from that folder in VS Code, and have its trainer compile the map.")
+    return 0
+
+
+def cmd_consultant_status(args: argparse.Namespace) -> int:
+    """What changed since each consultant was made. 0 when its documents are as they were, 2 when they changed."""
+    from docrepo import consultants
+
+    opened = _open(args)
+    if opened is None:
+        return 1
+    root, _settings, _fs, conn = opened
+    stale = False
+    _utf8_stdout()
+    with closing(conn):
+        m = Model(conn)
+        names = [consultants.slug_of(args.name)] if args.name else consultants.consultants(root)
+        if not names:
+            print("No consultants yet. Make one with: python -m docrepo consultant-make TASK --name NAME")
+        for slug in names:
+            try:
+                lines, changed = consultants.status_lines(m, root, slug)
+            except consultants.ConsultantError as e:
+                print(e, file=sys.stderr)
+                return 1
+            print("\n".join(lines))
+            stale = stale or changed
+    return 2 if stale else 0
+
+
+def cmd_consultant_check(args: argparse.Namespace) -> int:
+    """Check a consultant's map in Copilot's folder, and with --keep, keep the pages with no problems. 1 when a page
+    has problems."""
+    from docrepo import consultants
+
+    opened = _open(args)
+    if opened is None:
+        return 1
+    root, settings, fs, conn = opened
+    conn.close()
+    slug = consultants.slug_of(args.name)
+    try:
+        checks = consultants.check_map(root, settings.copilot_folder, slug)
+    except consultants.ConsultantError as e:
+        print(e, file=sys.stderr)
+        return 1
+    _utf8_stdout()
+    for c in checks:
+        print(f"{c.file}: {c.entries} entries, {len(c.problems)} problems, {len(c.warnings)} warnings.")
+        for line in c.problems:
+            print(f"  Problem: {line}")
+        for line in c.warnings:
+            print(f"  Warning: {line}")
+    if args.keep:
+        kept = consultants.keep_map(fs, root, slug, checks, datetime.now())
+        print(f"Kept: {', '.join(kept)}." if kept else "Nothing kept.")
+    return 1 if any(c.problems for c in checks) else 0
+
+
 def cmd_outlook_check(args: argparse.Namespace) -> int:
     """Make the troubleshooting report, print it and save it in System\\diagnostics."""
     opened = _open(args)
@@ -528,4 +616,7 @@ COMMANDS: dict[str, Callable[[argparse.Namespace], int]] = {
     "tree-check": cmd_tree_check,
     "tree-prompt": cmd_tree_prompt,
     "tree-export": cmd_tree_export,
+    "consultant-make": cmd_consultant_make,
+    "consultant-status": cmd_consultant_status,
+    "consultant-check": cmd_consultant_check,
 }

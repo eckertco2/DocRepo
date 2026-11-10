@@ -157,6 +157,7 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Browse tool**: DocRepo's main window for viewing and editing tasks, captures, lists and settings.
 - **Data root**: the folder holding all of DocRepo's data, with `docs.db` as the source of truth.
 - **Dump**: every table of `docs.db` written as JSON, a file each, in `System\export\<date>` (the `dump` command, release 5.102), for reading the database outside DocRepo. It's a copy made for reading; DocRepo never reads one back.
+- **Consultant**: an agent over the documents of one task and the tasks under it (release 5.107), made by `consultant-make` as a folder in `Consultants` in the data root, for asking questions of those documents in VS Code. Its **corpus** is the documents' text, a file a document and a section a heading, slide or page, each with a reference such as `D000123#s4`. Its **map** is the one part an LLM writes: a catalogue, a vocabulary, a topic index and an exam, checked by DocRepo before it's kept. Its **trainer** is the agent that compiles the map.
 - **Build phase**: a numbered step in building DocRepo, phases 1 to 6 in `PROGRESS.md`.
 - **Mods log**: DocRepo's own list of changes the owner wants made to it.
 - **IDs**: T task, C capture, D document, P person, M mod.

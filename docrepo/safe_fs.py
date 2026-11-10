@@ -37,7 +37,8 @@ log = logging.getLogger(__name__)
 REPLACE_PATIENCE, REPLACE_FIRST_WAIT = 1.0, 0.005
 
 #: The only kinds of file ``write_text`` produces. .jsonc is the wheels' config (JSON with comments); .csv their usage log.
-TEXT_SUFFIXES = frozenset({".md", ".json", ".jsonc", ".txt", ".log", ".csv"})
+#: ``.code-workspace`` (release 5.107) is JSON too: the VS Code workspace file of a consultant.
+TEXT_SUFFIXES = frozenset({".md", ".json", ".jsonc", ".txt", ".log", ".csv", ".code-workspace"})
 
 _RESERVED_NAMES = frozenset(
     {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"}

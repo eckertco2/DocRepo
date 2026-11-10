@@ -105,6 +105,9 @@ A missing file gives the defaults. An unreadable file stops DocRepo with an erro
 | `set-hotkey KEYS` | Sets the capture window's hotkey, such as `"Ctrl+Alt+Space"`. It needs Ctrl, Alt or Win. Takes effect when the app next starts. The browse tool's Settings view does the same, at once. |
 | `outlook-check` (or `troubleshoot`) | Makes the troubleshooting report (9.4), without the capture window's drags and pastes, prints it and saves it in `System\diagnostics`. `--try-category` and `--try-t-mail` run its try-outs. |
 | `email-ids [--dry-run]` | Reads the Outlook identifiers of each saved email that has none from its `.msg` file, without Outlook, and records them, making the rows of emails captured before release 5.74 (release 5.101, the knowledge base's stage K8). Then those emails' conversations follow their captures' tasks (7.2). It never changes a `.msg` file; `--dry-run` only counts. |
+| `consultant-make TASK --name NAME [--pdf-layout]` | Makes a consultant from a task and the tasks under it, or makes it again (section 14, release 5.107). |
+| `consultant-check NAME [--keep]` | Checks the map an LLM wrote for a consultant in Copilot's folder; with `--keep`, keeps the pages with no problems. Exits 1 if a page has problems. |
+| `consultant-status [NAME]` | Says what changed since a consultant, or each one, was made. It changes nothing. Exits 2 if its documents changed. |
 | `tree-check FILE` | Checks a tree file or an edit file (6.17) and prints its problems and warnings. Exits 1 if it has problems. It changes nothing. |
 | `tree-prompt [--edit ID]` | Prints the prompt for an LLM to write a tree file, or with `--edit`, to change a task's or a template's tree. It changes nothing. |
 | `tree-export ID` | Prints a task's tree, or a template's by its number, as a tree file. It changes nothing. |
@@ -964,3 +967,36 @@ A **tagged label** is a plant's tag, such as V-110 or FIC-2210, found in the tex
 - **The tester (release 5.80, decision 373).** Under the patterns, **Try it** is a box to paste text into; what the glossary and the patterns as they stand in the form find is marked as it's typed: a glossary label, an alias, a word alias, new from a pattern (named under it), and what's on Never a tag struck through. **Try on everything** runs the patterns as they stand, before they're saved, over every capture, document, notes page and task from the kept words, and says how many new labels they'd make and in how many items, the most frequent first ("3 new, in 2 items: API-6100 (2), ABC-1234 (1)…"); **Not a tag** on one puts it on the form's Never a tag. Neither changes anything until Save settings.
 - **Where it shows:** a Tagged labels row on a capture's and a document's page (× removes one, with Undo, and it stays removed; **Add** puts one on by hand; **Add back** undoes a removal), in a task's Details (from its own fields, notes page, captures and documents, each item once), and in Task.md after Labels. The Tagged labels view, under Manage, lists the glossary with each label's description, aliases and how many items mention it (at most 2,000 rows; **Mentioned only**, ticked to start with for a bigger glossary). A label's page lists everything that mentions it, newest first, under each top-level task, with the words around it. Search lists a label typed however it's written first, and what mentions it. Find files' `tag:V-110` filter keeps what mentions a label.
 - **Later (stage 32, set aside, decision 380):** descriptions and fuzzy matching, once the glossary and patterns have been used for a few weeks.
+
+## 14. Consultants (release 5.107)
+
+A **consultant** is an agent over the documents of one task and the tasks under it, for the owner to ask questions of in VS Code. DocRepo makes its folder and calls no LLM; `docrepo/consultants.py` holds it, and the command line runs it (a command in the browse tool comes later).
+
+- **`consultant-make TASK --name NAME`** reads every saved copy, tracked original and email attachment of the task and the tasks under it that aren't discarded, each document once, from the file itself, and writes `Consultants\<name>` in the data root (the name in lower case, its spaces as hyphens; 3 to 60 letters, digits, spaces and hyphens):
+
+  | File | Holds |
+  |---|---|
+  | `Index.md` | Every document: its ID, name, task, how it was read (ok, partial, fallback, none), its sections, tables and characters; the ones to check, with why; and each one's outline |
+  | `corpus\<document ID>.md` | The document's text, a heading a section, each with its reference in brackets: `D000123#s4`, `D000123#slide-7`, `D000123#page-12` |
+  | `manifest.json` | The task, the build, and each file's size, date, SHA-256 and sections |
+  | `.github\copilot-instructions.md` | The rules: the documents are data, no web, no terminal, read-only, a reference for every statement, limits quoted, the sweep and its coverage line |
+  | `.github\agents\<name>.agent.md` | The consultant: read and search |
+  | `.github\agents\<name>-trainer.agent.md` | The trainer: read, search and edit, and the four formats it writes |
+  | `<name>.code-workspace` | The folder, read-only, and Copilot's folder beside it when Settings names one |
+  | `map\<page>.md` | The map's pages, once checked and kept |
+
+- **Sections** (`extract.sections_of`): a Word file by heading style, its tables as Markdown tables in their place (a table of more than 40 rows in parts, each a section, with its header row again), its text boxes read; without heading styles, a short numbered or all-bold line is a heading. A deck by slide, with its notes. A PDF by page, headed by its bookmarks; `--pdf-layout` keeps each page's columns in place. Other kinds DocRepo reads are one section. Nothing is cut at the text limit.
+- **A file that can't be read** falls back to the text DocRepo kept when it was captured, as one section, and `Index.md` says so. A kind DocRepo doesn't read (`.doc`, `.ppt`, a picture) is listed with no text.
+- **Made again**, with the same name and task, it's rewritten. A document that left keeps its file, with one line saying it left. DocRepo deletes nothing.
+- **The rules and the agents are fixed templates** in the code, filled with the name, the task's title on one line, and counts. No LLM writes them.
+- **The map** is the one part an LLM writes: the trainer writes `<name>-catalogue.md`, `<name>-vocabulary.md`, `<name>-topics.md` and `<name>-exam.md` into Copilot's folder. **`consultant-check NAME`** reads them and checks each:
+
+  | Page | Format | Checked |
+  |---|---|---|
+  | Catalogue | `## D000123`, then what the document covers | The ID is one of the consultant's documents, once, with words under it, at most 1,000 characters; a warning for a document with no entry |
+  | Vocabulary | `- term = other word; ABBR` | Two words or more, at least one of them in the corpus |
+  | Topics | `## Topic`, then `- D000123#s4: why` lines | Every reference is a section in the manifest; a topic has one at least |
+  | Exam | `## The question?`, then `- D000123#s4` lines | Every reference is a section in the manifest |
+
+  No page may hold a web address, a file address or a path, a code block, or a heading other than one `#` title at its top and its `##` entries, and none is read past 2 MB. With **`--keep`**, each page with no problems is written to `map\<page>.md` under a line saying an LLM compiled it and which build DocRepo checked it against. A page is data: it's never acted on.
+- **`consultant-status [NAME]`** reads each file again and says which were added, changed, gone from the task or out of reach, and which map pages are missing or of an earlier build.
