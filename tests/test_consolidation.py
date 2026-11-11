@@ -105,6 +105,7 @@ def test_the_palette_still_finds_urgent(browse):
 def test_todays_due_shows_urgent_tasks_first_with_their_chip(browse, ctx):
     ctx.conn.execute("UPDATE tasks SET urgent = 1 WHERE id = 'T000012'")
     ctx.conn.execute("UPDATE tasks SET urgent = 0 WHERE id = 'T000019'")
+    ctx.conn.execute("UPDATE tasks SET reminder = NULL WHERE id = 'T000019'")  # its reminder would keep it off the list (decision 418)
     browse.refresh()
     browse.set_view("today")
     head = next(i for i in browse.tree.items() if "Due in the next 7 days" in str(i.data(0, HTML_ROLE)))

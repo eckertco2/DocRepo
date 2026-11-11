@@ -11,15 +11,16 @@ from datetime import datetime  # noqa: E402
 import pytest  # noqa: E402
 from PySide6.QtCore import Qt, QUrl  # noqa: E402
 from PySide6.QtGui import QGuiApplication  # noqa: E402
-from PySide6.QtWidgets import QApplication, QComboBox, QLabel, QPushButton  # noqa: E402
+from PySide6.QtWidgets import QApplication, QComboBox, QInputDialog, QLabel, QPushButton  # noqa: E402
 
-from docrepo import captures, prompts  # noqa: E402
+from docrepo import captures, edits, prompts  # noqa: E402
 from docrepo.config import Settings  # noqa: E402
 from docrepo.model import Model  # noqa: E402
 from docrepo.ui.browse_window import BrowseWindow  # noqa: E402
 from docrepo.ui.capture_window import CaptureWindow  # noqa: E402
 from docrepo.ui.context import AppContext  # noqa: E402
-from docrepo.ui.tree_view import HTML_ROLE, KEY_ROLE, LINE_ROLE  # noqa: E402
+from docrepo.ui.lists import today as today_list  # noqa: E402
+from docrepo.ui.tree_view import ACTIONS_ROLE, HTML_ROLE, KEY_ROLE, LINE_ROLE  # noqa: E402
 
 NOW = datetime(2026, 10, 8, 14, 10)
 
@@ -265,37 +266,58 @@ def _today_heading(browse, name: str):
     return next((i for i in browse.tree.items() if i.data(0, KEY_ROLE) is None and f"<b>{name}</b>" in (i.data(0, HTML_ROLE) or "")), None)
 
 
-def test_reminders_whose_day_has_come_are_on_today(browse):
-    """Item 77 (decisions 236 to 238): under their own heading, oldest first, with Add to Today and Clear. Tomorrow's stays
-    on the Reminders list until its day."""
+def test_reminders_whose_day_has_come_go_on_today(browse):
+    """Release 5.116, decision 415 (replacing 237 and 238's heading): each task whose reminder has come goes on Today as an
+    item of its own, marked as a reminder's, and the reminder is used up. Tomorrow's waits."""
     browse.set_view("today")
-    head = _today_heading(browse, "Reminders")
-    rows_under = [head.child(i) for i in range(head.childCount())]
-    assert [r.data(0, KEY_ROLE) for r in rows_under] == [("task", "T000016"), ("task", "T000018")]  # not T000019, tomorrow's
-    # No State column in the new look (decision L7): the row's icon says Reminder, and its date is the next cell.
-    assert "1 d ago" in rows_under[0].data(1, HTML_ROLE) and "Today" in rows_under[1].data(1, HTML_ROLE) and rows_under[0].data(0, LINE_ROLE).icon_tip == "Reminder"
-    links = [b.accessibleName() for b in browse.tree.action_strip(rows_under[1]).findChildren(QPushButton)]
-    assert links == ["Add to Today", "Clear"]
-    today_rows = browse.tree.keys()
-    assert today_rows.index(("task", "T000018")) < today_rows.index(("task", "T000012"))  # above what's due in the next 7 days
+    assert _today_heading(browse, "Reminders") is None
+    used = edits.reminders_to_today(browse.conn, browse.ctx.data_root, browse.ctx.fs, browse.ctx.settings, NOW)
+    browse.refresh()
+    m = Model(browse.conn)
+    assert used == ["T000016", "T000018"] and [a.subject for a in m.today_items()] == ["T000016", "T000018"]
+    assert m.task("T000019").reminder == "2026-10-09"
+    row = next(i for i in browse.tree.items() if i.data(0, KEY_ROLE) == ("task", "T000018"))
+    assert "reminder" in row.data(0, LINE_ROLE).context
+    assert _today_heading(browse, "Reminders") is None
 
 
-def test_a_reminder_on_today_can_be_added_and_cleared(browse):
+def _actions(browse, key):
+    row = next(i for i in browse.tree.items() if i.data(0, KEY_ROLE) == key)
+    return {a[0]: a[1] for a in row.data(0, ACTIONS_ROLE).actions}
+
+
+def test_later_from_today_and_its_undo(browse, monkeypatch):
+    """Release 5.116, decision 417: Later's menu, each choice with its day; a pick takes the item off Today until then."""
+    browse.add_to_today("T000012")
     browse.set_view("today")
-    head = _today_heading(browse, "Reminders")
-    buttons = {b.accessibleName(): b for b in browse.tree.action_strip(head.child(1)).findChildren(QPushButton)}
-    buttons["Add to Today"].click()
+    item = next(a for a in Model(browse.conn).today_items() if a.subject == "T000012")
+    shown = []
+    monkeypatch.setattr(today_list, "show_menu", lambda menu, at: shown.append([x.text() for x in menu.actions() if x.text()]))
+    _actions(browse, ("task", "T000012"))["Later…"]()
+    assert shown[0] == ["Tomorrow\tFri 9 Oct", "3 days\tTue 13 Oct", "1 week\tThu 15 Oct", "2 weeks\tThu 22 Oct",
+                        "1 month\tMon 9 Nov", "Other…"]
+    monkeypatch.setattr(today_list, "show_menu", lambda menu, at: menu.actions()[1].trigger())  # 3 days, from the menu itself
+    _actions(browse, ("task", "T000012"))["Later…"]()
     m = Model(browse.conn)
-    assert [a.subject for a in m.today_items()] == ["T000018"] and m.task("T000018").reminder == "2026-10-08"  # on Today, reminder kept
-    head = _today_heading(browse, "Reminders")
-    row = next(head.child(i) for i in range(head.childCount()) if head.child(i).data(0, KEY_ROLE) == ("task", "T000018"))
-    buttons = {b.accessibleName(): b for b in browse.tree.action_strip(row).findChildren(QPushButton)}
-    assert list(buttons) == ["Clear"]  # already on Today
-    buttons["Clear"].click()
+    assert not any(a.id == item.id for a in m.today_items()) and m.task("T000012").reminder == "2026-10-13"
+    assert "off Today until Tue 13 Oct" in browse.status.text() and "Undo" in browse.status.text()
+    browse._status_link("undo")
     m = Model(browse.conn)
-    assert m.task("T000018").reminder is None and [e.via for e in m.status_log_of("T000018") if e.field == "Reminder"][-1] == "Today"
-    browse.clear_reminder("T000016", "Today")
-    assert _today_heading(browse, "Reminders") is None  # the heading goes with its last reminder
+    assert any(a.id == item.id for a in m.today_items()) and m.task("T000012").reminder is None
+
+
+def test_later_from_a_due_row_and_other(browse, monkeypatch):
+    """Later on Due in the next 7 days (decision 418): the row leaves that list until its reminder's day. Other… reads words."""
+    browse.set_view("today")
+    due_task = next(k[1] for k in browse.tree.keys() if isinstance(k, tuple) and k[0] == "task")
+    assert "Later…" in _actions(browse, ("task", due_task))
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("whenever", True))
+    browse._later_other(due_task, None, None)
+    assert "isn't a number of workdays or a day after today" in browse.status.text() and Model(browse.conn).task(due_task).reminder is None
+    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("Tue", True))
+    browse._later_other(due_task, None, None)
+    assert Model(browse.conn).task(due_task).reminder == "2026-10-13"
+    assert ("task", due_task) not in browse.tree.keys()
 
 
 def test_discussed_closes_the_item_and_opens_an_update(browse):
@@ -509,13 +531,15 @@ def test_the_today_list(browse, monkeypatch):
     opened = []
     monkeypatch.setattr(browse, "open_capture", lambda **options: opened.append(options))
     browse.close_today_item(item.id, "Done")
-    assert browse.today_ask == "T000012" and "is done for today" in " ".join(w.text() for w in browse.filters.findChildren(QLabel))
+    # Release 5.115 (decision 421): no question; the Update opens at once.
+    assert opened == [{"task": "T000012", "mode": "update", "content": "Done today: "}]
+    assert "done for today" in browse.status.text() and "Undo" in browse.status.text()
     # Done today holds the item marked done (release 5.24: each heading holds its items, so it folds).
     done = next(browse.tree.topLevelItem(i) for i in range(browse.tree.topLevelItemCount())
                 if "Done today" in browse.tree.topLevelItem(i).data(0, Qt.ItemDataRole.UserRole + 1))
     assert done.childCount() == 1 and done.child(0).data(0, Qt.ItemDataRole.UserRole) == ("task", "T000012")
-    browse.answer_today("update")
-    assert opened == [{"task": "T000012", "mode": "update", "content": "Done today: "}] and browse.today_ask is None
+    browse.put_back_today(item.id)  # Back on Today, on Done today's row (decision 420)
+    assert any(a.id == item.id for a in Model(browse.conn).today_items())
     browse.set_view("agenda")
     pick = next(w for w in browse.filters.findChildren(QComboBox))
     assert pick.itemData(0) == TODAY
@@ -700,7 +724,10 @@ def test_today_shows_what_is_due_this_week(browse):
     from docrepo import db
 
     browse.set_view("today")
-    assert rows(browse).count(("task", "T000019")) == 1 and ("task", "T000012") in rows(browse)
+    # T000019's reminder is tomorrow, so it waits off the list until then (release 5.116, decision 418).
+    assert ("task", "T000019") not in rows(browse) and ("task", "T000012") in rows(browse)
+    browse.clear_reminder("T000019", "Today")
+    assert rows(browse).count(("task", "T000019")) == 1  # with no reminder to wait for, it's on the list
     add = browse.tree.action_strip(_item(browse, ("task", "T000012"))).findChild(QPushButton)
     assert add.accessibleName() == "Add to Today"
     add.click()

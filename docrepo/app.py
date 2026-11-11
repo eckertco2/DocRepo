@@ -292,8 +292,8 @@ class CaptureApp(QObject):
 
     def _message_clicked(self) -> None:
         """Clicking a reminder opens the browse tool's Reminders list, on that task when there's one."""
-        if self.reminder_task or self.reminder_many:
-            self.show_browse("reminders", self.reminder_task)
+        if self.reminder_task or self.reminder_many:  # on Today, where the reminder put it (release 5.116, decision 415)
+            self.show_browse("today", self.reminder_task)
         self.reminder_task, self.reminder_many = None, False
 
     def show_reminders(self) -> int:
@@ -389,12 +389,21 @@ class CaptureApp(QObject):
             self.notify("Backup", f"The backup couldn't be made. {result}")
         self.browse.settings_view.show_backup_status()
 
+    def reminders_to_today(self) -> list[str]:
+        """Decision 415: each task whose reminder has come goes on Today, after its notification; the views and the Today
+        side panel read it again."""
+        used = edits.reminders_to_today(self.ctx.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, self.ctx.now())
+        if used:
+            self.browse.refresh()
+        return used
+
     def tick(self) -> None:
         """Every minute: the daily work after midnight, and reminders once it's past reminder_time."""
         try:
             self.daily()
             if self.ctx.now().time() >= _reminder_time(self.ctx.settings):
                 self.show_reminders()
+                self.reminders_to_today()
         except Exception:  # noqa: BLE001 - a background check must never stop the app
             log.exception("background check failed")
 

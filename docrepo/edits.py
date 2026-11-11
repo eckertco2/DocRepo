@@ -14,18 +14,19 @@ import logging
 import sqlite3
 from collections.abc import Callable, Collection
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
-from docrepo import activity, agenda, bulk, captures, notes_page, people, priorities, quick, search, tasks, whatif
+from docrepo import activity, agenda, bulk, captures, notes_page, people, priorities, quick, repeats, search, tasks, whatif
 from docrepo.config import Settings
-from docrepo.dates import stamp
+from docrepo.dates import long_date, stamp, to_date, workday_numbers
 from docrepo.db import transaction
 from docrepo.links import is_link
+from docrepo.lists import reminders_due
 from docrepo.model import TODAY, Model, is_person
 from docrepo.pages import write_pages, write_task_page
 from docrepo.safe_fs import SafeFS
-from docrepo.schedule import start_of
+from docrepo.schedule import is_open, start_of
 from docrepo.stories import Stories
 
 log = logging.getLogger(__name__)
@@ -382,6 +383,91 @@ def close_today_item(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, item
     out = Outcome(f"{what}: {'done' if how == 'Done' else 'taken off Today'}." + (" Its status log says so." if a.subject else ""))
     write_touched_pages(conn, data_root, fs, at, out.problems, [a.subject] if a.subject else [], before)
     log.info("Today item %d closed as %s", item_id, how)
+    return out
+
+
+# ---- reminders onto Today, and Later (release 5.116, decisions 415 and 417) ----
+#: A Today item's ``added_by`` when a reminder put its task there.
+REMINDER = "Reminder"
+#: The status log's word for a reminder used up by putting its task on Today.
+PUT_ON_TODAY = "Put on Today"
+LATER = "Later"
+#: The status log's word for a repeating reminder moved on to its next time (release 5.117).
+REPEATS = "Reminder repeats"
+
+
+def _workdays(settings: Settings) -> frozenset[int]:
+    try:
+        return workday_numbers(settings.workdays)
+    except ValueError:
+        return frozenset(range(5))
+
+
+def next_reminder(task_id: str, model: Model, settings: Settings, today: date) -> str | None:
+    """The reminder a task has once today's has put it on Today: none, as a reminder is used up (decision 415), or, for one
+    that repeats, its next time after today (release 5.117, decision 416), unless that's past its Until."""
+    t = model.task(task_id)
+    if not t.reminder_repeat:
+        return None
+    return repeats.following(t.reminder_repeat, t.reminder_until, to_date(t.reminder) if t.reminder else today, today, _workdays(settings))
+
+
+def reminders_to_today(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, at: datetime) -> list[str]:
+    """Decision 415: each open task whose reminder has come, today or before, goes on Today by itself, as an item added by
+    "Reminder", and the reminder is used up: cleared, with "Put on Today" in its status log. A task already on Today just
+    has its reminder cleared. Returns the tasks whose reminder it used."""
+    before = Model(conn)
+    today = at.date()
+    due = reminders_due(before, today)
+    if not due:
+        return []
+    on_today = {a.subject for a in before.today_items() if a.subject}
+    put: list[str] = []
+    for t in due:
+        if t.id not in on_today:
+            agenda.add_item(conn, subject=t.id, target=TODAY, note="", added=stamp(at), added_by=REMINDER)
+            put.append(t.id)
+        tasks.update_task(conn, settings, t.id, at=at, via=PUT_ON_TODAY, reminder=next_reminder(t.id, before, settings, today))
+    # A repeat with no reminder (Clear took this time's) moves on to its next time after today (decision 416).
+    waiting = [t for t in before.tasks.values() if t.reminder_repeat and not t.reminder and is_open(t) and t not in due]
+    for t in waiting:
+        nxt = repeats.following(t.reminder_repeat, t.reminder_until, today, today, _workdays(settings))
+        if nxt:
+            tasks.update_task(conn, settings, t.id, at=at, via=REPEATS, reminder=nxt)
+    problems: list[str] = []
+    write_touched_pages(conn, data_root, fs, at, problems, [t.id for t in (*due, *waiting)], before)
+    log.info("reminders put on Today: %s", ", ".join(put) or "none new")
+    return [t.id for t in (*due, *waiting)]
+
+
+def later(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, task_id: str, day: date, at: datetime,
+          item_id: int | None = None) -> Outcome:
+    """Later (decision 417): the task's Reminder set to ``day``, so it comes back on Today then (decision 415). Its Today
+    item, when it has one, is taken off Today, closed as "Removed" by "Later"; from Due in the next 7 days, the reminder
+    keeps it off that list until its day (decision 418)."""
+    if day <= at.date():
+        raise EditError("Later needs a day after today.")
+    before = Model(conn)
+    t = before.task(task_id)
+    if item_id is not None:
+        agenda.close_item(conn, item_id, how="Removed", closed=stamp(at), closed_by=LATER)
+    tasks.update_task(conn, settings, task_id, at=at, via=LATER, reminder=day.isoformat())
+    off = "off Today" if item_id is not None else "off Due in the next 7 days"
+    out = Outcome(f"{t.title}: {off} until {long_date(day, at.date())}, when its reminder puts it back on Today.")
+    write_touched_pages(conn, data_root, fs, at, out.problems, [task_id], before)
+    log.info("later: %s until %s", task_id, day.isoformat())
+    return out
+
+
+def undo_later(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, task_id: str, reminder: str | None,
+               at: datetime, item_id: int | None = None) -> Outcome:
+    """Later's Undo: the reminder the task had, and its Today item open again."""
+    before = Model(conn)
+    if item_id is not None:
+        agenda.reopen_item(conn, item_id)
+    tasks.update_task(conn, settings, task_id, at=at, via="Undo", reminder=reminder)
+    out = Outcome("Back on Today, as it was." if item_id is not None else "Back as it was.")
+    write_touched_pages(conn, data_root, fs, at, out.problems, [task_id], before)
     return out
 
 

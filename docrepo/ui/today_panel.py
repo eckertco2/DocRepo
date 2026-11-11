@@ -43,13 +43,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo import db, key_dates, markup, notes_page, panel_rules, selection
-from docrepo.dates import to_date
+from docrepo import db, edits, key_dates, markup, notes_page, panel_rules, selection
 from docrepo.detail import Pages, PageState, esc
-from docrepo.lists import reminders_due
 from docrepo.model import Model, Task
 from docrepo.panel_rules import OPEN_KEY, REST_WIDTH_KEY, Hover, Monitor, Place, Rect
-from docrepo.schedule import DueDate, is_open
+from docrepo.schedule import is_open
 from docrepo.ui import tokens
 from docrepo.ui.browse_window import TODAY_MINE_KEY
 from docrepo.ui.capture_window import note_drag, read_drop
@@ -186,7 +184,7 @@ class _Row(_EdgeFrame):
         bl = QHBoxLayout(self.buttons)
         bl.setContentsMargins(0, 0, 0, 0)
         bl.setSpacing(0)
-        for label, how in (("Done", self.done_clicked), ("Remove", self.remove_clicked)):
+        for label, how in ((("Later", self.later_clicked),) if task_id else ()) + (("Done", self.done_clicked), ("Remove", self.remove_clicked)):
             b = QPushButton(label, objectName="tpLink")
             b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             b.clicked.connect(how)
@@ -197,6 +195,10 @@ class _Row(_EdgeFrame):
 
     def done_clicked(self) -> None:
         self.panel.done(self.item_id)
+
+    def later_clicked(self) -> None:
+        """Later (release 5.116, decision 417): its menu, under the pointer."""
+        self.panel.later(self.task_id, self.item_id)
 
     def remove_clicked(self) -> None:
         self.panel.remove(self.item_id)
@@ -349,7 +351,6 @@ class TodayPanel(QWidget):
         self.rows: list[_Row] = []
         self.cursor = -1  # the row the keyboard is on
         self._detail: tuple[str, int | None, str | None] | None = None  # ("task" or "note", the Today item, the task)
-        self._asked: str | None = None
         self._note_kind = "task"
         self._came_from = 0
         self._drag_from: QPoint | None = None
@@ -455,26 +456,8 @@ class TodayPanel(QWidget):
         self.detail_page.anchorClicked.connect(lambda _url: self._open_detail_in_browse())
         dl.addWidget(self.detail_page, 1)
         self.stack.addWidget(detail)
-        # Below the list when it's wide: the question after Done, and the box
-        self.ask_row = QWidget()
-        al = QVBoxLayout(self.ask_row)
-        al.setContentsMargins(6, 4, 6, 4)
-        al.setSpacing(2)
-        self.ask_label = QLabel(objectName="tpSub")
-        self.ask_label.setWordWrap(True)
-        al.addWidget(self.ask_label)
-        answers = QHBoxLayout()
-        answers.setSpacing(4)
-        for label, answer in (("Update…", "update"), ("Close the task…", "close"), ("No", None)):
-            b = QPushButton(label, objectName="tpLink")
-            b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            b.clicked.connect(lambda _=False, a=answer: self.answer(a))
-            answers.addWidget(b)
-        answers.addStretch()
-        al.addLayout(answers)
-        self.ask_row.hide()
-        outer.addWidget(self.ask_row)
-        # What a state picked from a row did, with Undo, for ten seconds (release 5.76, decision 363).
+        # Below the list: what a state picked from a row did (release 5.76, decision 363), or Done, Remove or Back on Today
+        # (release 5.115, decision 420), with Undo, for ten seconds; then, when it's wide, the box.
         self.note_row = QWidget()
         nl = QHBoxLayout(self.note_row)
         nl.setContentsMargins(6, 2, 6, 2)
@@ -619,14 +602,14 @@ class TodayPanel(QWidget):
                 # The state is a button of its own (release 5.76), not words in the second line; the rest is joined as
                 # the list rows review joins quiet words (release 5.78).
                 state = "" if t is None or t.discarded else t.state
-                row = _Row(self, a.id, t.id if t else None, t.title if t else a.note, " · ".join(x for x in (since.rstrip(" ·"), where) if x),
+                reminder = "reminder" if a.added_by == edits.REMINDER else ""  # a reminder put it here (release 5.116, decision 415)
+                row = _Row(self, a.id, t.id if t else None, t.title if t else a.note, " · ".join(x for x in (where, reminder, since.rstrip(" ·")) if x),
                            cell.text if cell else "", state, edge_of(t))
                 self.rows.append(row)
                 self._add(row)
         if not total:
             self._add(QLabel("Nothing on Today.", objectName="tpSub"))
         self.extras = []
-        self._add_reminder_section(m, today)
         self._add_due_section(m, today)
         self._add_done_section(m, today)
         self.list_lay.addStretch()
@@ -677,17 +660,6 @@ class TodayPanel(QWidget):
         self.extras.append(line)
         self._add(line)
 
-    def _add_reminder_section(self, m: Model, today: date) -> None:
-        """Reminders whose day has come, as on the Today view (decisions 224 and 236 to 238), only while there are any."""
-        due = reminders_due(m, today)
-        if not due or not self._fold(REMINDERS_OPEN_KEY, f"Reminders · {len(due)}"):
-            return
-        on_today = {a.subject for a in m.today_items() if a.subject}
-        for t in due:
-            links = [] if t.id in on_today else [("Add", "Put it on Today; the reminder stays until it's cleared", lambda i=t.id: self.browse.add_to_today(i))]
-            links.append(("Clear", "Clear this reminder. Its status log records it.", lambda i=t.id: self.browse.clear_reminder(i, "Today")))
-            self._add_line(t.title, due_cell(t, today, DueDate(to_date(t.reminder), "Reminder"), use_due=False).text, links, edge_of(t), t.id)
-
     def _add_due_section(self, m: Model, today: date) -> None:
         mine = db.get_state(self.ctx.conn, TODAY_MINE_KEY) == "1"
         entries = today_due_entries(m, today, self.ctx.settings.me, mine)
@@ -698,16 +670,28 @@ class TodayPanel(QWidget):
             task = t.task if is_key_date else t
             text = (key_dates.label(t.key_date, today) + " · " + task.title) if is_key_date else task.title
             cell = due_cell(task, today) if not is_key_date else None
-            links = [] if is_key_date else [("Add", "Put it on Today", lambda i=task.id: self.browse.add_to_today(i))]
+            links = [] if is_key_date else [("Add", "Put it on Today", lambda i=task.id: self.browse.add_to_today(i)),
+                                            ("Later", "Off this list until a later day, when its reminder puts it on Today",
+                                             lambda i=task.id: self.later(i, None))]
             self._add_line(text, cell.text if cell else "", links, edge_of(task), task.id)
 
     def _add_done_section(self, m: Model, today: date) -> None:
+        """Done today, each row with Back on Today (release 5.115, decision 420)."""
         done = m.done_on(today)
         if not self._fold(DONE_OPEN_KEY, f"Done today · {len(done)}"):
             return
         for a in done:
             t = m.tasks.get(a.subject) if a.subject else None
-            line = _Elided(f"{t.title if t else a.note}  ({(a.closed or '')[11:16]})", "tpDone")
+            line = QFrame(objectName="tpRow")
+            lay = QHBoxLayout(line)
+            lay.setContentsMargins(4, 2, 4, 2)
+            lay.setSpacing(4)
+            lay.addWidget(_Elided(f"{t.title if t else a.note}  ({(a.closed or '')[11:16]})", "tpDone"), 1)
+            back = QPushButton("Back on Today", objectName="tpLink")
+            back.setToolTip("Put it back on Today, as it was")
+            back.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            back.clicked.connect(lambda _=False, i=a.id: self.put_back(i))
+            lay.addWidget(back)
             self.extras.append(line)
             self._add(line)
 
@@ -735,37 +719,39 @@ class TodayPanel(QWidget):
 
     # ================= what the buttons do: the browse tool's own methods =================
     def done(self, item_id: int | None) -> None:
-        """Done takes it off Today, and on a task asks "Update the task too?", as the Today view does."""
-        if item_id is None:
-            return
-        item = next((a for a in self._model().today_items() if a.id == item_id), None)
-        title = None
-        if item is not None and item.subject and item.subject in self._model().tasks:
-            title = self._model().tasks[item.subject].title
-        self.browse.close_today_item(item_id, "Done")
-        self._asked = self.browse.today_ask
-        if self._asked and title:
-            self.ask_label.setText(f"{title} is done for today. Update the task too?")
-            self.ask_row.show()
-            self.hover.open_wide()
-        if self._detail and self._detail[1] == item_id:
-            self.close_detail()
-        self.refresh()
-        self._update_state()
+        """The tick box, Done or Space: off Today, and on a task the capture window opens as an Update on it, with no question
+        (release 5.115, decision 421). What it did is said under the list, with Undo (decision 420)."""
+        self._close_item(item_id, "Done")
 
     def remove(self, item_id: int | None) -> None:
+        self._close_item(item_id, "Removed")
+
+    def _close_item(self, item_id: int | None, how: str) -> None:
         if item_id is None:
             return
-        self.browse.close_today_item(item_id, "Removed")
+        self.browse.close_today_item(item_id, how, tell=self.tell_state)
         if self._detail and self._detail[1] == item_id:
             self.close_detail()
         self.refresh()
-
-    def answer(self, answer: str | None) -> None:
-        self.ask_row.hide()
-        self._asked = None
-        self.browse.answer_today(answer)
         self._update_state()
+
+    def later(self, task_id: str | None, item_id: int | None) -> None:
+        """Later (release 5.116, decision 417): the browse tool's menu, under the pointer, with what it did said here. The
+        panel stays open while the menu is."""
+        if not task_id:
+            return
+        self._menu_open = True
+        try:
+            self.browse.later_menu(task_id, item_id, QCursor.pos(), tell=self.tell_state)
+        finally:
+            self._menu_open = False
+        self.refresh()
+        self._hover_timer.start()
+
+    def put_back(self, item_id: int) -> None:
+        """Back on Today, on a row of Done today (decision 420)."""
+        self.browse.put_back_today(item_id, tell=self.tell_state)
+        self.refresh()
 
     def add_from_box(self) -> None:
         text = self.box.text().strip()
@@ -840,8 +826,7 @@ class TodayPanel(QWidget):
     # ================= hovering =================
     def _holding(self) -> bool:
         """What keeps it wide after the pointer leaves: the box has the cursor, a menu is open, or a detail is showing."""
-        return (self.box.hasFocus() or self._menu_open or self._detail is not None or self.ask_row.isVisible() or self.isActiveWindow()
-                or self._dragging)
+        return self.box.hasFocus() or self._menu_open or self._detail is not None or self.isActiveWindow() or self._dragging
 
     def _hover_ms(self) -> int | None:
         return self.settings.inner_edge_hover_ms if self._on_inner_edge() else None
@@ -1036,14 +1021,7 @@ class TodayPanel(QWidget):
     def drop_on(self, task_id: str, kind: str = "", paths: list[str] | None = None, found: DropRead | None = None) -> None:
         """Decision 407: the capture window, opened as an Update on the task, with what was dropped in it, as if it had
         been dropped there. A capture it was holding goes to Drafts first, as any open for a task does."""
-        self.browse.open_capture(task=task_id, mode="update")
-        capture = self.browse.capture
-        if capture is None:
-            return
-        if found is not None:
-            capture.take_drop(found)
-        elif kind:
-            capture.dropped(kind, list(paths or []))
+        self.browse.drop_on_task(task_id, kind, paths, found)
 
     def _update_state(self) -> None:
         self._apply_wide()
@@ -1071,7 +1049,7 @@ class TodayPanel(QWidget):
             return most
         self.list_lay.invalidate()  # rows just hidden or shown count at once
         wanted =self.top.sizeHint().height() + self.list_lay.sizeHint().height() + 12
-        for w in (self.ask_row, self.box_row):
+        for w in (self.note_row, self.box_row):
             if not w.isHidden():
                 wanted += w.sizeHint().height()
         return max(120, min(most, wanted))

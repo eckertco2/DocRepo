@@ -26,7 +26,7 @@ from docrepo.safe_fs import SafeFS
 log = logging.getLogger(__name__)
 
 DB_FILE = Path("System") / "docs.db"
-SCHEMA_VERSION = 23
+SCHEMA_VERSION = 24
 #: How long, in seconds, a statement waits for docs.db while another connection holds it (SQLite's busy timeout, release
 #: 5.102) before it gives up with "database is locked". A backup's copy holds it for as long as the copy takes. Python's
 #: own default is 5 seconds.
@@ -606,6 +606,13 @@ CREATE TABLE t_mails (
     capture            TEXT REFERENCES captures(id)
 );
 CREATE INDEX t_mails_conversation ON t_mails (conversation);
+""",
+    24: """
+-- A reminder that repeats (release 5.117, decision 416): its rule (week:mon,thu, month:15, month:last, workday:3,
+-- workday:last or days:5, ``repeats.parse``) and the last day it may come round. Each time it comes round, the task goes
+-- on Today and ``reminder`` moves on to the next time. Not the task's recurrence, which is for routine work's hours.
+ALTER TABLE tasks ADD COLUMN reminder_repeat TEXT;
+ALTER TABLE tasks ADD COLUMN reminder_until TEXT;
 """,
 }
 

@@ -58,6 +58,9 @@ class Task:
     #: Release 5.46 (decisions 189 to 191): its length in days, kept when its dates move, whether those days run through
     #: weekends, and each role's hours a day. With a rate, ``lead_hours`` or ``assignee_hours`` is the total worked out from it.
     duration: int | None = None
+    #: Release 5.117 (decision 416): how its reminder repeats (``repeats``' rule), and the last day it may come round.
+    reminder_repeat: str | None = None
+    reminder_until: str | None = None
     calendar_days: bool = False
     lead_per_day: float | None = None
     assignee_per_day: float | None = None
@@ -355,7 +358,7 @@ TASK_COLUMNS = (
     "id", "title", "state", "closed", "urgent", "meeting", "recurrence", "repeat_until", "start", "due", "deadline", "deadline_desc",
     "reminder", "lead_hours", "assignee_hours", "inherit_labels", "description", "current_status", "created", "created_by", "discarded",
     "discard_reason", "plant_event", "priority", "priority_rank", "day_headings", "duration", "calendar_days", "lead_per_day",
-    "assignee_per_day", "lead_per_week", "assignee_per_week",
+    "assignee_per_day", "lead_per_week", "assignee_per_week", "reminder_repeat", "reminder_until",
 )
 _TASK_COLUMNS = ", ".join(TASK_COLUMNS)
 

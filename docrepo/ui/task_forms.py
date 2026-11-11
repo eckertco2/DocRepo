@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo import priorities, quick, templates, ties, timeline
+from docrepo import priorities, quick, repeats, templates, ties, timeline
 from docrepo.bulk import BulkEdit, LabelMatch, TaskOutcome, summary
 from docrepo.db import RECURRENCES, STATES
 from docrepo.dates import long_date, to_date
@@ -49,6 +49,7 @@ from docrepo.tasks import TIE_LINKS, KeyDateRow, hours_values
 from docrepo.ui.tokens import C
 from docrepo.ui.icons import icon, set_fold
 from docrepo.ui.look import LOOK, Help
+from docrepo.ui.repeat_field import RepeatField
 from docrepo.ui.style import page_css, style_sheet
 from docrepo.ui.task_picker import full_path, path_text
 from docrepo.ui.tree_view import RowTree
@@ -1041,6 +1042,14 @@ class TaskEditDialog(FormDialog):
         self.recurrence.setFixedWidth(200)
         self.recurrence.currentIndexChanged.connect(self._sync)
         self.repeat_field = field("Repeat until", self.repeat, "repeatUntil")
+        # A reminder that repeats (release 5.117, decision 416), beside Reminder.
+        self.reminder_repeat = RepeatField()
+        self.reminder_repeat.set_value(t.reminder_repeat)
+        self.reminder_until = DateField()
+        self.reminder_until.set_value(t.reminder_until)
+        self.reminder_until_field = field("Reminder until", self.reminder_until, "reminderUntil")
+        self.reminder_repeat.changed.connect(self._repeat_changed)
+        self.reminder_until_field.setVisible(bool(t.reminder_repeat))
         recurrence_field = field("Recurrence", self.recurrence, "recurrence")
         # Start, Duration and Due (release 5.46, decision 191): with a Duration, a date moves the block.
         self.duration = QLineEdit("" if t.duration is None else str(t.duration))
@@ -1115,7 +1124,8 @@ class TaskEditDialog(FormDialog):
         later_dates = QGridLayout()
         later_dates.setHorizontalSpacing(16)
         later_dates.setVerticalSpacing(16)
-        for w, r, c in ((field("Reminder", self.reminder, "reminder"), 0, 0), (recurrence_field, 0, 1), (self.repeat_field, 1, 1)):
+        for w, r, c in ((field("Reminder", self.reminder, "reminder"), 0, 0), (recurrence_field, 0, 1), (self.repeat_field, 1, 1),
+                        (field("Reminder repeats", self.reminder_repeat, "reminderRepeats"), 1, 0), (self.reminder_until_field, 2, 0)):
             later_dates.addWidget(w, r, c)
         later_dates.setColumnStretch(0, 1)
         later_dates.setColumnStretch(1, 1)
@@ -1218,7 +1228,7 @@ class TaskEditDialog(FormDialog):
         # Open when anything is set in it but a task's place, which nearly every task has and its page shows, and for a task made from a
         # template, since its hours and labels carry marks saying whether they follow the template. A Duration or a tie opens it
         # too since release 5.100, when they moved in (decision 395).
-        open_more = bool(link or t.plant_event or t.reminder or t.recurrence or t.calendar_days or m.key_dates_of(task_id)
+        open_more = bool(link or t.plant_event or t.reminder or t.reminder_repeat or t.recurrence or t.calendar_days or m.key_dates_of(task_id)
                          or t.duration is not None or t.ties or any(t.references.get(n) for n in reference_fields))
         self.more.setVisible(open_more)
         set_fold(self.more_button, MORE_OPTIONS, open_more)
@@ -1534,14 +1544,25 @@ class TaskEditDialog(FormDialog):
     def snapshot(self) -> dict[str, Any]:
         return self.values()
 
+    def _repeat_changed(self) -> None:
+        """Reminder repeats changed (release 5.117, decision 416): Reminder until shows with a repeat, and Reminder moves to
+        the new rule's first time from today, so the form shows when it first comes round."""
+        self.reminder_until_field.setVisible(bool(self.reminder_repeat.kind.currentData()))
+        rule = self.reminder_repeat.value()
+        first = repeats.first_from(rule, self.today, self.workdays) if rule else None
+        if first:
+            self.reminder.set_value(first.isoformat())
+
     def problem(self) -> str | None:
         """What's wrong with the form, if anything: the first field that can't be saved."""
         if not self.title.text().strip():
             return "A task needs a title."
         for w, name in ((self.start, "Start"), (self.due, "Due"), (self.deadline, "Deadline"), (self.reminder, "Reminder"),
-                        (self.repeat, "Repeat until")):
+                        (self.repeat, "Repeat until"), (self.reminder_until, "Reminder until")):
             if not w.is_valid():
                 return f"{name} isn't a date. Use YYYY-MM-DD."
+        if self.reminder_repeat.problem():
+            return self.reminder_repeat.problem()
         for w, name in ((self.lead_hours, "Lead hours"), (self.asg_hours, "Assignee hours")):
             if not w.is_valid():
                 return f"{name} isn't a number of hours."
@@ -1568,6 +1589,8 @@ class TaskEditDialog(FormDialog):
             "duration": typed_days(self.duration) if not recurrence else None, "calendar_days": self.calendar.isChecked() and not recurrence,
             "start": self.start.value(), "due": self.due.value(), "deadline": self.deadline.value(),
             "deadline_desc": self.deadline_desc.text(), "reminder": self.reminder.value(), "recurrence": recurrence,
+            "reminder_repeat": self.reminder_repeat.value(),
+            "reminder_until": self.reminder_until.value() if self.reminder_repeat.value() else None,
             "repeat_until": self.repeat.value() if recurrence else None, "urgent": self.urgent.isChecked(), "meeting": self.meeting.isChecked(),
             "plant_event": self.plant_event.isChecked(), "parents": list(self.parents), "priority": self.priority.currentData(),
             "key_dates": self.key_dates.rows(), "ties": {} if recurrence else self.tie_panel.values(),
