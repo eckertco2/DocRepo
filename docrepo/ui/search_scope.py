@@ -1,6 +1,7 @@
 """The # list in Search everything (release 5.108, decision 414): typing ``#`` in the search box lists tasks, as it does
 in the content text, and a pick writes the task's whole name after the ``#``, so the search keeps to that task and what's
-under it ("search links #Reactor impeller upgrade", ``docrepo.search.read``).
+under it ("#Reactor impeller upgrade seal", ``docrepo.search.read``). Since release 5.121 (decision 450) the ``#`` comes
+at the start of the words, after any filters ("type:links #Reactor impeller upgrade"); 5.108's "search" before it went.
 
 It's the shared task list (``docrepo/ui/task_list.py``) with its rows, matching and levels: Up and Down move, Right lists a
 task's subtasks, Enter or Tab picks, Esc hides it. Closed and parked tasks are listed too, since a search looks in them;
@@ -19,8 +20,10 @@ from docrepo.model import Model
 from docrepo.ui.items_panel import RefPopup
 from docrepo.ui.task_list import subtask_options, task_mark
 
-#: The ``#`` being typed, at the start or after "search" and whatever follows it, up to the cursor.
-_TYPING = re.compile(r"^\s*(?:search\b[^#]*)?#([^#]*)$", re.I)
+#: The ``#`` being typed, at the start or after File search's filters (a date's value may be two words), up to the cursor.
+_FILTER = (r"(?:(?:type|in|from|is|tag):(?:\"[^\"]*\"|\S+)|(?:after|since|before):(?:\"[^\"]*\"|\d{1,2}\s+[a-z]{3,9}|[a-z]{3,9}\s+\d{1,2}"
+           r"|(?:last|this)\s+(?:week|month)|\S+)|\.\w+)\s+")
+_TYPING = re.compile(rf"^\s*(?:{_FILTER})*#([^#]*)$", re.I)
 SHOWN = 8
 
 
