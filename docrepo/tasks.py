@@ -773,6 +773,46 @@ def set_parents(conn: sqlite3.Connection, task_id: str, parents: Sequence[str], 
     return change
 
 
+def parent_links(conn: sqlite3.Connection, task_id: str) -> list[tuple[int, str]]:
+    """A task's parent links as (the link's number, the parent), oldest first. The numbers order a task's parents and each
+    parent's subtasks, so they're what puts a task back exactly where it was (release 5.118, decision 436)."""
+    return [(r["id"], r["parent"]) for r in conn.execute("SELECT id, parent FROM task_parents WHERE child = ? ORDER BY id", (task_id,))]
+
+
+def restore_parents(conn: sqlite3.Connection, task_id: str, links: Sequence[tuple[int, str]], *, expect: Sequence[tuple[int, str]],
+                    at: datetime, via: str) -> Change | None:
+    """Put a task back under exactly these parent links, ``parent_links`` from before a move, each with its own number
+    again: the same parents, in the same order, and the same place among each one's subtasks. Undo after a move (release
+    5.118, decisions 436 and 437). Only while its links are still ``expect``, what the move left; a parent that's gone, or
+    one that's under the task by now, refuses it too. A number another link has taken since (only the newest link's can be)
+    puts the task last among that parent's subtasks, and the links after it follow, so its parents keep their order. One
+    Parents line in the status log; None when nothing changed."""
+    links, expect = list(links), list(expect)
+    with transaction(conn):
+        t = get_task(conn, task_id)
+        if parent_links(conn, task_id) != expect:
+            raise TaskError(f"{t.title}'s parents have changed since, so Undo would take that back too. Edit task… sets them.")
+        below = descendant_ids(conn, task_id)
+        for _, p in links:
+            parent = get_task(conn, p)
+            if p == task_id or p in below:
+                raise TaskError(f"{parent.title} is under {t.title} now, so it can't go back under it.")
+        if links == expect:
+            return None
+        before = parent_titles(conn, task_id)
+        conn.execute("DELETE FROM task_parents WHERE child = ?", (task_id,))
+        fresh = False
+        for link_id, p in links:
+            fresh = fresh or conn.execute("SELECT 1 FROM task_parents WHERE id = ?", (link_id,)).fetchone() is not None
+            if fresh:
+                conn.execute("INSERT INTO task_parents (child, parent) VALUES (?, ?)", (task_id, p))
+            else:
+                conn.execute("INSERT INTO task_parents (id, child, parent) VALUES (?, ?, ?)", (link_id, task_id, p))
+        change = Change("Parents", before, parent_titles(conn, task_id))
+        _log(conn, task_id, at, via, [change])
+    return change
+
+
 def remove_parent(conn: sqlite3.Connection, task_id: str, parent_id: str, *, at: datetime, via: str) -> Change:
     """Take a task out from under one parent. With no parents left, it becomes a top-level task."""
     with transaction(conn):

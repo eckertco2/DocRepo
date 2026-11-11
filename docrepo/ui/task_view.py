@@ -1264,6 +1264,16 @@ class TaskView(QWidget):
         else:
             self.foot_undo.forget()
 
+    def _tell_move(self, text: str, undo) -> None:
+        """What a move from a task row's Edit menu did, in the footer, with Undo for ten seconds (release 5.118, decision
+        439); the browse tool's status line says it too."""
+        self.say(text)
+        if undo is not None:
+            self._foot_timer.start(10_000)
+            self.foot_undo.offer(undo, "Put it back under the parents it had, where it was. The status log keeps both changes.")
+        else:
+            self.foot_undo.forget()
+
     def _row_menu(self, i: int, at) -> None:
         """A row's right-click menu: what its buttons do, a task row's Add to and Edit, the task page's own (release 5.98,
         decision 392), and its State submenu (decision 361)."""
@@ -1279,7 +1289,7 @@ class TaskView(QWidget):
             if tip:
                 action.setToolTip(tip)
         if r.kind == "task":
-            task_menus.add_row_menus(self.browse, r.id, menu, anchor=self.list)
+            task_menus.add_row_menus(self.browse, r.id, menu, anchor=self.list, after=lambda: self.refresh(keep=True), tell=self._tell_move)
         if r.kind == "task" and can_change(self.browse.model(), r.id):
             sub = state_menu(menu, self.browse.model(), r.id, lambda to, branch, t=r.id: self.browse.set_state(
                 t, to, branch, after=lambda: self.refresh(keep=True), tell=self._tell_state))

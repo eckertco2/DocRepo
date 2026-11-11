@@ -292,3 +292,73 @@ def test_the_rule_against_new_date_kinds_is_in_claude_md():
 
     text = (Path(__file__).resolve().parent.parent / "CLAUDE.md").read_text(encoding="utf-8")
     assert "No new date kind without a decision that retires one" in text and "decision 396" in text
+
+
+# ================= release 5.118: Undo after a move (the design workspace's undo-moves plan, decisions 435 to 439) =================
+def edit_entry(menu, label: str):
+    """The Edit submenu of a row's menu, and its entry that starts with ``label``."""
+    edit = next(a.menu() for a in menu.actions() if a.menu() is not None and a.menu().title() == "Edit")
+    return next(a for a in edit.actions() if a.text().startswith(label))
+
+
+def test_remove_from_under_on_a_rows_menu_says_so_with_undo_which_puts_it_back(browse):
+    browse.set_view("tasks")
+    siblings = Model(browse.conn).children_of("T000001")
+    menu = browse.tree.row_menu(row(browse, "T000008"))
+    edit_entry(menu, "Remove from under…").trigger()
+    assert Model(browse.conn).parents_of("T000008") == []
+    assert browse.status.text().startswith("Installation is a top-level task now.") and 'href="undo"' in browse.status.text()
+    browse._status_link("undo")
+    m = Model(browse.conn)
+    assert m.parents_of("T000008") == ["T000001"] and m.children_of("T000001") == siblings  # second of four again
+    assert browse.status.text() == "Set back: Installation is under Reactor impeller upgrade again. The status log keeps both changes."
+    assert [(e.from_value, e.to_value) for e in m.status_log_of("T000008") if getattr(e, "field", None) == "Parents"] == [
+        ("Reactor impeller upgrade", None), (None, "Reactor impeller upgrade")]
+    menu.deleteLater()
+
+
+def test_move_on_the_task_pages_edit_menu_has_undo_until_the_next_message(browse):
+    browse.select("task", "T000008")
+    move = next(a for a in bar(browse)["More ways to edit"].menu().actions() if a.text().startswith("Move…"))
+    browse._pick_task = lambda anchor, picked, none, keep=None: picked("T000002")
+    move.trigger()
+    assert browse.status.text().startswith("Installation moved from under Reactor impeller upgrade to Verification walkthrough readiness.")
+    assert 'href="undo"' in browse.status.text()
+    browse.say("Something else.")  # a new line: the Undo was for the last one (decision 363's)
+    browse._status_link("undo")
+    assert Model(browse.conn).parents_of("T000008") == ["T000002"]
+
+
+def find_files_move(browse, task_id: str, label: str, to: str | None):
+    """Find files on Reactor impeller upgrade, ``label`` picked on ``task_id``'s row's Edit menu, ``to`` picked."""
+    browse.open_task_view("T000001")
+    view = browse.task_views["T000001"]
+    view.set_kind("task")
+    i = next(n for n, r in enumerate(view.list.rows) if r.record is not None and r.record.kind == "task" and r.record.id == task_id)
+    menus = []
+    browse.run_menu = lambda menu, at: menus.append(menu)
+    view._row_menu(i, None)
+    browse._pick_task = lambda anchor, picked, none, keep=None: picked(to)
+    edit_entry(menus[0], label).trigger()
+    return view
+
+
+def test_a_move_from_find_files_says_so_in_its_footer_with_undo(browse):
+    view = find_files_move(browse, "T000012", "Move…", "T000002")
+    assert view.foot.text() == "Rigging plan moved from under Installation to Verification walkthrough readiness."
+    assert view.foot_undo.isVisibleTo(view) and "where it was" in view.foot_undo.toolTip()
+    assert 'href="undo"' in browse.status.text()  # the browse tool's status line says it too
+    view.foot_undo.click()
+    assert Model(browse.conn).parents_of("T000012") == ["T000008"]
+    assert view.foot.text().startswith("Set back: Rigging plan is under Installation again.") and not view.foot_undo.isVisibleTo(view)
+    assert 'href="undo"' not in browse.status.text()  # once, from either place
+    view.foot_undo.offer(lambda: None)
+    assert view.foot_undo.toolTip().startswith("Set the state back")  # a state pick's own tip, as before
+
+
+def test_undo_from_find_files_after_another_move_says_why_and_changes_nothing(browse):
+    view = find_files_move(browse, "T000012", "Move…", "T000002")
+    undo = view.foot_undo._undo
+    browse.move_task("T000012", "T000002", "T000003")  # moved again, from the browse tool
+    undo()
+    assert Model(browse.conn).parents_of("T000012") == ["T000003"] and "changed since" in view.foot.text()
