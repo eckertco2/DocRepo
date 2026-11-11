@@ -186,6 +186,10 @@ class CaptureEmail:
     message_id: str = ""
     entry_id: str = ""
     store_id: str = ""
+    #: Its In-Reply-To and References headers (release 5.122): a reply joins the conversation of the email it names,
+    #: on the task page's Email conversations (``docrepo.email_conversations``).
+    in_reply_to: str = ""
+    refs: str = ""
 
 
 @dataclass(frozen=True)
@@ -453,7 +457,8 @@ class Model:
             if r["capture"] in self.captures:
                 self.captures[r["capture"]].emails.append(
                     CaptureEmail(r["pos"], r["file"], r["subject"], r["sender"], r["sent"], r["description"],
-                                 *(r[k] or "" for k in ("conversation", "conversation_index", "message_id", "entry_id", "store_id"))))
+                                 *(r[k] or "" for k in ("conversation", "conversation_index", "message_id", "entry_id", "store_id",
+                                                        "in_reply_to", "refs"))))
         self.t_mails: list[TMail] = [
             TMail(r["id"], r["task"], r["kind"], r["reply_capture"], r["reply_pos"], r["opened"], r["conversation"] or "",
                   r["conversation_index"] or "", r["capture"])

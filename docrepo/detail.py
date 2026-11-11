@@ -22,13 +22,13 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from urllib.parse import quote
 
-from docrepo import capacity, items, markup, notes_page, repeats, tagged, ties
+from docrepo import capacity, email_conversations, items, markup, notes_page, repeats, tagged, ties
 from docrepo.dates import ago, days_words, long_date, monday_of, short, to_date
 from docrepo.file_rows import dated_name, type_name
 from docrepo.markup import esc
 from docrepo.links import FOLDER_TEXT, NO_TEXT, is_folder, is_link, reference_link
 from docrepo.model import PRIORITY_NAMES, TODAY, TYPE_NAMES, Capture, Model, Task, is_person
-from docrepo.overview import file_type
+from docrepo.overview import file_type, sender_of
 from docrepo.pages import num
 from docrepo.schedule import due_of, held_on, is_open, start_of
 from docrepo.stories import Event, RawItem, Stories, clip
@@ -114,6 +114,12 @@ HISTORY_TABS = (("notes", "Captures"), ("summaries", "Summaries"))
 FILES_SHOWN = 8
 #: Find files' link in the Files group (release 5.98, the consolidation plan's decision 389: the Task view, renamed).
 FIND_FILES_TIP = "Find files (O): a window of its own for searching, previewing and opening its files, emails and notes"
+#: The Email conversations section's command (release 5.122, decision 455): New T-mail, as on the task page's bar.
+NEW_T_MAIL_TIP = ("A new email in Outlook, empty, tagged so its replies come back to this task when you capture them. "
+                  "You write and send it; DocRepo never sends email.")
+CONVERSATION_TIP = "Open the conversation: every email of it DocRepo holds, oldest first"
+#: The line between a conversation's emails: a block one pixel high in the rule's grey (Qt draws an <hr> dark).
+RULE = '<p class="rule" style="font-size: 1px; margin-top: 16px; margin-bottom: 0px">&nbsp;</p>'
 SCOPE_NAMES = {"self": "This task", "ancestors": "With parent tasks", "descendants": "With subtasks", "family": "Whole family"}
 SOURCE_NAMES = {"typed": "Typed", "outlook_email": "Email", "file_path": "File path"}
 MONTH_NAMES = ("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")
@@ -262,6 +268,7 @@ class PageState:
     details: bool = False  # Details open (release 5.21)
     desc: bool = False  # the whole description
     closed: bool = False  # the closed subtasks shown
+    conversations: bool = False  # every email conversation shown, not only the newest few (release 5.122)
 
 
 class Pages:
@@ -425,11 +432,19 @@ class Pages:
             out["subtasks_summary"] = section_head(f'{esc(out["subtasks_short"])} &nbsp;{bar}',
                                                    link(f"new:{t.id}", "New task under this one", "A new task under this one (T)"), raw=True)
             out["subtasks"] = split_section(subtasks)[1]
+        ids = self.m.scope_ids(t.id, state.scope)
+        # Email conversations (release 5.122, decisions 455 and 456): the task's and its subtasks' emails, a row per
+        # conversation; the section isn't there when they have none.
+        convs = email_conversations.for_tasks(self.m, ids)
+        if convs:
+            n = sum(len(cv.emails) for cv in convs)
+            out["emails_short"] = f"{len(convs)} · {n} email{'s' if n != 1 else ''}"
+            out["emails_summary"] = section_head(out["emails_short"], link(f"tmail:{t.id}", "New T-mail", NEW_T_MAIL_TIP))
+            out["emails"] = self.conversation_rows(t, convs, ids, state)
         links = self.links_group(t)
         if links:
             out["links_short"] = str(len(links_of(self.m, t.id, self.reference_links)))
             out["links_summary"], out["links"] = section_head(out["links_short"]), split_section(links)[1]
-        ids = self.m.scope_ids(t.id, state.scope)
         files = self.files_in(ids)
         # Find files opens from here (release 5.98, the consolidation plan's decision 389), and with O; so the group shows
         # with no files too, as the mock has it, and Find files always has a way in by the mouse.
@@ -899,6 +914,120 @@ class Pages:
         else:
             more = ""
         return table + more
+
+    # ---- email conversations (release 5.122, the email section plan's decisions 455 to 463) ----
+    def me_name(self) -> str | None:
+        """The owner's name, which a conversation says as "you"."""
+        return self.m.person_name(self.me) if self.me and self.me in self.m.people else None
+
+    def senders(self, cv: email_conversations.Conversation) -> list[str]:
+        """Who wrote a conversation's emails; for an email kept without its rows (decision 463), from its From line."""
+        return list(dict.fromkeys(x for x in (self.sender(e) for e in cv.emails) if x))
+
+    def sender(self, e: email_conversations.Email) -> str:
+        return e.sender or (sender_of(self.content_of(e.capture)) if e.pos < 0 else "")
+
+    def conversation_rows(self, t: Task, convs: list, ids: list[str], state: PageState) -> str:
+        """The Email conversations section's body (decision 458): a row per conversation, the newest first, as a file's row
+        is drawn (release 5.114): the mail mark, its subject in the text's colour with its count of emails in grey and the
+        subtask it's on, a grey line of who's written and the newest email's first words, and its newest day at the end.
+        The subject opens the conversation's page. The first ``SHOWN``, then Show all (decision 456)."""
+        ec = email_conversations
+        me = self.me_name()
+        shown = convs if state.conversations else convs[:ec.SHOWN]
+        rows = []
+        for cv in shown:
+            n = len(cv.emails)
+            subject = link(f"conv:{t.id}/{cv.id}", cv.subject, CONVERSATION_TIP, "tl")
+            count = f' <span class="rel">&nbsp;{n}</span>' if n > 1 else ""
+            where = ec.task_in(cv, ids)
+            words = ec.snippet(ec.newest_words(self.m, cv, self.content_of))
+            line = esc(ec.who(self.senders(cv), me)) + (f" · {esc(words)}" if words else "")
+            rows.append(f'<tr><td valign="top" width="22"><img src="ft:mail" width="16" height="16"></td>'
+                        f'<td valign="top">{subject}{count}{self.from_chip(where or "", t.id)}<br><span class="sub">{line}</span></td>'
+                        f'<td valign="top" align="right" class="rel" width="64">{esc(short(to_date(cv.newest.at), self.today))}</td></tr>')
+        table = f'<table width="100%" cellspacing="0" cellpadding="3">{"".join(rows)}</table>'
+        if len(convs) > ec.SHOWN:
+            words = "Show fewer" if state.conversations else f"Show all {len(convs)} conversations"
+            table += f'<p style="margin-top: 4px">{link("fold:conversations", words)}</p>'
+        return table
+
+    def conversation_page(self, task_id: str, conversation_id: str, state: PageState) -> str:
+        """A conversation's page (decision 459), opened from a task's Email conversations: back to the task, the subject, a
+        line of facts, then every email of it DocRepo holds, oldest first, each with its sender, when, To, its own words
+        (the quoted emails folded, decision 462), its capture's files, and Open in Outlook, Reply all and Open capture."""
+        ec = email_conversations
+        cv = ec.find(self.m, conversation_id)
+        back = (f'<p class="crumbs">{link(f"task:{task_id}", "‹ " + self.m.task(task_id).title, "Back to the task")}</p>'
+                if task_id in self.m.tasks else "")
+        if cv is None:
+            return back + '<p class="note">This conversation isn\'t here any more: the captures of its emails were discarded.</p>'
+        me = self.me_name()
+        n = len(cv.emails)
+        first, last = cv.emails[0].at, cv.newest.at
+        span = self.day(first) if first[:10] == last[:10] else f"{self.day(first)} to {self.day(last)}"
+        tasks = cv.tasks()
+        on = "on " + ", ".join(self.task_link(x) for x in tasks) if tasks else '<span class="faint">not filed to a task</span>'
+        head = (back + f"<h2>{esc(cv.subject)}</h2>"
+                + f'<p class="facts">{esc(ec.who(self.senders(cv), me, most=6))} · {n} email{"s" if n != 1 else ""} · {esc(span)} · {on}</p>')
+        blocks, filed = [], set()
+        for i, e in enumerate(cv.emails):
+            text = ec.email_text(self.m, e, self.content_of(e.capture))
+            own, quoted = ec.own_words(text.words)
+            sender = ec.who([self.sender(e)], me) if self.sender(e) else "An unknown sender"
+            when = f"{self.long(e.at)} {e.at[11:16]}".strip()
+            to = f'<span class="sub"> &nbsp;to {esc(clip(ec.to_words(text.to, me), 120))}</span>' if text.to else ""
+            newest = f" &nbsp;{chip('Newest', 'st-ip')}" if i == n - 1 and n > 1 else ""
+            # An email whose subject was changed says its own (a reply joined by In-Reply-To, decision 457).
+            own_subject = (f'<br><span class="sub">Subject: {esc(e.subject)}</span>'
+                           if e.subject and ec.clean_subject(e.subject) != cv.subject else "")
+            parts = [f'<table width="100%" cellspacing="0" cellpadding="0" style="margin-top: {4 if i == 0 else 16}px"><tr>'
+                     f'<td valign="top"><span class="ttl">{esc(sender[:1].upper() + sender[1:])}</span>{to}{newest}{own_subject}</td>'
+                     f'<td valign="top" align="right" class="rel" style="white-space: nowrap">{esc(when)}</td></tr></table>']
+            if own:
+                parts.append(f'<p style="margin-top: 6px; margin-bottom: 0px">{multiline(own)}</p>')
+            else:
+                parts.append('<p class="note" style="margin-top: 6px">DocRepo has none of its words here; its capture\'s page has what was kept.</p>')
+            if quoted:
+                key = f"q:{e.ref}"
+                if key in state.expanded:
+                    parts.append(f'<p class="sub" style="margin-top: 6px">{multiline(quoted)}</p>'
+                                 f'<p class="sub">{link("more:" + key, "Hide the quoted emails")}</p>')
+                else:
+                    parts.append(f'<p class="sub" style="margin-top: 4px">{link("more:" + key, "Show the quoted emails", "What it quotes of the emails before it")}</p>')
+            if text.note:
+                parts.append(f'<p class="sub" style="margin-top: 6px">Your words with it: {multiline(clip(text.note, 400))}</p>')
+            if e.capture not in filed:  # a capture's files, under the first of its emails here (decision 461)
+                filed.add(e.capture)
+                parts.append(self._capture_files(e.capture))
+            acts = []
+            if e.can_open:
+                acts.append(link(f"outlook:{e.ref}", "Open in Outlook", "The email itself in Outlook: from its place there, else its saved .msg"))
+                acts.append(link(f"replyall:{e.ref}", "Reply all", "Reply all in Outlook, as a T-mail: its replies come back to its task"))
+            acts.append(self.capture_link(e.capture, "Open capture"))
+            where = (self.from_chip(e.tasks[0], task_id) if task_id not in e.tasks else "") if e.tasks else ' <span class="faint">not filed</span>'
+            also = f' <span class="faint">· also in {esc(", ".join(c for c, _p in e.also))}</span>' if e.also else ""
+            parts.append(f'<p class="sub" style="margin-top: 6px">{" &nbsp;·&nbsp; ".join(acts)}{where}{also}</p>')
+            blocks.append("".join(parts))
+        return head + RULE.join(blocks)
+
+    def _capture_files(self, capture_id: str) -> str:
+        """A capture's files under its email on a conversation's page: its attachments, and the links and pictures email
+        layer 0 kept, each a row with its type's mark (decision 461)."""
+        c = self.m.captures[capture_id]
+        rows = []
+        for doc_id in c.document_ids:
+            d = self.m.documents.get(doc_id)
+            if d is None:
+                continue
+            kind = file_type(d.name, d.original)
+            if is_link(d.original) or is_folder(d.original):
+                name = link(f"opendoc:{d.id}", d.name, ("Opens in your browser: " if is_link(d.original) else "Opens in File Explorer: ") + (d.original or ""), "tl")
+            else:
+                name = link(f"show:doc:{d.id}", d.name, f"{type_name(kind)} · Email attachment. Click to show it in File Explorer.", "tl")
+            desc = f' <span class="sub">{esc(d.description)}</span>' if d.description else ""
+            rows.append(f'<tr><td valign="top" width="22"><img src="ft:{kind}" width="16" height="16"></td><td valign="top">{name}{desc}</td></tr>')
+        return f'<table cellspacing="0" cellpadding="2" style="margin-top: 6px">{"".join(rows)}</table>' if rows else ""
 
     def show_key(self, f) -> str:
         """The address that shows a file in File Explorer: a saved copy's, else its document's."""

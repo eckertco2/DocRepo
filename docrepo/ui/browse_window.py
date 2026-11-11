@@ -79,7 +79,7 @@ from docrepo.ui.task_picker import TaskPicker
 from docrepo.ui.timeline_view import TimelineView
 from docrepo.ui.state_menu import UNDO_MS, can_change, open_below, picked_line, state_menu
 from docrepo.ui.tree_view import HTML_ROLE, KEY_ROLE, RowTree
-from docrepo.ui import task_menus
+from docrepo.ui import conversation_page, task_menus
 from docrepo.ui.widgets import SAVE_KEYS, DropButton, FlowLayout, Option, ViewStack, ask, label_options, people_options
 from docrepo.views import (
     LIST_IDS,
@@ -649,6 +649,8 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
             return any(lb.name == item for lb in m.labels)
         if kind == "tagged":  # release 5.79: a tagged label, by its key
             return item in m.tagged.by_key
+        if kind == conversation_page.KIND:  # release 5.122: an email conversation, from a task's page
+            return conversation_page.exists(self, item)
         if kind == "tplrow":
             return self.templates.exists(item)
         return item in {"task": m.tasks, "capture": m.captures, "doc": m.documents, "person": m.people}.get(kind, {})
@@ -983,6 +985,9 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         elif kind == "tagged":  # release 5.79
             tagged_list.actions(self, item)
             html = pages.tagged_page(item)
+        elif kind == conversation_page.KIND:  # release 5.122: an email conversation (the email section plan's decision 459)
+            conversation_page.actions(self, item)
+            html = conversation_page.page(self, item)
         else:
             self._label_actions(item)
             html = pages.label_page(item)

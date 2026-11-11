@@ -482,6 +482,29 @@ def reply_all(entry_id: str, store_id: str, saved: Path | None) -> Opened:
     return Opened(index, route)
 
 
+def show_email(entry_id: str, store_id: str) -> bool:
+    """Open a captured email in Outlook, in its own window, found by its place (EntryID and StoreID, kept since release
+    5.93): a conversation page's Open in Outlook (release 5.122, the email section plan's decision 460). It only shows the
+    email; nothing in it changes. False when Outlook can't find it there (moved to another mailbox, deleted, or captured
+    before its place was kept), for the caller to open its saved .msg instead."""
+    if not entry_id:
+        return False
+    app, _how = connect()
+    session = app.Session  # type: ignore[attr-defined]
+    try:
+        item = session.GetItemFromID(entry_id, store_id) if store_id else session.GetItemFromID(entry_id)
+    except Exception as e:  # noqa: BLE001 - COM raises its own errors; the .msg is next
+        record_problem("finding the email in Outlook (GetItemFromID)", e)
+        return False
+    try:
+        item.Display()  # type: ignore[attr-defined]
+    except Exception as e:  # noqa: BLE001
+        detail = record_problem("showing the email (Display)", e)
+        raise OutlookError(f"Outlook found the email but didn't show it ({detail}).", "showing the email", detail) from e
+    log.info("Outlook: showed a captured email, found by its place")
+    return True
+
+
 def selected_emails(scratch: Path | None = None) -> list[EmailItem]:
     """The emails selected in Outlook's main window. Other kinds of item (meetings, tasks) are left out. With ``scratch``
     (a path in the data root), each is copied whole first (``copy_whole``); one that can't be is read field by field."""
