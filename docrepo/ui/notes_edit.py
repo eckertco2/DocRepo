@@ -96,6 +96,7 @@ class NotesEdit(RichEdit):
     folds_changed = Signal()
     files_dropped = Signal(list)  # local files dropped on the page (release 5.27)
     focus_changed = Signal(bool)  # the frame round the notes shows where you're typing (decision 130)
+    page_set = Signal()  # a page was put in (``set_page``): the outline reads it at once (release 5.113)
     takes_pictures = True
     takes_headings = True  # the format bar's Heading menu (release 5.28); the page folds its headings itself
     #: A document's file, for its picture: set by the browse window.
@@ -635,6 +636,7 @@ class NotesEdit(RichEdit):
         self.saved_body, self.day_headings = body, day_headings
         self._blocks = doc.blockCount()
         self.refold()
+        self.page_set.emit()
 
     def page(self) -> str:
         """The page as docs.db keeps it."""

@@ -1,14 +1,14 @@
-"""The task page's header (release 5.84, the task pane review's T2: R1, R2, R6 and decisions P1, P4, P6 and P10 in
-the design workspace's ``docs/ui-design/task-pane-review.md``).
+"""The task page's header (release 5.84, the task pane review's T2; made calmer in release 5.113, the task panel plan in
+the design workspace's ``docs/mods/task-panel-plan.md``).
 
-The facts above the notes were one HTML page. Now they're a short header the notes follow within the first screen:
-the path, title, chips, the fact line and the description (one HTML part); the status in a tinted card, with the
-status log behind its chevron (the owner's stage two: a status panel that opens to its updates); then one
-**expander** per group (When and who, Key dates, Agenda, Subtasks, Links, Files, Details). A closed group is a button
-with its title and a few words of summary, and the closed groups share one flowing row; an open group takes a row
-of its own, its summary in full (a count, a bar, a link) and its body under it. Which groups are open is the owner's,
-remembered per task. The bodies stay HTML from ``docrepo.detail``, so the page is still tested as text. On a wide
-pane the browse window puts When, Who, Links and Details in the rail instead, and those groups don't show.
+The facts above the notes: the path, the title and the description, then the **facts grid** (its state and flags, its
+dates, its people and its labels, each a grey name beside its value, release 5.113's decision 422), as one HTML part;
+the status as a card with a bar down its left side, its log behind the button at its right (the owner's stage two: a
+status panel that opens to its updates); then one **section** per group (Key dates, Agenda, Subtasks, Links, Files,
+Details), stacked in that order, open or closed. Every section's head is the same row: a chevron hanging in the margin,
+the title, a count or a few words, and its one command at the right; so the title, the grid, the sections, the notes
+and the history all start on one left edge (decision 423). Which groups are open is the owner's, remembered per task.
+The bodies stay HTML from ``docrepo.detail``, so the page is still tested as text.
 """
 from __future__ import annotations
 
@@ -20,13 +20,14 @@ from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QLayout, QSizePolicy,
 from docrepo.ui import tokens
 from docrepo.ui.icons import icon
 from docrepo.ui.page_view import FitPageView
-from docrepo.ui.widgets import FlowLayout
 
-#: The groups, in the page's order, with their titles.
-GROUPS = (("when_who", "When and who"), ("key_dates", "Key dates"), ("agenda", "Agenda"), ("subtasks", "Subtasks"),
-          ("links", "Links"), ("files", "Files"), ("details", "Details"))
+#: The groups, in the page's order, with their titles. When and who went into the facts grid in release 5.113.
+GROUPS = (("key_dates", "Key dates"), ("agenda", "Agenda"), ("subtasks", "Subtasks"), ("links", "Links"), ("files", "Files"),
+          ("details", "Details"))
 #: Open until the owner folds them: what's dated and what's next. The rest open on a click, remembered per task.
 OPEN_BY_DEFAULT = frozenset({"key_dates", "agenda", "subtasks"})
+#: How far a section's chevron hangs into the margin, so its title starts on the page's left edge (decision 423).
+HANG = 22
 _TAGS = re.compile(r"<[^>]+>")
 
 
@@ -45,8 +46,9 @@ def words_of(html: str) -> str:
 
 
 class Expander(QWidget):
-    """A group of the page: its head (the title on a button with a chevron, and its summary) and its body. ``toggled``
-    carries the group's key and whether it's open now. The header moves a closed group's head into its shared row."""
+    """A section of the page: its head (the chevron and title on one button, a count or a few words, and the section's
+    command at the right) and its body. Closed, the head shows ``short`` (a count) in the secondary colour; open, the
+    summary in full, with its links. ``toggled`` carries the group's key and whether it's open now."""
 
     toggled = Signal(str, bool)
 
@@ -61,8 +63,9 @@ class Expander(QWidget):
         self.lay.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         self.head = QWidget(objectName="groupHeadRow")
         hl = QHBoxLayout(self.head)
-        hl.setContentsMargins(0, 0, 0, 0)
-        hl.setSpacing(6)
+        # The chevron hangs in the margin: the title's words start where the page's do.
+        hl.setContentsMargins(max(0, margin - HANG), 3, margin, 3)
+        hl.setSpacing(8)
         self.button = QToolButton(objectName="groupHead")
         self.button.setText(title)
         self.button.setFont(tokens.ui_font(tokens.BODY, semibold=True))
@@ -74,28 +77,32 @@ class Expander(QWidget):
         self.button.clicked.connect(self.toggle)
         self.label = QLabel(objectName="groupSummaryLabel")  # the closed group's few words
         self.label.setFont(tokens.ui_font(tokens.CAPTION))
-        self.summary = fit_view(css, (2, 2, 2, 2))  # the open group's summary in full, with its links
+        self.label.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.label.mousePressEvent = lambda _e: self.toggle()
+        self.summary = fit_view(css, (0, 2, 0, 0))  # the open group's summary in full, with its links
         self.summary.setObjectName("groupSummary")
         self.summary.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        hl.addWidget(self.button)
-        hl.addWidget(self.label)
-        hl.addWidget(self.summary, 1)
-        self.body = body if body is not None else fit_view(css, (margin, 0, margin, 6))
+        hl.addWidget(self.button, 0, Qt.AlignmentFlag.AlignVCenter)
+        hl.addWidget(self.label, 0, Qt.AlignmentFlag.AlignVCenter)
+        hl.addWidget(self.summary, 1, Qt.AlignmentFlag.AlignVCenter)
+        hl.addStretch(0)  # nothing centres when the summary is empty (release 5.84 drew an open Details in the middle)
+        self.short = ""
+        self.body = body if body is not None else fit_view(css, (margin, 0, margin, 8))
         self.body.hide()
         self.lay.addWidget(self.head)
         self.lay.addWidget(self.body)
 
-    def set_content(self, summary_html: str, body_html: str | None = None) -> None:
+    def set_content(self, summary_html: str, body_html: str | None = None, short: str | None = None) -> None:
         self.summary.setHtml(summary_html)
-        self.label.setText(words_of(summary_html))
+        self.short = words_of(summary_html) if short is None else short
+        self.label.setText(self.short)
         self._show_summary()
         if body_html is not None:
             self.body.setHtml(body_html)
 
     def _show_summary(self) -> None:
-        has = bool(self.label.text())
-        self.label.setVisible(has and not self.is_open)
-        self.summary.setVisible(has and self.is_open)
+        self.label.setVisible(bool(self.short) and not self.is_open)
+        self.summary.setVisible(bool(self.summary.toPlainText().strip()) and self.is_open)
 
     def set_open(self, is_open: bool, emit: bool = False) -> None:
         self.is_open = is_open
@@ -120,8 +127,8 @@ class Expander(QWidget):
 
 
 class TaskHeader(QWidget):
-    """The header: the head part, the status card, the closed groups' row and the open groups. ``fold_changed`` carries
-    a group's key (or "status_log") and whether it's open now, for the browse window to keep per task."""
+    """The header: the head part (with the facts grid), the status card and the sections. ``fold_changed`` carries a
+    group's key (or "status_log") and whether it's open now, for the browse window to keep per task."""
 
     fold_changed = Signal(str, bool)
 
@@ -134,28 +141,33 @@ class TaskHeader(QWidget):
         lay.setSpacing(0)
         lay.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         self.head = fit_view(css, (margin, margin, margin, 0))
-        # The status card: the page's one tint, with the log of changes behind its chevron.
+        # The status card: the page's one tinted block, with a bar down its left side, and the log of changes behind the
+        # button at its right (release 5.113: the bar and the button's words, so the card reads as one and says what opens).
         self.card = QFrame(objectName="statusCard")
         cl = QVBoxLayout(self.card)
-        cl.setContentsMargins(12, 6, 10, 8)
+        cl.setContentsMargins(14, 8, 8, 10)
         cl.setSpacing(0)
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(6)
         self.status_name = QLabel("Current status", objectName="statusName")
-        self.status_name.setFont(tokens.ui_font(tokens.CAPTION))
+        self.status_name.setFont(tokens.ui_font(tokens.CAPTION, semibold=True))
         self.status_when = QLabel("", objectName="statusWhen")
         self.status_when.setFont(tokens.ui_font(tokens.CAPTION))
-        self.status_fold = QToolButton(objectName="groupFold")
+        self.status_fold = QToolButton(objectName="statusLog")
         self.status_fold.setIcon(icon("chevron-right"))
+        self.status_fold.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.status_fold.setLayoutDirection(Qt.LayoutDirection.RightToLeft)  # the chevron after the words
+        self.status_fold.setFont(tokens.ui_font(tokens.CAPTION))
         self.status_fold.setAutoRaise(True)
         self.status_fold.setCursor(Qt.CursorShape.PointingHandCursor)
         self.status_fold.clicked.connect(lambda: self.set_log_open(not self.log_open, emit=True))
         row.addWidget(self.status_name)
-        row.addStretch()
         row.addWidget(self.status_when)
+        row.addStretch()
         row.addWidget(self.status_fold)
-        self.status_body = fit_view(css, (0, 2, 0, 0))
-        self.status_log = fit_view(css, (0, 6, 0, 0))
+        self.status_body = fit_view(css, (0, 4, 0, 0))
+        self.status_log = fit_view(css, (0, 8, 0, 0))
         self.status_log.hide()
         self.log_open = False
         cl.addLayout(row)
@@ -163,57 +175,42 @@ class TaskHeader(QWidget):
         cl.addWidget(self.status_log)
         self.card_wrap = QWidget()
         wl = QVBoxLayout(self.card_wrap)
-        wl.setContentsMargins(margin, 8, margin, 4)
+        wl.setContentsMargins(margin, 14, margin, 10)
         wl.addWidget(self.card)
-        # The closed groups share one row that wraps; an open group has a row of its own, then its body.
-        self.strip = QWidget(objectName="groupStrip")
-        self.strip_layout = FlowLayout(self.strip, spacing=10)
-        self.strip_layout.setContentsMargins(max(0, margin - 4), 4, margin, 2)
         self.groups = {key: Expander(key, title, css, margin) for key, title in GROUPS}
         lay.addWidget(self.head)
         lay.addWidget(self.card_wrap)
-        lay.addWidget(self.strip)
         for g in self.groups.values():
             g.toggled.connect(self._toggled)
-            g.lay.setContentsMargins(max(0, margin - 4), 4, margin, 0)
             lay.addWidget(g)
 
     def _place(self, g: Expander) -> None:
-        """A closed group's head goes into the shared row; an open group's comes back above its body. A group with
-        nothing in it (``present`` off) shows nowhere."""
-        if g.present and g.is_open:
-            if g.head.parentWidget() is not g:
-                self.strip_layout.removeWidget(g.head)
-                g.lay.insertWidget(0, g.head)
-            g.head.show()
-            g.show()
-        else:
-            if g.present and g.head.parentWidget() is not self.strip:
-                g.lay.removeWidget(g.head)
-                self.strip_layout.addWidget(g.head)
-            g.head.setVisible(g.present)
-            g.hide()
-        self.strip.setVisible(any(x.present and not x.is_open for x in self.groups.values()))
+        """A group with nothing in it (``present`` off) shows nowhere."""
+        g.setVisible(g.present)
 
     def _toggled(self, key: str, is_open: bool) -> None:
         self._place(self.groups[key])
         self.fold_changed.emit(key, is_open)
 
     def show_parts(self, parts: dict[str, str], folds: dict[str, bool]) -> None:
-        """Draw the page's parts. A group whose body is empty (no subtasks, no links, in the rail) isn't shown."""
+        """Draw the page's parts. A group whose body is empty (no subtasks, no links) isn't shown."""
         self.head.setHtml(parts["head"])
         self.status_name.setText(parts["status_name"])
-        self.status_when.setText(parts["status_when"])
+        self.status_when.setText(f"· {parts['status_when']}" if parts["status_when"] else "")
         self.status_when.setToolTip(f"The current status last changed {parts['status_age']}" if parts["status_age"] else "")
         self.status_body.setHtml(parts["status_body"])
         self.status_log.setHtml(parts["status_log"])
+        self.status_fold.setText(parts["status_log_summary"])
         self.status_fold.setToolTip(f"The status log: {parts['status_log_summary']}")
+        self.card.setProperty("empty", not parts["status_when"])
+        self.card.style().unpolish(self.card)
+        self.card.style().polish(self.card)
         self.set_log_open(folds.get("status_log", False))
         for key, g in self.groups.items():
             body = parts.get(key, "")
             g.present = bool(body)
             if body:
-                g.set_content(parts.get(key + "_summary", ""), body)
+                g.set_content(parts.get(key + "_summary", ""), body, parts.get(key + "_short"))
                 g.set_open(folds.get(key, key in OPEN_BY_DEFAULT))
             self._place(g)
 
