@@ -9,7 +9,8 @@ page names its pictures and this view draws them:
 - ``progress:1:4``, a thin bar, 1 of 4 filled;
 - ``timing:...``, a lane of a template's chart, or its ruler (release 5.51);
 - ``chev:right`` and ``chev:down``, the icons' chevrons for a fold or a menu (release 5.59);
-- ``lk:link``, ``lk:folder``, ``lk:note``, ``lk:ref`` and ``lk:pin``, the marks of the Links group's rows (release 5.67);
+- ``lk:link``, ``lk:folder``, ``lk:note``, ``lk:ref`` and ``lk:pin``, the marks of the Links group's rows (release 5.67), and
+  ``lk:decision``, a decision's in the Decisions section (release 5.124);
 - ``ft:pdf``, ``ft:sheet`` and the other file types, a file's mark in its type's colour, for the Files group (release 5.114).
 """
 from __future__ import annotations
@@ -79,8 +80,9 @@ def mark(state: str, scale: float) -> QImage:
     return image
 
 
-#: The Links group's marks (release 5.67): the icon each draws, and its colour.
-LINK_MARKS = {"link": ("link", "text2"), "folder": ("folder", "text2"), "note": ("note", "text2"), "ref": ("link", "accent"), "pin": ("pin", "accent")}
+#: The Links group's marks (release 5.67), and the Decisions section's (release 5.124): the icon each draws, and its colour.
+LINK_MARKS = {"link": ("link", "text2"), "folder": ("folder", "text2"), "note": ("note", "text2"), "ref": ("link", "accent"), "pin": ("pin", "accent"),
+              "decision": ("decision", "text2")}
 
 
 def link_mark(key: str, scale: float) -> QImage:
