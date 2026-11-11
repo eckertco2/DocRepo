@@ -10,8 +10,8 @@ from datetime import datetime  # noqa: E402
 
 import pytest  # noqa: E402
 from PySide6.QtCore import QEvent, QMimeData, QPoint, QPointF, Qt, QUrl  # noqa: E402
-from PySide6.QtGui import QDragEnterEvent, QDragLeaveEvent, QDragMoveEvent, QDropEvent, QKeyEvent  # noqa: E402
-from PySide6.QtWidgets import QApplication, QPushButton, QSystemTrayIcon  # noqa: E402
+from PySide6.QtGui import QDragEnterEvent, QDragLeaveEvent, QDragMoveEvent, QDropEvent, QEnterEvent, QKeyEvent  # noqa: E402
+from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QSystemTrayIcon  # noqa: E402
 
 from docrepo import capacity, db, edits, hotkey, panel_rules, prompts, wheels_config as wc  # noqa: E402
 from docrepo.app import CaptureApp  # noqa: E402
@@ -24,7 +24,7 @@ from docrepo.ui import today_panel  # noqa: E402
 from docrepo.ui.context import AppContext  # noqa: E402
 from docrepo.ui.lists import today as today_list  # noqa: E402
 from docrepo.ui.drop_target import DropRead, Dropped  # noqa: E402
-from docrepo.views import today_due_entries, today_groups  # noqa: E402
+from docrepo.views import due_cell, today_due_entries, today_groups  # noqa: E402
 
 NOW = datetime(2026, 10, 8, 14, 10)
 
@@ -574,6 +574,68 @@ def test_a_note_has_no_later(app, panel):
     note_on_today(app)
     row = next(r for r in panel.rows if r.task_id is None)
     assert [b.text() for b in row.buttons.findChildren(QPushButton)] == ["Done", "Remove"]
+
+
+# ---- a row's two lines (release 5.119, the owner's voice memo of 2026-11-11, decisions 440 to 443) ----
+def _with_a_due(app) -> str:
+    """A sample task with a date in its row, put on Today."""
+    m = Model(app.ctx.conn)
+    task = next(t.id for t in m.tasks.values() if not t.discarded and t.state != "Closed" and due_cell(t, NOW.date()) is not None)
+    put_on_today(app, task)
+    return task
+
+
+def _wide(panel) -> None:
+    panel.hover.open_wide()
+    panel._update_state()
+    QApplication.processEvents()
+
+
+def test_the_title_has_its_line_to_itself(app, panel):
+    """Decision 440: the state and the date are on the second line, under the title, and the hover's links go there too."""
+    task = _with_a_due(app)
+    _wide(panel)
+    row = next(r for r in panel.rows if r.task_id == task)
+    assert all(w.parent() is row.second for w in (row.subtitle, row.state_button, row.due, row.buttons))
+    assert row.title_label.parent() is row and row.second.isVisibleTo(row)
+    assert row.title_label.width() >= row.width() - row.tick.width() - 24  # the whole row but its tick box
+    panel.hover.contract()
+    panel._update_state()
+    assert not row.second.isVisibleTo(row)  # at rest, the title alone
+
+
+def test_the_state_is_its_icon_and_the_date_is_short(app, panel):
+    """Decisions 441 and 442: the state's icon, its name in its tooltip; the date as "8 d", its whole date in its tooltip."""
+    task = _with_a_due(app)
+    _wide(panel)
+    t = Model(app.ctx.conn).task(task)
+    cell = due_cell(t, NOW.date())
+    row = next(r for r in panel.rows if r.task_id == task)
+    assert row.state_button.text() == "" and row.state_button.accessibleName() == t.state
+    assert row.state_button.toolTip() == f"{t.state}. Click to change the state."
+    assert row.due.property("days") == cell.days and row.due.toolTip() == cell.tip and "·" not in row.due.text()
+    QApplication.sendEvent(row, QEnterEvent(QPointF(2, 2), QPointF(2, 2), QPointF(2, 2)))
+    assert row.buttons.isVisibleTo(row) and not row.due.isVisibleTo(row) and row.state_button.isVisibleTo(row)
+    QApplication.sendEvent(row, QEvent(QEvent.Type.Leave))
+    assert not row.buttons.isVisibleTo(row) and row.due.isVisibleTo(row)
+
+
+def test_a_note_s_second_line_is_there_only_for_its_links(app, panel):
+    note_on_today(app)
+    _wide(panel)
+    row = next(r for r in panel.rows if r.task_id is None)
+    assert row.state_button is None and not row.second.isVisibleTo(row)
+    QApplication.sendEvent(row, QEnterEvent(QPointF(2, 2), QPointF(2, 2), QPointF(2, 2)))
+    assert row.second.isVisibleTo(row) and row.buttons.isVisibleTo(row)
+
+
+def test_due_in_the_next_7_days_has_the_short_date(app, panel):
+    """Decision 443."""
+    app.ctx.keep_state(today_panel.DUE_OPEN_KEY, "1")
+    panel.refresh()
+    _wide(panel)
+    dates = [w for line in panel.extras for w in line.findChildren(QLabel, "tpDue")]
+    assert dates and all("·" not in w.text() and w.toolTip() for w in dates)
 
 
 # ---- the width at rest (release 5.106, decision 406) ----

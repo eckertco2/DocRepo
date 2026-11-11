@@ -177,3 +177,44 @@ def test_the_words_plant_event_make_a_plant_event(model):
     own = items.self_fields(r, names_of(model))
     assert own.plant_event and r.items == []
     assert not items.self_fields(items.read("Spring outage, 3 to 14 Nov", names_of(model), TODAY, new_task=True), names_of(model)).plant_event
+
+
+# ---- sub-bullets (release 5.120, the owner's voice memo of 2026-11-11, decisions 444 to 446) ----
+def test_a_bullets_sub_bullets_are_its_lines(model):
+    """Decision 444, as it's been since release 5.8: a bullet's sub-bullets with no operator of their own are its task's,
+    its update's or its note's lines, and a task in a sub-bullet under a task's bullet goes under that task only."""
+    names = names_of(model)
+    r = items.read("- @Tom order seals\n  - ask about lead time\n    - two quotes\n  - @Mike book the crane\n    - 50 t", names, TODAY, home=True)
+    seals, crane = r.items
+    assert seals.text == "Order seals\n- ask about lead time\n  - two quotes" and [(w.kind,) for w in seals.where] == [("home",)]
+    assert crane.text == "Book the crane\n- 50 t" and [(w.kind, w.ref) for w in crane.where] == [("item", seals.key)]
+    update = items.read("- #Rigging plan **in progress, crane booked\n  - slings checked", names, TODAY).items[0]
+    assert update.kind == "update" and update.text == "Crane booked\n- slings checked"
+
+
+def test_a_task_in_a_sub_bullet_goes_under_its_parent_bullets_task(model):
+    """Decision 445: under the # task its parent bullet names, in the capture's task's place; a # of its own, or a top
+    bullet, is as before."""
+    names = names_of(model)
+    text = "- #Rigging plan\n  - crane is booked\n  - @Tom check the slings\n  - @Mike order shackles #Installation"
+    note, tom, mike = items.read(text, names, TODAY, home=True, own="T000010").items
+    assert note.kind == "note" and [(w.kind, w.ref) for w in note.where] == [("task", "T000012")]
+    assert [(w.kind, w.ref) for w in tom.where] == [("task", "T000012")]  # not under the capture's task too
+    assert [(w.kind, w.ref) for w in mike.where] == [("home", None), ("task", "T000008")]
+    top = items.read("- @Tom check the slings #Rigging plan", names, TODAY, home=True).items[0]
+    assert [(w.kind, w.ref) for w in top.where] == [("home", None), ("task", "T000012")]
+    update = "- #Rigging plan **in progress, crane booked\n  - @Tom check the slings"
+    assert [(w.kind, w.ref) for w in items.read(update, names, TODAY, home=True).items[1].where] == [("task", "T000012")]
+    meeting = "#Rigging plan\n- crane is booked\n  - @Tom check the slings\n- @Mike order shackles"
+    tom, mike = [x for x in items.read(meeting, names, TODAY, home=True).items if x.kind == "task"]
+    assert [(w.kind, w.ref) for w in tom.where] == [("task", "T000012")]  # a sub-bullet, under the heading's task
+    assert [(w.kind, w.ref) for w in mike.where] == [("home", None), ("task", "T000012")]  # a top bullet under a heading, as before
+
+
+def test_the_bullet_tree_of_a_sub_bullet():
+    """Decision 446: from its top bullet to the last line under it."""
+    lines = ["Intro", "- top", "  - a", "    - b", "\t- c", "- next", "", "  - stray", "  - its sibling", "Text"]
+    assert items.bullet_tree(lines, 3) == (1, 5) and items.bullet_tree(lines, 4) == (1, 5)
+    assert items.bullet_tree(lines, 1) is None and items.bullet_tree(lines, 0) is None  # a top bullet, and a line of text
+    assert items.bullet_tree(lines, 8) == (7, 9)  # no top bullet: from the first of its run
+    assert [items.list_level(x) for x in lines[:5]] == [-1, 0, 1, 2, 1]
