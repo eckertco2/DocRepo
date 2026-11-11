@@ -293,14 +293,16 @@ def test_the_today_side_panels_rows(browse):
     try:
         panel.refresh()
         r = next(x for x in panel.rows if x.task_id == INSTALLATION)
-        assert r.state_button is not None and r.state_button.text() == states(browse, INSTALLATION)[0]
-        assert states(browse, INSTALLATION)[0] not in r.subtitle.full  # the state is the button, not words in the line
+        # The state is the button, as its icon with its name for a screen reader and in its tooltip (release 5.119, decision 441).
+        assert r.state_button is not None and r.state_button.accessibleName() == states(browse, INSTALLATION)[0]
+        assert r.state_button.text() == "" and r.state_button.toolTip().startswith(states(browse, INSTALLATION)[0])
+        assert states(browse, INSTALLATION)[0] not in r.subtitle.full  # not words in the line
         picking(browse, "Parked")
         panel.state_clicked(r)
         assert states(browse, INSTALLATION) == ["Parked"]
         assert panel.note_row.isVisibleTo(panel) and panel.note_label.text() == "Parked: Installation." and panel.note_undo.isVisibleTo(panel)
         r = next(x for x in panel.rows if x.task_id == INSTALLATION)
-        assert r.state_button.text() == "Parked"  # drawn again
+        assert r.state_button.accessibleName() == "Parked"  # drawn again
     finally:
         panel.deleteLater()
 

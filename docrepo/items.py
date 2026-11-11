@@ -2,7 +2,9 @@
 
 In any capture, a block of the content text with an operator becomes an item: a task, a note, an update or a
 decision. A block is a line, with the list items under it that have no operator of their own; a list item under it
-with an operator is a block of its own, inside it. Operators are read from the content text's words (never from an
+with an operator is a block of its own, inside it. Since release 5.120 (decisions 444 to 446, the owner's voice memo of
+2026-11-11), a task in a sub-bullet goes under the # task its parent bullet names, in the capture's task's place, and
+``bullet_tree`` finds the tree a sub-bullet is in, which is a sub-bullet task's notes on its page. Operators are read from the content text's words (never from an
 added email), and only after a space, a "(" or the start of a line, so an address such as tom@example.com stays text.
 
 - ``@Tom``, ``@Tom Becker``: a task, with Tom an assignee (several allowed). ``@L.Tom``: a task, with Tom its lead.
@@ -1075,8 +1077,12 @@ def read(content: str, names: Names, today: date, *, labels: Sequence[ParseLabel
                 it.title = first_sentence(_MARKER.sub("", it.text)) or (it.state if kind == "update" and it.state else "")
             # Where it goes. A task: under the item it's listed under, else the capture's task (or meeting, or new task),
             # and under each # task; with none, under Quick tasks. A note, update or decision: on each # task, else on the
-            # task item it's listed under, else on the capture's task.
+            # task item it's listed under, else on the capture's task. A task in a sub-bullet with no # of its own goes
+            # under the # task its parent bullet names, in the capture's task's place (release 5.120, decision 445).
             up = [Where("item", it.parent_item)] if it.parent_item else [Where("home")] if it.parent_self or home else []
+            if kind == "task" and up and not it.parent_item and not it.parent_self and b.parent is not None and it.tasks and \
+                    not _tasks_of([x for x in lines[b.owner].toks if not x.inside]):
+                up = []
             if kind == "task":
                 it.where = [*up, *(Where("task", t) for t in it.tasks)] or [Where("quick")]
             else:
@@ -1152,6 +1158,28 @@ def self_fields(r: Reading, names: Names) -> SelfFields | None:
     people = [x for x in L.toks if x.kind == "person" and not x.none and not x.inside and (x.id or x.name.lower() not in off)]
     return SelfFields([x for x in people if x.lead], [x for x in people if not x.lead], _tasks_of([x for x in L.toks if not x.inside]), clean(L.text, L.toks, names), bool(L.toks),
                       any(x.kind == "type" and x.event for x in L.toks))
+
+
+def list_level(line: str) -> int:
+    """A line's list level, 0 for a top bullet, as ``read`` counts it (two spaces or a tab a level); -1 for a line that
+    isn't a list item."""
+    m = LIST_RE.match(line)
+    return len(m.group(1).replace("\t", "  ")) // 2 if m else -1
+
+
+def bullet_tree(lines: Sequence[str], at: int) -> tuple[int, int] | None:
+    """The bullet tree a sub-bullet is in (release 5.120, decision 446): from its top bullet to the last line under that
+    bullet, as (first line, line after the last), or None when line ``at`` isn't a sub-bullet. A line that isn't a list
+    item, or is empty, ends the tree above and below, as it ends a block in ``read``."""
+    if not 0 <= at < len(lines) or list_level(lines[at]) < 1:
+        return None
+    start = at
+    while start > 0 and list_level(lines[start]) > 0 and list_level(lines[start - 1]) >= 0:
+        start -= 1
+    end = at + 1
+    while end < len(lines) and list_level(lines[end]) > 0:
+        end += 1
+    return start, end
 
 
 def line_kinds(r: Reading) -> dict[int, str]:
