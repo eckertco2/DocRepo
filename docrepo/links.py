@@ -157,11 +157,29 @@ def read_address(text: str, one: bool = True) -> Address:
                                   "drive (C:\\) or \\\\server.")
 
 
+#: A link address typed with no http:// or https:// (release 5.134, decision 546): a server's name, with its port if it has
+#: one, then a / or a ?, as "intranet/record?" or "records.example.com/view?id=" are typed in a browser's address bar.
+_BARE_HOST = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*(?::\d+)?[/?]")
+
+
+def full_template(template: str | None) -> str:
+    """A reference field's link address with its http:// or https:// in front (release 5.134, decision 546). One typed
+    without them is read as a browser's address bar reads it: a server's name and a / take http://
+    ("intranet/record?" is http://intranet/record?), and www. takes https://, as Add link gives it. Anything else, such
+    as a path or a mailto: address, is left as it was, for ``check_link_template`` to refuse."""
+    t = (template or "").strip()
+    if not t or re.match(r"^https?://", t, re.IGNORECASE):
+        return t
+    if t.lower().startswith("www."):
+        return "https://" + t
+    return "http://" + t if _BARE_HOST.match(t) else t
+
+
 def reference_link(template: str | None, value: str | None) -> str:
     """A reference field's link (release 5.67, round 6's decision 320): its value put into the link address Settings
     gives the field, where ``{}`` is or at the end, encoded as an address needs. "" when either is empty, or what they
-    make isn't a web link."""
-    template, value = (template or "").strip(), (value or "").strip()
+    make isn't a web link. Since release 5.134 an address typed with no http:// or https:// gets one (``full_template``)."""
+    template, value = full_template(template), (value or "").strip()
     if not template or not value:
         return ""
     v = quote(value, safe="")
@@ -171,12 +189,13 @@ def reference_link(template: str | None, value: str | None) -> str:
 
 def check_link_template(template: str) -> str:
     """Why a reference field's link address can't be used, in words, or "" when it can: it must be an http or https
-    address, with ``{}`` where the value goes or the value going at its end."""
-    t = (template or "").strip()
+    address, or a server's name and a / that takes http:// (release 5.134), with ``{}`` where the value goes or the value
+    going at its end."""
+    t = full_template(template)
     if not t:
         return ""
     if not re.match(r"^https?://", t, re.IGNORECASE):
-        return "starts with http:// or https://"
+        return "starts with http://, https:// or a server's name and a /"
     if t.count("{}") > 1:
         return "has {} once at most"
     if not reference_link(t, "1234"):
