@@ -329,3 +329,32 @@ def test_a_task_made_from_a_note_on_the_page_is_one_line_there(root):
     assert r.capture_id is None and r.items  # the note is no capture (release 5.69); its item made a task
     lines = lines_of(page(root, "T000012"))
     assert [x.kind for x in lines] == ["heading", "text", "task"] and lines[2].ref == Model(conn).captures[r.items[0]].created_task
+
+
+# ---- a task in a sub-bullet has its bullet tree as its notes (release 5.120, decision 446) ----
+TREE = ("Crane is booked.\n"
+        "- Pump overhaul prep @Priya\n"
+        "  - parts list from the vendor\n"
+        "  - @Tom book the 50 t crane\n"
+        "    - for the 20th\n"
+        "  - spares in the store\n"
+        "- Seal kit, not in the tree")
+
+
+def test_a_task_from_a_sub_bullet_has_its_whole_bullet_tree_on_its_page(root):
+    conn = root[0]
+    r = save(root, CaptureDraft(content=TREE, task="T000010", meeting=True))
+    m = Model(conn)
+    prep, crane = (m.captures[c].created_task for c in r.items)
+    assert [p for p in m.parents_of(crane)] == [prep]
+    crane_page = page(root, crane)
+    for words in ("Pump overhaul prep", "parts list from the vendor", "book the 50 t crane", "for the 20th", "spares in the store"):
+        assert words in crane_page
+    assert "Seal kit" not in crane_page and "Crane is booked." not in crane_page
+    assert "parts list from the vendor" in page(root, prep) and "50 t crane" not in page(root, prep)  # a top bullet's: its own lines
+    # Its capture.md keeps its own lines, so the meeting's page still shows it as one task line where they were (R4b).
+    assert any(x.kind == "task" and x.ref == crane for x in lines_of(page(root, r.meeting)))
+    assert "for the 20th" not in page(root, r.meeting)
+    # Its block is found on its page as it was added, so discarding it takes it off with no question (decision 106).
+    model, stories = edits.stories_for(conn, root[1], AT)
+    assert notes_page.edited_blocks(model, stories, r.items[1]) == []

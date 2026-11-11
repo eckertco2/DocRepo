@@ -291,13 +291,41 @@ def has_caption(lines: list[str]) -> bool:
     return any(read_line(x).kind == "caption" for x in lines)
 
 
+def _same_line(line: str) -> str:
+    """A line's words, to find an item's line in its notes: its names as written, without marks, spaces run together."""
+    return " ".join(markup.to_plain(items.unstore(line)).split())
+
+
+def sub_bullet_tree(model: Model, stories, c: Capture, task_id: str, content: str | None) -> tuple[str, bool] | None:
+    """Decision 446 (release 5.120): a task made from a sub-bullet in the notes (``c``, the item's capture, on the page of
+    ``task_id``, the task it made) has the whole bullet tree its top bullet heads as its notes: the tree as the notes
+    have it, and whether that's markup. None for any other capture, or when its first line isn't found as a sub-bullet in
+    its notes. The item's capture.md keeps its own lines, so the notes' page still finds them for its task line (R4b)."""
+    if not (c.from_notes and c.item == "task" and c.created_task == task_id and content):
+        return None
+    notes = model.captures.get(c.from_notes)
+    first = next((x for x in content.split("\n") if x.strip()), "")
+    text = typed_content(notes, stories.content_of(notes.id)) if notes is not None else None
+    if not text or items.list_level(first) < 1:
+        return None
+    lines, key = text.split("\n"), _same_line(first)
+    for i, line in enumerate(lines):
+        if items.list_level(line) >= 1 and _same_line(line) == key:
+            span = items.bullet_tree(lines, i)
+            return ("\n".join(lines[span[0]:span[1]]), notes.formatted) if span else None
+    return None
+
+
 def block(model: Model, stories, c: Capture, task_id: str, content: str | None) -> list[str]:
     """A capture's block on a task's page (decisions 96, 114, 115, 120): its caption, its note text in full, and a file
     line for each of its files. ``content`` is its typed text: an email's own text stays with the email. Since release
     5.83 (the task pane review's R4 and R4b): text that only repeats a file's description isn't written, a block with no
     words of its own beyond its files has no caption, and a task made from the notes is one task line where its
-    lines were."""
-    text = capture_markup(c, content, c.title if c.created_task == task_id else "", task_id)
+    lines were. Since release 5.120 (decision 446), a task made from a sub-bullet in the capture window's notes has its
+    whole bullet tree as its block's text on its own page (``sub_bullet_tree``)."""
+    tree = sub_bullet_tree(model, stories, c, task_id, content)
+    text = (note_markup(tree[0], tree[1], "", task_id) if tree else
+            capture_markup(c, content, c.title if c.created_task == task_id else "", task_id))
     docs = [model.documents[d] for d in c.document_ids if d in model.documents]
     descriptions = {_plain_words(d.description) for d in docs if d.description and not made_up(d.description, d.name)}
     words = [w for x in text if (w := _plain_words(x))]
