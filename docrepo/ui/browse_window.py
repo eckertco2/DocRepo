@@ -177,7 +177,6 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         self.selecting = False
         self.ticked: set[str] = set()
         #: A task just marked Done on Today: the Today view asks whether to update it too (mods log round 1, M0016).
-        self.today_ask: str | None = None
         self.today_kind = "task"  # what Today's box makes: a quick task, or a note
         self.open: set[str] = set()
         self.doc_task: str | None = None
@@ -1515,32 +1514,6 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
             return
         if self._do(lambda: edits.add_to_today(self.conn, self.ctx.data_root, self.ctx.fs, None, text, self._now()), self.sel):
             self.today_note.setFocus()
-
-    def close_today_item(self, item_id: int, how: str) -> None:
-        """Done or Remove on Today. Done on a task then asks, in the Today view, whether to update the task too."""
-        item = next((a for a in self.model().agenda if a.id == item_id), None)
-        if item is None:
-            return
-        self.today_ask = item.subject if how == "Done" else None
-        out = self._do(lambda: edits.close_today_item(self.conn, self.ctx.data_root, self.ctx.fs, item_id, how, self._now()))
-        if not out:
-            self.today_ask = None
-            self.render_list()
-            return
-
-        def undo() -> None:  # release 5.91: back on Today as it was, and no "Update the task too?"
-            self.today_ask = None
-            if self._do(lambda: edits.reopen_agenda_item(self.conn, self.ctx.data_root, self.ctx.fs, item_id, self._now()), self.sel):
-                self.say("Back on Today.")
-
-        self.say_undo(out.message, undo)
-
-    def answer_today(self, answer: str | None) -> None:
-        """The answer to "Update the task too?": an Update capture starting "Done today: " or "Closed. ", or nothing."""
-        task_id, self.today_ask = self.today_ask, None
-        self.render_list()
-        if task_id and answer:
-            self.open_capture(task=task_id, mode="update", content="Done today: " if answer == "update" else "Closed. ")
 
     def copy_agenda(self, target: str) -> None:
         from docrepo.views import agenda_markdown

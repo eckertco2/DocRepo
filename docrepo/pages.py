@@ -13,7 +13,7 @@ from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import quote
 
-from docrepo import tagged, ties
+from docrepo import repeats, tagged, ties
 from docrepo.dates import day_diff, days_text, minutes, to_date
 from docrepo.links import reference_link
 from docrepo.model import PRIORITY_NAMES, TODAY, TYPE_NAMES, Capture, FileEntry, Model, StatusEntry, Task, is_person
@@ -140,6 +140,8 @@ class Pages:
             rows.append(("Tied to this", ", ".join(link(x.id) for x in tied)))
         if t.reminder:
             rows.append(("Reminder", t.reminder))
+        if t.reminder_repeat:  # release 5.117, decision 416
+            rows.append(("Reminder repeats", repeats.describe(t.reminder_repeat) + (f", until {t.reminder_until}" if t.reminder_until else "")))
         for name, value in t.references.items():  # its reference fields (release 5.9, M0034), as links when they have one (5.67)
             address = reference_link(self.reference_links.get(name), value)
             rows.append((name, f"[{_text(value)}]({address})" if address else value))

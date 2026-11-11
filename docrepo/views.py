@@ -558,7 +558,8 @@ def today_due_entries(m: Model, today: date, me: str | None, mine_only: bool = F
     together, those of urgent tasks first (release 5.97, the consolidation plan's decision 386, as the Urgent view is gone),
     then soonest first; on the same day, a key date before a task."""
     tasks = due_this_week(m, today, me, mine_only)
-    dues = key_dates_due(m, today, me, mine_only)  # each key date a row of its own (release 5.31, decision 150)
+    # Each key date a row of its own (release 5.31, decision 150); a task waiting for its reminder is left out (decision 418).
+    dues = [d for d in key_dates_due(m, today, me, mine_only) if not waiting_for_reminder(d.task, today)]
     entries = sorted([*((not t.urgent, d.date if (d := due_of(t, today)) else date.max, 1, i, t) for i, t in enumerate(tasks)),
                       *((not d.task.urgent, d.day, 0, i, d) for i, d in enumerate(dues))], key=lambda e: e[:4])
     return [e[4] for e in entries]
@@ -577,13 +578,20 @@ def find_text(m: Model, task_id: str) -> str:
     return " ".join([t.id, t.title, t.description, t.current_status, *(name for name, _ in m.labels_of(task_id)), *names]).lower()
 
 
+def waiting_for_reminder(t: Task, today: date) -> bool:
+    """A task whose reminder is still to come (release 5.116, decision 418): a reminder says when you want to hear about it,
+    so Due in the next 7 days leaves it out until then. That's how Later takes a row off that list."""
+    return bool(t.reminder) and to_date(t.reminder) > today
+
+
 def due_this_week(m: Model, today: date, me: str | None, mine_only: bool = False) -> list[Task]:
     """Today's Due in the next 7 days (mods log round 2, M0050): the Overdue and next 7 days list's tasks, soonest first,
-    that aren't on Today yet. With Mine only, those I lead or am assigned to."""
+    that aren't on Today yet, nor waiting for a reminder still to come (release 5.116, decision 418). With Mine only, those
+    I lead or am assigned to. The sidebar's Overdue and next 7 days list keeps them all."""
     on_today = {a.subject for a in m.today_items() if a.subject}
     due = next(x for x in LISTS if x.id == "due")
     return [t for t in list_tasks(m, due, today, me)
-            if t.id not in on_today and (not mine_only or me in t.leads or me in t.assignees)]
+            if t.id not in on_today and not waiting_for_reminder(t, today) and (not mine_only or me in t.leads or me in t.assignees)]
 
 
 # ---- agendas ----

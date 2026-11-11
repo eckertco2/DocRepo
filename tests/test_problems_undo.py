@@ -104,11 +104,11 @@ def test_undo_after_done_puts_it_back_on_today(windows, ctx):
     browse.add_to_today("T000012")
     item = next(a for a in Model(ctx.conn).today_items() if a.subject == "T000012")
     browse.close_today_item(item.id, "Done")
-    assert "Undo" in browse.status.text() and browse.today_ask == "T000012"
+    assert "Undo" in browse.status.text()
     browse._status_link("undo")
     m = Model(ctx.conn)
     again = next(a for a in m.agenda if a.id == item.id)
-    assert again.closed is None and again.how is None and browse.today_ask is None
+    assert again.closed is None and again.how is None
     assert not [e for e in m.status_log_of("T000012") if e.to_value == "Done"]  # its closing line went with it
     assert "Back on Today." in browse.status.text()
 

@@ -190,6 +190,10 @@ def test_due_in_the_next_7_days_on_today(m, sample_conn):
     from docrepo import agenda
     from docrepo.model import TODAY as ON_TODAY
 
+    # T000019's reminder is tomorrow, so it waits off the list until then (release 5.116, decision 418).
+    assert [t.id for t in views.due_this_week(m, TODAY, "P001")] == ["T000012"]
+    sample_conn.execute("UPDATE tasks SET reminder = NULL WHERE id = 'T000019'")
+    m = Model(sample_conn)
     assert [t.id for t in views.due_this_week(m, TODAY, "P001")] == ["T000019", "T000012"]
     assert [t.id for t in views.due_this_week(m, TODAY, "P001", mine_only=True)] == ["T000019"]  # I lead it
     agenda.add_item(sample_conn, subject="T000019", target=ON_TODAY, note="", added="2026-10-08 08:00:00", added_by="Browse tool")
@@ -219,6 +223,8 @@ def test_the_task_trees_urgent_filter_lists_what_the_urgent_view_did(m):
 
 def test_todays_due_puts_urgent_tasks_first(m, sample_conn):
     """Decision 386: an urgent task comes first in Today's Due in the next 7 days, then the rest soonest first."""
+    sample_conn.execute("UPDATE tasks SET reminder = NULL WHERE id = 'T000019'")  # its reminder would keep it off (decision 418)
+    m = Model(sample_conn)
     before = [views.entry_task(e).id for e in views.today_due_entries(m, TODAY, "P001")]
     assert before == ["T000019", "T000012"]  # T000019 is urgent and the soonest already
     sample_conn.execute("UPDATE tasks SET urgent = 0 WHERE id = 'T000019'")
