@@ -12,6 +12,10 @@ its box or its hotkey has the keyboard.
 Release 5.106 (``docs/mods/today-panel-plan.md`` in the design workspace): its inner edge can be dragged to set its width at
 rest, which it remembers (decision 406), and a file, a link or an email dropped on one of its tasks opens the capture window
 as an Update on that task, with what was dropped in it (decisions 407 and 408).
+
+Release 5.119 (``docs/mods/rows-and-bullets-plan.md``, decisions 440 to 443, the owner's voice memo of 2026-11-11): a row's
+title has its line to itself. Its state, as its icon, and its date, short ("8 d"), are on its second line, at the right,
+where Later, Done and Remove show on the pointer; Due in the next 7 days has the short date too.
 """
 from __future__ import annotations
 
@@ -55,12 +59,12 @@ from docrepo.ui.context import AppContext
 from docrepo.ui.drop_target import DropOverlay, DropRead
 from docrepo.ui.icons import icon, icon_size
 from docrepo.ui.page_view import PageView
-from docrepo.ui.tree_view import PRIORITY_EDGES
+from docrepo.ui.tree_view import PRIORITY_EDGES, state_icon
 from docrepo.ui.state_menu import UNDO_MS, UndoButton
 from docrepo.ui.style import page_css, style_sheet
 from docrepo.ui.tokens import C
 from docrepo.ui.wheel_window import animations_on
-from docrepo.views import due_cell, project_text, since_text, today_due_entries, today_groups
+from docrepo.views import DueCell, due_cell, project_text, since_text, today_due_entries, today_groups
 
 if TYPE_CHECKING:
     from docrepo.ui.browse_window import BrowseWindow
@@ -96,6 +100,7 @@ QFrame#tpRow[current="true"] {{ background: {selected}; }}
 QFrame#tpRow[drop="true"] {{ background: {selected}; border: 1px solid {accent}; }}
 QLabel#tpTitle {{ color: {text}; }}
 QLabel#tpSub {{ color: {text2}; font-size: {caption}pt; }}
+QLabel#tpDue {{ color: {text2}; font-size: {caption}pt; }}
 QLabel#tpGroup {{ color: {text2}; font-size: {caption}pt; font-weight: 600; }}
 QLabel#tpDone {{ color: {disabled}; text-decoration: line-through; }}
 QToolButton#tpFold {{ border: 0; color: {text2}; font-size: {caption}pt; font-weight: 600; text-align: left; padding: 2px; }}
@@ -142,12 +147,31 @@ class _EdgeFrame(QFrame):
             p.end()
 
 
-class _Row(_EdgeFrame):
-    """One Today item: a tick box and its line at rest; widened, a second line, state and due date, and Done and Remove while
-    the pointer is on it. Clicking opens its detail."""
+def due_label(cell: DueCell | None) -> QLabel:
+    """A row's date, short (release 5.119, decision 442): "8 d", "Today", "3 d late", red when it's late and caution's
+    colour within two days, as the browse tool's Due column, a deadline in Due's place with its red ◆, and the whole
+    date in the tooltip ("Due Fri 20 Nov, in 8 d")."""
+    label = QLabel(objectName="tpDue")
+    if cell is None:
+        return label
+    label.setTextFormat(Qt.TextFormat.RichText)
+    mark = f'<span style="color:{tokens.colour("critical")}">◆</span> ' if cell.deadline else ""
+    colour = {"over": "critical", "soon": "caution"}.get(cell.cls)
+    style = f' style="color:{tokens.colour(colour)}; font-weight:600"' if colour else ""
+    label.setText(f"{mark}<span{style}>{esc(cell.days)}</span>")
+    label.setProperty("days", cell.days)
+    label.setToolTip(cell.tip)
+    return label
 
-    def __init__(self, panel: TodayPanel, item_id: int, task_id: str | None, title: str, sub: str, due: str, state: str = "",
-                 edge: str = "") -> None:
+
+class _Row(_EdgeFrame):
+    """One Today item: a tick box and its title at rest. Widened, a second line under the title: its project, a reminder
+    and how long it's been carried at its left; its state's icon and its date at its right, the date giving way to Later,
+    Done and Remove while the pointer is on it. The title keeps its line to itself (release 5.119, decisions 440 to
+    442). Clicking opens its detail."""
+
+    def __init__(self, panel: TodayPanel, item_id: int, task_id: str | None, title: str, sub: str, due: DueCell | None,
+                 state: str = "", edge: str = "") -> None:
         super().__init__(objectName="tpRow")
         self.edge = edge
         self.panel, self.item_id, self.task_id, self.title = panel, item_id, task_id, title
@@ -162,24 +186,30 @@ class _Row(_EdgeFrame):
         lay.addWidget(self.tick, 0, Qt.AlignmentFlag.AlignTop)
         text = QVBoxLayout()
         text.setSpacing(0)
-        text.addWidget(_Elided(title))
+        self.title_label = _Elided(title)
+        text.addWidget(self.title_label)
+        self.second = QWidget()
+        second = QHBoxLayout(self.second)
+        second.setContentsMargins(0, 0, 0, 0)
+        second.setSpacing(4)
         self.subtitle = _Elided(sub, "tpSub")
-        text.addWidget(self.subtitle)
-        lay.addLayout(text, 1)
-        # The task's state, as a button that opens the state menu (release 5.76, round 7's item 101, decision 361).
+        second.addWidget(self.subtitle, 1)
+        # The task's state, as its icon (decision 441, as the browse tool's lists have it, decision L7), a button that
+        # opens the state menu (release 5.76, round 7's item 101, decision 361), its name in its tooltip.
         self.state_button: QPushButton | None = None
         if task_id and state:
-            self.state_button = QPushButton(state, objectName="tpState")
-            self.state_button.setIcon(icon("chevron-down", size=10))
-            self.state_button.setIconSize(icon_size(10))
-            self.state_button.setLayoutDirection(Qt.LayoutDirection.RightToLeft)  # the chevron after the words
+            name, colour = state_icon(state)
+            self.state_button = QPushButton(objectName="tpState")
+            self.state_button.setIcon(icon(name, tokens.colour(colour), size=14))
+            self.state_button.setIconSize(icon_size(14))
+            self.state_button.setAccessibleName(state)
             self.state_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             self.state_button.setCursor(Qt.CursorShape.PointingHandCursor)
             self.state_button.setToolTip(f"{state}. Click to change the state.")
             self.state_button.clicked.connect(lambda: panel.state_clicked(self))
-            lay.addWidget(self.state_button, 0, Qt.AlignmentFlag.AlignTop)
-        self.due = QLabel(due, objectName="tpSub")
-        lay.addWidget(self.due)
+            second.addWidget(self.state_button)
+        self.due = due_label(due)
+        second.addWidget(self.due)
         self.buttons = QWidget()
         bl = QHBoxLayout(self.buttons)
         bl.setContentsMargins(0, 0, 0, 0)
@@ -189,8 +219,10 @@ class _Row(_EdgeFrame):
             b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             b.clicked.connect(how)
             bl.addWidget(b)
-        lay.addWidget(self.buttons)
+        second.addWidget(self.buttons)
         self.buttons.hide()
+        text.addWidget(self.second)
+        lay.addLayout(text, 1)
         self.setMouseTracking(True)
 
     def done_clicked(self) -> None:
@@ -204,14 +236,13 @@ class _Row(_EdgeFrame):
         self.panel.remove(self.item_id)
 
     def set_wide(self, wide: bool) -> None:
-        self.subtitle.setVisible(wide and bool(self.subtitle.full))
-        self.due.setVisible(wide and bool(self.due.text()))
-        if self.state_button is not None:
-            self.state_button.setVisible(wide)
+        self.due.setVisible(bool(self.due.text()))
+        self.second.setVisible(wide and bool(self.subtitle.full or self.due.text() or self.state_button is not None))
 
     def enterEvent(self, event) -> None:  # noqa: N802
         super().enterEvent(event)
         if self.panel.hover.wide and not self.panel.detail_id():
+            self.second.show()
             self.buttons.show()
             self.due.hide()
 
@@ -604,7 +635,7 @@ class TodayPanel(QWidget):
                 state = "" if t is None or t.discarded else t.state
                 reminder = "reminder" if a.added_by == edits.REMINDER else ""  # a reminder put it here (release 5.116, decision 415)
                 row = _Row(self, a.id, t.id if t else None, t.title if t else a.note, " · ".join(x for x in (where, reminder, since.rstrip(" ·")) if x),
-                           cell.text if cell else "", state, edge_of(t))
+                           cell, state, edge_of(t))
                 self.rows.append(row)
                 self._add(row)
         if not total:
@@ -638,7 +669,7 @@ class TodayPanel(QWidget):
         self._add(fold)
         return is_open
 
-    def _add_line(self, text: str, when: str, links: list[tuple[str, str, Callable[[], object]]], edge: str = "",
+    def _add_line(self, text: str, when: DueCell | None, links: list[tuple[str, str, Callable[[], object]]], edge: str = "",
                   task_id: str | None = None) -> None:
         """A row under a folded heading: its words, its date, each link's name, tooltip and what it does, its task's
         priority as its edge, and its task, where a drop on it goes."""
@@ -649,8 +680,8 @@ class TodayPanel(QWidget):
         lay.setContentsMargins(4, 2, 4, 2)
         lay.setSpacing(4)
         lay.addWidget(_Elided(text, "tpSub"), 1)
-        if when:
-            lay.addWidget(QLabel(when, objectName="tpSub"))
+        if when:  # short, as a Today row's (decision 443)
+            lay.addWidget(due_label(when))
         for name, tip, do in links:
             link = QPushButton(name, objectName="tpLink")
             link.setToolTip(tip)
@@ -673,7 +704,7 @@ class TodayPanel(QWidget):
             links = [] if is_key_date else [("Add", "Put it on Today", lambda i=task.id: self.browse.add_to_today(i)),
                                             ("Later", "Off this list until a later day, when its reminder puts it on Today",
                                              lambda i=task.id: self.later(i, None))]
-            self._add_line(text, cell.text if cell else "", links, edge_of(task), task.id)
+            self._add_line(text, cell, links, edge_of(task), task.id)
 
     def _add_done_section(self, m: Model, today: date) -> None:
         """Done today, each row with Back on Today (release 5.115, decision 420)."""
