@@ -453,6 +453,8 @@ class RowTree(QTreeWidget):
             self.setStyleSheet(CLASSIC_TREE)
         self._building = False
         self._moves: tuple[Callable, Callable, Callable] | None = None
+        #: Files, links and emails dropped on a row (release 5.115, decision 419): whether a row's key takes one, and what to do.
+        self._file_drops: tuple[Callable[[object], bool], Callable[[object, str, list[str]], None]] | None = None
         self._hover: QTreeWidgetItem | None = None
         self._strips: list[ActionStrip] = []
         self._widths: list[int] = []
@@ -494,10 +496,30 @@ class RowTree(QTreeWidget):
         self.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
 
     def stop_row_moves(self) -> None:
+        """No row moves and no file drops: each view turns on what it takes."""
         self._moves = None
+        self._file_drops = None
         self.setDragEnabled(False)
         self.setAcceptDrops(False)
         self.setDragDropMode(QAbstractItemView.DragDropMode.NoDragDrop)
+
+    def take_file_drops(self, takes: Callable[[object], bool], dropped: Callable[[object, str, list[str]], None]) -> None:
+        """Files, folders, web links and Outlook emails can be dropped on a row (release 5.115, decision 419): ``takes`` says
+        whether a row's key takes one, and ``dropped`` gets the key and what the capture window's ``read_drop`` made of the
+        drop, after the drop."""
+        self._file_drops = (takes, dropped)
+        self.setAcceptDrops(True)
+
+    def _file_drop(self, event) -> tuple[object, str, list[str]] | None:
+        """A file drop's row key, kind and paths, when it's over a row that takes one."""
+        from docrepo.ui.capture_window import read_drop  # here: the capture window's module imports this one
+
+        kind, paths = read_drop(event.mimeData(), links=True)
+        item = self.itemAt(event.position().toPoint())
+        key = item.data(0, KEY_ROLE) if item is not None else None
+        if not kind or key is None or not self._file_drops or not self._file_drops[0](key):
+            return None
+        return key, kind, paths
 
     def _drop_at(self, pos: QPoint) -> tuple[object, str] | None:
         """The row under a point and which part of it, by the margins Qt draws its drop line from, or None where nothing can land."""
@@ -510,11 +532,27 @@ class RowTree(QTreeWidget):
         return item.data(0, KEY_ROLE), where
 
     def dragEnterEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        if self._file_drops and not self._moves:
+            from docrepo.ui.capture_window import note_drag
+
+            if note_drag("enter", event.mimeData(), links=True):
+                event.setDropAction(Qt.DropAction.CopyAction)
+                event.accept()
+            else:
+                event.ignore()
+            return
         super().dragEnterEvent(event)
         if self._moves:
             event.acceptProposedAction()
 
     def dragMoveEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        if self._file_drops and not self._moves:
+            if self._file_drop(event):
+                event.setDropAction(Qt.DropAction.CopyAction)
+                event.accept()
+            else:
+                event.ignore()
+            return
         super().dragMoveEvent(event)
         if not self._moves:
             return
@@ -525,6 +563,19 @@ class RowTree(QTreeWidget):
             event.ignore()
 
     def dropEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        if self._file_drops and not self._moves:
+            from docrepo.ui.capture_window import note_drag
+
+            note_drag("drop", event.mimeData(), links=True)
+            found = self._file_drop(event)
+            if found is None:
+                event.ignore()
+                return
+            event.setDropAction(Qt.DropAction.CopyAction)
+            event.accept()
+            dropped = self._file_drops[1]
+            QTimer.singleShot(0, lambda: dropped(*found))  # after the drop, so the program dragging is let go
+            return
         if not self._moves:
             super().dropEvent(event)
             return

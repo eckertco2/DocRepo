@@ -84,5 +84,14 @@
    "task_pages": 17,
    "task_dates": 2
   }
+ },
+ "v23": {
+  "commit": "b1eb46c",
+  "counts": {
+   "tasks": 17,
+   "captures": 24,
+   "task_pages": 17,
+   "task_dates": 2
+  }
  }
 }

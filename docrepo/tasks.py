@@ -10,10 +10,10 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
-from docrepo import capacity, ties
+from docrepo import capacity, repeats, ties
 from docrepo.config import Settings
 from docrepo.dates import check_date, stamp, to_date, workday_numbers
 from docrepo.db import RECURRENCES, STATES, check_names, next_id, transaction
@@ -28,11 +28,11 @@ FIELDS = (
     ("assignees", "Assignees"), ("lead_per_day", "Lead hours a day"), ("assignee_per_day", "Assignee hours a day"), ("lead_per_week", "Lead hours a week"),
     ("assignee_per_week", "Assignee hours a week"), ("lead_hours", "Lead hours"),
     ("assignee_hours", "Assignee hours"), ("urgent", "Urgent"), ("meeting", "Meeting"), ("plant_event", "Plant event"), ("start", "Start"),
-    ("reminder", "Reminder"), ("recurrence", "Recurrence"), ("repeat_until", "Repeat until"), ("title", "Title"),
+    ("reminder", "Reminder"), ("reminder_repeat", "Reminder repeats"), ("reminder_until", "Reminder until"), ("recurrence", "Recurrence"), ("repeat_until", "Repeat until"), ("title", "Title"),
     ("description", "Description"), ("labels", "Labels"), ("inherit_labels", "Inherit parent labels"),
 )
 FIELD_NAMES = dict(FIELDS)
-DATE_FIELDS = ("due", "deadline", "start", "reminder", "repeat_until")
+DATE_FIELDS = ("due", "deadline", "start", "reminder", "repeat_until", "reminder_until")
 TEXT_FIELDS = ("title", "current_status", "deadline_desc", "description")
 FLAG_FIELDS = ("urgent", "meeting", "inherit_labels", "plant_event", "calendar_days")
 #: Reference fields (mods log round 2, M0034, release 5.9): named in Settings, each logged under its own name.
@@ -113,6 +113,11 @@ def stated(item: Any, key: str) -> Any:
 
 
 def _normalize(conn: sqlite3.Connection, key: str, value: Any) -> Any:
+    if key == "reminder_repeat":  # release 5.117, decision 416
+        try:
+            return repeats.normal(value)
+        except repeats.RepeatError as e:
+            raise TaskError(str(e)) from None
     if key == "duration":
         if value is None or value == "":
             return None
@@ -179,6 +184,8 @@ def _shown(conn: sqlite3.Connection, key: str, value: Any) -> str | None:
         return ", ".join(names) or None
     if key == "labels":
         return ", ".join(value) or None
+    if key == "reminder_repeat":
+        return repeats.describe(value) or None
     return value or None
 
 
@@ -258,6 +265,20 @@ def _apply_columns(conn: sqlite3.Connection, task_id: str, columns: dict[str, An
         stored = {k: int(v) if k in FLAG_FIELDS else v for k, v in columns.items()}
         assignments = ", ".join(f"{k} = ?" for k in stored)
         conn.execute(f"UPDATE tasks SET {assignments} WHERE id = ?", (*stored.values(), task_id))  # noqa: S608 - a column or table name of DocRepo's own; values are parameters
+
+
+def _start_repeat(task: Task, new: dict[str, Any], today: date, workdays: Collection[int]) -> None:
+    """A reminder that repeats (release 5.117, decision 416): clearing the repeat clears its Until; an Until needs a repeat;
+    and a repeat given with no reminder starts with its first time from today."""
+    if "reminder_repeat" in new and not new["reminder_repeat"]:
+        new["reminder_until"] = None
+    rule = new.get("reminder_repeat", task.reminder_repeat)
+    if new.get("reminder_until", task.reminder_until) and not rule:
+        raise TaskError("Reminder until needs a reminder that repeats.")
+    if rule and new.get("reminder_repeat") and not new.get("reminder", task.reminder):
+        first = repeats.first_from(rule, today, workdays)
+        until = new.get("reminder_until", task.reminder_until)
+        new["reminder"] = first.isoformat() if first and not (until and first.isoformat() > until) else None
 
 
 def _check_repeat(recurrence: str | None, repeat_until: str | None) -> None:
@@ -567,6 +588,7 @@ def update_task(conn: sqlite3.Connection, settings: Settings, task_id: str, *, a
             new["repeat_until"] = None
         _check_repeat(new.get("recurrence", task.recurrence), new.get("repeat_until", task.repeat_until))
         workdays = workday_numbers(settings.workdays)
+        _start_repeat(task, new, at.date(), workdays)
         routine = new.get("recurrence", task.recurrence)  # a routine task has no one date to tie, as it has no Duration
         tied = {} if routine else dict(task.ties) if given_ties is None else {f: x for f, x in given_ties.items() if x}
         for f, tie in tied.items():

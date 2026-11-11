@@ -22,6 +22,7 @@ from docrepo.panel_rules import Hover, Monitor, Place, Rect  # noqa: E402
 from docrepo.sample import load_sample  # noqa: E402
 from docrepo.ui import today_panel  # noqa: E402
 from docrepo.ui.context import AppContext  # noqa: E402
+from docrepo.ui.lists import today as today_list  # noqa: E402
 from docrepo.ui.drop_target import DropRead, Dropped  # noqa: E402
 from docrepo.views import today_due_entries, today_groups  # noqa: E402
 
@@ -236,6 +237,10 @@ def note_on_today(app, text="Sign the sheets"):
     app.browse.refresh(render=False)
 
 
+def panel_task(app, item_id):
+    return next(a.subject for a in Model(app.ctx.conn).agenda if a.id == item_id)
+
+
 def key(panel, k):
     QApplication.sendEvent(panel, QKeyEvent(QEvent.Type.KeyPress, k, Qt.KeyboardModifier.NoModifier))
 
@@ -293,22 +298,65 @@ def test_a_change_elsewhere_reaches_it(app, panel):
     assert len(panel.rows) == before + 1
 
 
-def test_done_here_is_done_there_and_asks(app, panel):
+def test_done_here_is_done_there_and_opens_an_update(app, panel):
+    """Release 5.115, decision 421: no question, the capture window opens as an Update on the task."""
     put_on_today(app)
     item = next(r for r in panel.rows if r.task_id == "T000008")
     panel.done(item.item_id)
     assert not any(a.id == item.item_id for a in Model(app.ctx.conn).today_items())
-    assert panel.ask_row.isVisibleTo(panel) and "Update the task too?" in panel.ask_label.text()
     assert not any(r.item_id == item.item_id for r in panel.rows)
-    panel.answer(None)
-    assert not panel.ask_row.isVisibleTo(panel) and app.browse.today_ask is None
+    w = app.window
+    assert w.isVisible() and w.task == "T000008" and w.types == {"update"} and w.content.value()[0].startswith("Done today")
+    assert panel.note_row.isVisibleTo(panel) and "done for today" in panel.note_label.text()  # said here, with Undo (decision 420)
 
 
-def test_update_opens_the_capture_window_as_the_today_view_does(app, panel):
+def test_undo_in_the_panel_puts_it_back_and_takes_away_the_untouched_update(app, panel):
     put_on_today(app)
-    panel.done(next(r for r in panel.rows if r.task_id == "T000008").item_id)
-    panel.answer("update")
-    assert app.window.isVisible() and "Done today" in app.window.content.value()[0]
+    item = next(r for r in panel.rows if r.task_id == "T000008").item_id
+    panel.done(item)
+    assert app.window.isVisible()
+    panel.note_undo.click()
+    assert any(a.id == item for a in Model(app.ctx.conn).today_items())
+    assert not app.window.isVisible() and "Back on Today." in panel.note_label.text()
+
+
+def test_undo_keeps_an_update_with_something_typed_in_it(app, panel):
+    put_on_today(app)
+    item = next(r for r in panel.rows if r.task_id == "T000008").item_id
+    panel.done(item)
+    app.window.content.setPlainText("Done today: the vendor called back.")
+    panel.note_undo.click()
+    assert any(a.id == item for a in Model(app.ctx.conn).today_items())
+    assert app.window.isVisible() and "stays open" in panel.note_label.text()
+
+
+def test_remove_in_the_panel_has_undo(app, panel):
+    put_on_today(app)
+    item = next(r for r in panel.rows if r.task_id == "T000008").item_id
+    panel.remove(item)
+    assert not app.window.isVisible() and "taken off Today" in panel.note_label.text()
+    panel.note_undo.click()
+    assert any(a.id == item for a in Model(app.ctx.conn).today_items())
+
+
+def test_a_note_ticked_is_just_done(app, panel):
+    note_on_today(app)
+    item = next(r for r in panel.rows if r.task_id is None).item_id
+    panel.done(item)
+    assert not app.window.isVisible() and not any(a.id == item for a in Model(app.ctx.conn).today_items())
+
+
+def test_put_back_from_done_today(app, panel):
+    put_on_today(app)
+    item = next(r for r in panel.rows if r.task_id == "T000008").item_id
+    panel.done(item)
+    db.set_state(app.ctx.conn, today_panel.DONE_OPEN_KEY, "1")
+    panel.hover.open_wide()
+    panel.refresh()
+    back = next(b for w in panel.extras for b in w.findChildren(QPushButton) if b.text() == "Back on Today")
+    back.click()
+    assert any(a.id == item for a in Model(app.ctx.conn).today_items())
+    assert any(r.item_id == item for r in panel.rows) and "Back on Today." in panel.note_label.text()
 
 
 def test_remove_asks_nothing(app, panel):
@@ -316,7 +364,7 @@ def test_remove_asks_nothing(app, panel):
     item = next(r for r in panel.rows if r.task_id == "T000008")
     panel.remove(item.item_id)
     assert not any(a.id == item.item_id for a in Model(app.ctx.conn).today_items())
-    assert not panel.ask_row.isVisibleTo(panel)
+    assert not app.window.isVisible()  # no Update opens for Remove
 
 
 def test_the_box_makes_a_quick_task_or_a_note(app, panel):
@@ -380,7 +428,8 @@ def test_the_keyboard(app, panel, monkeypatch):
     panel.cursor = 0
     key(panel, Qt.Key.Key_Space)
     assert not any(a.id == first for a in Model(app.ctx.conn).today_items())
-    panel.answer(None)
+    assert app.window.isVisible() and app.window.task == panel_task(app, first)  # Space ticks it: the Update opens (decision 421)
+    app.window.hide()
     panel.hover.open_wide()
     key(panel, Qt.Key.Key_Escape)
     assert not panel.hover.wide
@@ -496,33 +545,35 @@ def _click(panel, row, name):
     next(b for b in rows[row].findChildren(QPushButton) if b.text() == name).click()
 
 
-def test_reminders_reach_the_panel_as_they_do_today(app, panel):
-    """Thread E's reminders (decisions 236 to 238) under a folded heading of their own (decision 224), read from the same place."""
+def test_reminders_reach_the_panel_as_today_items(app, panel):
+    """Release 5.116, decision 415: no Reminders fold; a reminder whose day has come puts its task on Today, marked as a
+    reminder's. The app does it each minute, once it's past the reminder time."""
     due = reminders_due(Model(app.ctx.conn), NOW.date())
-    assert len(due) == 2
-    fold = _reminder_fold(panel)
-    assert fold.text() == "Reminders · 2" and not _reminder_links(panel)  # folded to start with, like its neighbours
-    assert [w.text() for w in panel.extras if w.objectName() == "tpFold"][1].startswith("Due in the next 7 days")  # above Due, as on Today
-    fold.click()
-    assert db.get_state(app.ctx.conn, "today_panel_reminders_open") == "1"
-    assert _reminder_links(panel) == [["Add", "Clear"], ["Add", "Clear"]]
+    assert len(due) == 2 and _reminder_fold(panel) is None
+    app.reminders_to_today()
+    rows = {r.task_id: r for r in panel.rows}
+    assert {t.id for t in due} <= set(rows) and "reminder" in rows[due[0].id].subtitle.full
+    assert _reminder_fold(panel) is None
 
 
-def test_a_reminder_in_the_panel_can_be_added_and_cleared(app, panel):
-    conn = app.ctx.conn
-    _reminder_fold(panel).click()
-    first, second = reminders_due(Model(conn), NOW.date())
-    _click(panel, 0, "Add")
-    m = Model(conn)
-    assert first.id in [a.subject for a in m.today_items()] and m.task(first.id).reminder == first.reminder  # on Today, reminder kept
-    assert _reminder_links(panel) == [["Clear"], ["Add", "Clear"]]  # the panel heard, and it can't be added twice
-    _click(panel, 0, "Clear")
-    m = Model(conn)
-    assert m.task(first.id).reminder is None and [e.via for e in m.status_log_of(first.id) if e.field == "Reminder"][-1] == "Today"
-    assert _reminder_fold(panel).text() == "Reminders · 1" and _reminder_links(panel) == [["Add", "Clear"]]
-    _click(panel, 0, "Clear")
-    assert Model(conn).task(second.id).reminder is None
-    assert _reminder_fold(panel) is None  # only while there are any
+def test_later_from_a_panel_row(app, panel, monkeypatch):
+    """Release 5.116, decision 417: a task's row has Later, whose menu is the Today view's; what it did is said here."""
+    put_on_today(app)
+    row = next(r for r in panel.rows if r.task_id == "T000008")
+    assert [b.text() for b in row.buttons.findChildren(QPushButton)] == ["Later", "Done", "Remove"]
+    monkeypatch.setattr(today_list, "show_menu", lambda menu, at: menu.actions()[0].trigger())  # Tomorrow
+    row.later_clicked()
+    m = Model(app.ctx.conn)
+    assert "T000008" not in [a.subject for a in m.today_items()] and m.task("T000008").reminder == "2026-10-09"
+    assert "off Today until Fri 9 Oct" in panel.note_label.text()
+    panel.note_undo.click()
+    assert "T000008" in [a.subject for a in Model(app.ctx.conn).today_items()]
+
+
+def test_a_note_has_no_later(app, panel):
+    note_on_today(app)
+    row = next(r for r in panel.rows if r.task_id is None)
+    assert [b.text() for b in row.buttons.findChildren(QPushButton)] == ["Done", "Remove"]
 
 
 # ---- the width at rest (release 5.106, decision 406) ----

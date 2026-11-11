@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from urllib.parse import quote
 
-from docrepo import capacity, items, markup, notes_page, tagged, ties
+from docrepo import capacity, items, markup, notes_page, repeats, tagged, ties
 from docrepo.dates import ago, days_words, long_date, monday_of, short, to_date
 from docrepo.file_rows import dated_name, type_name
 from docrepo.markup import esc
@@ -637,6 +637,9 @@ class Pages:
         if open_ and t.reminder:
             r = to_date(t.reminder)
             rows.append(("Reminder", f'{esc(long_date(r, today))} <span class="rel">{ago(r, today) if r < today else days_words(r, today)}</span>'))
+        if open_ and t.reminder_repeat:  # release 5.117, decision 416
+            until = f", until {long_date(to_date(t.reminder_until), today)}" if t.reminder_until else ""
+            rows.append(("Repeats", f'{esc(repeats.describe(t.reminder_repeat))}<span class="rel">{esc(until)}</span>'))
         on = self.m.agendas_on(t.id)
         if on:
             def when_met(target: str) -> str:
