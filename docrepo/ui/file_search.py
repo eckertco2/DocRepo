@@ -31,7 +31,8 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-WIDTH, HEIGHT = 720, 520
+#: Wide enough for a file's name and its task on one row beside the preview (release 5.114, decision 432; 720 × 520 before).
+WIDTH, HEIGHT = 880, 560
 SECOND_TIER_MS = 250
 SHOWN = 200
 
@@ -110,7 +111,7 @@ class FileSearch(QWidget):
         buttons.addStretch()
         sl.addLayout(buttons)
         split.addWidget(side)
-        split.setSizes([WIDTH * 55 // 100, WIDTH * 45 // 100])
+        split.setSizes([WIDTH * 58 // 100, WIDTH * 42 // 100])
         lay.addWidget(split, 1)
         self.foot = QLabel(objectName="hint")
         self.foot.setContentsMargins(12, 4, 12, 6)

@@ -220,7 +220,10 @@ class ResultDelegate(QStyledItemDelegate):
         self.draw_marked(p, title_rect, r.title, finder.highlights(r.title, row.words, row.slips) if row.words else [], self.font, self.bold, _c("text"))
         if not one:
             line2 = self.second_line(row)
-            spans = finder.highlights(line2, row.words) if row.words else []
+            # Marks only on what matched (release 5.114, decision 431): the words in the text or description, never the
+            # task it's on, which would mark every row of a search for that task's name.
+            skip = len(row.where) + 3 if row.where and line2.startswith(f"{row.where} · ") else len(line2) if line2 == row.where else 0
+            spans = [(a + skip, b + skip) for a, b in finder.highlights(line2[skip:], row.words)] if row.words else []
             self.draw_marked(p, QRect(left, top + 13, right - left - 12, 18), line2, spans, self.small, self.small_bold, _c("text2"))
 
     def paint_right(self, p: QPainter, rect: QRect, row: Row, right: int) -> int:
@@ -266,11 +269,10 @@ class ResultDelegate(QStyledItemDelegate):
 
     def _second_line(self, row: Row) -> str:
         r = row.record
-        if row.snippet:
-            return ("in its text: " if r.kind == "file" else "") + row.snippet
-        if r.kind == "file":
-            came = f"from {r.came}" + (" · saved copy too" if r.copy and r.source != "Saved copy" else "")
-            return f"{r.desc} · {came}" if r.desc else came
+        if row.snippet:  # its marks say why it's listed (release 5.114, decision 431)
+            return row.snippet
+        if r.kind == "file":  # where it came from is in the preview (decision 428); only a file with no description says it
+            return r.desc or f"from {r.came}"
         if r.kind == "note":
             text = " ".join(r.text.split())
             return text[len(r.title):].lstrip(" .:;-") if text.startswith(r.title) else text

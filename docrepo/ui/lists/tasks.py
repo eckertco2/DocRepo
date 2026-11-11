@@ -15,11 +15,11 @@ from PySide6.QtWidgets import (
 from docrepo import bulk, edits, key_dates, priorities
 from docrepo.lists import key_dates_due
 from docrepo.dates import short
-from docrepo.detail import chip, esc
+from docrepo.file_rows import doc_places, type_colour, type_icon, type_name
+from docrepo.detail import esc
 from docrepo.links import is_link
 from docrepo.overview import file_type
 from docrepo.schedule import DueDate, is_open
-from docrepo.ui import tokens
 from docrepo.ui.look import LOOK
 from docrepo.ui.task_forms import BulkEditDialog
 from docrepo.ui.tree_view import KEY_ROLE, Line, group_ground, state_icon, tint, with_actions
@@ -84,6 +84,7 @@ class TaskLists:
     def _add_nodes(self, nodes: list[Node], parent=None, filtered: bool = False, expand_all: bool = True,
                    row: Callable[[Node], tuple[list[str], str]] | None = None) -> None:
         m = self.model()
+        places = None  # where each document is, read once when the first one comes (release 5.114)
         for n in nodes:
             if n.kind == "group":
                 item = self.tree.add_row(parent, None, [f"<b>{esc(n.label)}</b>"], group_ground(), selectable=False, span=True)
@@ -91,11 +92,16 @@ class TaskLists:
                 d = m.documents[n.id]
                 link = is_link(d.original)
                 kind = file_type(d.name, d.original)
-                cells = [Line(d.name, icon="folder" if kind == "folder" else f"type-{kind}", icon_colour=f"type_{kind}" if f"type_{kind}" in tokens.LIGHT else "type_other",
-                              icon_tip=kind.capitalize(), second=d.description or "No description yet"),
-                         chip("Link", "st-ns") if link else chip(d.status, "st-ns" if d.status == "Current" else "st-pk"),
-                         f'<p align="right">{esc(short(date.fromisoformat(d.checked[:10]), self.today())) if d.checked else ""}</p>']
-                tip = f"{d.original} (double-click copies it)" if link else f"Last checked {d.checked or 'not yet'}"
+                # Release 5.114 (decisions 427 and 428): its type in its colour, a chip only when it isn't current, and the day it
+                # came in. Every document was "Current" and checked the same day, so those columns said nothing row by row.
+                if places is None:
+                    places = doc_places(m)
+                added = places[d.id].added if d.id in places else ""
+                odd = (d.status, "st-pk") if d.status and d.status != "Current" and not link else None
+                cells = [Line(d.name, icon=type_icon(kind), icon_colour=type_colour(kind), icon_tip=type_name(kind), chips=(odd,) if odd else (),
+                              second=d.description or "No description yet"),
+                         f'<p align="right">{esc(short(date.fromisoformat(added[:10]), self.today())) if added else ""}</p>']
+                tip = f"{d.original} (double-click copies it)" if link else f"{type_name(kind)} · {d.status} · last checked {d.checked or 'not yet'}"
                 item = self.tree.add_row(parent, ("doc", n.id), cells, tint(n.group, n.depth), tip=tip)
             else:
                 cells, tip = row(n) if row else (self._task_cells(n.id, n.depth, filtered and not n.match), full_path(m, n.id))

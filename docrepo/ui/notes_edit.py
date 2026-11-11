@@ -33,6 +33,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import date
 
+import re
 from pathlib import Path
 from urllib.parse import quote
 
@@ -66,6 +67,21 @@ PICTURE_WIDTH = 560
 
 def _grey() -> QColor:
     return QColor(tokens.colour("text2"))
+
+
+#: The word a file line starts with (``notes_page.file_line``'s "File: Pump spec.docx, the vendor's datasheet").
+FILE_WORD = "File: "
+_NAME_END = re.compile(r"\.[A-Za-z0-9]{1,5}(?=, )")
+
+
+def file_name_end(text: str, start: int = 0) -> int:
+    """Where a file line's name ends, after ``start`` (release 5.114): at the ", " after its extension, else at the first
+    ", ", else at the end. A name with a comma in it keeps its comma when it has an extension."""
+    m = _NAME_END.search(text, start)
+    if m:
+        return m.end()
+    comma = text.find(", ", start)
+    return comma if comma >= 0 else len(text)
 
 
 class NotesEdit(RichEdit):
@@ -237,6 +253,24 @@ class NotesEdit(RichEdit):
                 c.setCharFormat(fmt)
             else:
                 c.mergeCharFormat(fmt)
+            if kind == "file":
+                self._quiet_file_words(block)
+
+    def _quiet_file_words(self, block) -> None:
+        """A file line reads as its name (release 5.114, the file rows review's decision 434): "File:" before it and its
+        description after it in secondary text, the name in the link's blue. The whole line still opens the file, and the
+        page keeps its words as they were: only their colour changes."""
+        text = block.text()
+        start = len(FILE_WORD) if text.startswith(FILE_WORD) else 0
+        end = file_name_end(text, start)
+        grey = QTextCharFormat()
+        grey.setForeground(_grey())
+        c = QTextCursor(block)
+        for a, b in ((0, start), (end, len(text))):
+            if b > a:
+                c.setPosition(block.position() + a)
+                c.setPosition(block.position() + b, QTextCursor.MoveMode.KeepAnchor)
+                c.mergeCharFormat(grey)
 
     # ---- the page in and out ----
     def _put(self, c: QTextCursor, line: Line, new_block: bool) -> None:
@@ -299,6 +333,9 @@ class NotesEdit(RichEdit):
             c.setBlockFormat(bf)
             c.setBlockCharFormat(cf)
         c.insertText(line.text, cf)
+        if line.kind == "file":
+            self._quiet_file_words(c.block())
+            c.movePosition(QTextCursor.MoveOperation.EndOfBlock)
         if line.kind != "heading":
             c.setCharFormat(QTextCharFormat())  # what's typed after a link isn't part of it
 

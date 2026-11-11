@@ -9,7 +9,8 @@ page names its pictures and this view draws them:
 - ``progress:1:4``, a thin bar, 1 of 4 filled;
 - ``timing:...``, a lane of a template's chart, or its ruler (release 5.51);
 - ``chev:right`` and ``chev:down``, the icons' chevrons for a fold or a menu (release 5.59);
-- ``lk:link``, ``lk:folder``, ``lk:note``, ``lk:ref`` and ``lk:pin``, the marks of the Links group's rows (release 5.67).
+- ``lk:link``, ``lk:folder``, ``lk:note``, ``lk:ref`` and ``lk:pin``, the marks of the Links group's rows (release 5.67);
+- ``ft:pdf``, ``ft:sheet`` and the other file types, a file's mark in its type's colour, for the Files group (release 5.114).
 """
 from __future__ import annotations
 
@@ -20,6 +21,7 @@ from PySide6.QtGui import QColor, QFont, QImage, QPainter, QTextDocument
 from PySide6.QtWidgets import QTextBrowser
 
 from docrepo.detail import PROGRESS_WIDTH, SIDE_BY_SIDE, WIDE_PAGE
+from docrepo.file_rows import type_colour, type_icon
 from docrepo.ui import tokens
 from docrepo.ui.icons import tinted
 from docrepo.ui.timing_chart import picture as timing_picture
@@ -89,6 +91,17 @@ def link_mark(key: str, scale: float) -> QImage:
     return image
 
 
+#: A file's type mark (release 5.114, decision 429): drawn at the size the lists draw it, in its type's colour.
+FILE_MARK = 16
+
+
+def file_mark(kind: str, scale: float) -> QImage:
+    image, p = _canvas(FILE_MARK, FILE_MARK, scale)
+    p.drawPixmap(QPointF(0, 0), tinted(type_icon(kind), tokens.LIGHT[type_colour(kind)], FILE_MARK, scale))
+    p.end()
+    return image
+
+
 def chevron(direction: str, scale: float) -> QImage:
     image, p = _canvas(MARK, MARK, scale)
     p.drawPixmap(QPointF(0, 0), tinted(f"chevron-{direction}", tokens.LIGHT["text2"], MARK, scale))
@@ -128,6 +141,8 @@ def picture(url: QUrl, scale: float) -> QImage | None:
         return chevron(key, scale)
     if kind == "lk" and key in LINK_MARKS:
         return link_mark(key, scale)
+    if kind == "ft" and key.isalpha():
+        return file_mark(key, scale)
     return None
 
 

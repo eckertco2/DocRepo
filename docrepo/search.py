@@ -29,6 +29,7 @@ from pathlib import Path
 from docrepo.captures import plain, read_content
 from docrepo.db import transaction
 from docrepo.model import Model
+from docrepo.text import snip
 
 log = logging.getLogger(__name__)
 
@@ -274,15 +275,14 @@ def _has_all(words: list[str], *texts: str | None) -> bool:
     return all(w in hay for w in words)
 
 
-def snippet(text: str, words: list[str], width: int = 110) -> str:
-    """The text around the first word found, on one line."""
+def snippet(text: str, words: list[str], width: int = 160) -> str:
+    """The text around the first word found, on one line: wide enough to fill a row once an email's headers and the row's own title
+    are taken out (release 5.114; 110 before)."""
     low = text.lower()
     at = min((i for i in (low.find(w) for w in words) if i >= 0), default=-1)
     if at < 0:
         return ""
-    start = max(0, at - 40)
-    part = " ".join(text[start:start + width].split())
-    return ("…" if start else "") + part + ("…" if start + width < len(text) else "")
+    return snip(text, at, 40, width)
 
 
 def _after_title(body: str) -> str:

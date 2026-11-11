@@ -72,7 +72,9 @@ from docrepo.db import RECURRENCES, STATES
 from docrepo.extract import extract_text, to_unc
 from docrepo.layer0 import Part, size_text
 from docrepo.markup import esc
+from docrepo.file_rows import type_colour, type_icon
 from docrepo.links import folder_name, folder_original, is_folder, is_link, keeps_no_text, link_name, link_of_line, read_address, short_name
+from docrepo.overview import file_type
 from docrepo.text import typed_path
 from docrepo.model import TODAY, Model, Task
 from docrepo.parse import Found, Known, Who, as_plant_event, parse_capture, quick_update
@@ -2843,7 +2845,7 @@ class CaptureWindow(QWidget):
             return ("Unwrapped from Outlook's Safe Links. " if part and part.safe else "") + "Only the address is kept, and DocRepo never fetches it."
         if is_folder(row.path):
             return "It stays where it is. DocRepo keeps where it is, and reads nothing in it."
-        return "It stays where it is."
+        return ""  # a file stays where it is, as files do (decision 434): only what's different is said
 
     def _picture_pasted(self, image) -> None:
         """A picture pasted in the content text (release 5.27, decision 129): a file of the capture's, as a dropped file is,
@@ -2880,8 +2882,10 @@ class CaptureWindow(QWidget):
         frame = QFrame(objectName="fileRow")
         hl.addWidget(frame)
         fl = QVBoxLayout(frame)
-        fl.setContentsMargins(7, 6, 7, 6)
+        fl.setContentsMargins(8, 5, 6, 6)
+        fl.setSpacing(4)
         top = QHBoxLayout()
+        top.setSpacing(6)
         if row.of is not None:
             entry.keep = QCheckBox("Keep")
             entry.keep.setChecked(row.keep)
@@ -2891,8 +2895,17 @@ class CaptureWindow(QWidget):
         folder = is_folder(row.path)
         label = "Email" if row.email else {"attachment": "Attachment", "picture": "Picture"}.get(kind) or (
             "Link" if link else "Folder" if folder else "Path" if src == "pasted" else "File")
-        name = QLabel(f"<span style='color:{C.text2}'>{label}</span>  <b>{esc(row.name)}</b>")
+        # Release 5.114 (the file rows review's decision 434): its type's mark in its type's colour says what it is, as in every
+        # list, rather than a word before its name; the word is the mark's tooltip.
+        typed = "mail" if row.email else "picture" if kind == "picture" else file_type(row.name, row.path)
+        mark = QLabel()
+        mark.setPixmap(icon(type_icon(typed), tokens.colour(type_colour(typed))).pixmap(icon_size(16)))
+        mark.setToolTip(label)
+        mark.setAccessibleName(label)
+        top.addWidget(mark)
+        name = QLabel(f"<b>{esc(row.name)}</b>")
         name.setToolTip(row.path or "")
+        name.setAccessibleName(f"{label} {row.name}")
         top.addWidget(name)
         entry.note = QLabel(self._file_note(row, doc.id if doc else None, link), objectName="hint")
         top.addWidget(entry.note, 1)
@@ -2927,12 +2940,12 @@ class CaptureWindow(QWidget):
                       else "What's in this folder?" if folder else "What's in this file?")
         entry.desc = QLineEdit(doc.description or "" if doc else "")
         entry.desc.setAccessibleName(f"Description of {row.name}")
-        fl.addWidget(entry.desc)
-        opts = QHBoxLayout()
+        opts = QHBoxLayout()  # the description and its two choices on one line (decision 434)
+        opts.setSpacing(10)
+        opts.addWidget(entry.desc, 1)
         entry.copy, entry.extract = QCheckBox("Save a copy"), QCheckBox("Extract information")
         opts.addWidget(entry.copy)
         opts.addWidget(entry.extract)
-        opts.addStretch()
         fl.addLayout(opts)
         entry.copy.setVisible(not link and not folder)  # a link or a folder has nothing to copy or read, and a picture no text
         entry.extract.setVisible(not link and not folder and kind != "picture")
