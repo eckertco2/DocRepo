@@ -388,7 +388,7 @@ def test_ways_down_a_long_page(browse, ctx):
     pane = browse.task_pane
     notes, bar = pane.notes, pane.verticalScrollBar()
     QApplication.processEvents()
-    assert not pane.jump_button.isHidden() and not pane.sticky.isVisible()
+    assert pane.jump_button.isHidden() == pane.outline_shown() and not pane.sticky.isVisible()  # the outline stands in for it
     pane.show_jump_menu()
     assert [a.text() for a in pane._jump_menu.actions() if a.text()] == \
         ["Top of the page", "Mon 7 Sep 2026", "\u2003Design", "Thu 8 Oct 2026", "\u2003Site", "Latest"]
@@ -419,3 +419,47 @@ def test_ways_down_a_long_page(browse, ctx):
     assert notes.folds() == [] and notes.textCursor().block().text() == "Design"
     pane.old_days_action.trigger()
     assert not pane.old_days_action.isChecked() and json.loads(db.get_state(ctx.conn, "page_folds:T000012"))["old_days"] is False
+
+
+def test_the_outline_beside_the_notes(browse, ctx, monkeypatch):
+    """Release 5.113 (the notes workspace plan's decision 349, at the owner's ask of 2026-11-10): a column at the notes'
+    left lists the page's headings and days, marks the one you're in, goes to one on a click, stays in view as the page
+    scrolls, follows the page shown, and is shown or hidden for every task by its button; where it doesn't fit, Jump to's
+    button stands in."""
+    body = "\n".join(["# Mon 7 Sep 2026", "Old.", "## Design", *["A line of notes."] * 60, "# Thu 8 Oct 2026", "New.", "## Site", "Here."])
+    notes_page.put(ctx.conn, "T000012", body, NOW)
+    browse.refresh()
+    browse.go_task("T000012")
+    pane = browse.task_pane
+    monkeypatch.setattr(pane, "outline_fits", lambda: True)  # the offscreen platform's letters are wide
+    pane._fit_outline()
+    QApplication.processEvents()
+    o, bar = pane.outline, pane.verticalScrollBar()
+    assert pane.outline_shown() and pane.jump_button.isHidden() and pane.outline_button.isChecked()
+    assert [x[3] for x in o.entries()] == ["Mon 7 Sep 2026", "Design", "Thu 8 Oct 2026", "Site"]
+    assert [o.item(i).text() for i in range(o.count())] == ["Mon 7 Sep", "Design", "Thu 8 Oct", "Site"]  # one year, so no year
+    assert o.current == o.entries()[0][0]  # the first, at the top of the page
+    site = o.entries()[3][0]
+    o.picked.emit(site)
+    for _ in range(3):
+        QApplication.processEvents()
+    assert pane.notes.textCursor().block().blockNumber() == site and o.current == site and bar.value() > 0
+    if pane._outline_offset() > 8:
+        assert o.y() > 8  # moved down its slot, so it's still in view
+    bar.setValue(0)
+    QApplication.processEvents()
+    assert o.y() <= 8
+    # It follows the page shown at once: never the page before's headings.
+    browse.go_task("T000001")
+    assert [x[3] for x in o.entries()] == [b.text() for b, _level, _day in pane.notes.outline()]
+    # Hidden by its button, and kept so for every task; Jump to's button comes back.
+    pane.outline_button.click()
+    assert not pane.outline_shown() and not pane.jump_button.isHidden() and db.get_state(ctx.conn, "notes_outline") == "0"
+    browse.go_task("T000012")
+    assert not pane.outline_shown()
+    pane.outline_button.click()
+    assert pane.outline_shown() and db.get_state(ctx.conn, "notes_outline") == "1"
+    # Where it doesn't fit, it steps aside.
+    monkeypatch.setattr(pane, "outline_fits", lambda: False)
+    pane._fit_outline()
+    assert not pane.outline_shown() and pane.outline_button.isHidden() and not pane.jump_button.isHidden()

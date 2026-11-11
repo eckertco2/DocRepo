@@ -357,10 +357,24 @@ QLabel#keyTip { background: $text; color: $content; border-radius: 3px; padding:
 /* the task page with its notes page (release 5.25): one white page; the notes are part of it, not a box on it */
 QWidget#taskPaneInner, QWidget#notesWrap { background: $content; }
 /* the notes' frame (release 5.27, decision 130): the capture window's editor frame, its header band on the base colour */
-QFrame#notesCard { background: $content; border: 1px solid $stroke; border-bottom: 1px solid $control; border-radius: 4px; }
-QFrame#notesCard[typing="true"] { border-bottom: 2px solid $accent; }
-QFrame#notesCard QWidget#notesHead { background: $base; border: none; border-bottom: 1px solid $stroke;
-  border-top-left-radius: 4px; border-top-right-radius: 4px; }
+QFrame#notesCard { background: $content; border: 1px solid $stroke_strong; border-radius: 6px; }
+QFrame#notesCard[typing="true"] { border: 1px solid $stroke_strong; border-bottom: 2px solid $accent; }
+/* release 5.113 (the task panel plan): the Notes heading is a section's head over its frame, not a band inside it */
+QWidget#notesHead { background: transparent; border: none; }
+/* the outline at the notes' left (release 5.113, decision 349): a column with a divider, its rows painted from the tokens */
+QFrame#outlineSlot { background: transparent; border: none; border-right: 1px solid $stroke; }
+QListWidget#notesOutline { background: transparent; border: none; padding: 0; }
+/* the task page's parts (release 5.113): no padding or white of their own, so their words start on the page's left edge
+   and the status card's tint shows behind its words */
+QTextBrowser#fitView { background: transparent; border: none; padding: 0; }
+/* the task page's header (release 5.113): the status card with a bar down its left side, and every section's head alike */
+QFrame#statusCard { background: $base; border: none; border-left: 3px solid $accent; }
+QFrame#statusCard[empty="true"] { border-left: 3px solid $stroke_strong; }
+QLabel#statusName, QLabel#statusWhen, QLabel#groupSummaryLabel { color: $text2; }
+QToolButton#statusLog { border: none; border-radius: 4px; background: transparent; padding: 2px 4px 2px 6px; color: $text2; }
+QToolButton#statusLog:hover { background: $hover; color: $text; }
+QToolButton#groupHead { border: none; border-radius: 4px; background: transparent; padding: 2px 6px 2px 2px; color: $text; }
+QToolButton#groupHead:hover { background: $hover; }
 QTextEdit#notesPage, QTextEdit#notesPage:focus { border: none; border-radius: 0; background: transparent; padding: 0; }
 QLabel#notesSaved { color: $text2; }
 /* the Checklist summary (release 5.26): rows bound to the page's checklist lines */
@@ -545,4 +559,7 @@ h2 { font-family: 'Segoe UI'; font-size: ${subtitle}pt; font-weight: 600; margin
 .hitline { margin: 0; background-color: $caution_bg; }
 .gap { margin: 0; color: $text2; }
 .stext { margin-top: 4px; margin-bottom: 0; }
+.gk { color: $text2; padding-right: 10px; }
+.relb { color: $text2; font-weight: 400; }
+.grid { margin-top: 12px; }
 """).substitute(LIGHT, caption=CAPTION, subtitle=SUBTITLE)
