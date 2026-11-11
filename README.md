@@ -116,6 +116,7 @@ The comma after the name is what makes it one: `**due, 5 Nov`, not `**due. 5 Nov
 | `**meeting,` |  | Meeting | `**meeting, yes` |
 | `**label,` | `**labels,` | Labels (adds to the list) | `**label, Safety` |
 | `**parent,` | `**parents,` | Parents (adds to the list) | `**parent, #Installation` |
+| `**agenda,` | `**agendas,` | Puts the task on each agenda named: a person's, a meeting's, a task's or Today | `**agenda, @Tom and #Business team meeting` |
 
 ## Navigation wheels and the Today side panel
 
