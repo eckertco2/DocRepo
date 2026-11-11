@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
+from collections import Counter
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import date, timedelta
@@ -23,9 +24,11 @@ from urllib.parse import quote
 
 from docrepo import capacity, items, markup, notes_page, tagged, ties
 from docrepo.dates import ago, days_words, long_date, monday_of, short, to_date
+from docrepo.file_rows import dated_name, type_name
 from docrepo.markup import esc
 from docrepo.links import FOLDER_TEXT, NO_TEXT, is_folder, is_link, reference_link
 from docrepo.model import PRIORITY_NAMES, TODAY, TYPE_NAMES, Capture, Model, Task, is_person
+from docrepo.overview import file_type
 from docrepo.pages import num
 from docrepo.schedule import due_of, held_on, is_open, start_of
 from docrepo.stories import Event, RawItem, Stories, clip
@@ -797,25 +800,40 @@ class Pages:
         """The files as rows, each opening in File Explorer (a link in the browser, a folder in File Explorer), with Find
         files for searching, previewing and opening them (decision 166; the Task view until release 5.98, decision 389).
         ``limit`` shows the first so many, with the rest's count (the Files group, release 5.84)."""
+        # Release 5.114 (the file rows review's decision 429): each file as a row of a list, not a run of blue links: its type's
+        # mark, its name in the text's colour, the subtask it's on, its description under it, and the day it came in at the
+        # end. Where it came from ("Saved copy", "Email attachment") is its tooltip; only an old version says so.
+        came = {(c.task, d): c.saved for tid in dict.fromkeys(f.task for f in files) for c in self.m.notes_of(tid) for d in c.document_ids}
+        names = Counter(dated_name(f.name)[1] if f.kind in ("Saved copy", "Old version") else f.name for f in files)
         rows = []
         for f in files[:limit]:
             d = self.m.documents.get(f.document)
             original = d.original if d and d.original else ""
+            kind = file_type(f.name, original)
+            day, shown = dated_name(f.name) if f.kind in ("Saved copy", "Old version") else ("", f.name)
+            day = day or came.get((f.task, f.document), "")[:10]
             if f.kind == "Link":  # it opens in the browser, on a click (release 5.67, decision 315)
-                name = (f'{link(f"opendoc:{f.document}", f.name, "Opens in your browser: " + original)} · '
-                        f'{link(f"copylink:{f.document}", "Copy link")} · {link(f"doc:{f.document}", "Details")}')
+                name = (f'{link(f"opendoc:{f.document}", shown, "Opens in your browser: " + original, "tl")} &nbsp;'
+                        f'{link(f"copylink:{f.document}", "Copy link", "", "tq")} &nbsp;{link(f"doc:{f.document}", "Details", "", "tq")}')
             elif f.kind == "Folder":  # release 5.66: it opens in File Explorer
-                name = (f'{link(f"opendoc:{f.document}", f.name, "Opens in File Explorer: " + original)} · '
-                        f'{link("copyaddr:" + quote(original, safe=""), "Copy path")}')
+                name = (f'{link(f"opendoc:{f.document}", shown, "Opens in File Explorer: " + original, "tl")} &nbsp;'
+                        f'{link("copyaddr:" + quote(original, safe=""), "Copy path", "", "tq")}')
             else:
-                name = link(self.show_key(f), f.name, "Show it in File Explorer")
-            rows.append(f'<tr><td>{name} <span class="sub">{esc(f.kind)}</span>'
-                        f'{self.from_chip(f.task, t.id)}{"<br><span class=sub>" + esc(d.description) + "</span>" if d and d.description else ""}</td></tr>')
-        # Decision 166: Find files is where a task's files are searched, previewed and opened.
+                name = link(self.show_key(f), shown, f"{type_name(kind)} · {f.kind}. Click to show it in File Explorer.", "tl")
+            # Only an old version says what it is, and a file listed twice by one name (a saved copy and its original).
+            old = f' <span class="sub">{esc(f.kind.lower())}</span>' if f.kind == "Old version" or names[shown] > 1 else ""
+            desc = f'<br><span class="sub">{esc(d.description)}</span>' if d and d.description else ""
+            when = esc(short(to_date(day), self.today)) if day else ""
+            rows.append(f'<tr><td valign="top" width="22"><img src="ft:{kind}" width="16" height="16"></td>'
+                        f'<td valign="top">{name}{old}{self.from_chip(f.task, t.id)}{desc}</td>'
+                        f'<td valign="top" align="right" class="rel" width="64">{when}</td></tr>')
+        if not rows:
+            return '<p class="note">No files yet.</p>'
+        # Decision 166: Find files is where a task's files are searched, previewed and opened; its link follows the list.
         left = len(files) - len(rows)
-        more = f'<p>{link(f"taskview:{t.id}", f"All {len(files)} in Find files" if left > 0 else "Find files", FIND_FILES_TIP)} '
-        more += f'<span class="sub">{f"{left} more; " if left > 0 else ""}to search, preview and open its files (O)</span></p>'
-        return more + (f'<table cellspacing="0" cellpadding="4">{"".join(rows)}</table>' if rows else '<p class="note">No files yet.</p>')
+        more = (f'<p style="margin-top: 4px">{link(f"taskview:{t.id}", f"Show all {len(files)} in Find files" if left > 0 else "Find files", FIND_FILES_TIP)} '
+                f'<span class="sub">{"(O)" if left > 0 else "to search, preview and open them (O)"}</span></p>')
+        return f'<table width="100%" cellspacing="0" cellpadding="3">{"".join(rows)}</table>' + more
 
     def show_key(self, f) -> str:
         """The address that shows a file in File Explorer: a saved copy's, else its document's."""

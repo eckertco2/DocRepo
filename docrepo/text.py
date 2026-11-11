@@ -22,6 +22,31 @@ _ABBREV_BEFORE_LOWER = re.compile(
     re.IGNORECASE,
 )
 _ENDS = re.compile(r"[.!?]+(?=\s)|\n")
+#: In a snippet: an email address in angle brackets, and an email's header labels (release 5.114, decision 433).
+_SNIP_ADDRESS = re.compile(r"\s*<[^<>\s]+@[^<>\s]+>")
+_SNIP_LABEL = re.compile(r"(?:^|\s)(?:From|To|Cc|Sent|Date|Subject):\s*")
+
+
+def snip(text: str, at: int, before: int, width: int) -> str:
+    """The text around position ``at`` on one line, about ``width`` characters from ``before`` characters ahead of it, with
+    "…" where it's cut (release 5.114, decision 433). It starts and ends at a word when one is near, and an email's
+    addresses and header labels are left out ("From: Dana <dana@example.com> Subject: Re: seals" reads "Dana · Re: seals"),
+    so a search result's second line is words, not markup."""
+    start = max(0, at - before)
+    if start:
+        gap = text.find(" ", start, min(at, start + 16))
+        if gap >= 0:
+            start = gap + 1
+    end = min(len(text), start + width)
+    if end < len(text):
+        gap = text.rfind(" ", max(at + 1, end - 16), end)
+        if gap > at:
+            end = gap
+    part = " ".join(text[start:end].split())
+    part = _SNIP_LABEL.sub(" · ", _SNIP_ADDRESS.sub("", part)).strip(" ·")
+    if start:
+        part = part.lstrip(".,;:)-– ")
+    return ("…" if start else "") + part + ("…" if end < len(text) else "")
 
 
 @dataclass(frozen=True)

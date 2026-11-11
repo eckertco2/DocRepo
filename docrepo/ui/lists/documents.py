@@ -4,13 +4,16 @@ from __future__ import annotations
 
 
 import re
+from datetime import date
 
 from PySide6.QtWidgets import (
     QLabel,
 )
 
 from docrepo import search
+from docrepo.dates import short
 from docrepo.detail import esc
+from docrepo.file_rows import GROUP_NAMES, doc_places, place_words, type_colour, type_icon, type_name, without_title
 from docrepo.overview import file_type
 from docrepo.ui.look import LOOK
 from docrepo.ui.tree_view import Line, group_ground, state_icon
@@ -36,7 +39,7 @@ class DocumentLists:
         if self.doc_task:
             self._check("Include subtasks", self.doc_subs, self._set_doc_subs)
             self._button("Show all", lambda: self._set_doc_task(None))
-        self.tree.set_columns(["Document", "Status", "Checked"])
+        self.tree.set_columns(["Document", "Added"], [0, 76])  # no Status column: a chip says when one isn't current (release 5.114)
         nodes = documents_tree(m, self.doc_task if self.doc_task in m.tasks else None, self.doc_subs)
         # A task's row holds its documents: only its title, so nothing stands under Status and Checked but a document's.
         self._add_nodes(nodes, filtered=True, row=lambda n: (self._task_cells(n.id, n.depth, context=not n.match)[:1], full_path(m, n.id)))
@@ -60,27 +63,70 @@ class DocumentLists:
             self._set_head(f"Search: {self.query}", "No task matches what follows the #. Pick one from the list # opens.")
         elif scope:
             self._set_head(f"Search {scope.name}: {rest}" if rest else f"Search {scope.name}",
-                           f"{count}, only there. " + ("Every word you type after it must be in the item." if rest else "Type words to narrow it."))
+                           f"{count}, only there. " + ("Every word you type after it must be in the item." if rest else "Type words to narrow it."), count)
         else:
             self._set_head(f"Search: {self.query}", f"{count}. Every word you type must be in the item. "
-                           "To look in one place, start with “search excel files”, “search links”, “search notes” or “search #” and a task.")
-        self.tree.set_columns(["Result"])
+                           "To look in one place, start with “search excel files”, “search links”, “search notes” or “search #” and a task.", count)
+        if LOOK.classic:
+            self.tree.set_columns(["Result"])
+        else:  # a date at the row's end, as Documents has (release 5.114, decision 430)
+            self.tree.set_columns(["Result", "When"], [0, 76])
         grey, group = group_ground(), ""
+        places = doc_places(m) if not LOOK.classic else {}
         for r in results:
             if r.group != group:
                 group = r.group
-                self.tree.add_row(None, None, [f"<b>{esc(group)}</b>"], grey, selectable=False)
+                n = sum(1 for x in results if x.group == group)
+                head = f"<b>{esc(GROUP_NAMES.get(group, group))}</b>" + ("" if LOOK.classic else f' <span class="faint">&nbsp;{n}</span>')
+                self.tree.add_row(None, None, [head] if LOOK.classic else [head, ""], grey, selectable=False, span=not LOOK.classic)
             if LOOK.classic:
                 snippet = f'<br><span class="sub">{esc(r.snippet)}</span>' if r.snippet else ""
                 self.tree.add_row(None, (r.kind, r.id), [f'{esc(r.title)}<br><span class="sub">{esc(r.sub)}</span>{snippet}'])
                 continue
-            kind = file_type(r.title) if r.kind == "doc" else ""
-            name = {"task": "task", "capture": "note", "person": "person", "label": "labels", "tagged": "tagged"}.get(r.kind, f"type-{kind}" if kind not in ("", "other") else "file")
-            colour, tip = "text2", r.kind.capitalize()
-            if r.kind == "task" and r.id in m.tasks:  # a task's state, as everywhere else (decision L7)
-                (name, colour), tip = state_icon(m.task(r.id).state), m.task(r.id).state
-            sub = re.sub(rf"^{re.escape(r.id)}( · )?", "", r.sub)  # no ID (decision L4): it's in the tooltip
-            line = Line(r.title, icon=name, icon_colour=colour, icon_tip=tip, context=sub if r.snippet else "", second=r.snippet or sub)
-            self.tree.add_row(None, (r.kind, r.id), [line], tip=f"{r.title}\n{r.sub}")
+            line, when = self._result_line(m, r, places)
+            self.tree.add_row(None, (r.kind, r.id), [line, f'<p align="right">{esc(when)}</p>'], tip=f"{r.title}\n{r.sub}")
         if not results:
-            self.tree.add_row(None, None, ['<span class="sub">No matches.</span>'], selectable=False)
+            self.tree.add_row(None, None, ['<span class="sub">No matches.</span>'] + ([] if LOOK.classic else [""]), selectable=False,
+                              span=not LOOK.classic)
+
+    def _result_line(self, m, r: search.Result, places: dict) -> tuple[Line, str]:
+        """A result as a file's row is everywhere (release 5.114, decisions 427 to 430): its icon in its type's colour, its name,
+        then one quiet line, where it is and the words that matched (or its description), and one short date at the end."""
+        snippet = without_title(r.snippet, r.title)
+        when, where, rest = "", "", snippet
+        if r.kind == "doc" and r.id in m.documents:
+            d = m.documents[r.id]
+            kind = file_type(d.name, d.original)
+            icon, colour, tip = type_icon(kind), type_colour(kind), type_name(kind)
+            place = places.get(d.id)
+            where = place_words(m, place)
+            rest = snippet or d.description
+            when = self._day(place.added if place else "")
+        elif r.kind == "capture" and r.id in m.captures:
+            c = m.captures[r.id]
+            icon, colour, tip = ("type-mail", "type_mail", "Email") if c.emails or c.source == "outlook_email" else ("note", "text2", "Capture")
+            where = m.task(c.task).title if c.task and c.task in m.tasks else "Unfiled"
+            when = self._day(c.saved)
+        elif r.group == "Saved copy":
+            kind = file_type(r.title)
+            icon, colour, tip = type_icon(kind), type_colour(kind), "Saved copy"
+            where = m.task(r.id).title if r.id in m.tasks else ""
+        elif r.group == "Notes":
+            icon, colour, tip = "note", "text2", "Notes page"
+        elif r.kind == "task" and r.id in m.tasks:  # a task's state, as everywhere else (decision L7)
+            t = m.task(r.id)
+            (icon, colour), tip = state_icon(t.state), t.state
+            where = " › ".join(m.task(x).title for x in m.chains_of(t.id)[0][:-1])  # the tasks it's under
+            rest = snippet or ("" if where else t.state)
+        else:
+            icon, colour, tip = {"person": "person", "label": "labels", "tagged": "tagged"}.get(r.kind, "file"), "text2", r.kind.capitalize()
+            rest = snippet or re.sub(rf"^{re.escape(r.id)}( · )?", "", r.sub)  # no ID (decision L4): it's in the tooltip
+        second = " · ".join(x for x in (where, rest) if x)
+        return Line(r.title, icon=icon, icon_colour=colour, icon_tip=tip, second=second or None), when
+
+    def _day(self, at: str | None) -> str:
+        """A short date ("7 Oct"), or nothing."""
+        try:
+            return short(date.fromisoformat(at[:10]), self.today()) if at else ""
+        except ValueError:
+            return ""

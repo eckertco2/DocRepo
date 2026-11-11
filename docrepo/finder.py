@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 
 from docrepo.overview import Record, fold
+from docrepo.text import snip
 
 #: What a typed ``type:`` value means, and the file extensions typed alone (".pdf").
 TYPE_WORDS = {
@@ -375,9 +376,7 @@ def snippet(text: str, words: list[str], width: int = 100) -> str:
     spans = highlights(text, words)
     if not spans:
         return ""
-    start = max(0, spans[0][0] - 20)  # the word near the start, so a narrow row still shows it
-    part = " ".join(text[start:start + width].split())
-    return ("…" if start else "") + part + ("…" if start + width < len(text) else "")
+    return snip(text, spans[0][0], 20, width)  # the word near the start, so a narrow row still shows it
 
 
 def matched_lines(text: str, words: list[str], context: int = 1, limit: int = 14) -> list[tuple[int, str, bool]]:

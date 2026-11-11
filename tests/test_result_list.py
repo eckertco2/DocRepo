@@ -90,9 +90,9 @@ def test_the_keyboard_steps_past_headings(view):
 
 def test_each_kind_of_record_has_its_line_icon_and_actions(view):
     d = view.delegate
-    assert d.second_line(view.rows[1]) == "Rev B · from an email from Ann Example"
+    assert d.second_line(view.rows[1]) == "Rev B"  # where it came from is in the preview (release 5.114, decision 428)
     assert d.second_line(Row("item", NOTE)) == "Agreed the scope."
-    assert d.second_line(Row("item", PDF, snippet="rated flow 120", where="Installation")) == "Installation · in its text: rated flow 120"
+    assert d.second_line(Row("item", PDF, snippet="rated flow 120", where="Installation")) == "Installation · rated flow 120"  # decision 431
     assert d.icon_of(PDF)[0] == "type-pdf" and d.icon_of(EMAIL)[0] == "type-mail" and d.icon_of(TASK)[0] == "state-ip"
     assert d.icon_of(NOTE)[0] == "note"
     assert d.actions_for(PDF) == ACTIONS

@@ -14,6 +14,7 @@ from urllib.parse import quote
 from docrepo import finder
 from docrepo.dates import days_words, long_date, to_date
 from docrepo.detail import Pages, chip, esc, label_href, link, multiline, state_chip
+from docrepo.file_rows import folder_of
 from docrepo.model import Model, Task
 from docrepo.overview import KIND_NAMES, TYPE_NAMES, Record, ago, family
 
@@ -103,7 +104,7 @@ def preview(model: Model, r: Record | None, today: date, words: list[str], slips
         rows += [("Type", esc(TYPE_NAMES.get(r.type, "Other")) + size),
                  ("Added", f"{esc(long_date(to_date(r.at), today))} · {link(f'capture:{r.capture}', r.came) if r.capture else esc(r.came)}"),
                  ("In", link(f"scope:{r.task}", model.task(r.task).title, "Show what's in it")),
-                 ("Where", esc(r.path)), ("Source", esc(r.source) + (" · a saved copy too" if r.copy and r.source != "Saved copy" else ""))]
+                 ("Where", where_html(r.path)), ("Source", esc(r.source) + (" · a saved copy too" if r.copy and r.source != "Saved copy" else ""))]
         if last_opened:
             rows.append(("Opened", f"{esc(ago(last_opened, today))}, from DocRepo"))
         warn = ('<p class="warn">&nbsp;Not found at its path when it was last opened. Show in File Explorer opens the nearest folder '
@@ -125,6 +126,15 @@ def preview(model: Model, r: Record | None, today: date, words: list[str], slips
              ("Who", esc(", ".join(model.person_name(p) for p in dict.fromkeys([*t.leads, *t.assignees]))) or none("No one yet"))]
     status = f'<p class="desc">{multiline(t.current_status)}</p>' if t.current_status else ""
     return title + status + table(rows)
+
+
+def where_html(path: str) -> str:
+    """A file's folder for its preview (release 5.114, decision 432): its name is the title already, and the folder breaks only
+    after a backslash, so a long path wraps as folders rather than mid-word. The whole path is its tooltip."""
+    folder = folder_of(path)
+    if not folder:
+        return none("Not known")
+    return f'<span class="sub" title="{esc(path)}">{esc(folder).replace(chr(92), chr(92) + "&#8203;")}</span>'
 
 
 def none(text: str = "None") -> str:
