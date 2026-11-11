@@ -17,6 +17,10 @@ A search may say where to look with File search's filters (release 5.121, decisi
 words, "search excel files …", retired): "type:pdf pump curve", "type:links approval", "from:tom after:1 sep", "tag:V-110",
 "#Reactor impeller upgrade seal". ``read`` takes the filters and the ``#task`` out of what was typed, and ``search`` then
 lists only what they keep. Filters with no words after them list everything they keep.
+
+``type:decision`` (or ``decisions``, release 5.124, decision 476) keeps only decisions (``docrepo.decisions``): the
+captures saved as decision items, newest first, listed as Decisions; with no words, every one, up to 200. The other
+filters and a ``#task`` narrow it as they narrow any capture.
 """
 from __future__ import annotations
 
@@ -37,8 +41,9 @@ log = logging.getLogger(__name__)
 
 #: The most results shown for each kind of item.
 LIMIT = 40
-#: "Tagged label" comes first (release 5.79, decision 378): a tag typed however it's written names its label.
-GROUPS = ("Tagged label", "Task", "Notes", "Capture", "Document", "Saved copy", "Person", "Label")
+#: "Tagged label" comes first (release 5.79, decision 378): a tag typed however it's written names its label. "Decision" is
+#: the captures ``type:decision`` keeps (release 5.124): a search without it lists a decision with the other captures.
+GROUPS = ("Tagged label", "Task", "Notes", "Capture", "Decision", "Document", "Saved copy", "Person", "Label")
 
 
 #: The most for each kind when a search says where to look: fewer kinds are listed, so each may be longer.
@@ -64,6 +69,7 @@ class Scope:
     tagged: frozenset[str] = frozenset()  # tag: tagged labels' IDs
     hints: tuple[str, ...] = ()
     applied: bool = True  # False when every filter typed is still being typed: nothing to keep yet
+    decisions: bool = False  # type:decision (release 5.124): captures only when they're decisions, listed as Decisions
 
     def lists(self, group: str) -> bool:
         return group in self.groups
@@ -103,13 +109,14 @@ _KINDS: dict[str, Scope] = {
     "label": Scope("labels", frozenset({"Label"})),
     "tag": Scope("tagged labels", frozenset({"Tagged label"})), "tagged": Scope("tagged labels", frozenset({"Tagged label"})),
     "copy": Scope("saved copies", frozenset({"Saved copy"})), "saved": Scope("saved copies", frozenset({"Saved copy"})),
+    "decision": Scope("decisions", frozenset({"Capture"}), decisions=True),  # release 5.124, decision 476
 }
 _TYPE_SCOPE_NAMES = {"doc": "Word files", "sheet": "Excel files", "slides": "PowerPoint files", "pdf": "PDF files", "picture": "pictures",
                      "drawing": "drawings"}
 #: What each filter takes, for one still being typed or one that names nothing: File search's words, with the kinds.
 HINTS = {
     "type": "type: takes a kind: pdf, word, excel, powerpoint, picture, drawing, email, link, folder, file, task, note, capture, "
-            "person, label, tagged or copy.",
+            "decision, person, label, tagged or copy.",
     "in": "in: takes a word of a task's name, as # does: in:reactor.",
     "from": "from: takes part of a sender's name, or attachment, original, copy, link or pasted.",
     "after": "after: takes a date: 1 sep, sep, 2026-09-01, yesterday, last week or 30d.",
@@ -156,7 +163,9 @@ def _joined(scopes: list[Scope]) -> Scope:
     types = frozenset() if any(not s.types for s in typed) else frozenset().union(*(s.types for s in typed))
     keeps = {s.emails for s in scopes if "Capture" in s.groups}
     emails = next(iter(keeps)) if len(keeps) == 1 else None
-    return Scope(" and ".join(dict.fromkeys(s.name for s in scopes)), groups, types, emails)
+    # Only decisions when every place that lists captures lists only decisions: "type:decision type:note" is every note.
+    decided = all(s.decisions for s in scopes if "Capture" in s.groups) and any(s.decisions for s in scopes)
+    return Scope(" and ".join(dict.fromkeys(s.name for s in scopes)), groups, types, emails, decisions=decided)
 
 
 def task_named(model: Model | None, text: str) -> tuple[list[str], str, str]:
@@ -321,7 +330,7 @@ def read(query: str, model: Model | None = None, today: date | None = None) -> t
     if base.name:
         name = name[0].upper() + name[1:]
     return Scope(name, groups, base.types, base.emails, tasks, frozenset(r.senders), frozenset(r.sources), r.since, r.before, r.pinned,
-                 frozenset(r.tags), tuple(dict.fromkeys(r.hints)), r.applied), rest
+                 frozenset(r.tags), tuple(dict.fromkeys(r.hints)), r.applied, base.decisions), rest
 
 
 @dataclass(frozen=True)
@@ -578,8 +587,10 @@ def search(conn: sqlite3.Connection, model: Model, query: str, today: date | Non
     def typed(name: str, original: str | None = None) -> bool:
         return scope is None or not scope.types or file_type(name, original) in scope.types
 
-    def wanted(capture_id: str) -> bool:  # notes leave emails out, and emails keep only them
+    def wanted(capture_id: str) -> bool:  # notes leave emails out, and emails keep only them; decisions keep only decisions
         c = m.captures[capture_id]
+        if scope is not None and scope.decisions and c.item != "decision":
+            return False
         return scope is None or scope.emails is None or bool(c.emails or c.source == "outlook_email") == scope.emails
 
     # Tagged labels (release 5.79, decision 378): one typed however it's written ("v110" finds V-110) is listed first, and
@@ -616,9 +627,10 @@ def search(conn: sqlite3.Connection, model: Model, query: str, today: date | Non
     for tid, body in pages[:limit]:
         t = m.tasks[tid]
         out.append(Result("Notes", "task", t.id, f"Notes of {t.title}", f"{t.id} · its notes page", snippet(_after_title(body), words)))
+    as_group = "Decision" if scope is not None and scope.decisions else "Capture"
     for cid, body in sorted(found, key=lambda x: m.captures[x[0]].saved, reverse=True)[:limit]:
         c = m.captures[cid]
-        out.append(Result("Capture", "capture", c.id, c.title, f"{c.id} · {c.saved[:16]}", snippet(_after_title(body), words)))
+        out.append(Result(as_group, "capture", c.id, c.title, f"{c.id} · {c.saved[:16]}", snippet(_after_title(body), words)))
     docs = [(i, b) for i, b in _indexed(conn, "document", words) if i in m.documents]
     docs += _bodies(conn, "document", mentioned.get("document", set()) - {i for i, _ in docs})
     docs = [(i, b) for i, b in docs if typed(m.documents[i].name, m.documents[i].original) and (in_tasks is None or i in on_tasks)

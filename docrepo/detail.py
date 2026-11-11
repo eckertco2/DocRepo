@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from urllib.parse import quote
 
-from docrepo import capacity, email_conversations, items, markup, notes_page, repeats, tagged, ties
+from docrepo import capacity, decisions, email_conversations, items, markup, notes_page, repeats, tagged, ties
 from docrepo.dates import ago, days_words, long_date, monday_of, short, to_date
 from docrepo.file_rows import dated_name, type_name
 from docrepo.markup import esc
@@ -118,6 +118,9 @@ FIND_FILES_TIP = "Find files (O): a window of its own for searching, previewing 
 NEW_T_MAIL_TIP = ("A new email in Outlook, empty, tagged so its replies come back to this task when you capture them. "
                   "You write and send it; DocRepo never sends email.")
 CONVERSATION_TIP = "Open the conversation: every email of it DocRepo holds, oldest first"
+#: The Decisions section's command (release 5.124, decision 479): the decision register, on the clipboard.
+COPY_DECISIONS_TIP = ("Copy the decision register: a table of each decision's date, its words, its task and the meeting it came "
+                      "from, for an email or a document")
 #: The line between a conversation's emails: a block one pixel high in the rule's grey (Qt draws an <hr> dark).
 RULE = '<p class="rule" style="font-size: 1px; margin-top: 16px; margin-bottom: 0px">&nbsp;</p>'
 SCOPE_NAMES = {"self": "This task", "ancestors": "With parent tasks", "descendants": "With subtasks", "family": "Whole family"}
@@ -269,6 +272,7 @@ class PageState:
     desc: bool = False  # the whole description
     closed: bool = False  # the closed subtasks shown
     conversations: bool = False  # every email conversation shown, not only the newest few (release 5.122)
+    decisions: bool = False  # every decision shown, not only the newest few (release 5.124)
 
 
 class Pages:
@@ -433,6 +437,13 @@ class Pages:
                                                    link(f"new:{t.id}", "New task under this one", "A new task under this one (T)"), raw=True)
             out["subtasks"] = split_section(subtasks)[1]
         ids = self.m.scope_ids(t.id, state.scope)
+        # Decisions (release 5.124, decisions 477 to 479): the task's and its subtasks' decisions, newest first, after
+        # Subtasks and before Email conversations, with Copy at the right; the section isn't there when they have none.
+        found = decisions.of_tasks(self.m, ids)  # their words are read for the rows shown (decision_rows)
+        if found:
+            out["decisions_short"] = str(len(found))
+            out["decisions_summary"] = section_head(out["decisions_short"], link(f"copydecisions:{t.id}", "Copy", COPY_DECISIONS_TIP))
+            out["decisions"] = self.decision_rows(t, found, state)
         # Email conversations (release 5.122, decisions 455 and 456): the task's and its subtasks' emails, a row per
         # conversation; the section isn't there when they have none.
         convs = email_conversations.for_tasks(self.m, ids)
@@ -914,6 +925,36 @@ class Pages:
         else:
             more = ""
         return table + more
+
+    # ---- decisions (release 5.124, the cold-eyes plan's decisions 477 to 479) ----
+    def decision_rows(self, t: Task, found: list[decisions.Decision], state: PageState) -> str:
+        """The Decisions section's body (decision 478): a row per decision, the newest first, as a conversation's row is
+        drawn: the decision's mark, its words (its first line, all of them in the tooltip) in the text's colour, the subtask
+        it's on (unless that's the meeting, which the next line names), a grey line naming the meeting it came from, and its
+        day at the end. The words open its capture. The first ``SHOWN``, then Show all (decision 477); only the rows shown
+        have their words read."""
+        shown = found if state.decisions else found[:decisions.SHOWN]
+        rows = []
+        for d in (decisions.worded(self.m, x, self.content_of) for x in shown):
+            tip = f"{d.more or d.words}\n\nClick to open its capture."
+            words = link(f"capture:{d.capture}", d.words, tip, "tl")
+            where = d.where(self.today)
+            line = (f'<br><span class="sub">in {link(f"task:{d.meeting}", where, "Open the meeting", "tq")}</span>'
+                    if where and d.meeting in self.m.tasks else f'<br><span class="sub">in {esc(where)}</span>' if where else "")
+            chip = "" if d.task == d.meeting else self.from_chip(d.task, t.id)  # on the meeting itself: its line names it
+            rows.append(f'<tr><td valign="top" width="22"><img src="lk:decision" width="14" height="14"></td>'
+                        f'<td valign="top">{words}{chip}{line}</td>'
+                        f'<td valign="top" align="right" class="rel" width="64">{esc(self.day(d.saved))}</td></tr>')
+        table = f'<table width="100%" cellspacing="0" cellpadding="3">{"".join(rows)}</table>'
+        if len(found) > decisions.SHOWN:
+            words = "Show fewer" if state.decisions else f"Show all {len(found)} decisions"
+            table += f'<p style="margin-top: 4px">{link("fold:decisions", words)}</p>'
+        return table
+
+    def decision_register(self, task_id: str, scope: str = "descendants") -> list[tuple[str, str, str, str]]:
+        """The decision register the Decisions section's Copy puts on the clipboard (decision 479): every decision on the
+        task and the tasks under it (the page's scope), newest first, as Date, Decision, Task and Where."""
+        return decisions.rows(self.m, decisions.of_tasks(self.m, self.m.scope_ids(task_id, scope), self.content_of), self.today)
 
     # ---- email conversations (release 5.122, the email section plan's decisions 455 to 463) ----
     def me_name(self) -> str | None:
