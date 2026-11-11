@@ -49,13 +49,13 @@ def test_hash_lists_tasks_and_a_pick_writes_the_name(env):
     conn, box, scope = env
     m = Model(conn)
     title = m.task(RIGGING).title
-    typed(box, scope, "search links #")
+    typed(box, scope, "type:links #")
     assert scope.popup.isVisible()
     assert [o.ref for o in scope.popup.rows()] == [t.id for t in m.top_level() if not t.discarded]
-    typed(box, scope, f"search links #{title.split()[0].lower()}")
+    typed(box, scope, f"type:links #{title.split()[0].lower()}")
     assert RIGGING in [o.ref for o in scope.popup.rows()]
     scope.pick(next(o for o in scope.popup.rows() if o.ref == RIGGING))
-    assert box.text() == f"search links #{title} " and not scope.popup.isVisible()
+    assert box.text() == f"type:links #{title} " and not scope.popup.isVisible()
     assert box.cursorPosition() == len(box.text())
     # What it wrote is read as that task, and the words go on after it.
     read, rest = search.read(box.text() + "crane", m)
@@ -75,7 +75,7 @@ def test_its_keys_and_where_it_stays_shut(env):
     typed(box, scope, "#")
     key(box, Qt.Key.Key_Escape)  # Esc hides the list, and leaves what's typed
     assert not scope.popup.isVisible() and box.text() == "#"
-    for text in ("crane", "search links crane", "pump #2", "search #zzzqqq"):
+    for text in ("crane", "type:links crane", "pump #2", "search #zzzqqq"):  # 5.108's "search" went (release 5.121)
         typed(box, scope, text)
         assert not scope.popup.isVisible(), text
     assert m.task(RIGGING).title  # the sample data's task is there

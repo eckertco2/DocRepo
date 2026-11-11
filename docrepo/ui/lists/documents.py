@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
 from docrepo import search
 from docrepo.dates import short
 from docrepo.detail import esc
-from docrepo.file_rows import GROUP_NAMES, doc_places, place_words, type_colour, type_icon, type_name, without_title
+from docrepo.file_rows import GROUP_NAMES, dated_name, doc_places, place_words, type_colour, type_icon, type_name, without_title
 from docrepo.overview import file_type
 from docrepo.ui.look import LOOK
 from docrepo.ui.tree_view import Line, group_ground, state_icon
@@ -55,24 +55,31 @@ class DocumentLists:
         self.render_list()
 
     def _search_view(self) -> None:
-        m = self.model()
-        results = search.search(self.conn, m, self.query)
-        scope, rest = search.read(self.query, m)  # "search excel files …", "search #task …" (release 5.108): the heading says where
+        m, today = self.model(), self.today()
+        results = search.search(self.conn, m, self.query, today)
+        scope, rest = search.read(self.query, m, today)  # File search's filters and the #task (release 5.121): the heading names them
         count = f"{len(results)} result{'s' if len(results) != 1 else ''}"
         if scope and scope.tasks is not None and not scope.tasks:
             self._set_head(f"Search: {self.query}", "No task matches what follows the #. Pick one from the list # opens.")
-        elif scope:
+        elif scope and scope.name:
             self._set_head(f"Search {scope.name}: {rest}" if rest else f"Search {scope.name}",
-                           f"{count}, only there. " + ("Every word you type after it must be in the item." if rest else "Type words to narrow it."), count)
+                           f"{count}, only what the filters keep. " + ("Every word after them must be in the item." if rest else "Type words to narrow it."), count)
         else:
-            self._set_head(f"Search: {self.query}", f"{count}. Every word you type must be in the item. "
-                           "To look in one place, start with “search excel files”, “search links”, “search notes” or “search #” and a task.", count)
+            self._set_head(f"Search: {rest if scope else self.query}", f"{count}. Every word you type must be in the item. "
+                           "Narrow it as File search does, with type:pdf, from:name, after:1 sep, is:pinned or tag:, or a #task first.", count)
         if LOOK.classic:
             self.tree.set_columns(["Result"])
         else:  # a date at the row's end, as Documents has (release 5.114, decision 430)
             self.tree.set_columns(["Result", "When"], [0, 76])
         grey, group = group_ground(), ""
         places = doc_places(m) if not LOOK.classic else {}
+
+        def say(text: str) -> None:  # a line of its own above or in place of the results
+            self.tree.add_row(None, None, [f'<span class="sub">{esc(text)}</span>'] + ([] if LOOK.classic else [""]), selectable=False,
+                              span=not LOOK.classic, tip=text)  # a long one is cut at the list's edge: hovering says it all
+
+        for hint in scope.hints if scope else ():  # a filter still being typed, or one that names nothing (decision 452)
+            say(hint)
         for r in results:
             if r.group != group:
                 group = r.group
@@ -85,15 +92,19 @@ class DocumentLists:
                 continue
             line, when = self._result_line(m, r, places)
             self.tree.add_row(None, (r.kind, r.id), [line, f'<p align="right">{esc(when)}</p>'], tip=f"{r.title}\n{r.sub}")
-        if not results:
-            self.tree.add_row(None, None, ['<span class="sub">No matches.</span>'] + ([] if LOOK.classic else [""]), selectable=False,
-                              span=not LOOK.classic)
+        if not results and self.query.lower().startswith("search "):  # 5.108's place words went (decision 454)
+            say(search.OLD_WAY)
+        elif not results and scope and scope.senders and not scope.hints:
+            who = " or ".join(f"“{s}”" for s in sorted(scope.senders))
+            say(f"No email from {who} holds every word." if rest else f"No email's sender has {who} in it.")
+        elif not results and not (scope and scope.hints):
+            say("No matches.")
 
     def _result_line(self, m, r: search.Result, places: dict) -> tuple[Line, str]:
         """A result as a file's row is everywhere (release 5.114, decisions 427 to 430): its icon in its type's colour, its name,
         then one quiet line, where it is and the words that matched (or its description), and one short date at the end."""
         snippet = without_title(r.snippet, r.title)
-        when, where, rest = "", "", snippet
+        when, where, rest, title = "", "", snippet, r.title
         if r.kind == "doc" and r.id in m.documents:
             d = m.documents[r.id]
             kind = file_type(d.name, d.original)
@@ -107,10 +118,12 @@ class DocumentLists:
             icon, colour, tip = ("type-mail", "type_mail", "Email") if c.emails or c.source == "outlook_email" else ("note", "text2", "Capture")
             where = m.task(c.task).title if c.task and c.task in m.tasks else "Unfiled"
             when = self._day(c.saved)
-        elif r.group == "Saved copy":
+        elif r.group == "Saved copy":  # its name without the day it starts with, which is the row's date (decision 429)
             kind = file_type(r.title)
             icon, colour, tip = type_icon(kind), type_colour(kind), "Saved copy"
             where = m.task(r.id).title if r.id in m.tasks else ""
+            day, title = dated_name(r.title)
+            when = self._day(day)
         elif r.group == "Notes":
             icon, colour, tip = "note", "text2", "Notes page"
         elif r.kind == "task" and r.id in m.tasks:  # a task's state, as everywhere else (decision L7)
@@ -122,7 +135,7 @@ class DocumentLists:
             icon, colour, tip = {"person": "person", "label": "labels", "tagged": "tagged"}.get(r.kind, "file"), "text2", r.kind.capitalize()
             rest = snippet or re.sub(rf"^{re.escape(r.id)}( · )?", "", r.sub)  # no ID (decision L4): it's in the tooltip
         second = " · ".join(x for x in (where, rest) if x)
-        return Line(r.title, icon=icon, icon_colour=colour, icon_tip=tip, second=second or None), when
+        return Line(title, icon=icon, icon_colour=colour, icon_tip=tip, second=second or None), when
 
     def _day(self, at: str | None) -> str:
         """A short date ("7 Oct"), or nothing."""
