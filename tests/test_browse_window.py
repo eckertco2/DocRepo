@@ -896,9 +896,10 @@ def test_the_task_page_bar_and_its_links(browse, monkeypatch):
     browse.on_link(QUrl("fold:anything"))  # only the page's own folds
     browse.go_task("T000012")  # another task: its folds start closed; the tab and order stay
     assert not browse.state.details and browse.state.order == "new"
-    browse.task_pane.setFixedWidth(1040)  # the pane made wide: the page is drawn again in two columns
+    browse.task_pane.setFixedWidth(1040)  # the pane made wide: drawn again, with no rail since release 5.113 (decision 424)
     QApplication.processEvents()
-    assert browse.task_pane.page_width() >= 760 and "Folder" in shown(browse)  # the rail, with Details open
+    assert browse.task_pane.page_width() >= 760 and "Folder" not in shown(browse) and browse.task_pane.top.isHidden()
+    assert 'width="760"' in browse.task_pane.header.head.toHtml()  # the facts grid stops widening
     browse.task_pane.setFixedWidth(520)
     QApplication.processEvents()
     assert "Folder" not in shown(browse)
@@ -1101,17 +1102,20 @@ def test_the_page_view_draws_the_pages_pictures(qapp):
 
 
 def test_the_header_s_groups_open_fold_and_are_remembered(browse):
-    """Release 5.84 (the task pane review's T2): closed groups share a row, an open one has its body, the status log is
-    behind the status card, the history folds after the notes, and what's open is kept per task."""
+    """Release 5.84 (the task pane review's T2): an open group has its body, the status log is behind the status card,
+    the history folds after the notes, and what's open is kept per task. Since release 5.113 every group is a row of its
+    own in the page's order, open or closed, a closed one with its count, and When and who is the facts grid."""
     from docrepo import db
 
     browse.go_task("T000001")
     pane = browse.task_pane
     header, g = pane.header, pane.header.groups
-    assert g["subtasks"].is_open and not g["when_who"].is_open and not g["files"].is_open and not g["details"].is_open
+    assert g["subtasks"].is_open and not g["files"].is_open and not g["details"].is_open and "when_who" not in g
     assert not g["key_dates"].present and not g["agenda"].present  # nothing in them
-    assert g["when_who"].head.parentWidget() is header.strip and g["subtasks"].head.parentWidget() is g["subtasks"]
-    assert "Installation" in header.text() and "Folder" not in header.text() and g["files"].label.text() == "5 Find files"
+    assert all(x.head.parentWidget() is x for x in g.values())  # each its own row
+    assert "Installation" in header.text() and "Folder" not in header.text() and g["files"].label.text() == "5"
+    grid = " ".join(header.head.toPlainText().replace("￼", "").split())  # without the faces' pictures
+    assert "Lead Me 20 h" in grid and "Status In progress" in grid  # the grid
     g["details"].toggle()
     assert g["details"].is_open and g["details"].head.parentWidget() is g["details"] and "Folder" in header.text()
     assert not header.log_open and "Imported from the Excel tracker" not in header.text()
@@ -1128,4 +1132,4 @@ def test_the_header_s_groups_open_fold_and_are_remembered(browse):
     browse.on_link(QUrl("tab:files"))
     assert g["files"].is_open and "Find files" in header.text()
     g["subtasks"].toggle()
-    assert g["subtasks"].head.parentWidget() is header.strip and "Rigging plan" not in header.text()
+    assert not g["subtasks"].is_open and g["subtasks"].label.text() == "3 of 4 open" and "Rigging plan" not in header.text()

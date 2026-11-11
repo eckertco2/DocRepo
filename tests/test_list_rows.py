@@ -221,8 +221,9 @@ def test_search_rows_show_no_ids_and_a_tasks_state(browse):
     assert browse.view == "search"
     lines = [(i.data(0, KEY_ROLE), i.data(0, LINE_ROLE)) for i in shown_rows(browse) if i.data(0, LINE_ROLE) is not None]
     assert lines and not any(key[1] in line.words() for key, line in lines)  # its ID is in the tooltip only
-    task = dict(lines)[("task", "T000001")]
+    task, *copies = [line for key, line in lines if key == ("task", "T000001")]  # the task's row, then its saved copies'
     assert task.icon == "state-ip" and task.icon_tip == "In progress"
+    assert copies and all(c.icon == "type-pdf" and c.icon_tip == "Saved copy" for c in copies)  # a file's mark (release 5.114)
 
 
 # ---- release 5.81: a task's priority as its row's left edge (decision L9) ----

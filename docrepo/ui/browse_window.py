@@ -62,6 +62,7 @@ from docrepo.ui.explorer import show_in_explorer
 from docrepo.ui.front import bring_to_front
 from docrepo.ui.problems import ProblemsLine
 from docrepo.ui.settings_view import SettingsView
+from docrepo.ui.search_scope import ScopeList
 from docrepo.ui import tokens
 from docrepo.ui.icons import icon
 from docrepo.ui.look import LOOK, Help, KeyTips, set_hints, tip, with_key
@@ -236,7 +237,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         bl.addWidget(self.views_button)
         self.search_box = QLineEdit()
         self.search_box.setPlaceholderText("Search everything: tasks, captures, documents and people" + ("   (Ctrl+Shift+F)" if LOOK.classic else ""))
-        tip(self.search_box, "Search everything", "Ctrl+Shift+F")
+        tip(self.search_box, "Search everything, or one place: “search excel files …”, “search links …”, “search notes …”, “search #” and a task", "Ctrl+Shift+F")
         if not LOOK.classic:
             self.search_box.addAction(icon("search"), QLineEdit.ActionPosition.LeadingPosition)
             self.search_box.setMaximumWidth(560)
@@ -248,6 +249,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         self._search_timer.timeout.connect(self._run_search)
         self.search_box.textChanged.connect(lambda _: self._search_timer.start())
         self.search_box.installEventFilter(self)
+        self.search_scope = ScopeList(self.search_box, self.model, self)  # "#" lists tasks to search in (release 5.108)
         bl.addWidget(self.search_box, 1)
         if not LOOK.classic:
             bl.addStretch(0)
@@ -410,7 +412,9 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         self.detail_stack.addWidget(self.page)
         self.detail_stack.addWidget(self._build_edit_form())
         # A task's page with its notes page (release 5.25): its facts, the notes and its history in one scroll.
-        self.task_pane = TaskPane(page_css(), 14 if LOOK.classic else 16)
+        # The page's left edge is 24 px in from the pane in the new look (release 5.113, decision 423), so a section's
+        # chevron can hang in the margin and every title, grid and frame starts on that one edge.
+        self.task_pane = TaskPane(page_css(), 14 if LOOK.classic else 24)
         for view in self.task_pane.views():
             view.anchorClicked.connect(self.on_link)
         self.task_pane.layout_changed.connect(self._page_width_changed)

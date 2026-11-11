@@ -15,3 +15,4 @@ The state menu (release 5.76) draws tick, in the accent, after the current state
 The notes page's Jump to (release 5.86) is jump, an arrow down to a line, on the Notes header.
 Tagged labels (release 5.79) adds tagged, an equipment tag's plate with its hole and two lines of text, to the sidebar and
 to search's results.
+The notes page's outline (release 5.113) is outline, a panel with a column at its left and indented lines beside it, on the Notes heading.

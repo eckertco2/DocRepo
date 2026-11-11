@@ -50,6 +50,8 @@ class NotesPages:
         notes.image_pasted.connect(lambda image: self._picture_pasted(image, pane))
         notes.files_dropped.connect(lambda paths: self._files_dropped(paths, pane))
         pane.notes_menu.connect(lambda which: self._notes_menu(which, pane))
+        # The outline beside the notes (release 5.113): shown until the owner hides it, then kept so for every task.
+        pane.set_outline_on(db.get_state(self.conn, "notes_outline") != "0")
         pane.summary.folded.connect(lambda folded: self._save_summary_folded(folded, pane))
 
     def note_panes(self) -> list[TaskPane]:
@@ -267,6 +269,8 @@ class NotesPages:
                      else f"Days older than two weeks stay open on this page: {days} unfolded.")
         elif which == "history":
             self.page_history(task_id, pane)
+        elif which == "outline":
+            db.set_state(self.conn, "notes_outline", "1" if pane.outline_on else "0")
 
     def page_history(self, task_id: str, pane: TaskPane | None = None) -> None:
         """Page history (decision 103): the page as it stood at the end of each day it changed, and Restore, which is an

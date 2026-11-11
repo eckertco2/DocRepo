@@ -222,27 +222,38 @@ def test_release_59_fields_on_the_pages(sample_root):
 
 
 def test_the_page_in_parts(pages):
-    """Release 5.84 (the task pane review's T2): the header's parts, the fact line, each group's summary and body, the
-    history with Captures and Summaries only, the Files group, and the rail on a wide page."""
+    """Release 5.84 (the task pane review's T2), made calmer in release 5.113 (the task panel plan): the head with the
+    facts grid in place of the chips and the fact line, each section's summary (its count, its command at the right),
+    its few words when closed and its body, the history with Captures and Summaries only, the Files section, and no
+    rail on a wide page."""
     from docrepo.detail import split_section
 
-    assert split_section('<p class="sec">Subtasks<span class="secx"> <span class="rel">3 of 4</span></span></p><table>x</table>') == \
-        ('<span class="rel">3 of 4</span>', "<table>x</table>")
+    assert split_section('<p class="sec">Subtasks<span class="secx"> <span class="rel">3 of 4</span></span></p><table>x</table>') ==         ('<span class="rel">3 of 4</span>', "<table>x</table>")
     parts = pages.task_parts("T000008", PageState())
-    assert text(parts["head"]).startswith("Reactor impeller upgrade › Installation In progress Line 1 Strategic Plan "
-                                          "Due Fri 30 Oct in 22 days · deadline too · Lead Me , Tom Becker , Mike Ortiz Install and align")  # the links' commas
+    head = text(parts["head"])
+    # The path, the title and the description, then the grid: Status and When's rows on the left, Who's and Labels on the right.
+    assert head.startswith("Reactor impeller upgrade › Installation Install and align the new impeller")
+    assert "Status In progress Due Fri 30 Oct in 22 days Deadline too" in head and "Starts Mon 19 Oct in 11 days" in head
+    assert "Lead Me 8 h Assignees Tom Becker 60 h Mike Ortiz 60 h Labels Line 1 , Strategic Plan" in head
+    grid = parts["head"].split("<table", 1)[1]
+    assert 'href="state:T000008"' in parts["head"] and 'class="rel"' not in grid and 'class="sub"' not in grid  # one size in the grid
     assert (parts["status_name"], parts["status_when"], parts["status_age"]) == ("Current status", "Mon 5 Oct", "3 days ago")
     assert "Procedure rev 2 approved" in parts["status_body"]
     assert parts["status_log_summary"] == f"{len(pages.stories.story('T000008'))} changes" and "Work started" in text(parts["status_log"])
     assert text(parts["subtasks_summary"]) == "3 of 3 open New task under this one" and "Rigging plan" in text(parts["subtasks"]) and "Subtasks" not in text(parts["subtasks"])
-    assert "Starts" in parts["when_who_summary"] and "Due" not in parts["when_who_summary"] and "h" in parts["when_who_summary"]
-    assert "Deadline too" in text(parts["when_who"]) and "Who Lead Me 8 h" in text(parts["when_who"])
-    assert parts["details_summary"] == "" and "ID T000008" in text(parts["details"]) and "Folder" in text(parts["details"])
+    assert parts["subtasks_short"] == "3 of 3 open" and 'align="right"' in parts["subtasks_summary"]  # the command at the right
+    assert "when_who" not in parts and "rail" not in parts  # When and who is the grid now
+    assert parts["details_short"] == "" and "ID T000008" in text(parts["details"]) and "Folder" in text(parts["details"])
     history = text(parts["history"])
     assert history.startswith("Captures 6 Summaries 1 With subtasks") and "Status log" not in history and "Files 3" not in history  # the tabs
-    assert text(parts["history_summary"]) == "6 captures" and text(parts["files_summary"]) == "3 Find files" and "Find files" in text(parts["files"])  # release 5.98
+    assert parts["history_short"] == "6 captures" and parts["files_short"] == "3" and text(parts["files_summary"]) == "3 Find files"  # release 5.98
+    assert "to search, preview and open" not in text(parts["files"])  # Find files is the section's command, not a line in it
     assert "key_dates" not in parts or parts["key_dates"] == ""  # nothing in them
     wide = pages.task_parts("T000008", PageState(), 900)
-    assert "when_who" not in wide and "details" not in wide and "Who Lead Me 8 h" in text(wide["rail"]) and "Folder" in text(wide["rail"])
-    done = next(t for t in pages.m.tasks.values() if t.state == "Closed")  # a closed task says so on its fact line
+    assert "rail" not in wide and "Folder" in text(wide["details"]) and 'width="760"' in wide["head"]  # the grid stops widening
+    narrow = pages.task_parts("T000008", PageState(), 500)
+    assert "Labels Line 1" in text(narrow["head"]) and 'width="50%"' not in narrow["head"]  # one column
+    done = next(t for t in pages.m.tasks.values() if t.state == "Closed")  # a closed task says so in its grid
     assert f"Closed {pages.long(done.closed)}" in text(pages.task_parts(done.id, PageState())["head"])
+    meeting = text(pages.task_parts("T000010", PageState())["head"])
+    assert "Next meeting" in meeting and "Meeting " not in meeting.split("Next meeting")[0]  # its dates say it's a meeting
