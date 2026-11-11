@@ -1771,16 +1771,20 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
             self.go_capture(capture_id)
             self.say(message)
 
-    def _pick_parent(self, task_id: str, old_parent: str | None, also: bool = False, anchor: QWidget | None = None) -> None:
+    def _pick_parent(self, task_id: str, old_parent: str | None, also: bool = False, anchor: QWidget | None = None,
+                     after: Callable[[], None] | None = None, tell: Callable[[str, Callable[[], None] | None], None] | None = None) -> None:
         """The task picker for Move, Put under and Also put under, under ``anchor`` (the command bar unless a menu says),
         without the task itself and every task under it, which it can't go under (release 5.98, with 5.103's ``keep``: the
-        owner's yes of 2026-11-07)."""
+        owner's yes of 2026-11-07). ``after`` and ``tell`` are ``move_task``'s."""
         out = {task_id, *self.model().descendants_of(task_id)}
-        self._pick_task(anchor or self.actions, lambda new: self.move_task(task_id, None if also else old_parent, new) if new else None, None,
+        self._pick_task(anchor or self.actions,
+                        lambda new: self.move_task(task_id, None if also else old_parent, new, after, tell) if new else None, None,
                         keep=lambda t: t not in out)
 
-    def move_task(self, task_id: str, old_parent: str | None, new_parent: str | None) -> None:
-        self._do(lambda: edits.move_task(self.conn, self.ctx.data_root, self.ctx.fs, task_id, old_parent, new_parent, self._now()))
+    def move_task(self, task_id: str, old_parent: str | None, new_parent: str | None, after: Callable[[], None] | None = None,
+                  tell: Callable[[str, Callable[[], None] | None], None] | None = None) -> bool:
+        """A move from the Edit menu, with Undo for ten seconds (release 5.118): ``task_menus.move``."""
+        return task_menus.move(self, task_id, old_parent, new_parent, after, tell)
 
     # ---- people and labels ----
     def add_person(self) -> None:

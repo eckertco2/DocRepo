@@ -103,16 +103,21 @@ def picked_line(model: Model, task_id: str, state: str, others: int) -> str:
 class UndoButton(QPushButton):
     """Undo beside a status line, for ten seconds after a change it can take back (decision 363). A new message hides it."""
 
+    TIP = "Set the state back. The status log keeps both changes."
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__("Undo", parent, objectName="link")
-        self.setToolTip("Set the state back. The status log keeps both changes.")
+        self.setToolTip(self.TIP)
         self._undo: Callable[[], None] | None = None
         self._timer = QTimer(self, singleShot=True, interval=UNDO_MS, timeout=self.forget)
         self.clicked.connect(self._run)
         self.hide()
 
-    def offer(self, undo: Callable[[], None]) -> None:
+    def offer(self, undo: Callable[[], None], tip: str = "") -> None:
+        """Offer ``undo`` for ten seconds; ``tip`` says what it takes back, a state unless it says otherwise (a move's,
+        release 5.118)."""
         self._undo = undo
+        self.setToolTip(tip or self.TIP)
         self.show()
         self._timer.start()
 

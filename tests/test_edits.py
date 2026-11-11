@@ -178,18 +178,20 @@ def test_the_edit_task_form_changes_only_what_differs(sample_root):
 def test_moving_a_task_in_the_tree(sample_root):
     conn, root, fs = sample_root
     out = edits.move_task(conn, root, fs, "T000012", "T000008", "T000001", AT)
-    assert out.message == "Rigging plan is now under Reactor impeller upgrade."
+    assert out.message == "Rigging plan moved from under Installation to Reactor impeller upgrade."  # release 5.118's words
     m = Model(conn)
     assert m.parents_of("T000012") == ["T000001"]
     assert m.status_log_of("T000012")[-1].from_value == "Installation"
-    edits.move_task(conn, root, fs, "T000012", None, "T000008", AT)  # also under
-    assert Model(conn).parents_of("T000012") == ["T000001", "T000008"]
-    edits.move_task(conn, root, fs, "T000012", "T000001", None, AT)  # take out from under one
-    assert Model(conn).parents_of("T000012") == ["T000008"]
+    out = edits.move_task(conn, root, fs, "T000012", None, "T000008", AT)  # also under
+    assert Model(conn).parents_of("T000012") == ["T000001", "T000008"] and out.message == "Rigging plan is under Installation too."
+    out = edits.move_task(conn, root, fs, "T000012", "T000001", None, AT)  # take out from under one
+    assert Model(conn).parents_of("T000012") == ["T000008"] and out.message == "Rigging plan is no longer under Reactor impeller upgrade."
     with pytest.raises(tasks.TaskError, match="under itself"):
         edits.move_task(conn, root, fs, "T000008", "T000001", "T000012", AT)
     out = edits.move_task(conn, root, fs, "T000012", "T000008", None, AT)
-    assert Model(conn).parents_of("T000012") == [] and "top-level task" in out.message
+    assert Model(conn).parents_of("T000012") == [] and out.message == "Rigging plan is a top-level task now."
+    out = edits.move_task(conn, root, fs, "T000012", None, "T000002", AT)  # a top-level task's Put under…
+    assert out.message == "Rigging plan is under Verification walkthrough readiness now."
 
 
 def test_task_md_keeps_a_long_value_on_one_line(sample_root):

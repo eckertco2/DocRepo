@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from docrepo import activity, agenda, bulk, captures, notes_page, people, priorities, search, tasks, whatif
+from docrepo import activity, agenda, bulk, captures, notes_page, people, priorities, quick, search, tasks, whatif
 from docrepo.config import Settings
 from docrepo.dates import stamp
 from docrepo.db import transaction
@@ -731,10 +731,41 @@ def bring_back_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, ca
 
 def move_task(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, task_id: str, old_parent: str | None, new_parent: str | None,
               at: datetime) -> Outcome:
-    """Move a task under another parent, add a parent, or take it out from under one."""
-    change = tasks.move_parent(conn, task_id, old_parent, new_parent, at=at, via=BROWSE)
+    """Move a task under another parent, add a parent, or take it out from under one: the Edit menu's Move…, Put under…,
+    Also put under… and Remove from under…, saying which in the mock's words (release 5.118, decision 439)."""
+    had = tasks.parent_links(conn, task_id)
+    tasks.move_parent(conn, task_id, old_parent, new_parent, at=at, via=BROWSE)
     m = Model(conn)
-    where = change.to_value or "nothing: it's a top-level task now"
-    out = Outcome(f"{m.task(task_id).title} is now under {where}.")
+    out = Outcome(moved_line(m, task_id, old_parent, new_parent, bool(had)))
     write_all_pages(conn, data_root, fs, at, out.problems)
+    return out
+
+
+def moved_line(m: Model, task_id: str, old_parent: str | None, new_parent: str | None, had_parents: bool) -> str:
+    """What the status line says after a move (the consolidation mock's words, decision 439): "Rigging plan moved from
+    under Installation to Reactor impeller upgrade.", "… is under X now, out of Quick tasks.", "… is under X now." (a
+    top-level task's first parent), "… is under X too.", "… is no longer under X." or "… is a top-level task now."."""
+    name = m.task(task_id).title
+    title = lambda p: m.task(p).title  # noqa: E731
+    if new_parent is None:
+        return f"{name} is no longer under {title(old_parent)}." if m.parents_of(task_id) and old_parent else f"{name} is a top-level task now."
+    if old_parent is None:
+        return f"{name} is under {title(new_parent)} {'too' if had_parents else 'now'}."
+    if quick.is_parent(m.task(old_parent)):
+        return f"{name} is under {title(new_parent)} now, out of Quick tasks."
+    return f"{name} moved from under {title(old_parent)} to {title(new_parent)}."
+
+
+def undo_move(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, task_id: str, links: list[tuple[int, str]],
+              expect: list[tuple[int, str]], at: datetime) -> Outcome:
+    """Undo after a move from the Edit menu (release 5.118, decisions 435 to 438): the task back under exactly the parents it
+    had, in its old place (``links``, ``tasks.parent_links`` from before the move), while its links are still ``expect``,
+    what the move left. One Parents line in the status log as "Browse tool", so the log keeps both changes."""
+    tasks.restore_parents(conn, task_id, links, expect=expect, at=at, via=BROWSE)
+    m = Model(conn)
+    name, parents = m.task(task_id).title, [m.task(p).title for p in m.parents_of(task_id)]
+    where = f"under {' and '.join(parents)} again" if parents else "a top-level task again"
+    out = Outcome(f"Set back: {name} is {where}. The status log keeps both changes.")
+    write_all_pages(conn, data_root, fs, at, out.problems)
+    log.info("task %s set back under %d parents", task_id, len(parents))
     return out
