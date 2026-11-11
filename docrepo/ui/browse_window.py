@@ -413,7 +413,9 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         self.detail_stack.addWidget(self.page)
         self.detail_stack.addWidget(self._build_edit_form())
         # A task's page with its notes page (release 5.25): its facts, the notes and its history in one scroll.
-        self.task_pane = TaskPane(page_css(), 14 if LOOK.classic else 16)
+        # The page's left edge is 24 px in from the pane in the new look (release 5.113, decision 423), so a section's
+        # chevron can hang in the margin and every title, grid and frame starts on that one edge.
+        self.task_pane = TaskPane(page_css(), 14 if LOOK.classic else 24)
         for view in self.task_pane.views():
             view.anchorClicked.connect(self.on_link)
         self.task_pane.layout_changed.connect(self._page_width_changed)

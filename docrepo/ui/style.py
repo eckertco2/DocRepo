@@ -60,7 +60,11 @@ NOTES_STYLE = """
 QWidget#taskPaneInner, QWidget#notesWrap { background: #ffffff; }
 QFrame#notesCard { background: #ffffff; border: 1px solid #b8c1cb; border-radius: 4px; }
 QFrame#notesCard[typing="true"] { border: 1px solid #1d5e98; }
-QFrame#notesCard QWidget#notesHead { background: #f4f6f8; border: none; border-bottom: 1px solid #d6dce3; }
+QWidget#notesHead { background: transparent; border: none; }
+QFrame#outlineSlot { background: transparent; border: none; border-right: 1px solid #d6dce3; }
+QListWidget#notesOutline { background: transparent; border: none; }
+QToolButton#notesOutlineButton { border: 1px solid transparent; background: transparent; border-radius: 3px; }
+QToolButton#notesOutlineButton:checked { background: #dbe8f5; border-color: #9dc0e3; }
 QTextEdit#notesPage { border: none; background: transparent; padding: 0; }
 QLabel#notesSaved { color: #5a6571; }
 QWidget#summaryBox { background: transparent; }
@@ -69,11 +73,13 @@ QTextEdit#checkText { border: none; background: transparent; padding: 0; }
 QLabel#checkCount, QLabel#checkHeading { color: #5a6571; }
 QToolButton#checkFold, QToolButton#rowAction { border: none; background: transparent; }
 QTextBrowser#fitView { background: transparent; border: none; }
-QFrame#statusCard { background: #f4f6f8; border: none; border-radius: 4px; }
-QLabel#statusName, QLabel#statusWhen { color: #5a6571; }
+QFrame#statusCard { background: #f4f6f8; border: none; border-left: 3px solid #1d5e98; }
+QFrame#statusCard[empty="true"] { border-left: 3px solid #d6dce3; }
+QLabel#statusName, QLabel#statusWhen, QLabel#groupSummaryLabel { color: #5a6571; }
+QToolButton#statusLog { border: none; background: transparent; padding: 1px 4px 1px 6px; color: #5a6571; }
+QToolButton#statusLog:hover { background: #eef1f4; border-radius: 4px; }
 QToolButton#groupHead { border: none; background: transparent; padding: 2px 6px 2px 2px; color: #1a1f25; }
 QToolButton#groupHead:hover { background: #eef1f4; border-radius: 4px; }
-QToolButton#groupFold { border: none; background: transparent; }
 QWidget#stickyTitle { background: #ffffff; border-bottom: 1px solid #d6dce3; }
 QToolButton#stickyButton { border: none; background: transparent; padding: 1px 6px; color: #1d5e98; }
 """

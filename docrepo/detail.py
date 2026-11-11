@@ -95,6 +95,9 @@ h2 { font-size: 15pt; font-weight: 600; margin-top: 2px; margin-bottom: 4px; }
 .line { margin: 0; }
 .hitline { margin: 0; background-color: #fff4ce; }
 .gap { margin: 0; color: #5a6571; }
+.gk { color: #5a6571; padding-right: 10px; }
+.relb { color: #5a6571; font-weight: 400; }
+.grid { margin-top: 10px; }
 """
 
 STATE_CLASS = {"Not started": "st-ns", "In progress": "st-ip", "Parked": "st-pk", "Closed": "st-cl"}
@@ -202,6 +205,27 @@ def group(title: str, rows: list[tuple[str, str]]) -> str:
 
 
 _SECTION = re.compile(r'^<p class="sec">(?:<a [^>]*>.*?</a> &nbsp;)?[^<]*<span class="secx">(.*?)</span></p>(.*)$', re.S)
+
+
+#: How wide the facts grid gets on a wide pane (release 5.113).
+GRID_MAX = 760
+
+
+def grid_column(rows: list[tuple[str, str]]) -> str:
+    """Rows of the facts grid (release 5.113): a grey name beside its value, both at the Body size, the names' column a
+    fixed width, so values line up down the grid; the first column's words on the page's left edge."""
+    cells = "".join(f'<tr><td class="gk" valign="top" style="padding: 3px 14px 3px 0px; white-space: nowrap">{esc(k)}</td>'
+                    f'<td valign="top" style="padding: 3px 12px 3px 0px">{v}</td></tr>' for k, v in rows)
+    return f'<table cellspacing="0" cellpadding="0">{cells}</table>'
+
+
+def section_head(count: str, action: str = "", raw: bool = False) -> str:
+    """An open section's summary beside its title (release 5.113, decision 423): its count in the secondary colour, then
+    its one command at the right. ``count`` is HTML already when ``raw``."""
+    words = count if raw else esc(count)
+    left = f'<span class="rel">{words}</span>' if words else ""
+    right = f'<td align="right" class="rel">{action}</td>' if action else ""
+    return f'<table width="100%" cellspacing="0" cellpadding="0"><tr><td valign="middle">{left}</td>{right}</tr></table>'
 
 
 def split_section(html: str) -> tuple[str, str]:
@@ -359,89 +383,109 @@ class Pages:
         return (head + self.status_block(t) + facts + links + self.agenda_section(t) + self.subtask_section(t, state) + self.details(t, state)
                 + (self.history(t, state) if history else ""))
 
-    # ---- the page in parts (release 5.84, the task pane review's T2: R1, R2, R6 and decisions P1, P4, P10) ----
-    def fact_line(self, t: Task) -> str:
-        """One line of the facts acted on most, under the chips: when it's due (or closed, or next met) and who's on it.
-        The rest of When and Who is behind the "When and who" group."""
-        today, open_, parts = self.today, is_open(t), []
-
-        def dated(label: str, value: str | date) -> str:
-            d = to_date(value)
-            return f"{label} {esc(long_date(d, today))}" + (f' <span class="rel">{self.days(d)}</span>' if open_ else "")
-
-        if t.state == "Closed" and t.closed:
-            parts.append(f"Closed {esc(self.long(t.closed))}")
-        nxt = due_of(t, today) if t.recurrence and open_ else None
-        if nxt:
-            parts.append(dated("Next meeting" if t.meeting else "Next due", nxt.date))
-        elif t.due:
-            parts.append(dated("Due", t.due) + (' <span class="rel">· deadline too</span>' if t.deadline == t.due else ""))
-        elif t.deadline:
-            parts.append(dated("Deadline", t.deadline))
-        elif open_ and not t.recurrence:
-            parts.append('<span class="sub">No due date</span>')
-        people = [*t.leads, *t.assignees]
-        if people:
-            names = ", ".join(link(f"person:{p}", self.m.person_name(p)) for p in people[:3])
-            if len(people) > 3:
-                names += f' <span class="rel">and {len(people) - 3} more</span>'
-            parts.append(("Lead " if t.leads else "Assigned ") + names)
-        else:
-            parts.append('<span class="sub">No one yet</span>')
-        return f'<p class="factline">{" &nbsp;·&nbsp; ".join(parts)}</p>'
-
-    def when_who_summary(self, t: Task, when_rows: list[tuple[str, str]]) -> str:
-        """What the "When and who" group holds beyond the fact line: the other dates' names, and the hours."""
-        labels = [k for k, _ in when_rows if k not in ("Due", "Closed", "Next due", "Next meeting")]
-        hours = (t.lead_hours or 0) + (t.assignee_hours or 0)
-        if hours:
-            labels.append(f"{num(hours)} h")
-        return esc(", ".join(labels))
-
+    # ---- the page in parts (release 5.84, the task pane review's T2: R1, R2, R6 and decisions P1, P4, P10; release 5.113's
+    # facts grid took the fact line's and the When and who group's place, the task panel plan's decision 422) ----
     def task_parts(self, task_id: str, state: PageState, width: int = 600) -> dict[str, str]:
-        """The page as the browse window draws it since release 5.84: the header (the path, title, chips, fact line and
-        description), the status card's pieces with the status log behind it, each group's summary and body (an
-        expander on the pane), the history's, and, from WIDE_PAGE, the rail (When, Who, Links and Details open) in
-        place of their groups. Everything here is also in ``task_page``, which draws the page as one, for reading."""
+        """The page as the browse window draws it since release 5.84: the header (the path, title and description, and
+        since release 5.113 the facts grid in place of the chips and the fact line), the status card's pieces with the
+        status log behind it, and each section's summary (its count, and its command at the right), its few words for
+        when it's closed (``<key>_short``) and its body; then the history's. Since release 5.113 there's no rail on a
+        wide pane: the grid holds what it held, and the sections are the same at any width (the task panel plan's decision
+        424). Everything here is also in ``task_page``, which draws the page as one, for reading."""
         t = self.m.task(task_id)
-        wide = width >= WIDE_PAGE
         out: dict[str, str] = {}
         out["head"] = (self.discarded_box(t.discarded, t.discard_reason, "the task tree, the lists, the pickers, search and the capacity calendar")
-                       if t.discarded else "") + self.page_head(t, state, self.fact_line(t))
+                       if t.discarded else "") + self.page_head(t, state, grid=self.facts_grid(t, width))
         out["title"] = t.title  # the sticky title line's words (release 5.86)
         out["status_name"], out["status_when"], out["status_age"], out["status_body"] = self.status_parts(t)
         log = self.stories.story(task_id)
         out["status_log"] = self.story_list(log, lambda e: self.log_item(e), state) if log else '<p class="note">No changes yet.</p>'
         out["status_log_summary"] = f"{len(log)} change{'s' if len(log) != 1 else ''}"
-        when_rows, who_rows = self.when_rows(t), self.who_rows(t)
-        when_html, who_html = group("When", when_rows), group("Who", who_rows)
         kd = self.key_dates_block(t)
-        if wide:
-            out["rail"] = when_html + kd + who_html + self.links_group(t) + self.details(t, state, rail=True)
-        else:
-            out["when_who"] = (f'<table width="100%" cellspacing="0" cellpadding="0"><tr><td width="50%" valign="top">{when_html}</td>'
-                               f'<td width="50%" valign="top">{who_html}</td></tr></table>' if width >= SIDE_BY_SIDE else when_html + who_html)
-            out["when_who_summary"] = self.when_who_summary(t, when_rows)
-            out["links_summary"], out["links"] = split_section(self.links_group(t))
-            out["details"] = fact_rows(self.details_rows(t))
-            out["details_summary"] = esc(" · ".join(f"{k} {v}" for k, v in t.references.items()))
-            out["key_dates_summary"], out["key_dates"] = split_section(kd)
-        out["agenda_summary"], out["agenda"] = split_section(self.agenda_section(t))
-        out["subtasks_summary"], out["subtasks"] = split_section(self.subtask_section(t, state))
+        if kd:
+            kds = self.m.key_dates_of(t.id)
+            open_n = sum(1 for x in kds if not x.done)
+            out["key_dates_short"] = f"{open_n} open" if open_n != len(kds) else str(len(kds))
+            out["key_dates_summary"], out["key_dates"] = section_head(out["key_dates_short"]), split_section(kd)[1]
+        agenda = self.agenda_section(t)
+        if agenda:
+            n_open = len(self.m.open_items_for(t.id))
+            out["agenda_short"] = f"{n_open} open"
+            out["agenda_summary"] = section_head(out["agenda_short"], link(f"agenda:{t.id}", "Open agenda"))
+            out["agenda"] = split_section(agenda)[1]
+        subtasks = self.subtask_section(t, state)
+        if subtasks:
+            kids = [self.m.task(k) for k in self.m.children_of(t.id)]
+            closed = sum(1 for k in kids if k.state == "Closed")
+            out["subtasks_short"] = f"{sum(is_open(k) for k in kids)} of {len(kids)} open"
+            bar = f'<img src="progress:{closed}:{len(kids)}" width="{PROGRESS_WIDTH}" height="4" title="{closed} of {len(kids)} closed">'
+            out["subtasks_summary"] = section_head(f'{esc(out["subtasks_short"])} &nbsp;{bar}',
+                                                   link(f"new:{t.id}", "New task under this one", "A new task under this one (T)"), raw=True)
+            out["subtasks"] = split_section(subtasks)[1]
+        links = self.links_group(t)
+        if links:
+            out["links_short"] = str(len(links_of(self.m, t.id, self.reference_links)))
+            out["links_summary"], out["links"] = section_head(out["links_short"]), split_section(links)[1]
         ids = self.m.scope_ids(t.id, state.scope)
         files = self.files_in(ids)
         # Find files opens from here (release 5.98, the consolidation plan's decision 389), and with O; so the group shows
         # with no files too, as the mock has it, and Find files always has a way in by the mouse.
-        out["files"] = self.files_body(t, files, FILES_SHOWN)
-        out["files_summary"] = f'<span class="sub">{len(files) if files else "none yet"}</span> &nbsp;{link(f"taskview:{t.id}", "Find files", FIND_FILES_TIP)}'
+        out["files"] = self.files_body(t, files, FILES_SHOWN, intro=False)
+        out["files_short"] = str(len(files)) if files else "none yet"
+        out["files_summary"] = section_head(out["files_short"], link(f"taskview:{t.id}", "Find files", FIND_FILES_TIP))
+        out["details"] = grid_column(self.details_rows(t))
+        out["details_short"] = " · ".join(f"{k} {v}" for k, v in t.references.items())
+        out["details_summary"] = section_head(out["details_short"])
         out["history"] = self.history(t, state, HISTORY_TABS)
         n = self.history_counts(ids)["notes"]
-        out["history_summary"] = f'<span class="sub">{n} capture{"s" if n != 1 else ""}</span>'
+        out["history_short"] = f"{n} capture{'s' if n != 1 else ''}"
+        out["history_summary"] = section_head(out["history_short"])
         return out
 
-    def page_head(self, t: Task, state: PageState, fact: str = "") -> str:
+    def facts_grid(self, t: Task, width: int = 600) -> str:
+        """The task's facts as one grid under its title (release 5.113, the task panel plan's decision 422): its state
+        with its flags, then its dates (When's rows) on the left; its people (Who's rows) and its labels on the right; each
+        a grey name beside its value, all at the Body size. From SIDE_BY_SIDE wide the two sit side by side, below it one
+        under the other. It takes the place of the chips, the fact line and the When and who group."""
+        left = [("Status", self.status_value(t)), *self.when_rows(t)]
+        right = list(self.who_rows(t))
+        labels = self.labels_value(t)
+        if labels:
+            right.append(("Labels", labels))
+
+        column = grid_column
+        if width >= SIDE_BY_SIDE:
+            wide = f'width="{GRID_MAX}"' if width >= WIDE_PAGE else 'width="100%"'
+            html = (f'<table {wide} cellspacing="0" cellpadding="0" class="grid"><tr><td width="50%" valign="top">{column(left)}</td>'
+                    f'<td width="50%" valign="top">{column(right)}</td></tr></table>')
+        else:
+            html = f'<table width="100%" cellspacing="0" cellpadding="0" class="grid"><tr><td>{column(left + right)}</td></tr></table>'
+        # One size on the grid: the grey words (how far off a date is, "No due date") are Body size here, not Caption (R10).
+        return html.replace('class="rel"', 'class="relb"').replace('class="sub"', 'class="relb"')
+
+    def status_value(self, t: Task) -> str:
+        """The grid's Status: the state's mark and name, which open the state menu (a discarded task's are only words),
+        then its priority, flags and kind as chips, as a chip says something needs a look (the visual review's V6)."""
+        if t.discarded:
+            state = f"{self.mark(t)} {esc(t.state)}"
+        else:
+            state = (f'<a href="state:{t.id}" title="{esc(t.state)}. Click to change the state." style="text-decoration: none">'
+                     f'{self.mark(t)} <span class="tl">{esc(t.state)}</span>{CHEVRON_DOWN}</a>')
+        # A meeting's dates already say it's one ("Next meeting", "Meeting"), so its chip would say it twice.
+        said = t.meeting and any("eeting" in k for k, _ in self.when_rows(t))
+        flags = (self.priority_chip(t) + self.markers_html(t, critical=False) + (" " + chip("Meeting", "routine") if t.meeting and not said else "")
+                 + (" " + chip("Plant event", "new") if t.plant_event else ""))
+        return state + (f" &nbsp;{flags.strip()}" if flags.strip() else "")
+
+    def labels_value(self, t: Task) -> str:
+        """The grid's Labels: each label's name, which opens its page; an inherited one in the secondary colour."""
+        return ", ".join(link(label_href(name), name, "Inherited from a parent task" if inherited else "Set on this task", "tq" if inherited else "tl")
+                         for name, inherited in self.m.labels_of(t.id))
+
+    def page_head(self, t: Task, state: PageState, fact: str = "", grid: str | None = None) -> str:
         """The path (none for a top-level task), the title, the state, flags and labels, ``fact`` (the fact line, release
-        5.84) and the description in two lines."""
+        5.84) and the description in two lines. With ``grid`` (the facts grid, release 5.113) the description follows the
+        title and the grid takes the place of the chips and the fact line."""
         m = self.m
         chains = [c for c in m.chains_of(t.id) if len(c) > 1]
         crumbs = ""
@@ -466,6 +510,8 @@ class Pages:
         if origin:  # release 5.44: the template it came from
             gone = " (discarded)" if origin.discarded else ""
             made = f'<p class="rel">From template: {link(f"tplrow:{origin.row}", " › ".join(origin.path), "Open it in Templates")}{gone}</p>'
+        if grid is not None:
+            return f'{crumbs}<h2 title="{t.id}">{esc(t.title)}</h2>{desc}{made}{grid}'
         return f'{crumbs}<h2 title="{t.id}">{esc(t.title)}</h2><p class="tags">{tags}</p>{fact}{desc}{made}'
 
     def state_button(self, t: Task) -> str:
@@ -669,9 +715,9 @@ class Pages:
             else:
                 due, tip = "", "No due date"
             who = ([*k.leads, *k.assignees] or [None])[0]
-            rows.append(f'<tr><td width="18">{self.mark(k)}</td><td>{self.task_link(k.id, "tl")}{self.markers_html(k)}</td>'
-                        f'<td align="right" class="rel" title="{esc(tip)}">{due}</td>'
-                        f'<td width="24" align="right">{self.avatar(who) if who else ""}</td></tr>')
+            rows.append(f'<tr><td width="20" valign="middle">{self.mark(k)}</td><td valign="middle">{self.task_link(k.id, "tl")}{self.markers_html(k)}</td>'
+                        f'<td align="right" valign="middle" class="rel" title="{esc(tip)}">{due}</td>'
+                        f'<td width="28" align="right" valign="middle">{self.avatar(who) if who else ""}</td></tr>')
         count = f'{sum(is_open(k) for k in kids)} of {len(kids)} open'
         bar = f' <img src="progress:{len(closed)}:{len(kids)}" width="{PROGRESS_WIDTH}" height="4" title="{len(closed)} of {len(kids)} closed">'
         toggle = (f'<p class="more">{link("fold:closed", "Hide closed" if state.closed else f"Show {len(closed)} closed")}</p>' if closed else "")
@@ -793,10 +839,12 @@ class Pages:
             return f'<table cellspacing="0" cellpadding="4">{"".join(rows)}</table>'
         return self.files_body(t, self.files_in(ids))
 
-    def files_body(self, t: Task, files: list, limit: int | None = None) -> str:
+    def files_body(self, t: Task, files: list, limit: int | None = None, intro: bool = True) -> str:
         """The files as rows, each opening in File Explorer (a link in the browser, a folder in File Explorer), with Find
         files for searching, previewing and opening them (decision 166; the Task view until release 5.98, decision 389).
-        ``limit`` shows the first so many, with the rest's count (the Files group, release 5.84)."""
+        ``limit`` shows the first so many, with the rest's count (the Files group, release 5.84). Without ``intro`` (the
+        Files section since release 5.113, whose head has Find files at its right) the line about Find files is left out,
+        and the rest's count follows the rows."""
         rows = []
         for f in files[:limit]:
             d = self.m.documents.get(f.document)
@@ -813,6 +861,10 @@ class Pages:
                         f'{self.from_chip(f.task, t.id)}{"<br><span class=sub>" + esc(d.description) + "</span>" if d and d.description else ""}</td></tr>')
         # Decision 166: Find files is where a task's files are searched, previewed and opened.
         left = len(files) - len(rows)
+        if not intro:
+            table = f'<table cellspacing="0" cellpadding="4">{"".join(rows)}</table>' if rows else '<p class="note">No files yet.</p>'
+            rest = f'<p>{link(f"taskview:{t.id}", f"All {len(files)} in Find files", FIND_FILES_TIP)} <span class="sub">{left} more</span></p>'
+            return table + (rest if left > 0 else "")
         more = f'<p>{link(f"taskview:{t.id}", f"All {len(files)} in Find files" if left > 0 else "Find files", FIND_FILES_TIP)} '
         more += f'<span class="sub">{f"{left} more; " if left > 0 else ""}to search, preview and open its files (O)</span></p>'
         return more + (f'<table cellspacing="0" cellpadding="4">{"".join(rows)}</table>' if rows else '<p class="note">No files yet.</p>')

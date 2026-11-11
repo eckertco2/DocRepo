@@ -266,7 +266,8 @@ def test_a_picture_pasted_on_the_task_page(browse):
 def test_the_notes_frame_shows_where_you_type(browse):
     browse.go_task("T000012")
     pane = browse.task_pane
-    assert pane.card.objectName() == "notesCard" and pane.title.parentWidget().parentWidget() is pane.card
+    assert pane.card.objectName() == "notesCard" and pane.title.parentWidget() is pane.notes_head  # over the frame since 5.113
+    assert pane.notes_head.parentWidget() is pane.wrap and pane.notes.parentWidget().parentWidget() is pane.card
     pane.notes.focus_changed.emit(True)
     assert pane.card.property("typing") is True
     pane.notes.focus_changed.emit(False)

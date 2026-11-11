@@ -18,6 +18,7 @@ from docrepo.ui.icons import icon
 from docrepo.ui.look import LOOK
 from docrepo.ui.checklist_summary import ChecklistSummary
 from docrepo.ui.notes_edit import NotesEdit
+from docrepo.ui.notes_outline import OUTLINE_MIN_TEXT, OUTLINE_WIDTH, NotesOutline, OutlineSlot
 from docrepo.detail import RAIL
 from docrepo.ui.page_view import FitPageView, layout_of
 from docrepo.ui.task_header import Expander, TaskHeader
@@ -83,7 +84,7 @@ class LandmarkBar(QScrollBar):
 class TaskPane(QScrollArea):
     """The task page's one scroll: ``top``, the Notes heading with its menu, ``notes``, and ``bottom``."""
 
-    #: A Notes menu choice: "fold", "unfold" or "history".
+    #: A Notes menu choice: "fold", "unfold", "old_days", "history" or "outline" (the outline shown or hidden, release 5.113).
     notes_menu = Signal(str)
     #: The pane crossed a width at which the page lays itself out differently (release 5.84; PageView's did this before).
     layout_changed = Signal()
@@ -126,10 +127,12 @@ class TaskPane(QScrollArea):
         self._layout, self._margin = -1, margin
         for view in self.views():
             view.viewport().installEventFilter(self)
+        # The Notes heading is a section's head over the frame (release 5.113, the task panel plan's decision 423), on the
+        # page's left edge with the other sections' titles; the frame holds only what's typed in.
         head = QWidget(objectName="notesHead")
         head.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         hv = QVBoxLayout(head)
-        hv.setContentsMargins(14, 8, 8, 8)
+        hv.setContentsMargins(0, 0, 0, 6)
         hv.setSpacing(4)
         hl = QHBoxLayout()
         hl.setContentsMargins(0, 0, 0, 0)
@@ -177,6 +180,20 @@ class TaskPane(QScrollArea):
         self.jump_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.jump_button.clicked.connect(lambda: self.show_jump_menu())
         self._jump_menu: QMenu | None = None
+        # The outline (release 5.113, the notes workspace plan's decision 349): a column of the page's headings at the
+        # notes' left, shown or hidden by this button and kept for every task. Where it doesn't fit, Jump to stands in.
+        self.outline_button = QToolButton(objectName="notesOutlineButton")
+        self.outline_button.setIcon(icon("outline"))
+        self.outline_button.setCheckable(True)
+        self.outline_button.setAutoRaise(True)
+        self.outline_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.outline_button.setToolTip("Show or hide the outline: the page's headings and days at the notes' left")
+        self.outline_button.clicked.connect(self._outline_clicked)
+        self.outline_on = True
+        #: The heading picked in the outline, kept marked until the page is scrolled by hand (the scroll it made can leave
+        #: an earlier heading at the top, near the page's end), and the scroll that pick left.
+        self._outline_hold: int | None = None
+        self._hold_value: int | None = None
         QShortcut(QKeySequence("Ctrl+G"), self, context=Qt.ShortcutContext.WidgetWithChildrenShortcut, activated=self._jump_key)
         hl.addWidget(self.title)
         hl.addSpacing(8)
@@ -184,6 +201,7 @@ class TaskPane(QScrollArea):
         hl.addStretch()
         hl.addWidget(self.format_bar)
         hl.addWidget(self.table_button)
+        hl.addWidget(self.outline_button)
         hl.addWidget(self.jump_button)
         hl.addWidget(self.menu_button)
         # In a narrow pane the format bar has a line of its own, so the page can be as narrow as the pane (release 5.58).
@@ -194,6 +212,12 @@ class TaskPane(QScrollArea):
         row = QWidget()
         rl = QHBoxLayout(row)
         rl.setContentsMargins(0, 0, 14, 10)
+        rl.setSpacing(6)
+        self.outline = NotesOutline(self.notes)
+        self.outline.picked.connect(self._outline_picked)
+        self.outline_slot = OutlineSlot(self.outline, self._outline_offset, self._outline_view_height)
+        self.outline_slot.hide()
+        rl.addWidget(self.outline_slot)
         rl.addWidget(self.notes, 1)
         rl.addStretch(0)
         # The text stops at NOTES_LINE characters (R11), however wide the frame: the eye loses a longer line on the way back.
@@ -224,15 +248,19 @@ class TaskPane(QScrollArea):
         cl.setContentsMargins(0, 0, 0, 0)
         cl.setSpacing(0)
         cl.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
-        for w in (head, box, row):
+        for w in (box, row):
             cl.addWidget(w)
         self.card.setMaximumWidth(NOTES_MAX)
+        head.setMaximumWidth(NOTES_MAX)
         self.notes.focus_changed.connect(self._card_focus)
         self.wrap = QWidget(objectName="notesWrap")
-        wl = QHBoxLayout(self.wrap)
-        wl.setContentsMargins(margin, 20, margin, 20)
+        wl = QVBoxLayout(self.wrap)
+        wl.setContentsMargins(margin, 14, margin, 16)
+        wl.setSpacing(0)
         wl.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
+        wl.addWidget(head)
         wl.addWidget(self.card, 1)
+        self.notes_head = head
         lay.addWidget(self.facts)
         lay.addWidget(self.wrap)
         lay.addWidget(self.history)
@@ -265,6 +293,10 @@ class TaskPane(QScrollArea):
         self.sticky.hide()
         self._title = ""
         self.verticalScrollBar().valueChanged.connect(lambda _: self._sticky_check())
+        self.verticalScrollBar().valueChanged.connect(lambda _: self._outline_follow_scroll())
+        self.notes.cursorPositionChanged.connect(self._outline_follow_caret)
+        self.outline.rebuilt.connect(self._fit_outline)
+        self.notes.page_set.connect(self._outline_release)
         # The landmarks follow the page: the notes' layout, their folds, and the page's height as groups open and close.
         self._landmark_timer = QTimer(self, singleShot=True, interval=0, timeout=self._relandmark)
         self.notes.document().documentLayout().documentSizeChanged.connect(lambda _: self._landmark_timer.start())
@@ -274,6 +306,7 @@ class TaskPane(QScrollArea):
     def resizeEvent(self, event) -> None:  # noqa: N802 - Qt's name
         super().resizeEvent(event)
         self._fit_head()
+        self._fit_outline()
         self._place_sticky()
         self._landmark_timer.start()
         now = layout_of(self.page_width())
@@ -301,6 +334,7 @@ class TaskPane(QScrollArea):
         on = not self.facts.isHidden() and self.verticalScrollBar().value() > self.facts.geometry().bottom()
         if on != self.sticky.isVisible():
             self.sticky.setVisible(on)
+        self.outline_slot.place()
 
     def show_jump_menu(self, at: QPoint | None = None) -> None:
         """Jump to: the page's headings and day dividers in the page's order, with the owner's headings indented by level
@@ -360,10 +394,11 @@ class TaskPane(QScrollArea):
         """Draw a task's page from its parts (``Pages.task_parts``): the header, the rail when the pane is wide, and the
         history, open or closed as the owner left it on this task."""
         self.header.show_parts(parts, folds)
-        self.top.setVisible(wide)
-        if wide:
+        rail = wide and bool(parts.get("rail"))  # no rail since release 5.113: the facts grid holds what it held
+        self.top.setVisible(rail)
+        if rail:
             self.top.setHtml(parts["rail"])
-        self.history.set_content(parts["history_summary"], parts["history"])
+        self.history.set_content(parts["history_summary"], parts["history"], parts.get("history_short"))
         self.history.set_open(folds.get("history", False))
         self.set_title(parts.get("title", ""))
         QTimer.singleShot(0, self._sticky_check)
@@ -371,7 +406,8 @@ class TaskPane(QScrollArea):
     def _fit_head(self) -> None:
         """The format bar beside the Notes heading while it fits there, or else on a line of its own under it."""
         spare = self.viewport().width() - 2 * self.head_margin - 22
-        need = sum(w.sizeHint().width() + 8 for w in (self.title, self.saved, self.format_bar, self.table_button, self.jump_button, self.menu_button)
+        need = sum(w.sizeHint().width() + 8 for w in (self.title, self.saved, self.format_bar, self.table_button, self.outline_button,
+                                                      self.jump_button, self.menu_button)
                    if not w.isHidden())
         narrow = need > spare
         if narrow == (self.bar_row is not None):
@@ -388,6 +424,95 @@ class TaskPane(QScrollArea):
             self.head_lines.removeItem(self.bar_row)
             self.bar_row = None
             self.head_row.insertWidget(self.head_row.count() - 2, self.format_bar)
+
+    # ---- the outline (release 5.113) ----
+    def set_outline_on(self, on: bool) -> None:
+        """Show the outline beside the notes (where it fits), or hide it: the owner's choice, kept for every task."""
+        self.outline_on = on
+        self._fit_outline()
+
+    def outline_fits(self) -> bool:
+        """Whether the notes keep OUTLINE_MIN_TEXT of text beside the outline in this pane."""
+        text = self.viewport().width() - 2 * self._margin - OUTLINE_WIDTH - 2 * round(self.notes.document().documentMargin()) - 40
+        return text >= OUTLINE_MIN_TEXT
+
+    def outline_shown(self) -> bool:
+        return not self.outline_slot.isHidden()
+
+    def _fit_outline(self) -> None:
+        """The outline shows when it's on, fits and the page has a heading; Jump to's button shows whenever it doesn't."""
+        fits = self.outline_fits()
+        if self.outline.count() == 0 and self.outline_on:
+            self.outline.rebuild()
+        show = self.outline_on and fits and self.outline.count() > 0
+        if show != self.outline_shown():
+            self.outline_slot.setVisible(show)
+        self.outline_button.setVisible(fits)
+        self.outline_button.setChecked(self.outline_on and fits)
+        self.jump_button.setVisible(not show)
+        if show:
+            self.outline_slot.place()
+            self._outline_follow_scroll()
+
+    def _outline_clicked(self) -> None:
+        self.outline_on = not self.outline_on
+        self._fit_outline()
+        self.notes_menu.emit("outline")
+
+    def _outline_offset(self) -> int:
+        """How far the outline's slot has scrolled above the view's top, less the sticky line over it."""
+        covered = self.sticky.height() if self.sticky.isVisible() else 0
+        return covered - self.outline_slot.mapTo(self.viewport(), QPoint(0, 0)).y()
+
+    def _outline_view_height(self) -> int:
+        return self.viewport().height() - (self.sticky.height() if self.sticky.isVisible() else 0)
+
+    def _outline_picked(self, number: int) -> None:
+        block = self.notes.document().findBlockByNumber(number)
+        if block.isValid():
+            self._outline_hold, self._hold_value = number, None
+            self.jump_to(block)
+            self.outline.set_current(number)
+            QTimer.singleShot(0, self._outline_settled)  # after jump_to's own second scroll
+
+    def _outline_settled(self) -> None:
+        if self._outline_hold is not None:
+            self._hold_value = self.verticalScrollBar().value()
+
+    def _outline_release(self) -> None:
+        self._outline_hold = self._hold_value = None
+
+    def _outline_follow_scroll(self) -> None:
+        """Mark the heading at the top of the view: the last one whose line has reached it (the first, before any has)."""
+        if not self.outline_shown():
+            return
+        self.outline_slot.place()
+        bar = self.verticalScrollBar()
+        if self._outline_hold is not None:
+            if self._hold_value is None or bar.value() == self._hold_value:
+                self.outline.set_current(self._outline_hold)
+                return
+            self._outline_release()  # scrolled by hand since
+        covered = self.sticky.height() if self.sticky.isVisible() else 0
+        top = self.notes.viewport().mapFrom(self.viewport(), QPoint(0, covered)).y()
+        # At the page's end the last headings can't reach the top: the last one in view is where you are.
+        line = top + (self.viewport().height() - covered - 24 if bar.maximum() > 0 and bar.value() >= bar.maximum() else 24)
+        layout = self.notes.document().documentLayout()
+        current = -1
+        for b, _level, _day in self.notes.outline():
+            if not b.isVisible():
+                continue
+            if current != -1 and layout.blockBoundingRect(b).top() > line:
+                break
+            current = b.blockNumber()
+        self.outline.set_current(current)
+
+    def _outline_follow_caret(self) -> None:
+        """While you type, the heading over the caret is the one marked."""
+        if not self.outline_shown() or not self.notes.hasFocus():
+            return
+        h = self.notes.heading_of(self.notes.textCursor().block())
+        self.outline.set_current(h.blockNumber() if h is not None else -1)
 
     def _card_focus(self, on: bool) -> None:
         self.card.setProperty("typing", on)  # not "focus": every widget has a read-only one
