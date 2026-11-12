@@ -31,6 +31,7 @@ from docrepo.report import build_report
 from docrepo.safe_fs import SafeFS, WriteRefused
 from docrepo.sample import SAMPLE_AS_OF, SampleError, load_sample, read_sample, write_sample_files
 from docrepo.sample_large import add_large_project, add_pins_and_uses
+from docrepo.sample_scale import add_scale_extras, add_years
 
 log = logging.getLogger(__name__)
 
@@ -54,6 +55,13 @@ def a_date(value: str) -> date:
         raise argparse.ArgumentTypeError(f"{value!r} isn't YYYY-MM-DD") from None
 
 
+def a_count(value: str) -> int:
+    """A whole number from 1 to 10, for --years."""
+    if not value.strip().isdigit() or not 1 <= int(value) <= 10:
+        raise argparse.ArgumentTypeError(f"{value!r} isn't a whole number from 1 to 10")
+    return int(value)
+
+
 def build_parser() -> argparse.ArgumentParser:
     """The command line's commands and their options."""
     parser = argparse.ArgumentParser(prog="docrepo", description="Capture and organize work notes, tasks and documents.")
@@ -70,6 +78,9 @@ def build_parser() -> argparse.ArgumentParser:
     sample = commands.add_parser("load-sample", help="fill a new, empty data root with the made-up sample data, for trying DocRepo")
     sample.add_argument("--as-of", type=as_of, metavar="WHEN", help=f"{as_of_help} (default: the sample's own date, 2026-10-08 07:58)")
     sample.add_argument("--large", action="store_true", help="add a large made-up project, Line 2 debottleneck, for trying Find files at scale")
+    sample.add_argument("--years", type=a_count, metavar="N", help="add N years of a lead engineer's made-up work, ending on the sample's "
+                                                                    "date, for timing DocRepo at scale (release 5.126): per year 500 tasks, "
+                                                                    "5,000 captures, 2,500 documents and 30,000 status-log rows")
     rebuild = commands.add_parser("rebuild", help="rebuild the capacity calendar, every generated page and the search index")
     rebuild.add_argument("--as-of", type=as_of, metavar="WHEN", help=as_of_help)
     report = commands.add_parser("report", help="print capacity, days until due, lists, labels, raw text logs and agendas")
@@ -84,6 +95,12 @@ def build_parser() -> argparse.ArgumentParser:
                                       "the search index and SQLite's quick check. It changes nothing, and writes its list to System\\check-<date>.md")
     commands.add_parser("dump", help="write every table of docs.db as JSON into System\\export\\<date>, for reading outside DocRepo. It reads docs.db "
                                      "and changes nothing in it")
+    timings = commands.add_parser("timings", help="time loading, the view counts, search, a task page, saving, the task tree, the Timeline, "
+                                                  "the daily work and rebuild against their budgets (release 5.126). It reads docs.db, changes "
+                                                  "nothing, prints counts and times only, and keeps them in System\\diagnostics")
+    timings.add_argument("--words", default=None, metavar="WORDS", help="the three words Search everything is timed with "
+                                                                         "(default: \"pump seal drawing\"). They aren't printed")
+    timings.add_argument("--as-of", type=as_of, metavar="WHEN", help=as_of_help)
     commands.add_parser("make-shortcut", help="make DocRepo.lnk, to move into your Startup folder so DocRepo starts when you sign in")
     set_hotkey = commands.add_parser("set-hotkey", help="choose the capture window's hotkey, such as \"Ctrl+Alt+Space\"")
     set_hotkey.add_argument("keys")
@@ -237,9 +254,13 @@ def cmd_load_sample(args: argparse.Namespace) -> int:
     with closing(conn):
         when = args.as_of or SAMPLE_AS_OF
         data = add_large_project(read_sample()) if args.large else None
+        if args.years:  # release 5.126: years of made-up work, for the timing budgets
+            data = add_years(data or read_sample(), args.years)
         load_sample(conn, data)
         if args.large:
             add_pins_and_uses(conn)
+        if args.years:
+            add_scale_extras(conn, data)
         if settings.me is None:
             settings.me = "P001"
             settings.save(fs, root)
@@ -520,6 +541,35 @@ def cmd_dump(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_timings(args: argparse.Namespace) -> int:
+    """Time DocRepo's everyday work on this data root against its budgets (release 5.126, decisions 470 to 472): print the
+    counts and times, and keep them in System\\diagnostics. 0 when every budget is met, 2 when one isn't."""
+    from docrepo import timings
+
+    root = _data_root(args)
+    if root is None:
+        return 1
+    if not (root / SETTINGS_FILE).exists():
+        print(f"{root} isn't set up yet. Run: python -m docrepo init", file=sys.stderr)
+        return 1
+    settings = Settings.load(root)
+    fs = make_safe_fs(root, settings)
+    setup_logging(fs, root)
+    now = args.as_of or datetime.now().replace(second=0, microsecond=0)
+    _utf8_stdout()
+    print("Timing DocRepo on this data root; it takes a few minutes and changes nothing ...", flush=True)
+    try:
+        found = timings.measure(root, settings, now, args.words or timings.DEFAULT_WORDS)
+        text = timings.report(root, found, now, timings.counts(root))
+    except timings.TimingsError as e:
+        print(e, file=sys.stderr)
+        return 1
+    path = timings.save_report(fs, root, text, datetime.now())
+    print(text)
+    print(f"Kept as {path.relative_to(root)} in the data root. Bring it, or the text above, to the personal computer.")
+    return 0 if all(x.within for x in found) else 2
+
+
 def cmd_backup(args: argparse.Namespace) -> int:
     """Make a backup now, and say what it did."""
     opened = _open(args)
@@ -601,6 +651,7 @@ COMMANDS: dict[str, Callable[[argparse.Namespace], int]] = {
     "check": cmd_check,
     "dump": cmd_dump,
     "usage": cmd_usage,
+    "timings": cmd_timings,
     "make-shortcut": cmd_make_shortcut,
     "set-hotkey": cmd_set_hotkey,
     "where": cmd_where,

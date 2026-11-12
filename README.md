@@ -183,6 +183,8 @@ and start DocRepo.
 
 **To read the database outside DocRepo,** run `.venv\Scripts\python.exe -m docrepo dump`. It writes every table of `docs.db` as a JSON file (its columns, then each row) into `System\export\<date>` in your data root, with `_dump.json` saying when and how many rows each table had. It reads `docs.db` without changing it, even while DocRepo runs; a second dump on one day replaces the first. Templates, ties, pins and the notes pages' versions live only in the database, so this is their plain-file way out.
 
+**To see how quick DocRepo is on your data,** run `.venv\Scripts\python.exe -m docrepo timings`. It times loading, the view counts, a search, the busiest task's page, a save, the task tree, the Timeline, the daily work and a rebuild against their budgets, in a few minutes, and changes nothing: what writes is timed on a copy of `docs.db` in memory. It prints counts and times only, never a title, a name or a word of what you captured, and keeps them in `System\diagnostics`.
+
 ## Try it with the sample data
 
 DocRepo comes with made-up sample data: a few projects, people, captures and agendas, as of 8 October 2026. Load it into a separate, empty data root, never your real one:

@@ -314,7 +314,8 @@ class ReferenceFields(QWidget):
         name_box.setAccessibleName(f"Reference field {n}'s name")
         link_box.setPlaceholderText("None: its value is only copied")
         link_box.setAccessibleName(f"Reference field {n}'s link address, with {{}} where its value goes")
-        link_box.setToolTip("Where the field's value goes, such as https://example.com/record/{}. With no {}, the value goes at the end.")
+        link_box.setToolTip("Where the field's value goes, such as https://example.com/record/{}. With no {}, the value goes at the end.\n"
+                            "With no http:// or https://, http:// goes in front, as your browser does: intranet/record? works.")
         made = QLabel(objectName="hint")
         made.setWordWrap(True)
         remove = QToolButton(text="×")
