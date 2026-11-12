@@ -288,18 +288,20 @@ def email_keys(emails: list[EmailItem]) -> list[str]:
 
 # ---- T-mails (K8's release B, release 5.105) ----
 def record_t_mail(conn: sqlite3.Connection, task: str, kind: str, opened: str, index: str, reply_capture: str | None = None,
-                  reply_pos: int | None = None) -> int | None:
-    """Keep a T-mail DocRepo opened: its task, new or a reply (to which capture's email), when, and its conversation from
-    its whole index, so the conversation follows the task from now on. None, and nothing kept, when the index has no
-    key: then nothing could find the task by it."""
+                  reply_pos: int | None = None, untagged: bool = False) -> int | None:
+    """Keep a T-mail DocRepo opened: its task, its kind (new, a reply to which capture's email, or since release 5.125
+    an ask), when, and its conversation from its whole index, so the conversation follows the task from now on. None,
+    and nothing kept, when the index has no key: then nothing could find the task by it. With ``untagged`` (an ask,
+    whose "asked Mon" counts even so) it's kept with no conversation, and its id is returned."""
     k = key(index)
-    if not k:
+    if not k and not untagged:
         return None
     with transaction(conn):
         cur = conn.execute("INSERT INTO t_mails (task, kind, reply_capture, reply_pos, opened, conversation, conversation_index) "
-                           "VALUES (?, ?, ?, ?, ?, ?, ?)", (task, kind, reply_capture, reply_pos, opened, k, clean_hex(index)))
-    log.info("T-mail %s opened from %s (%s%s), conversation %s…", cur.lastrowid, task, kind,
-             f" to {reply_capture} email {reply_pos + 1}" if reply_capture is not None and reply_pos is not None else "", k[:8])
+                           "VALUES (?, ?, ?, ?, ?, ?, ?)", (task, kind, reply_capture, reply_pos, opened, k or None, clean_hex(index) or None))
+    log.info("T-mail %s opened from %s (%s%s), conversation %s", cur.lastrowid, task, kind,
+             f" to {reply_capture} email {reply_pos + 1}" if reply_capture is not None and reply_pos is not None else "",
+             f"{k[:8]}…" if k else "none")
     return cur.lastrowid
 
 

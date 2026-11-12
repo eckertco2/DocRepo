@@ -136,7 +136,7 @@ def bar(browse) -> dict:
 def test_new_t_mail_opens_an_email_and_keeps_it_on_the_task(browse, fake_outlook):
     browse.select("task", RIGGING)
     buttons = bar(browse)
-    assert buttons["New T-mail"].menu() is None and buttons["Reply all"].menu() is not None  # a split button
+    assert buttons["New T-mail"].menu() is None and buttons["More T-mails"].menu() is not None  # a split button
     buttons["New T-mail"].click()
     assert fake_outlook == [("new", NOW)]
     t = Model(browse.conn).t_mails[-1]
@@ -160,15 +160,15 @@ def test_new_t_mail_says_why_when_outlook_isnt_there(browse, monkeypatch):
 
 def test_the_arrow_replies_to_the_tasks_latest_email(browse, ctx, fake_outlook):
     browse.select("task", RIGGING)
-    menu = bar(browse)["Reply all"].menu()
-    (only,) = [a for a in menu.actions() if not a.isSeparator()]
-    assert only.text() == "Reply all to the latest email" and not only.isEnabled()
+    menu = bar(browse)["More T-mails"].menu()
+    only, ask = [a for a in menu.actions() if not a.isSeparator()]  # Ask for an update after it since release 5.125
+    assert only.text() == "Reply all to the latest email" and not only.isEnabled() and ask.text() == "Ask for an update"
     captured(ctx, email(sent=datetime(2026, 10, 1, 8, 0)), RIGGING)
     newest = captured(ctx, email("Re: crane booking", replies=1, message_id="<a2@example.com>"), RIGGING,
                       datetime(2026, 10, 7, 10, 0), entry="E2")
     browse.select("task", RIGGING)
-    menu = bar(browse)["Reply all"].menu()
-    (only,) = [a for a in menu.actions() if not a.isSeparator()]
+    menu = bar(browse)["More T-mails"].menu()
+    only = [a for a in menu.actions() if not a.isSeparator()][0]
     assert only.isEnabled() and only.text() == "Reply all to the latest email: “Re: crane booking”, Ann Example, 2026-10-07"
     only.trigger()
     assert fake_outlook[-1][:3] == ("reply", "E2", "S1") and fake_outlook[-1][3].name == "email.msg"

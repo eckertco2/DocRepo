@@ -93,5 +93,14 @@
    "task_pages": 17,
    "task_dates": 2
   }
+ },
+ "v24": {
+  "commit": "dc795e3",
+  "counts": {
+   "tasks": 17,
+   "captures": 24,
+   "task_pages": 17,
+   "task_dates": 2
+  }
  }
 }

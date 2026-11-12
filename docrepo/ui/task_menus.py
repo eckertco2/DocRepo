@@ -17,6 +17,7 @@ from PySide6.QtWidgets import QMenu, QWidget
 from docrepo import edits, task_commands, tasks
 from docrepo.model import TODAY
 from docrepo.task_commands import Entry
+from docrepo.ui import t_mails
 from docrepo.ui.icons import icon
 from docrepo.ui.look import LOOK
 
@@ -97,16 +98,19 @@ def add_to_menu(browse: BrowseWindow, task_id: str, parent: QWidget | None) -> Q
 
 
 def add_row_menus(browse: BrowseWindow, task_id: str, menu: QMenu, anchor: QWidget | None = None, after: After = None,
-                  tell: Tell = None) -> None:
+                  tell: Tell = None, ask: bool = False) -> None:
     """A task row's right-click menu gets them too (decision 392), after its own actions: a quick task's Put under… on
     its own (release 5.99, decision 394), then Add to and Edit as submenus. Nothing for a discarded task. ``after`` and
-    ``tell`` are ``move``'s, for a list outside the browse window (Find files)."""
+    ``tell`` are ``move``'s, for a list outside the browse window (Find files). With ``ask`` (a row in Waiting on others),
+    Ask for an update comes first (release 5.125, the cold-eyes plan's decision 481)."""
     m = browse.model()
     t = m.tasks.get(task_id)
     if t is None or t.discarded:
         return
     if not menu.isEmpty():
         menu.addSeparator()
+    if ask:
+        t_mails.add_ask(browse, task_id, menu)
     put = task_commands.put_under(m, task_id)
     if put is not None:
         fill(menu, [put], lambda e: run(browse, task_id, e, anchor, after, tell))
