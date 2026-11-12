@@ -55,7 +55,7 @@ DocRepo picks the data root from, in order:
 | `capacity_horizon_years` | How far ahead routine tasks fill the capacity calendar | 5 |
 | `workdays` | Days the capacity calendar spreads hours over | Mon to Fri |
 | `event_words` | Words Parse and populate reads as events, for deadlines | turnaround, shutdown, audit, inspection, outage, walkthrough |
-| `reference_links` | Each reference field's link address, by its name (release 5.67, round 6's decision 320), with `{}` where the value goes or the value at its end; written once one is set. The code names none | none |
+| `reference_links` | Each reference field's link address, by its name (release 5.67, round 6's decision 320), with `{}` where the value goes or the value at its end; written once one is set. Since release 5.134 (decision 546, `links.full_template`) one typed with no `http://` or `https://`, a server's name and a `/` or `?` such as `intranet/record?`, is kept as typed and takes `http://` when it's used, as a browser's address bar reads it (`www.` takes `https://`, as Add link gives it); anything else, a path or a `mailto:` address, is still refused. The code names none | none |
 | `reference_fields` | The reference fields' names (6.3, release 5.9), such as a change record's number. The code names none | none |
 | `tagged_patterns` | The tag patterns (section 13, release 5.80): each `{"name", "mask", "space"}`; written once one is set. DocRepo ships none | none |
 | `tagged_never` | Never a tag (section 13, release 5.80): whole tags, or starts with `*`, that no pattern makes a tagged label; written once one is set | none |
