@@ -18,7 +18,7 @@ from docrepo.captures import capture_md_path
 from docrepo.detail import SCOPE_NAMES
 from docrepo.links import is_folder, is_link
 from docrepo.schedule import is_open
-from docrepo.ui import conversation_page, t_mails, task_menus
+from docrepo.ui import conversation_page, decision_register, t_mails, task_menus
 from docrepo.ui.icons import icon
 from docrepo.ui.look import LOOK
 from docrepo.views import full_path
@@ -175,6 +175,8 @@ class PageCommands:
                 t_mails.reply_all(self, capture_id, int(pos), conversation_page.reply_task(self))
         elif kind in conversation_page.LINKS:  # Email conversations and a conversation's page (release 5.122)
             conversation_page.on_link(self, kind, rest)
+        elif kind == decision_register.LINK:  # the Decisions section's Copy (release 5.124, decision 479)
+            decision_register.copy(self, rest)
         elif kind == "doc":
             self.view = "docs"
             self.select("doc", rest, update_list=True)
@@ -231,7 +233,7 @@ class PageCommands:
             self.render_detail(keep_scroll=True)
         # The task page's own (release 5.21): Details, the whole description and the closed subtasks, the history's scope
         # and order menus, New task under this one, Add one (an update), a reference field's Copy, and the task's folder.
-        elif kind == "fold" and rest in ("details", "desc", "closed", "conversations"):
+        elif kind == "fold" and rest in ("details", "desc", "closed", "conversations", "decisions"):
             setattr(st, rest, not getattr(st, rest))
             if rest == "details":  # since release 5.84 Details is a group of the page; the link opens it
                 self.task_pane.header.groups["details"].set_open(st.details, emit=True)

@@ -237,7 +237,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         bl.addWidget(self.views_button)
         self.search_box = QLineEdit()
         self.search_box.setPlaceholderText("Search everything: tasks, captures, documents and people" + ("   (Ctrl+Shift+F)" if LOOK.classic else ""))
-        tip(self.search_box, "Search everything. Narrow it as File search does: type:pdf, type:notes, from:name, after:1 sep, is:pinned, tag:V-110, or a #task first", "Ctrl+Shift+F")
+        tip(self.search_box, "Search everything. Narrow it as File search does: type:pdf, type:notes, type:decision, from:name, after:1 sep, is:pinned, tag:V-110, or a #task first", "Ctrl+Shift+F")
         if not LOOK.classic:
             self.search_box.addAction(icon("search"), QLineEdit.ActionPosition.LeadingPosition)
             self.search_box.setMaximumWidth(560)

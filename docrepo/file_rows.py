@@ -18,7 +18,7 @@ from docrepo.overview import TYPE_NAMES
 #: The types with a colour of their own; the rest are drawn in ``type_other``'s.
 _COLOURED = frozenset({"doc", "sheet", "slides", "pdf", "picture", "mail", "drawing", "link"})
 #: Search's groups as their headings say them, plural, with how many follow (decision 430).
-GROUP_NAMES = {"Tagged label": "Tagged labels", "Task": "Tasks", "Notes": "Notes pages", "Capture": "Captures", "Document": "Documents",
+GROUP_NAMES = {"Tagged label": "Tagged labels", "Task": "Tasks", "Notes": "Notes pages", "Capture": "Captures", "Decision": "Decisions", "Document": "Documents",
                "Saved copy": "Saved copies", "Person": "People", "Label": "Labels"}
 #: A saved copy's name starts with the day it was saved (decision 429 shows the day at the row's end instead).
 _DATED = re.compile(r"^(\d{4}-\d{2}-\d{2}) (.+)$")
