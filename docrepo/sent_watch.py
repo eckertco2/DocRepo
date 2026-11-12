@@ -62,6 +62,15 @@ def waiting(model: Model, now: datetime) -> list[TMail]:
     return sorted(out, key=lambda t: (t.opened, t.id))
 
 
+def any_waiting(conn: sqlite3.Connection, now: datetime) -> bool:
+    """Whether a T-mail could still be waiting, read from ``t_mails`` alone: one not captured, with an index, opened in the
+    last 14 days. The app's tick asks this every minute, so on the days with none it builds no model."""
+    since = (now - timedelta(days=conversations.WAIT_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
+    row = conn.execute("SELECT 1 FROM t_mails WHERE capture IS NULL AND conversation_index IS NOT NULL AND opened >= ? LIMIT 1",
+                       (since,)).fetchone()
+    return row is not None
+
+
 def oldest(waits: list[TMail]) -> datetime | None:
     """When the oldest waiting T-mail was opened: the sweep looks at the emails sent since then."""
     times = [x for x in (_opened_at(t) for t in waits) if x is not None]
@@ -211,8 +220,9 @@ class Watcher:
         return self.last_found
 
     def tick(self) -> None:
-        """Every minute from the app: join Outlook when a T-mail waits, and sweep every 5 minutes while one does."""
-        if not self.waits():
+        """Every minute from the app: join Outlook when a T-mail waits, and sweep every 5 minutes while one does. The model
+        is built only when ``t_mails`` has one that could be waiting."""
+        if not any_waiting(self.conn, self.now()) or not self.waits():
             return
         if not self.ensure():
             return

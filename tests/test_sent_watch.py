@@ -295,3 +295,20 @@ def test_the_report_lists_the_waiting_t_mails_and_the_watch(env, data_root):
     text = diagnose.build_report(data_root, AT, [], check_outlook=lambda: ([], ""), drops=[], t_mails=lines)
     assert "## T-mails waiting to be sent" in text and "Last sweep: none yet" in text
     assert "Not available from the command line (the running app watches)." in diagnose.build_report(data_root, AT, None, check_outlook=lambda: ([], ""))
+
+
+def test_a_tick_with_nothing_waiting_builds_no_model(env, monkeypatch):
+    """The app ticks every minute: with no T-mail waiting it reads t_mails alone, so it builds no model (and asks Outlook
+    nothing). A T-mail opened 15 days ago, or one captured already, isn't waiting."""
+    out = FakeOutlook()
+    w, clock, _told = watcher(env, out)
+    loads: list[int] = []
+    init = Model.__init__
+    monkeypatch.setattr(Model, "__init__", lambda self, conn: (loads.append(1), init(self, conn))[1])
+    w.tick()
+    open_t_mail(env, opened=AT - timedelta(days=15))
+    w.tick()
+    assert loads == [] and out.handler is None
+    open_t_mail(env)
+    w.tick()
+    assert loads and out.handler is not None
