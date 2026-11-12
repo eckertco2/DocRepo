@@ -77,8 +77,14 @@ def pytest_ignore_collect(collection_path: Path, config: pytest.Config) -> bool 
     return None
 
 
+def asks_for_scale(markexpr: str, args: list[str]) -> bool:
+    """True when a run asks for the scale tests (release 5.126, decision 471): its ``-m`` names ``scale``, or it names
+    ``test_scale.py``. They take minutes, so the default and the fast runs leave them out."""
+    return bool(re.search(r"\bscale\b", markexpr or "")) or any("test_scale" in str(a) for a in args)
+
+
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
-    """Mark each test in a module that uses Qt as ``gui``."""
+    """Mark each test in a module that uses Qt as ``gui``, and leave out the ``scale`` tests unless the run asks for them."""
     seen: dict[Path, bool] = {}
     for item in items:
         path = Path(str(item.fspath))
@@ -86,6 +92,11 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             seen[path] = is_gui_module(path)
         if seen[path]:
             item.add_marker(pytest.mark.gui)
+    if not asks_for_scale(config.option.markexpr, config.args):
+        dropped = [item for item in items if item.get_closest_marker("scale")]
+        if dropped:
+            config.hook.pytest_deselected(items=dropped)
+            items[:] = [item for item in items if not item.get_closest_marker("scale")]
 
 
 def example_block(name: str) -> str:
