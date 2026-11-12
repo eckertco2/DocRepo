@@ -4,16 +4,18 @@ They're one-way printouts of docs.db for reading outside DocRepo, in VS Code's
 Markdown preview or from a restored backup. DocRepo never reads them back. Links
 are relative, so they work wherever the data root is. The formats are those in
 the mockup's ``examples.md``, with each task's notes page (release 5.25) printed under Notes, and its raw text log
-listed as Captures.
+listed as Captures. Since release 5.124 a task's page has its decision register under Decisions (``docrepo.decisions``):
+the decisions on it and the tasks under it, newest first, as a table of Date, Decision, Task and Where, each decision a
+link to its capture.md, for agents and the handover pack.
 """
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import quote
 
-from docrepo import repeats, tagged, ties
+from docrepo import decisions, repeats, tagged, ties
 from docrepo.dates import day_diff, days_text, minutes, to_date
 from docrepo.links import reference_link
 from docrepo.model import PRIORITY_NAMES, TODAY, TYPE_NAMES, Capture, FileEntry, Model, StatusEntry, Task, is_person
@@ -65,12 +67,15 @@ def _value(value: str | None) -> str:
 class Pages:
     """Builds the page texts from a Model, as of ``today``."""
 
-    def __init__(self, model: Model, today: date, generated_at: datetime, reference_links: Mapping[str, str] | None = None) -> None:
+    def __init__(self, model: Model, today: date, generated_at: datetime, reference_links: Mapping[str, str] | None = None,
+                 content_of: Callable[[str], str | None] | None = None) -> None:
         self.m = model
         self.today = today
         self.generated = generated_at.strftime("%Y-%m-%d %H:%M")
         #: Settings' link address for each reference field (release 5.67, round 6's decision 320).
         self.reference_links = dict(reference_links or {})
+        #: Reads a capture's content text, for a decision's words (release 5.124); without it, a decision is its title.
+        self.content_of = content_of
 
     # ---- links ----
     def _task_link(self, from_dir: list[str], task_id: str) -> str:
@@ -193,6 +198,7 @@ class Pages:
                 c = self.m.task(k)
                 out.append(f"| {c.id} | {_cell(link(k))} | {c.state} | {_cell(self._names(c.assignees))} | {c.due or ''} |")
             out.append("")
+        out += self._decisions(here, t)
         items = self.m.open_items_for(t.id)
         if items or (t.meeting and is_open(t)):
             lines = [f"- {self._agenda_text(here, a.subject, a.note)} · added {a.added[:10]}" for a in items]
@@ -220,6 +226,21 @@ class Pages:
         if found:
             out += ["## Links", "", *[f"- [{_text(x.name)}]({_link_target(x.address) if x.kind == 'folder' else x.address})" for x in found], ""]
         return "\n".join(out)
+
+    def _decisions(self, here: list[str], t: Task) -> list[str]:
+        """The decision register (release 5.124, decision 479): the decisions on the task and the tasks under it, newest
+        first, as the task page's Decisions section has them and its Copy puts them, each decision a link to its
+        capture.md and each task to its Task.md. Nothing when there are none."""
+        found = decisions.of_tasks(self.m, [t.id, *self.m.descendants_of(t.id)], self.content_of)
+        if not found:
+            return []
+        out = ["## Decisions", "", "| " + " | ".join(decisions.COLUMNS) + " |", "|" + "---|" * len(decisions.COLUMNS)]
+        for d in found:
+            words = " ".join(d.words.split())
+            c = self.m.captures[d.capture]
+            decided = f"[{_text(words)}]({rel_link(here, [*capture_dir(c), 'capture.md'])})"
+            out.append(f"| {d.day} | {_cell(decided)} | {_cell(self._task_link(here, d.task))} | {_cell(d.where(self.today))} |")
+        return [*out, ""]
 
     def _target(self, here: list[str], target: str) -> str:
         if target == TODAY:
@@ -351,8 +372,23 @@ def reference_links_of(data_root: Path) -> dict[str, str]:
 
 def write_task_page(model: Model, data_root: Path, fs: SafeFS, task_id: str, today: date, generated_at: datetime) -> bool:
     """Write one task's Task.md, as an edit of its notes page does (release 5.25). Says whether it was written."""
-    pages = Pages(model, today, generated_at, reference_links_of(data_root))
+    pages = Pages(model, today, generated_at, reference_links_of(data_root), _reader(model, data_root))
     return _write(fs, data_root.joinpath(*task_dir(task_id), TASK_FILE), pages.task_page(model.task(task_id)))
+
+
+def _reader(model: Model, data_root: Path) -> Callable[[str], str | None]:
+    """Reads a capture's content text from its capture.md, each once, for the decisions' words (release 5.124)."""
+    from docrepo.captures import read_content
+
+    read: dict[str, str | None] = {}
+
+    def content_of(capture_id: str) -> str | None:
+        if capture_id not in read:
+            c = model.captures.get(capture_id)
+            read[capture_id] = read_content(data_root, c) if c else None
+        return read[capture_id]
+
+    return content_of
 
 
 def pages_touched(m: Model, task_ids: Iterable[str]) -> set[str]:
@@ -362,7 +398,9 @@ def pages_touched(m: Model, task_ids: Iterable[str]) -> set[str]:
     - the tasks themselves, and the tasks tied to them, and to those, since a move follows its ties;
     - each one's ancestors (a parent's Subtasks table, and the chains) and descendants (inherited labels, and Parents);
     - the tasks it's tied to (Tied to this), its agenda items' targets and subjects, open or closed, and the tasks
-      whose notes page holds a task line for it (a task made from those notes).
+      whose notes page holds a task line for it (a task made from those notes);
+    - for a meeting, the tasks of the decisions its notes made, and the tasks above them, whose registers name it (release
+      5.124).
 
     Call it on the Model from before a change as well as after, since a move, an untie or a discard takes a link away."""
     seeds = {t for t in task_ids if t in m.tasks}
@@ -391,6 +429,11 @@ def pages_touched(m: Model, task_ids: Iterable[str]) -> set[str]:
     for c in m.captures.values():  # a task line on the notes page it was made from (release 5.83)
         if c.created_task in seeds and c.from_notes and c.from_notes in m.captures:
             out.update(m.capture_tasks(m.captures[c.from_notes]))
+        # A decision's Where names the meeting whose notes it came from (release 5.124): its task's register, and those above.
+        if c.item == "decision" and c.from_notes in m.captures and m.captures[c.from_notes].task in seeds:
+            for x in m.capture_tasks(c):
+                out.add(x)
+                out.update(m.ancestors_of(x))
     return {t for t in out if t in m.tasks}
 
 
@@ -399,7 +442,7 @@ def write_pages(
 ) -> int:
     """Write Task.md for every task (or only ``task_ids``) and Contents.md. Returns how many files were written. Contents.md
     is one page listing every task: it's made each time, and written only when its text changed, as every page is."""
-    pages = Pages(model, today, generated_at, reference_links_of(data_root))
+    pages = Pages(model, today, generated_at, reference_links_of(data_root), _reader(model, data_root))
     ids = list(model.tasks) if task_ids is None else [i for i in task_ids if i in model.tasks]
     written = 0
     for task_id in ids:
