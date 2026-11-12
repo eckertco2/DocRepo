@@ -26,7 +26,7 @@ from docrepo.safe_fs import SafeFS
 log = logging.getLogger(__name__)
 
 DB_FILE = Path("System") / "docs.db"
-SCHEMA_VERSION = 24
+SCHEMA_VERSION = 25
 #: How long, in seconds, a statement waits for docs.db while another connection holds it (SQLite's busy timeout, release
 #: 5.102) before it gives up with "database is locked". A backup's copy holds it for as long as the copy takes. Python's
 #: own default is 5 seconds.
@@ -613,6 +613,28 @@ CREATE INDEX t_mails_conversation ON t_mails (conversation);
 -- on Today and ``reminder`` moves on to the next time. Not the task's recurrence, which is for routine work's hours.
 ALTER TABLE tasks ADD COLUMN reminder_repeat TEXT;
 ALTER TABLE tasks ADD COLUMN reminder_until TEXT;
+""",
+    25: """
+-- T-mails' kinds (release 5.125, the cold-eyes plan's decision 485): ``ask`` is Ask for an update's, a new T-mail with its
+-- To, Subject and words filled in; ``report`` is kept for a one-project status report (decision 507). SQLite can't change
+-- a CHECK, so the table is made again, as agenda_items was in migration 4, with every row kept.
+CREATE TABLE t_mails_new (
+    id                 INTEGER PRIMARY KEY,
+    task               TEXT NOT NULL REFERENCES tasks(id),
+    kind               TEXT NOT NULL CHECK (kind IN ('new', 'reply', 'ask', 'report')),
+    reply_capture      TEXT REFERENCES captures(id),
+    reply_pos          INTEGER,
+    opened             TEXT NOT NULL,
+    conversation       TEXT,
+    conversation_index TEXT,
+    capture            TEXT REFERENCES captures(id)
+);
+INSERT INTO t_mails_new (id, task, kind, reply_capture, reply_pos, opened, conversation, conversation_index, capture)
+    SELECT id, task, kind, reply_capture, reply_pos, opened, conversation, conversation_index, capture FROM t_mails;
+DROP TABLE t_mails;
+ALTER TABLE t_mails_new RENAME TO t_mails;
+CREATE INDEX t_mails_conversation ON t_mails (conversation);
+CREATE INDEX t_mails_task ON t_mails (task, opened);
 """,
 }
 

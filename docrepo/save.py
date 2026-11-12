@@ -26,7 +26,7 @@ from docrepo.dates import long_date, short, stamp, workday_numbers
 from docrepo.db import next_id, transaction
 from docrepo.extract import extract_text, file_info
 from docrepo.links import FOLDER_TEXT, NO_TEXT, is_folder, is_link, keeps_no_text
-from docrepo.model import TODAY, Model
+from docrepo.model import TODAY, AgendaItem, Model, is_person
 from docrepo.pages import pages_touched, write_pages
 from docrepo.parse import ParseLabel, ParsePerson, Who, parse_capture
 from docrepo.safe_fs import SafeFS
@@ -683,11 +683,12 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
             # A split note's task on its own agenda is the note alone: a task can't be on its own agenda.
             agenda.add_item(conn, subject=None if subject == target else subject, target=target, note=note_text, added=when, added_by=via)
         item_files: list[tuple[str, str, bool]] = []  # (item capture, its block, whether it's markup)
+        on_agendas: list[str] = []  # the tasks and targets **agenda, lines put on agendas (release 5.133), for their pages
         made: dict[str, int] = {}
         unused = 0
         if (capture_id or page_note) and reading:
             item_files, made, unused = _save_items(conn, settings, reading, names, content, formatted, via, capture_id, created or t, when, at,
-                                                   person, home_is_new=bool(created or meeting_made))
+                                                   person, home_is_new=bool(created or meeting_made), on_agendas=on_agendas)
         noted_under = []
         if page_note:
             made_tasks = {r["id"]: r["created_task"] for r in conn.execute(
@@ -745,7 +746,7 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
         edits.add_to_pages(conn, data_root, at, [(source_capture.id, None)], result.problems)
     try:  # only the pages this save can reach (release 5.90, the review's F5); the daily work rewrites them all
         after = Model(conn)
-        touched = {x for x in (t, created, draft.task, *targets) if x}
+        touched = {x for x in (t, created, draft.task, *targets, *on_agendas) if x}
         for cid in [capture_id, *result.items]:
             if cid and cid in after.captures:
                 touched.update(after.capture_tasks(after.captures[cid]))
@@ -774,13 +775,15 @@ def first_line(text: str) -> str:
 
 def _save_items(conn: sqlite3.Connection, settings: Settings, reading: items.Reading, names: items.Names, content: str, formatted: bool,
                 notes_id: str, from_notes: str | None, home: str | None, when: str, at: datetime, person: Callable[[Who], str],
-                home_is_new: bool = False) -> tuple[list[tuple[str, str, bool]], dict[str, int], int]:
+                home_is_new: bool = False, on_agendas: list[str] | None = None) -> tuple[list[tuple[str, str, bool]], dict[str, int], int]:
     """Each ticked item as a small capture of its own, linked to the notes (release 5.8): ``from_notes``, the notes'
     capture, or None for a note on a task's page that's no capture (release 5.69). A task item makes its task, under the
     capture's task (or meeting, or new task) and its # tasks; a note, an update or a decision is filed to each of its
     tasks. A parameter (release 5.38), a key date among them, fills in or adds to each of its tasks, logged as
-    ``notes_id``'s, with no capture of its own: its line stays in the notes. Returns each item's capture with its block as
-    written (and whether that's markup), how many of each kind were made, and how many lines couldn't be used."""
+    ``notes_id``'s, with no capture of its own: its line stays in the notes; ``**agenda,`` (release 5.133) puts them on
+    agendas, adding each task and target to ``on_agendas``. Returns each item's capture with its block as written (and
+    whether that's markup), how many of each kind were made, and how many lines couldn't be used."""
+    on_agendas = on_agendas if on_agendas is not None else []
     lines = content.split("\n")
     files: list[tuple[str, str, bool]] = []
     made: dict[str, int] = {}
@@ -807,6 +810,13 @@ def _save_items(conn: sqlite3.Connection, settings: Settings, reading: items.Rea
             for task_id in where:
                 tasks.add_key_dates(conn, task_id, [tasks.KeyDateRow(kd.start, kd.end, description, kd.plant, kd.deadline)], at=at, via=notes_id)
             made["date"] = made.get("date", 0) + 1
+            continue
+        if it.kind == "param" and it.op and it.op.task_field == "agenda":  # not a field (release 5.133)
+            added, already = _put_on_agendas(conn, it, where, when, notes_id, on_agendas)
+            if added:
+                made["agenda"] = made.get("agenda", 0) + added
+            elif not already:
+                unused += 1
             continue
         if it.kind == "param":
             # Nothing is being edited on a task this capture is making, so its line's value is used (decision 200).
@@ -844,6 +854,29 @@ def _save_items(conn: sqlite3.Connection, settings: Settings, reading: items.Rea
 
 
 _LAST = {"duration": 1, "involvement": 2}
+
+
+def _put_on_agendas(conn: sqlite3.Connection, it: items.Item, where: list[str], when: str, via: str, touched: list[str]) -> tuple[int, int]:
+    """``**agenda,`` (release 5.133, decisions 543 and 544): each task the line goes on, on each agenda it names, with the
+    line's other words as the note; with no task, those words alone. A task already open on an agenda isn't put on it
+    again, and none goes on its own. Adds each task and target to ``touched``, for their pages. Returns how many items it
+    added, and how many were there already."""
+    targets = list(it.value.changes.get("agenda", ())) if it.value else []
+    added = already = 0
+    for subject in where or ([None] if it.note else []):
+        for target in targets:
+            if subject == target:
+                continue
+            if subject and conn.execute("SELECT 1 FROM agenda_items WHERE subject = ? AND target = ? AND closed IS NULL", (subject, target)).fetchone():
+                already += 1
+                continue
+            try:
+                agenda.add_item(conn, subject=subject, target=target, note=it.note, added=when, added_by=via)
+            except agenda.AgendaError:
+                continue
+            added += 1
+            touched.extend(x for x in (subject, target) if x)
+    return added, already
 
 
 def _fill_param(conn: sqlite3.Connection, settings: Settings, it: items.Item, task_id: str, made_here: bool, at: datetime, via: str,
@@ -909,6 +942,30 @@ def note_to_task(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
         result.problems.append(f"The generated pages weren't all updated ({type(e).__name__}).")
     result.message += " It's on Today in the note's place."
     return result
+
+
+def answer_text(model: Model, item: AgendaItem, answer: str) -> str:
+    """An answer's words (release 5.131, decision 526): who or where it was asked, the question, and the answer, on one line:
+    'Mike Ortiz, on "Is the spare seal on site?": It is, fitting Friday.'"""
+    where = model.target_name(item.target)
+    question = " ".join((item.note or (model.task(item.subject).title if item.subject else "")).split())
+    said = " ".join(answer.split())
+    return f'{where}, on "{question}": {said}' if question else f"{where}: {said}"
+
+
+def save_answer(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, item_id: int, answer: str, at: datetime) -> SaveResult:
+    """What was said about a discussed agenda item, from the quick summary (release 5.131, decision 526), kept as a note: on
+    the item's task, so it lands on its notes page; for a note on a meeting's agenda, on the meeting; for a note on a person's
+    agenda, an unfiled capture. It's saved as the capture window saves a note, so its words may make items as any note's do."""
+    model = Model(conn)
+    item = next((a for a in model.agenda if a.id == item_id), None)
+    if item is None:
+        raise SaveError("That agenda item is gone.", "content")
+    if not answer.strip():
+        raise SaveError("Type the answer first.", "content")
+    task = item.subject or (None if is_person(item.target) or item.target == TODAY else item.target)
+    draft = CaptureDraft(content=answer_text(model, item, answer), task=task, types={"note"})
+    return save_capture(conn, data_root, fs, settings, draft, at)
 
 
 def email_layer0_line(email: EmailItem, rows: list[FileRow]) -> str:

@@ -79,7 +79,7 @@ from docrepo.ui.task_picker import TaskPicker
 from docrepo.ui.timeline_view import TimelineView
 from docrepo.ui.state_menu import UNDO_MS, can_change, open_below, picked_line, state_menu
 from docrepo.ui.tree_view import HTML_ROLE, KEY_ROLE, RowTree
-from docrepo.ui import task_menus
+from docrepo.ui import conversation_page, task_menus
 from docrepo.ui.widgets import SAVE_KEYS, DropButton, FlowLayout, Option, ViewStack, ask, label_options, people_options
 from docrepo.views import (
     LIST_IDS,
@@ -237,7 +237,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         bl.addWidget(self.views_button)
         self.search_box = QLineEdit()
         self.search_box.setPlaceholderText("Search everything: tasks, captures, documents and people" + ("   (Ctrl+Shift+F)" if LOOK.classic else ""))
-        tip(self.search_box, "Search everything. Narrow it as File search does: type:pdf, type:notes, from:name, after:1 sep, is:pinned, tag:V-110, or a #task first", "Ctrl+Shift+F")
+        tip(self.search_box, "Search everything. Narrow it as File search does: type:pdf, type:notes, type:decision, from:name, after:1 sep, is:pinned, tag:V-110, or a #task first", "Ctrl+Shift+F")
         if not LOOK.classic:
             self.search_box.addAction(icon("search"), QLineEdit.ActionPosition.LeadingPosition)
             self.search_box.setMaximumWidth(560)
@@ -341,8 +341,9 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         # right-click menu has it as a submenu.
         self.tree.state_clicked = self.popup_state_menu
         self.tree.state_menu = lambda task_id, parent: self.state_menu_for(task_id, parent)
-        # One Edit and one Add to (release 5.98, decision 392): a task row's menu has them too, from the task page's own lists.
-        self.tree.task_menus = lambda task_id, menu: task_menus.add_row_menus(self, task_id, menu, anchor=self.tree)
+        # One Edit and one Add to (release 5.98, decision 392): a task row's menu has them too, from the task page's own lists;
+        # in Waiting on others, Ask for an update first (release 5.125, the cold-eyes plan's decision 481).
+        self.tree.task_menus = lambda task_id, menu: task_menus.add_row_menus(self, task_id, menu, anchor=self.tree, ask=self.view == "waiting")
         lp.addWidget(self.tree, 1)
         self.middle.addWidget(list_page)
         if LOOK.classic:  # the new look has it on the Timeline's page (decision 229)
@@ -649,6 +650,8 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
             return any(lb.name == item for lb in m.labels)
         if kind == "tagged":  # release 5.79: a tagged label, by its key
             return item in m.tagged.by_key
+        if kind == conversation_page.KIND:  # release 5.122: an email conversation, from a task's page
+            return conversation_page.exists(self, item)
         if kind == "tplrow":
             return self.templates.exists(item)
         return item in {"task": m.tasks, "capture": m.captures, "doc": m.documents, "person": m.people}.get(kind, {})
@@ -816,6 +819,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         out += [Command("", "New capture", lambda: self.open_capture(), self.ctx.settings.hotkey),
                 Command("", "Import a tree file", self.tree_files.import_tree),
                 Command("", "Search everything", self.search_box.setFocus, "Ctrl+Shift+F"),
+                Command("", "Quick summary: a person, an agenda or a label", lambda: self.ctx.open_summary(None)),
                 Command("", "Find in this view", self.open_find, "Ctrl+F"),
                 Command("", "Show or hide the views", lambda: self.show_views_pane(not self.views_button.isChecked()), "Ctrl+B"),
                 Command("", "Read docs.db again", self.refresh, "F5"),
@@ -983,6 +987,9 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         elif kind == "tagged":  # release 5.79
             tagged_list.actions(self, item)
             html = pages.tagged_page(item)
+        elif kind == conversation_page.KIND:  # release 5.122: an email conversation (the email section plan's decision 459)
+            conversation_page.actions(self, item)
+            html = conversation_page.page(self, item)
         else:
             self._label_actions(item)
             html = pages.label_page(item)

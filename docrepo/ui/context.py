@@ -40,6 +40,8 @@ class AppContext:
     t_mail_opened: Callable[[], None] = lambda: None
     #: The troubleshooting report's T-mail lines (release 5.123): the waiting T-mails, the watch and the last sweep.
     t_mail_report: Callable[[], list[str]] | None = None
+    #: Opens the quick summary (release 5.131): on a subject's key ("person:P004"), or with its box for None.
+    open_summary: Callable[[str | None], None] = lambda key=None: None
     #: This session's saves that had problems (release 5.91), for the Problems lines of the capture and browse windows.
     problem_log: ProblemLog = field(default_factory=ProblemLog)
     #: The Model last loaded, and the database's state when it was (``model``).

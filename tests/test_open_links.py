@@ -76,7 +76,8 @@ def test_a_reference_fields_link():
     assert reference_link("https://changes.example.com/record/{}", "A/12 3") == "https://changes.example.com/record/A%2F12%203"
     assert reference_link("https://changes.example.com/record/{}", "") == "" and reference_link("", "4471") == ""
     assert check_link_template("") == "" and check_link_template("https://changes.example.com/record/{}") == ""
-    assert check_link_template("changes.example.com/{}") == "starts with http:// or https://"
+    assert check_link_template("changes.example.com/{}") == ""  # release 5.134: http:// goes in front
+    assert check_link_template("mailto:changes@example.com?subject={}") == "starts with http://, https:// or a server's name and a /"
     assert check_link_template("https://x.example.com/{}/{}") == "has {} once at most"
     assert check_link_template("https://changes example.com/{}") == "is a web address with no spaces"
 
@@ -254,8 +255,10 @@ def test_settings_reference_fields_with_links(browse, ctx_settings=None):
     assert view.references.names() == ["Change record"] and view.references.links() == LINKS
     name, address, made, _ = view.references.rows[0]
     assert made.text() == "https://changes.example.com/record/1234"
-    address.setText("changes.example.com/record/{}")
-    assert made.text() == "Needs an address that starts with http:// or https://"
+    address.setText("changes.example.com/record/{}")  # release 5.134: http:// goes in front, as a browser does
+    assert made.text() == "http://changes.example.com/record/1234"
+    address.setText("mailto:changes@example.com?subject={}")
+    assert made.text() == "Needs an address that starts with http://, https:// or a server's name and a /"
     assert view.save() == [] and "link address needs to be one that starts with http://" in view.error.text()
     address.setText("https://changes.example.com/view?id={}")
     assert "reference_links" in view.save()
@@ -263,6 +266,9 @@ def test_settings_reference_fields_with_links(browse, ctx_settings=None):
     view.references.add_row("Permit no.", "")
     assert "reference_fields" in view.save() and browse.ctx.settings.reference_fields == ["Change record", "Permit no."]
     assert browse.ctx.settings.reference_links == {"Change record": "https://changes.example.com/view?id={}"}
+    view.references.rows[0][1].setText("intranet/record?")  # save() loaded the rows again
+    assert "reference_links" in view.save() and browse.ctx.settings.reference_links == {"Change record": "intranet/record?"}  # kept as typed
+    assert view.references.rows[0][2].text() == "http://intranet/record?1234"
 
 
 def test_edit_tasks_reference_box_opens_its_page(browse):

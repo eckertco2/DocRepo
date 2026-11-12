@@ -24,7 +24,10 @@ On the owner's click (the knowledge base's stage K8, release B, as release
 email the owner filed (``reply_all``), and opens it for the owner to write and
 send. A new email Outlook gives no conversation index is saved to Drafts first,
 as Outlook's AutoSave would, and if it still has none, DocRepo gives it one in
-MS-OXOMSG's shape (KB decision 39). It never sends one.
+MS-OXOMSG's shape (KB decision 39). It never sends one. Since release 5.125
+Ask for an update (``ask_t_mail``) makes a new T-mail with its To, Subject and
+words filled in: it writes those fields, shows the email so Outlook adds the
+owner's signature, puts the words before it, and still never sends it.
 
 Each field is read on its own, so a field Outlook refuses (its security guard
 can refuse the sender, the recipients or the body) leaves only that field out.
@@ -443,6 +446,102 @@ def new_t_mail(now: datetime) -> Opened:
     return Opened(index if conversations.key(index) else "", how)
 
 
+# ---- Ask for an update (release 5.125, the cold-eyes plan's decisions 481 to 487) ----
+OL_FORMAT_PLAIN = 1  # olFormatPlain: a plain-text email
+_WORD_SECTION = re.compile(r"<div\b[^>]*\bclass=\"?WordSection1\"?[^>]*>", re.IGNORECASE)
+_BODY_TAG = re.compile(r"<body\b[^>]*>", re.IGNORECASE)
+
+
+@dataclass(frozen=True)
+class AskOpened:
+    """An ask Outlook opened: the T-mail (its conversation index and how it was had), whether To was filled, and how the
+    words went in before the signature: "editor" (through Word, the email's editor), "html", "text", or "" when they
+    couldn't be, for the owner to paste."""
+
+    opened: Opened
+    to_filled: bool
+    words: str
+
+
+def words_first_html(html: str, words: str) -> str:
+    """An HTML body with the words put first, a paragraph a line in Outlook's own paragraph style, before what was there
+    (the signature): just inside Word's section when there is one, else just inside the body."""
+    from html import escape
+
+    paras = "".join(f"<p class=MsoNormal>{escape(line) if line else '&nbsp;'}</p>" for line in words.split("\n"))
+    at = _WORD_SECTION.search(html) or _BODY_TAG.search(html)
+    return html[:at.end()] + paras + html[at.end():] if at else paras + html
+
+
+def put_words_first(item: object, words: str) -> str:
+    """Put the words before what Outlook wrote in a new email it's showing, its signature (decision 483): through Word,
+    the email's editor, at the very start; else into the HTML body, or the text of a plain-text email. Returns how, or ""
+    when nothing worked; each failure is kept for the troubleshooting report. Either way the email is only changed, never
+    sent."""
+    try:
+        doc = item.GetInspector.WordEditor  # type: ignore[attr-defined]
+        doc.Range(0, 0).InsertBefore(words.replace("\n", "\r") + "\r")
+        return "editor"
+    except Exception as e:  # noqa: BLE001 - COM raises its own errors; the body is next
+        record_problem("putting the words in through the editor (WordEditor)", e)
+    try:
+        if item.BodyFormat == OL_FORMAT_PLAIN:  # type: ignore[attr-defined]
+            item.Body = words.replace("\n", "\r\n") + "\r\n" + (item.Body or "")  # type: ignore[attr-defined]
+            return "text"
+        item.HTMLBody = words_first_html(item.HTMLBody or "", words)  # type: ignore[attr-defined]
+        return "html"
+    except Exception as e:  # noqa: BLE001 - the email stays open, for the owner to paste the words
+        record_problem("putting the words in the body (HTMLBody)", e)
+    return ""
+
+
+def ask_t_mail(now: datetime, to: Sequence[str], subject: str, words: str) -> AskOpened:
+    """Ask for an update: a new email with To, Subject and the words filled in, opened for the owner to change and send
+    (decisions 482 to 486). Outlook writes the owner's signature when it shows a new email, so DocRepo shows it first and
+    then puts the words before what Outlook wrote. Then it's tagged by its conversation as New T-mail's is: the index
+    Outlook gives, else the one it has once saved to Drafts, else one DocRepo writes (KB decision 39). Filling To,
+    Subject and the body only writes fields; DocRepo reads no address and never sends one."""
+    from docrepo import conversations
+
+    app, _how = connect()
+    try:
+        item = app.CreateItem(OL_MAIL_ITEM)  # type: ignore[attr-defined]
+    except Exception as e:  # noqa: BLE001
+        detail = record_problem("making a new email (CreateItem)", e)
+        raise OutlookError(f"Outlook didn't make a new email ({detail}).", "making a new email", detail) from e
+    to_filled = False
+    try:
+        item.Subject = subject
+        if to:
+            item.To = "; ".join(to)
+            to_filled = True
+    except Exception as e:  # noqa: BLE001 - the owner fills what's missing
+        record_problem("filling the new email's To and Subject", e)
+    try:
+        item.Display()
+    except Exception as e:  # noqa: BLE001
+        detail = record_problem("opening the new email (Display)", e)
+        _close_unsaved(item)
+        raise OutlookError(f"Outlook didn't open the new email ({detail}).", "opening the new email", detail) from e
+    placed = put_words_first(item, words)
+    index, how = index_of(item), "made"
+    if not conversations.key(index):
+        try:
+            item.Save()
+            index, how = index_of(item), "saved"
+        except Exception as e:  # noqa: BLE001 - then DocRepo gives it one
+            record_problem("saving the new email to Drafts", e)
+    if not conversations.key(index):
+        try:
+            index, how = give_index(item, now), "written"
+        except Exception as e:  # noqa: BLE001 - it's still open, untagged, and the owner is told
+            record_problem("giving the new email a conversation index", e)
+            index, how = "", "none"
+    log.info("Outlook: opened an Ask for an update, To %s, the words %s, its conversation index %s",
+             "filled" if to_filled else "empty", f"in by the {placed}" if placed else "not in", how)
+    return AskOpened(Opened(index if conversations.key(index) else "", how), to_filled, placed)
+
+
 def reply_all(entry_id: str, store_id: str, saved: Path | None) -> Opened:
     """Reply all to a captured email and open the reply for the owner (KB decisions 37 and 38): found by its place in
     Outlook (EntryID and StoreID, kept since release 5.93), else from its saved .msg, which Outlook opens without changing
@@ -575,6 +674,29 @@ def watch_sent(app: object, on_sent) -> object:
 
     handler = type("SentHandler", (_SentHandler,), {"on_sent": staticmethod(on_sent)})
     return win32com.client.WithEvents(sent_items(app).Items, handler)
+
+
+def show_email(entry_id: str, store_id: str) -> bool:
+    """Open a captured email in Outlook, in its own window, found by its place (EntryID and StoreID, kept since release
+    5.93): a conversation page's Open in Outlook (release 5.122, the email section plan's decision 460). It only shows the
+    email; nothing in it changes. False when Outlook can't find it there (moved to another mailbox, deleted, or captured
+    before its place was kept), for the caller to open its saved .msg instead."""
+    if not entry_id:
+        return False
+    app, _how = connect()
+    session = app.Session  # type: ignore[attr-defined]
+    try:
+        item = session.GetItemFromID(entry_id, store_id) if store_id else session.GetItemFromID(entry_id)
+    except Exception as e:  # noqa: BLE001 - COM raises its own errors; the .msg is next
+        record_problem("finding the email in Outlook (GetItemFromID)", e)
+        return False
+    try:
+        item.Display()  # type: ignore[attr-defined]
+    except Exception as e:  # noqa: BLE001
+        detail = record_problem("showing the email (Display)", e)
+        raise OutlookError(f"Outlook found the email but didn't show it ({detail}).", "showing the email", detail) from e
+    log.info("Outlook: showed a captured email, found by its place")
+    return True
 
 
 def selected_emails(scratch: Path | None = None) -> list[EmailItem]:

@@ -182,3 +182,131 @@ def test_the_browse_tool_opens_meeting_notes(ctx, monkeypatch):
     finally:
         browse.deleteLater()
         capture.deleteLater()
+
+
+# ---- files on meeting notes (release 5.135, decision 547) ----
+def _drop_files(widget, paths):
+    """A drag of files from File Explorer, dropped on ``widget``."""
+    from PySide6.QtCore import QMimeData, QPointF, QUrl
+    from PySide6.QtGui import QDragEnterEvent, QDropEvent
+
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile(str(p)) for p in paths])
+    where = widget.rect().center()
+    actions = Qt.DropAction.CopyAction | Qt.DropAction.MoveAction
+    QApplication.sendEvent(widget, QDragEnterEvent(where, actions, mime, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier))
+    drop = QDropEvent(QPointF(where), actions, mime, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    QApplication.sendEvent(widget, drop)
+    return drop
+
+
+def _picture(window) -> None:
+    from PySide6.QtGui import QImage
+
+    image = QImage(4, 3, QImage.Format.Format_RGB32)
+    image.fill(0x336699)
+    window._picture_pasted(image)
+
+
+def test_meeting_notes_take_files_as_any_capture_does(window, ctx, tmp_path, monkeypatch):
+    """Attach's Files…, a drop on the notes, a path and a link each on its own line, the email selected in Outlook and a
+    pasted picture: each row shows under the notes while they're expanded, and Save keeps them on the notes, on the
+    meeting, with Save a copy in the meeting's Files folder."""
+    from PySide6.QtWidgets import QFileDialog
+
+    from docrepo import captures, outlook
+    from docrepo.save import EmailItem
+
+    report, sketch, drawings = tmp_path / "Pump curve.txt", tmp_path / "Seal sketch.txt", tmp_path / "Drawings"
+    report.write_text("Design point 38 kW", encoding="utf-8")
+    sketch.write_text("Made-up seal sketch", encoding="utf-8")
+    drawings.mkdir()
+    window.show_capture(task="T000010", meeting=True)
+    assert window.expanded and not window.files_area.isVisibleTo(window)  # no files, no room taken
+    monkeypatch.setattr(QFileDialog, "getOpenFileNames", lambda *a, **k: ([str(report)], ""))
+    window._pick_files()
+    assert _drop_files(window.content.viewport(), [drawings]).isAccepted()
+    window.content.setPlainText(f"Impeller is on site.\n{sketch}\nhttps://example.com/crane-booking")
+    window._sync_paths()
+    email = EmailItem("Revised guard delivery", "Ann Example", "2026-10-08 09:30", "", "The guards arrive Friday.")
+    monkeypatch.setattr(outlook, "selected_emails", lambda scratch=None: [email])
+    window.add_outlook()
+    _picture(window)
+    type_text(window, "\nThe vendor's drawings are in.")  # typing on after the picture keeps it (decision 548)
+    window._sync_paths()
+    QApplication.processEvents()  # a row added to a shown layout is shown on the next pass
+    assert [e.row.name for e in window.files][-1] == "Picture 2026-10-08 1410.png"
+    assert len(window.files) == 6 and window.task == "T000010"  # an email doesn't move meeting notes to its conversation's task
+    assert window.files_area.isVisibleTo(window) and all(e.widget.isVisibleTo(window) for e in window.files)
+    assert window.meeting_on and window.expanded and not window.lower.isVisibleTo(window)  # the rest stays folded away
+    assert window.files[0].desc.placeholderText() == (
+        "What's in this file? Left empty: Business team meeting 8 Oct – Attached document – Pump curve.txt")
+    assert "and keeps these notes on it, with 1 email, 3 files, 1 folder and 1 link." in window.does.text()
+    assert window.copy_hint.text().startswith("Save a copy puts the file in the meeting's Files folder, once Save makes the meeting,")
+    window.files[0].copy.setChecked(True)
+    window.save()
+    assert not window.isVisible() and ctx.messages[-1][1].startswith("Saved C000026. Made the meeting Business team meeting 8 Oct")
+    m = Model(ctx.conn)
+    notes = m.captures["C000026"]
+    meeting = notes.task
+    assert m.task(meeting).title == "Business team meeting 8 Oct" and notes.item == "notes"
+    assert sorted(m.documents[d.document].name for d in notes.documents) == sorted(
+        ["Pump curve.txt", "Drawings", "Seal sketch.txt", "example.com", "Picture 2026-10-08 1410.png"])
+    assert [e.subject for e in notes.emails] == ["Revised guard delivery"]
+    assert (ctx.data_root / "Tasks" / meeting / "Files" / "2026-10-08 Pump curve.txt").exists()
+    folder = captures.capture_folder(ctx.data_root, notes.id, notes.saved)
+    assert (folder / "attachments" / "Picture 2026-10-08 1410.png").read_bytes()[:4] == b"\x89PNG"
+
+
+def test_expand_alone_still_folds_the_files_away(window, tmp_path):
+    """Only meeting notes keep the files in view while expanded; Expand on its own folds them away, as before."""
+    report = tmp_path / "Pump curve.txt"
+    report.write_text("Design point 38 kW", encoding="utf-8")
+    window.set_task("T000008")
+    window.add_paths([str(report)])
+    assert window.files_area.isVisibleTo(window)
+    window.toggle_expand()
+    assert window.expanded and not window.files_area.isVisibleTo(window)
+    assert window.folded.text().startswith("While expanded, 1 file and Copy prompt and the summary are folded away. Drop files")
+    window.toggle_expand()
+    window.toggle_meeting()
+    QApplication.processEvents()
+    assert window.meeting_on and window.expanded and window.files[0].widget.isVisibleTo(window)
+    assert window.folded.text().startswith("While expanded, Copy prompt and the summary is folded away. Files you add are listed under the notes.")
+    assert window.files[0].desc.placeholderText().endswith("Left empty: (the meeting's name) – Attached document – Pump curve.txt")
+    window.meet_name.setText("Pump vendor call")
+    window._meet_typed("Pump vendor call")
+    assert window.files[0].desc.placeholderText().endswith("Left empty: Pump vendor call – Attached document – Pump curve.txt")
+    window.toggle_meeting()
+    assert not window.meeting_on and not window.expanded and window.files_area.isVisibleTo(window) and window.lower.isVisibleTo(window)
+
+
+def test_a_meeting_notes_draft_keeps_its_files(window, ctx, tmp_path):
+    """Closed before it's saved, meeting notes go to System\\Drafts with their files, and come back as meeting notes with
+    their rows in view."""
+    report = tmp_path / "Pump curve.txt"
+    report.write_text("Design point 38 kW", encoding="utf-8")
+    window.show_capture(task="T000010", meeting=True)
+    window.content.setPlainText("Impeller is on site.")
+    window.add_paths([str(report)])
+    _picture(window)
+    window.hide()  # to Drafts
+    (kept,) = drafts.listed(ctx.data_root)
+    assert kept.data["meeting"] and kept.file_count() == 2
+    again = CaptureWindow(ctx)  # as after a restart
+    try:
+        again.show_capture()
+        again.open_draft(kept.id)
+        assert again.meeting_on and again.expanded and again.task == "T000010"
+        assert [e.row.name for e in again.files] == ["Pump curve.txt", "Picture 2026-10-08 1410.png"]
+        QApplication.processEvents()
+        assert all(e.widget.isVisibleTo(again) for e in again.files)
+        again.save()
+        m = Model(ctx.conn)
+        notes = max(m.captures.values(), key=lambda c: c.id)
+        assert notes.item == "notes" and m.task(notes.task).title == "Business team meeting 8 Oct" and len(notes.documents) == 2
+        assert drafts.listed(ctx.data_root) == []
+    finally:
+        again._draft_timer.stop()
+        again.hide()
+        again.deleteLater()

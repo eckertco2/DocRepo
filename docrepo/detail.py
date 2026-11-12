@@ -22,13 +22,13 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from urllib.parse import quote
 
-from docrepo import capacity, items, markup, notes_page, repeats, tagged, ties
+from docrepo import ask_update, capacity, decisions, email_conversations, items, markup, notes_page, repeats, tagged, ties
 from docrepo.dates import ago, days_words, long_date, monday_of, short, to_date
 from docrepo.file_rows import dated_name, type_name
 from docrepo.markup import esc
 from docrepo.links import FOLDER_TEXT, NO_TEXT, is_folder, is_link, reference_link
 from docrepo.model import PRIORITY_NAMES, TODAY, TYPE_NAMES, Capture, Model, Task, is_person
-from docrepo.overview import file_type
+from docrepo.overview import file_type, sender_of
 from docrepo.pages import num
 from docrepo.schedule import due_of, held_on, is_open, start_of
 from docrepo.stories import Event, RawItem, Stories, clip
@@ -114,6 +114,15 @@ HISTORY_TABS = (("notes", "Captures"), ("summaries", "Summaries"))
 FILES_SHOWN = 8
 #: Find files' link in the Files group (release 5.98, the consolidation plan's decision 389: the Task view, renamed).
 FIND_FILES_TIP = "Find files (O): a window of its own for searching, previewing and opening its files, emails and notes"
+#: The Email conversations section's command (release 5.122, decision 455): New T-mail, as on the task page's bar.
+NEW_T_MAIL_TIP = ("A new email in Outlook, empty, tagged so its replies come back to this task when you capture them. "
+                  "You write and send it; DocRepo never sends email.")
+CONVERSATION_TIP = "Open the conversation: every email of it DocRepo holds, oldest first"
+#: The Decisions section's command (release 5.124, decision 479): the decision register, on the clipboard.
+COPY_DECISIONS_TIP = ("Copy the decision register: a table of each decision's date, its words, its task and the meeting it came "
+                      "from, for an email or a document")
+#: The line between a conversation's emails: a block one pixel high in the rule's grey (Qt draws an <hr> dark).
+RULE = '<p class="rule" style="font-size: 1px; margin-top: 16px; margin-bottom: 0px">&nbsp;</p>'
 SCOPE_NAMES = {"self": "This task", "ancestors": "With parent tasks", "descendants": "With subtasks", "family": "Whole family"}
 SOURCE_NAMES = {"typed": "Typed", "outlook_email": "Email", "file_path": "File path"}
 MONTH_NAMES = ("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")
@@ -262,6 +271,8 @@ class PageState:
     details: bool = False  # Details open (release 5.21)
     desc: bool = False  # the whole description
     closed: bool = False  # the closed subtasks shown
+    conversations: bool = False  # every email conversation shown, not only the newest few (release 5.122)
+    decisions: bool = False  # every decision shown, not only the newest few (release 5.124)
 
 
 class Pages:
@@ -401,6 +412,7 @@ class Pages:
                        if t.discarded else "") + self.page_head(t, state, grid=self.facts_grid(t, width))
         out["title"] = t.title  # the sticky title line's words (release 5.86)
         out["status_name"], out["status_when"], out["status_age"], out["status_body"] = self.status_parts(t)
+        out["status_asked"], out["status_asked_tip"] = self.asked_parts(t)
         log = self.stories.story(task_id)
         out["status_log"] = self.story_list(log, lambda e: self.log_item(e), state) if log else '<p class="note">No changes yet.</p>'
         out["status_log_summary"] = f"{len(log)} change{'s' if len(log) != 1 else ''}"
@@ -425,11 +437,26 @@ class Pages:
             out["subtasks_summary"] = section_head(f'{esc(out["subtasks_short"])} &nbsp;{bar}',
                                                    link(f"new:{t.id}", "New task under this one", "A new task under this one (T)"), raw=True)
             out["subtasks"] = split_section(subtasks)[1]
+        ids = self.m.scope_ids(t.id, state.scope)
+        # Decisions (release 5.124, decisions 477 to 479): the task's and its subtasks' decisions, newest first, after
+        # Subtasks and before Email conversations, with Copy at the right; the section isn't there when they have none.
+        found = decisions.of_tasks(self.m, ids)  # their words are read for the rows shown (decision_rows)
+        if found:
+            out["decisions_short"] = str(len(found))
+            out["decisions_summary"] = section_head(out["decisions_short"], link(f"copydecisions:{t.id}", "Copy", COPY_DECISIONS_TIP))
+            out["decisions"] = self.decision_rows(t, found, state)
+        # Email conversations (release 5.122, decisions 455 and 456): the task's and its subtasks' emails, a row per
+        # conversation; the section isn't there when they have none.
+        convs = email_conversations.for_tasks(self.m, ids)
+        if convs:
+            n = sum(len(cv.emails) for cv in convs)
+            out["emails_short"] = f"{len(convs)} · {n} email{'s' if n != 1 else ''}"
+            out["emails_summary"] = section_head(out["emails_short"], link(f"tmail:{t.id}", "New T-mail", NEW_T_MAIL_TIP))
+            out["emails"] = self.conversation_rows(t, convs, ids, state)
         links = self.links_group(t)
         if links:
             out["links_short"] = str(len(links_of(self.m, t.id, self.reference_links)))
             out["links_summary"], out["links"] = section_head(out["links_short"]), split_section(links)[1]
-        ids = self.m.scope_ids(t.id, state.scope)
         files = self.files_in(ids)
         # Find files opens from here (release 5.98, the consolidation plan's decision 389), and with O; so the group shows
         # with no files too, as the mock has it, and Find files always has a way in by the mouse.
@@ -542,10 +569,20 @@ class Pages:
                 else f'<span class="sub">No status yet.</span> {link(f"update:{t.id}", "Add one", "Update this task")}')
         return name, when, age, body
 
+    def asked_parts(self, t: Task) -> tuple[str, str]:
+        """The status card's "asked Mon" and its tooltip (release 5.125, the cold-eyes plan's decision 485), while an Ask for
+        an update waits for a capture on the task; two empty strings otherwise."""
+        opened = ask_update.asked(self.m, t.id)
+        return (ask_update.asked_words(opened, self.today), ask_update.asked_tip(opened, self.today)) if opened else ("", "")
+
     def status_block(self, t: Task) -> str:
-        """The page's one tinted block: where the task stands, and the date that was written."""
+        """The page's one tinted block: where the task stands, the date that was written, and "asked Mon" while an Ask for
+        an update waits (release 5.125)."""
         name, date, age, body = self.status_parts(t)
+        asked, asked_tip = self.asked_parts(t)
         when = f'<td align="right" class="rel" title="The current status last changed {age}">{esc(date)}</td>' if date else ""
+        if asked:
+            when += f'<td align="right" class="rel" width="1" title="{esc(asked_tip)}">&nbsp;·&nbsp;{esc(asked)}</td>'
         return (f'<table width="100%" cellspacing="0" cellpadding="12" style="margin-top: 12px"><tr><td class="stat">'
                 f'<table width="100%" cellspacing="0" cellpadding="0"><tr><td class="sk">{name}</td>{when}</tr></table>'
                 f'<p class="stext">{body}</p></td></tr></table>')
@@ -899,6 +936,150 @@ class Pages:
         else:
             more = ""
         return table + more
+
+    # ---- decisions (release 5.124, the cold-eyes plan's decisions 477 to 479) ----
+    def decision_rows(self, t: Task, found: list[decisions.Decision], state: PageState) -> str:
+        """The Decisions section's body (decision 478): a row per decision, the newest first, as a conversation's row is
+        drawn: the decision's mark, its words (its first line, all of them in the tooltip) in the text's colour, the subtask
+        it's on (unless that's the meeting, which the next line names), a grey line naming the meeting it came from, and its
+        day at the end. The words open its capture. The first ``SHOWN``, then Show all (decision 477); only the rows shown
+        have their words read."""
+        shown = found if state.decisions else found[:decisions.SHOWN]
+        rows = []
+        for d in (decisions.worded(self.m, x, self.content_of) for x in shown):
+            tip = f"{d.more or d.words}\n\nClick to open its capture."
+            words = link(f"capture:{d.capture}", d.words, tip, "tl")
+            where = d.where(self.today)
+            line = (f'<br><span class="sub">in {link(f"task:{d.meeting}", where, "Open the meeting", "tq")}</span>'
+                    if where and d.meeting in self.m.tasks else f'<br><span class="sub">in {esc(where)}</span>' if where else "")
+            chip = "" if d.task == d.meeting else self.from_chip(d.task, t.id)  # on the meeting itself: its line names it
+            rows.append(f'<tr><td valign="top" width="22"><img src="lk:decision" width="14" height="14"></td>'
+                        f'<td valign="top">{words}{chip}{line}</td>'
+                        f'<td valign="top" align="right" class="rel" width="64">{esc(self.day(d.saved))}</td></tr>')
+        table = f'<table width="100%" cellspacing="0" cellpadding="3">{"".join(rows)}</table>'
+        if len(found) > decisions.SHOWN:
+            words = "Show fewer" if state.decisions else f"Show all {len(found)} decisions"
+            table += f'<p style="margin-top: 4px">{link("fold:decisions", words)}</p>'
+        return table
+
+    def decision_register(self, task_id: str, scope: str = "descendants") -> list[tuple[str, str, str, str]]:
+        """The decision register the Decisions section's Copy puts on the clipboard (decision 479): every decision on the
+        task and the tasks under it (the page's scope), newest first, as Date, Decision, Task and Where."""
+        return decisions.rows(self.m, decisions.of_tasks(self.m, self.m.scope_ids(task_id, scope), self.content_of), self.today)
+
+    # ---- email conversations (release 5.122, the email section plan's decisions 455 to 463) ----
+    def me_name(self) -> str | None:
+        """The owner's name, which a conversation says as "you"."""
+        return self.m.person_name(self.me) if self.me and self.me in self.m.people else None
+
+    def senders(self, cv: email_conversations.Conversation) -> list[str]:
+        """Who wrote a conversation's emails; for an email kept without its rows (decision 463), from its From line."""
+        return list(dict.fromkeys(x for x in (self.sender(e) for e in cv.emails) if x))
+
+    def sender(self, e: email_conversations.Email) -> str:
+        return e.sender or (sender_of(self.content_of(e.capture)) if e.pos < 0 else "")
+
+    def conversation_rows(self, t: Task, convs: list, ids: list[str], state: PageState) -> str:
+        """The Email conversations section's body (decision 458): a row per conversation, the newest first, as a file's row
+        is drawn (release 5.114): the mail mark, its subject in the text's colour with its count of emails in grey and the
+        subtask it's on, a grey line of who's written and the newest email's first words, and its newest day at the end.
+        The subject opens the conversation's page. The first ``SHOWN``, then Show all (decision 456)."""
+        ec = email_conversations
+        me = self.me_name()
+        shown = convs if state.conversations else convs[:ec.SHOWN]
+        rows = []
+        for cv in shown:
+            n = len(cv.emails)
+            subject = link(f"conv:{t.id}/{cv.id}", cv.subject, CONVERSATION_TIP, "tl")
+            count = f' <span class="rel">&nbsp;{n}</span>' if n > 1 else ""
+            where = ec.task_in(cv, ids)
+            words = ec.snippet(ec.newest_words(self.m, cv, self.content_of))
+            line = esc(ec.who(self.senders(cv), me)) + (f" · {esc(words)}" if words else "")
+            rows.append(f'<tr><td valign="top" width="22"><img src="ft:mail" width="16" height="16"></td>'
+                        f'<td valign="top">{subject}{count}{self.from_chip(where or "", t.id)}<br><span class="sub">{line}</span></td>'
+                        f'<td valign="top" align="right" class="rel" width="64">{esc(short(to_date(cv.newest.at), self.today))}</td></tr>')
+        table = f'<table width="100%" cellspacing="0" cellpadding="3">{"".join(rows)}</table>'
+        if len(convs) > ec.SHOWN:
+            words = "Show fewer" if state.conversations else f"Show all {len(convs)} conversations"
+            table += f'<p style="margin-top: 4px">{link("fold:conversations", words)}</p>'
+        return table
+
+    def conversation_page(self, task_id: str, conversation_id: str, state: PageState) -> str:
+        """A conversation's page (decision 459), opened from a task's Email conversations: back to the task, the subject, a
+        line of facts, then every email of it DocRepo holds, oldest first, each with its sender, when, To, its own words
+        (the quoted emails folded, decision 462), its capture's files, and Open in Outlook, Reply all and Open capture."""
+        ec = email_conversations
+        cv = ec.find(self.m, conversation_id)
+        back = (f'<p class="crumbs">{link(f"task:{task_id}", "‹ " + self.m.task(task_id).title, "Back to the task")}</p>'
+                if task_id in self.m.tasks else "")
+        if cv is None:
+            return back + '<p class="note">This conversation isn\'t here any more: the captures of its emails were discarded.</p>'
+        me = self.me_name()
+        n = len(cv.emails)
+        first, last = cv.emails[0].at, cv.newest.at
+        span = self.day(first) if first[:10] == last[:10] else f"{self.day(first)} to {self.day(last)}"
+        tasks = cv.tasks()
+        on = "on " + ", ".join(self.task_link(x) for x in tasks) if tasks else '<span class="faint">not filed to a task</span>'
+        head = (back + f"<h2>{esc(cv.subject)}</h2>"
+                + f'<p class="facts">{esc(ec.who(self.senders(cv), me, most=6))} · {n} email{"s" if n != 1 else ""} · {esc(span)} · {on}</p>')
+        blocks, filed = [], set()
+        for i, e in enumerate(cv.emails):
+            text = ec.email_text(self.m, e, self.content_of(e.capture))
+            own, quoted = ec.own_words(text.words)
+            sender = ec.who([self.sender(e)], me) if self.sender(e) else "An unknown sender"
+            when = f"{self.long(e.at)} {e.at[11:16]}".strip()
+            to = f'<span class="sub"> &nbsp;to {esc(clip(ec.to_words(text.to, me), 120))}</span>' if text.to else ""
+            newest = f" &nbsp;{chip('Newest', 'st-ip')}" if i == n - 1 and n > 1 else ""
+            # An email whose subject was changed says its own (a reply joined by In-Reply-To, decision 457).
+            own_subject = (f'<br><span class="sub">Subject: {esc(e.subject)}</span>'
+                           if e.subject and ec.clean_subject(e.subject) != cv.subject else "")
+            parts = [f'<table width="100%" cellspacing="0" cellpadding="0" style="margin-top: {4 if i == 0 else 16}px"><tr>'
+                     f'<td valign="top"><span class="ttl">{esc(sender[:1].upper() + sender[1:])}</span>{to}{newest}{own_subject}</td>'
+                     f'<td valign="top" align="right" class="rel" style="white-space: nowrap">{esc(when)}</td></tr></table>']
+            if own:
+                parts.append(f'<p style="margin-top: 6px; margin-bottom: 0px">{multiline(own)}</p>')
+            else:
+                parts.append('<p class="note" style="margin-top: 6px">DocRepo has none of its words here; its capture\'s page has what was kept.</p>')
+            if quoted:
+                key = f"q:{e.ref}"
+                if key in state.expanded:
+                    parts.append(f'<p class="sub" style="margin-top: 6px">{multiline(quoted)}</p>'
+                                 f'<p class="sub">{link("more:" + key, "Hide the quoted emails")}</p>')
+                else:
+                    parts.append(f'<p class="sub" style="margin-top: 4px">{link("more:" + key, "Show the quoted emails", "What it quotes of the emails before it")}</p>')
+            if text.note:
+                parts.append(f'<p class="sub" style="margin-top: 6px">Your words with it: {multiline(clip(text.note, 400))}</p>')
+            if e.capture not in filed:  # a capture's files, under the first of its emails here (decision 461)
+                filed.add(e.capture)
+                parts.append(self._capture_files(e.capture))
+            acts = []
+            if e.can_open:
+                acts.append(link(f"outlook:{e.ref}", "Open in Outlook", "The email itself in Outlook: from its place there, else its saved .msg"))
+                acts.append(link(f"replyall:{e.ref}", "Reply all", "Reply all in Outlook, as a T-mail: its replies come back to its task"))
+            acts.append(self.capture_link(e.capture, "Open capture"))
+            where = (self.from_chip(e.tasks[0], task_id) if task_id not in e.tasks else "") if e.tasks else ' <span class="faint">not filed</span>'
+            also = f' <span class="faint">· also in {esc(", ".join(c for c, _p in e.also))}</span>' if e.also else ""
+            parts.append(f'<p class="sub" style="margin-top: 6px">{" &nbsp;·&nbsp; ".join(acts)}{where}{also}</p>')
+            blocks.append("".join(parts))
+        return head + RULE.join(blocks)
+
+    def _capture_files(self, capture_id: str) -> str:
+        """A capture's files under its email on a conversation's page: its attachments, and the links and pictures email
+        layer 0 kept, each a row with its type's mark (decision 461)."""
+        c = self.m.captures[capture_id]
+        rows = []
+        for doc_id in c.document_ids:
+            d = self.m.documents.get(doc_id)
+            if d is None:
+                continue
+            kind = file_type(d.name, d.original)
+            if is_link(d.original) or is_folder(d.original):
+                name = link(f"opendoc:{d.id}", d.name, ("Opens in your browser: " if is_link(d.original) else "Opens in File Explorer: ") + (d.original or ""), "tl")
+            else:
+                name = link(f"show:doc:{d.id}", d.name, f"{type_name(kind)} · Email attachment. Click to show it in File Explorer.", "tl")
+            desc = f' <span class="sub">{esc(d.description)}</span>' if d.description else ""
+            rows.append(f'<tr><td valign="top" width="22"><img src="ft:{kind}" width="16" height="16"></td><td valign="top">{name}{desc}</td></tr>')
+        return f'<table cellspacing="0" cellpadding="2" style="margin-top: 6px">{"".join(rows)}</table>' if rows else ""
 
     def show_key(self, f) -> str:
         """The address that shows a file in File Explorer: a saved copy's, else its document's."""
@@ -1293,7 +1474,8 @@ class Pages:
                 ("Leads", ", ".join(self.task_link(x) for x in leads) or "None"), ("Assigned", ", ".join(self.task_link(x) for x in assigned) or "None")]
         added = f'<p class="note">{esc(p.added_note)}</p>' if p.added_note else ""
         tags = f'<p class="tags">{chips.strip()}</p>' if chips else ""  # under the name, at the chips' own size
-        return f'<p class="crumbs">Person {p.id}</p><h2>{esc(p.name)}</h2>{tags}{added}{fields_table(rows)}{self.agenda_block(person_id)}'
+        summary = link(f"summary:person:{p.id}", "Quick summary", "Their agenda, the tasks you share and what's changed (release 5.131)")
+        return f'<p class="crumbs">Person {p.id} &nbsp;{summary}</p><h2>{esc(p.name)}</h2>{tags}{added}{fields_table(rows)}{self.agenda_block(person_id)}'
 
     def label_page(self, name: str) -> str:
         """A label's page: its tasks, or its sublabels' tasks under each sublabel."""
@@ -1306,14 +1488,19 @@ class Pages:
             for s in subs:
                 tasks = label_tasks(self.m, s)
                 rows.append((s, "<br>".join(self.task_link(t) + (' <span class="sub">inherited</span>' if inh else "") for t, inh in tasks) or none_text()))
-            return (f'<p class="crumbs">Label</p><h2>{esc(label.name)}</h2>{fields_table(rows)}'
+            return (f'<p class="crumbs">Label &nbsp;{self.summary_link(name)}</p><h2>{esc(label.name)}</h2>{fields_table(rows)}'
                     '<p class="note">A label with labels under it is a heading: tasks get one of its labels, not it.</p>')
         tasks = label_tasks(self.m, name)
         parent = self.m.parent_label(name)
         rows = [*([("Under", link(label_href(parent), parent))] if parent else []),
                 ("Keywords", esc(", ".join(label.keywords)) or none_text()), ("Status", esc(label.status)),
                 ("Tasks", "<br>".join(self.task_link(t) + (' <span class="sub">inherited</span>' if inh else "") for t, inh in tasks) or none_text())]
-        return f'<p class="crumbs">{"Label › " + esc(parent) if parent else "Label"}</p><h2>{esc(label.name)}</h2>{fields_table(rows)}'
+        return (f'<p class="crumbs">{"Label › " + esc(parent) if parent else "Label"} &nbsp;{self.summary_link(name)}</p>'
+                f'<h2>{esc(label.name)}</h2>{fields_table(rows)}')
+
+    def summary_link(self, label_name: str) -> str:
+        """A label's Quick summary (release 5.131): where its open tasks stand, what needs attention and what's changed."""
+        return link("summary:label:" + quote(label_name, safe=""), "Quick summary", "Where its open tasks stand, what needs attention, what's changed")
 
     # ---- capacity ----
     def capacity_detail(self, rows: list[CapacityRow], weeks: list[date], cell: tuple[str, int] | None, unestimated: list[str],

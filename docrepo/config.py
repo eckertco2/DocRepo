@@ -163,6 +163,12 @@ class Settings:
     tagged_patterns: list[dict] = field(default_factory=list)
     #: Never a tag (decision 375): whole tags (ABC123) or starts with * (API*) that no pattern makes a tagged label.
     tagged_never: list[str] = field(default_factory=list)
+    #: The quick summary (release 5.131, the quick summary plan's decisions 524 and 534): a task nothing has touched for this
+    #: many days is quiet (the weekly review's setting too, when it comes); and the subjects pinned to the box's list, and the
+    #: recent ones, as "person:P004", "agenda:T000010" or "label:Safety".
+    quiet_days: int = 21
+    summary_pins: list[str] = field(default_factory=list)
+    summary_recent: list[str] = field(default_factory=list)
 
     @classmethod
     def load(cls, data_root: Path) -> Settings:
@@ -197,6 +203,16 @@ class Settings:
                 log.warning("Ignoring tagged_never in %s: it isn't a list of words", file)
                 never = []
             data["tagged_never"] = never
+        # The quick summary's pins and recents (release 5.131): lists of words; anything else is left out.
+        for key in ("summary_pins", "summary_recent"):
+            value = data.get(key)
+            if value is not None and not (isinstance(value, list) and all(isinstance(x, str) for x in value)):
+                log.warning("Ignoring %s in %s: it isn't a list of words", key, file)
+                del data[key]
+        quiet = data.get("quiet_days")
+        if quiet is not None and not (isinstance(quiet, int) and not isinstance(quiet, bool) and 1 <= quiet <= 365):
+            log.warning("Ignoring quiet_days in %s: it isn't a number of days from 1 to 365", file)
+            del data["quiet_days"]
         return cls(**{k: v for k, v in data.items() if k in known})
 
     def reference_link(self, name: str, value: str | None) -> str:
@@ -208,9 +224,12 @@ class Settings:
 
     def save(self, fs: SafeFS, data_root: Path) -> Path:
         data = asdict(self)
-        for key in ("wheel_hotkeys", "today_panel_hotkey", "copilot_folder", "reference_links", "tagged_patterns", "tagged_never"):  # written once they're set, as they're optional (releases 5.41, 5.56, 5.67 and 5.80)
+        for key in ("wheel_hotkeys", "today_panel_hotkey", "copilot_folder", "reference_links", "tagged_patterns", "tagged_never",
+                    "summary_pins", "summary_recent"):  # written once they're set, as they're optional (releases 5.41, 5.56, 5.67, 5.80 and 5.131)
             if not data[key]:
                 del data[key]
+        if data["quiet_days"] == 21:  # release 5.131: written once it's changed from its default, as the optional ones are
+            del data["quiet_days"]
         return fs.write_text(data_root / SETTINGS_FILE, json.dumps(data, indent=2) + "\n")
 
 

@@ -2,7 +2,8 @@
 
 One table: an ID, a title, typed arguments with their choices and defaults, and what it runs. A slot can name nothing else,
 so a config can't start a program, and captured content can never become a command. It also feeds the Ctrl+K palette.
-A command runs on the app (``docrepo.app.CaptureApp``). The agent window, when it comes, is one more row here.
+A command runs on the app (``docrepo.app.CaptureApp``). The agent window, when it comes, is one more row here, as the quick
+summary (release 5.131) was.
 """
 from __future__ import annotations
 
@@ -83,6 +84,11 @@ def _search_everything(app: CaptureApp, _args: Mapping[str, Any]) -> None:
     app.browse.search_box.selectAll()
 
 
+def _summary_open(app: CaptureApp, _args: Mapping[str, Any]) -> None:
+    """The quick summary (release 5.131, the quick summary plan's decision 517): its window, with the cursor in its box."""
+    app.wheels.quick_summary()
+
+
 def _find_files_current(app: CaptureApp, _args: Mapping[str, Any]) -> None:
     """Find files for the task selected in the browse tool, or else the last one opened; with neither, task search, and
     picking a task opens its Find files. Its old name, task_view.current, still works (``wheels_config.RENAMED``)."""
@@ -107,6 +113,7 @@ _ROWS = (
     Registered(CommandSpec("search.files", "File search"), _search_files),
     Registered(CommandSpec("search.everything", "Search everything"), _search_everything),
     Registered(CommandSpec("find_files.current", "Find files for the current task"), _find_files_current),
+    Registered(CommandSpec("summary.open", "The quick summary"), _summary_open),
 )
 REGISTRY: dict[str, Registered] = {r.spec.id: r for r in _ROWS}
 SPECS: dict[str, CommandSpec] = {r.spec.id: r.spec for r in _ROWS}
