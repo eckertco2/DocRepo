@@ -36,6 +36,10 @@ class AppContext:
     save_open_pages: Callable[[], None] = lambda: None
     #: Shows a capture's page in the browse tool (release 5.93): the capture window's link to an email captured before.
     open_capture_page: Callable[[str], None] = lambda capture_id: None
+    #: A T-mail was just opened (release 5.123): the app starts watching Sent Items for it.
+    t_mail_opened: Callable[[], None] = lambda: None
+    #: The troubleshooting report's T-mail lines (release 5.123): the waiting T-mails, the watch and the last sweep.
+    t_mail_report: Callable[[], list[str]] | None = None
     #: This session's saves that had problems (release 5.91), for the Problems lines of the capture and browse windows.
     problem_log: ProblemLog = field(default_factory=ProblemLog)
     #: The Model last loaded, and the database's state when it was (``model``).

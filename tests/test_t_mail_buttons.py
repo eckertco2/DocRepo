@@ -141,7 +141,7 @@ def test_new_t_mail_opens_an_email_and_keeps_it_on_the_task(browse, fake_outlook
     assert fake_outlook == [("new", NOW)]
     t = Model(browse.conn).t_mails[-1]
     assert (t.task, t.kind, t.conversation, t.opened) == (RIGGING, "new", OTHER.hex().upper(), "2026-10-08 14:10:00")
-    assert browse.status.text() == "Opened a new T-mail from Rigging plan in Outlook. When you capture its replies, they'll go to Rigging plan."
+    assert browse.status.text() == "Opened a new T-mail from Rigging plan in Outlook. When you send it, it's captured on Rigging plan, and so are the replies you capture."
     # Its replies now fill the capture window's picker with the task.
     answer = email("Re: hello", OTHER, replies=1, message_id="<c1@example.com>")
     assert conversations.pick_emails(Model(browse.conn), [answer]).task == RIGGING
@@ -174,7 +174,7 @@ def test_the_arrow_replies_to_the_tasks_latest_email(browse, ctx, fake_outlook):
     assert fake_outlook[-1][:3] == ("reply", "E2", "S1") and fake_outlook[-1][3].name == "email.msg"
     t = Model(browse.conn).t_mails[-1]
     assert (t.task, t.kind, t.reply_capture, t.reply_pos) == (RIGGING, "reply", newest, 0)
-    assert browse.status.text() == "Opened a Reply all from Rigging plan in Outlook. When you capture its replies, they'll go to Rigging plan."
+    assert browse.status.text() == "Opened a Reply all from Rigging plan in Outlook. When you send it, it's captured on Rigging plan, and so are the replies you capture."
 
 
 # ================= Reply all in Find files and on a capture's page =================
