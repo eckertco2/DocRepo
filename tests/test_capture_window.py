@@ -167,6 +167,24 @@ def test_a_pasted_path_line_adds_the_file(window, tmp_path):
     assert window.files == []
 
 
+def test_a_pasted_picture_stays_as_you_type_on(window, tmp_path):
+    """Release 5.135 (decision 548): a pasted picture's row came from no line of the text, so the path lines' check, which
+    runs as you type, leaves it; a pasted path's row still goes with its line."""
+    from PySide6.QtGui import QImage
+
+    image = QImage(4, 3, QImage.Format.Format_RGB32)
+    image.fill(0x336699)
+    window._picture_pasted(image)
+    report = tmp_path / "Checklist.txt"
+    report.write_text("Area 3", encoding="utf-8")
+    window.content.setPlainText(f"The guard as fitted.\n{report}")
+    window._sync_paths()
+    assert [e.row.name for e in window.files] == ["Picture 2026-10-08 1410.png", "Checklist.txt"]
+    window.content.setPlainText("The guard as fitted, and painted.")
+    window._sync_paths()
+    assert [e.row.name for e in window.files] == ["Picture 2026-10-08 1410.png"]
+
+
 def test_a_path_from_copy_as_path_adds_the_file(window, tmp_path):
     """Release 5.26.1: File Explorer's Copy as path puts quotes round the path, and the line was left as text."""
     folder = tmp_path / "Parent 1" / "Parent 2"
