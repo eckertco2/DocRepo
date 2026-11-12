@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QComboBox,
 )
 
-from docrepo import bulk, edits, key_dates, priorities
+from docrepo import ask_update, bulk, edits, key_dates, priorities
 from docrepo.lists import key_dates_due
 from docrepo.dates import short
 from docrepo.file_rows import doc_places, type_colour, type_icon, type_name
@@ -72,7 +72,13 @@ class TaskLists:
         chips, quiet = [], []
         for text, cls in markers(m, t):  # a chip only for an exception; the rest are quiet words (the review's recipe)
             (chips if LOOK.classic or cls in ("urgent", "pri-critical") else quiet).append((text, cls))
-        line = Line(t.title, icon=icon, icon_colour=colour, icon_tip=t.state, chips=tuple(chips), muted=(*(x for x, _ in quiet), *muted),
+        # "asked Mon" (release 5.125, the cold-eyes plan's decision 485): before the people waited on, where there are some,
+        # so a narrow row cuts the end of their names first and keeps it; else with the quiet words.
+        asked = ask_update.asked_text(m, task_id, self.today())
+        if asked and people:
+            people, asked = f"{asked} · {people}", ""
+        line = Line(t.title, icon=icon, icon_colour=colour, icon_tip=t.state, chips=tuple(chips),
+                    muted=(*(x for x, _ in quiet), *muted, *((asked,) if asked else ())),
                     context=people, strong=depth == 0, closed=t.state == "Closed")
         return _shape([line, _row_state(t.state), _due_html(due_cell(t, self.today(), when, use_due))])
 

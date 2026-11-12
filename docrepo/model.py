@@ -200,7 +200,7 @@ class TMail:
 
     id: int
     task: str
-    kind: str  # "new" or "reply"
+    kind: str  # "new", "reply", "ask" (Ask for an update, release 5.125) or "report" (kept for decision 507)
     reply_capture: str | None
     reply_pos: int | None
     opened: str
