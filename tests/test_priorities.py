@@ -13,7 +13,7 @@ import pytest  # noqa: E402
 from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from docrepo import bulk, db, edits, priorities, quick  # noqa: E402
+from docrepo import bulk, db, edits, priorities, quick, tasks  # noqa: E402
 from docrepo.config import Settings  # noqa: E402
 from docrepo.detail import Pages  # noqa: E402
 from docrepo.model import Model  # noqa: E402
@@ -270,6 +270,68 @@ def test_fold_subtasks(conn):
     assert priorities.folded_under(m, "T000008") == len(priorities.open_subtasks(m, "T000008"))
 
 
+def _represented(m: Model, f: priorities.BoardFilter, match=None) -> set[str]:
+    """Every task the board holds, on a card of its own that matches, or folded into a card."""
+    cols = priorities.columns(m, TODAY, f, match)
+    return {x for c in cols for x in c.ids if x not in c.context} | {y for c in cols for v in c.folds.values() for y in v}
+
+
+@pytest.mark.parametrize("f", [{"people": ("P002",)}, {"people": ("P004",)}, {"people": ("P005",)}, {"people": ("P006",)},
+                               {"due": "7"}, {"due": "none"}, {"due": "30"}, {"labels": ("Safety",)}, {}])
+def test_fold_hides_no_task_the_filters_show(conn, f):
+    """Release 5.136, the owner's report: with Fold subtasks on and a filter set, a parent that didn't match the filter
+    itself was left off the board, and the subtasks folded into it went with it. Now every task the board shows without
+    Fold is on its own card or folded into one."""
+    m = Model(conn)
+    plain = priorities.BoardFilter(**f)
+    unfolded = {x for c in priorities.columns(m, TODAY, plain) for x in c.ids}
+    assert _represented(m, priorities.BoardFilter(fold=True, **f)) == unfolded
+
+
+def test_a_parent_shown_for_its_folded_subtasks_is_context(conn):
+    """Priya leads or works on two of Reactor impeller upgrade's subtasks, not on the task itself: with Fold on, its card
+    shows, dimmed (context), holding just those two."""
+    m = Model(conn)
+    cols = priorities.columns(m, TODAY, priorities.BoardFilter(people=("P002",), fold=True))
+    ids = [x for c in cols for x in c.ids]
+    assert ids == ["T000001"]
+    assert cols[0].context == {"T000001"} and sorted(cols[0].folds["T000001"]) == ["T000009", "T000011"]
+    # due in 7 days: Installation is due later, but Rigging plan and Book the alignment contractor fold into it
+    cols = priorities.columns(m, TODAY, priorities.BoardFilter(due="7", fold=True))
+    assert [x for c in cols for x in c.ids] == ["T000008"] and cols[0].context == {"T000008"}
+    assert sorted(cols[0].folds["T000008"]) == ["T000012", "T000019"]
+    # a parent that matches itself isn't context
+    cols = priorities.columns(m, TODAY, priorities.BoardFilter(people=("P001",), fold=True))
+    assert "T000008" in cols[0].ids and not cols[0].context
+
+
+def test_a_subtask_folds_only_into_a_card_on_the_board(conn):
+    """A subtask whose parent has no card (parked, or routine while routine tasks are hidden) keeps its own card, and one
+    with a parent on the board as well folds there."""
+    s = Settings()
+    under_parked = tasks.create_task(conn, s, title="Measure the screw wear", at=AT, created_by="test", parents=["T000004"])
+    under_routine = tasks.create_task(conn, s, title="Collect the incident counts", at=AT, created_by="test", parents=["T000006"])
+    m = Model(conn)
+    assert m.task("T000004").state == "Parked" and m.task("T000006").recurrence
+    folded = board(conn, priorities.BoardFilter(fold=True))["Not ranked"]
+    assert under_parked in folded and under_routine in folded
+    assert not priorities.folded(m, m.task(under_parked)) and priorities.fold_parents(m, m.task(under_routine)) == []
+    # with Show routine on, the routine parent's card is on the board, so its subtask folds into it
+    shown = priorities.columns(m, TODAY, priorities.BoardFilter(fold=True, routine=True))
+    assert under_routine not in shown[0].ids and under_routine in shown[0].folds["T000006"]
+    # Q4 overtime budget's other parent is parked: it folds into Installation only
+    assert priorities.fold_parents(m, m.task("T000015")) == ["T000008"]
+
+
+def test_find_with_fold(conn):
+    """Find goes through the same rules: a folded subtask it finds brings its parent's card, as context."""
+    m = Model(conn)
+    cols = priorities.columns(m, TODAY, priorities.BoardFilter(fold=True), lambda x: "sling" in m.task(x).description.lower()
+                              or "sling" in m.task(x).title.lower() or "sling" in m.task(x).current_status.lower())
+    assert [x for c in cols for x in c.ids] == ["T000008"] and cols[0].folds["T000008"] == ["T000012"]
+    assert cols[0].context == {"T000008"}
+
+
 def test_find_and_fold_on_the_board(browse):
     v = browse.priorities
     browse.open_find()
@@ -286,5 +348,12 @@ def test_find_and_fold_on_the_board(browse):
     assert v.find_bar.isHidden() and len([x for c in v.columns for x in c.ids]) > 3
     browse.priorities._set("fold", True)
     assert "T000012" not in v.cards and "folded" in v.cards["T000008"].findChildren(type(v.title))[-1].text()
+    # Find and Fold together (release 5.136): Rigging plan is found, folded into Installation, which shows dimmed for it
+    browse.open_find()
+    v.find_box.setText("sling")
+    assert list(v.cards) == ["T000008"] and v.find_count.text() == "1 match"
+    assert v.cards["T000008"].property("context") and "1 subtask folded" not in v.cards["T000008"].findChildren(type(v.title))[-1].text()
+    assert ", 1 folded" in v.cards["T000008"].findChildren(type(v.title))[-1].text()
+    v.close_find()
     browse.set_view("tasks")
     assert v.find_bar.isHidden()
