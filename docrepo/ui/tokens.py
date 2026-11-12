@@ -478,6 +478,14 @@ QFrame#prDrop { background: $accent; border: none; border-radius: 1px; }
 QLabel#prTitle { font-weight: 600; color: $text; }
 /* a parent shown only for the subtasks folded into it (release 5.136): dimmed, as the task tree's parents are */
 QFrame#prCard[context="true"] QLabel#prTitle { font-weight: 400; color: $text2; }
+/* the subtasks inside a parent's card in Parents, and its opener (release 5.137, decisions 552 and 553) */
+QFrame#prRows { border: none; border-top: 1px solid $stroke; background: transparent; }
+QFrame#prRow { background: transparent; border: 1px solid transparent; border-radius: 3px; }
+QFrame#prRow:hover { background: $hover; }
+QFrame#prRow[sel="true"] { background: $selected; border-color: $accent; }
+QLabel#prRowTitle { color: $text; }
+QPushButton#prOpener { border: none; background: transparent; color: $text2; padding: 0; border-radius: 3px; }
+QPushButton#prOpener:hover { background: $hover; color: $text; }
 QTextBrowser { border: none; background: $content; }
 QWidget#settingsCard { background: $content; border: 1px solid $stroke; border-radius: 6px; }
 QDialog#palette { background: $content; border: 1px solid $stroke_strong; }
