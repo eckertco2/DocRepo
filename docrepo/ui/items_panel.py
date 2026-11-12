@@ -166,6 +166,10 @@ def _facts(it: items.Item, where: str) -> str:
         if it.assignee_hours or it.lead_hours:
             out.append(f"{it.assignee_hours or it.lead_hours} h")
         out.append(f"under {where}")
+    elif it.kind == "param" and it.op and it.op.task_field == "agenda":  # what goes on the agendas (release 5.133)
+        out.append(f"puts {where} on it" if it.where else "a note on its own")
+        if it.note:
+            out.append(f"note: {it.note}")
     elif it.kind == "param":  # whose field it fills (release 5.38)
         if it.where:
             out.append(f"on {where}")

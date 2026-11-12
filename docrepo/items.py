@@ -27,6 +27,11 @@ added email), and only after a space, a "(" or the start of a line, so an addres
   task item it's listed under, the new task it's listed under, a ``#`` above, the capture's task (decision 208). Release
   5.62 adds Duration, Runs through weekends, hours a day or a week, Involvement and ties (decisions 293 to 300), the last
   in the words of Edit task's tie line, ``**start, 3 workdays after #Line 2 outage ends.``, whose ``#`` names only its source.
+- ``**agenda,`` (release 5.133, decisions 540 to 545, the owner's ask of 2026-11-11) names agendas, not a field: a person's
+  (``@Tom``), a meeting's or another task's (``#Business team meeting``), or Today. The task it goes on, found as any
+  parameter's, goes on each, so a task being written in the content text, or the New task itself, can go on an agenda.
+  The line's other words are the agenda item's note, unless they made that task; with no task at all they go on the
+  agenda as a note alone (``_read_agenda``, ``save._put_on_agendas``).
 
 A ``**`` kind wins; else an ``@`` makes a task; else a ``#`` alone makes a note; a block with none stays in the notes.
 Parameters make their own cards beside whatever the rest of their line makes. ``**`` and a space is never an operator, and
@@ -48,13 +53,14 @@ from typing import Any
 
 from docrepo import markup, ties
 from docrepo.db import RECURRENCES
-from docrepo.model import PRIORITY_NAMES, Tie
+from docrepo.model import PRIORITY_NAMES, TODAY, Tie, is_person
 from docrepo.parse import (
     EVENT_WORDS, REF_SUFFIX, DateHit, ParseLabel, ParsePerson, Who, find_dates, find_hours, ok_day, one_decimal, parse_capture, quick_update,
 )
 from docrepo.text import first_sentence, sentences
 
-KIND_NAMES = {"task": "Task", "note": "Note", "update": "Update", "decision": "Decision", "date": "Key date", "param": "Field"}
+#: Each kind of item, and what ``**agenda,`` lines make (release 5.133), as Save's message counts them.
+KIND_NAMES = {"task": "Task", "note": "Note", "update": "Update", "decision": "Decision", "date": "Key date", "param": "Field", "agenda": "Agenda item"}
 #: The kinds of item a parameter makes: they go on a task, with no capture of their own.
 PARAM_KINDS = ("date", "param")
 _NAME = re.compile(r"\*\*([A-Za-z][^,*\n]{0,40}),")
@@ -666,6 +672,49 @@ def _read_parents(x: str, c: ReadWith, op: Operator) -> Value:
     return Value({op.task_field: ids}, ", ".join(c.names.task_title(i) for i in ids))
 
 
+def _agenda_target(chunk: str, c: ReadWith) -> str | None:
+    """One agenda a ``**agenda,`` sentence names (release 5.133, decision 541): Today; a person by name or alias, which an @
+    says it is; or a meeting or another task by its title or ID, which a # says it is. A bare name is a person's first."""
+    name = chunk.strip()
+    if name.lower() == "today":
+        return TODAY
+    sigil = name[0] if name.startswith(("@", "#")) else ""
+    name = name[1:].strip() if sigil else name
+    if sigil != "#":
+        pid = _person_id(name, c)
+        if pid:
+            return pid
+    if sigil == "@":
+        return None
+    low = name.lower()
+    if re.fullmatch(r"t\d{6}", low) and low.upper() in c.names.tasks:
+        return low.upper()
+    return next((v for n, v in (*c.names.prefer_tasks, *c.names.task_names) if n.lower() == low), None)
+
+
+def _target_name(target: str, names: Names) -> str:
+    return "Today" if target == TODAY else names.person_name(target) if is_person(target) else names.task_title(target)
+
+
+def _read_agenda(x: str, c: ReadWith, op: Operator) -> Value:
+    """``**agenda,`` (release 5.133, decisions 540 and 541): the agendas its sentence names, the whole sentence first, since a
+    title may hold "and" or a comma, then each part. Your own agenda is Today, so you aren't one (decision 542)."""
+    whole = _agenda_target(x, c) if x.strip() else None
+    chunks = [x] if whole else _chunks(x)
+    if not chunks:
+        return _NOTHING
+    found: list[str] = []
+    for chunk in chunks:
+        target = whole or _agenda_target(chunk, c)
+        if target is None:
+            return Value(problem=f"No person, meeting or task called {chunk.strip().lstrip('@#').strip()}")
+        if is_person(target) and target in c.names.person_by_id and c.names.person_by_id[target].me:
+            return Value(problem="Your own agenda is Today: write **agenda, today")
+        if target not in found:
+            found.append(target)
+    return Value({op.task_field: found}, ", ".join(_target_name(t, c.names) for t in found))
+
+
 def _read_reference(x: str, c: ReadWith, op: Operator) -> Value:
     v = re.sub(r"^(?:#|no\.?(?=\s|\d|\Z)|number)\s*[:#-]?\s*", "", x, flags=re.I).strip()
     return Value({"references": {op.label: v}}, v) if v else _NOTHING
@@ -692,6 +741,7 @@ class Operator:
     whole: bool = False
     gone: str = ""
     reference: bool = False  # a reference field, whose label is its name in Settings
+    what: str = ""  # what it does, for the Syntax tab and the README, when its label doesn't say (release 5.133)
 
 
 OPERATORS: tuple[Operator, ...] = (
@@ -729,6 +779,9 @@ OPERATORS: tuple[Operator, ...] = (
     Operator(("meeting",), label="Meeting", task_field="meeting", read=_read_yes_no),
     Operator(("label", "labels"), label="Labels", task_field="labels", adds=True, read=_read_labels),
     Operator(("parent", "parents"), label="Parents", task_field="parents", adds=True, whole=True, read=_read_parents),
+    # Not a field (release 5.133): the task goes on each agenda named. Its sentence is all value, so a # names an agenda.
+    Operator(("agenda", "agendas"), label="Agenda", task_field="agenda", adds=True, whole=True, read=_read_agenda,
+             what="Puts the task on each agenda named: a person's, a meeting's, a task's or Today"),
     # An old form still in the hands (decision 206): this entry comes out once the habit has gone.
     Operator(("date",), gone="Say which date: **start, **due, **deadline or **key date"),
 )
@@ -890,6 +943,8 @@ class Item:
     op: Operator | None = None
     value: Value | None = None
     where: list[Where] = field(default_factory=list)
+    #: An ``**agenda,`` line's other words (release 5.133, decision 543): its agenda items' note.
+    note: str = ""
     on: bool = True
     changed: bool = False
     problem: str = ""
@@ -1034,10 +1089,16 @@ def read(content: str, names: Names, today: date, *, labels: Sequence[ParseLabel
         if v.key_date and ov.get("title") is not None:
             it.title, it.changed = str(ov["title"]), True
         ids = [w.ref if w.kind == "task" else home_task if w.kind == "home" else None for w in where]
+        # **agenda, (release 5.133, decision 543): the line's other words are its note, unless they're the task going on it.
+        agendas = list(v.changes.get("agenda", ())) if op and op.task_field == "agenda" else []
+        if op and op.task_field == "agenda" and not b.is_self and not (mine and mine.kind == "task"):
+            it.note = clean(L.text, L.toks, names)
+        own_agenda = bool(agendas and where) and all(i and set(agendas) <= {i} for i in ids)  # a task can't be on its own agenda
         filled = [value_now(names.records[i], op) if i in names.records else "" for i in ids] if op and not p.problem and not v.problem else []
         tie = (v.changes.get("ties") or {}).get(op.task_field) if op else None
         refused = [ties.problem_in(names.model, i or "", tie) for i in ids] if tie and names.model is not None else []
-        it.problem = (p.problem or v.problem or ("" if where else "No task to put it on: it stays in the notes")
+        it.problem = (p.problem or v.problem or ("" if where or it.note else "No task to put it on: it stays in the notes")
+                      or ("A task can't be on its own agenda" if own_agenda else "")
                       or (f"{p.label} is already {filled[0]}: {'tie it in Edit task' if tie else 'change it with Update or Edit task'}" if filled and all(filled) else "")
                       or (refused[0] if refused and all(refused) else ""))
         if it.problem:
@@ -1463,6 +1524,7 @@ STAR_EXAMPLES = {
     "meeting": "**meeting, yes",
     "label": "**label, Safety",
     "parent": "**parent, #Installation",
+    "agenda": "**agenda, @Tom and #Business team meeting",
 }
 
 
@@ -1497,7 +1559,7 @@ def syntax_rows(names: Names | None = None) -> list[tuple[str, str, str, str]]:
         name = star_name(op)
         others = ", ".join(f"**{n}," for n in op.names if n != name)
         what = (f"{KIND_NAMES.get(op.item, 'Item')}" + (f", {op.state}" if op.state else "") + (", a plant event" if op.event else "")
-                if op.item else op.label + (" (adds to the list)" if op.adds else ""))
+                if op.item else op.what or op.label + (" (adds to the list)" if op.adds else ""))
         rows.append((f"**{name},", others, what, STAR_EXAMPLES.get(name, "")))
     for op in (names.field_ops.values() if names else ()):
         rows.append((f"**{op.label.lower()},", "", f"{op.label} (a reference field, from Settings)", f"**{op.label.lower()}, 4471"))
