@@ -183,6 +183,11 @@ QFrame#prCard[sel="true"] { background: #dbe8f5; border-color: #1d5e98; }
 QFrame#prDrop { background: #1d5e98; border: none; }
 QLabel#prTitle { font-weight: 600; }
 QFrame#prCard[context="true"] QLabel#prTitle { font-weight: 400; color: #5a6571; }
+QFrame#prRows { border: none; border-top: 1px solid #d6dce3; background: transparent; }
+QFrame#prRow { background: transparent; border: 1px solid transparent; border-radius: 3px; }
+QFrame#prRow:hover { background: #eef1f4; }
+QFrame#prRow[sel="true"] { background: #dbe8f5; border-color: #1d5e98; }
+QPushButton#prOpener { border: none; background: transparent; color: #5a6571; padding: 0; }
 QLabel#count { color: #5a6571; }
 """ + FORMAT_BAR_STYLE + NOTES_STYLE
 CLASSIC_TREE = ("QTreeWidget { border: none; font-family: 'Segoe UI'; font-size: 10pt; }"

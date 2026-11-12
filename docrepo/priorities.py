@@ -37,6 +37,12 @@ FIELD = "Priority"
 VIA = "Priorities view"
 #: The board's Due filter.
 DUE_CHOICES = (("any", "Any time"), ("over", "Overdue"), ("7", "Due in 7 days"), ("30", "Due in 30 days"), ("none", "No due date"))
+#: The board's Show switch (release 5.137, decisions 550 to 552, in place of release 5.24's Fold subtasks): its key, its
+#: name and its tooltip. All is the board as it was; Parents is Fold subtasks, as release 5.136 left it.
+SHOWS = (("work", "Work", "Tasks with no open subtasks: the work itself. Each card's grey line names its parents."),
+         ("parents", "Parents", "Top-level tasks and tasks with open subtasks. A subtask with none of its own is inside its "
+                                "parent's card, as a square in its bucket's colour; ▸ opens the card to list them."),
+         ("all", "All", "Every open task, parents and subtasks alike. A parent's squares are its open subtasks, in their buckets' colours."))
 
 
 def name(bucket: str | None) -> str:
@@ -62,8 +68,13 @@ class BoardFilter:
     labels: tuple[str, ...] = ()
     due: str = "any"
     routine: bool = False
-    #: Fold subtasks (release 5.24): only parent and top-level tasks show.
-    fold: bool = False
+    #: Show (release 5.137): "work", "parents" or "all" (``SHOWS``).
+    show: str = "all"
+
+    @property
+    def fold(self) -> bool:
+        """Parents folds the subtasks with none of their own into their parents' cards, as Fold subtasks did (release 5.24)."""
+        return self.show == "parents"
 
 
 def open_subtasks(m: Model, task_id: str) -> list[str]:
@@ -71,7 +82,7 @@ def open_subtasks(m: Model, task_id: str) -> list[str]:
 
 
 def fold_parents(m: Model, t: Task, routine: bool = False) -> list[str]:
-    """The parents Fold subtasks folds a task into: a task with no open subtasks of its own goes into each parent whose
+    """The parents Parents (Fold subtasks before release 5.137) folds a task into: a task with no open subtasks of its own goes into each parent whose
     card is on the board. A parent that's parked, closed or routine (while routine tasks are hidden) has no card, and
     neither has Quick tasks, so a task with no other parent keeps its own card (release 5.136: before, it folded into the
     missing card, and was lost from the board)."""
@@ -81,24 +92,31 @@ def fold_parents(m: Model, t: Task, routine: bool = False) -> list[str]:
 
 
 def folded(m: Model, t: Task, routine: bool = False) -> bool:
-    """Whether Fold subtasks takes a task off the board, into its parents' cards."""
+    """Whether Parents takes a task off the board, into its parents' cards."""
     return bool(fold_parents(m, t, routine))
 
 
 def folded_into(m: Model, task_id: str, routine: bool = False) -> list[str]:
-    """The open subtasks Fold subtasks folds into a task's card."""
+    """The open subtasks Parents folds into a task's card."""
     return [c for c in open_subtasks(m, task_id) if on_board(m.task(c), routine) and task_id in fold_parents(m, m.task(c), routine)]
 
 
 def folded_under(m: Model, task_id: str, routine: bool = False) -> int:
-    """How many of a task's open subtasks Fold subtasks folds into it."""
+    """How many of a task's open subtasks Parents folds into it."""
     return len(folded_into(m, task_id, routine))
 
 
 def shown(m: Model, t: Task, f: BoardFilter, today: date) -> bool:
-    """Whether a task has a card of its own that passes the filters. With Fold subtasks on, a parent's card also shows for
-    the subtasks folded into it, as context (``columns``)."""
-    return on_board(t, f.routine) and not (f.fold and folded(m, t, f.routine)) and passes(m, t, f, today)
+    """Whether a task has a card of its own that passes the filters. In Parents, a parent's card also shows for the
+    subtasks folded into it, as context (``columns``)."""
+    return (on_board(t, f.routine) and not (f.fold and folded(m, t, f.routine)) and not (f.show == "work" and open_subtasks(m, t.id))
+            and passes(m, t, f, today))
+
+
+def by_bucket(m: Model, ids: list[str]) -> list[str]:
+    """Tasks in their buckets' order, Critical first and Not ranked last, each bucket in its own order: a card's squares
+    and the subtasks inside it (release 5.137, decision 554)."""
+    return sorted(ids, key=lambda x: sort_key(m.task(x)))
 
 
 def passes(m: Model, t: Task, f: BoardFilter, today: date) -> bool:
@@ -155,19 +173,23 @@ class Column:
     name: str
     digit: str
     ids: list[str]
-    #: With Fold subtasks on, each card's folded subtasks that pass the filters and Find, by the card's task.
+    #: In Parents, each card's folded subtasks that pass the filters and Find, by the card's task, in their buckets' order.
     folds: dict[str, list[str]] = field(default_factory=dict)
     #: The cards shown only for what's folded into them, dimmed as the task tree's parents are when a filter hides them.
     context: set[str] = field(default_factory=set)
+    #: Each parent card's squares (release 5.137, decision 554), in their buckets' order: in Parents the subtasks folded
+    #: into it, in All its open subtasks the filters and Find show.
+    pips: dict[str, list[str]] = field(default_factory=dict)
 
 
 def columns(m: Model, today: date, f: BoardFilter, match: Callable[[str], bool] | None = None) -> list[Column]:
     """The board: a column per bucket, Not ranked first, each with the tasks the filters and ``match`` (Find's words)
-    show, in its order.
+    show, in its order, as Show has them (release 5.137).
 
-    With Fold subtasks on, a task with no open subtasks folds into its parents' cards (``fold_parents``), and a parent's
-    card shows when it passes the filters itself, or when a subtask folded into it does, as context. So Fold hides no
-    task the board shows without it: each has its own card or is folded into one (release 5.136)."""
+    All has every open task. Work has those with no open subtasks. In Parents, a task with no open subtasks folds into
+    its parents' cards (``fold_parents``), and a parent's card shows when it passes the filters itself, or when a subtask
+    folded into it does, as context; so Parents hides no task All shows: each has its own card or is folded into one
+    (release 5.136)."""
     def ok(task_id: str) -> bool:
         return passes(m, m.task(task_id), f, today) and (match is None or match(task_id))
 
@@ -178,11 +200,17 @@ def columns(m: Model, today: date, f: BoardFilter, match: Callable[[str], bool] 
             t = m.task(x)
             if not on_board(t, f.routine) or (f.fold and folded(m, t, f.routine)):
                 continue
-            kept = [c for c in folded_into(m, x, f.routine) if ok(c)] if f.fold else []
+            if f.show == "work" and open_subtasks(m, x):
+                continue
+            kept = by_bucket(m, [c for c in folded_into(m, x, f.routine) if ok(c)]) if f.fold else []
             if ok(x) or kept:
                 col.ids.append(x)
                 if f.fold:
                     col.folds[x] = kept
+                    if kept:
+                        col.pips[x] = kept
+                elif f.show == "all" and open_subtasks(m, x):
+                    col.pips[x] = by_bucket(m, [c for c in open_subtasks(m, x) if on_board(m.task(c), f.routine) and ok(c)])
                 if not ok(x):
                     col.context.add(x)
         out.append(col)
