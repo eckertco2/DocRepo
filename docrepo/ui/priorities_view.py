@@ -254,6 +254,9 @@ class PrioritiesView(QWidget):
         self.fold = False
         self.dragging: str | None = None
         self.columns: list[priorities.Column] = []
+        #: With Fold subtasks on: each card's folded subtasks that the filters show, and the cards shown only for those.
+        self.folds: dict[str, list[str]] = {}
+        self.context: set[str] = set()
         self.cards: dict[str, Card] = {}
         self._colours: dict[str, str] = {}
         lay = QVBoxLayout(self)
@@ -342,12 +345,17 @@ class PrioritiesView(QWidget):
             top = model.chains_of(t.id)[0][0]
             self._colours[t.id] = tokens.group_colour(tops.index(top)) if top in tops else tokens.group_colour(-1)
         f = priorities.BoardFilter(tuple(self.people), tuple(self.labels), self.due, self.routine, self.fold)
-        self.columns = priorities.columns(model, today, f)
         words = self.find_box.text().lower().split() if not self.find_bar.isHidden() else []
-        if words:  # every word in the task's ID, title, description, status, labels, people or path
-            for col in self.columns:
-                col.ids = [x for x in col.ids if all(w in find_text(model, x) + " " + path_text(model, x).lower() for w in words)]
-            hits = sum(len(c.ids) for c in self.columns)
+
+        def found(x: str) -> bool:  # every word in the task's ID, title, description, status, labels, people or path
+            return all(w in find_text(model, x) + " " + path_text(model, x).lower() for w in words)
+
+        # Find goes through the board's own rules, so a subtask it finds brings its folded parent's card (release 5.136)
+        self.columns = priorities.columns(model, today, f, found if words else None)
+        self.folds = {x: kept for c in self.columns for x, kept in c.folds.items()}
+        self.context = set().union(*(c.context for c in self.columns))
+        if words:  # the tasks found, on their own cards or folded into one
+            hits = sum(len(c.ids) for c in self.columns) - len(self.context) + sum(len(v) for v in self.folds.values())
             self.find_count.setText(f"{hits} match{'es' if hits != 1 else ''}" if hits else "Nothing on the board matches")
         else:
             self.find_count.clear()
@@ -384,17 +392,21 @@ class PrioritiesView(QWidget):
         if who:
             bits.append(f'<span style="color:{tokens.colour("text2")}">{esc(who)}</span>')
         kids = len(priorities.open_subtasks(m, t.id))
-        shut = priorities.folded_under(m, t.id) if self.fold else 0
+        inside = self.folds.get(t.id, []) if self.fold else []  # the folded subtasks the filters and Find show
+        shut = len(inside)
         if kids:
             text = f"{shut} subtask{'' if shut == 1 else 's'} folded" if shut == kids else \
                 f"{kids} open subtask{'' if kids == 1 else 's'}" + (f", {shut} folded" if shut else "")
             if shut:  # what the folded ones are ranked, so a Critical subtask isn't lost from sight
-                ranked = [priorities.name(m.task(c).priority) for c in priorities.open_subtasks(m, t.id)
-                          if m.task(c).priority and priorities.folded(m, m.task(c))]
+                ranked = [priorities.name(m.task(c).priority) for c in inside if m.task(c).priority]
                 counts = [f"{ranked.count(n)} {n}" for _, n, _ in priorities.BUCKETS if n in ranked]
                 text += f" ({', '.join(counts)})" if counts else ""
             bits.append(f'<span style="color:{tokens.colour("text2")}">{text}</span>')
         card = Card(self, t, self._colours.get(t.id, tokens.group_colour(-1)), " &nbsp;".join(bits), path_text(m, t.id), t.id == self.sel)
+        if task_id in self.context:  # shown only for the subtasks folded into it: dimmed, as the task tree's parents are
+            card.setProperty("context", True)
+            card.setToolTip("Shown for the subtasks folded into it; it doesn't match the filters itself")
+            card.setAccessibleName(f"{card.accessibleName()}, shown for its folded subtasks")
         self.cards[task_id] = card
         return card
 
@@ -428,7 +440,8 @@ class PrioritiesView(QWidget):
         routine.toggled.connect(lambda on: self._set("routine", on))
         lay.addWidget(routine)
         fold = QCheckBox("Fold subtasks")
-        fold.setToolTip("Only parent and top-level tasks: a subtask with no open subtasks of its own folds into its parent's card")
+        fold.setToolTip("Only parent and top-level tasks: a subtask with no open subtasks of its own folds into its parent's card. "
+                        "A parent shows, dimmed, when only its folded subtasks match the filters")
         fold.setChecked(self.fold)
         fold.toggled.connect(lambda on: self._set("fold", on))
         lay.addWidget(fold)
