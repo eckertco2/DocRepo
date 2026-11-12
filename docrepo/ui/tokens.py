@@ -476,6 +476,8 @@ QFrame#prCard:hover { border-color: $stroke_strong; }
 QFrame#prCard[sel="true"] { background: $selected; border-color: $accent; }
 QFrame#prDrop { background: $accent; border: none; border-radius: 1px; }
 QLabel#prTitle { font-weight: 600; color: $text; }
+/* a parent shown only for the subtasks folded into it (release 5.136): dimmed, as the task tree's parents are */
+QFrame#prCard[context="true"] QLabel#prTitle { font-weight: 400; color: $text2; }
 QTextBrowser { border: none; background: $content; }
 QWidget#settingsCard { background: $content; border: 1px solid $stroke; border-radius: 6px; }
 QDialog#palette { background: $content; border: 1px solid $stroke_strong; }
