@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QLabel,
 )
 
-from docrepo import search
+from docrepo import decisions, search
 from docrepo.dates import short
 from docrepo.detail import esc
 from docrepo.file_rows import GROUP_NAMES, dated_name, doc_places, place_words, type_colour, type_icon, type_name, without_title
@@ -117,6 +117,12 @@ class DocumentLists:
             c = m.captures[r.id]
             icon, colour, tip = ("type-mail", "type_mail", "Email") if c.emails or c.source == "outlook_email" else ("note", "text2", "Capture")
             where = m.task(c.task).title if c.task and c.task in m.tasks else "Unfiled"
+            if c.item == "decision":  # release 5.124 (decision 478): its mark, its task and the meeting it came from
+                icon, tip = "decision", "Decision"
+                meeting, name, day = decisions.meeting_of(m, c)
+                if name:  # a decision on the meeting itself is named once
+                    said = "in " + (f"{name}, {self._day(day)}" if day else name)
+                    where = said if meeting == c.task else f"{where} · {said}"
             when = self._day(c.saved)
         elif r.group == "Saved copy":  # its name without the day it starts with, which is the row's date (decision 429)
             kind = file_type(r.title)
