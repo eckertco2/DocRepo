@@ -48,11 +48,13 @@ class PageCommands:
             self._action("Meeting notes", lambda: self.open_capture(task=task_id, meeting=True),
                          "Take this meeting's notes, with its agenda beside them", icon_name="people", key="M")
         # New T-mail (the knowledge base's stage K8, release B, as release 5.105, decision 36): one click opens a new email
-        # in Outlook tagged for this task; its arrow has Reply all to the task's latest email.
+        # in Outlook tagged for this task; its arrow has Reply all to the task's latest email, and since release 5.125 Ask
+        # for an update (the cold-eyes plan's decision 481).
         self._split_action("New T-mail", lambda: t_mails.new_t_mail(self, task_id),
                            "A new email in Outlook, empty, tagged so its replies come back to this task when you capture them. "
                            "You write and send it; DocRepo never sends email.",
-                           t_mails.latest_menu(self, task_id, self), "Reply all: to the latest email filed to this task, as a T-mail",
+                           t_mails.latest_menu(self, task_id, self),
+                           "More T-mails: Reply all to the latest email filed to this task, or Ask for an update",
                            icon_name="mail")
         self._action(task_commands.ADD_TO, tip="Put it on Today (D) or an agenda", menu=task_menus.add_to_menu(self, task_id, self),
                      icon_name="agenda", key="A")

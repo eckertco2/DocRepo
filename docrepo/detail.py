@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from urllib.parse import quote
 
-from docrepo import capacity, email_conversations, items, markup, notes_page, repeats, tagged, ties
+from docrepo import ask_update, capacity, email_conversations, items, markup, notes_page, repeats, tagged, ties
 from docrepo.dates import ago, days_words, long_date, monday_of, short, to_date
 from docrepo.file_rows import dated_name, type_name
 from docrepo.markup import esc
@@ -408,6 +408,7 @@ class Pages:
                        if t.discarded else "") + self.page_head(t, state, grid=self.facts_grid(t, width))
         out["title"] = t.title  # the sticky title line's words (release 5.86)
         out["status_name"], out["status_when"], out["status_age"], out["status_body"] = self.status_parts(t)
+        out["status_asked"], out["status_asked_tip"] = self.asked_parts(t)
         log = self.stories.story(task_id)
         out["status_log"] = self.story_list(log, lambda e: self.log_item(e), state) if log else '<p class="note">No changes yet.</p>'
         out["status_log_summary"] = f"{len(log)} change{'s' if len(log) != 1 else ''}"
@@ -557,10 +558,20 @@ class Pages:
                 else f'<span class="sub">No status yet.</span> {link(f"update:{t.id}", "Add one", "Update this task")}')
         return name, when, age, body
 
+    def asked_parts(self, t: Task) -> tuple[str, str]:
+        """The status card's "asked Mon" and its tooltip (release 5.125, the cold-eyes plan's decision 485), while an Ask for
+        an update waits for a capture on the task; two empty strings otherwise."""
+        opened = ask_update.asked(self.m, t.id)
+        return (ask_update.asked_words(opened, self.today), ask_update.asked_tip(opened, self.today)) if opened else ("", "")
+
     def status_block(self, t: Task) -> str:
-        """The page's one tinted block: where the task stands, and the date that was written."""
+        """The page's one tinted block: where the task stands, the date that was written, and "asked Mon" while an Ask for
+        an update waits (release 5.125)."""
         name, date, age, body = self.status_parts(t)
+        asked, asked_tip = self.asked_parts(t)
         when = f'<td align="right" class="rel" title="The current status last changed {age}">{esc(date)}</td>' if date else ""
+        if asked:
+            when += f'<td align="right" class="rel" width="1" title="{esc(asked_tip)}">&nbsp;·&nbsp;{esc(asked)}</td>'
         return (f'<table width="100%" cellspacing="0" cellpadding="12" style="margin-top: 12px"><tr><td class="stat">'
                 f'<table width="100%" cellspacing="0" cellpadding="0"><tr><td class="sk">{name}</td>{when}</tr></table>'
                 f'<p class="stext">{body}</p></td></tr></table>')
