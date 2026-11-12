@@ -872,7 +872,8 @@ class SettingsView(QWidget):
             t_mail = self.try_t_mail.isChecked()
             scratch = outlook.copy_path(self.ctx.fs, self.ctx.data_root)
             reply_to = diagnose.newest_saved_email(self.ctx.data_root) if t_mail else None
-            text = diagnose.build_report(self.ctx.data_root, now, list(diagnose.DRAGS), drops=list(diagnose.DROPS),
+            waits = self.ctx.t_mail_report() if self.ctx.t_mail_report is not None else None
+            text = diagnose.build_report(self.ctx.data_root, now, list(diagnose.DRAGS), drops=list(diagnose.DROPS), t_mails=waits,
                                          check_outlook=lambda: diagnose.outlook_check(try_category=trying, scratch=scratch, colour=colour,
                                                                                       try_t_mail=t_mail, reply_to=reply_to))
             try:
