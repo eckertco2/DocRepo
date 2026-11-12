@@ -4,8 +4,8 @@ the design workspace's ``docs/mods/task-panel-plan.md``).
 The facts above the notes: the path, the title and the description, then the **facts grid** (its state and flags, its
 dates, its people and its labels, each a grey name beside its value, release 5.113's decision 422), as one HTML part;
 the status as a card with a bar down its left side, its log behind the button at its right (the owner's stage two: a
-status panel that opens to its updates); then one **section** per group (Key dates, Agenda, Subtasks, Email
-conversations since release 5.122, Links, Files, Details), stacked in that order, open or closed. Every section's head
+status panel that opens to its updates); then one **section** per group (Key dates, Agenda, Subtasks, Decisions since
+release 5.124, Email conversations since release 5.122, Links, Files, Details), stacked in that order, open or closed. Every section's head
 is the same row: a chevron hanging in the margin, the title, a count or a few words, and its one command at the right;
 so the title, the grid, the sections, the notes and the history all start on one left edge (decision 423). Which groups
 are open is the owner's, remembered per task. The bodies stay HTML from ``docrepo.detail``, so the page is still tested
@@ -22,12 +22,13 @@ from docrepo.ui import tokens
 from docrepo.ui.icons import icon
 from docrepo.ui.page_view import FitPageView
 
-#: The groups, in the page's order, with their titles. When and who went into the facts grid in release 5.113.
-GROUPS = (("key_dates", "Key dates"), ("agenda", "Agenda"), ("subtasks", "Subtasks"), ("emails", "Email conversations"), ("links", "Links"),
-          ("files", "Files"), ("details", "Details"))
-#: Open until the owner folds them: what's dated and what's next, and the task's emails (release 5.122, the email section
-#: plan's decision 455). The rest open on a click, remembered per task.
-OPEN_BY_DEFAULT = frozenset({"key_dates", "agenda", "subtasks", "emails"})
+#: The groups, in the page's order, with their titles. When and who went into the facts grid in release 5.113. Decisions
+#: (release 5.124, the cold-eyes plan's decision 477) come after Subtasks and before Email conversations.
+GROUPS = (("key_dates", "Key dates"), ("agenda", "Agenda"), ("subtasks", "Subtasks"), ("decisions", "Decisions"), ("emails", "Email conversations"),
+          ("links", "Links"), ("files", "Files"), ("details", "Details"))
+#: Open until the owner folds them: what's dated and what's next, what's been decided (release 5.124) and the task's
+#: emails (release 5.122, the email section plan's decision 455). The rest open on a click, remembered per task.
+OPEN_BY_DEFAULT = frozenset({"key_dates", "agenda", "subtasks", "decisions", "emails"})
 #: How far a section's chevron hangs into the margin, so its title starts on the page's left edge (decision 423).
 HANG = 22
 _TAGS = re.compile(r"<[^>]+>")
@@ -156,6 +157,10 @@ class TaskHeader(QWidget):
         self.status_name.setFont(tokens.ui_font(tokens.CAPTION, semibold=True))
         self.status_when = QLabel("", objectName="statusWhen")
         self.status_when.setFont(tokens.ui_font(tokens.CAPTION))
+        # "asked Mon" while an Ask for an update waits for a capture on the task (release 5.125, the cold-eyes plan's decision 485).
+        self.status_asked = QLabel("", objectName="statusWhen")
+        self.status_asked.setFont(tokens.ui_font(tokens.CAPTION))
+        self.status_asked.hide()
         self.status_fold = QToolButton(objectName="statusLog")
         self.status_fold.setIcon(icon("chevron-right"))
         self.status_fold.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
@@ -166,6 +171,7 @@ class TaskHeader(QWidget):
         self.status_fold.clicked.connect(lambda: self.set_log_open(not self.log_open, emit=True))
         row.addWidget(self.status_name)
         row.addWidget(self.status_when)
+        row.addWidget(self.status_asked)
         row.addStretch()
         row.addWidget(self.status_fold)
         self.status_body = fit_view(css, (0, 4, 0, 0))
@@ -200,6 +206,10 @@ class TaskHeader(QWidget):
         self.status_name.setText(parts["status_name"])
         self.status_when.setText(f"· {parts['status_when']}" if parts["status_when"] else "")
         self.status_when.setToolTip(f"The current status last changed {parts['status_age']}" if parts["status_age"] else "")
+        asked = parts.get("status_asked", "")
+        self.status_asked.setText(f"· {asked}")
+        self.status_asked.setToolTip(parts.get("status_asked_tip", ""))
+        self.status_asked.setVisible(bool(asked))
         self.status_body.setHtml(parts["status_body"])
         self.status_log.setHtml(parts["status_log"])
         self.status_fold.setText(parts["status_log_summary"])

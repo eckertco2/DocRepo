@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
     QPushButton,
 )
 
-from docrepo import db, edits, key_dates, later
+from docrepo import ask_update, db, edits, key_dates, later
 from docrepo.dates import long_date
 from docrepo.detail import esc
 from docrepo.model import Model
@@ -89,7 +89,8 @@ class TodayList:
                 # One line (decisions L1 and L3): the title, then its project and how long it's been carried, in quiet words.
                 since = f"since {since_text(a.added, today)}" if a.added[:10] < today.isoformat() else ""
                 reminder = "reminder" if a.added_by == edits.REMINDER else ""  # a reminder put it here (decision 415)
-                context = " · ".join(x for x in (project_text(m, t.id) if t else "", a.note if t else "", reminder, since) if x)
+                asked = ask_update.asked_text(m, t.id, today) if t else ""  # "asked Mon" (release 5.125, decision 485)
+                context = " · ".join(x for x in (project_text(m, t.id) if t else "", a.note if t else "", reminder, asked, since) if x)
                 icon, colour = state_icon(t.state) if t else ("note", "text2")
                 line = Line(t.title if t else a.note, icon=icon, icon_colour=colour, icon_tip=t.state if t else "Note", context=context)
                 tip = f"{full_path(m, t.id)}\n" if t else ""

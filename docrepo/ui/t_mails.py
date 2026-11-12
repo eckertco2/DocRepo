@@ -4,7 +4,10 @@
 A T-mail is an email DocRepo opens in Outlook from a task, for the owner to write and send:
 - **New T-mail**, on the task page's bar: a new email, empty (no subject, no To), tagged only by its conversation index;
 - **Reply all** to a captured email: on New T-mail's arrow, to the newest email filed to the task, on each email in Find
-  files, and beside each email on a capture's page.
+  files, and beside each email on a capture's page;
+- **Ask for an update** (release 5.125, the cold-eyes plan's decisions 481 to 487): on New T-mail's arrow and on a task
+  row's right-click menu in Waiting on others, a new email to the task's assignees and leads with its Subject and words
+  filled in above the owner's signature (``docrepo.ask_update``).
 
 Each is kept in ``t_mails`` with its conversation (``conversations.record_t_mail``), so the replies it gets fill the
 capture window's task picker with its task. DocRepo never sends one; the owner does, in Outlook.
@@ -14,9 +17,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QMenu, QWidget
 
-from docrepo import conversations, outlook
+from docrepo import ask_update, conversations, outlook
 from docrepo.captures import capture_folder
 from docrepo.ui.icons import icon
 
@@ -99,7 +103,7 @@ def latest_label(c: Capture, e: CaptureEmail) -> str:
 
 def latest_menu(browse: BrowseWindow, task_id: str, parent: QWidget | None) -> QMenu:
     """New T-mail's arrow (decision 36): Reply all to the newest email filed to the task, by when it was sent; greyed, saying
-    why, when the task has none."""
+    why, when the task has none. Then, since release 5.125, Ask for an update (the cold-eyes plan's decision 481)."""
     menu = QMenu(parent)
     menu.setToolTipsVisible(True)
     found = conversations.latest_email(browse.model(), task_id)
@@ -107,8 +111,62 @@ def latest_menu(browse: BrowseWindow, task_id: str, parent: QWidget | None) -> Q
         a = menu.addAction(icon("mail"), "Reply all to the latest email")
         a.setEnabled(False)
         a.setToolTip("No email is filed to this task yet")
-        return menu
-    c, e = found
-    a = menu.addAction(icon("mail"), latest_label(c, e), lambda: reply_all(browse, c.id, e.pos, task_id))
-    a.setToolTip(f"Reply all in Outlook, as a T-mail of this task. Its capture is {c.id}.")
+    else:
+        c, e = found
+        a = menu.addAction(icon("mail"), latest_label(c, e), lambda: reply_all(browse, c.id, e.pos, task_id))
+        a.setToolTip(f"Reply all in Outlook, as a T-mail of this task. Its capture is {c.id}.")
+    add_ask(browse, task_id, menu)
     return menu
+
+
+# ---- Ask for an update (release 5.125, the cold-eyes plan's decisions 481 to 487) ----
+def ask_tip(browse: BrowseWindow, task_id: str) -> str:
+    """The command's tooltip: who it would go to, then what it does."""
+    ask = ask_update.compose(browse.model(), task_id, browse.ctx.settings.me, browse.today())
+    return f"{ask_update.who_line(ask)} {ask_update.TIP}"
+
+
+def add_ask(browse: BrowseWindow, task_id: str, menu: QMenu) -> None:
+    """Ask for an update as a menu's line, with who it would go to in its tooltip: on New T-mail's arrow, and on a task
+    row's right-click menu in Waiting on others (decision 481). Not for a closed or discarded task."""
+    t = browse.model().tasks.get(task_id)
+    if t is None or t.discarded or t.state == "Closed":
+        return
+    menu.setToolTipsVisible(True)
+    a = menu.addAction(icon("mail"), ask_update.LABEL, lambda: ask_for_update(browse, task_id))
+    a.setToolTip(ask_tip(browse, task_id))
+
+
+def ask_for_update(browse: BrowseWindow, task_id: str, say: Say | None = None) -> int | None:
+    """Ask for an update (decisions 481 to 486): a new email in Outlook to the task's assignees and leads, with its Subject
+    and words filled in above the owner's signature, kept as a T-mail of kind ``ask`` so its reply files itself on the
+    task, and so its rows and status card say "asked Mon". Words Outlook wouldn't take go on the clipboard. Returns the
+    T-mail's id, or None when nothing was opened. Never sent."""
+    out = _say(browse, say)
+    m = browse.model()
+    if task_id not in m.tasks:
+        return None
+    title = m.tasks[task_id].title
+    ask = ask_update.compose(m, task_id, browse.ctx.settings.me, browse.today())
+    try:
+        asked = outlook.ask_t_mail(browse.ctx.now(), ask.to, ask.subject, ask.words)
+    except outlook.OutlookError as e:
+        out(f"{ask_update.LABEL}: {e}", True)
+        return None
+    kept = conversations.record_t_mail(browse.conn, task_id, ask_update.KIND, _stamp(browse), asked.opened.index, untagged=True)
+    browse.refresh()  # its rows and status card say "asked" now
+    lines, trouble = [f"Opened {ask_update.LABEL} on {title} in Outlook. {ask_update.who_line(ask)}"], bool(ask.missing)
+    if ask.to and not asked.to_filled:
+        lines.append("Outlook didn't take To, so fill it in there.")
+        trouble = True
+    if not asked.words:
+        QGuiApplication.clipboard().setText(ask.words)
+        lines.append("Outlook didn't take the words, so they're on the clipboard: paste them above your signature.")
+        trouble = True
+    if conversations.key(asked.opened.index):
+        lines.append(f"When you capture the reply, it'll go to {title}.")
+    else:
+        lines.append(f"Outlook gave it no conversation index, so the reply won't find {title} by itself. Settings → Troubleshooting report shows why.")
+        trouble = True
+    out(" ".join(lines), trouble)
+    return kept

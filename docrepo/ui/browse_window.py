@@ -237,7 +237,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         bl.addWidget(self.views_button)
         self.search_box = QLineEdit()
         self.search_box.setPlaceholderText("Search everything: tasks, captures, documents and people" + ("   (Ctrl+Shift+F)" if LOOK.classic else ""))
-        tip(self.search_box, "Search everything. Narrow it as File search does: type:pdf, type:notes, from:name, after:1 sep, is:pinned, tag:V-110, or a #task first", "Ctrl+Shift+F")
+        tip(self.search_box, "Search everything. Narrow it as File search does: type:pdf, type:notes, type:decision, from:name, after:1 sep, is:pinned, tag:V-110, or a #task first", "Ctrl+Shift+F")
         if not LOOK.classic:
             self.search_box.addAction(icon("search"), QLineEdit.ActionPosition.LeadingPosition)
             self.search_box.setMaximumWidth(560)
@@ -341,8 +341,9 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         # right-click menu has it as a submenu.
         self.tree.state_clicked = self.popup_state_menu
         self.tree.state_menu = lambda task_id, parent: self.state_menu_for(task_id, parent)
-        # One Edit and one Add to (release 5.98, decision 392): a task row's menu has them too, from the task page's own lists.
-        self.tree.task_menus = lambda task_id, menu: task_menus.add_row_menus(self, task_id, menu, anchor=self.tree)
+        # One Edit and one Add to (release 5.98, decision 392): a task row's menu has them too, from the task page's own lists;
+        # in Waiting on others, Ask for an update first (release 5.125, the cold-eyes plan's decision 481).
+        self.tree.task_menus = lambda task_id, menu: task_menus.add_row_menus(self, task_id, menu, anchor=self.tree, ask=self.view == "waiting")
         lp.addWidget(self.tree, 1)
         self.middle.addWidget(list_page)
         if LOOK.classic:  # the new look has it on the Timeline's page (decision 229)
