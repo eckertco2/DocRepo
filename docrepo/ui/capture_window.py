@@ -796,23 +796,30 @@ class CaptureWindow(QWidget):
         self.folded = Help()
         self.folded.hide()
         b.addWidget(self.folded)
+        # Files: a row for each, once there are any (Attach, above, adds them). An area of its own, apart from what Expand
+        # folds away, as meeting notes keep it in view (release 5.135, decision 547).
+        self.files_area = QWidget()
+        fa = QVBoxLayout(self.files_area)
+        fa.setContentsMargins(0, 0, 0, 0)
+        fa.setSpacing(12)
+        self.files_area.hide()
+        b.addWidget(self.files_area)
+        self.files_box = QVBoxLayout()
+        self.files_box.setSpacing(8)
+        self.files_label = field("Files", None, "files", "a description for each")
+        fa.addWidget(self.files_label)
+        fa.addLayout(self.files_box)
+        self.same_all = QCheckBox("Use the first file's description and choices for every file")
+        self.same_all.toggled.connect(self._apply_same_all)
+        fa.addWidget(self.same_all)
+        self.copy_hint = Help()
+        fa.addWidget(self.copy_hint)
         self.lower = QWidget()
         self.lower_layout = QVBoxLayout(self.lower)
         self.lower_layout.setContentsMargins(0, 0, 0, 0)
         self.lower_layout.setSpacing(12)
         b.addWidget(self.lower)
         b = self.lower_layout
-        # Files: a row for each, once there are any (Attach, above, adds them)
-        self.files_box = QVBoxLayout()
-        self.files_box.setSpacing(8)
-        self.files_label = field("Files", None, "files", "a description for each")
-        b.addWidget(self.files_label)
-        b.addLayout(self.files_box)
-        self.same_all = QCheckBox("Use the first file's description and choices for every file")
-        self.same_all.toggled.connect(self._apply_same_all)
-        b.addWidget(self.same_all)
-        self.copy_hint = Help()
-        b.addWidget(self.copy_hint)
         # Copy prompt and the summary: the summary type is picked in More, beside Save
         self.prompt_type = QComboBox()
         self.prompt_type.setAccessibleName("Summary type")
@@ -1387,7 +1394,8 @@ class CaptureWindow(QWidget):
 
     def toggle_expand(self) -> None:
         """Expand (F11, mods log round 2, M0046, M0048 phase 1): the content text fills the window, and the files, Copy
-        prompt and the New task and Update fields fold away until it's turned off."""
+        prompt and the New task and Update fields fold away until it's turned off. Meeting notes, which expand, keep their
+        files in view under the notes (release 5.135, decision 547)."""
         if self.pages.currentIndex() == 1:
             return
         self._set_expanded(not self.expanded)
@@ -1406,7 +1414,8 @@ class CaptureWindow(QWidget):
     # ---- meeting notes (release 5.8) ----
     def toggle_meeting(self, focus: bool = True) -> None:
         """Meeting notes (Alt+M): Expand, plus the meeting's name and its agenda. The task picked at the top decides the
-        meeting (``save.meeting_case``)."""
+        meeting (``save.meeting_case``). Files, folders, links, emails and pasted pictures are added as in any capture, and
+        their rows stay in view under the notes (release 5.135): Save keeps them on the notes, on the meeting."""
         if self.pages.currentIndex() == 1:
             return
         if self.from_capture:
@@ -2454,16 +2463,22 @@ class CaptureWindow(QWidget):
         self.agenda.setEnabled(shown)
         self.agenda.setToolTip(f"Put {what} on a meeting's, a task's or a person's agenda (Alt+A)" if shown else
                                "With a task picked, check New task or Update to put something on an agenda")
+        # Meeting notes keep their files in view while expanded (release 5.135, decision 547): they're the notes' own.
+        files_folded = self.expanded and not self.meeting_on
         if self.expanded:
-            folded = [f"{len(self.files)} file{'s' if len(self.files) != 1 else ''}"] * bool(self.files) + ["Copy prompt and the summary"]
+            folded = [f"{len(self.files)} file{'s' if len(self.files) != 1 else ''}"] * (bool(self.files) and files_folded) + ["Copy prompt and the summary"]
             folded += ["the New task fields"] * new + ["the Update fields"] * (upd and bool(t))
-            self.folded.setText(f"While expanded, {and_list(folded)} {'are' if len(folded) > 1 else 'is'} folded away. Drop files on the "
-                                "window as usual. F11 brings them back.")
+            self.folded.setText(f"While expanded, {and_list(folded)} {'are' if len(folded) > 1 else 'is'} folded away. "
+                                + ("Files you add are listed under the notes. " if self.meeting_on else "Drop files on the window as usual. ")
+                                + "F11 brings them back.")
         self.folded.setVisible(self.expanded)
+        self.files_area.setVisible(bool(self.files) and not files_folded)
         self.files_label.setVisible(bool(self.files))
         self.same_all.setVisible(sum(e.desc is not None for e in self.files) > 1)
-        self._apply_same_all()  # the placeholders name the task
-        where ="the new task's Files folder" if new else f"Tasks\\{t.id}\\Files\\" if t else "the task's Files folder once the capture is filed"
+        self._apply_same_all()  # the placeholders name the task, or the meeting
+        case = meeting_case(m, self.task) if self.meeting_on else ""
+        where = ("the meeting's Files folder, once Save makes the meeting" if case in ("regular", "new") else
+                 "the new task's Files folder" if new else f"Tasks\\{t.id}\\Files\\" if t else "the task's Files folder once the capture is filed")
         has_files = any(e.copy is not None and not e.copy.isHidden() for e in self.files)  # rows that offer Save a copy
         self.copy_hint.setText(f"Save a copy puts the file in {where}, named with today's date. Extract information marks it for the later processing stage."
                                if has_files else "")
@@ -2495,7 +2510,8 @@ class CaptureWindow(QWidget):
         self.content_hint.setText(
             f"The content text of {self.from_capture}. It stays in that capture." if self.from_capture else
             "Each line with an operator becomes an item when you save: @Tom a task for Tom, #Rigging plan a note on it, **closed, an update, "
-            "**decision, a decision. Type @ or # for a list." if self.meeting_on else
+            "**decision, a decision. Type @ or # for a list. Drop files or Outlook emails anywhere on this window: they go with the notes."
+            if self.meeting_on else
             "Type or paste. Drop files or Outlook emails anywhere on this window. Start with “Closed.” or another state for a quick update. "
             "@, # and ** make items (Items, on the right).")
         self._fit_timer.start()
@@ -2521,9 +2537,11 @@ class CaptureWindow(QWidget):
             case, typed = meeting_case(m, self.task), self.meet_name.text().strip()
             meeting = f"<b>{esc(typed)}</b>" if typed else "the meeting (name it first)"
             done = sum(self._discussed(a) for a in m.open_items_for(self.task)) if case != "new" else 0
-            return (f"Save keeps these notes on {name}." if case == "oneoff" else
+            held = held_text([e.row for e in self.files])  # the notes' files go with them, on the meeting (release 5.135)
+            with_files = f", with {held}" if held else ""
+            return (f"Save keeps these notes on {name}{with_files}." if case == "oneoff" else
                     f"Save makes {meeting}, a meeting {'under ' + name if t else 'at the top level'}, In progress until you close it, and keeps "
-                    "these notes on it.") + items_text + (f" {done} agenda item{'s close' if done > 1 else ' closes'} as Discussed." if done else "")
+                    f"these notes on it{with_files}.") + items_text + (f" {done} agenda item{'s close' if done > 1 else ' closes'} as Discussed." if done else "")
         split = self.split()
         if split:
             said = []
@@ -2637,10 +2655,11 @@ class CaptureWindow(QWidget):
     def _sync_paths(self) -> None:
         """A line of the content text that's an existing file's path, or a link, adds a row for it; deleting the line
         removes it. A path may have the quotes File Explorer's Copy as path puts round it (release 5.26.1). A path line
-        that isn't a file DocRepo can find says so once the cursor leaves it, rather than staying text without a word."""
+        that isn't a file DocRepo can find says so once the cursor leaves it, rather than staying text without a word. Only
+        a row that came from a line goes with its line: a pasted picture has none, and stays (release 5.135, decision 548)."""
         lines = [line.strip() for line in self.content.toPlainText().split("\n") if PATH_LINE.match(typed_path(line)) or link_of_line(line)]
         keep = {line.lower() for line in lines}
-        for entry in [e for e in self.files if e.src == "pasted" and (e.line or "").lower() not in keep]:
+        for entry in [e for e in self.files if e.src == "pasted" and e.line and e.line.lower() not in keep]:
             self._remove_file(entry, from_content=False)
         self._missing_paths = {line: told for line, told in self._missing_paths.items() if line in lines}
         for line in lines:
@@ -3008,8 +3027,11 @@ class CaptureWindow(QWidget):
                                       else f"{e.what} Left empty: {self._default_desc(e.row)}")
 
     def _default_desc(self, row: FileRow) -> str:
-        """The description Save gives a row left empty: the new task's title, or the picked task's."""
-        if "new_task" in self.types:
+        """The description Save gives a row left empty: the meeting's name in meeting notes (release 5.135), else the new
+        task's title, or the picked task's."""
+        if self.meeting_on:
+            title = self.meet_name.text().strip() or "(the meeting's name)"
+        elif "new_task" in self.types:
             title = self.title.text().strip() or "(the new task's title)"
         else:
             t = self.ctx.model().tasks.get(self.task) if self.task else None
