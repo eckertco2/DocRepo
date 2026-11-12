@@ -173,7 +173,7 @@ def test_document_person_and_label_pages(pages):
     person = text(pages.person_page("P003"))
     assert "Tom Becker" in person and "Aliases Tom, Thomas" in person and "h this week" in person and "Agenda: 1 open item" in person
     me = text(pages.person_page("P001"))
-    assert me.startswith("Person P001 Me me")
+    assert me.startswith("Person P001 Quick summary Me me")  # release 5.131: the quick summary's link beside the crumbs
     label = text(pages.label_page("Safety"))
     assert "Keywords" in label and "Rails need to be painted red inherited" in label
 
@@ -218,7 +218,7 @@ def test_release_59_fields_on_the_pages(sample_root):
     assert "In progress Plant event" in task and "Work order # 48213" in task
     parent = text(pages.label_page("Production line"))
     assert "Labels under it Line 1" in parent and "a heading: tasks get one of its labels, not it" in parent
-    assert text(pages.label_page("Line 1")).startswith("Label › Production line Line 1 Under Production line")
+    assert text(pages.label_page("Line 1")).startswith("Label › Production line Quick summary Line 1 Under Production line")
 
 
 def test_the_page_in_parts(pages):

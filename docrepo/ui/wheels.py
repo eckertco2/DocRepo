@@ -51,6 +51,7 @@ class Wheels(QObject):
         self.started = False  # until the app's tray is showing, a notification would go nowhere
         self._task_search = None
         self._file_search = None
+        self._quick_summary = None
         self._reload_timer = QTimer(self, singleShot=True, interval=RELOAD_WAIT_MS, timeout=self._file_changed)
         self._watcher = QFileSystemWatcher(self)
         self._watcher.fileChanged.connect(lambda _p: self._reload_timer.start())
@@ -247,6 +248,14 @@ class Wheels(QObject):
         if self._file_search is None:
             self._file_search = FileSearch(self.app)
         self._file_search.open_it(self._screen_for(self.snapshot.hwnd if self.snapshot else 0))
+
+    def quick_summary(self, key: str | None = None) -> None:
+        """The quick summary's window (release 5.131), on the monitor you were on: with its box, or on ``key``'s summary."""
+        from docrepo.ui.quick_summary import QuickSummary
+
+        if self._quick_summary is None:
+            self._quick_summary = QuickSummary(self.app)
+        self._quick_summary.open_it(self._screen_for(self.snapshot.hwnd if self.snapshot else 0), key)
 
     def today_panel(self, do: str = "toggle") -> None:
         self.app.today_panel_action(do)

@@ -149,6 +149,7 @@ class CaptureApp(QObject):
         self.browse = BrowseWindow(ctx, self.window)
         self.wheels = Wheels(self)  # the navigation wheels (release 5.41)
         ctx.wheel_palette = self.wheels.palette_commands
+        ctx.open_summary = self.wheels.quick_summary  # the quick summary, from a page or Ctrl+K (release 5.131)
         self.panel: TodayPanel | None = None  # the Today side panel, made the first time it opens (release 5.43)
         menu = QMenu()
         menu.addAction("New capture", lambda: self.window.show_capture())

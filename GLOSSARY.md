@@ -73,6 +73,11 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Agenda item**: a temporary link that puts a task, or a note with no task, on the agenda of a meeting, another task or a person. It's added with the capture window's Add to agenda option and stays open until it's closed by hand.
 - **Agenda target**: the meeting, task or person whose agenda an item is on.
 - **Agenda**: the open agenda items of one agenda target.
+- **Quick summary**: one person's, agenda's, label's or tagged label's briefing in a window of its own (release 5.131), from the Execution wheel's S: its agenda first, the tasks that need a word, the newest email conversations and what's changed. Its box picks the subject, or several **together** (Ctrl+Enter adds one): either of several of one kind, and every kind chosen.
+- **Attention order**: how the quick summary lists tasks: late first, then urgent or Critical, then by date, no date last.
+- **Quiet**: said of an open task nothing has touched (no capture, status change or edit of its notes) for Settings' `quiet_days`, 21 by default. It's grey, never red: stale isn't late.
+- **Last talked**: when an item on a person's agenda was last marked Discussed; for a meeting, last discussed.
+- **Answer**: what was said about an agenda item marked Discussed in the quick summary, kept as a note on its task, with the question before it.
 - **Today**: the built-in agenda target that is the owner's to-do list for the day. Its items carry over until they're marked Done.
 - **Quick task**: a task made from one line and put on Today, two ways (release 5.99): Today's box (the view's and the side panel's), and Ctrl+Shift+D, whose command the wheels' slots run. Make it a task turns a note on Today into one. It's an ordinary task. A New task with Today ticked in the capture window isn't one: it's an ordinary new task on Today. D on a row is **Add to Today**, which puts the task on Today as it is.
 - **Quick tasks**: the built-in top-level task that quick tasks wait under until **Put under…** on the row's menu (release 5.99), or Edit task, puts them under their real task. DocRepo makes it the first time it's needed.

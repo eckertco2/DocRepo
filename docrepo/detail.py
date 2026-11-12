@@ -1474,7 +1474,8 @@ class Pages:
                 ("Leads", ", ".join(self.task_link(x) for x in leads) or "None"), ("Assigned", ", ".join(self.task_link(x) for x in assigned) or "None")]
         added = f'<p class="note">{esc(p.added_note)}</p>' if p.added_note else ""
         tags = f'<p class="tags">{chips.strip()}</p>' if chips else ""  # under the name, at the chips' own size
-        return f'<p class="crumbs">Person {p.id}</p><h2>{esc(p.name)}</h2>{tags}{added}{fields_table(rows)}{self.agenda_block(person_id)}'
+        summary = link(f"summary:person:{p.id}", "Quick summary", "Their agenda, the tasks you share and what's changed (release 5.131)")
+        return f'<p class="crumbs">Person {p.id} &nbsp;{summary}</p><h2>{esc(p.name)}</h2>{tags}{added}{fields_table(rows)}{self.agenda_block(person_id)}'
 
     def label_page(self, name: str) -> str:
         """A label's page: its tasks, or its sublabels' tasks under each sublabel."""
@@ -1487,14 +1488,19 @@ class Pages:
             for s in subs:
                 tasks = label_tasks(self.m, s)
                 rows.append((s, "<br>".join(self.task_link(t) + (' <span class="sub">inherited</span>' if inh else "") for t, inh in tasks) or none_text()))
-            return (f'<p class="crumbs">Label</p><h2>{esc(label.name)}</h2>{fields_table(rows)}'
+            return (f'<p class="crumbs">Label &nbsp;{self.summary_link(name)}</p><h2>{esc(label.name)}</h2>{fields_table(rows)}'
                     '<p class="note">A label with labels under it is a heading: tasks get one of its labels, not it.</p>')
         tasks = label_tasks(self.m, name)
         parent = self.m.parent_label(name)
         rows = [*([("Under", link(label_href(parent), parent))] if parent else []),
                 ("Keywords", esc(", ".join(label.keywords)) or none_text()), ("Status", esc(label.status)),
                 ("Tasks", "<br>".join(self.task_link(t) + (' <span class="sub">inherited</span>' if inh else "") for t, inh in tasks) or none_text())]
-        return f'<p class="crumbs">{"Label › " + esc(parent) if parent else "Label"}</p><h2>{esc(label.name)}</h2>{fields_table(rows)}'
+        return (f'<p class="crumbs">{"Label › " + esc(parent) if parent else "Label"} &nbsp;{self.summary_link(name)}</p>'
+                f'<h2>{esc(label.name)}</h2>{fields_table(rows)}')
+
+    def summary_link(self, label_name: str) -> str:
+        """A label's Quick summary (release 5.131): where its open tasks stand, what needs attention and what's changed."""
+        return link("summary:label:" + quote(label_name, safe=""), "Quick summary", "Where its open tasks stand, what needs attention, what's changed")
 
     # ---- capacity ----
     def capacity_detail(self, rows: list[CapacityRow], weeks: list[date], cell: tuple[str, int] | None, unestimated: list[str],

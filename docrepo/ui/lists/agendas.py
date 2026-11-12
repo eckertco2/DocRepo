@@ -55,6 +55,8 @@ class AgendaList:
         self._filter_widget(QLabel("Agenda for"))
         self._filter_widget(pick)
         self._button("Copy as Markdown", lambda: self.copy_agenda(target))
+        # Release 5.131: the agenda's quick summary, its items with their tasks' dates and what's changed.
+        self._button("Quick summary", lambda: self.ctx.open_summary(f"{'person' if is_person(target) else 'agenda'}:{target}"))
         meeting = m.tasks.get(target)
         if meeting and meeting.meeting and is_open(meeting):  # release 5.8
             self._button("Meeting notes", lambda: self.open_capture(task=target, meeting=True))

@@ -18,7 +18,7 @@ from __future__ import annotations
 from urllib.parse import unquote
 
 from PySide6.QtCore import QPointF, QRectF, Qt, QUrl, Signal
-from PySide6.QtGui import QColor, QFont, QImage, QPainter, QTextDocument
+from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPainterPath, QPen, QTextDocument
 from PySide6.QtWidgets import QTextBrowser
 
 from docrepo.detail import PROGRESS_WIDTH, SIDE_BY_SIDE, WIDE_PAGE
@@ -124,9 +124,123 @@ def progress(done: int, total: int, width: int, scale: float) -> QImage:
     return image
 
 
+#: The quick summary's pictures (release 5.131): a priority's colour, the trend's size and the header's face.
+BUCKET_COLOURS = {"critical": "pri_critical", "high": "pri_high", "medium": "pri_medium", "parking": "pri_parking", "none": "scroll"}
+SPARK_W, SPARK_H, STACK_H, SWATCH, FACE = 120, 26, 12, 10, 40
+FACE_ICONS = {"label": "labels", "agenda": "agenda", "tag": "tagged", "many": "people"}
+
+
+def stack(counts: list[int], width: int, scale: float) -> QImage:
+    """A label's bar on Where they stand (decision 532): its segments by priority, Critical first, 2 px apart, the far end
+    rounded."""
+    image, p = _canvas(width, STACK_H, scale)
+    p.setPen(Qt.PenStyle.NoPen)
+    total = sum(counts) or 1
+    gaps = 2 * max(0, sum(1 for n in counts if n) - 1)
+    x = 0.0
+    shown = [(b, n) for b, n in zip(BUCKET_COLOURS, counts, strict=False) if n]
+    for i, (bucket, n) in enumerate(shown):
+        w = (width - gaps) * n / total
+        p.setBrush(_colour(BUCKET_COLOURS[bucket]))
+        if i == len(shown) - 1:
+            p.drawRoundedRect(QRectF(x, 0, w, STACK_H), 3, 3)
+            p.drawRect(QRectF(x, 0, min(w, 4), STACK_H))  # only the far end is rounded
+        else:
+            p.drawRect(QRectF(x, 0, w, STACK_H))
+        x += w + 2
+    p.end()
+    return image
+
+
+def spark(values: list[int], scale: float) -> QImage:
+    """The open count's last weeks (decision 532): a line in the accent over a light fill, the last point marked."""
+    image, p = _canvas(SPARK_W, SPARK_H, scale)
+    if len(values) >= 2:
+        lo, hi = min(values) - 1, max(values) + 1
+        pts = [QPointF(2 + i * (SPARK_W - 6) / (len(values) - 1), 2 + (SPARK_H - 4) * (1 - (v - lo) / (hi - lo))) for i, v in enumerate(values)]
+        area = QPainterPath(QPointF(pts[0].x(), SPARK_H))
+        for pt in pts:
+            area.lineTo(pt)
+        area.lineTo(QPointF(pts[-1].x(), SPARK_H))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(_colour("info_bg"))
+        p.drawPath(area)
+        line = QPainterPath(pts[0])
+        for pt in pts[1:]:
+            line.lineTo(pt)
+        p.setPen(QPen(_colour("accent"), 2))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawPath(line)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(_colour("accent"))
+        p.drawEllipse(pts[-1], 3, 3)
+    p.end()
+    return image
+
+
+def swatch(bucket: str, scale: float) -> QImage:
+    image, p = _canvas(SWATCH, SWATCH, scale)
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(_colour(BUCKET_COLOURS[bucket]))
+    p.drawRoundedRect(QRectF(0, 0, SWATCH, SWATCH), 2, 2)
+    p.end()
+    return image
+
+
+def face(key: str, scale: float) -> QImage:
+    """The quick summary's header picture: a person's initials in a circle on the accent's tint, or a label's or an
+    agenda's icon on a grey rounded square."""
+    image, p = _canvas(FACE, FACE, scale)
+    p.setPen(Qt.PenStyle.NoPen)
+    if key in FACE_ICONS:  # a label's, an agenda's, a tag's or several's mark (release 5.131)
+        p.setBrush(_colour("base"))
+        p.drawRoundedRect(QRectF(0, 0, FACE, FACE), 9, 9)
+        p.drawPixmap(QPointF(10, 10), tinted(FACE_ICONS[key], tokens.LIGHT["text2"], 20, scale))
+    else:
+        p.setBrush(_colour("info_bg"))
+        p.drawEllipse(QRectF(0, 0, FACE, FACE))
+        f = QFont("Segoe UI", 12)
+        f.setWeight(QFont.Weight.DemiBold)
+        p.setFont(f)
+        p.setPen(_colour("accent"))
+        p.drawText(QRectF(0, 0, FACE, FACE), Qt.AlignmentFlag.AlignCenter, key[:3])
+    p.end()
+    return image
+
+
+def edge(bucket: str, scale: float) -> QImage:
+    """A row's priority at its left edge (release 5.81's mark), 3 by 18, on the quick summary's rows."""
+    image, p = _canvas(3, 18, scale)
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(_colour(BUCKET_COLOURS[bucket]))
+    p.drawRoundedRect(QRectF(0, 0, 3, 18), 1.5, 1.5)
+    p.end()
+    return image
+
+
+def _ints(text: str) -> list[int] | None:
+    try:
+        return [int(x) for x in text.split(",") if x != ""]
+    except ValueError:
+        return None
+
+
 def picture(url: QUrl, scale: float) -> QImage | None:
     """The picture a page names, or None for any other address."""
     kind, key = url.scheme(), unquote(url.path())
+    if kind == "stack":  # "stack:0,2,2,0,0:300", the quick summary's bars (release 5.131)
+        counts, _, width = key.partition(":")
+        values = _ints(counts)
+        return stack(values, max(4, min(int(width), 800)), scale) if values and width.isdigit() and len(values) == len(BUCKET_COLOURS) else None
+    if kind == "spark":
+        values = _ints(key)
+        return spark(values, scale) if values else None
+    if kind == "swatch" and key in BUCKET_COLOURS:
+        return swatch(key, scale)
+    if kind == "face" and key:
+        return face(key, scale)
+    if kind == "edge" and key in BUCKET_COLOURS and key != "none":
+        return edge(key, scale)
     if kind == "avatar" and key:
         return avatar(key, scale)
     if kind == "mark" and key in MARK_COLOURS:

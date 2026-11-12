@@ -53,7 +53,8 @@ def test_the_default_file_is_the_decided_wheels():
         "N": "browse.view", "E": "search.tasks", "S": "search.files", "W": "search.everything"}
     execution = config.wheel("execution").slots
     assert execution["N"].args == {"view": "today"} and execution["E"].command == "today.panel"
-    assert execution["S"].held and not execution["S"].command and execution["W"].command == "find_files.current"
+    # Release 5.131 (the quick summary plan's decision 517): S is the quick summary, no longer held for the agent window.
+    assert execution["S"].command == "summary.open" and not execution["S"].held and execution["W"].command == "find_files.current"
     assert not any(w.eight_way for w in config.wheels)
 
 
@@ -202,6 +203,35 @@ def test_a_wait_you_set_yourself_stays(data_root, fs):
         assert path.read_bytes().decode("utf-8") == mine
     upgraded = wc.draw_at_once(OLD_TIMING).replace('"draw_ms": 0', '"draw_ms": 333')  # back to 333 by hand, after the change
     assert wc.draw_at_once(upgraded) == upgraded
+
+
+OLD_S = ("        // The agent window's place, for when it comes.\r\n"
+         '        "S": { "label": "Agent window", "held": true },\r\n')
+NEW_S = ("        // summary.open: the quick summary, a person's, an agenda's or a label's, from one box.\n"
+         '        "S": { "label": "Quick summary", "icon": "agenda", "command": "summary.open" },\n')
+
+
+def test_a_file_from_before_gets_the_quick_summary_on_s_and_keeps_the_rest(data_root, fs):
+    """Release 5.131 (decision 517): the default's held S becomes the quick summary, in a file written before it."""
+    wc.write_defaults(fs, data_root, SPECS, ICONS)
+    path = data_root / wc.CONFIG_FILE
+    assert NEW_S in wc.DEFAULT_TEXT
+    text = wc.DEFAULT_TEXT.replace(NEW_S, OLD_S)
+    path.write_bytes(("// mine\r\n" + text).encode("utf-8"))
+    wc.write_defaults(fs, data_root, SPECS, ICONS)
+    now = path.read_bytes().decode("utf-8")
+    assert now.startswith("// mine\r\n") and "Agent window" not in now and '"command": "summary.open" },\r\n' in now
+    assert wc.load(data_root, SPECS, ICONS).wheel("execution").slots["S"].command == "summary.open"
+
+
+def test_an_s_slot_you_changed_stays(data_root, fs):
+    wc.write_defaults(fs, data_root, SPECS, ICONS)
+    path = data_root / wc.CONFIG_FILE
+    for mine in (OLD_S.replace("Agent window", "My agent"), OLD_S.replace('"held": true', '"held": true, "icon": "sun"')):
+        path.write_bytes(mine.encode("utf-8"))
+        wc.write_defaults(fs, data_root, SPECS, ICONS)
+        assert path.read_bytes().decode("utf-8") == mine
+    assert wc.summary_slot(wc.summary_slot(OLD_S)) == wc.summary_slot(OLD_S)
 
 
 def test_a_config_with_a_byte_order_mark_loads(data_root, fs):

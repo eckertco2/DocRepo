@@ -26,7 +26,7 @@ from docrepo.dates import long_date, short, stamp, workday_numbers
 from docrepo.db import next_id, transaction
 from docrepo.extract import extract_text, file_info
 from docrepo.links import FOLDER_TEXT, NO_TEXT, is_folder, is_link, keeps_no_text
-from docrepo.model import TODAY, Model
+from docrepo.model import TODAY, AgendaItem, Model, is_person
 from docrepo.pages import pages_touched, write_pages
 from docrepo.parse import ParseLabel, ParsePerson, Who, parse_capture
 from docrepo.safe_fs import SafeFS
@@ -942,6 +942,30 @@ def note_to_task(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
         result.problems.append(f"The generated pages weren't all updated ({type(e).__name__}).")
     result.message += " It's on Today in the note's place."
     return result
+
+
+def answer_text(model: Model, item: AgendaItem, answer: str) -> str:
+    """An answer's words (release 5.131, decision 526): who or where it was asked, the question, and the answer, on one line:
+    'Mike Ortiz, on "Is the spare seal on site?": It is, fitting Friday.'"""
+    where = model.target_name(item.target)
+    question = " ".join((item.note or (model.task(item.subject).title if item.subject else "")).split())
+    said = " ".join(answer.split())
+    return f'{where}, on "{question}": {said}' if question else f"{where}: {said}"
+
+
+def save_answer(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, item_id: int, answer: str, at: datetime) -> SaveResult:
+    """What was said about a discussed agenda item, from the quick summary (release 5.131, decision 526), kept as a note: on
+    the item's task, so it lands on its notes page; for a note on a meeting's agenda, on the meeting; for a note on a person's
+    agenda, an unfiled capture. It's saved as the capture window saves a note, so its words may make items as any note's do."""
+    model = Model(conn)
+    item = next((a for a in model.agenda if a.id == item_id), None)
+    if item is None:
+        raise SaveError("That agenda item is gone.", "content")
+    if not answer.strip():
+        raise SaveError("Type the answer first.", "content")
+    task = item.subject or (None if is_person(item.target) or item.target == TODAY else item.target)
+    draft = CaptureDraft(content=answer_text(model, item, answer), task=task, types={"note"})
+    return save_capture(conn, data_root, fs, settings, draft, at)
 
 
 def email_layer0_line(email: EmailItem, rows: list[FileRow]) -> str:

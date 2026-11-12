@@ -361,6 +361,37 @@ def reopen_agenda_item(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, it
     return out
 
 
+#: Who adds and closes agenda items from the quick summary (release 5.131, decisions 526 and 527), in the agenda and status log.
+SUMMARY = "Quick summary"
+
+
+def add_agenda_item(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, target: str, subject: str | None, note: str, at: datetime) -> Outcome:
+    """The quick summary's add box (release 5.131, decision 527): a note, or a task with the note as the item's words, on a
+    person's or a task's agenda. A task already open on that agenda isn't put there twice."""
+    m = Model(conn)
+    words = " ".join(note.split())
+    if subject and any(a.subject == subject for a in m.open_items_for(target)):
+        return Outcome(f"{m.task(subject).title} is on that agenda already.")
+    agenda.add_item(conn, subject=subject, target=target, note=words, added=stamp(at), added_by=SUMMARY)
+    where = f"{m.person_name(target)}'s agenda" if is_person(target) else f"the agenda of {m.target_name(target)}"
+    out = Outcome(f"Added to {where}" + (f", on {m.task(subject).title}." if subject else " as a note."))
+    write_touched_pages(conn, data_root, fs, at, out.problems, [x for x in (subject, None if is_person(target) else target) if x], m)
+    log.info("quick summary: agenda item on %s", target)
+    return out
+
+
+def discuss_agenda_item(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, item_id: int, at: datetime) -> Outcome:
+    """An agenda item ticked in the quick summary (release 5.131, decision 526): closed as Discussed, by the quick summary.
+    Its task stays as it is; ``reopen_agenda_item`` is its Undo."""
+    before = Model(conn)
+    agenda.close_item(conn, item_id, how="Discussed", closed=stamp(at), closed_by=SUMMARY)
+    a = next(x for x in before.agenda if x.id == item_id)
+    out = Outcome("Discussed.")
+    write_touched_pages(conn, data_root, fs, at, out.problems, [x for x in (a.subject, None if is_person(a.target) else a.target) if x], before)
+    log.info("quick summary: agenda item %d discussed", item_id)
+    return out
+
+
 def add_to_today(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, subject: str | None, note: str, at: datetime) -> Outcome:
     """Put a task, or a note, on Today (mods log round 1, M0016). A task already there stays as it is."""
     m = Model(conn)
