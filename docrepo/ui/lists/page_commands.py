@@ -193,6 +193,8 @@ class PageCommands:
             self.templates.timing(int(rest))
         elif kind == "agenda":
             self.show_agenda(rest)
+        elif kind == "summary":  # a person's, a label's or an agenda's quick summary (release 5.131)
+            self.ctx.open_summary(unquote(rest))
         elif kind == "show":
             self.reveal_key(tuple(rest.split(":", 1)))
         elif kind == "copylink":

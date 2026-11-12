@@ -818,6 +818,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         out += [Command("", "New capture", lambda: self.open_capture(), self.ctx.settings.hotkey),
                 Command("", "Import a tree file", self.tree_files.import_tree),
                 Command("", "Search everything", self.search_box.setFocus, "Ctrl+Shift+F"),
+                Command("", "Quick summary: a person, an agenda or a label", lambda: self.ctx.open_summary(None)),
                 Command("", "Find in this view", self.open_find, "Ctrl+F"),
                 Command("", "Show or hide the views", lambda: self.show_views_pane(not self.views_button.isChecked()), "Ctrl+B"),
                 Command("", "Read docs.db again", self.refresh, "F5"),

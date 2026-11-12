@@ -416,8 +416,8 @@ DEFAULT_TEXT = """\
         "N": { "label": "Today", "icon": "sun", "command": "browse.view", "args": { "view": "today" } },
         // today.panel: the Today side panel. "do" is toggle, open or close.
         "E": { "label": "Today panel", "icon": "sidebar", "command": "today.panel" },
-        // The agent window's place, for when it comes.
-        "S": { "label": "Agent window", "held": true },
+        // summary.open: the quick summary, a person's, an agenda's or a label's, from one box.
+        "S": { "label": "Quick summary", "icon": "agenda", "command": "summary.open" },
         // find_files.current: Find files for the task selected in the browse tool, or the last one opened.
         "W": { "label": "Find files", "icon": "open", "command": "find_files.current" }
       }
@@ -449,6 +449,21 @@ def draw_at_once(text: str) -> str:
     return text
 
 
+#: What releases 5.41 to 5.130 wrote on the Execution wheel's S: the agent window's place, held (decisions 178 and 212).
+_OLD_S_COMMENT = "// The agent window's place, for when it comes."
+_OLD_S_SLOT = '"S": { "label": "Agent window", "held": true }'
+_S_COMMENT = "// summary.open: the quick summary, a person's, an agenda's or a label's, from one box."
+_S_SLOT = '"S": { "label": "Quick summary", "icon": "agenda", "command": "summary.open" }'
+
+
+def summary_slot(text: str) -> str:
+    """Release 5.131 (the quick summary plan's decision 517): a file whose Execution wheel still holds S for the agent window,
+    as the default wrote it, gets the quick summary there. A slot you've changed stays yours, and so does every other line."""
+    if _OLD_S_SLOT not in text or text.count(_OLD_S_SLOT) != 1:
+        return text
+    return text.replace(_OLD_S_COMMENT, _S_COMMENT).replace(_OLD_S_SLOT, _S_SLOT)
+
+
 def write_defaults(fs: SafeFS, data_root: Path, registry: Mapping[str, CommandSpec], icons: Iterable[str]) -> None:
     """The config file, if there isn't one, and always the schema beside it, which is DocRepo's own."""
     path = data_root / CONFIG_FILE
@@ -459,8 +474,9 @@ def write_defaults(fs: SafeFS, data_root: Path, registry: Mapping[str, CommandSp
             text = path.read_bytes().decode("utf-8-sig")  # as bytes, so its line endings stay
         except (OSError, UnicodeDecodeError):
             text = ""  # loading it says what's wrong
-        if draw_at_once(text) != text:
-            fs.write_text(path, draw_at_once(text))
+        upgraded = summary_slot(draw_at_once(text))
+        if upgraded != text:
+            fs.write_text(path, upgraded)
     fs.write_text(data_root / SCHEMA_FILE, json.dumps(schema(registry, icons), indent=1) + "\n")
 
 

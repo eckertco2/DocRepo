@@ -170,8 +170,12 @@ def test_an_empty_slot_on_an_eight_way_wheel_nudges(wheel_window):
 
 
 def test_a_held_slot_says_later_and_stays_open(wheel_window):
+    """Since release 5.131 no default slot is held (the Execution wheel's S is the quick summary), so a config holds one."""
     w = wheel_window
-    open_tapped(w, "execution")
+    held = wc.check({"wheels": [{"id": "execution", "name": "Execution", "slots": {
+        "N": {"label": "Today", "command": "browse.view", "args": {"view": "today"}}, "S": {"label": "Agent window", "held": True}}}]},
+        SPECS, icon_names()).wheels[0]
+    w.open_wheel(held, CONFIG.timing, QPointF(500, 400), None)  # tapped, as open_tapped opens one
     press(w, DOWN)
     release(w, DOWN)
     assert not w.picks and w.isVisible() and w.note == "Later"
@@ -362,6 +366,7 @@ def app(qapp, data_root, fs, monkeypatch):
     ctx.notify = lambda t, m: messages.append((t, m))
     a.messages = messages
     yield a
+    a.timer.stop()  # release 5.131: its minute tick otherwise goes on into later tests, on a closed database
     a.wheels.window.hide()
     a.window.hide()
     a.browse.hide()
@@ -521,7 +526,7 @@ def test_the_palette_lists_each_slot_with_its_wheel_and_direction(app):
     labels = [c.label for c in app.wheels.palette_commands()]
     assert "Capture wheel, up: Blank capture" in labels and "Execution wheel, left: Find files" in labels
     assert "Wheel: Open the Browse wheel" in labels
-    assert not any("Agent window" in x for x in labels)  # a held slot does nothing
+    assert "Execution wheel, down: Quick summary" in labels  # release 5.131, decision 517
     assert any(c.label == "Capture wheel, up: Blank capture" for c in app.browse.palette_commands())
     assert any(c.label == "Capture wheel, up: Blank capture" for c in app.window.palette_commands())
 
