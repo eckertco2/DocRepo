@@ -263,7 +263,7 @@ def test_the_classic_look_has_both(qapp, sample_root):
 def test_fold_subtasks(conn):
     """Release 5.24: only parent and top-level tasks; a subtask with no open subtasks of its own folds into its parent."""
     m = Model(conn)
-    folded = board(conn, priorities.BoardFilter(fold=True))["Not ranked"]
+    folded = board(conn, priorities.BoardFilter(show="parents"))["Not ranked"]
     assert "T000008" in folded and "T000001" in folded  # Installation has open subtasks; Reactor impeller upgrade is top-level
     assert "T000012" not in folded and "T000019" not in folded  # Rigging plan and Book the alignment contractor fold away
     assert "T000016" in folded  # top-level, with no subtasks: it stays
@@ -285,23 +285,23 @@ def test_fold_hides_no_task_the_filters_show(conn, f):
     m = Model(conn)
     plain = priorities.BoardFilter(**f)
     unfolded = {x for c in priorities.columns(m, TODAY, plain) for x in c.ids}
-    assert _represented(m, priorities.BoardFilter(fold=True, **f)) == unfolded
+    assert _represented(m, priorities.BoardFilter(show="parents", **f)) == unfolded
 
 
 def test_a_parent_shown_for_its_folded_subtasks_is_context(conn):
     """Priya leads or works on two of Reactor impeller upgrade's subtasks, not on the task itself: with Fold on, its card
     shows, dimmed (context), holding just those two."""
     m = Model(conn)
-    cols = priorities.columns(m, TODAY, priorities.BoardFilter(people=("P002",), fold=True))
+    cols = priorities.columns(m, TODAY, priorities.BoardFilter(people=("P002",), show="parents"))
     ids = [x for c in cols for x in c.ids]
     assert ids == ["T000001"]
     assert cols[0].context == {"T000001"} and sorted(cols[0].folds["T000001"]) == ["T000009", "T000011"]
     # due in 7 days: Installation is due later, but Rigging plan and Book the alignment contractor fold into it
-    cols = priorities.columns(m, TODAY, priorities.BoardFilter(due="7", fold=True))
+    cols = priorities.columns(m, TODAY, priorities.BoardFilter(due="7", show="parents"))
     assert [x for c in cols for x in c.ids] == ["T000008"] and cols[0].context == {"T000008"}
     assert sorted(cols[0].folds["T000008"]) == ["T000012", "T000019"]
     # a parent that matches itself isn't context
-    cols = priorities.columns(m, TODAY, priorities.BoardFilter(people=("P001",), fold=True))
+    cols = priorities.columns(m, TODAY, priorities.BoardFilter(people=("P001",), show="parents"))
     assert "T000008" in cols[0].ids and not cols[0].context
 
 
@@ -313,11 +313,11 @@ def test_a_subtask_folds_only_into_a_card_on_the_board(conn):
     under_routine = tasks.create_task(conn, s, title="Collect the incident counts", at=AT, created_by="test", parents=["T000006"])
     m = Model(conn)
     assert m.task("T000004").state == "Parked" and m.task("T000006").recurrence
-    folded = board(conn, priorities.BoardFilter(fold=True))["Not ranked"]
+    folded = board(conn, priorities.BoardFilter(show="parents"))["Not ranked"]
     assert under_parked in folded and under_routine in folded
     assert not priorities.folded(m, m.task(under_parked)) and priorities.fold_parents(m, m.task(under_routine)) == []
     # with Show routine on, the routine parent's card is on the board, so its subtask folds into it
-    shown = priorities.columns(m, TODAY, priorities.BoardFilter(fold=True, routine=True))
+    shown = priorities.columns(m, TODAY, priorities.BoardFilter(show="parents", routine=True))
     assert under_routine not in shown[0].ids and under_routine in shown[0].folds["T000006"]
     # Q4 overtime budget's other parent is parked: it folds into Installation only
     assert priorities.fold_parents(m, m.task("T000015")) == ["T000008"]
@@ -326,7 +326,7 @@ def test_a_subtask_folds_only_into_a_card_on_the_board(conn):
 def test_find_with_fold(conn):
     """Find goes through the same rules: a folded subtask it finds brings its parent's card, as context."""
     m = Model(conn)
-    cols = priorities.columns(m, TODAY, priorities.BoardFilter(fold=True), lambda x: "sling" in m.task(x).description.lower()
+    cols = priorities.columns(m, TODAY, priorities.BoardFilter(show="parents"), lambda x: "sling" in m.task(x).description.lower()
                               or "sling" in m.task(x).title.lower() or "sling" in m.task(x).current_status.lower())
     assert [x for c in cols for x in c.ids] == ["T000008"] and cols[0].folds["T000008"] == ["T000012"]
     assert cols[0].context == {"T000008"}
@@ -346,14 +346,106 @@ def test_find_and_fold_on_the_board(browse):
     assert v.find_count.text() == "Nothing on the board matches"
     v.close_find()
     assert v.find_bar.isHidden() and len([x for c in v.columns for x in c.ids]) > 3
-    browse.priorities._set("fold", True)
-    assert "T000012" not in v.cards and "folded" in v.cards["T000008"].findChildren(type(v.title))[-1].text()
-    # Find and Fold together (release 5.136): Rigging plan is found, folded into Installation, which shows dimmed for it
+    browse.priorities._set("show_what", "parents")
+    assert "T000012" not in v.cards and _family(v.cards["T000008"]) == "3 subtasks"
+    # Find and Parents together (release 5.136): Rigging plan is found, inside Installation, which shows dimmed for it
     browse.open_find()
     v.find_box.setText("sling")
     assert list(v.cards) == ["T000008"] and v.find_count.text() == "1 match"
-    assert v.cards["T000008"].property("context") and "1 subtask folded" not in v.cards["T000008"].findChildren(type(v.title))[-1].text()
-    assert ", 1 folded" in v.cards["T000008"].findChildren(type(v.title))[-1].text()
+    assert v.cards["T000008"].property("context") and _family(v.cards["T000008"]) == "1 subtask"
     v.close_find()
     browse.set_view("tasks")
     assert v.find_bar.isHidden()
+
+
+def _family(card) -> str:
+    """A parent's card's line for its subtasks, as words (release 5.137)."""
+    from PySide6.QtWidgets import QLabel, QWidget
+
+    line = card.findChild(QWidget, "prFamily")
+    return line.findChild(QLabel).text().split(">", 1)[1].rsplit("<", 1)[0].replace("&middot;", "·") if line else ""
+
+
+def test_show_work_parents_and_all(conn):
+    """Release 5.137, decisions 550, 551 and 554: Show starts on All; Work is the tasks with no open subtasks; Parents is
+    release 5.136's fold; a parent's squares are its subtasks in their buckets' order."""
+    m = Model(conn)
+    assert priorities.BoardFilter().show == "all" and not priorities.BoardFilter().fold and priorities.BoardFilter(show="parents").fold
+    assert [k for k, _, _ in priorities.SHOWS] == ["work", "parents", "all"]
+    every = {x for c in priorities.columns(m, TODAY, priorities.BoardFilter()) for x in c.ids}
+    work = {x for c in priorities.columns(m, TODAY, priorities.BoardFilter(show="work")) for x in c.ids}
+    assert work == {x for x in every if not priorities.open_subtasks(m, x)}
+    assert "T000008" not in work and "T000001" not in work and {"T000012", "T000016"} <= work
+    assert all(not c.pips and not c.folds for c in priorities.columns(m, TODAY, priorities.BoardFilter(show="work")))
+    # ranked on the board, a subtask's square moves up: Critical first, Not ranked last
+    priorities.place(conn, "T000019", "critical", at=AT, via=priorities.VIA)
+    priorities.place(conn, "T000015", "medium", at=AT, via=priorities.VIA)
+    m = Model(conn)
+    pips = {x: v for c in priorities.columns(m, TODAY, priorities.BoardFilter()) for x, v in c.pips.items()}
+    assert pips["T000008"] == ["T000019", "T000015", "T000012"]
+    assert "T000012" not in pips  # no open subtasks, no squares
+    cols = priorities.columns(m, TODAY, priorities.BoardFilter(show="parents"))
+    folds = {x: v for c in cols for x, v in c.folds.items()}
+    assert folds["T000008"] == ["T000019", "T000015", "T000012"] and {x: v for c in cols for x, v in c.pips.items()}["T000008"] == folds["T000008"]
+    # with a filter, All's squares are the subtasks it shows
+    pips = {x: v for c in priorities.columns(m, TODAY, priorities.BoardFilter(people=("P004",))) for x, v in c.pips.items()}
+    assert pips.get("T000008") == ["T000012"]
+
+
+def test_show_on_the_board(browse):
+    """The Show switch, a parent's card opened in Parents, and a row picked, ranked, moved through and opened as a card is
+    (release 5.137, decisions 550 to 554)."""
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QApplication
+
+    from docrepo.ui.priorities_view import Pips
+
+    v = browse.priorities
+    assert v.show_what == "all" and v.show_buttons["all"].isChecked() and "Fold subtasks" not in [
+        w.text() for w in v.controls.findChildren(type(v.show_buttons["all"]))]
+    assert _family(v.cards["T000008"]) == "3 open subtasks" and v.cards["T000008"].opener is None
+    v.show_buttons["work"].click()
+    assert v.show_buttons["work"].isChecked() and "T000008" not in v.cards and "T000001" not in v.cards and "T000012" in v.cards
+    assert _family(v.cards["T000012"]) == ""
+    v.show_buttons["parents"].click()
+    card = v.cards["T000008"]
+    assert card.opener is not None and card.rows_box is not None and card.rows_box.isHidden()
+    assert _family(card) == "3 subtasks" and "1 with a card" in _family(v.cards["T000001"])  # Installation has its own
+    assert "Rigging plan: Not ranked" in card.findChild(Pips).toolTip()
+    card.opener.click()
+    assert not card.rows_box.isHidden() and "T000008" in v.opened and {x for x, ws in v.rows.items() if any(w.holder == "T000008" for w in ws)} == {"T000012", "T000015", "T000019"}
+    row = v.rows["T000012"][0]
+    QTest.mouseClick(row, Qt.MouseButton.LeftButton)
+    assert v.sel == "T000012" and row.property("sel") and not card.property("sel") and "Rigging plan" in v.strip_text.text()
+    # 1 ranks the row Critical: it stays inside its card, which stays open, and its square turns Critical
+    v.key(Qt.Key.Key_1, Qt.KeyboardModifier.NoModifier)
+    QApplication.processEvents()
+    card = v.cards["T000008"]
+    assert Model(browse.conn).task("T000012").priority == "critical" and "T000012" not in v.cards
+    assert not card.rows_box.isHidden() and v.sel == "T000012" and v.folds["T000008"][0] == "T000012"
+    assert "Rigging plan: Critical" in card.findChild(Pips).toolTip()
+    # Up and Down go through the open card's rows; Alt+Down on a row does nothing
+    v.focus_card("T000008")
+    v.key(Qt.Key.Key_Down, Qt.KeyboardModifier.NoModifier)
+    assert v.sel == v.folds["T000008"][0]
+    v.key(Qt.Key.Key_Down, Qt.KeyboardModifier.NoModifier)
+    assert v.sel == v.folds["T000008"][1]
+    seen: list = []
+    v.nudged.connect(lambda *a: seen.append(a))
+    assert v.key(Qt.Key.Key_Down, Qt.KeyboardModifier.AltModifier) and not seen
+    # Space closes the card from the card; closed on its picked row, the card is picked
+    v.focus_card("T000008")
+    v.key(Qt.Key.Key_Space, Qt.KeyboardModifier.NoModifier)
+    assert v.cards["T000008"].rows_box.isHidden() and "T000008" not in v.opened
+    v.key(Qt.Key.Key_Space, Qt.KeyboardModifier.NoModifier)
+    v.focus_card("T000019")
+    assert v.sel == "T000019"
+    v.toggle("T000008")
+    assert v.sel == "T000008"
+    # Enter opens a row's task, as a card's
+    v.toggle("T000008")
+    v.focus_card("T000015")
+    opened: list = []
+    v.open_task.connect(opened.append)
+    v.key(Qt.Key.Key_Return, Qt.KeyboardModifier.NoModifier)
+    assert opened == ["T000015"]
