@@ -43,6 +43,8 @@ class AppContext:
     t_mail_report: Callable[[], list[str]] | None = None
     #: Opens the quick summary (release 5.131): on a subject's key ("person:P004"), or with its box for None.
     open_summary: Callable[[str | None], None] = lambda key=None: None
+    #: Opens Log progress (release 5.139, decision 583) on a task, with no email: the status card's Log progress….
+    log_progress: Callable[[str | None], None] = lambda task=None: None
     #: This session's saves that had problems (release 5.91), for the Problems lines of the capture and browse windows.
     problem_log: ProblemLog = field(default_factory=ProblemLog)
     #: Today's appointments from the Outlook calendar (release 5.127), read at most every 5 minutes, shared by the Today view

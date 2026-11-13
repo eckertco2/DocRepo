@@ -10,21 +10,26 @@ it. It's kept as a T-mail of kind ``ask`` (schema 25), so the reply files itself
   day, the due date and the open subtasks, then "Thanks,". They go above the owner's Outlook signature
   (``outlook.ask_t_mail``).
 
-Until a newer capture lands on the task, its rows in the lists and its status card say "asked Mon" (decision 485,
-``asked``). The ask's own sent copy, once K8's release C captures it, isn't one: it's the question, not the answer.
+Since release 5.139 (the email progress plan's decision 593) an ask starts a wait on the people it went to
+(``start_wait``, ``docrepo.waits``), shown as "waiting on Mike since Mon" until a reply is captured on the task, in place
+of 5.125's "asked Mon" (decision 485), which any newer capture ended.
 
 Not now (decision 487): several tasks in one email, since its reply couldn't say which task it's about.
 """
 from __future__ import annotations
 
 import re
-import weakref
+import sqlite3
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
+from typing import TYPE_CHECKING
 
-from docrepo.dates import WEEKDAYS, long_date, short, to_date
+from docrepo.dates import long_date, short, to_date
 from docrepo.model import Model, Person, Task
 from docrepo.schedule import due_of, is_open
+
+if TYPE_CHECKING:
+    from docrepo.config import Settings
 
 #: The T-mail kind Ask for an update is kept as (``t_mails.kind``).
 KIND = "ask"
@@ -177,54 +182,23 @@ def who_line(ask: Ask) -> str:
     return f"To is empty.{gone}" if ask.missing else "To is empty: nobody but you is on this task."
 
 
-# ---- "asked Mon" (decision 485) ----
-_ASKED: "weakref.WeakKeyDictionary[Model, dict[str, str]]" = weakref.WeakKeyDictionary()
+# ---- the wait it starts (release 5.139, the email progress plan's decision 593; "asked Mon" in release 5.125) ----
+def start_wait(conn: sqlite3.Connection, settings: Settings, task_id: str, t_mail: int | None, at: datetime) -> int | None:
+    """An ask starts a wait on the people it went to (decision 593), with the last Follow up chosen in Log progress (3
+    workdays at first), as the task's Reminder, so it comes back on Today if nobody answers. It ends as any wait does: a
+    reply captured on the task, Got it, a newer wait, or closing the task. None, and no wait, when it went to nobody."""
+    from docrepo import tasks, waits
+    from docrepo.edits import _workdays
 
-
-def asked_all(m: Model) -> dict[str, str]:
-    """Each task with an ask still waiting, and when the newest was opened: no live capture has landed on the task since.
-    A T-mail's own sent copy (K8's release C) doesn't count. Worked out once per model, with one pass over the captures."""
-    cached = _ASKED.get(m)
-    if cached is not None:
-        return cached
-    out: dict[str, str] = {}
-    for x in m.t_mails:
-        if x.kind == KIND and x.opened > out.get(x.task, ""):
-            out[x.task] = x.opened
-    if out:
-        own = {x.capture for x in m.t_mails if x.capture}
-        for c in m.captures.values():
-            if c.discarded or c.id in own:
-                continue
-            at = max(c.saved, c.filed or "")
-            for task in m.capture_tasks(c):
-                if task in out and at > out[task]:
-                    del out[task]
-    _ASKED[m] = out
-    return out
-
-
-def asked(m: Model, task_id: str) -> str | None:
-    """When the waiting ask on a task was opened, or None when there's none."""
-    return asked_all(m).get(task_id)
-
-
-def asked_words(opened: str, today: date) -> str:
-    """"asked today", "asked Mon" within the week, else "asked 13 Oct"."""
-    day = to_date(opened[:10])
-    n = (today - day).days
-    if n <= 0:
-        return "asked today"
-    return f"asked {WEEKDAYS[day.weekday()]}" if n < 7 else f"asked {short(day, today)}"
-
-
-def asked_text(m: Model, task_id: str, today: date) -> str:
-    """A row's quiet "asked Mon", or "" when no ask is waiting."""
-    opened = asked(m, task_id)
-    return asked_words(opened, today) if opened else ""
-
-
-def asked_tip(opened: str, today: date) -> str:
-    """The longer words, for a tooltip."""
-    return (f"You asked for an update on {long_date(to_date(opened[:10]), today)}. This shows until a capture lands on "
-            "this task, such as the reply.")
+    m = Model(conn)
+    t = m.task(task_id)
+    found, _ = people(m, t, settings.me)
+    if not found:
+        return None
+    day = waits.follow_up_day(waits.last_follow_up(conn), at.date(), _workdays(settings))
+    reminder = waits.reminder_for(m, task_id, day)
+    if reminder != t.reminder:
+        tasks.update_task(conn, settings, task_id, at=at, via=LABEL, reminder=reminder)
+    names = listed([first_name(p.name) for p in found])
+    return waits.start(conn, m, task_id, at=waits.stamp_of(at), line=f"Asked {names} for an update", on=[p.id for p in found],
+                       follow_up=day, via=LABEL, t_mail=t_mail)

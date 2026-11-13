@@ -667,12 +667,18 @@ class SettingsView(QWidget):
         for name in outlook.COLOURS:
             self.colour.addItem("None: leave Outlook's list alone" if name == "None" else name, name)
         self.colour.setFixedWidth(240)
+        self.progress_sends = QCheckBox("Log progress sends the email")
+        self.progress_sends.setToolTip("Enter in Log progress sends the draft in its own window, held a minute in the Outbox")
         self._card(lay, "Outlook", [
             ("Categories", "When a capture with an Outlook email is saved on a task, DocRepo adds the task's name to the email in "
                            "Outlook as a category, so Outlook's search finds it (category:\"Pump trial\"). Nothing else on the email "
                            "changes, and nobody on the email sees it.", self.categories),
             ("Category colour", "A new category goes on Outlook's list of categories in this colour, so it shows on the email. One "
                                 "already on the list keeps its own colour.", self.colour),
+            ("Log progress", "With this on, Enter in Log progress sends the email you're writing in its own window, after keeping the "
+                             "line, the wait and the follow-up; it's held a minute in the Outbox, where you can still stop it. A reply in "
+                             "the reading pane can't be sent by a program, so it comes back to the front for you to send, as every "
+                             "email does with this off.", self.progress_sends),
         ])
 
     def _build_troubleshooting(self, lay) -> None:
@@ -821,6 +827,7 @@ class SettingsView(QWidget):
         self.colour.setCurrentIndex(max(0, self.colour.findData(s.outlook_category_colour)))
         self.meetings_on.setChecked(s.today_meetings)
         self.meeting_links.load()
+        self.progress_sends.setChecked(s.progress_sends)
         self.startup_status.setText(f"<b>Start when you sign in:</b> {startup.status()}")
         self.show_backup_status()
         self.error.hide()
@@ -841,6 +848,7 @@ class SettingsView(QWidget):
             "backup_every_days": self.backup_days.value(), "backup_keep": self.backup_keep.value(),
             "look": self.look.currentData(), "show_hints": self.hints.isChecked(), "outlook_categories": self.categories.isChecked(),
             "outlook_category_colour": self.colour.currentData(), "today_meetings": self.meetings_on.isChecked(),
+            "progress_sends": self.progress_sends.isChecked(),
         }
 
     def save(self) -> list[str]:

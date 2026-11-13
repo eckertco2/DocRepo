@@ -45,7 +45,7 @@ def make(conn, title: str, at: datetime = AT, **kw) -> str:
 def test_schema_27_adds_reviewed_and_review_every(conn):
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(tasks)")}
     assert {"reviewed", "review_every"} <= cols
-    assert db.SCHEMA_VERSION == 27  # 26 is 5.127's meeting links, merged first
+    assert db.SCHEMA_VERSION >= 27  # 26 is 5.127's meeting links, merged first; 28 is 5.139's waits
     with pytest.raises(sqlite3.IntegrityError):
         conn.execute("UPDATE tasks SET review_every = 3 WHERE id = ?", (REACTOR,))
     t = Model(conn).task(REACTOR)

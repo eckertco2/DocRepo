@@ -256,6 +256,10 @@ class PageCommands:
             self.open_capture(task=rest, mode="new_task")
         elif kind == "update":
             self.open_capture(task=rest, mode="update")
+        elif kind == "progress" and rest in self.model().tasks:  # the status card's Log progress… (release 5.139, decision 583)
+            self.ctx.log_progress(rest)
+        elif kind == "gotit" and rest in self.model().tasks:  # the status card's Got it (decision 581)
+            self.got_it(rest)
         elif kind == "copyref" and self.sel and self.sel[0] == "task":
             self.copy_reference(self.sel[1], unquote(rest))
         elif kind == "folder" and rest in self.model().tasks:
@@ -270,6 +274,16 @@ class PageCommands:
         elif kind in ("goto", "readd") and ":" in rest:
             task_id, capture_id = rest.split(":", 1)
             (self.go_to_block if kind == "goto" else self.add_again)(task_id, capture_id)
+
+    def got_it(self, task_id: str) -> None:
+        """Got it (release 5.139, decision 581): the task's wait ends by the owner's word, and the follow-up it set goes."""
+        from docrepo import progress
+
+        title = self.model().task(task_id).title
+        if progress.got_it(self.conn, self.ctx.settings, task_id, self.ctx.now()):
+            self.say(f"{title} isn't waiting any more; its follow-up is gone.", False)
+            self.ctx.today_changed()
+            self.refresh()
 
     def _page_menu(self, which: str) -> None:
         """The task page's history menus: which tasks' entries it shows, with Open all and Close all chapters, and the

@@ -9,7 +9,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 
-from docrepo import key_dates
+from docrepo import key_dates, waits
 from docrepo.dates import day_diff, to_date
 from docrepo.model import Model, Task
 from docrepo.schedule import due_of, is_open
@@ -78,4 +78,9 @@ def list_tasks(model: Model, task_list: TaskList, today: date, me: str | None) -
         return d.isoformat() if d else "9999"
 
     matching = [t for t in model.tasks.values() if is_open(t) and task_list.matches(t, today, me)]
+    if task_list.id == "waiting":  # a task the owner waits on someone for (release 5.139, decision 594), by its follow-up
+        open_waits = waits.open_waits(model)
+        have = {t.id for t in matching}
+        matching += [model.tasks[k] for k in open_waits if k not in have and is_open(model.tasks[k])]
+        return sorted(matching, key=lambda t: (open_waits[t.id].follow_up or "9999", "") if t.id in open_waits else ("9999", sort_date(t)))
     return sorted(matching, key=sort_date)

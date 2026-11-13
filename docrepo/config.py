@@ -132,6 +132,11 @@ class Settings:
     wheel_hotkeys: dict[str, str] = field(default_factory=dict)
     #: Opens or closes the Today side panel (release 5.43).
     today_panel_hotkey: str = ""
+    #: Log progress (release 5.139, the design workspace's docs/mods/email-progress-plan.md, decision 583): off until set.
+    progress_hotkey: str = ""
+    #: Whether Log progress's Enter sends the draft in its own window (decision 590 A); off, Enter logs and brings the draft
+    #: back to the front for the owner to send (590 B).
+    progress_sends: bool = True
     backup_dir: str | None = None
     backup_every_days: int = 7
     backup_keep: int = 8
@@ -242,9 +247,11 @@ class Settings:
     def save(self, fs: SafeFS, data_root: Path) -> Path:
         data = asdict(self)
         for key in ("wheel_hotkeys", "today_panel_hotkey", "copilot_folder", "reference_links", "tagged_patterns", "tagged_never",
-                    "summary_pins", "summary_recent"):  # written once they're set, as they're optional (releases 5.41, 5.56, 5.67, 5.80 and 5.131)
+                    "summary_pins", "summary_recent", "progress_hotkey"):  # written once they're set, as they're optional (releases 5.41, 5.56, 5.67, 5.80, 5.131 and 5.139)
             if not data[key]:
                 del data[key]
+        if data["progress_sends"]:  # release 5.139: written once it's turned off
+            del data["progress_sends"]
         if data["quiet_days"] == 21:  # release 5.131: written once it's changed from its default, as the optional ones are
             del data["quiet_days"]
         if data["today_meetings"]:  # release 5.127: on by default, so written only once it's turned off

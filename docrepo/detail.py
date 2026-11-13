@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from urllib.parse import quote
 
-from docrepo import all_notes, ask_update, capacity, decisions, email_conversations, items, markup, meeting_rows, notes_page, repeats, tagged, ties
+from docrepo import all_notes, capacity, decisions, email_conversations, items, markup, meeting_rows, notes_page, repeats, tagged, ties, waits
 from docrepo.dates import ago, days_words, long_date, monday_of, short, to_date
 from docrepo.file_rows import dated_name, type_name
 from docrepo.markup import esc
@@ -430,7 +430,7 @@ class Pages:
                        if t.discarded else "") + self.page_head(t, state, grid=self.facts_grid(t, width))
         out["title"] = t.title  # the sticky title line's words (release 5.86)
         out["status_name"], out["status_when"], out["status_age"], out["status_body"] = self.status_parts(t)
-        out["status_asked"], out["status_asked_tip"] = self.asked_parts(t)
+        out["status_wait"], out["status_wait_tip"], out["status_wait_late"] = self.wait_parts(t)
         log = self.stories.story(task_id)
         out["status_log"] = self.story_list(log, lambda e: self.log_item(e), state) if log else '<p class="note">No changes yet.</p>'
         out["status_log_summary"] = f"{len(log)} change{'s' if len(log) != 1 else ''}"
@@ -593,22 +593,31 @@ class Pages:
         age = ago(to_date(since), self.today) if when else ""
         body = (multiline(t.current_status) if t.current_status
                 else f'<span class="sub">No status yet.</span> {link(f"update:{t.id}", "Add one", "Update this task")}')
+        if t.state != "Closed" and not t.discarded:  # Log progress, and Got it while it waits (release 5.139, decisions 581 and 583)
+            acts = [link(f"progress:{t.id}", "Log progress…", "A line of what you did, who you're waiting on and when to follow up")]
+            if waits.current(self.m, t.id) is not None:
+                acts.insert(0, link(f"gotit:{t.id}", "Got it", "The answer came: stop waiting, and take away the follow-up"))
+            body += f'<br><span class="sub">{" · ".join(acts)}</span>'
         return name, when, age, body
 
-    def asked_parts(self, t: Task) -> tuple[str, str]:
-        """The status card's "asked Mon" and its tooltip (release 5.125, the cold-eyes plan's decision 485), while an Ask for
-        an update waits for a capture on the task; two empty strings otherwise."""
-        opened = ask_update.asked(self.m, t.id)
-        return (ask_update.asked_words(opened, self.today), ask_update.asked_tip(opened, self.today)) if opened else ("", "")
+    def wait_parts(self, t: Task) -> tuple[str, str, str]:
+        """The status card's waiting mark (release 5.139, decision 580): "waiting on Dana since Thu · follow up Tue", or "no
+        reply from Dana since Thu" from the follow-up day (then "1" in the third, for the caution colour), and its tooltip;
+        empty strings when the task isn't waiting. It replaces 5.125's "asked Mon" (decision 593)."""
+        w = waits.current(self.m, t.id)
+        if w is None:
+            return "", "", ""
+        return waits.words(self.m, w, self.today), waits.tip(self.m, w, self.today), "1" if w.late(self.today) else ""
 
     def status_block(self, t: Task) -> str:
-        """The page's one tinted block: where the task stands, the date that was written, and "asked Mon" while an Ask for
-        an update waits (release 5.125)."""
+        """The page's one tinted block: where the task stands, the date that was written, and the waiting mark while the
+        task waits (release 5.139; "asked Mon" in 5.125)."""
         name, date, age, body = self.status_parts(t)
-        asked, asked_tip = self.asked_parts(t)
+        wait, wait_tip, late = self.wait_parts(t)
         when = f'<td align="right" class="rel" title="The current status last changed {age}">{esc(date)}</td>' if date else ""
-        if asked:
-            when += f'<td align="right" class="rel" width="1" title="{esc(asked_tip)}">&nbsp;·&nbsp;{esc(asked)}</td>'
+        if wait:
+            shown = f'<span class="over">{esc(wait)}</span>' if late else esc(wait)
+            when += f'<td align="right" class="rel" width="1" title="{esc(wait_tip)}">&nbsp;·&nbsp;{shown}</td>'
         return (f'<table width="100%" cellspacing="0" cellpadding="12" style="margin-top: 12px"><tr><td class="stat">'
                 f'<table width="100%" cellspacing="0" cellpadding="0"><tr><td class="sk">{name}</td>{when}</tr></table>'
                 f'<p class="stext">{body}</p></td></tr></table>')

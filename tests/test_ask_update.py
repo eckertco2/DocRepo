@@ -117,51 +117,31 @@ def test_greetings_and_lists():
     assert ask_update.listed(list("ABCDEFG")) == "A, B, C, D, E and 2 more"
 
 
-# ================= "asked Mon" (decision 485) =================
+# ================= the wait it starts (release 5.139, decision 593; "asked Mon" in 5.125) =================
 def ask_kept(conn, task_id: str, opened: str, index: str = "") -> int | None:
     return conversations.record_t_mail(conn, task_id, ask_update.KIND, opened, index, untagged=True)
 
 
-def test_an_ask_waits_until_a_newer_capture_lands_on_its_task(conn):
-    assert ask_update.asked(Model(conn), RIGGING) is None
-    ask_kept(conn, RIGGING, "2026-11-09 10:00:00", conversations.new_index(datetime(2026, 11, 9, 10, 0), GUID))
+def test_an_ask_waits_on_the_people_asked_until_one_answers(conn, data_root, fs):
+    from docrepo import msg, waits
+    from docrepo.save import CaptureDraft, email_rows, save_capture
+    from msg_builder import FakeEmail, build
+
+    t_mail = ask_kept(conn, RIGGING, "2026-10-08 09:00:00", conversations.new_index(AT, GUID))
+    ask_update.start_wait(conn, SETTINGS, RIGGING, t_mail, AT)
     m = Model(conn)
-    assert ask_update.asked(m, RIGGING) == "2026-11-09 10:00:00" and ask_update.asked(m, INSTALLATION) is None
-    assert ask_update.asked_text(m, RIGGING, date(2026, 11, 11)) == "asked Mon"
-    # A capture on another task, or one saved before the ask, changes nothing.
-    captures.add_capture(conn, saved="2026-11-10 09:00:00", source="typed", types=["note"], title="Elsewhere", task=INSTALLATION)
-    captures.add_capture(conn, saved="2026-11-09 09:00:00", source="typed", types=["note"], title="Before", task=RIGGING)
-    assert ask_update.asked(Model(conn), RIGGING) == "2026-11-09 10:00:00"
-    # The ask's own sent copy, once release C captures it, isn't the answer.
-    sent = captures.add_capture(conn, saved="2026-11-09 10:05:00", source="outlook_email", types=["note"], title="Sent", task=RIGGING)
-    conn.execute("UPDATE t_mails SET capture = ? WHERE kind = 'ask'", (sent,))
-    assert ask_update.asked(Model(conn), RIGGING) == "2026-11-09 10:00:00"
-    # The reply, captured on the task, ends it.
-    captures.add_capture(conn, saved="2026-11-10 08:30:00", source="outlook_email", types=["note"], title="Re: Rigging plan", task=RIGGING)
-    assert ask_update.asked(Model(conn), RIGGING) is None
+    assert waits.row_text(m, RIGGING, date(2026, 10, 9)) == "waiting on Mike · Thu" and waits.current(m, INSTALLATION) is None
+    # A note of the owner's own on the task doesn't end it, as 5.125's "asked" ended: it waits for Mike.
+    captures.add_capture(conn, saved="2026-10-08 10:00:00", source="typed", types=["note"], title="Mine", task=RIGGING)
+    assert waits.current(Model(conn), RIGGING) is not None
+    answer = msg.read(build(FakeEmail(subject="RE: Rigging plan: where does it stand?", sender="Mike Ortiz <mike.ortiz@example.com>")))
+    save_capture(conn, data_root, fs, SETTINGS, CaptureDraft(task=RIGGING, types={"note"}, files=email_rows(answer)), datetime(2026, 10, 9, 8, 0))
+    assert waits.current(Model(conn), RIGGING) is None
 
 
-def test_a_capture_filed_to_the_task_later_ends_it_too(conn):
-    ask_kept(conn, RIGGING, "2026-11-09 10:00:00")
-    unfiled = captures.add_capture(conn, saved="2026-11-08 09:00:00", source="typed", types=["note"], title="Loose note")
-    assert ask_update.asked(Model(conn), RIGGING)
-    conn.execute("UPDATE captures SET filed_to = ?, filed = ? WHERE id = ?", (RIGGING, "2026-11-10 12:00:00", unfiled))
-    assert ask_update.asked(Model(conn), RIGGING) is None
-
-
-def test_a_discarded_capture_doesnt_end_it(conn):
-    ask_kept(conn, RIGGING, "2026-11-09 10:00:00")
-    c = captures.add_capture(conn, saved="2026-11-10 09:00:00", source="typed", types=["note"], title="Oops", task=RIGGING)
-    conn.execute("UPDATE captures SET discarded = '2026-11-10 09:01:00', discard_reason = 'wrong task' WHERE id = ?", (c,))
-    assert ask_update.asked(Model(conn), RIGGING) == "2026-11-09 10:00:00"
-
-
-def test_the_newest_ask_counts():
-    assert ask_update.asked_words("2026-11-11 08:00:00", date(2026, 11, 11)) == "asked today"
-    assert ask_update.asked_words("2026-11-10 08:00:00", date(2026, 11, 11)) == "asked Tue"
-    assert ask_update.asked_words("2026-11-04 08:00:00", date(2026, 11, 11)) == "asked 4 Nov"
-    assert ask_update.asked_words("2025-12-30 08:00:00", date(2026, 1, 9)) == "asked 30 Dec 2025"
-    assert ask_update.asked_tip("2026-11-09 10:00:00", date(2026, 11, 11)).startswith("You asked for an update on Mon 9 Nov.")
+def test_an_ask_to_nobody_starts_no_wait(conn):
+    tasks.update_task(conn, SETTINGS, RIGGING, at=AT, via="test", assignees=[ME], leads=[ME])
+    assert ask_update.start_wait(conn, SETTINGS, RIGGING, None, AT) is None
 
 
 def test_an_ask_without_an_index_is_kept_for_its_asked_but_a_new_t_mail_isnt(conn):
@@ -378,9 +358,15 @@ def test_words_first_html_without_words_section_or_body():
     assert outlook.words_first_html("", "Hi") == "<p class=MsoNormal>Hi</p>"
 
 
-def test_nothing_here_sends_an_email():
-    """DocRepo never sends one (decision 486): no Send in the ask's code either."""
+def test_only_log_progress_sends_and_only_the_owners_draft():
+    """DocRepo never sends an email of its own (decision 486, as release 5.139's decision 590 A changed it): the one Send in
+    the code is ``outlook.send_draft``'s, and only the Log progress window calls it, on the owner's Enter there."""
     root = Path(__file__).resolve().parent.parent / "docrepo"
-    for name in ("ask_update.py", "outlook.py", "ui/t_mails.py"):
-        text = (root / name).read_text(encoding="utf-8")
-        assert ".Send(" not in text and ".Send()" not in text, name
+    sends = {str(p.relative_to(root)): p.read_text(encoding="utf-8").count(".Send(") for p in root.rglob("*.py")}
+    assert {k: v for k, v in sends.items() if v} == {"outlook.py": 1}
+    outlook_text = (root / "outlook.py").read_text(encoding="utf-8")
+    assert outlook_text.index(".Send(") > outlook_text.index("def send_draft(")
+    callers = sorted(str(p.relative_to(root)) for p in root.rglob("*.py") if "send_draft(" in p.read_text(encoding="utf-8"))
+    assert callers == ["outlook.py", str(Path("ui") / "log_progress.py")]
+    for name in ("ask_update.py", "ui/t_mails.py"):
+        assert "send_draft" not in (root / name).read_text(encoding="utf-8"), name

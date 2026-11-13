@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
 
-from docrepo import activity, agenda, bulk, captures, notes_page, people, priorities, quick, repeats, search, tasks, whatif
+from docrepo import activity, agenda, bulk, captures, notes_page, people, priorities, quick, repeats, search, tasks, waits, whatif
 from docrepo.config import Settings
 from docrepo.dates import long_date, stamp, to_date, workday_numbers
 from docrepo.db import transaction
@@ -458,7 +458,8 @@ def reminders_to_today(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, se
         if t.id not in on_today:
             agenda.add_item(conn, subject=t.id, target=TODAY, note="", added=stamp(at), added_by=REMINDER)
             put.append(t.id)
-        tasks.update_task(conn, settings, t.id, at=at, via=PUT_ON_TODAY, reminder=next_reminder(t.id, before, settings, today))
+        # an open wait's follow-up still to come takes the reminder's place (release 5.139, decision 588)
+        tasks.update_task(conn, settings, t.id, at=at, via=PUT_ON_TODAY, reminder=waits.after_reminder(before, t.id, today, next_reminder(t.id, before, settings, today)))
     # A repeat with no reminder (Clear took this time's) moves on to its next time after today (decision 416).
     waiting = [t for t in before.tasks.values() if t.reminder_repeat and not t.reminder and is_open(t) and t not in due]
     for t in waiting:
