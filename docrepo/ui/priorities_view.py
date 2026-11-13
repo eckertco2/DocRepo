@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from PySide6.QtCore import QByteArray, QEvent, QMimeData, QObject, QPoint, QRectF, Qt, Signal
+from PySide6.QtCore import QByteArray, QEvent, QMimeData, QObject, QPoint, QRect, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QDrag, QPainter, QPen
 from PySide6.QtWidgets import (
     QApplication,
@@ -33,12 +33,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo import priorities
+from docrepo import priorities, task_tile
 from docrepo.detail import esc
 from docrepo.model import Model, Task
 from docrepo.stories import clip
 from docrepo.ui import tokens
-from docrepo.ui.icons import icon
+from docrepo.ui.icons import icon, tinted
+from docrepo.ui import task_tile as tile_ui
 from docrepo.ui.look import LOOK, Help, KeyBadge
 from docrepo.ui.widgets import CheckMenuButton, ElidedLabel, FlowLayout, label_filter, people_filter
 from docrepo.views import due_cell, find_text, path_text
@@ -63,10 +64,6 @@ def _urgent() -> str:
     return _chip("Urgent", "critical", "critical_bg", True)
 
 
-def _due_colour(cls: str) -> str:
-    return tokens.colour("critical") if cls == "over" else tokens.colour("caution") if cls == "soon" else tokens.colour("text2")
-
-
 NOTE = ("Click a card, or a subtask inside one, to see it here. Drag cards between columns, or use the keys on the column "
         "headers: 1 to 4 and 0 move the selected card, Alt+Up and Alt+Down move it within its column, the arrow keys move "
         "between cards, Space opens a parent's card in Parents, and Enter opens the task.")
@@ -79,8 +76,17 @@ class _Picked:
     task_id: str
     _press: QPoint | None
 
+    def circle_at(self, pos: QPoint) -> QRect | None:
+        """The state circle's rectangle when ``pos`` is on it, in this widget's own coordinates; None elsewhere."""
+        return None
+
     def mousePressEvent(self, event) -> None:  # noqa: N802
         if event.button() == Qt.MouseButton.LeftButton:
+            circle = self.circle_at(event.position().toPoint())
+            if circle is not None:  # the state circle (release 5.138, decision 564): its menu, under it
+                event.accept()
+                self.view.state_clicked.emit(self.task_id, self.mapToGlobal(circle.bottomLeft() + QPoint(0, 2)))
+                return
             self._press = event.position().toPoint()
             self.view.pick(self.task_id)
         event.accept()  # a row's press stays with the row, so its card doesn't take the pick
@@ -107,9 +113,10 @@ class _Picked:
         self._press = None
         event.accept()
 
-    def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802 - opens Edit task, as a double-click does since release 5.17
+    def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802 - opens its page (release 5.138, decision 572): Edit task is E
         event.accept()
-        self.view.edit_task.emit(self.task_id)
+        if self.circle_at(event.position().toPoint()) is None:
+            self.view.open_task.emit(self.task_id)
 
 
 class Pips(QWidget):
@@ -151,7 +158,8 @@ class Card(_Picked, QFrame):
     task's colour down its left edge. A parent's card adds a line for its subtasks, and in Parents the rows of those
     inside it (``rows_box``), opened and closed by its ``opener``."""
 
-    def __init__(self, view: "PrioritiesView", t: Task, colour: str, facts: str, path: str, selected: bool) -> None:
+    def __init__(self, view: "PrioritiesView", t: Task, colour: str, facts: str, path: str, selected: bool,
+                 tile: task_tile.Tile | None = None) -> None:
         super().__init__(objectName="prCard")
         self.view, self.task_id, self.colour = view, t.id, colour
         self.setProperty("sel", selected)
@@ -161,22 +169,45 @@ class Card(_Picked, QFrame):
         self.lay = QVBoxLayout(self)
         self.lay.setContentsMargins(12, 8, 10, 8)
         self.lay.setSpacing(2)
+        # A task tile's parts on a card (release 5.138, the task tile plan's decision 575): the state's circle before the
+        # title, which still wraps, and the marks and days at the end of the facts line.
+        top = QHBoxLayout()
+        top.setContentsMargins(0, 0, 0, 0)
+        top.setSpacing(6)
+        self.circle = QLabel(objectName="prCircle")
+        name, colour_key = tile_ui.STATE_ICONS.get(t.state, tile_ui.STATE_ICONS["Not started"])
+        self.circle.setPixmap(tinted(name, tokens.colour(colour_key), tile_ui.STATE, self.devicePixelRatioF()))
+        self.circle.setFixedSize(tile_ui.STATE + 4, tile_ui.STATE + 4)
+        self.circle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.circle.setToolTip(f"{t.state}. Click to change the state.")
+        top.addWidget(self.circle, 0, Qt.AlignmentFlag.AlignTop)
         title = QLabel(esc(t.title), objectName="prTitle")
         title.setWordWrap(True)
-        self.lay.addWidget(title)
+        top.addWidget(title, 1)
+        self.lay.addLayout(top)
         if path:
             self.lay.addWidget(ElidedLabel(path, objectName="fieldLabel"))
-        if facts:
+        if facts or tile is not None:
+            line = QHBoxLayout()
+            line.setContentsMargins(0, 0, 0, 0)
+            line.setSpacing(6)
             f = QLabel(facts)
             f.setWordWrap(True)
             f.setTextFormat(Qt.TextFormat.RichText)
-            self.lay.addWidget(f)
+            line.addWidget(f, 1)
+            if tile is not None and (tile.days is not None or any(tile.marks)):
+                line.addWidget(tile_ui.MarksDays(tile), 0, Qt.AlignmentFlag.AlignVCenter)
+            self.lay.addLayout(line)
         for w in self.findChildren(QLabel):
             w.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.opener: QPushButton | None = None
         self.rows_box: QWidget | None = None
         self._press: QPoint | None = None
         self.installEventFilter(view)
+
+    def circle_at(self, pos: QPoint) -> QRect | None:
+        r = self.circle.geometry()
+        return r if r.adjusted(-2, -2, 2, 2).contains(pos) else None
 
     def add(self, w: QWidget) -> None:
         """A line of its own under the facts. Its words let a click through to the card, as the card's own do."""
@@ -208,23 +239,20 @@ class Row(_Picked, QFrame):
         lay.setContentsMargins(4, 2, 4, 2)
         lay.setSpacing(6)
         lay.addWidget(Pips(m, [t.id]), 0, Qt.AlignmentFlag.AlignVCenter)
-        if t.urgent:
-            urgent = QLabel(_urgent())
-            urgent.setTextFormat(Qt.TextFormat.RichText)
-            lay.addWidget(urgent)
-        title = ElidedLabel(t.title, objectName="prRowTitle")
-        title.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        lay.addWidget(title, 1)
-        d = due_cell(t, today)
-        if d:
-            when = QLabel(f'<span style="color:{_due_colour(d.cls)}">{esc(d.text)}</span>', objectName="prRowDue")
-            when.setTextFormat(Qt.TextFormat.RichText)
-            lay.addWidget(when)
+        # A task tile (release 5.138, the task tile plan's decision 575), its pip in its edge's place: the circle, the title
+        # cut to fit, the flag, the marks and the days.
+        self.tile = tile_ui.TileWidget(task_tile.tile(m, t.id, today, task_tile.marks(m, today)), font=tokens.ui_font(tokens.CAPTION + 0.5))
+        self.tile.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        lay.addWidget(self.tile, 1)
         self.setToolTip(f"{t.title}: {priorities.name(t.priority)}")
         for w in self.findChildren(QWidget):
             w.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self._press: QPoint | None = None
         self.installEventFilter(view)
+
+    def circle_at(self, pos: QPoint) -> QRect | None:
+        r = self.tile.circle_rect().translated(self.tile.pos())
+        return r if r.contains(pos) else None
 
 
 class Column(QFrame):
@@ -340,6 +368,8 @@ class PrioritiesView(QWidget):
     nudged = Signal(str, int, list)
     #: A card's right-click menu, at a point on the screen: Open, Edit and its State submenu (release 5.76, decision 361).
     card_menu = Signal(str, QPoint)
+    #: A card's or a row's state circle was clicked (release 5.138, decision 564): the task, and where its menu goes.
+    state_clicked = Signal(str, QPoint)
 
     def __init__(self) -> None:
         super().__init__()
@@ -578,15 +608,13 @@ class PrioritiesView(QWidget):
         assert m is not None
         t = m.task(task_id)
         bits = []
-        if t.urgent:
-            bits.append(_urgent())
-        d = due_cell(t, self.today)
-        if d:
-            bits.append(f'<span style="color:{_due_colour(d.cls)}">{esc(d.text)}</span>')
+        tile = task_tile.tile(m, t.id, self.today, task_tile.marks(m, self.today))
+        if t.urgent:  # Urgent's flag, as on every tile (release 5.138, decision 569); the days are the tile's, at the line's end
+            bits.append(f'<span style="color:{tokens.colour("critical")}; font-weight:600">⚑</span>')
         who = ", ".join("Me" if p == self.me else m.person_name(p).split()[0] for p in dict.fromkeys((*t.leads, *t.assignees)))
         if who:
             bits.append(f'<span style="color:{tokens.colour("text2")}">{esc(who)}</span>')
-        card = Card(self, t, self._colours.get(t.id, tokens.group_colour(-1)), " &nbsp;".join(bits), path_text(m, t.id), t.id == self.sel)
+        card = Card(self, t, self._colours.get(t.id, tokens.group_colour(-1)), " &nbsp;".join(bits), path_text(m, t.id), t.id == self.sel, tile)
         self._family(card, t)
         if task_id in self.context:  # shown only for the subtasks folded into it: dimmed, as the task tree's parents are
             card.setProperty("context", True)

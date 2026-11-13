@@ -38,7 +38,7 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Parent task**: any task with subtasks. A task can have more than one parent.
 - **Subtask**: a task under a parent task.
 - **Task tree**: all tasks arranged by their parent links, as the browse tool and the task picker show them.
-- **State**: Not started, In progress, Parked or Closed. Closed means done or cancelled.
+- **State**: Not started, In progress, Parked or Closed. Closed means done or cancelled. Since release 5.138 a task's state is the circle at the start of its line wherever it's listed, and a click on the circle opens the state menu.
 - **Current status**: a short paragraph saying where the task stands now.
 - **Status log**: the dated list of changes to a task's state, current status and other fields.
 - **Raw text log**: the corpus of all reference information entered for a task, including the text of its status updates and the content text of all captures associated with that task. Since release 5.25 the browse tool lists it on the task page's **Captures** tab, and the notes page is where its words are read.
@@ -189,7 +189,7 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Show hints**: the setting that shows the help text, the **i** buttons and the key badges in every window. Off by default.
 - **Key tips**: the labels that show each control's key while Alt (letter keys) or Ctrl (Ctrl shortcuts) is held.
 - **Find files**: a window of its own for one task (releases 5.34 and 5.35, as the Task view; renamed in release 5.98), opened from the Files group on the task page, or with O: its status at a glance, an outline of its subtasks, and a search that finds its files, emails, notes and updates as you type, with a preview, built for finding and opening its documents. Its one command is Task page: the task page is a task's home.
-- **Edit** and **Add to** (a task's menus): Edit is Edit task… with the task's place in the tree and Discard…; Add to is Today, the open meetings and anyone else. Each is made from one list (release 5.98), the same on the task page, every task row's right-click menu and Find files' task rows.
+- **Edit** and **Add to** (a task's menus): Edit is Edit task… with the task's place in the tree and Discard…; Add to is Today, the open meetings and anyone else. Each is made from one list (release 5.98), the same on the task page, every task row's right-click menu and Find files' task rows. Since release 5.138 a task's line has one right-click menu wherever it's listed, with Open, the view's own commands, State, Add to, Ask for an update, Note, Update, New task under this one, Edit, Priority and Copy; a double-click or Enter opens the task's page.
 - **Command palette**: the box Ctrl+K opens, listing every action and view, narrowed as you type.
 - **Pinned window**: the capture window shrunk to a small window at the bottom right (Pin, F12), for dropping files, emails and links on. It's the same capture.
 

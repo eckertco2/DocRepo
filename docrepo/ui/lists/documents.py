@@ -141,6 +141,14 @@ class DocumentLists:
             icon, colour, tip = {"person": "person", "label": "labels", "tagged": "tagged"}.get(r.kind, "file"), "text2", r.kind.capitalize()
             rest = snippet or re.sub(rf"^{re.escape(r.id)}( · )?", "", r.sub)  # no ID (decision L4): it's in the tooltip
         second = " · ".join(x for x in (where, rest) if x)
+        if r.kind == "task" and r.group not in ("Saved copy", "Notes") and r.id in m.tasks and not LOOK.classic:
+            # A task tile (release 5.138, the task tile plan's decision 563): its depth ticks (search is flat), flag, two-parents
+            # mark and marks; no days, as the When column keeps a task's empty (decision 430).
+            from docrepo.ui.lists.common import tile_cells
+
+            line, _days = tile_cells(m, r.id, self.today(), flat=True)
+            line.second = second or None
+            return line, when
         return Line(title, icon=icon, icon_colour=colour, icon_tip=tip, second=second or None), when
 
     def _day(self, at: str | None) -> str:

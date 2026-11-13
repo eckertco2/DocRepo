@@ -13,17 +13,20 @@ import contextlib
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 
-from PySide6.QtCore import QModelIndex, QPoint, QRect, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QAbstractTextDocumentLayout, QColor, QCursor, QFont, QFontMetrics, QPainter, QPalette, QTextDocument, QTextOption
+from PySide6.QtCore import QModelIndex, QPoint, QRect, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import (QAbstractTextDocumentLayout, QColor, QCursor, QFont, QFontMetrics, QPainter, QPainterPath, QPalette, QTextDocument,
+                           QTextOption)
 from PySide6.QtWidgets import (QAbstractItemView, QHBoxLayout, QHeaderView, QLabel, QMenu, QPushButton, QStyle, QStyledItemDelegate, QStyleOptionViewItem,
                                QToolTip, QTreeWidget, QTreeWidgetItem, QWidget)
 
 from docrepo.detail import chip, esc
 from docrepo.model import PRIORITY_NAMES
+from docrepo.task_tile import fit_title
 from docrepo.ui import tokens
 from docrepo.ui.icons import icon, icon_size, tinted
 from docrepo.ui.look import LOOK, paint_focus_ring
 from docrepo.ui.style import CLASSIC_TREE, page_css
+from docrepo.ui.task_tile import FLAG, TICK_SLOT, marks_width, paint_marks, paint_ticks
 
 KEY_ROLE = Qt.ItemDataRole.UserRole
 HTML_ROLE = Qt.ItemDataRole.UserRole + 1
@@ -74,6 +77,10 @@ CHIPS = {"urgent": ("critical", "critical_bg", True), "pri-critical": ("on_accen
          "routine": ("text", "hover", False), "count": ("text2", "hover", False)}
 #: Marks drawn as coloured words, not chips: a key date's plant flag and deadline diamond.
 MARKS = ("critical", "caution")
+#: The room between tiles in a tiled view (release 5.138, the task tile plan's decision 571), and their corners.
+TILE_GAP, TILE_RADIUS, TILE_INSET = 2, 4, 4
+#: The depth ticks' slot and the room after it, before the state circle, in a flat list (decision 570).
+TICKS_W = TICK_SLOT + 2
 
 
 def state_icon(state: str) -> tuple[str, str]:
@@ -109,6 +116,23 @@ class Line:
     closed: bool = False
     #: All quiet: a parent kept for context.
     dim: bool = False
+    # The task tile's parts (release 5.138, the task tile plan, decisions 565 to 570). A tile's title is cut at its first
+    # sentence, then its first clause, before its end (565).
+    tile: bool = False
+    #: Urgent, as a small red flag after the title (569).
+    flag: bool = False
+    #: The two-parents mark's tooltip, or "" (570).
+    parents: str = ""
+    #: Generations above the task, as ticks before its state in a flat list (570); -1 where the list indents instead.
+    depth: int = -1
+    depth_tip: str = ""
+    #: The marks' slots at the line's right end (566): each a ``task_tile.Mark``, or None for an empty slot.
+    marks: tuple = ()
+
+    @property
+    def icon_offset(self) -> int:
+        """How far the state's icon sits from the line's start: past the depth ticks, in a flat list."""
+        return TICKS_W if self.depth >= 0 else 0
 
     def html(self, classic: bool = False) -> str:
         title = esc(self.title)
@@ -133,7 +157,8 @@ class Line:
 
     def words(self) -> str:
         """Everything the row says, as plain text, for its tooltip and for Find."""
-        return " ".join(x for x in (self.icon_tip, self.lead, self.title, *(t for t, _ in self.chips), *self.muted, self.context, self.second or "") if x)
+        return " ".join(x for x in (self.icon_tip, self.lead, self.title, "Urgent" if self.flag else "", *(t for t, _ in self.chips), *self.muted,
+                                    self.context, self.second or "") if x)
 
 
 def tint(group: int, depth: int) -> QColor | None:
@@ -319,12 +344,17 @@ class HtmlDelegate(QStyledItemDelegate):
 
     def _parts(self, line: Line, width: int, fm: QFontMetrics, chip_fm: QFontMetrics, folded: bool) -> list[tuple[str, str, int]]:
         """What the first line shows, left to right, as (part, text, width), cut to fit ``width``: the context goes first, then
-        the quiet words, the lead, the chips and the count, and the title last, which is cut with "…" but never dropped."""
+        the quiet words, the lead, the chips and the count, then a tile's two-parents mark and flag, and the title last, which
+        is cut but never dropped: a tile's at its first sentence or clause (decision 565), any other with "…"."""
         gap = 8
         parts: list[list] = []  # [part, text, width, priority, can be cut]
         if line.lead:
             parts.append(["lead", line.lead, fm.horizontalAdvance(line.lead), 3, True])
         parts.append(["title", line.title, fm.horizontalAdvance(line.title), 9, True])
+        if line.flag:
+            parts.append(["flag", "Urgent", FLAG, 8, False])
+        if line.parents:
+            parts.append(["parents", line.parents, FLAG, 7, False])
         if line.count and folded:  # a small neutral badge, so it can't be read as a label
             parts.append(["chip:count", str(line.count), chip_fm.horizontalAdvance(str(line.count)) + 12, 5, False])
         for text, kind in line.chips:
@@ -343,7 +373,11 @@ class HtmlDelegate(QStyledItemDelegate):
             p = min(parts, key=lambda x: x[3])
             room = p[2] - (total() - width)
             if p[0] == "title":
-                p[1] = fm.elidedText(line.title, Qt.TextElideMode.ElideRight, max(0, room))
+                room = max(0, room)
+                if line.tile:
+                    p[1] = fit_title(line.title, room, fm.horizontalAdvance, lambda s, w: fm.elidedText(s, Qt.TextElideMode.ElideRight, int(w)))
+                else:
+                    p[1] = fm.elidedText(line.title, Qt.TextElideMode.ElideRight, room)
                 p[2] = fm.horizontalAdvance(p[1])
                 break
             if p[4] and room >= 48:
@@ -353,26 +387,54 @@ class HtmlDelegate(QStyledItemDelegate):
                 parts.remove(p)
         return [(p[0], p[1], p[2]) for p in parts]
 
-    def _paint_line(self, painter: QPainter, rect: QRect, line: Line, opt: QStyleOptionViewItem, index: QModelIndex, lit: bool = False) -> None:
-        font, small, chip_font = self._fonts(opt)
-        fm, chip_fm, small_fm = QFontMetrics(font), QFontMetrics(chip_font), QFontMetrics(small)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    def _layout(self, line: Line, rect: QRect, opt: QStyleOptionViewItem, index: QModelIndex):
+        """Where each part of a ``Line`` goes in ``rect``: its first line's rectangle, whether it shows two, where the depth
+        ticks and the icon start, the parts as (part, text, rectangle), and where the marks end. One layout for painting and
+        for tooltips."""
+        font, _small, chip_font = self._fonts(opt)
+        fm, chip_fm = QFontMetrics(font), QFontMetrics(chip_font)
         two = line.second is not None and rect.height() >= TWO_LINE_ROW
-        line_h = fm.height() + 4
-        first = QRect(rect.left(), rect.top() + 5, rect.width(), line_h) if two and line.second else QRect(rect)
+        first = QRect(rect.left(), rect.top() + 5, rect.width(), fm.height() + 4) if two and line.second else QRect(rect)
         x = rect.left() + 2
+        ticks = None
+        if line.depth >= 0:
+            ticks, x = x, x + TICKS_W
+        icon_at = None
         if line.icon:
-            scale = painter.device().devicePixelRatioF()
-            if lit:  # the state's icon is its menu's button (release 5.76 on the list rows review's decision L7)
-                self._plate(painter, self.icon_box(first.adjusted(-2 + (x - rect.left()), 0, 0, 0)))
-            painter.drawPixmap(QPoint(x, first.center().y() - ROW_ICON // 2 + 1), tinted(line.icon, tokens.colour(line.icon_colour), ROW_ICON, scale))
-            x += ROW_ICON + ROW_ICON_GAP
+            icon_at, x = x, x + ROW_ICON + ROW_ICON_GAP
+        right = rect.right()
+        marks_right = None
+        if line.marks:  # the marks keep the line's end, in fixed slots, so they line up down a list (decision 566)
+            marks_right = right - 2
+            right -= marks_width(line.marks) + 10
         item = self.view.itemFromIndex(index)
         folded = item is not None and item.childCount() > 0 and not item.isExpanded()
+        parts = []
+        for part, text, w in self._parts(line, right - x, fm, chip_fm, folded):
+            parts.append((part, text, QRect(x, first.top(), w + 2, first.height())))
+            x += w + 8
+        return first, two, ticks, icon_at, parts, marks_right
+
+    def _paint_line(self, painter: QPainter, rect: QRect, line: Line, opt: QStyleOptionViewItem, index: QModelIndex, lit: bool = False) -> None:
+        font, small, chip_font = self._fonts(opt)
+        small_fm = QFontMetrics(small)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        first, two, ticks, icon_at, parts, marks_right = self._layout(line, rect, opt, index)
+        mid = first.center().y() + 1
+        scale = painter.device().devicePixelRatioF()
+        if ticks is not None:
+            paint_ticks(painter, ticks, mid, line.depth)
+        if icon_at is not None:
+            if lit:  # the state's icon is its menu's button (release 5.76 on the list rows review's decision L7)
+                self._plate(painter, self.icon_box(first.adjusted(icon_at - rect.left() - 2, 0, 0, 0)))
+            painter.drawPixmap(QPoint(icon_at, first.center().y() - ROW_ICON // 2 + 1), tinted(line.icon, tokens.colour(line.icon_colour), ROW_ICON, scale))
         quiet, normal = QColor(tokens.colour("text2")), QColor(tokens.colour("text2" if line.closed or line.dim else "text"))
-        for part, text, w in self._parts(line, rect.right() - x, fm, chip_fm, folded):
-            box = QRect(x, first.top(), w + 2, first.height())
-            if part.startswith("chip:") and part[5:] not in MARKS:
+        for part, text, box in parts:
+            x, w = box.left(), box.width() - 2
+            if part in ("flag", "parents"):  # Urgent's flag (decision 569) and the two-parents mark (570)
+                name, colour = ("urgent", "critical") if part == "flag" else ("parents", "text2")
+                painter.drawPixmap(QPoint(x, mid - FLAG // 2), tinted(name, tokens.colour(colour), FLAG, scale))
+            elif part.startswith("chip:") and part[5:] not in MARKS:
                 fg, bg, bold = CHIPS.get(part[5:], CHIPS["lbl"])
                 pill = QRect(x, first.center().y() - 9, w, 19)
                 painter.setPen(Qt.PenStyle.NoPen)
@@ -388,22 +450,47 @@ class HtmlDelegate(QStyledItemDelegate):
                 painter.setFont(f)
                 painter.setPen(normal if part == "title" else QColor(tokens.colour(part[5:])) if part.startswith("chip:") else quiet)
                 painter.drawText(box, Qt.AlignmentFlag.AlignVCenter, text)
-            x += w + 8
+        if marks_right is not None:
+            paint_marks(painter, marks_right, mid, line.marks, scale)
         if two and line.second:
-            left = rect.left() + 2 + (ROW_ICON + ROW_ICON_GAP if line.icon else 0)
+            left = rect.left() + 2 + line.icon_offset + (ROW_ICON + ROW_ICON_GAP if line.icon else 0)
             second = QRect(left, first.bottom() - 1, rect.right() - left, small_fm.height() + 4)
             painter.setFont(small)
             painter.setPen(quiet)
             painter.drawText(second, Qt.AlignmentFlag.AlignVCenter, small_fm.elidedText(" ".join(line.second.split()), Qt.TextElideMode.ElideRight, second.width()))
 
+    def line_tip(self, line: Line, option: QStyleOptionViewItem, index: QModelIndex, pos: QPoint) -> str | None:
+        """What the part of a ``Line`` under ``pos`` says: a tile's depth ticks, flag, two-parents mark or a mark; None
+        elsewhere. The state's icon is ``helpEvent``'s own."""
+        rect = QRect(option.rect.left() + self.view.cell_pad, option.rect.top(), option.rect.width() - self.view.cell_pad - 3, option.rect.height())
+        first, _two, ticks, _icon_at, parts, marks_right = self._layout(line, rect, option, index)
+        mid = first.center().y() + 1
+        if ticks is not None and line.depth > 0 and ticks <= pos.x() < ticks + TICK_SLOT:
+            return line.depth_tip or None
+        for part, text, box in parts:
+            if part in ("flag", "parents") and box.contains(pos):
+                return text
+        if marks_right is not None:
+            x = marks_right - marks_width(line.marks)
+            for mk in line.marks:
+                if mk is not None and QRect(x, mid - 8, 14, 16).contains(pos):
+                    return mk.tip
+                x += 17
+        return None
+
     def helpEvent(self, event, view, option, index) -> bool:  # noqa: N802 - Qt's name
-        """Over a row's icon, what the icon means (decision L7); elsewhere, the row's own tooltip."""
+        """Over a row's icon, what the icon means (decision L7); over a tile's ticks, flag, two-parents mark or marks, what
+        each says (decisions 566 to 570); elsewhere, the row's own tooltip."""
         line = None if LOOK.classic else index.data(LINE_ROLE)
-        if line is not None and line.icon_tip and index.column() == 0:
-            left = option.rect.left() + self.view.cell_pad + 2
-            if left - 2 <= event.pos().x() <= left + ROW_ICON + 2:
+        if line is not None and index.column() == 0:
+            left = option.rect.left() + self.view.cell_pad + 2 + line.icon_offset
+            if line.icon_tip and left - 2 <= event.pos().x() <= left + ROW_ICON + 2:
                 tip = line.icon_tip + (". Click to change the state." if index.data(STATE_ROLE) else "")
                 QToolTip.showText(event.globalPos(), tip, view)
+                return True
+            said = self.line_tip(line, option, index, event.pos())
+            if said:
+                QToolTip.showText(event.globalPos(), said, view)
                 return True
         bucket = "" if LOOK.classic else self.view.row_priority(index)
         if bucket:  # the row's tooltip names its priority, as its edge shows it only by colour (decision L9)
@@ -419,7 +506,8 @@ class HtmlDelegate(QStyledItemDelegate):
             line = index.data(LINE_ROLE)
             if html is None and line is None:
                 return super().sizeHint(option, index)
-            return QSize(1, TWO_LINE_ROW if line is not None and line.second is not None and self.view.two_lines else self.view.row_height)
+            gap = TILE_GAP if self.view.tiled else 0  # every row, headings too, so the rows keep one height (decision 571)
+            return QSize(1, (TWO_LINE_ROW if line is not None and line.second is not None and self.view.two_lines else self.view.row_height) + gap)
         if html is None:
             return super().sizeHint(option, index)
         doc = self._doc(html, self._width(index), option)
@@ -466,6 +554,13 @@ class RowTree(QTreeWidget):
         self.state_menu: Callable[[str, QWidget], QMenu | None] | None = None
         #: Adds a task's Add to and Edit menus to its row's right-click menu (release 5.98, the consolidation plan's decision 392).
         self.task_menus: Callable[[str, QMenu], None] | None = None
+        #: A task tile's whole right-click menu (release 5.138, the task tile plan's decision 573): given the task, the menu and
+        #: the row's own actions, it fills the menu. When set, it's used for task rows in place of ``task_menus`` and ``state_menu``.
+        self.tile_menu: Callable[[str, QMenu, list], None] | None = None
+        #: Rows drawn as tiles, set apart by tone on the list's ground (decision 571): the views of tasks set it.
+        self.tiled = False
+        #: Enter on a task's row (decision 572): the browse window opens its page.
+        self.task_opened: Callable[[str], None] | None = None
         self._state_hover: tuple[QTreeWidgetItem, int] | None = None  # the State cell under the mouse
         self._state_open: tuple[QTreeWidgetItem, int] | None = None  # the State cell whose menu is open
         self._relayout = QTimer(self)
@@ -587,6 +682,12 @@ class RowTree(QTreeWidget):
             QTimer.singleShot(0, lambda: drop(key, *at))  # after the drag has finished with these rows
 
     def keyPressEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        if (event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and not event.modifiers() and self.task_opened is not None
+                and self.currentItem() is not None):  # a task tile's Enter opens its page, as its double-click does (decision 572)
+            task = self.row_task(self.currentItem())
+            if task:
+                self.task_opened(task)
+                return
         alt = event.modifiers() == Qt.KeyboardModifier.AltModifier
         if self._moves and alt and event.key() in (Qt.Key.Key_Up, Qt.Key.Key_Down) and self.currentItem() is not None:
             self._moves[2](self.currentItem().data(0, KEY_ROLE), -1 if event.key() == Qt.Key.Key_Up else 1)
@@ -646,6 +747,18 @@ class RowTree(QTreeWidget):
         self.row_height, self.two_lines = height, two_lines
         if not LOOK.classic:
             self.setUniformRowHeights(not two_lines)
+
+    def set_tiled(self, on: bool) -> None:
+        """Draw selectable rows as tiles (release 5.138, the task tile plan's decision 571): each the content's white with
+        4 px corners, ``TILE_GAP`` apart on the base grey, no outline. Headings stay on the ground. Not in the Classic look."""
+        on = on and not LOOK.classic
+        if on == self.tiled:
+            return
+        self.tiled = on
+        self.setProperty("tiled", on)
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self.viewport().update()
 
     def end(self, select: object | None = None) -> None:
         if select is not None:
@@ -735,7 +848,9 @@ class RowTree(QTreeWidget):
             return None
         if not LOOK.classic and column == 0:
             cell = self.visualRect(self.indexFromItem(item, 0))
-            if cell.left() + self.cell_pad + 2 - 3 > pos.x() or pos.x() > cell.left() + self.cell_pad + 2 + ROW_ICON + 3:
+            line = item.data(0, LINE_ROLE)
+            left = cell.left() + self.cell_pad + 2 + (line.icon_offset if isinstance(line, Line) else 0)
+            if left - 3 > pos.x() or pos.x() > left + ROW_ICON + 3:
                 return None
         return item, column, task
 
@@ -901,9 +1016,16 @@ class RowTree(QTreeWidget):
         if item is None:
             return None
         row = item.data(0, ACTIONS_ROLE)
-        task = self.row_task(item) if self.state_menu is not None or self.task_menus is not None else None
+        task = self.row_task(item) if self.state_menu is not None or self.task_menus is not None or self.tile_menu is not None else None
         menu = QMenu(self)
         menu.setToolTipsVisible(True)
+        if task and self.tile_menu is not None:  # a task tile's one menu (decision 573), with the row's own actions in it
+            own = [a for a in (row.actions if row is not None else ()) if a[0] not in ("Edit", "Note")]  # the menu has both
+            self.tile_menu(task, menu, own)
+            if menu.isEmpty():
+                menu.deleteLater()
+                return None
+            return menu
         for label, clicked, tip in row.actions if row is not None else ():
             if task and self.task_menus is not None and label == "Edit":
                 continue
@@ -967,18 +1089,46 @@ class RowTree(QTreeWidget):
     def drawRow(self, painter, option, index) -> None:  # noqa: N802 - Qt's name
         """The new look's mark at a row's left edge: the accent bar on the selected row, else the task's priority in its
         colour (release 5.81, decision L9), at any depth. Nothing on an unranked row. A row kept for context has it faded."""
-        super().drawRow(painter, option, index)
         if LOOK.classic:
+            super().drawRow(painter, option, index)
             return
         first = index.siblingAtColumn(0)
         selected = self.selectionModel().isSelected(first)
+        # A tile (release 5.138, decision 571): the content's white under the row, then whatever the row draws, then the
+        # ground's grey put back in the gap and the corners round it, so a hover or a selection is a tile too.
+        tile = self.tiled and bool(first.flags() & Qt.ItemFlag.ItemIsSelectable)
+        row = QRect(0, option.rect.top(), self.viewport().width(), option.rect.height())
+        box = row.adjusted(TILE_INSET, TILE_GAP // 2, -TILE_INSET, -(TILE_GAP - TILE_GAP // 2))
+        if tile:
+            painter.save()
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(tokens.colour("content")))
+            painter.drawRoundedRect(QRectF(box), TILE_RADIUS, TILE_RADIUS)
+            painter.restore()
+        super().drawRow(painter, option, index)
+        if tile:
+            ground = QPainterPath()
+            ground.addRect(QRectF(row))
+            inner = QPainterPath()
+            inner.addRoundedRect(QRectF(box), TILE_RADIUS, TILE_RADIUS)
+            painter.save()
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.fillPath(ground.subtracted(inner), QColor(tokens.colour("base")))
+            painter.restore()
         bucket = "" if selected else self.row_priority(first)
         mark = tokens.colour("accent") if selected else tokens.colour(PRIORITY_EDGES[bucket]) if bucket in PRIORITY_EDGES else None
         if mark:
             painter.save()
             if not selected and first.data(DIM_ROLE):
                 painter.setOpacity(0.5)
-            painter.fillRect(0, option.rect.top() + 2, 3, option.rect.height() - 4, QColor(mark))
+            if tile:  # the edge is the tile's own left edge, inside its corners
+                edge = QPainterPath()
+                edge.addRoundedRect(QRectF(box), TILE_RADIUS, TILE_RADIUS)
+                painter.setClipPath(edge)
+                painter.fillRect(box.left(), box.top(), 3, box.height(), QColor(mark))
+            else:
+                painter.fillRect(0, option.rect.top() + 2, 3, option.rect.height() - 4, QColor(mark))
             painter.restore()
 
     def _item_changed(self, item: QTreeWidgetItem, column: int) -> None:

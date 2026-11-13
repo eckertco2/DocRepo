@@ -591,40 +591,43 @@ def _wide(panel) -> None:
     QApplication.processEvents()
 
 
-def test_the_title_has_its_line_to_itself(app, panel):
-    """Decision 440: the state and the date are on the second line, under the title, and the hover's links go there too."""
+def test_a_task_is_its_tile_with_its_project_under_it(app, panel):
+    """Release 5.138 (the task tile plan's decision 576, in place of 5.119's 440): a task's first line is its tile (its circle,
+    title, marks and days); widened, Today's Done box before it and its project under it, where the hover's links go; at rest,
+    the tile alone, without its ticks and marks."""
     task = _with_a_due(app)
     _wide(panel)
     row = next(r for r in panel.rows if r.task_id == task)
-    assert all(w.parent() is row.second for w in (row.subtitle, row.state_button, row.due, row.buttons))
-    assert row.title_label.parent() is row and row.second.isVisibleTo(row)
-    assert row.title_label.width() >= row.width() - row.tick.width() - 24  # the whole row but its tick box
+    assert row.tile is not None and row.tile.tile.task_id == task and not row.tile.compact
+    assert all(w.parent() is row.second for w in (row.subtitle, row.buttons))
+    assert row.tick.isVisibleTo(row) and row.second.isVisibleTo(row) == bool(row.subtitle.full)  # a project, or nothing to say
     panel.hover.contract()
     panel._update_state()
-    assert not row.second.isVisibleTo(row)  # at rest, the title alone
+    assert not row.second.isVisibleTo(row) and not row.tick.isVisibleTo(row) and row.tile.compact
 
 
-def test_the_state_is_its_icon_and_the_date_is_short(app, panel):
-    """Decisions 441 and 442: the state's icon, its name in its tooltip; the date as "8 d", its whole date in its tooltip."""
+def test_the_state_is_the_tiles_circle_and_the_date_its_number(app, panel):
+    """Decision 441 kept, 442 changed by 5.138's 568: the state is the tile's circle, the date its number of days, its whole
+    dates in its tooltip; the hover's links come on the second line."""
+    from docrepo import task_tile
+
     task = _with_a_due(app)
     _wide(panel)
     t = Model(app.ctx.conn).task(task)
-    cell = due_cell(t, NOW.date())
     row = next(r for r in panel.rows if r.task_id == task)
-    assert row.state_button.text() == "" and row.state_button.accessibleName() == t.state
-    assert row.state_button.toolTip() == f"{t.state}. Click to change the state."
-    assert row.due.property("days") == cell.days and row.due.toolTip() == cell.tip and "·" not in row.due.text()
+    assert row.tile.tile.state == t.state and row.tile.tile.days == task_tile.days(t, NOW.date())
+    assert not row.due.text()  # a task's days are on its tile
     QApplication.sendEvent(row, QEnterEvent(QPointF(2, 2), QPointF(2, 2), QPointF(2, 2)))
-    assert row.buttons.isVisibleTo(row) and not row.due.isVisibleTo(row) and row.state_button.isVisibleTo(row)
+    assert row.buttons.isVisibleTo(row)
     QApplication.sendEvent(row, QEvent(QEvent.Type.Leave))
-    assert not row.buttons.isVisibleTo(row) and row.due.isVisibleTo(row)
+    assert not row.buttons.isVisibleTo(row)
 
 
 def test_a_note_s_second_line_is_there_only_for_its_links(app, panel):
     note_on_today(app)
     _wide(panel)
     row = next(r for r in panel.rows if r.task_id is None)
-    assert row.state_button is None and not row.second.isVisibleTo(row)
+    assert row.tile is None and not row.second.isVisibleTo(row)
     QApplication.sendEvent(row, QEnterEvent(QPointF(2, 2), QPointF(2, 2), QPointF(2, 2)))
     assert row.second.isVisibleTo(row) and row.buttons.isVisibleTo(row)
 
@@ -635,7 +638,7 @@ def test_due_in_the_next_7_days_has_the_short_date(app, panel):
     panel.refresh()
     _wide(panel)
     dates = [w for line in panel.extras for w in line.findChildren(QLabel, "tpDue")]
-    assert dates and all("·" not in w.text() and w.toolTip() for w in dates)
+    assert dates and all("·" not in w.text() and " d" not in w.text() and w.toolTip() for w in dates)  # the tile's number (568)
 
 
 # ---- the width at rest (release 5.106, decision 406) ----

@@ -217,14 +217,17 @@ def test_a_branch_closes_every_open_level_and_one_undo_takes_it_back(browse):
 def test_every_task_rows_right_click_menu_has_state(browse):
     item = row(browse, INSTALLATION)
     menu = browse.tree.row_menu(item)
-    assert labels(menu) == ["Add to", "Edit", "State"]  # the task page's menus since release 5.98 (decision 392), then State
+    words = [w.split("	")[0] for w in labels(menu)]
+    # A task tile's one menu since release 5.138 (decision 573): Open, then State, then Add to; Edit (5.98's) further down
+    assert words[0] == "Open" and words[words.index("State"):][:2] == ["State", "Add to"] and "Edit" in words
     assert labels(next(a.menu() for a in menu.actions() if a.menu() and a.text() == "State"))[:4] == ["Not started", "In progress", "Parked", "Closed"]
     edits.add_to_today(browse.conn, browse.ctx.data_root, browse.ctx.fs, INSTALLATION, "", NOW)
     browse.refresh(render=False)
     browse.show_browse(view="today")
     today_row = next(i for i in browse.tree.items() if i.data(0, KEY_ROLE) == ("task", INSTALLATION) and i.data(0, STATE_ROLE))
     menu = browse.tree.row_menu(today_row)
-    assert labels(menu)[-1] == "State" and len(labels(menu)) > 1  # Today's own commands, then State
+    words = [w.split("	")[0] for w in labels(menu)]
+    assert words.index("Done") < words.index("State")  # Today's own commands, then State
 
 
 def test_a_key_dates_row_isnt_a_state_button(browse):
@@ -253,11 +256,12 @@ def test_the_task_pages_state_opens_the_menu(browse):
 def test_the_cards_right_click_menus_have_state(browse):
     picking(browse, None)
     browse.priorities.card_menu.emit(INSTALLATION, QPoint(0, 0))
-    assert browse.menus[-1][0] == ["Open task", "Edit task…", "State"]
+    words = [w.split("	")[0] for w in browse.menus[-1][0]]
+    assert words[0] == "Open" and "State" in words and "Edit" in words  # the tile's menu since release 5.138 (decision 573)
     browse.timeline.render(browse.model(), NOW.date())
     browse.timeline.sel = INSTALLATION
     browse.timeline._card_menu(QPoint(0, 0))
-    assert browse.menus[-1][0] == ["Open task", "Edit task…", "State"] and len(browse.menus) == 2
+    assert "State" in browse.menus[-1][0] and len(browse.menus) == 2
 
 
 # ---- the Task view and the Today side panel ----
@@ -293,16 +297,15 @@ def test_the_today_side_panels_rows(browse):
     try:
         panel.refresh()
         r = next(x for x in panel.rows if x.task_id == INSTALLATION)
-        # The state is the button, as its icon with its name for a screen reader and in its tooltip (release 5.119, decision 441).
-        assert r.state_button is not None and r.state_button.accessibleName() == states(browse, INSTALLATION)[0]
-        assert r.state_button.text() == "" and r.state_button.toolTip().startswith(states(browse, INSTALLATION)[0])
+        # The state is the tile's circle (release 5.119's decision 441, a tile's since 5.138, decision 576).
+        assert r.tile is not None and r.tile.tile.state == states(browse, INSTALLATION)[0]
         assert states(browse, INSTALLATION)[0] not in r.subtitle.full  # not words in the line
         picking(browse, "Parked")
         panel.state_clicked(r)
         assert states(browse, INSTALLATION) == ["Parked"]
         assert panel.note_row.isVisibleTo(panel) and panel.note_label.text() == "Parked: Installation." and panel.note_undo.isVisibleTo(panel)
         r = next(x for x in panel.rows if x.task_id == INSTALLATION)
-        assert r.state_button.accessibleName() == "Parked"  # drawn again
+        assert r.tile.tile.state == "Parked"  # drawn again
     finally:
         panel.deleteLater()
 
