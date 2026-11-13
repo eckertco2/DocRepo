@@ -39,7 +39,8 @@ OTHER_KEYS = (
                          "Enter opens the task. In Templates: moves the selected row among those beside it"),
     ("Q", "On the Timeline: Quick edit for the selected row (release 5.91; a double-click is Edit task, as everywhere)"),
     ("R", "In Review's Projects step: marks the selected project reviewed (release 5.128)"),
-    ("Alt+Right, Alt+Left", "In Review: the next step, or back, passing over empty ones"),
+    ("Alt+Right, Alt+Left", "In Review, from its list: the next step, or back, passing over empty ones. On a task page, Alt+Left "
+                            "goes back to the All notes it left"),
     ("F1", "This list, and the Syntax tab: every ** name, with examples"),
 )
 #: Find files' keys (releases 5.34 and 5.35, as the Task view). Since release 5.98 the task's letters aren't there: its

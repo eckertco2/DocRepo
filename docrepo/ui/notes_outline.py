@@ -75,7 +75,9 @@ class NotesOutline(QListWidget):
     #: The list was read from the page again, with something new in it.
     rebuilt = Signal()
 
-    def __init__(self, notes) -> None:
+    def __init__(self, notes=None) -> None:
+        """``notes`` is the editor it reads its headings from; with none, it shows what ``set_entries`` gives it (All
+        notes' days and pages, release 5.140)."""
         super().__init__()
         self.setObjectName("notesOutline")
         self.notes = notes
@@ -93,9 +95,10 @@ class NotesOutline(QListWidget):
         self.itemClicked.connect(lambda it: self.picked.emit(int(it.data(NUMBER))))
         # The list follows the page: its words, its headings and its folds, read again a moment after they change.
         self._timer = QTimer(self, singleShot=True, interval=150, timeout=self.rebuild)
-        notes.document().contentsChanged.connect(self._timer.start)
-        notes.folds_changed.connect(self._timer.start)
-        notes.page_set.connect(self._page_set)
+        if notes is not None:
+            notes.document().contentsChanged.connect(self._timer.start)
+            notes.folds_changed.connect(self._timer.start)
+            notes.page_set.connect(self._page_set)
 
     def _page_set(self) -> None:
         """Another page (or the same one again): read at once, so the list never shows the page before, and marked from
@@ -111,7 +114,12 @@ class NotesOutline(QListWidget):
         return list(self._entries or [])
 
     def rebuild(self) -> None:
-        entries = [(b.blockNumber(), level, day, " ".join(b.text().split()) or "(an empty heading)") for b, level, day in self.notes.outline()]
+        if self.notes is None:
+            return
+        self.set_entries([(b.blockNumber(), level, day, " ".join(b.text().split()) or "(an empty heading)") for b, level, day in self.notes.outline()])
+
+    def set_entries(self, entries: list[tuple[int, int, bool, str]]) -> None:
+        """Show these entries: (a number ``picked`` carries back, level, whether it's a day, words), in order."""
         if entries == self._entries:
             return
         self._entries = entries

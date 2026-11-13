@@ -242,3 +242,17 @@ def test_edit_task_sets_review_every(browse):
     tasks.update_task(browse.conn, browse.ctx.settings, RIGGING, at=FRI, via="test", review_every=4)
     again = TaskEditDialog(browse, browse.model(), RIGGING, browse._label_options, browse._people_options)
     assert again.review_every.currentData() == 4 and not again.more.isHidden()  # More options opens for it
+
+
+def test_next_and_back_keys_dont_take_the_task_pages_alt_left(browse):
+    """Alt+Right and Alt+Left are Review's from the list pane only, so the task page's Alt+Left (release 5.140, back to All
+    notes) never shares a key with them where the focus is: Qt would fire neither."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QKeySequence, QShortcut
+
+    mine = [s for s in browse.findChildren(QShortcut) if s.key() in (QKeySequence("Alt+Left"), QKeySequence("Alt+Right"))]
+    assert all(s.context() == Qt.ShortcutContext.WidgetWithChildrenShortcut for s in mine)
+    review_keys = [s for s in mine if s.parent() is browse.middle]
+    assert sorted(s.key().toString() for s in review_keys) == ["Alt+Left", "Alt+Right"]
+    others = [s.parent() for s in mine if s.parent() is not browse.middle]
+    assert others and not any(browse.middle.isAncestorOf(w) or w.isAncestorOf(browse.middle) for w in others)

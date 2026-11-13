@@ -211,10 +211,13 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
                               ("M", lambda: self._key("meeting")), ("O", lambda: self._key("find_files")),
                               ("Ctrl+F", self.open_find), ("Ctrl+Shift+F", self.search_box.setFocus), ("F1", self.show_keys), ("F5", self.refresh),
                               ("Ctrl+B", lambda: self.show_views_pane(not self.views_button.isChecked())), ("Ctrl+K", self.open_palette),
-                              # The weekly review (release 5.128): R marks a project reviewed in step 4; Alt+Right and Alt+Left are Next and Back.
-                              ("R", lambda: None if self._typing() else review_list.mark_reviewed(self)),
-                              ("Alt+Right", lambda: review_list.go(self)), ("Alt+Left", lambda: review_list.go(self, back=True))):
+                              # The weekly review (release 5.128): R marks a project reviewed in step 4.
+                              ("R", lambda: None if self._typing() else review_list.mark_reviewed(self))):
             QShortcut(QKeySequence(keys), self, handler)
+        # Review's Next and Back (release 5.128) work from the list pane, so the task page keeps its own Alt+Left, back to
+        # All notes (release 5.140): two shortcuts on one key where focus is would fire neither.
+        for keys, handler in (("Alt+Right", lambda: review_list.go(self)), ("Alt+Left", lambda: review_list.go(self, back=True))):
+            QShortcut(QKeySequence(keys), self.middle, context=Qt.ShortcutContext.WidgetWithChildrenShortcut, activated=handler)
         if capture is not None:
             capture.saved.connect(self.capture_saved)
 
