@@ -4,6 +4,14 @@ One line per release, newest first: its number, the date it was built, and what 
 
 Since 2026-11-12, releases ship in weekly trains (the design workspace's `docs/mods/cold-eyes-plan.md`, decisions 464 to 468): each train has a heading with the day it was pushed to GitHub, over its releases. Releases keep their own numbers and tags.
 
+## Fix train (not on GitHub yet)
+
+5.141 fixes an error the owner reported, so it ships at once, as a train of its own (decision 466). The heading takes the day it's pushed to GitHub.
+
+| Release | Date | What |
+|---|---|---|
+| 5.141 | 2026-11-12 | New T-mail works where Outlook's security guard won't let DocRepo tag a new email (the owner's report of 2026-11-12: "giving the new email a conversation index" refused, so the email opened with nothing tying it to its task). Such a T-mail, and an Ask for an update, is kept with its draft and known when it's sent: DocRepo hears Outlook's send, or sees the draft leave Drafts, then finds its copy in Sent Items by its subject and a new conversation's index, files it on the task (5.123's capture) and learns its conversation, so its replies find the task. Nothing is written on the email. No schema change. |
+
 ## Train of 2026-11-12
 
 The first weekly train: 5.123, 5.124, 5.125, 5.126, 5.131, 5.133, 5.134, 5.135, 5.136 and 5.137. Its corporate test is the design workspace's `handoff/docrepo/train-2026-11-12-test.md`.
