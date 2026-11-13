@@ -16,3 +16,5 @@ The notes page's Jump to (release 5.86) is jump, an arrow down to a line, on the
 Tagged labels (release 5.79) adds tagged, an equipment tag's plate with its hole and two lines of text, to the sidebar and
 to search's results.
 The notes page's outline (release 5.113) is outline, a panel with a column at its left and indented lines beside it, on the Notes heading.
+The task tile (release 5.138) adds parents, two circles joining one, after a task's title when it's under more than one
+parent; and draws sun, agenda and waiting as its marks, and urgent as its flag.

@@ -295,6 +295,7 @@ QTabBar::tab:selected { color: $text; font-weight: 600; border-bottom-color: $ac
 /* lists, trees and tables */
 QTreeView, QListView, QTableView { background: $content; border: none; outline: 0; selection-background-color: $selected;
   selection-color: $text; alternate-background-color: $content; }
+QTreeView[tiled="true"] { background: $base; }
 QTreeView::item, QListView::item { padding: 2px 4px; }
 QTreeView::item:hover, QListView::item:hover { background: $hover; }
 QTreeView::item:selected, QListView::item:selected, QTableView::item:selected { background: $selected; color: $text; }
@@ -552,6 +553,7 @@ h2 { font-family: 'Segoe UI'; font-size: ${subtitle}pt; font-weight: 600; margin
 .dt { color: $text2; font-size: ${caption}pt; padding-right: 14px; }
 .rel { color: $text2; font-size: ${caption}pt; font-weight: 400; }
 .over { color: $critical; }
+.tile { background-color: $base; border-bottom: 2px solid $content; }
 .stat { background-color: $base; }
 .sk { color: $text2; font-size: ${caption}pt; }
 .desc { color: $text2; margin-top: 4px; }

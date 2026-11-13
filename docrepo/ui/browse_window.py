@@ -80,6 +80,7 @@ from docrepo.ui.timeline_view import TimelineView
 from docrepo.ui.state_menu import UNDO_MS, can_change, open_below, picked_line, state_menu
 from docrepo.ui.tree_view import HTML_ROLE, KEY_ROLE, RowTree
 from docrepo.ui import conversation_page, task_menus
+from docrepo.ui import task_tile as tile_ui
 from docrepo.ui.widgets import SAVE_KEYS, DropButton, FlowLayout, Option, ViewStack, ask, label_options, people_options
 from docrepo.views import (
     LIST_IDS,
@@ -344,6 +345,10 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         # One Edit and one Add to (release 5.98, decision 392): a task row's menu has them too, from the task page's own lists;
         # in Waiting on others, Ask for an update first (release 5.125, the cold-eyes plan's decision 481).
         self.tree.task_menus = lambda task_id, menu: task_menus.add_row_menus(self, task_id, menu, anchor=self.tree, ask=self.view == "waiting")
+        # The task tile's one menu (release 5.138, the task tile plan's decision 573): Open, the row's own lines, State, Add to,
+        # Ask for an update, Note, Update, New task under, Edit, Priority and Copy, in every view of tasks.
+        self.tree.tile_menu = lambda task_id, menu, own: tile_ui.fill_menu(self, task_id, menu, own, anchor=self.tree, ask_first=self.view == "waiting")
+        self.tree.task_opened = lambda task_id: tile_ui.open_task(self, task_id)  # Enter, as a double-click (decision 572)
         lp.addWidget(self.tree, 1)
         self.middle.addWidget(list_page)
         if LOOK.classic:  # the new look has it on the Timeline's page (decision 229)
@@ -384,7 +389,8 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         self.middle.addWidget(self.timeline)
         self.priorities = PrioritiesView()  # mods log round 2, M0029, M0030 (release 5.23)
         self.priorities.picked.connect(lambda task_id: setattr(self, "sel", ("task", task_id)))
-        self.priorities.open_task.connect(lambda task_id: self.go_task(task_id))
+        self.priorities.open_task.connect(lambda task_id: tile_ui.open_task(self, task_id))  # its page (release 5.138, decision 572)
+        self.priorities.state_clicked.connect(lambda task_id, at: self.popup_state_menu(task_id, at))  # decision 564
         self.priorities.edit_task.connect(self.edit_task)
         self.priorities.moved.connect(self.move_priority)
         self.priorities.nudged.connect(self.nudge_priority)
@@ -409,6 +415,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         self.page.document().setDefaultStyleSheet(page_css())
         self.page.document().setDocumentMargin(14 if LOOK.classic else 16)
         self.page.anchorClicked.connect(self.on_link)
+        self.page.link_menu = self.page_link_menu  # a task's link: the tile's menu (release 5.138)
         self.page.layout_changed.connect(self._page_width_changed)
         self.detail_stack.addWidget(self.page)
         self.detail_stack.addWidget(self._build_edit_form())
@@ -418,6 +425,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         self.task_pane = TaskPane(page_css(), 14 if LOOK.classic else 24)
         for view in self.task_pane.views():
             view.anchorClicked.connect(self.on_link)
+            view.link_menu = self.page_link_menu  # a subtask's link or circle: the tile's menu (release 5.138, decision 577)
         self.task_pane.layout_changed.connect(self._page_width_changed)
         # Which groups are open on each task's page (release 5.84), kept in docs.db like the notes' folds.
         self.task_pane.header.fold_changed.connect(self._save_page_fold)
@@ -745,17 +753,11 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         return True
 
     def card_menu(self, task_id: str, at: QPoint, open_it: bool = True) -> None:
-        """The right-click menu of a Priorities card or the timeline's card (decision 361, settled as mocked): Open task and
-        Edit task, then the State submenu."""
-        menu = QMenu(self)
-        menu.setToolTipsVisible(True)
-        if open_it:
-            menu.addAction("Open task", lambda: self.go_task(task_id))
-        menu.addAction("Edit task…", lambda: self.edit_task(task_id))
-        sub = self.state_menu_for(task_id, menu)
-        if sub is not None:
-            menu.addSeparator()
-            menu.addMenu(sub)
+        """The right-click menu of a Priorities card, a row inside one, or the timeline's card: a task tile's one menu
+        (release 5.138, the task tile plan's decision 573), in place of 5.76's Open task, Edit task and State."""
+        menu = tile_ui.tile_menu(self, task_id, self, open_it=open_it)
+        if menu is None:
+            return
         try:
             self.run_menu(menu, at)
         finally:
@@ -928,6 +930,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         self.tree.stop_row_moves()  # the Templates view turns it back on
         self.tree.begin()
         self.tree.set_density(*ROW_DENSITY.get(self.view, (tokens.LIST_ROW, False)))
+        self.tree.set_tiled(self.view in TASK_VIEWS)  # tiles set apart by tone (release 5.138, decision 571)
         self.tree.priorities = priorities_of(self.model())
         try:
             if builder:
@@ -1017,8 +1020,8 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
             b.setToolTip(f"{verb} {task.title}" if task else "Select a task first")
 
     def double_click(self, item: QTreeWidgetItem) -> None:
-        """Double-clicking a row opens its edit form (mods log round 3, M0056; decision 57): Edit task for a task, wherever
-        it's listed, Edit for a capture (a note on Today edits the note), and Edit… for a person or a label. A document has
+        """Double-clicking a row opens its edit form (mods log round 3, M0056; decision 57), but a task's opens its page (release
+        5.138, the task tile plan's decision 572: Edit task is E and the menu), Edit for a capture (a note on Today edits the note), and Edit… for a person or a label. A document has
         no form yet, so it still shows its file, or copies a link's address. Subtasks open and close by the row's arrow and
         the Right, Left, + and − keys."""
         key = item.data(0, KEY_ROLE)
@@ -1026,10 +1029,10 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
             return
         kind, ident = key
         m = self.model()
-        if kind == "task":
+        if kind == "task":  # a task tile opens its page (release 5.138, the task tile plan's decision 572): Edit task is E
             t = m.tasks.get(ident)
             if t is not None and not t.discarded:
-                self.edit_task(ident)
+                tile_ui.open_task(self, ident)
         elif kind == "capture":
             note = next((a for a in m.today_items() if a.subject is None and a.added_by == ident), None) if self.view == TODAY else None
             c = m.captures.get(ident)

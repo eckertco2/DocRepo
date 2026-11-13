@@ -42,8 +42,11 @@ from docrepo.ui.lists.common import (
     _row_state,
     _row_word,
     _shape,
+    DAYS_COL,
     TODAY_MINE_KEY,
+    tile_cells,
 )
+from docrepo.ui.look import LOOK
 
 
 #: Later's tooltip (release 5.116, decision 417).
@@ -79,7 +82,7 @@ class TodayList:
         self.today_note.returnPressed.connect(self.add_today_item)
         self._filter_widget(self.today_note)
         self._button("Add", self.add_today_item)
-        self.tree.set_columns(*_cols(*with_actions(["Item", "State", "Due"], [0, 96, 96], 220)))
+        self.tree.set_columns(*_cols(*with_actions(["Item", "State", "Due"], [0, 96, 96 if LOOK.classic else DAYS_COL], 220)))
         grey = group_ground()
         for name, group in today_groups(m, today):  # each group's items under its heading, which folds (release 5.24)
             head = self.tree.add_row(None, None, [f"<b>{esc(name)}</b>"], grey, selectable=False, span=True)
@@ -89,12 +92,17 @@ class TodayList:
                 # One line (decisions L1 and L3): the title, then its project and how long it's been carried, in quiet words.
                 since = f"since {since_text(a.added, today)}" if a.added[:10] < today.isoformat() else ""
                 reminder = "reminder" if a.added_by == edits.REMINDER else ""  # a reminder put it here (decision 415)
-                asked = ask_update.asked_text(m, t.id, today) if t else ""  # "asked Mon" (release 5.125, decision 485)
+                # "asked Mon" (release 5.125, decision 485) is the tile's hourglass since 5.138 (decision 567); the Classic look keeps the words.
+                asked = ask_update.asked_text(m, t.id, today) if t and LOOK.classic else ""
                 context = " · ".join(x for x in (project_text(m, t.id) if t else "", a.note if t else "", reminder, asked, since) if x)
                 icon, colour = state_icon(t.state) if t else ("note", "text2")
-                line = Line(t.title if t else a.note, icon=icon, icon_colour=colour, icon_tip=t.state if t else "Note", context=context)
+                if t and not LOOK.classic:  # a tile (release 5.138): depth ticks, as Today is flat, and no sun, as every task here is on it
+                    line, days = tile_cells(m, t.id, today, context=context, flat=True, hide=("today",))
+                else:
+                    line = Line(t.title if t else a.note, icon=icon, icon_colour=colour, icon_tip=t.state if t else "Note", context=context)
+                    days = _due_html(due_cell(t, today) if t else None, False)
                 tip = f"{full_path(m, t.id)}\n" if t else ""
-                item = self.tree.add_row(head, key, _shape([line, _row_state(t.state) if t else _row_word("Note"), _due_html(due_cell(t, today) if t else None, False)]),
+                item = self.tree.add_row(head, key, _shape([line, _row_state(t.state) if t else _row_word("Note"), days]),
                                          tip=f"{tip}Added {long_date(date.fromisoformat(a.added[:10]), today)}")
                 self.tree.set_actions(item, self._today_actions(a.id, t.id if t else None))
             head.setExpanded(True)
@@ -134,10 +142,15 @@ class TodayList:
                 self.tree.set_actions(item, self._key_date_actions(t.key_date.id))
                 continue
             icon, colour = state_icon(t.state)
-            # Urgent ones first, with their chip, since the Urgent view went into the tree's filter (release 5.97, decision 386).
-            line = Line(t.title, icon=icon, icon_colour=colour, icon_tip=t.state, context=project_text(m, t.id),
-                        chips=(("Urgent", "urgent"),) if t.urgent else ())
-            item = self.tree.add_row(head, ("task", t.id), _shape([line, _row_state(t.state), _due_html(due_cell(t, today), False)]), tip=full_path(m, t.id))
+            # Urgent ones first, with their chip, since the Urgent view went into the tree's filter (release 5.97, decision 386);
+            # since 5.138 a tile, whose flag says Urgent (decision 569).
+            if LOOK.classic:
+                line = Line(t.title, icon=icon, icon_colour=colour, icon_tip=t.state, context=project_text(m, t.id),
+                            chips=(("Urgent", "urgent"),) if t.urgent else ())
+                days = _due_html(due_cell(t, today), False)
+            else:
+                line, days = tile_cells(m, t.id, today, context=project_text(m, t.id), flat=True, hide=("today",))
+            item = self.tree.add_row(head, ("task", t.id), _shape([line, _row_state(t.state), days]), tip=full_path(m, t.id))
             self.tree.set_actions(item, [("Add to Today", lambda i=t.id: self.add_to_today(i), "Put it on Today (D)"),
                                          ("Later…", lambda i=t.id: self.later_menu(i), LATER_TIP)])
         if not entries:

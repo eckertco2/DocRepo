@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING
 from urllib.parse import unquote
 
 from PySide6.QtCore import QEvent, QMimeData, QObject, QPoint, QRect, QSize, Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QColor, QFontMetrics, QGuiApplication, QKeySequence, QPainter, QShortcut
+from PySide6.QtGui import QColor, QCursor, QFontMetrics, QGuiApplication, QKeySequence, QPainter, QShortcut
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -462,6 +462,7 @@ class QuickSummary(QWidget):
         self.page_lay.setSpacing(0)
         self.header = fit_view(self.css, (MARGIN, 16, MARGIN, 12))
         self.header.anchorClicked.connect(self.on_link)
+        self.header.link_menu = self.link_menu
         self.page_lay.addWidget(self.header)
         rule = QFrame(objectName="summaryRule")
         rule.setFrameShape(QFrame.Shape.HLine)
@@ -741,9 +742,11 @@ class QuickSummary(QWidget):
         else:
             g = Expander(sec.key, sec.title, self.css, MARGIN)
             g.body.anchorClicked.connect(self.on_link)
+            g.body.link_menu = self.link_menu
         action = f'<a href="{esc(sec.action[0])}">{esc(sec.action[1])}</a>' if sec.action else ""
         g.set_content(section_head(esc(head_words(sec)), action, raw=True), None if sec.agenda is not None else sec.body, head_words(sec))
         g.summary.anchorClicked.connect(self.on_link)
+        g.summary.link_menu = self.link_menu
         g.set_open(not self.folds.get(key, sec.folded))
         g.toggled.connect(lambda k, is_open, key=key: self.folds.__setitem__(key, not is_open))
         return g
@@ -902,6 +905,9 @@ class QuickSummary(QWidget):
                 self.more.setdefault(self.subject.key, set()).add(rest)
                 self.render()
             return
+        if kind == "state":  # a task tile's circle (release 5.138, decision 564): the state menu, drawn again after
+            browse.popup_state_menu(rest, QCursor.pos(), after=self.render)
+            return
         if kind == "task":
             self.app.show_browse(None, rest)
         elif kind == "capture":
@@ -923,6 +929,24 @@ class QuickSummary(QWidget):
                                "labels": labels or ([unquote(ref)] if what == summary.LABEL else [])})
             browse.set_view("activity")
             self.app.show_browse()
+
+    def link_menu(self, href: str, at: QPoint) -> bool:
+        """A right-click on a task's link or circle (release 5.138, the task tile plan's decision 577): the tile's menu, as in
+        the browse window; the summary is drawn again after it."""
+        from docrepo.ui import task_tile as tile_ui
+
+        kind, _, rest = href.partition(":")
+        if kind not in ("task", "state") or rest not in self.app.browse.model().tasks:
+            return False
+        menu = tile_ui.tile_menu(self.app.browse, rest, self)
+        if menu is None:
+            return False
+        try:
+            menu.exec(at)
+        finally:
+            menu.deleteLater()
+        self.render()
+        return True
 
     # ---- messages ----
     def say(self, text: str, error: bool = False, undo=None, problems: list[str] | None = None) -> None:

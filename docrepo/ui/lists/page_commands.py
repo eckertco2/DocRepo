@@ -6,7 +6,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from urllib.parse import unquote
 
-from PySide6.QtCore import QUrl
+from PySide6.QtCore import QPoint, QUrl
 from PySide6.QtGui import QCursor, QGuiApplication
 from PySide6.QtWidgets import (
     QComboBox,
@@ -19,6 +19,7 @@ from docrepo.detail import SCOPE_NAMES
 from docrepo.links import is_folder, is_link
 from docrepo.schedule import is_open
 from docrepo.ui import conversation_page, decision_register, t_mails, task_menus
+from docrepo.ui import task_tile as tile_ui
 from docrepo.ui.icons import icon
 from docrepo.ui.look import LOOK
 from docrepo.views import full_path
@@ -159,6 +160,21 @@ class PageCommands:
             self._action("Make active", lambda: self.set_label_status(name, "active"))
 
     # ---- links on a page ----
+    def page_link_menu(self, href: str, at: QPoint) -> bool:
+        """A right-click on a task's link or its circle on a page (release 5.138, the task tile plan's decision 577): the tile's
+        menu, as a task's row has. False for any other link, which keeps the page's own menu."""
+        kind, _, rest = href.partition(":")
+        if kind not in ("task", "state") or rest not in self.model().tasks:
+            return False
+        menu = tile_ui.tile_menu(self, rest, self)
+        if menu is None:
+            return False
+        try:
+            self.run_menu(menu, at)
+        finally:
+            menu.deleteLater()
+        return True
+
     def on_link(self, url: QUrl) -> None:
         kind, _, rest = url.toString().partition(":")
         st = self.state

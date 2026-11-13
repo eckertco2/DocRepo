@@ -26,6 +26,7 @@ from PySide6.QtGui import QColor, QFontMetrics, QGuiApplication, QPainter, QPen
 from PySide6.QtWidgets import QApplication, QListWidget, QListWidgetItem, QStyle, QStyledItemDelegate, QStyleOptionViewItem, QWidget
 
 from docrepo import items
+from docrepo.task_tile import fit_title
 from docrepo.model import Model, Task
 from docrepo.ui import tokens
 from docrepo.ui.icons import tinted
@@ -237,7 +238,10 @@ class TaskRowDelegate(QStyledItemDelegate):
         name_room = room - (sub_room + self.GAP if sub_room else 0)
         # A part that fits is drawn whole: Qt's eliding wants a little more room than the words measure (release 5.64's
         # DropButton found the same), so it would shorten words that fit exactly.
-        name = o.label if name_w <= name_room else fn.elidedText(o.label, Qt.TextElideMode.ElideRight, name_room)
+        # A long name is cut as a task tile's is (release 5.138, the task tile plan's decision 574): its first sentence, then its
+        # first clause, then at the edge.
+        name = o.label if name_w <= name_room else fit_title(o.label, name_room, fn.horizontalAdvance,
+                                                                  lambda t, w: fn.elidedText(t, Qt.TextElideMode.ElideRight, int(w)))
         p.setFont(self.name_font(o, head))
         p.setPen(QColor(tokens.colour("text")))
         p.drawText(QPoint(left, base), name)

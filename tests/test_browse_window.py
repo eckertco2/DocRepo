@@ -237,29 +237,28 @@ def _line(browse, task_id: str):
     return next(i for i in browse.tree.items() if i.data(0, KEY_ROLE) == ("task", task_id)).data(0, LINE_ROLE)
 
 
-def test_the_task_tree_s_rows_name_their_own_labels(browse):
-    """Item 76 (decision 235): quiet words after the title, not chips, on the task tree only."""
+def test_the_task_tree_s_rows_leave_labels_to_the_page(browse):
+    """Item 76 (decision 235) put a task's own labels after its title in the task tree; since release 5.138 (the task tile
+    plan's decision 569) a tile shows no labels, and Urgent is its flag, not a chip."""
     browse.set_view("tasks")
     browse.open.update(Model(browse.conn).tasks)
     browse.render_list()
-    assert _line(browse, "T000001").muted == ("Line 1", "Strategic Plan") and 'class="faint">&nbsp;Line 1 · Strategic Plan</span>' in _title_cell(browse, "T000001")
-    assert "Safety</span>" in _title_cell(browse, "T000019") and _line(browse, "T000019").chips == (("Urgent", "urgent"),)  # after its chips
-    assert "Line 1" not in _title_cell(browse, "T000012")  # a subtask doesn't repeat what it inherits
-    assert _line(browse, "T000016").muted == ()  # no labels, nothing added
+    assert _line(browse, "T000001").muted == () and "Line 1" not in _title_cell(browse, "T000001")
+    assert "Safety" not in _title_cell(browse, "T000019") and _line(browse, "T000019").chips == () and _line(browse, "T000019").flag
     browse.set_view("due")
-    assert "Safety" not in _title_cell(browse, "T000019")  # the other lists are as they were
+    assert "Safety" not in _title_cell(browse, "T000019")
 
 
-def test_a_dimmed_parent_and_a_label_s_own_section_leave_the_words_off(browse):
+def test_a_filter_or_a_label_s_section_shows_no_labels_on_the_tiles(browse):
+    """Since release 5.138 (decision 569) no tile names its labels, whatever the filter or the grouping."""
     browse.set_view("tasks")
     browse._set_filter("labels", ["Safety"])
-    assert "Line 1" not in _title_cell(browse, "T000001")  # there for context, as the row of a parent that doesn't match
-    assert "Safety</span>" in _title_cell(browse, "T000019")
+    assert "Line 1" not in _title_cell(browse, "T000001") and "Safety" not in _title_cell(browse, "T000019")
     browse._set_filter("labels", [])
     browse._set_tree_group("label")
-    assert "Line 1" not in _title_cell(browse, "T000001") and "Strategic Plan</span>" in _title_cell(browse, "T000001")  # first under Line 1
+    assert "Strategic Plan" not in _title_cell(browse, "T000001")
     browse._set_tree_group("group")
-    assert "Line 1 · Strategic Plan</span>" in _title_cell(browse, "T000001")
+    assert "Line 1" not in _title_cell(browse, "T000001")
 
 
 def _today_heading(browse, name: str):
@@ -753,7 +752,8 @@ def test_double_click_opens_the_rows_edit_form(browse, ctx):
     item = _item(browse, ("task", "T000001"))
     was = item.isExpanded()
     browse.double_click(item)
-    assert opened == [("edit_task", "T000001")] and item.isExpanded() == was and browse.revealed == []
+    # Since release 5.138 (the task tile plan's decision 572) a task's double-click opens its page; Edit task is E.
+    assert opened == [] and browse.sel == ("task", "T000001") and item.isExpanded() == was and browse.revealed == []
     for view, kind, form in (("unfiled", "capture", "start_capture_edit"), ("people", "person", "edit_person"), ("labels", "label", "edit_label")):
         browse.set_view(view)
         row = next(i for i in browse.tree.items() if (i.data(0, KEY_ROLE) or ("",))[0] == kind)

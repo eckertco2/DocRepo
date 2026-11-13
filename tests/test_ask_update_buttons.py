@@ -113,18 +113,21 @@ def test_waiting_on_others_has_it_on_a_rows_menu_and_says_asked(browse, fake_out
     calls, _ = fake_outlook
     browse.set_view("waiting")
     menu = browse.tree.row_menu(row(browse, RIGGING))
-    first = next(a for a in menu.actions() if not a.isSeparator())
-    assert first.text() == "Ask for an update"
-    first.trigger()
+    # The tile's menu (release 5.138, decision 573): Open, then this view's own, Ask for an update first among them.
+    first, second = [a for a in menu.actions() if not a.isSeparator()][:2]
+    assert first.text().startswith("Open") and second.text() == "Ask for an update"
+    second.trigger()
     assert calls[-1][1] == ("mike.ortiz@example.com",)
     assert browse.view == "waiting"
     assert row(browse, RIGGING).data(0, LINE_ROLE).context == "asked today · Mike Ortiz"  # before the person waited on
-    # The task tree's menu has no Ask for an update; its row says asked, as every list's does.
+    # Since release 5.138 the task tree's menu has it too, for a task someone else is on (decision 573), and the ask is the
+    # tile's hourglass, its words in its tooltip (decision 567).
     browse.set_view("tasks")
     browse.open.update(Model(browse.conn).tasks)
     browse.render_list()
-    assert ask_action(browse.tree.row_menu(row(browse, RIGGING))) is None
-    assert "asked today" in row(browse, RIGGING).data(0, LINE_ROLE).muted
+    assert ask_action(browse.tree.row_menu(row(browse, RIGGING))) is not None
+    wait = row(browse, RIGGING).data(0, LINE_ROLE).marks[2]
+    assert wait is not None and wait.icon == "waiting" and "asked" not in " ".join(row(browse, RIGGING).data(0, LINE_ROLE).muted)
 
 
 def test_a_closed_task_isnt_asked_about(browse, fake_outlook):

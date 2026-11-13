@@ -106,6 +106,28 @@ def _due_html(cell, deadline_line: bool = True) -> str:
     return f'<p align="right" style="{_due_css(cell.cls)}">{esc(cell.text)}{mark}</p>'
 
 
+#: The days number's column (release 5.138, the task tile plan's decision 568): an integer, so narrow.
+DAYS_COL = 44
+
+
+def tile_cells(m: Model, task_id: str, today, *, context: str = "", flat: bool = False, hide: tuple[str, ...] = (), dim: bool = False,
+               under: str | None = None):
+    """A task as a tile (release 5.138, the task tile plan's decisions 563 to 570): its ``Line`` (the state's icon, the title
+    cut at its first sentence or clause, Urgent's flag, the two-parents mark, ``context``, the marks less ``hide``, and depth
+    ticks in a ``flat`` list) and its days cell. A ``dim`` row, a parent kept for context, is its icon and title only."""
+    from docrepo import task_tile
+    from docrepo.ui.tree_view import Line, state_icon
+
+    t = m.task(task_id)
+    icon, colour = state_icon(t.state)
+    if dim:
+        return Line(t.title, icon=icon, icon_tip=t.state, dim=True, tile=True), ""
+    tl = task_tile.tile(m, task_id, today, task_tile.marks(m, today), hide=hide, flat=flat, under=under)
+    line = Line(t.title, icon=icon, icon_colour=colour, icon_tip=t.state, context=context, closed=tl.closed, tile=True, flag=tl.urgent,
+                parents=tl.parents, depth=tl.depth, depth_tip=tl.depth_tip, marks=tl.marks)
+    return line, task_tile.days_html(tl.days)
+
+
 def _empty(layout) -> None:
     """Take every widget out of a layout at once, so none is left showing until Qt deletes it."""
     while layout.count():
