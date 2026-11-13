@@ -169,6 +169,9 @@ class Settings:
     quiet_days: int = 21
     summary_pins: list[str] = field(default_factory=list)
     summary_recent: list[str] = field(default_factory=list)
+    #: Today's meetings from the Outlook calendar (release 5.127, the cold-eyes plan's decision 494): Today's first group, and
+    #: the side panel's first line. On by default; off, DocRepo doesn't read the calendar at all.
+    today_meetings: bool = True
 
     @classmethod
     def load(cls, data_root: Path) -> Settings:
@@ -230,6 +233,8 @@ class Settings:
                 del data[key]
         if data["quiet_days"] == 21:  # release 5.131: written once it's changed from its default, as the optional ones are
             del data["quiet_days"]
+        if data["today_meetings"]:  # release 5.127: on by default, so written only once it's turned off
+            del data["today_meetings"]
         return fs.write_text(data_root / SETTINGS_FILE, json.dumps(data, indent=2) + "\n")
 
 

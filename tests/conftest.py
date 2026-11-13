@@ -135,6 +135,18 @@ def isolated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def no_outlook_calendar(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Today's meetings (release 5.127) read as if Outlook weren't open, so no test asks the computer's own Outlook, and Today
+    draws the same everywhere. ``tests/test_meetings.py`` and the windows' tests stand in for a calendar of their own."""
+    from docrepo import outlook
+
+    def closed(day):
+        raise outlook.CalendarProblem("closed", "Outlook isn't open.", "finding Outlook", "not running in the tests")
+
+    monkeypatch.setattr(outlook, "todays_appointments", closed)
+
+
+@pytest.fixture(autouse=True)
 def close_log_file():
     """Detach DocRepo's log file after each test, so it doesn't stay open."""
     yield

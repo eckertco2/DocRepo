@@ -397,6 +397,8 @@ class SettingsView(QWidget):
         self._build_backups(lay)
         # ---- calendar and reminders ----
         self._build_calendar(lay)
+        # ---- Today: its meetings from the Outlook calendar (release 5.127) ----
+        self._build_today(lay)
         # ---- Parse and populate ----
         self._build_parse(lay)
         # ---- tagged labels' patterns, Never a tag and the tester (release 5.80) ----
@@ -541,6 +543,23 @@ class SettingsView(QWidget):
             ("Reminders at", "Each day's reminders show as notifications from this time.", self.reminder),
             ("Workdays", "The capacity calendar spreads hours over these days.", _row(*self.workdays.values())),
             ("Capacity horizon", "How far ahead routine tasks fill the capacity calendar.", self.horizon),
+        ])
+
+    def _build_today(self, lay) -> None:
+        """Today (release 5.127, the cold-eyes plan's decisions 491 and 494): the switch for today's meetings from Outlook, on
+        by default, and the meeting links, each with Remove."""
+        from docrepo.ui.today_meetings import MeetingLinks
+
+        self.meetings_on = QCheckBox("Show today's meetings from Outlook")
+        self.meetings_on.setToolTip("Today's first group, and the Today side panel's first line. Off, DocRepo doesn't read the calendar")
+        self.meeting_links = MeetingLinks(self.ctx, self.message)
+        self._card(lay, "Today", [
+            ("Today's meetings", "Today's first group lists today's appointments in your Outlook calendar: each one's time, subject and "
+                                 "place, and, once it's linked, how many are on its agenda, with Agenda and Meeting notes. DocRepo only "
+                                 "reads the calendar, never its attendees or words, and never starts Outlook to do it.", self.meetings_on),
+            ("Meeting links", "Each appointment's subject you've linked, and the meeting task or person it's linked to: it's linked "
+                              "each time it's on your calendar. Remove forgets a link at once.", QWidget()),
+            (None, "", self.meeting_links),
         ])
 
     def _build_parse(self, lay) -> None:
@@ -763,6 +782,8 @@ class SettingsView(QWidget):
         self.hints.blockSignals(False)
         self.categories.setChecked(s.outlook_categories)
         self.colour.setCurrentIndex(max(0, self.colour.findData(s.outlook_category_colour)))
+        self.meetings_on.setChecked(s.today_meetings)
+        self.meeting_links.load()
         self.startup_status.setText(f"<b>Start when you sign in:</b> {startup.status()}")
         self.show_backup_status()
         self.error.hide()
@@ -781,7 +802,7 @@ class SettingsView(QWidget):
             "extracted_text_cap_chars": self.cap.value(), "prompt_warn_chars": self.warn.value(), "doc_check_minutes": self.check.value(),
             "backup_every_days": self.backup_days.value(), "backup_keep": self.backup_keep.value(),
             "look": self.look.currentData(), "show_hints": self.hints.isChecked(), "outlook_categories": self.categories.isChecked(),
-            "outlook_category_colour": self.colour.currentData(),
+            "outlook_category_colour": self.colour.currentData(), "today_meetings": self.meetings_on.isChecked(),
         }
 
     def save(self) -> list[str]:
