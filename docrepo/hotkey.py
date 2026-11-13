@@ -31,6 +31,7 @@ HOTKEYS: tuple[tuple[str, str], ...] = (
     ("pin_hotkey", "Pin the capture window, or bring it back"),
     ("outlook_hotkey", "Add the email selected in Outlook"),
     ("today_panel_hotkey", "Open or close the Today side panel"),  # release 5.43: decision 216, no keys until set
+    ("progress_hotkey", "Log progress, on the email you're writing in Outlook"),  # release 5.139, decision 583: none until set
 )
 HOTKEY_IDS = {setting: n for n, (setting, _label) in enumerate(HOTKEYS, 1)}
 #: The wheels' hotkeys (release 5.41, decisions 173 and 216): a wheel's ID is this plus its place in Config/wheels.jsonc.

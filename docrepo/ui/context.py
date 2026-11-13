@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 
 from docrepo.config import Settings
+from docrepo.meetings import TodayCalendar
 from docrepo.model import Model
 from docrepo.parse import ParseLabel, ParsePerson
 from docrepo.safe_fs import SafeFS
@@ -36,10 +37,19 @@ class AppContext:
     save_open_pages: Callable[[], None] = lambda: None
     #: Shows a capture's page in the browse tool (release 5.93): the capture window's link to an email captured before.
     open_capture_page: Callable[[str], None] = lambda capture_id: None
+    #: A T-mail was just opened (release 5.123): the app starts watching Sent Items for it.
+    t_mail_opened: Callable[[], None] = lambda: None
+    #: The troubleshooting report's T-mail lines (release 5.123): the waiting T-mails, the watch and the last sweep.
+    t_mail_report: Callable[[], list[str]] | None = None
     #: Opens the quick summary (release 5.131): on a subject's key ("person:P004"), or with its box for None.
     open_summary: Callable[[str | None], None] = lambda key=None: None
+    #: Opens Log progress (release 5.139, decision 583) on a task, with no email: the status card's Log progress….
+    log_progress: Callable[[str | None], None] = lambda task=None: None
     #: This session's saves that had problems (release 5.91), for the Problems lines of the capture and browse windows.
     problem_log: ProblemLog = field(default_factory=ProblemLog)
+    #: Today's appointments from the Outlook calendar (release 5.127), read at most every 5 minutes, shared by the Today view
+    #: and the Today side panel so they read it once.
+    calendar: TodayCalendar = field(default_factory=TodayCalendar)
     #: The Model last loaded, and the database's state when it was (``model``).
     _model: Model | None = field(default=None, init=False, repr=False)
     _model_at: tuple[int, int] | None = field(default=None, init=False, repr=False)

@@ -20,6 +20,7 @@ from docrepo.links import is_folder, is_link
 from docrepo.schedule import is_open
 from docrepo.ui import conversation_page, decision_register, t_mails, task_menus
 from docrepo.ui import task_tile as tile_ui
+from docrepo.ui.lists import review as review_list
 from docrepo.ui.icons import icon
 from docrepo.ui.look import LOOK
 from docrepo.views import full_path
@@ -42,6 +43,8 @@ class PageCommands:
             self._action("Open folder", lambda: self.reveal(self.ctx.data_root / "Tasks" / task_id), f"Open Tasks\\{task_id} in File Explorer")
             return
         menu_key = "   " if LOOK.classic else "\t"  # a menu's key column; the Classic look puts the key after the label
+        if self.view == "review":  # the weekly review's step 4 (release 5.128): Mark reviewed first
+            review_list.page_actions(self, task_id)
         self._action("Note", lambda: self.open_capture(task=task_id, mode="note"), "Add a note to this task's notes page", icon_name="note", key="N")
         self._action("Update", lambda: self.open_capture(task=task_id, mode="update"), "Update this task: its state, status, dates and more",
                      icon_name="update", key="U")
@@ -193,6 +196,13 @@ class PageCommands:
             conversation_page.on_link(self, kind, rest)
         elif kind == decision_register.LINK:  # the Decisions section's Copy (release 5.124, decision 479)
             decision_register.copy(self, rest)
+        elif kind == "meetrow":  # a meeting's row in Meetings, unfolded or folded (release 5.140, decision 607)
+            st.meeting_open = "" if st.meeting_open == rest else rest
+            self.render_detail(keep_scroll=True)
+        elif kind == "meetingnotes":  # the Meetings section's Meeting notes (decision 607)
+            self.open_capture(task=rest, meeting=True)
+        elif kind in ("allnotes", "notesgo"):  # All notes' links (release 5.140, decisions 603, 605 and 609)
+            self.all_notes_link(kind, rest)
         elif kind == "doc":
             self.view = "docs"
             self.select("doc", rest, update_list=True)
@@ -251,7 +261,7 @@ class PageCommands:
             self.render_detail(keep_scroll=True)
         # The task page's own (release 5.21): Details, the whole description and the closed subtasks, the history's scope
         # and order menus, New task under this one, Add one (an update), a reference field's Copy, and the task's folder.
-        elif kind == "fold" and rest in ("details", "desc", "closed", "conversations", "decisions"):
+        elif kind == "fold" and rest in ("details", "desc", "closed", "conversations", "decisions", "meetings"):
             setattr(st, rest, not getattr(st, rest))
             if rest == "details":  # since release 5.84 Details is a group of the page; the link opens it
                 self.task_pane.header.groups["details"].set_open(st.details, emit=True)
@@ -262,6 +272,10 @@ class PageCommands:
             self.open_capture(task=rest, mode="new_task")
         elif kind == "update":
             self.open_capture(task=rest, mode="update")
+        elif kind == "progress" and rest in self.model().tasks:  # the status card's Log progress… (release 5.139, decision 583)
+            self.ctx.log_progress(rest)
+        elif kind == "gotit" and rest in self.model().tasks:  # the status card's Got it (decision 581)
+            self.got_it(rest)
         elif kind == "copyref" and self.sel and self.sel[0] == "task":
             self.copy_reference(self.sel[1], unquote(rest))
         elif kind == "folder" and rest in self.model().tasks:
@@ -276,6 +290,16 @@ class PageCommands:
         elif kind in ("goto", "readd") and ":" in rest:
             task_id, capture_id = rest.split(":", 1)
             (self.go_to_block if kind == "goto" else self.add_again)(task_id, capture_id)
+
+    def got_it(self, task_id: str) -> None:
+        """Got it (release 5.139, decision 581): the task's wait ends by the owner's word, and the follow-up it set goes."""
+        from docrepo import progress
+
+        title = self.model().task(task_id).title
+        if progress.got_it(self.conn, self.ctx.settings, task_id, self.ctx.now()):
+            self.say(f"{title} isn't waiting any more; its follow-up is gone.", False)
+            self.ctx.today_changed()
+            self.refresh()
 
     def _page_menu(self, which: str) -> None:
         """The task page's history menus: which tasks' entries it shows, with Open all and Close all chapters, and the

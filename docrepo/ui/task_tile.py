@@ -209,6 +209,7 @@ def fill_menu(browse: BrowseWindow, task_id: str, menu: QMenu, own: Iterable[Own
     menu.addMenu(task_menus.add_to_menu(browse, task_id, menu))
     if not ask_first and others_on(browse, task_id):
         t_mails.add_ask(browse, task_id, menu)
+    add_wait_lines(browse, task_id, menu)
     put = task_commands.put_under(m, task_id)
     if put is not None:
         task_menus.fill(menu, [put], lambda e: task_menus.run(browse, task_id, e, anchor, after, tell))
@@ -228,6 +229,24 @@ def fill_menu(browse: BrowseWindow, task_id: str, menu: QMenu, own: Iterable[Own
     menu.addMenu(edit)
     menu.addMenu(_priority_menu(browse, task_id, menu))
     menu.addMenu(_copy_menu(browse, task_id, menu))
+
+
+def add_wait_lines(browse: BrowseWindow, task_id: str, menu: QMenu) -> None:
+    """Release 5.139's wait on a tile's menus (the task tile plan's decision 567): Log progress…, and Got it while the task
+    waits. On the right-click menu after Ask for an update, and at the end of the circle's menu, under a line, as the owner
+    looks for "waiting" where a state is set. Nothing on a closed or discarded task."""
+    from docrepo import waits as wait_records
+
+    m = browse.model()
+    t = m.tasks.get(task_id)
+    if t is None or t.discarded or t.state == "Closed":
+        return
+    menu.setToolTipsVisible(True)
+    logged = menu.addAction(icon("waiting"), "Log progress…", lambda: browse.ctx.log_progress(task_id))
+    logged.setToolTip("A line of what you did, who you're waiting on and when to follow up")
+    if wait_records.current(m, task_id) is not None:
+        got = menu.addAction(icon("state-cl"), "Got it", lambda: browse.got_it(task_id))
+        got.setToolTip("The answer came: stop waiting, and take away the follow-up")
 
 
 def tile_menu(browse: BrowseWindow, task_id: str, parent: QWidget | None, own: Iterable[Own] = (), **options) -> QMenu | None:

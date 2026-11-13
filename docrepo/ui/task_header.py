@@ -24,11 +24,12 @@ from docrepo.ui.page_view import FitPageView
 
 #: The groups, in the page's order, with their titles. When and who went into the facts grid in release 5.113. Decisions
 #: (release 5.124, the cold-eyes plan's decision 477) come after Subtasks and before Email conversations.
-GROUPS = (("key_dates", "Key dates"), ("agenda", "Agenda"), ("subtasks", "Subtasks"), ("decisions", "Decisions"), ("emails", "Email conversations"),
-          ("links", "Links"), ("files", "Files"), ("details", "Details"))
-#: Open until the owner folds them: what's dated and what's next, what's been decided (release 5.124) and the task's
-#: emails (release 5.122, the email section plan's decision 455). The rest open on a click, remembered per task.
-OPEN_BY_DEFAULT = frozenset({"key_dates", "agenda", "subtasks", "decisions", "emails"})
+GROUPS = (("key_dates", "Key dates"), ("agenda", "Agenda"), ("subtasks", "Subtasks"), ("meetings", "Meetings"), ("decisions", "Decisions"),
+          ("emails", "Email conversations"), ("links", "Links"), ("files", "Files"), ("details", "Details"))
+#: Open until the owner folds them: what's dated and what's next, the meetings it was in (release 5.140, the notes
+#: consolidation plan's decision 607), what's been decided (release 5.124) and the task's emails (release 5.122, the
+#: email section plan's decision 455). The rest open on a click, remembered per task.
+OPEN_BY_DEFAULT = frozenset({"key_dates", "agenda", "subtasks", "meetings", "decisions", "emails"})
 #: How far a section's chevron hangs into the margin, so its title starts on the page's left edge (decision 423).
 HANG = 22
 _TAGS = re.compile(r"<[^>]+>")
@@ -157,10 +158,10 @@ class TaskHeader(QWidget):
         self.status_name.setFont(tokens.ui_font(tokens.CAPTION, semibold=True))
         self.status_when = QLabel("", objectName="statusWhen")
         self.status_when.setFont(tokens.ui_font(tokens.CAPTION))
-        # "asked Mon" while an Ask for an update waits for a capture on the task (release 5.125, the cold-eyes plan's decision 485).
-        self.status_asked = QLabel("", objectName="statusWhen")
-        self.status_asked.setFont(tokens.ui_font(tokens.CAPTION))
-        self.status_asked.hide()
+        # The waiting mark while the task waits (release 5.139, decision 580; "asked Mon" in release 5.125).
+        self.status_wait = QLabel("", objectName="statusWhen")
+        self.status_wait.setFont(tokens.ui_font(tokens.CAPTION))
+        self.status_wait.hide()
         self.status_fold = QToolButton(objectName="statusLog")
         self.status_fold.setIcon(icon("chevron-right"))
         self.status_fold.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
@@ -171,7 +172,7 @@ class TaskHeader(QWidget):
         self.status_fold.clicked.connect(lambda: self.set_log_open(not self.log_open, emit=True))
         row.addWidget(self.status_name)
         row.addWidget(self.status_when)
-        row.addWidget(self.status_asked)
+        row.addWidget(self.status_wait)
         row.addStretch()
         row.addWidget(self.status_fold)
         self.status_body = fit_view(css, (0, 4, 0, 0))
@@ -206,10 +207,12 @@ class TaskHeader(QWidget):
         self.status_name.setText(parts["status_name"])
         self.status_when.setText(f"· {parts['status_when']}" if parts["status_when"] else "")
         self.status_when.setToolTip(f"The current status last changed {parts['status_age']}" if parts["status_age"] else "")
-        asked = parts.get("status_asked", "")
-        self.status_asked.setText(f"· {asked}")
-        self.status_asked.setToolTip(parts.get("status_asked_tip", ""))
-        self.status_asked.setVisible(bool(asked))
+        wait = parts.get("status_wait", "")
+        self.status_wait.setText(f"· {wait}")
+        self.status_wait.setToolTip(parts.get("status_wait_tip", ""))
+        late = bool(parts.get("status_wait_late"))  # from the follow-up day, in the caution colour
+        self.status_wait.setStyleSheet(f"color: {tokens.LIGHT['caution']}; font-weight: 600" if late else "")
+        self.status_wait.setVisible(bool(wait))
         self.status_body.setHtml(parts["status_body"])
         self.status_log.setHtml(parts["status_log"])
         self.status_fold.setText(parts["status_log_summary"])

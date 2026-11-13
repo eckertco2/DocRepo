@@ -37,7 +37,7 @@ from PySide6.QtWidgets import (
 
 from docrepo import __version__, backup, capacity, db, diagnose, hotkey, outlook, prompts, search, startup, tagged, wheels_config
 from docrepo import tagged_masks as masks
-from docrepo.config import Settings, data_root_problem, init_data_root, make_safe_fs, resolve_data_root, save_location
+from docrepo.config import REVIEW_DAYS, Settings, data_root_problem, init_data_root, make_safe_fs, resolve_data_root, save_location
 from docrepo.dates import WEEKDAYS, long_date, stamp
 from docrepo.links import check_link_template
 from docrepo.markup import esc
@@ -135,6 +135,12 @@ def check_values(ctx: AppContext, values: dict[str, Any]) -> dict[str, Any]:
         if why:
             raise SettingsProblem(f"{name}'s link address needs to be one that {why}, such as https://example.com/record/{{}}.")
     out["reference_links"] = links
+    if "review_day" in out and out["review_day"] not in REVIEW_DAYS:  # release 5.128
+        raise SettingsProblem("The review day is a day of the week.")
+    if "review_weeks" in out and out["review_weeks"] not in (1, 2, 4):
+        raise SettingsProblem("Projects come up every 1, 2 or 4 weeks.")
+    if "quiet_days" in out and not (isinstance(out["quiet_days"], int) and 1 <= out["quiet_days"] <= 365):
+        raise SettingsProblem("Gone quiet is after 1 to 365 days.")
     if out.get("look", "new") not in ("new", "classic"):
         raise SettingsProblem("The look is the new one or the Classic one.")
     if out.get("me") and out["me"] not in Model(ctx.conn).people:
@@ -397,6 +403,10 @@ class SettingsView(QWidget):
         self._build_backups(lay)
         # ---- calendar and reminders ----
         self._build_calendar(lay)
+        # ---- Today: its meetings from the Outlook calendar (release 5.127) ----
+        self._build_today(lay)
+        # ---- the weekly review (release 5.128) ----
+        self._build_review(lay)
         # ---- Parse and populate ----
         self._build_parse(lay)
         # ---- tagged labels' patterns, Never a tag and the tester (release 5.80) ----
@@ -543,6 +553,49 @@ class SettingsView(QWidget):
             ("Capacity horizon", "How far ahead routine tasks fill the capacity calendar.", self.horizon),
         ])
 
+    def _build_today(self, lay) -> None:
+        """Today (release 5.127, the cold-eyes plan's decisions 491 and 494): the switch for today's meetings from Outlook, on
+        by default, and the meeting links, each with Remove."""
+        from docrepo.ui.today_meetings import MeetingLinks
+
+        self.meetings_on = QCheckBox("Show today's meetings from Outlook")
+        self.meetings_on.setToolTip("Today's first group, and the Today side panel's first line. Off, DocRepo doesn't read the calendar")
+        self.meeting_links = MeetingLinks(self.ctx, self.message)
+        self._card(lay, "Today", [
+            ("Today's meetings", "Today's first group lists today's appointments in your Outlook calendar: each one's time, subject and "
+                                 "place, and, once it's linked, how many are on its agenda, with Agenda and Meeting notes. DocRepo only "
+                                 "reads the calendar, never its attendees or words, and never starts Outlook to do it.", self.meetings_on),
+            ("Meeting links", "Each appointment's subject you've linked, and the meeting task or person it's linked to: it's linked "
+                              "each time it's on your calendar. Remove forgets a link at once.", QWidget()),
+            (None, "", self.meeting_links),
+        ])
+
+    def _build_review(self, lay) -> None:
+        """The weekly review (release 5.128, the cold-eyes plan's decisions 499, 500 and 502): its day, how often a project
+        comes up, and when a task has gone quiet, which the quick summary's grey "quiet" uses too."""
+        self.review_day = QComboBox()
+        self.review_day.setAccessibleName("Review day")
+        for day, name in zip(WEEKDAYS, ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"), strict=True):
+            self.review_day.addItem(name, day)
+        self.review_day.setFixedWidth(160)
+        self.review_weeks = QComboBox()
+        self.review_weeks.setAccessibleName("Projects come up for review")
+        for weeks, words in ((1, "Every week"), (2, "Every 2 weeks"), (4, "Every 4 weeks")):
+            self.review_weeks.addItem(words, weeks)
+        self.review_weeks.setFixedWidth(160)
+        self.quiet_days = QSpinBox()
+        self.quiet_days.setRange(1, 365)
+        self.quiet_days.setSuffix(" days")
+        self.quiet_days.setAccessibleName("Gone quiet after")
+        self.quiet_days.setFixedWidth(120)
+        self._card(lay, "Weekly review", [
+            ("Review day", "That day, Today's first line is Weekly review, until you finish one.", self.review_day),
+            ("Projects come up", "How often an open top-level task comes up in Review's Projects step. A task can have its own "
+                                 "interval, or never, in Edit task's More options.", self.review_weeks),
+            ("Gone quiet after", "A task nothing has touched for this long (a capture, a change, an edit of its notes, on it or "
+                                 "under it) is in Review's Gone quiet step, and grey in the quick summary.", self.quiet_days),
+        ])
+
     def _build_parse(self, lay) -> None:
         """Parse and populate (part of ``__init__``, release 5.95)."""
         self.events = QLineEdit()
@@ -614,12 +667,18 @@ class SettingsView(QWidget):
         for name in outlook.COLOURS:
             self.colour.addItem("None: leave Outlook's list alone" if name == "None" else name, name)
         self.colour.setFixedWidth(240)
+        self.progress_sends = QCheckBox("Log progress sends the email")
+        self.progress_sends.setToolTip("Enter in Log progress sends the draft in its own window, held a minute in the Outbox")
         self._card(lay, "Outlook", [
             ("Categories", "When a capture with an Outlook email is saved on a task, DocRepo adds the task's name to the email in "
                            "Outlook as a category, so Outlook's search finds it (category:\"Pump trial\"). Nothing else on the email "
                            "changes, and nobody on the email sees it.", self.categories),
             ("Category colour", "A new category goes on Outlook's list of categories in this colour, so it shows on the email. One "
                                 "already on the list keeps its own colour.", self.colour),
+            ("Log progress", "With this on, Enter in Log progress sends the email you're writing in its own window, after keeping the "
+                             "line, the wait and the follow-up; it's held a minute in the Outbox, where you can still stop it. A reply in "
+                             "the reading pane can't be sent by a program, so it comes back to the front for you to send, as every "
+                             "email does with this off.", self.progress_sends),
         ])
 
     def _build_troubleshooting(self, lay) -> None:
@@ -749,6 +808,9 @@ class SettingsView(QWidget):
         for d, box in self.workdays.items():
             box.setChecked(d in s.workdays)
         self.horizon.setValue(s.capacity_horizon_years)
+        self.review_day.setCurrentIndex(max(0, self.review_day.findData(s.review_day)))
+        self.review_weeks.setCurrentIndex(max(0, self.review_weeks.findData(s.review_weeks)))
+        self.quiet_days.setValue(s.quiet_days)
         self.events.setText(", ".join(s.event_words))
         self.references.set(s.reference_fields, s.reference_links)
         self.tagged.set(s.tagged_patterns, s.tagged_never)
@@ -763,6 +825,9 @@ class SettingsView(QWidget):
         self.hints.blockSignals(False)
         self.categories.setChecked(s.outlook_categories)
         self.colour.setCurrentIndex(max(0, self.colour.findData(s.outlook_category_colour)))
+        self.meetings_on.setChecked(s.today_meetings)
+        self.meeting_links.load()
+        self.progress_sends.setChecked(s.progress_sends)
         self.startup_status.setText(f"<b>Start when you sign in:</b> {startup.status()}")
         self.show_backup_status()
         self.error.hide()
@@ -776,12 +841,14 @@ class SettingsView(QWidget):
             "copilot_folder": self.copilot.text(),
             "reminder_time": self.reminder.time().toString("HH:mm"), "workdays": [d for d, box in self.workdays.items() if box.isChecked()],
             "capacity_horizon_years": self.horizon.value(), "event_words": [w for w in self.events.text().split(",")],
+            "review_day": self.review_day.currentData(), "review_weeks": self.review_weeks.currentData(), "quiet_days": self.quiet_days.value(),
             "reference_fields": self.references.names(), "reference_links": self.references.links(),
             "tagged_patterns": self.tagged.patterns(), "tagged_never": self.tagged.never(),
             "extracted_text_cap_chars": self.cap.value(), "prompt_warn_chars": self.warn.value(), "doc_check_minutes": self.check.value(),
             "backup_every_days": self.backup_days.value(), "backup_keep": self.backup_keep.value(),
             "look": self.look.currentData(), "show_hints": self.hints.isChecked(), "outlook_categories": self.categories.isChecked(),
-            "outlook_category_colour": self.colour.currentData(),
+            "outlook_category_colour": self.colour.currentData(), "today_meetings": self.meetings_on.isChecked(),
+            "progress_sends": self.progress_sends.isChecked(),
         }
 
     def save(self) -> list[str]:
@@ -872,7 +939,8 @@ class SettingsView(QWidget):
             t_mail = self.try_t_mail.isChecked()
             scratch = outlook.copy_path(self.ctx.fs, self.ctx.data_root)
             reply_to = diagnose.newest_saved_email(self.ctx.data_root) if t_mail else None
-            text = diagnose.build_report(self.ctx.data_root, now, list(diagnose.DRAGS), drops=list(diagnose.DROPS),
+            waits = self.ctx.t_mail_report() if self.ctx.t_mail_report is not None else None
+            text = diagnose.build_report(self.ctx.data_root, now, list(diagnose.DRAGS), drops=list(diagnose.DROPS), t_mails=waits,
                                          check_outlook=lambda: diagnose.outlook_check(try_category=trying, scratch=scratch, colour=colour,
                                                                                       try_t_mail=t_mail, reply_to=reply_to))
             try:

@@ -141,7 +141,7 @@ def test_new_t_mail_opens_an_email_and_keeps_it_on_the_task(browse, fake_outlook
     assert fake_outlook == [("new", NOW)]
     t = Model(browse.conn).t_mails[-1]
     assert (t.task, t.kind, t.conversation, t.opened) == (RIGGING, "new", OTHER.hex().upper(), "2026-10-08 14:10:00")
-    assert browse.status.text() == "Opened a new T-mail from Rigging plan in Outlook. When you capture its replies, they'll go to Rigging plan."
+    assert browse.status.text() == "Opened a new T-mail from Rigging plan in Outlook. When you send it, it's captured on Rigging plan, and so are the replies you capture."
     # Its replies now fill the capture window's picker with the task.
     answer = email("Re: hello", OTHER, replies=1, message_id="<c1@example.com>")
     assert conversations.pick_emails(Model(browse.conn), [answer]).task == RIGGING
@@ -174,7 +174,7 @@ def test_the_arrow_replies_to_the_tasks_latest_email(browse, ctx, fake_outlook):
     assert fake_outlook[-1][:3] == ("reply", "E2", "S1") and fake_outlook[-1][3].name == "email.msg"
     t = Model(browse.conn).t_mails[-1]
     assert (t.task, t.kind, t.reply_capture, t.reply_pos) == (RIGGING, "reply", newest, 0)
-    assert browse.status.text() == "Opened a Reply all from Rigging plan in Outlook. When you capture its replies, they'll go to Rigging plan."
+    assert browse.status.text() == "Opened a Reply all from Rigging plan in Outlook. When you send it, it's captured on Rigging plan, and so are the replies you capture."
 
 
 # ================= Reply all in Find files and on a capture's page =================
@@ -207,3 +207,29 @@ def test_an_unfiled_captures_reply_is_opened_but_not_kept(browse, ctx, fake_outl
     browse.on_link(QUrl(f"replyall:{cid}:0"))
     assert fake_outlook[-1][0] == "reply" and Model(browse.conn).t_mails == []
     assert "isn't filed to a task" in browse.status.text()
+
+
+def test_a_new_t_mail_outlook_wont_tag_is_kept_by_its_draft(browse, monkeypatch):
+    """Release 5.141 (the owner's report of 2026-11-12): Outlook's guard refused the index, so the T-mail is kept with its
+    draft's place and known when it's sent."""
+    from docrepo import sent_watch
+
+    monkeypatch.setattr(outlook, "new_t_mail", lambda now: outlook.Opened("", "none", "D1", "S1"))
+    opened: list[int] = []
+    browse.ctx.t_mail_opened = lambda: opened.append(1)
+    browse.select("task", RIGGING)
+    bar(browse)["New T-mail"].click()
+    t = Model(browse.conn).t_mails[-1]
+    assert (t.task, t.kind, t.conversation) == (RIGGING, "new", "")
+    assert sent_watch.drafts(browse.conn)[t.id] == sent_watch.Draft("D1", "S1") and opened == [1]
+    assert browse.status.text() == ("Opened a new T-mail from Rigging plan in Outlook. When you send it, DocRepo files it on "
+                                    "Rigging plan, and its replies follow.")
+    assert not browse.status.property("error")
+
+
+def test_a_new_t_mail_with_no_index_and_no_draft_says_so(browse, monkeypatch):
+    monkeypatch.setattr(outlook, "new_t_mail", lambda now: outlook.Opened("", "none"))
+    browse.select("task", RIGGING)
+    bar(browse)["New T-mail"].click()
+    assert Model(browse.conn).t_mails == [] and browse.status.property("error")
+    assert "Outlook gave it no conversation index" in browse.status.text()

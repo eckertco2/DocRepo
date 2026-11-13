@@ -24,7 +24,7 @@ from PySide6.QtCore import QAbstractNativeEventFilter, QLockFile, QObject, QRect
 from PySide6.QtGui import QAction, QColor, QFont, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QInputDialog, QMenu, QMessageBox, QSystemTrayIcon
 
-from docrepo import backup, capacity, db, diagnose, edits, hotkey, notes_page, people, prompts, search, tagged
+from docrepo import backup, capacity, db, diagnose, edits, hotkey, notes_page, people, prompts, search, sent_watch, tagged
 from docrepo.config import Settings
 from docrepo.dates import long_date, stamp
 from docrepo.model import Model
@@ -150,6 +150,7 @@ class CaptureApp(QObject):
         self.wheels = Wheels(self)  # the navigation wheels (release 5.41)
         ctx.wheel_palette = self.wheels.palette_commands
         ctx.open_summary = self.wheels.quick_summary  # the quick summary, from a page or Ctrl+K (release 5.131)
+        ctx.log_progress = lambda task=None: self.wheels.log_progress(task, with_email=False)  # the status card's (release 5.139)
         self.panel: TodayPanel | None = None  # the Today side panel, made the first time it opens (release 5.43)
         menu = QMenu()
         menu.addAction("New capture", lambda: self.window.show_capture())
@@ -186,10 +187,17 @@ class CaptureApp(QObject):
             hotkey.HOTKEY_IDS["pin_hotkey"]: self.window.toggle_pin,
             hotkey.HOTKEY_IDS["outlook_hotkey"]: self.window.add_selected_email,
             hotkey.HOTKEY_IDS["today_panel_hotkey"]: lambda: self.today_panel_action("hotkey"),
+            hotkey.HOTKEY_IDS["progress_hotkey"]: lambda: self.wheels.log_progress(),  # release 5.139, decision 583
         }
         self.register_hotkey()
         if db.get_state(ctx.conn, OPEN_KEY) == "1":  # open or closed is remembered across restarts (release 5.43)
             QTimer.singleShot(0, lambda: self.today_panel_action("open"))
+        # T-mails captured when they're sent (K8's release C, release 5.123): Sent Items watched while one waits.
+        self.message_capture: str | None = None
+        self.sent = sent_watch.Watcher(ctx.conn, ctx.data_root, ctx.fs, ctx.settings, ctx.now, self.t_mail_captured,
+                                       lambda work: QTimer.singleShot(0, work))
+        ctx.t_mail_opened = self.sent.started
+        ctx.t_mail_report = self.sent.report
         self.timer = QTimer(self)
         self.timer.setInterval(60_000)
         self.timer.timeout.connect(self.tick)
@@ -251,7 +259,10 @@ class CaptureApp(QObject):
         self.browse.show_browse(view, task)
 
     def settings_changed(self, keys: list[str]) -> None:
-        """Apply what the Settings view changed: a new hotkey works at once."""
+        """Apply what the Settings view changed: a new hotkey works at once, and today's meetings show or go from the Today
+        side panel (release 5.127)."""
+        if "today_meetings" in keys:
+            self.ctx.today_changed()
         if any(k in hotkey.HOTKEY_IDS or k == "wheel_hotkeys" for k in keys):
             self.unregister_hotkeys()
             self.paused = False
@@ -288,11 +299,37 @@ class CaptureApp(QObject):
             self.window.show_capture()
 
     # ---- notifications and reminders ----
+    def progress_logged(self, done, said: str, trouble: bool) -> None:
+        """Log progress kept it (release 5.139): say so from the tray, and bring the lists up to date."""
+        self.notify("Log progress" if not trouble else "Log progress: press Send in Outlook", said)
+        self.ctx.today_changed()
+        if self.browse.isVisible():
+            self.browse.refresh()
+        else:
+            self.browse.dirty = True
+
     def notify(self, title: str, text: str) -> None:
         self.tray.showMessage(title, text, make_icon(), 6000)
 
+    def t_mail_captured(self, captured: sent_watch.Captured) -> None:
+        """A sent T-mail is a capture now (decision 44): say so; clicking the notification opens it."""
+        self.reminder_task, self.reminder_many = None, False
+        self.message_capture = captured.capture
+        self.notify("T-mail captured", sent_watch.notice(self.ctx.model(), captured))
+        self.ctx.today_changed()
+        if self.browse.isVisible():
+            self.browse.refresh()
+        else:
+            self.browse.dirty = True
+
     def _message_clicked(self) -> None:
-        """Clicking a reminder opens the browse tool's Reminders list, on that task when there's one."""
+        """Clicking a reminder opens the browse tool's Reminders list, on that task when there's one; clicking a T-mail's
+        notification opens its capture (release 5.123)."""
+        if self.message_capture:
+            capture, self.message_capture = self.message_capture, None
+            self.show_browse()
+            self.browse.go_capture(capture)
+            return
         if self.reminder_task or self.reminder_many:  # on Today, where the reminder put it (release 5.116, decision 415)
             self.show_browse("today", self.reminder_task)
         self.reminder_task, self.reminder_many = None, False
@@ -312,6 +349,7 @@ class CaptureApp(QObject):
                 who = ", ".join(model.person_name(p) for p in t.assignees)
                 d = due_of(t, today)
                 lines.append(" · ".join(x for x in (t.title, who, f"{d.label.lower()} {long_date(d.date, today)}" if d else "") if x))
+            self.message_capture = None
             self.reminder_task = due[0].id if len(due) == 1 else None
             self.reminder_many = len(due) > 1
             self.notify("Reminder" if len(due) == 1 else f"{len(due)} reminders", "\n".join(lines))
@@ -407,6 +445,10 @@ class CaptureApp(QObject):
                 self.reminders_to_today()
         except Exception:  # noqa: BLE001 - a background check must never stop the app
             log.exception("background check failed")
+        try:
+            self.sent.tick()  # T-mails: join Outlook while one waits, and sweep every 5 minutes (release 5.123)
+        except Exception:  # noqa: BLE001
+            log.exception("T-mail watch failed")
 
     def quit(self) -> None:
         self.window.keep_draft(closing=True)  # an open capture waits in Drafts for the next start (release 5.77)
@@ -474,6 +516,7 @@ def run(data_root: Path, settings: Settings, fs: SafeFS, browse: bool = False) -
     if browse:
         app.show_browse()
     app.show_reminders()
+    QTimer.singleShot(3000, app.sent.tick)  # the start-up sweep, once the windows are up (release 5.123)
     log.info("capture app started")
     code = qt.exec()
     conn.close()

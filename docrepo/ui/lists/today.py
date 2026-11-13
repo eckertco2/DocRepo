@@ -22,10 +22,12 @@ from PySide6.QtWidgets import (
     QPushButton,
 )
 
-from docrepo import ask_update, db, edits, key_dates, later
+from docrepo import db, edits, key_dates, later, waits
 from docrepo.dates import long_date
 from docrepo.detail import esc
 from docrepo.model import Model
+from docrepo.ui import today_meetings
+from docrepo.ui.lists import review as review_list
 from docrepo.ui.tree_view import Line, group_ground, state_icon, with_actions
 from docrepo.views import (
     project_text,
@@ -84,6 +86,8 @@ class TodayList:
         self._button("Add", self.add_today_item)
         self.tree.set_columns(*_cols(*with_actions(["Item", "State", "Due"], [0, 96, 96 if LOOK.classic else DAYS_COL], 220)))
         grey = group_ground()
+        review_list.today_row(self, grey)  # on the review day, "Weekly review" first (release 5.128, decision 502)
+        today_meetings.add_group(self, grey)  # Meetings first, from the Outlook calendar (release 5.127, decision 490)
         for name, group in today_groups(m, today):  # each group's items under its heading, which folds (release 5.24)
             head = self.tree.add_row(None, None, [f"<b>{esc(name)}</b>"], grey, selectable=False, span=True)
             for a in group:
@@ -92,8 +96,13 @@ class TodayList:
                 # One line (decisions L1 and L3): the title, then its project and how long it's been carried, in quiet words.
                 since = f"since {since_text(a.added, today)}" if a.added[:10] < today.isoformat() else ""
                 reminder = "reminder" if a.added_by == edits.REMINDER else ""  # a reminder put it here (decision 415)
-                # "asked Mon" (release 5.125, decision 485) is the tile's hourglass since 5.138 (decision 567); the Classic look keeps the words.
-                asked = ask_update.asked_text(m, t.id, today) if t and LOOK.classic else ""
+                # Its wait (release 5.139, decisions 580 and 595; "asked Mon" in 5.125): "Follow up: no reply from Dana since
+                # Thu" in place of "reminder" once its follow-up day has come. While it's waiting, the tile's hourglass says so
+                # (release 5.138, decision 567); the Classic look keeps "waiting on Dana · Thu".
+                wait = waits.current(m, t.id) if t else None
+                asked = waits.words(m, wait, today, row=True) if wait is not None and not wait.late(today) and LOOK.classic else ""
+                if wait is not None and wait.late(today):
+                    reminder = f"Follow up: {waits.words(m, wait, today)}"
                 context = " · ".join(x for x in (project_text(m, t.id) if t else "", a.note if t else "", reminder, asked, since) if x)
                 icon, colour = state_icon(t.state) if t else ("note", "text2")
                 if t and not LOOK.classic:  # a tile (release 5.138): depth ticks, as Today is flat, and no sun, as every task here is on it
@@ -267,6 +276,16 @@ class TodayList:
                   ("Later…", lambda: self.later_menu(task_id, item_id), LATER_TIP)) if task_id else
                  (("Edit", lambda: self.edit_today_note(item_id), "Change the note's text"),
                   ("Make it a task", lambda: self.make_today_task(item_id), "Make it a quick task, under Quick tasks, in the note's place")))
+        if task_id and waits.current(self.model(), task_id) is not None:  # a wait's row (release 5.139, decision 595)
+            from docrepo import conversations
+            from docrepo.ui import t_mails
+
+            found = conversations.latest_email(self.model(), task_id)
+            if found is not None:
+                c, e = found
+                links = (("Reply all", lambda: t_mails.reply_all(self, c.id, e.pos, task_id), "Reply all to the newest email on the task, "
+                          "to follow up; then Log progress on it"), *links)
+            links = (("Got it", lambda: self.got_it(task_id), "The answer came: stop waiting, and take away the follow-up"), *links)
         return [*links, ("Done", lambda: self.close_today_item(item_id, "Done"),
                          "Take it off Today as done, and open an Update on the task" if task_id else "Take it off Today as done"),
                 ("Remove", lambda: self.close_today_item(item_id, "Removed"), "Take it off Today")]

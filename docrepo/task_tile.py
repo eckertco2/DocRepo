@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from datetime import date
 from html import escape
 
-from docrepo import ask_update
+from docrepo import waits as wait_records
 from docrepo.dates import day_diff, days_words, long_date, to_date
 from docrepo.model import TODAY, Model, Task
 from docrepo.schedule import due_of
@@ -173,8 +173,10 @@ class Mark:
 
 
 @dataclass(frozen=True)
-class Wait:
-    """A task waiting on someone. Until release 5.139's waits, it's 5.125's ask: no follow-up day, so never late."""
+class TileWait:
+    """What a tile's hourglass says of a task's open wait (release 5.139's ``docrepo.waits``, the email-progress plan's
+    decisions 580 and 581): since when, a row's words ("waiting on Dana · Thu", or "no reply from Dana since Thu" once its
+    follow-up day has come), its tooltip, and whether that day has come."""
 
     since: str
     words: str
@@ -189,7 +191,7 @@ class Marks:
     today: frozenset[str]
     #: Each task's open agenda items' targets, by name: a meeting's title or a person's name.
     agendas: dict[str, tuple[str, ...]]
-    waits: dict[str, Wait]
+    waits: dict[str, TileWait]
 
 
 _MARKS: "weakref.WeakKeyDictionary[Model, tuple[date, Marks]]" = weakref.WeakKeyDictionary()
@@ -201,13 +203,18 @@ def listed(names: Iterable[str]) -> str:
     return names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}" if names else ""
 
 
-def wait_of(m: Model, task_id: str, today: date) -> Wait | None:
-    """The wait a task's hourglass shows. Release 5.139 (the email-progress plan's decisions 580 and 581) makes this its
-    wait record, with a follow-up day; until then it's an ask that's still waiting (5.125)."""
-    opened = ask_update.asked(m, task_id)
-    if not opened:
+def wait_of(m: Model, task_id: str, today: date) -> TileWait | None:
+    """The wait a task's hourglass shows (decision 567): its open wait (release 5.139), or None. An Ask for an update starts
+    one too (the email-progress plan's decision 593)."""
+    w = wait_records.current(m, task_id)
+    if w is None:
         return None
-    return Wait(opened, ask_update.asked_words(opened, today), ask_update.asked_tip(opened, today))
+    late = w.late(today)
+    tip = wait_records.tip(m, w, today)
+    if late:  # "No reply from Dana since Thu." first, as the row's words say it
+        said = wait_records.words(m, w, today)
+        tip = f"{said[:1].upper()}{said[1:]}. {tip}"
+    return TileWait(w.since, wait_records.words(m, w, today, row=True), tip, late)
 
 
 def marks(m: Model, today: date) -> Marks:
@@ -228,7 +235,7 @@ def marks(m: Model, today: date) -> Marks:
             if name not in names:
                 names.append(name)
     waits = {}
-    for task_id in ask_update.asked_all(m):
+    for task_id in wait_records.open_waits(m):
         w = wait_of(m, task_id, today)
         if w is not None:
             waits[task_id] = w

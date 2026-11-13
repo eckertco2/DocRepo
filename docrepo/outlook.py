@@ -24,10 +24,26 @@ On the owner's click (the knowledge base's stage K8, release B, as release
 email the owner filed (``reply_all``), and opens it for the owner to write and
 send. A new email Outlook gives no conversation index is saved to Drafts first,
 as Outlook's AutoSave would, and if it still has none, DocRepo gives it one in
-MS-OXOMSG's shape (KB decision 39). It never sends one. Since release 5.125
+MS-OXOMSG's shape (KB decision 39). It never sends one. Where Outlook's security
+guard refuses that (it guards ``PropertyAccessor`` itself), release 5.141 keeps the
+draft's place instead: ``draft_state`` looks at the draft again, reading only its
+subject and index, and ``watch_send`` hears Outlook's ``ItemSend``, reading only
+the email's EntryID, subject and index and never cancelling a send, so the email
+is known when it's sent (``docrepo.sent_watch``). Since release 5.125
 Ask for an update (``ask_t_mail``) makes a new T-mail with its To, Subject and
 words filled in: it writes those fields, shows the email so Outlook adds the
 owner's signature, puts the words before it, and still never sends it.
+
+Log progress (release 5.139, the email progress plan's decisions 584 and 590)
+finds the email being written in Outlook's active window (``front_draft``) and,
+on the owner's Enter in its window, sends that draft (``send_draft``), with its
+deferred delivery a minute on; an inline reply, which Outlook won't let a program
+send, or a send Outlook refuses, is brought back to the front (``show_draft``).
+
+Since release 5.127 (the cold-eyes plan's decisions 488 to 495) it reads today's appointments from the default calendar
+for Today's Meetings (``todays_appointments``): only their subject, start, end, location, whether all day, busy status,
+meeting status, sensitivity and whether recurring, never attendees, the organizer or the body. It never starts Outlook
+to do it, and writes nothing to the calendar.
 
 Each field is read on its own, so a field Outlook refuses (its security guard
 can refuse the sender, the recipients or the body) leaves only that field out.
@@ -43,14 +59,16 @@ import re
 from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
+from time import perf_counter
 from typing import TYPE_CHECKING
 
 from docrepo.layer0 import Part
 from docrepo.save import Attachment, EmailItem, FileRow
 
 if TYPE_CHECKING:
+    from docrepo.meetings import Appointment
     from docrepo.model import Model
     from docrepo.safe_fs import SafeFS
 
@@ -152,10 +170,11 @@ def outlook_window_open() -> bool:
     return bool(ctypes.windll.user32.FindWindowW(OUTLOOK_WINDOW_CLASS, None))
 
 
-def connect() -> tuple[object, str]:
+def connect(quiet: bool = False) -> tuple[object, str]:
     """The running Outlook, and how it was found. GetActiveObject first; Office registers itself late, so when that
     fails but Outlook's window is open, Dispatch joins the running Outlook (it never starts one: the window check
-    comes first)."""
+    comes first). ``quiet`` (today's meetings, read every few minutes, release 5.127): Outlook simply not running isn't
+    kept as a problem."""
     try:
         import pythoncom  # noqa: F401 - pywin32's COM support; importing it starts COM on this thread
         import win32com.client
@@ -164,7 +183,7 @@ def connect() -> tuple[object, str]:
     try:
         return win32com.client.GetActiveObject("Outlook.Application"), "GetActiveObject"
     except Exception as e:  # noqa: BLE001 - COM raises its own errors
-        first = record_problem("finding Outlook (GetActiveObject)", e)
+        first = describe(e) if quiet else record_problem("finding Outlook (GetActiveObject)", e)
     if not outlook_window_open():
         raise OutlookError("Outlook isn't open. Open classic Outlook, select the email, and try again.", "finding Outlook", first)
     try:
@@ -365,10 +384,14 @@ def copy_whole(app: object, item: object, scratch: Path) -> EmailItem:
 class Opened:
     """A T-mail Outlook opened: its whole conversation index as hex ("" when Outlook gave none), and how DocRepo got it.
     A new email's: "made" (Outlook gave one at once), "saved" (once saved to Drafts) or "written" (DocRepo gave it one,
-    KB decision 39). A reply's route to the original: "place" (where Outlook keeps it) or "msg" (its saved .msg)."""
+    KB decision 39). A reply's route to the original: "place" (where Outlook keeps it) or "msg" (its saved .msg).
+    A new email's draft place (EntryID, StoreID) too, once it's saved to Drafts: where Outlook's guard refuses DocRepo's
+    index (release 5.141), DocRepo knows the email by its draft until it's sent."""
 
     index: str
     how: str
+    entry_id: str = ""
+    store_id: str = ""
 
 
 def index_of(item: object) -> str:
@@ -442,8 +465,9 @@ def new_t_mail(now: datetime) -> Opened:
         if how != "saved":
             _close_unsaved(item)
         raise OutlookError(f"Outlook didn't open the new email ({detail}).", "opening the new email", detail) from e
+    entry_id, store_id = where_kept(item) if how != "made" else ("", "")  # saved to Drafts: its place there (release 5.141)
     log.info("Outlook: opened a new T-mail, its conversation index %s", how)
-    return Opened(index if conversations.key(index) else "", how)
+    return Opened(index if conversations.key(index) else "", how, entry_id, store_id)
 
 
 # ---- Ask for an update (release 5.125, the cold-eyes plan's decisions 481 to 487) ----
@@ -539,7 +563,8 @@ def ask_t_mail(now: datetime, to: Sequence[str], subject: str, words: str) -> As
             index, how = "", "none"
     log.info("Outlook: opened an Ask for an update, To %s, the words %s, its conversation index %s",
              "filled" if to_filled else "empty", f"in by the {placed}" if placed else "not in", how)
-    return AskOpened(Opened(index if conversations.key(index) else "", how), to_filled, placed)
+    entry_id, store_id = where_kept(item) if how != "made" else ("", "")  # its place in Drafts (release 5.141)
+    return AskOpened(Opened(index if conversations.key(index) else "", how, entry_id, store_id), to_filled, placed)
 
 
 def reply_all(entry_id: str, store_id: str, saved: Path | None) -> Opened:
@@ -581,6 +606,112 @@ def reply_all(entry_id: str, store_id: str, saved: Path | None) -> Opened:
     return Opened(index, route)
 
 
+# ---- T-mails captured when sent (K8's release C, as release 5.123) ----
+OL_FOLDER_SENT_MAIL = 5  # olFolderSentMail: the default Sent Items folder
+
+
+@dataclass(frozen=True)
+class SentCopy:
+    """An email in Sent Items, as the watch and the sweep see it before anything else is read: its whole conversation
+    index (hex), where Outlook keeps it, and (release 5.141) its subject and when it was sent, which the guard allows,
+    for a new T-mail Outlook wouldn't let DocRepo tag. Neither is ever logged."""
+
+    index: str
+    entry_id: str
+    store_id: str
+    subject: str = ""
+    sent: datetime | None = None
+
+
+def _subject(item: object) -> str:
+    try:
+        value = item.Subject  # type: ignore[attr-defined]
+    except Exception:  # noqa: BLE001 - COM raises its own errors
+        return ""
+    return value if isinstance(value, str) else ""
+
+
+def sent_items(app: object) -> object:
+    """Outlook's default Sent Items folder."""
+    return app.Session.GetDefaultFolder(OL_FOLDER_SENT_MAIL)  # type: ignore[attr-defined]
+
+
+def _sent_on(item: object) -> datetime | None:
+    try:
+        v = item.SentOn  # type: ignore[attr-defined]
+        return datetime(v.year, v.month, v.day, v.hour, v.minute, v.second)
+    except Exception:  # noqa: BLE001 - COM, or a value that isn't a time
+        return None
+
+
+def sent_since(folder: object, since: datetime, limit: int) -> list[SentCopy]:
+    """The emails in Sent Items sent since ``since``, newest first, at most ``limit``: each one's conversation index and
+    place only. Nothing else of them is read."""
+    items = folder.Items  # type: ignore[attr-defined]
+    items.Sort("[SentOn]", True)
+    out: list[SentCopy] = []
+    item, seen = items.GetFirst(), 0
+    while item is not None and seen < limit:
+        seen += 1
+        if getattr(item, "Class", None) == OL_MAIL:
+            when = _sent_on(item)
+            if when is not None and when < since - timedelta(minutes=5):  # Outlook's clock and DocRepo's may differ a little
+                break
+            out.append(SentCopy(index_of(item), *where_kept(item), _subject(item), when))
+        item = items.GetNext()
+    return out
+
+
+def copy_sent(app: object, copy: SentCopy, scratch: Path | None) -> EmailItem:
+    """A T-mail's sent copy, whole (``copy_whole``), found again by its place; read field by field when it can't be
+    copied. Called only for an email whose index matched a waiting T-mail."""
+    session = app.Session  # type: ignore[attr-defined]
+    try:
+        item = session.GetItemFromID(copy.entry_id, copy.store_id) if copy.store_id else session.GetItemFromID(copy.entry_id)
+    except Exception as e:  # noqa: BLE001
+        detail = record_problem("finding the sent T-mail (GetItemFromID)", e)
+        raise OutlookError(f"Outlook didn't give DocRepo the sent T-mail ({detail}).", "finding the sent T-mail", detail) from e
+    if scratch is not None:
+        try:
+            return copy_whole(app, item, scratch)
+        except Exception as e:  # noqa: BLE001 - read it field by field instead
+            record_problem("copying the sent T-mail whole (attached to a new email, never saved)", e)
+    try:
+        email = email_from_item(item)
+    except Exception as e:  # noqa: BLE001
+        detail = record_problem("reading the sent T-mail", e)
+        raise OutlookError(f"Outlook didn't give DocRepo the sent T-mail ({detail}).", "reading the sent T-mail", detail) from e
+    email.entry_id, email.store_id = copy.entry_id, copy.store_id
+    return email
+
+
+class _SentHandler:
+    """pywin32's handler for Sent Items' ``ItemAdd``. It reads only the new email's index and place, and hands them on;
+    the work is done after the event has returned (``on_sent``, set by ``watch_sent``)."""
+
+    on_sent = None  # set on the class watch_sent makes
+
+    def OnItemAdd(self, item: object) -> None:  # noqa: N802 - Outlook's event name
+        try:
+            if getattr(item, "Class", None) != OL_MAIL:
+                return
+            copy = SentCopy(index_of(item), *where_kept(item), _subject(item), _sent_on(item))
+        except Exception as e:  # noqa: BLE001 - an event must never raise into Outlook
+            record_problem("reading an email that arrived in Sent Items", e)
+            return
+        if self.on_sent is not None:
+            self.on_sent(copy)
+
+
+def watch_sent(app: object, on_sent) -> object:
+    """Listen for emails arriving in Sent Items (decision 43). Returns the watch, which must be kept for the events to
+    keep coming. ``on_sent`` gets each one's ``SentCopy``, inside the event: it should only schedule the work."""
+    import win32com.client
+
+    handler = type("SentHandler", (_SentHandler,), {"on_sent": staticmethod(on_sent)})
+    return win32com.client.WithEvents(sent_items(app).Items, handler)
+
+
 def show_email(entry_id: str, store_id: str) -> bool:
     """Open a captured email in Outlook, in its own window, found by its place (EntryID and StoreID, kept since release
     5.93): a conversation page's Open in Outlook (release 5.122, the email section plan's decision 460). It only shows the
@@ -602,6 +733,198 @@ def show_email(entry_id: str, store_id: str) -> bool:
         raise OutlookError(f"Outlook found the email but didn't show it ({detail}).", "showing the email", detail) from e
     log.info("Outlook: showed a captured email, found by its place")
     return True
+
+
+# ---- A new T-mail known by its draft (release 5.141, the design workspace's docs/mods/email-progress-plan.md, decision 582) ----
+#: MAPI_E_NOT_FOUND: the item isn't where its EntryID said, because it was sent (it moved) or deleted.
+NOT_FOUND = 0x8004010F
+
+
+def _codes(error: BaseException) -> set[int]:
+    """A COM error's code and its inner code, as unsigned numbers."""
+    args = getattr(error, "args", ())
+    out = {args[0] & 0xFFFFFFFF} if args and isinstance(args[0], int) else set()
+    if len(args) >= 3 and isinstance(args[2], tuple) and len(args[2]) > 5 and isinstance(args[2][5], int):
+        out.add(args[2][5] & 0xFFFFFFFF)
+    return out
+
+
+@dataclass(frozen=True)
+class DraftState:
+    """A new T-mail's draft, looked at again: still a draft (its subject and its conversation index, both of which the
+    guard allows), or gone (sent, waiting in the Outbox, or deleted)."""
+
+    gone: bool
+    subject: str = ""
+    index: str = ""
+
+
+def draft_state(app: object, entry_id: str, store_id: str) -> DraftState:
+    """Find a new T-mail's draft by its place and read only its subject and index. Gone when Outlook can't find it there
+    any more or it's been sent or handed to the Outbox. Any other failure (Outlook busy, closed) is raised, so the watch
+    tries again later rather than taking a draft for gone."""
+    session = app.Session  # type: ignore[attr-defined]
+    try:
+        item = session.GetItemFromID(entry_id, store_id) if store_id else session.GetItemFromID(entry_id)
+    except Exception as e:  # noqa: BLE001 - COM raises its own errors
+        if NOT_FOUND in _codes(e):
+            return DraftState(True)
+        raise
+    subject, index = _subject(item), index_of(item)
+    try:
+        sent = bool(item.Sent) or bool(item.Submitted)  # type: ignore[attr-defined]
+    except Exception:  # noqa: BLE001 - a draft can't say: it's still one
+        sent = False
+    return DraftState(sent, subject, index)
+
+
+@dataclass(frozen=True)
+class SendSeen:
+    """An email Outlook is sending, as its ``ItemSend`` event shows it, while it's still the draft: its EntryID (a saved
+    draft's, which is how a new T-mail is known), its subject and its conversation index, if it has one yet."""
+
+    entry_id: str
+    subject: str
+    index: str
+
+
+class _SendHandler:
+    """pywin32's handler for Outlook's ``ItemSend``. It reads only the email's EntryID, subject and index and hands them
+    on; it never cancels a send, and the work is done after the event has returned (``on_send``, set by
+    ``watch_send``)."""
+
+    on_send = None  # set on the class watch_send makes
+
+    def OnItemSend(self, item: object, cancel: object = None) -> None:  # noqa: N802 - Outlook's event name
+        try:
+            if getattr(item, "Class", None) != OL_MAIL:
+                return
+            seen = SendSeen(where_kept(item)[0], _subject(item), index_of(item))
+        except Exception as e:  # noqa: BLE001 - an event must never raise into Outlook
+            record_problem("reading an email being sent (ItemSend)", e)
+            return
+        if self.on_send is not None:
+            self.on_send(seen)
+
+
+def watch_send(app: object, on_send) -> object:
+    """Listen for Outlook sending an email (``ItemSend``, which Outlook raises for its Send button and for a program's
+    send alike). Returns the watch, to be kept for the events to keep coming. ``on_send`` gets each ``SendSeen`` inside
+    the event: it should only schedule the work."""
+    import win32com.client
+
+    handler = type("SendHandler", (_SendHandler,), {"on_send": staticmethod(on_send)})
+    return win32com.client.WithEvents(app, handler)
+
+
+# ---- Log progress (release 5.139, the design workspace's docs/mods/email-progress-plan.md, decisions 584 and 590) ----
+OL_INSPECTOR_CLASS = 35  # olInspector: a window of its own, such as a draft
+OL_EXPLORER_CLASS = 34  # olExplorer: Outlook's main window
+
+
+@dataclass
+class FrontDraft:
+    """The email the owner is writing, in front when the Log progress hotkey was pressed (decision 584): the item itself,
+    kept for the send or to bring it back to the front; whether it's an inline reply in the reading pane, which a program
+    can't send; and what DocRepo could read of it. ``copy`` is the email read from its copy without Outlook, for To and
+    what it answers, or None when it couldn't be copied."""
+
+    item: object
+    inline: bool
+    subject: str
+    index: str
+    entry_id: str
+    store_id: str
+    copy: EmailItem | None
+
+
+def _front_item(app: object) -> tuple[object | None, bool]:
+    """The draft in Outlook's active window: a draft's own window (``ActiveInspector``) or the reading pane's inline reply
+    (``ActiveInlineResponse``, empty when none is showing). (None, False) when neither is a mail being written."""
+    try:
+        window = app.ActiveWindow()  # type: ignore[attr-defined]
+        kind = getattr(window, "Class", None)
+    except Exception:  # noqa: BLE001 - no Outlook window has the focus
+        window, kind = None, None
+    candidates: list[tuple[object, bool]] = []
+    if kind == OL_INSPECTOR_CLASS:
+        candidates.append((lambda: window.CurrentItem, False))  # type: ignore[union-attr]
+    if kind in (OL_EXPLORER_CLASS, None):
+        candidates.append((lambda: app.ActiveExplorer().ActiveInlineResponse, True))  # type: ignore[attr-defined]
+    if kind is None:
+        candidates.append((lambda: app.ActiveInspector().CurrentItem, False))  # type: ignore[attr-defined]
+    for read, inline in candidates:
+        try:
+            item = read()
+        except Exception:  # noqa: BLE001, S112 - no such window, or no item in it: the next place is looked at
+            continue
+        if item is not None and getattr(item, "Class", None) == OL_MAIL and not getattr(item, "Sent", False):
+            return item, inline
+    return None, False
+
+
+def front_draft(scratch: Path | None) -> FrontDraft | None:
+    """The email being written in Outlook's active window, for Log progress (decision 584): None when Outlook isn't open
+    or no email is being written there. A draft never saved is saved to Drafts first, as Outlook's AutoSave would, so it
+    has a place; its subject and conversation index are read (the guard allows both), and with ``scratch`` it's copied
+    whole and read without Outlook, for its To and what it answers (the guard refuses To itself). Nothing is sent."""
+    if not outlook_window_open():
+        return None
+    app, _how = connect()
+    item, inline = _front_item(app)
+    if item is None:
+        return None
+    entry_id, store_id = where_kept(item)
+    if not entry_id:
+        try:
+            item.Save()  # type: ignore[attr-defined]
+            entry_id, store_id = where_kept(item)
+        except Exception as e:  # noqa: BLE001 - it's still the owner's draft; only its place is missing
+            record_problem("saving the draft for Log progress", e)
+    copy = None
+    if scratch is not None:
+        try:
+            copy = copy_whole(app, item, scratch)
+        except Exception as e:  # noqa: BLE001 - To is then typed by the owner
+            record_problem("copying the draft whole for Log progress (attached to a new email, never saved)", e)
+    log.info("Outlook: a draft for Log progress, %s, its index %s, copied %s", "inline" if inline else "in its own window",
+             "yes" if index_of(item) else "none", "yes" if copy else "no")
+    return FrontDraft(item, inline, _subject(item), index_of(item), entry_id, store_id, copy)
+
+
+def send_draft(draft: FrontDraft, now: datetime) -> None:
+    """Send the owner's own draft, the one the Log progress window named, on their Enter there (decision 590 A): first
+    its deferred delivery is set a minute on, so it waits in the Outbox as the owner's own delay rule makes mail wait.
+    Never an inline reply (Outlook won't let a program send one). Raises OutlookError when Outlook refuses; the caller then
+    brings the draft to the front for the owner to send."""
+    if draft.inline:
+        raise OutlookError("Outlook won't let a program send a reply in the reading pane.", "sending the draft", "inline")
+    item = draft.item
+    try:
+        item.DeferredDeliveryTime = now + timedelta(minutes=1)  # type: ignore[attr-defined]
+    except Exception as e:  # noqa: BLE001 - the owner's own delay rule may still hold it
+        record_problem("setting the draft's deferred delivery", e)
+    try:
+        item.Send()  # type: ignore[attr-defined]
+    except Exception as e:  # noqa: BLE001
+        detail = record_problem("sending the draft (Send)", e)
+        raise OutlookError(f"Outlook didn't send it ({detail}).", "sending the draft", detail) from e
+    log.info("Outlook: sent a draft for Log progress, deferred a minute")
+
+
+def show_draft(draft: FrontDraft) -> bool:
+    """Bring the draft back to the front for the owner to send (decision 590 B, or A's fallback): its own window, or
+    Outlook's main window for an inline reply. False when Outlook won't."""
+    try:
+        if draft.inline:
+            app, _how = connect()
+            app.ActiveExplorer().Activate()  # type: ignore[attr-defined]
+        else:
+            draft.item.GetInspector.Activate()  # type: ignore[attr-defined]
+        return True
+    except Exception as e:  # noqa: BLE001
+        record_problem("bringing the draft to the front", e)
+        return False
 
 
 def selected_emails(scratch: Path | None = None) -> list[EmailItem]:
@@ -903,3 +1226,175 @@ def refused_note(emails: list[EmailItem]) -> str:
             "Outlook's security guard does this when it doesn't trust programs that ask. If Outlook asks whether to allow access, choose Allow. "
             + ("Otherwise, copy the email's text in Outlook (Ctrl+A, then Ctrl+C) and paste it into the content text. " if text_too else "")
             + "Settings → Troubleshooting report shows Outlook's security settings.")
+
+
+# ---- Today's meetings (release 5.127, the cold-eyes plan's decisions 488 to 495) ----
+OL_FOLDER_CALENDAR = 9  # olFolderCalendar: the default calendar
+OL_PRIVATE, OL_CONFIDENTIAL = 2, 3  # Sensitivity: shown as "Private appointment", its subject and place not read
+OL_MEETING_CANCELED, OL_MEETING_RECEIVED_AND_CANCELED = 5, 7  # MeetingStatus: left out
+#: The only fields read from an appointment (decision 488). Never attendees, the organizer or the body: Outlook's security
+#: guard protects those, and Today doesn't need them. ``tests/test_meetings.py`` checks no other is read.
+CALENDAR_FIELDS = ("Subject", "Start", "End", "Location", "AllDayEvent", "BusyStatus", "MeetingStatus", "Sensitivity", "IsRecurring")
+#: At most this many appointments are read in a day, so a calendar Outlook can't end (a recurrence it expands without end,
+#: should Restrict misread its dates) can't hold DocRepo up.
+CALENDAR_LIMIT = 300
+#: The COM error codes that mean Outlook is busy, and those that mean it refused.
+BUSY_CODES = frozenset({0x80010001, 0x8001010A})
+REFUSED_CODES = frozenset({0x80004004, 0x80070005})
+LOCALE_USER_DEFAULT, DATE_SHORTDATE, TIME_NOSECONDS = 0x0400, 0x1, 0x2
+
+
+class CalendarProblem(OutlookError):
+    """Today's appointments couldn't be read. ``kind``: "closed" (Outlook isn't open), "busy", "refused" or "failed"."""
+
+    def __init__(self, kind: str, message: str, step: str = "", detail: str = "") -> None:
+        super().__init__(message, step, detail)
+        self.kind = kind
+
+
+@dataclass(frozen=True)
+class CalendarRead:
+    """One read of today's calendar, for the troubleshooting report: when, Restrict's filter (only dates, in Windows' own
+    format, which is what the corporate test checks), how many items it gave and how many were kept, how long it took, and
+    its problem. Never a subject or a place."""
+
+    at: str
+    filter: str
+    items: int
+    kept: int
+    ms: int
+    problem: str = ""
+
+
+#: This session's last reads of the calendar, newest last.
+CALENDAR_READS: deque[CalendarRead] = deque(maxlen=5)
+
+
+class _SYSTEMTIME(ctypes.Structure):
+    _fields_ = [(name, ctypes.c_ushort) for name in ("wYear", "wMonth", "wDayOfWeek", "wDay", "wHour", "wMinute", "wSecond", "wMilliseconds")]
+
+
+def restrict_stamp(when: datetime) -> str:
+    """A time as Items.Restrict reads it: Windows' short date and its time without seconds, in the owner's own format
+    (decision 488's note: "11/12/2026 12:00 AM" in the United States, "12/11/2026 00:00" in Britain), as Outlook's own
+    examples build it. Off Windows, the United States' format."""
+    if os.name == "nt":
+        st = _SYSTEMTIME(when.year, when.month, 0, when.day, when.hour, when.minute, 0, 0)
+        day_text, time_text = ctypes.create_unicode_buffer(80), ctypes.create_unicode_buffer(80)
+        k32 = ctypes.windll.kernel32
+        if (k32.GetDateFormatW(LOCALE_USER_DEFAULT, DATE_SHORTDATE, ctypes.byref(st), None, day_text, 80)
+                and k32.GetTimeFormatW(LOCALE_USER_DEFAULT, TIME_NOSECONDS, ctypes.byref(st), None, time_text, 80)):
+            return f"{day_text.value} {time_text.value}"
+    return when.strftime("%m/%d/%Y %I:%M %p")
+
+
+def calendar_filter(day: date) -> str:
+    """Restrict's filter for what's on ``day``: whatever starts before the next midnight and ends after this one, so an
+    all-day event and one that runs over midnight are in it, and yesterday's all-day event isn't."""
+    start = datetime.combine(day, time())
+    return f"[Start] < '{restrict_stamp(start + timedelta(days=1))}' AND [End] > '{restrict_stamp(start)}'"
+
+
+def problem_kind(error: BaseException) -> str:
+    """A COM error's kind: "busy", "refused" or "failed"."""
+    args = getattr(error, "args", ())
+    codes = {args[0] & 0xFFFFFFFF} if args and isinstance(args[0], int) else set()
+    if len(args) >= 3 and isinstance(args[2], tuple) and len(args[2]) > 5 and isinstance(args[2][5], int):
+        codes.add(args[2][5] & 0xFFFFFFFF)
+    return "busy" if codes & BUSY_CODES else "refused" if codes & REFUSED_CODES else "failed"
+
+
+def _minute(value: object) -> datetime | None:
+    """An appointment's time as Outlook gives it, local, to the minute. pywin32 marks it as UTC though it's local, so only
+    its parts are used."""
+    try:
+        return datetime(value.year, value.month, value.day, value.hour, value.minute)  # type: ignore[attr-defined]
+    except (AttributeError, ValueError, TypeError):
+        return None
+
+
+def appointment_of(item: object, day: date, refused: set[str]) -> Appointment | None:
+    """One appointment, from only decision 488's fields, each read on its own (``refused`` gains any Outlook won't give);
+    None for a cancelled one, or one not on ``day`` after all. A private one's subject and place aren't read."""
+    from docrepo.meetings import BUSY, Appointment
+
+    def get(name: str) -> object:
+        try:
+            return getattr(item, name)
+        except Exception:  # noqa: BLE001 - COM raises its own errors; the field is left out
+            refused.add(name)
+            return None
+
+    sensitivity = get("Sensitivity")
+    if get("MeetingStatus") in (OL_MEETING_CANCELED, OL_MEETING_RECEIVED_AND_CANCELED):
+        return None
+    start, end = _minute(get("Start")), _minute(get("End"))
+    midnight = datetime.combine(day, time())
+    if start is None or end is None or not (start < midnight + timedelta(days=1) and end > midnight):
+        return None
+    private = sensitivity in (OL_PRIVATE, OL_CONFIDENTIAL)
+    busy = get("BusyStatus")
+    return Appointment(subject="" if private else _text(get("Subject")), start=start, end=end, location="" if private else _text(get("Location")),
+                       all_day=bool(get("AllDayEvent")), busy=busy if isinstance(busy, int) else BUSY, private=private,
+                       recurring=bool(get("IsRecurring")))
+
+
+def read_calendar(app: object, day: date, limit: int = CALENDAR_LIMIT) -> tuple[list[Appointment], int, set[str]]:
+    """``day``'s appointments in the default calendar, in the order the plan gives: Items, then ``Sort("[Start]")``, then
+    ``IncludeRecurrences``, then ``Restrict`` to the day, walked with GetFirst and GetNext (a collection that includes
+    recurrences has no true Count). Returns them, how many items Restrict gave, and the fields Outlook refused."""
+    folder = app.Session.GetDefaultFolder(OL_FOLDER_CALENDAR)  # type: ignore[attr-defined]
+    items = folder.Items
+    items.Sort("[Start]")
+    items.IncludeRecurrences = True
+    found = items.Restrict(calendar_filter(day))
+    out: list[Appointment] = []
+    refused: set[str] = set()
+    seen = 0
+    item = found.GetFirst()
+    while item is not None and seen < limit:
+        seen += 1
+        appointment = appointment_of(item, day, refused)
+        if appointment is not None:
+            out.append(appointment)
+        item = found.GetNext()
+    return out, seen, refused
+
+
+def _keep_once(step: str, detail: str) -> None:
+    """A calendar problem for the troubleshooting report, unless it's the same as the last one kept (a read every few
+    minutes would otherwise fill the list with one problem)."""
+    if not PROBLEMS or (PROBLEMS[-1].step, PROBLEMS[-1].detail) != (step, detail):
+        PROBLEMS.append(Problem(datetime.now().strftime("%Y-%m-%d %H:%M:%S"), step, detail))
+        log.warning("Outlook: %s failed: %s", step, detail)
+
+
+def todays_appointments(day: date) -> list[Appointment]:
+    """Today's appointments from the running Outlook (decisions 488 and 493). It never starts Outlook: with none running,
+    or none whose window is open, it raises CalendarProblem "closed" and keeps nothing as a problem. Busy, refused and any
+    other failure raise their kind, kept once for the troubleshooting report. Nothing is written to Outlook."""
+    began = perf_counter()
+    stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        app, _how = connect(quiet=True)
+    except OutlookError as e:
+        kind = "closed" if e.step == "finding Outlook" else "failed"
+        if kind != "closed":
+            _keep_once(f"reading today's calendar ({e.step})", e.detail)
+        CALENDAR_READS.append(CalendarRead(stamp, "", 0, 0, 0, kind))
+        raise CalendarProblem(kind, str(e), e.step, e.detail) from e
+    filt = ""
+    try:
+        filt = calendar_filter(day)
+        found, seen, refused = read_calendar(app, day)
+    except Exception as e:  # noqa: BLE001 - COM raises its own errors
+        kind, detail = problem_kind(e), describe(e)
+        _keep_once("reading today's calendar", detail)
+        CALENDAR_READS.append(CalendarRead(stamp, filt, 0, 0, round((perf_counter() - began) * 1000), kind))
+        raise CalendarProblem(kind, f"Outlook didn't give the calendar ({detail}).", "reading today's calendar", detail) from e
+    ms = round((perf_counter() - began) * 1000)
+    if refused:
+        _keep_once("reading today's calendar", "refused " + ", ".join(sorted(refused)))
+    CALENDAR_READS.append(CalendarRead(stamp, filt, seen, len(found), ms, "refused " + ", ".join(sorted(refused)) if refused else ""))
+    log.info("Outlook: read %d of today's appointments (%d items) in %d ms", len(found), seen, ms)
+    return found

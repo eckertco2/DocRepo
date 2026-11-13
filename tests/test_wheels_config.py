@@ -55,7 +55,10 @@ def test_the_default_file_is_the_decided_wheels():
     assert execution["N"].args == {"view": "today"} and execution["E"].command == "today.panel"
     # Release 5.131 (the quick summary plan's decision 517): S is the quick summary, no longer held for the agent window.
     assert execution["S"].command == "summary.open" and not execution["S"].held and execution["W"].command == "find_files.current"
-    assert not any(w.eight_way for w in config.wheels)
+    # Release 5.139 (the email progress plan's decision 583): Log progress on NE makes the Execution wheel eight-way
+    # (decision 170: a diagonal item makes it 8-way, and nothing moves); the other two stay crosses.
+    assert execution["NE"].command == "progress.log"
+    assert [w.id for w in config.wheels if w.eight_way] == ["execution"]
 
 
 def test_the_default_file_comments_every_command():

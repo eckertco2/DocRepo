@@ -100,13 +100,15 @@ def test_the_arrow_asks_for_an_update_and_keeps_it_on_the_task(browse, fake_outl
     assert browse.status.text() == ("Opened Ask for an update on Rigging plan in Outlook. To Mike Ortiz. "
                                     "When you capture the reply, it'll go to Rigging plan.")
     assert not browse.status.property("error")
-    # The status card says so, until a capture lands on the task.
+    # The status card says the task waits on Mike (release 5.139, decision 593), until Got it, or his answer is captured.
     header = browse.task_pane.header
-    assert header.status_asked.isVisibleTo(header) and header.status_asked.text() == "· asked today"
-    assert header.status_asked.toolTip().startswith("You asked for an update on Thu 8 Oct.")
-    captures.add_capture(browse.conn, saved="2026-10-08 15:00:00", source="typed", types=["note"], title="Mike's answer", task=RIGGING)
+    assert header.status_wait.isVisibleTo(header) and header.status_wait.text().startswith("· waiting on Mike since today · follow up ")
+    assert header.status_wait.toolTip().startswith("Waiting on Mike Ortiz since Thu 8 Oct: Asked Mike for an update.")
+    captures.add_capture(browse.conn, saved="2026-10-08 15:00:00", source="typed", types=["note"], title="My own note", task=RIGGING)
     browse.refresh()
-    assert not header.status_asked.isVisibleTo(header)
+    assert header.status_wait.isVisibleTo(header)  # a note of the owner's own isn't the answer
+    browse.got_it(RIGGING)
+    assert not header.status_wait.isVisibleTo(header) and "isn't waiting any more" in browse.status.text()
 
 
 def test_waiting_on_others_has_it_on_a_rows_menu_and_says_asked(browse, fake_outlook):
@@ -119,15 +121,15 @@ def test_waiting_on_others_has_it_on_a_rows_menu_and_says_asked(browse, fake_out
     second.trigger()
     assert calls[-1][1] == ("mike.ortiz@example.com",)
     assert browse.view == "waiting"
-    assert row(browse, RIGGING).data(0, LINE_ROLE).context == "asked today · Mike Ortiz"  # before the person waited on
-    # Since release 5.138 the task tree's menu has it too, for a task someone else is on (decision 573), and the ask is the
-    # tile's hourglass, its words in its tooltip (decision 567).
+    assert row(browse, RIGGING).data(0, LINE_ROLE).context == "waiting on Mike · today · Mike Ortiz"  # before the people
+    # Since release 5.138 the task tree's menu has it too, for a task someone else is on (decision 573), and the wait is the
+    # tile's hourglass, its words in its tooltip (decision 567), not words on the line.
     browse.set_view("tasks")
     browse.open.update(Model(browse.conn).tasks)
     browse.render_list()
     assert ask_action(browse.tree.row_menu(row(browse, RIGGING))) is not None
     wait = row(browse, RIGGING).data(0, LINE_ROLE).marks[2]
-    assert wait is not None and wait.icon == "waiting" and "asked" not in " ".join(row(browse, RIGGING).data(0, LINE_ROLE).muted)
+    assert wait is not None and wait.icon == "waiting" and "waiting" not in " ".join(row(browse, RIGGING).data(0, LINE_ROLE).muted)
 
 
 def test_a_closed_task_isnt_asked_about(browse, fake_outlook):
@@ -156,3 +158,19 @@ def test_it_says_why_when_outlook_isnt_there(browse, monkeypatch):
     ask_action(bar(browse)["More T-mails"].menu()).trigger()
     assert browse.status.text().startswith("Ask for an update: Outlook isn't open") and browse.status.property("error")
     assert Model(browse.conn).t_mails == []
+
+
+def test_an_ask_outlook_wont_tag_is_known_by_its_draft(browse, monkeypatch):
+    """Release 5.141: where Outlook's guard refuses DocRepo's index, the ask is kept with its draft, for its send."""
+    from docrepo import sent_watch
+
+    monkeypatch.setattr(outlook, "ask_t_mail", lambda now, to, subject, words: outlook.AskOpened(outlook.Opened("", "none", "D7", "S1"), True, "html"))
+    opened: list[int] = []
+    browse.ctx.t_mail_opened = lambda: opened.append(1)
+    browse.select("task", RIGGING)
+    ask_action(bar(browse)["More T-mails"].menu()).trigger()
+    t = Model(browse.conn).t_mails[-1]
+    assert (t.task, t.kind, t.conversation) == (RIGGING, "ask", "")
+    assert sent_watch.drafts(browse.conn)[t.id].entry_id == "D7" and opened == [1]
+    assert browse.status.text().endswith("When you send it, DocRepo files it on Rigging plan, and its reply follows.")
+    assert not browse.status.property("error")

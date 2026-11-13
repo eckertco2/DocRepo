@@ -89,6 +89,11 @@ def _summary_open(app: CaptureApp, _args: Mapping[str, Any]) -> None:
     app.wheels.quick_summary()
 
 
+def _progress_log(app: CaptureApp, _args: Mapping[str, Any]) -> None:
+    """Log progress (release 5.139, decision 583): its window, on the email being written in Outlook."""
+    app.wheels.log_progress()
+
+
 def _find_files_current(app: CaptureApp, _args: Mapping[str, Any]) -> None:
     """Find files for the task selected in the browse tool, or else the last one opened; with neither, task search, and
     picking a task opens its Find files. Its old name, task_view.current, still works (``wheels_config.RENAMED``)."""
@@ -114,6 +119,7 @@ _ROWS = (
     Registered(CommandSpec("search.everything", "Search everything"), _search_everything),
     Registered(CommandSpec("find_files.current", "Find files for the current task"), _find_files_current),
     Registered(CommandSpec("summary.open", "The quick summary"), _summary_open),
+    Registered(CommandSpec("progress.log", "Log progress, on the email you're writing in Outlook"), _progress_log),
 )
 REGISTRY: dict[str, Registered] = {r.spec.id: r for r in _ROWS}
 SPECS: dict[str, CommandSpec] = {r.spec.id: r.spec for r in _ROWS}

@@ -43,10 +43,14 @@ LIST_NOTES = {
     "unplanned": "Open tasks the capacity calendar can't place: people but no hours, or hours but no dates.",
 }
 
-TODAY_NOTE = ("Your list for today. Each item stays until you mark it Done, carrying over to the next day. Put a task on it with D "
+TODAY_NOTE = ("Your list for today, after today's meetings from your Outlook calendar (Settings → Today). Each item stays until you mark it Done, carrying over to the next day. Put a task on it with D "
               "while browsing, or Add to Today on its page. The box makes a quick task (under Quick tasks until Put under… on its "
               "row files it), or a note; Ctrl+Shift+D makes a quick task from anywhere. Below it, reminders whose day has come, and the tasks due in the next "
               "7 days that aren't on it yet, urgent ones first.")
+
+REVIEW_NOTE = ("The weekly review, a step at a time: Unfiled, what's overdue or due soon, what's waiting on others, the projects due for "
+               "review, what's gone quiet and the projects with no next step, each list with its own commands. Next and Back (Alt+Right "
+               "and Alt+Left) move between steps, passing over empty ones; Review leaves off where you were until it's done.")
 
 ACTIVITY_NOTE = ("What happened, under the tasks it happened to: captures, changes, document versions and agenda items. For meeting "
                  "prep, Select, tick tasks or lines, then Add to agenda: a ticked line goes on as its task, with the line as the "
@@ -67,6 +71,7 @@ RETIRED_VIEWS: dict[str, tuple[str, str]] = {"urgent": ("tasks", "urgent")}
 
 VIEWS: tuple[ViewDef, ...] = (
     ViewDef("today", "Today", note=TODAY_NOTE),  # mods log round 1, M0016
+    ViewDef("review", "Review", note=REVIEW_NOTE),  # release 5.128, the weekly review (decision 496): docrepo/review.py
     ViewDef("unfiled", "Unfiled"),
     ViewDef("tasks", "Task tree"),
     *(ViewDef(x.id, x.label, "Lists", LIST_NOTES[x.id]) for x in VIEW_LISTS),
@@ -91,7 +96,7 @@ LIST_IDS = {x.id: x for x in VIEW_LISTS}
 #: look's sidebar counts only these (the visual overhaul's stage O10, decision 81).
 ASKS = frozenset({"today", "unfiled", *LIST_IDS})
 #: Views that show tasks, so opening a task from them stays in them.
-TASK_VIEWS = ("today", "tasks", *LIST_IDS, "agenda", "activity", "search")
+TASK_VIEWS = ("today", "review", "tasks", *LIST_IDS, "agenda", "activity", "search")
 
 
 def view_counts(m: Model, today: date, me: str | None) -> dict[str, int]:

@@ -56,6 +56,7 @@ from docrepo.save import EmailItem, SaveError, SaveResult, add_quick_task, note_
 from docrepo.tasks import TaskError
 from docrepo.ui.context import AppContext
 from docrepo.ui.dialogs import LabelDialog, PersonDialog
+from docrepo.ui.lists import review as review_list
 from docrepo.ui.lists import tagged as tagged_list
 from docrepo.ui.rich_edit import RichEdit
 from docrepo.ui.explorer import show_in_explorer
@@ -79,7 +80,7 @@ from docrepo.ui.task_picker import TaskPicker
 from docrepo.ui.timeline_view import TimelineView
 from docrepo.ui.state_menu import UNDO_MS, can_change, open_below, picked_line, state_menu
 from docrepo.ui.tree_view import HTML_ROLE, KEY_ROLE, RowTree
-from docrepo.ui import conversation_page, task_menus
+from docrepo.ui import conversation_page, task_menus, today_meetings
 from docrepo.ui import task_tile as tile_ui
 from docrepo.ui.widgets import SAVE_KEYS, DropButton, FlowLayout, Option, ViewStack, ask, label_options, people_options
 from docrepo.views import (
@@ -209,9 +210,15 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         for keys, handler in (("N", lambda: self._key("note")), ("T", lambda: self._key("new_task")), ("U", lambda: self._key("update")),
                               ("A", lambda: self._key("agenda")), ("E", lambda: self._key("edit")), ("D", lambda: self._key("today")),
                               ("M", lambda: self._key("meeting")), ("O", lambda: self._key("find_files")),
-                              ("Ctrl+F", self.open_find), ("Ctrl+Shift+F", self.search_box.setFocus), ("F1", self.show_keys), ("F5", self.refresh),
-                              ("Ctrl+B", lambda: self.show_views_pane(not self.views_button.isChecked())), ("Ctrl+K", self.open_palette)):
+                              ("Ctrl+F", self.open_find), ("Ctrl+Shift+F", self.search_box.setFocus), ("F1", self.show_keys), ("F5", self.read_again),
+                              ("Ctrl+B", lambda: self.show_views_pane(not self.views_button.isChecked())), ("Ctrl+K", self.open_palette),
+                              # The weekly review (release 5.128): R marks a project reviewed in step 4.
+                              ("R", lambda: None if self._typing() else review_list.mark_reviewed(self))):
             QShortcut(QKeySequence(keys), self, handler)
+        # Review's Next and Back (release 5.128) work from the list pane, so the task page keeps its own Alt+Left, back to
+        # All notes (release 5.140): two shortcuts on one key where focus is would fire neither.
+        for keys, handler in (("Alt+Right", lambda: review_list.go(self)), ("Alt+Left", lambda: review_list.go(self, back=True))):
+            QShortcut(QKeySequence(keys), self.middle, context=Qt.ShortcutContext.WidgetWithChildrenShortcut, activated=handler)
         if capture is not None:
             capture.saved.connect(self.capture_saved)
 
@@ -344,10 +351,12 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         self.tree.state_menu = lambda task_id, parent: self.state_menu_for(task_id, parent)
         # One Edit and one Add to (release 5.98, decision 392): a task row's menu has them too, from the task page's own lists;
         # in Waiting on others, Ask for an update first (release 5.125, the cold-eyes plan's decision 481).
-        self.tree.task_menus = lambda task_id, menu: task_menus.add_row_menus(self, task_id, menu, anchor=self.tree, ask=self.view == "waiting")
+        # The weekly review's Waiting step too (release 5.128).
+        self.tree.task_menus = lambda task_id, menu: task_menus.add_row_menus(self, task_id, menu, anchor=self.tree, ask=self._asks())
         # The task tile's one menu (release 5.138, the task tile plan's decision 573): Open, the row's own lines, State, Add to,
-        # Ask for an update, Note, Update, New task under, Edit, Priority and Copy, in every view of tasks.
-        self.tree.tile_menu = lambda task_id, menu, own: tile_ui.fill_menu(self, task_id, menu, own, anchor=self.tree, ask_first=self.view == "waiting")
+        # Ask for an update, Log progress, Note, Update, New task under, Edit, Priority and Copy, in every view of tasks; Ask
+        # for an update first among a waiting list's own (Waiting on others, the review's Waiting step).
+        self.tree.tile_menu = lambda task_id, menu, own: tile_ui.fill_menu(self, task_id, menu, own, anchor=self.tree, ask_first=self._asks())
         self.tree.task_opened = lambda task_id: tile_ui.open_task(self, task_id)  # Enter, as a double-click (decision 572)
         lp.addWidget(self.tree, 1)
         self.middle.addWidget(list_page)
@@ -450,6 +459,8 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         self._status_timer.setSingleShot(True)
         self._status_timer.setInterval(9000)
         self._status_timer.timeout.connect(lambda: self.status.setText(""))
+        #: Each minute while Today shows: the next meeting's minutes, and the calendar read again when it's 5 minutes old (release 5.127).
+        self.meetings_timer = today_meetings.start_timer(self)
         #: Undo after a state picked from a row: a link after the line's words, for ten seconds (release 5.76, decision 363).
         self._undo: Callable[[], None] | None = None
         self._status_timer.timeout.connect(lambda: setattr(self, "_undo", None))
@@ -651,6 +662,11 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
             view.reload()
         self.ctx.today_changed()  # and the Today side panel (release 5.43)
 
+    def read_again(self) -> None:
+        """F5: read docs.db again, and today's calendar too (release 5.127, decision 493)."""
+        today_meetings.read_again(self.ctx)
+        self.refresh()
+
     def _exists(self, key: tuple[str, str]) -> bool:
         kind, item = key
         m = self.model()
@@ -709,6 +725,8 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         if not can_change(m, task_id):
             return
         menu = state_menu(self, m, task_id, lambda to, branch: self.set_state(task_id, to, branch, after, tell))
+        menu.addSeparator()  # a tile's circle: Log progress… and Got it under the states (release 5.138, decision 567)
+        tile_ui.add_wait_lines(self, task_id, menu)
         try:
             self.run_menu(menu, at)
         finally:
@@ -824,7 +842,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
                 Command("", "Quick summary: a person, an agenda or a label", lambda: self.ctx.open_summary(None)),
                 Command("", "Find in this view", self.open_find, "Ctrl+F"),
                 Command("", "Show or hide the views", lambda: self.show_views_pane(not self.views_button.isChecked()), "Ctrl+B"),
-                Command("", "Read docs.db again", self.refresh, "F5"),
+                Command("", "Read docs.db and the calendar again", self.read_again, "F5"),
                 Command("", "Keys", self.show_keys, "F1"),
                 Command("", "Hide hints" if LOOK.hints else "Show hints", lambda: self._set_hints(not LOOK.hints)),
                 *self.ctx.wheel_palette()]  # the wheels' slots (release 5.41)
@@ -923,7 +941,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         self.middle.setCurrentIndex(0)
         self._clear_filters()
         self.filters.setVisible(True)
-        builder = {"today": self._today_view, "tasks": self._tasks_view, "unfiled": self._unfiled_view, "agenda": self._agenda_view,
+        builder = {"today": self._today_view, "review": lambda: review_list.view(self), "tasks": self._tasks_view, "unfiled": self._unfiled_view, "agenda": self._agenda_view,
                    "people": self._people_view, "templates": self.templates.render_list,
                    "labels": self._labels_view, "tagged": lambda: tagged_list.view(self), "docs": self._docs_view, "search": self._search_view,
                    "discarded": self._discarded_view, "activity": self._activity_view}.get(self.view)
@@ -1182,6 +1200,8 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         self.ticked.clear()
         self.close_find()
         self.priorities.close_find(render=False)
+        if view == "review":  # release 5.128: the review in hand carries on, or a new one starts
+            review_list.enter(self)
         self._select_first()
         self.render_all()
 
@@ -1204,6 +1224,8 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
             new = ("label", m.labels[0].name) if m.labels else None
         elif v == "tagged":  # release 5.79: the first label it lists
             new = tagged_list.first(self)
+        elif v == "review":  # release 5.128: the step's first row
+            new = review_list.first(self)
         elif v == "templates":
             new = self.templates.first()
         elif v == "discarded":
@@ -1252,11 +1274,19 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
             return True
         return super().eventFilter(watched, event)
 
-    def _key(self, mode: str) -> None:
+    def _typing(self) -> bool:
+        """Whether the keyboard is in a box being typed in, where a letter is a letter, not a command."""
         focus = QGuiApplication.focusObject()
-        typing = isinstance(focus, (QLineEdit, QPlainTextEdit, QSpinBox)) or (isinstance(focus, QTextEdit) and not focus.isReadOnly()) or (
+        return isinstance(focus, (QLineEdit, QPlainTextEdit, QSpinBox)) or (isinstance(focus, QTextEdit) and not focus.isReadOnly()) or (
             isinstance(focus, QComboBox) and focus.isEditable())
-        if not typing:
+
+    def _asks(self) -> bool:
+        """Whether a task row's right-click menu has Ask for an update first: in Waiting on others (release 5.125, decision
+        481) and in the weekly review's Waiting step (release 5.128)."""
+        return self.view == "waiting" or self.view == "review" and review_list.step_id(self) == "waiting"
+
+    def _key(self, mode: str) -> None:
+        if not self._typing():
             self.capture_for_selected(mode)
 
     def _pick_task(self, anchor: QWidget, picked: Callable[[str | None], None], none: tuple[str, str] | None,
@@ -1675,7 +1705,8 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
                                 lambda anchor, picked: self._pick_task(anchor, picked, None),
                                 reference_fields=self.ctx.settings.reference_fields, today=self.today(), checklist=checklist,
                                 link=self.templates.link_of(task_id), workdays=self._workdays(),
-                                reference_links=self.ctx.settings.reference_links, open_link=self.open_address)
+                                reference_links=self.ctx.settings.reference_links, open_link=self.open_address,
+                                review_weeks=self.ctx.settings.review_weeks)
         if more:
             dialog.show_more()
         self._edit_dialog = dialog  # kept, so tests can reach it

@@ -42,7 +42,9 @@ def test_a_version_1_database_is_brought_up_to_date(data_root, fs):
     old.close()
     conn = db.connect(fs, data_root)
     try:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 25
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 28
+        assert conn.execute("SELECT count(*) FROM meeting_links").fetchone()[0] == 0  # version 26 (release 5.127)
+        assert conn.execute("SELECT count(*) FROM waits").fetchone()[0] == 0  # version 28 (release 5.139): no waits yet
         assert conn.execute("SELECT count(*) FROM capture_emails").fetchone()[0] == 0  # version 21 (release 5.74): no rows for older emails
         assert conn.execute("SELECT count(*) FROM tagged_labels").fetchone()[0] == 0  # version 22 (release 5.79): no glossary yet
         assert conn.execute("SELECT name, sha256, text_status FROM documents").fetchone()[:] == ("a.pdf", None, None)

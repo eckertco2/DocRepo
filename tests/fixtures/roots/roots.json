@@ -102,5 +102,32 @@
    "task_pages": 17,
    "task_dates": 2
   }
+ },
+ "v25": {
+  "commit": "551005d",
+  "counts": {
+   "tasks": 17,
+   "captures": 24,
+   "task_pages": 17,
+   "task_dates": 2
+  }
+ },
+ "v26": {
+  "commit": "862af52",
+  "counts": {
+   "tasks": 17,
+   "captures": 24,
+   "task_pages": 17,
+   "task_dates": 2
+  }
+ },
+ "v27": {
+  "commit": "dc670e2",
+  "counts": {
+   "tasks": 17,
+   "captures": 24,
+   "task_pages": 17,
+   "task_dates": 2
+  }
  }
 }

@@ -419,7 +419,9 @@ DEFAULT_TEXT = """\
         // summary.open: the quick summary, a person's, an agenda's or a label's, from one box.
         "S": { "label": "Quick summary", "icon": "agenda", "command": "summary.open" },
         // find_files.current: Find files for the task selected in the browse tool, or the last one opened.
-        "W": { "label": "Find files", "icon": "open", "command": "find_files.current" }
+        "W": { "label": "Find files", "icon": "open", "command": "find_files.current" },
+        // progress.log: Log progress, on the email you're writing in Outlook, or a call or a talk.
+        "NE": { "label": "Log progress", "icon": "mail", "command": "progress.log" }
       }
     }
   ],
@@ -464,6 +466,22 @@ def summary_slot(text: str) -> str:
     return text.replace(_OLD_S_COMMENT, _S_COMMENT).replace(_OLD_S_SLOT, _S_SLOT)
 
 
+#: What releases 5.131 to 5.138 wrote last on the Execution wheel (release 5.139 adds NE after it).
+_OLD_W_SLOT = '"W": { "label": "Find files", "icon": "open", "command": "find_files.current" }\n      }'
+_NE_SLOTS = ('"W": { "label": "Find files", "icon": "open", "command": "find_files.current" },\n'
+             '        // progress.log: Log progress, on the email you\'re writing in Outlook, or a call or a talk.\n'
+             '        "NE": { "label": "Log progress", "icon": "mail", "command": "progress.log" }\n      }')
+
+
+def progress_slot(text: str) -> str:
+    """Release 5.139 (the email progress plan's decision 583): a file whose Execution wheel still ends with Find files as
+    the default wrote it, and has no Log progress anywhere, gets Log progress on the wheel's NE. A wheel you've changed
+    stays yours, and so does every other line."""
+    if "progress.log" in text or text.count(_OLD_W_SLOT) != 1:
+        return text
+    return text.replace(_OLD_W_SLOT, _NE_SLOTS)
+
+
 def write_defaults(fs: SafeFS, data_root: Path, registry: Mapping[str, CommandSpec], icons: Iterable[str]) -> None:
     """The config file, if there isn't one, and always the schema beside it, which is DocRepo's own."""
     path = data_root / CONFIG_FILE
@@ -474,7 +492,7 @@ def write_defaults(fs: SafeFS, data_root: Path, registry: Mapping[str, CommandSp
             text = path.read_bytes().decode("utf-8-sig")  # as bytes, so its line endings stay
         except (OSError, UnicodeDecodeError):
             text = ""  # loading it says what's wrong
-        upgraded = summary_slot(draw_at_once(text))
+        upgraded = progress_slot(summary_slot(draw_at_once(text)))
         if upgraded != text:
             fs.write_text(path, upgraded)
     fs.write_text(data_root / SCHEMA_FILE, json.dumps(schema(registry, icons), indent=1) + "\n")

@@ -38,7 +38,7 @@ ROW_DENSITY = {"tasks": (tokens.TREE_ROW, False), **{v: (tokens.TREE_ROW, False)
                "templates": (tokens.TREE_ROW, False), "docs": (tokens.TREE_ROW, True), "agenda": (tokens.LIST_ROW, True),
                "activity": (tokens.LIST_ROW, True), "search": (tokens.LIST_ROW, True)}
 #: Views whose column headings say nothing their cells don't (decision L6). Search has one column, so none either.
-NO_HEADINGS = ("today", "tasks", "unfiled", "search", *LIST_IDS)
+NO_HEADINGS = ("today", "review", "tasks", "unfiled", "search", *LIST_IDS)
 #: Activity's kinds as icons (release 5.78), in place of their chips.
 ACT_ICONS = {"task": "task", "update": "update", "note": "note", "email": "type-mail", "change": "edit", "doc": "file", "agenda": "agenda"}
 #: Unfiled's sources as icons (release 5.78), in place of a Source column.

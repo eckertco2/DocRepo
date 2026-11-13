@@ -6,7 +6,7 @@ from datetime import date
 
 import pytest
 
-from docrepo import agenda, task_tile
+from docrepo import agenda, task_tile, waits
 from docrepo.model import TODAY as TODAY_TARGET, Model
 from docrepo.task_tile import ELLIPSIS, MINUS, days, days_to, fit_title, title_cuts
 
@@ -100,18 +100,33 @@ def test_a_quiet_number_has_no_colour_however_late():
 
 
 # ================= the marks (decisions 566 and 567) =================
+def wait_on(conn, task_id: str, follow_up: date | None) -> None:
+    """A wait (release 5.139) on Mike Ortiz, started Monday."""
+    waits.start(conn, Model(conn), task_id, at="2026-10-05 09:00:00", line="asked Mike for the crane size", on=["P002"],
+                follow_up=follow_up, via="test")
+
+
 def test_today_agendas_and_a_wait(sample_conn):
     agenda.add_item(sample_conn, subject=RIGGING, target=TODAY_TARGET, note="", added="2026-10-08 08:00:00", added_by="test")
-    sample_conn.execute("INSERT INTO t_mails (task, kind, opened) VALUES (?, 'ask', '2026-10-08 09:00:00')", (RIGGING,))
+    wait_on(sample_conn, RIGGING, date(2026, 10, 12))
     m = Model(sample_conn)
     marks = task_tile.marks(m, TODAY)
     assert RIGGING in marks.today and REACTOR not in marks.today
     assert marks.agendas[REACTOR] == ("Business team meeting",)
     assert marks.agendas[MONITORING] == (m.person_name("P003"),)
-    assert marks.waits[RIGGING].words == "asked today" and not marks.waits[RIGGING].late
+    w = marks.waits[RIGGING]
+    assert w.words == f"waiting on {m.person_name('P002').split()[0]} · Mon" and not w.late and "Follow up Mon 12 Oct" in w.tip
     today, on_agenda, wait = task_tile.slots(RIGGING, marks)
     assert today.tip == "On Today" and on_agenda is None and wait.icon == "waiting" and wait.colour == "text2"
     assert task_tile.slots(REACTOR, marks)[1].tip == "On the agenda of Business team meeting"
+
+
+def test_a_wait_whose_follow_up_day_has_come_is_orange(sample_conn):
+    """Decision 567: the hourglass in caution's colour once the wait's follow-up day has come, its words first in its tooltip."""
+    wait_on(sample_conn, RIGGING, date(2026, 10, 8))
+    w = task_tile.marks(Model(sample_conn), TODAY).waits[RIGGING]
+    assert w.late and w.words.startswith("no reply from") and w.tip.startswith("No reply from")
+    assert task_tile.slots(RIGGING, task_tile.marks(Model(sample_conn), TODAY))[2].colour == "caution"
 
 
 def test_a_slot_every_row_would_fill_is_left_out(sample_conn):

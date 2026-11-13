@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
 
-from docrepo import activity, agenda, bulk, captures, notes_page, people, priorities, quick, repeats, search, tasks, whatif
+from docrepo import activity, agenda, bulk, captures, notes_page, people, priorities, quick, repeats, search, tasks, waits, whatif
 from docrepo.config import Settings
 from docrepo.dates import long_date, stamp, to_date, workday_numbers
 from docrepo.db import transaction
@@ -458,7 +458,8 @@ def reminders_to_today(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, se
         if t.id not in on_today:
             agenda.add_item(conn, subject=t.id, target=TODAY, note="", added=stamp(at), added_by=REMINDER)
             put.append(t.id)
-        tasks.update_task(conn, settings, t.id, at=at, via=PUT_ON_TODAY, reminder=next_reminder(t.id, before, settings, today))
+        # an open wait's follow-up still to come takes the reminder's place (release 5.139, decision 588)
+        tasks.update_task(conn, settings, t.id, at=at, via=PUT_ON_TODAY, reminder=waits.after_reminder(before, t.id, today, next_reminder(t.id, before, settings, today)))
     # A repeat with no reminder (Clear took this time's) moves on to its next time after today (decision 416).
     waiting = [t for t in before.tasks.values() if t.reminder_repeat and not t.reminder and is_open(t) and t not in due]
     for t in waiting:
@@ -520,6 +521,36 @@ def change_task(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings:
     moved = tasks.moved_words(logged)
     out = Outcome((f"{len(logged)} change{'s' if len(logged) != 1 else ''} in the status log." if logged else "Nothing changed.") + (f" {moved}" if moved else ""), moved=moved)
     write_touched_pages(conn, data_root, fs, at, out.problems, [task_id, *(f.task for f in logged.followed)], before)
+    return out
+
+
+def mark_reviewed(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, task_id: str, at: datetime) -> Outcome:
+    """Mark reviewed, in the weekly review's step 4 (release 5.128, decision 498): the task keeps the time, its facts say
+    "Reviewed Fri 13 Nov", and it leaves the step until its interval comes round. Nothing goes into the status log
+    (decision 503); Undo is ``set_reviewed``."""
+    from docrepo import review
+
+    before = Model(conn)
+    if task_id not in before.tasks:
+        raise EditError(f"There's no task {task_id}.")
+    tasks.set_reviewed(conn, {task_id: stamp(at)})
+    m = Model(conn)
+    t = m.task(task_id)
+    weeks = review.interval(m, t, settings.review_weeks)
+    nxt = review.next_review(t, weeks) if weeks else None
+    again = f" It comes up again in the week of {long_date(nxt, at.date())}." if nxt else ""
+    out = Outcome(f"{t.title}: reviewed.{again}")
+    write_touched_pages(conn, data_root, fs, at, out.problems, [task_id], before)
+    log.info("task %s marked reviewed", task_id)
+    return out
+
+
+def set_reviewed(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, task_id: str, reviewed: str | None, at: datetime) -> Outcome:
+    """Mark reviewed's Undo (release 5.128): the task's last review as it was before."""
+    before = Model(conn)
+    tasks.set_reviewed(conn, {task_id: reviewed})
+    out = Outcome(f"{Model(conn).task(task_id).title}: back to " + (f"reviewed {long_date(to_date(reviewed), at.date())}." if reviewed else "not reviewed yet."))
+    write_touched_pages(conn, data_root, fs, at, out.problems, [task_id], before)
     return out
 
 

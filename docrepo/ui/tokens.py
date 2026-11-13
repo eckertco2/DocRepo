@@ -574,4 +574,8 @@ h2 { font-family: 'Segoe UI'; font-size: ${subtitle}pt; font-weight: 600; margin
 .gk { color: $text2; padding-right: 10px; }
 .relb { color: $text2; font-weight: 400; }
 .grid { margin-top: 12px; }
+.anday { color: $text2; font-size: ${caption}pt; font-weight: 600; margin-top: 14px; margin-bottom: 2px; }
+.src { color: $text2; font-size: ${caption}pt; font-weight: 400; margin-top: 8px; margin-bottom: 2px; }
+.nl { margin: 0; }
+.also { color: $text2; font-size: ${caption}pt; }
 """).substitute(LIGHT, caption=CAPTION, subtitle=SUBTITLE)

@@ -1251,17 +1251,20 @@ class CaptureWindow(QWidget):
     # ================= showing and hiding =================
     def show_capture(self, task: str | None = None, mode: str | None = None, content: str | None = None, mods: bool = False,
                      agenda: list[str] | None = None, agenda_focus: bool = False, from_capture: str | None = None, meeting: bool = False,
-                     keep: bool = False) -> None:
+                     keep: bool = False, meeting_name: str | None = None, title: str | None = None, as_meeting: bool = False) -> None:
         """Open the window. ``mode`` checks only that capture type ("note", "new_task" or "update"). ``agenda`` picks
         agenda targets under Add to agenda. ``from_capture`` starts Make it a task from an unfiled capture. ``meeting``
         turns on meeting notes (release 5.8), for the picked task's meeting. A pinned capture comes back in full.
+
+        From Today's meetings (release 5.127, the cold-eyes plan's decisions 491 and 492): ``meeting_name`` names the meeting
+        notes' meeting, as if typed; ``title`` is New task's title, and ``as_meeting`` ticks its Meeting, as if clicked.
 
         Every open starts empty, as closing files what the window held in Drafts (release 5.77, decision 333). While it's
         open, with something in it, a command for a task, a meeting, some text or Make it a task (the browse tool's, the
         wheel's) puts that in Drafts first and starts afresh; the main hotkey, a type's hotkey and ``keep`` leave it as it
         is (decision 334)."""
         note = ""
-        command = not keep and bool(task or from_capture or meeting or content is not None)
+        command = not keep and bool(task or from_capture or meeting or content is not None or title is not None)
         showing = self.isVisible() or (self.pinned and self.pin_window is not None and self.pin_window.isVisible())
         if command and showing and self.holds_draft() and self.file_draft():
             note = "Your other capture is in Drafts."
@@ -1276,10 +1279,19 @@ class CaptureWindow(QWidget):
                 self.set_task(task)
             if meeting and not self.meeting_on:
                 self.toggle_meeting(focus=False)
+            if meeting_name and self.meeting_on:
+                self.meet_name.setText(meeting_name)
+                self._meet_name_typed = True
             if mode:
                 self.types, self.note_auto = {mode}, mode == "note"
                 if mode == "update":
                     self.prefill()
+            if title is not None:
+                self.title.setText(title)
+                self._touch("new.title", self.title)
+            if as_meeting:
+                self.n_meeting.setChecked(True)
+                self._touch("new.meeting", self.n_meeting)
             if content is not None:
                 self._set_plain(self.content, content)
                 cursor = self.content.textCursor()

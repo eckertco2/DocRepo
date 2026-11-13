@@ -84,7 +84,7 @@ def mark(state: str, scale: float) -> QImage:
 
 #: The Links group's marks (release 5.67), and the Decisions section's (release 5.124): the icon each draws, and its colour.
 LINK_MARKS = {"link": ("link", "text2"), "folder": ("folder", "text2"), "note": ("note", "text2"), "ref": ("link", "accent"), "pin": ("pin", "accent"),
-              "decision": ("decision", "text2")}
+              "decision": ("decision", "text2"), "meeting": ("calendar", "text2")}  # a meeting's mark (release 5.140)
 
 
 def link_mark(key: str, scale: float) -> QImage:

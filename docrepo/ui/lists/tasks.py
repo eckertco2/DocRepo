@@ -12,13 +12,14 @@ from PySide6.QtWidgets import (
     QComboBox,
 )
 
-from docrepo import ask_update, bulk, edits, key_dates, priorities, task_tile
+from docrepo import bulk, edits, key_dates, priorities, task_tile, waits
 from docrepo.lists import key_dates_due
 from docrepo.dates import short
 from docrepo.file_rows import doc_places, type_colour, type_icon, type_name
 from docrepo.detail import esc
 from docrepo.links import is_link
 from docrepo.overview import file_type
+from docrepo.model import Model
 from docrepo.schedule import DueDate, is_open
 from docrepo.ui.look import LOOK
 from docrepo.ui.task_forms import BulkEditDialog
@@ -65,16 +66,17 @@ class TaskLists:
     def _task_cells(self, task_id: str, depth: int, context: bool = False, muted: tuple[str, ...] = (), people: str = "",
                     when: DueDate | None = None, use_due: bool = True) -> list:
         """A task's row. In the new look, a tile (release 5.138, the task tile plan's decisions 563 to 570): its state's icon,
-        its title, Urgent's flag, the two-parents mark, ``people`` (Waiting on others' context, with its wait's words), its
-        marks, and the days to its nearer date; no labels, recurrence or Critical chip (569). Reminders keeps its reminder's
-        day (``when``) in place of the days. The Classic look keeps its row: labels and marks as words, State, the date."""
+        its title, Urgent's flag, the two-parents mark, its context (``people``, Waiting on others', after its wait's words
+        "waiting on Dana · Thu"; then ``muted``, a view's own words, such as the weekly review's), its marks, and the days to
+        its nearer date; no labels, recurrence or Critical chip (569). Reminders keeps its reminder's day (``when``) in place
+        of the days. The Classic look keeps its row: labels and marks as words, State, the date."""
         if LOOK.classic:
             return self._classic_task_cells(task_id, depth, context, muted, people, when, use_due)
         m, today = self.model(), self.today()
-        if people:  # Waiting on others: what's waited on first, so a narrow row cuts the names' end (5.125's decision 485)
+        if people:  # Waiting on others: what's waited on first, so a narrow row cuts the names' end (5.139's decision 594)
             wait = task_tile.marks(m, today).waits.get(task_id)
             people = f"{wait.words} · {people}" if wait else people
-        line, days = tile_cells(m, task_id, today, context=people, dim=context)
+        line, days = tile_cells(m, task_id, today, context=" · ".join(x for x in (people, *muted) if x), dim=context)
         if context:
             return _shape([line, "", ""])
         line.strong = depth == 0
@@ -93,9 +95,9 @@ class TaskLists:
         chips, quiet = [], []
         for text, cls in markers(m, t):  # a chip only for an exception; the rest are quiet words (the review's recipe)
             (chips if LOOK.classic or cls in ("urgent", "pri-critical") else quiet).append((text, cls))
-        # "asked Mon" (release 5.125, the cold-eyes plan's decision 485): before the people waited on, where there are some,
-        # so a narrow row cuts the end of their names first and keeps it; else with the quiet words.
-        asked = ask_update.asked_text(m, task_id, self.today())
+        # The waiting mark (release 5.139, decision 580; "asked Mon" in release 5.125): before the people, where there are
+        # some, so a narrow row cuts the end of their names first and keeps it; else with the quiet words.
+        asked = waits.row_text(m, task_id, self.today())
         if asked and people:
             people, asked = f"{asked} · {people}", ""
         line = Line(t.title, icon=icon, icon_colour=colour, icon_tip=t.state, chips=tuple(chips),
@@ -190,7 +192,9 @@ class TaskLists:
 
         def row(n: Node, section: str = "") -> tuple[list, str]:
             dimmed = bool(how or filtered) and not n.match
-            return self._task_cells(n.id, n.depth, dimmed, muted=self._label_words(n.id, section)), full_path(m, n.id)
+            # A tile names no labels (release 5.138, decision 569); the Classic look keeps them as words (decision 235).
+            words = self._label_words(n.id, section) if LOOK.classic else ()
+            return self._task_cells(n.id, n.depth, dimmed, muted=words), full_path(m, n.id)
 
         if how:  # a section per group, each with its tasks in tree shape (release 5.24)
             grey = group_ground()
@@ -333,17 +337,23 @@ class TaskLists:
             edit = dialog.edit()
             self._do(lambda: edits.bulk_edit(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, ids, edit, self._now()))
 
-    def _list_view(self, view_id: str) -> None:
+    def _list_view(self, view_id: str, controls: bool = True, order: Callable[[Model, list[Node]], list[Node]] | None = None,
+                   extra: Callable[[str], tuple[str, ...]] | None = None) -> None:
+        """A list's view. The weekly review (release 5.128) draws its steps with it too: with ``controls`` False there's no
+        Sort, Group by or Select, ``order`` puts the rows in its own order, and ``extra`` gives a row's quiet words."""
         v, task_list, m = VIEW_IDS[view_id], LIST_IDS[view_id], self.model()
         self._set_head(v.label, v.note + " Dimmed rows are their parents, shown for context.")
         reminders = view_id == "reminders"
         with_keys = view_id == "due"  # key dates have a row each, with Done (release 5.31, decision 150)
         self.tree.set_columns(*_cols(*(with_actions(["Title", "State", "Reminder" if reminders else "Due"], [0, 96, 96 if reminders else DAYS_COL], 56)
                                        if reminders or with_keys else (["Title", "State", "Due"], [0, 96, DAYS_COL]))))
-        self._sort_box(view_id)
-        grouped = self._group_box(view_id)
-        self._select_controls()
-        nodes = sort_tree(m, list_tree(m, task_list, self.today(), self.ctx.settings.me), self.sorts.get(view_id, "default"), self.today())
+        grouped = None
+        if controls:
+            self._sort_box(view_id)
+            grouped = self._group_box(view_id)
+            self._select_controls()
+        tree = list_tree(m, task_list, self.today(), self.ctx.settings.me)
+        nodes = order(m, tree) if order else sort_tree(m, tree, self.sorts.get(view_id, "default"), self.today())
         if grouped:  # under each sublabel's heading (release 5.9, M0051)
             self._grouped_list(view_id, grouped, nodes)
             if with_keys:
@@ -356,7 +366,7 @@ class TaskLists:
             t = m.task(n.id)
             who = ", ".join(m.person_name(p) for p in t.assignees) if view_id == "waiting" else ""
             when = list_date(task_list, t, self.today()) if reminders else None
-            return self._task_cells(n.id, n.depth, people=who, when=when, use_due=not reminders), full_path(m, n.id)
+            return self._task_cells(n.id, n.depth, people=who, when=when, use_due=not reminders, muted=extra(n.id) if extra else ()), full_path(m, n.id)
 
         self._add_nodes(nodes, row=row)
         if reminders:

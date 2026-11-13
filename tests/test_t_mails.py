@@ -417,8 +417,11 @@ def test_a_report_line_is_ok_failed_or_a_finding():
 
 
 def test_nothing_here_sends_an_email():
-    """DocRepo never sends one (the rules file): no Send in the Outlook or T-mail code."""
+    """DocRepo never sends an email of its own (the rules file): no Send in the T-mail code. The one Send in DocRepo is
+    ``outlook.send_draft``'s, Log progress's (release 5.139, decision 590 A), which ``test_ask_update`` pins down."""
     root = Path(__file__).resolve().parent.parent / "docrepo"
-    for name in ("outlook.py", "conversations.py", "diagnose.py", "ui/t_mails.py"):
+    for name in ("conversations.py", "diagnose.py", "ui/t_mails.py"):
         text = (root / name).read_text(encoding="utf-8")
         assert ".Send(" not in text and ".Send()" not in text, name
+    outlook_text = (root / "outlook.py").read_text(encoding="utf-8")
+    assert outlook_text.count(".Send(") == 1 and outlook_text.index(".Send(") > outlook_text.index("def send_draft(")

@@ -10,7 +10,9 @@ A T-mail is an email DocRepo opens in Outlook from a task, for the owner to writ
   filled in above the owner's signature (``docrepo.ask_update``).
 
 Each is kept in ``t_mails`` with its conversation (``conversations.record_t_mail``), so the replies it gets fill the
-capture window's task picker with its task. DocRepo never sends one; the owner does, in Outlook.
+capture window's task picker with its task. Where Outlook's security guard won't let DocRepo give a new email its
+conversation (release 5.141), the T-mail is kept with its draft's place instead, and ``docrepo.sent_watch`` knows it when
+it's sent. DocRepo never sends one; the owner does, in Outlook.
 """
 from __future__ import annotations
 
@@ -20,7 +22,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QMenu, QWidget
 
-from docrepo import ask_update, conversations, outlook
+from docrepo import ask_update, conversations, outlook, sent_watch
 from docrepo.captures import capture_folder
 from docrepo.ui.icons import icon
 
@@ -48,11 +50,20 @@ def _kept(browse: BrowseWindow, say: Say, task_id: str | None, kind: str, opened
         say(f"Opened {what} in Outlook. Its capture isn't filed to a task, so its replies won't find one by themselves.", False)
         return
     title = m.tasks[task_id].title
+    if kind == "new" and not conversations.key(opened.index) and opened.entry_id:
+        # Outlook's guard refused the index (release 5.141): kept untagged with its draft, known when it's sent.
+        kept = conversations.record_t_mail(browse.conn, task_id, kind, _stamp(browse), "", untagged=True)
+        if kept is not None:
+            sent_watch.keep_draft(browse.conn, kept, opened.entry_id, opened.store_id)
+            say(f"Opened a new T-mail from {title} in Outlook. When you send it, DocRepo files it on {title}, and its replies follow.", False)
+            browse.ctx.t_mail_opened()
+            return
     if conversations.record_t_mail(browse.conn, task_id, kind, _stamp(browse), opened.index, reply_capture, reply_pos) is None:
         say(f"Opened {what} in Outlook, but Outlook gave it no conversation index, so its replies won't find {title} by themselves. "
             "Settings → Troubleshooting report shows why.", True)
         return
-    say(f"Opened {what} from {title} in Outlook. When you capture its replies, they'll go to {title}.", False)
+    say(f"Opened {what} from {title} in Outlook. When you send it, it's captured on {title}, and so are the replies you capture.", False)
+    browse.ctx.t_mail_opened()  # Sent Items is watched for it (release 5.123)
 
 
 def new_t_mail(browse: BrowseWindow, task_id: str, say: Say | None = None) -> None:
@@ -154,7 +165,8 @@ def ask_for_update(browse: BrowseWindow, task_id: str, say: Say | None = None) -
         out(f"{ask_update.LABEL}: {e}", True)
         return None
     kept = conversations.record_t_mail(browse.conn, task_id, ask_update.KIND, _stamp(browse), asked.opened.index, untagged=True)
-    browse.refresh()  # its rows and status card say "asked" now
+    ask_update.start_wait(browse.conn, browse.ctx.settings, task_id, kept, browse.ctx.now())  # waiting on them (release 5.139, decision 593)
+    browse.refresh()  # its rows and status card say "waiting on Mike since …" now
     lines, trouble = [f"Opened {ask_update.LABEL} on {title} in Outlook. {ask_update.who_line(ask)}"], bool(ask.missing)
     if ask.to and not asked.to_filled:
         lines.append("Outlook didn't take To, so fill it in there.")
@@ -163,8 +175,15 @@ def ask_for_update(browse: BrowseWindow, task_id: str, say: Say | None = None) -
         QGuiApplication.clipboard().setText(ask.words)
         lines.append("Outlook didn't take the words, so they're on the clipboard: paste them above your signature.")
         trouble = True
+    by_draft = kept is not None and not conversations.key(asked.opened.index) and bool(asked.opened.entry_id)
+    if by_draft:  # Outlook's guard refused the index (release 5.141): known by its draft when it's sent
+        sent_watch.keep_draft(browse.conn, kept, asked.opened.entry_id, asked.opened.store_id)
+    if kept is not None and (by_draft or conversations.key(asked.opened.index)):
+        browse.ctx.t_mail_opened()  # Sent Items is watched for it (release 5.123)
     if conversations.key(asked.opened.index):
         lines.append(f"When you capture the reply, it'll go to {title}.")
+    elif by_draft:
+        lines.append(f"When you send it, DocRepo files it on {title}, and its reply follows.")
     else:
         lines.append(f"Outlook gave it no conversation index, so the reply won't find {title} by itself. Settings → Troubleshooting report shows why.")
         trouble = True
