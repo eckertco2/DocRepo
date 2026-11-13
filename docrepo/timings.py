@@ -52,6 +52,8 @@ BUDGETS = (
     Budget("counts", "The view counts", 0.3),
     Budget("search", "Search everything, three words", 0.3),
     Budget("page", "A task page with 300 notes", 0.3),
+    # Release 5.140 (the notes consolidation plan's decision 609): the task page's budget, for its All notes and Meetings.
+    Budget("allnotes", "All notes and Meetings on the busiest project", 0.3),
     Budget("save", "Saving a capture on a task", 0.5),
     Budget("tree", "Refreshing the task tree", 0.5),
     Budget("timeline", "The Timeline over 12 months", 1.0),
@@ -155,6 +157,18 @@ def busiest_task(model) -> tuple[str | None, int]:
     return task, n
 
 
+def busiest_project(model) -> tuple[str | None, int]:
+    """The top-level task with the most live tasks under it, and how many: the All notes that's timed (release 5.140)."""
+    best, most = None, -1
+    for t in model.tasks.values():
+        if t.discarded or model.parents_of(t.id):
+            continue
+        n = sum(1 for x in model.descendants_of(t.id) if x in model.tasks and not model.tasks[x].discarded)
+        if n > most:
+            best, most = t.id, n
+    return best, max(most, 0)
+
+
 def _clock(work: Callable[[], object], runs: int) -> tuple[float, object]:
     """The median time of ``runs`` runs of ``work``, and what the last returned."""
     times, out = [], None
@@ -169,7 +183,7 @@ def measure(data_root: Path, settings: Settings, now: datetime, words: str = DEF
             keys: tuple[str, ...] | None = None) -> list[Timing]:
     """Time each budget's operation on a data root, ``runs`` times for the quick ones (the median counts) and once for the
     daily work and ``rebuild``. ``keys`` times only those. The data root and its docs.db are left as they were."""
-    from docrepo import capacity, notes_page, search, timeline
+    from docrepo import capacity, meeting_rows, notes_page, search, timeline
     from docrepo.captures import read_content
     from docrepo.detail import PageState, Pages
     from docrepo.model import Model
@@ -202,6 +216,16 @@ def measure(data_root: Path, settings: Settings, now: datetime, words: str = DEF
                 return len(html) + len(notes_page.lines_of(m.pages.get(busiest, "")))
             t, _ = _clock(page, runs)
             out.append(Timing("page", t, runs, f"its task has {notes:,} captures"))
+        project, under = busiest_project(m)
+        if "allnotes" in wanted and project:
+            def all_notes() -> int:
+                pages = Pages(m, today, lambda cid: read_content(data_root, m.captures[cid]) or "" if cid in m.captures else "",
+                              settings.me, conn, hints=False, reference_links=settings.reference_links)
+                html, _an = pages.all_notes(project, PageState())
+                rows = meeting_rows.rows(m, project)
+                return len(html) + len(pages.meeting_rows_html(m.task(project), rows, PageState()) if rows else "")
+            t, _ = _clock(all_notes, runs)
+            out.append(Timing("allnotes", t, runs, f"{under:,} tasks under it"))
         if "tree" in wanted:
             def tree() -> int:
                 mm = Model(conn)

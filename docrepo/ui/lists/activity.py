@@ -145,6 +145,13 @@ class ActivityList:
                                 selectable=key is not None, span=True)
         if select and g.task:
             self.tree.add_tick(top, f"t:{g.task}" in self.act["picked"])
+        self._activity_rows(m, today, g, top)
+        top.setExpanded(True)
+
+    def _activity_rows(self, m, today, g, top) -> None:
+        """Under a group's row, a row for each task under it and a row for each line. The weekly review's step 4 (release
+        5.128) puts a project's lines under its row with it."""
+        select = self.act["select"] and self.view == "activity"
         for h in g.headings:
             parent = top
             if h.task and h.task != g.task:
@@ -171,7 +178,6 @@ class ActivityList:
                 if select:
                     self.tree.add_tick(row, f"l:{line.key}" in self.act["picked"])
             parent.setExpanded(True)
-        top.setExpanded(True)
 
     def _set_act(self, key: str, value) -> None:
         self.act[key] = value

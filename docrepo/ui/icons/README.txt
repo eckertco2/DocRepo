@@ -16,3 +16,4 @@ The notes page's Jump to (release 5.86) is jump, an arrow down to a line, on the
 Tagged labels (release 5.79) adds tagged, an equipment tag's plate with its hole and two lines of text, to the sidebar and
 to search's results.
 The notes page's outline (release 5.113) is outline, a panel with a column at its left and indented lines beside it, on the Notes heading.
+The weekly review (release 5.128) is review, a circling arrow around a tick, in the sidebar between Today and Unfiled.

@@ -523,6 +523,36 @@ def change_task(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings:
     return out
 
 
+def mark_reviewed(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, task_id: str, at: datetime) -> Outcome:
+    """Mark reviewed, in the weekly review's step 4 (release 5.128, decision 498): the task keeps the time, its facts say
+    "Reviewed Fri 13 Nov", and it leaves the step until its interval comes round. Nothing goes into the status log
+    (decision 503); Undo is ``set_reviewed``."""
+    from docrepo import review
+
+    before = Model(conn)
+    if task_id not in before.tasks:
+        raise EditError(f"There's no task {task_id}.")
+    tasks.set_reviewed(conn, {task_id: stamp(at)})
+    m = Model(conn)
+    t = m.task(task_id)
+    weeks = review.interval(m, t, settings.review_weeks)
+    nxt = review.next_review(t, weeks) if weeks else None
+    again = f" It comes up again in the week of {long_date(nxt, at.date())}." if nxt else ""
+    out = Outcome(f"{t.title}: reviewed.{again}")
+    write_touched_pages(conn, data_root, fs, at, out.problems, [task_id], before)
+    log.info("task %s marked reviewed", task_id)
+    return out
+
+
+def set_reviewed(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, task_id: str, reviewed: str | None, at: datetime) -> Outcome:
+    """Mark reviewed's Undo (release 5.128): the task's last review as it was before."""
+    before = Model(conn)
+    tasks.set_reviewed(conn, {task_id: reviewed})
+    out = Outcome(f"{Model(conn).task(task_id).title}: back to " + (f"reviewed {long_date(to_date(reviewed), at.date())}." if reviewed else "not reviewed yet."))
+    write_touched_pages(conn, data_root, fs, at, out.problems, [task_id], before)
+    return out
+
+
 def set_states(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, states: dict[str, str], at: datetime) -> Outcome:
     """Set tasks' states from a row's state menu (release 5.76, round 7's item 101, decisions 362 to 364): each change a status
     log line as "Browse tool", as Edit task's are, with no capture, all in one transaction, and the pages written once. A

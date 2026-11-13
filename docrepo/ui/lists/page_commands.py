@@ -19,6 +19,7 @@ from docrepo.detail import SCOPE_NAMES
 from docrepo.links import is_folder, is_link
 from docrepo.schedule import is_open
 from docrepo.ui import conversation_page, decision_register, t_mails, task_menus
+from docrepo.ui.lists import review as review_list
 from docrepo.ui.icons import icon
 from docrepo.ui.look import LOOK
 from docrepo.views import full_path
@@ -41,6 +42,8 @@ class PageCommands:
             self._action("Open folder", lambda: self.reveal(self.ctx.data_root / "Tasks" / task_id), f"Open Tasks\\{task_id} in File Explorer")
             return
         menu_key = "   " if LOOK.classic else "\t"  # a menu's key column; the Classic look puts the key after the label
+        if self.view == "review":  # the weekly review's step 4 (release 5.128): Mark reviewed first
+            review_list.page_actions(self, task_id)
         self._action("Note", lambda: self.open_capture(task=task_id, mode="note"), "Add a note to this task's notes page", icon_name="note", key="N")
         self._action("Update", lambda: self.open_capture(task=task_id, mode="update"), "Update this task: its state, status, dates and more",
                      icon_name="update", key="U")
@@ -177,6 +180,13 @@ class PageCommands:
             conversation_page.on_link(self, kind, rest)
         elif kind == decision_register.LINK:  # the Decisions section's Copy (release 5.124, decision 479)
             decision_register.copy(self, rest)
+        elif kind == "meetrow":  # a meeting's row in Meetings, unfolded or folded (release 5.140, decision 607)
+            st.meeting_open = "" if st.meeting_open == rest else rest
+            self.render_detail(keep_scroll=True)
+        elif kind == "meetingnotes":  # the Meetings section's Meeting notes (decision 607)
+            self.open_capture(task=rest, meeting=True)
+        elif kind in ("allnotes", "notesgo"):  # All notes' links (release 5.140, decisions 603, 605 and 609)
+            self.all_notes_link(kind, rest)
         elif kind == "doc":
             self.view = "docs"
             self.select("doc", rest, update_list=True)
@@ -235,7 +245,7 @@ class PageCommands:
             self.render_detail(keep_scroll=True)
         # The task page's own (release 5.21): Details, the whole description and the closed subtasks, the history's scope
         # and order menus, New task under this one, Add one (an update), a reference field's Copy, and the task's folder.
-        elif kind == "fold" and rest in ("details", "desc", "closed", "conversations", "decisions"):
+        elif kind == "fold" and rest in ("details", "desc", "closed", "conversations", "decisions", "meetings"):
             setattr(st, rest, not getattr(st, rest))
             if rest == "details":  # since release 5.84 Details is a group of the page; the link opens it
                 self.task_pane.header.groups["details"].set_open(st.details, emit=True)

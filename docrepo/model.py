@@ -61,6 +61,10 @@ class Task:
     #: Release 5.117 (decision 416): how its reminder repeats (``repeats``' rule), and the last day it may come round.
     reminder_repeat: str | None = None
     reminder_until: str | None = None
+    #: Release 5.128 (the weekly review, decisions 498 and 499): when it was last marked reviewed (a stored time), and its own
+    #: review interval in weeks, 1, 2 or 4, or 0 for never; None follows Settings for a project and means none for a subtask.
+    reviewed: str | None = None
+    review_every: int | None = None
     calendar_days: bool = False
     lead_per_day: float | None = None
     assignee_per_day: float | None = None
@@ -362,7 +366,7 @@ TASK_COLUMNS = (
     "id", "title", "state", "closed", "urgent", "meeting", "recurrence", "repeat_until", "start", "due", "deadline", "deadline_desc",
     "reminder", "lead_hours", "assignee_hours", "inherit_labels", "description", "current_status", "created", "created_by", "discarded",
     "discard_reason", "plant_event", "priority", "priority_rank", "day_headings", "duration", "calendar_days", "lead_per_day",
-    "assignee_per_day", "lead_per_week", "assignee_per_week", "reminder_repeat", "reminder_until",
+    "assignee_per_day", "lead_per_week", "assignee_per_week", "reminder_repeat", "reminder_until", "reviewed", "review_every",
 )
 _TASK_COLUMNS = ", ".join(TASK_COLUMNS)
 
