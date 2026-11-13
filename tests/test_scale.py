@@ -3,7 +3,9 @@ made-up work (``docrepo.sample_scale``), and each everyday operation timed on it
 
 They take minutes, so they never run in the default or the fast run (decision 471): run them before each train with
 ``.venv\\Scripts\\python.exe -m pytest -m scale``. The data root is built once by ``load-sample --years 3`` and kept in
-``.pytest_tmp\\scale-v<generator version>-3y``, so only the first run, or the first after the generator changes, builds it.
+``.pytest_tmp\\scale-v<generator version>-s<schema version>-3y``, so only the first run, or the first after the generator
+or the schema changes, builds it. (Before the train of 2026-11-13 the name had no schema, so a root built at schema 25 was
+kept at 28, and `timings` refused it: every budget erred.)
 The last run's times are kept beside it as ``last-timings.md``.
 
 A missed budget fails with its time. A budget missed on the day it's built is recorded in ``MISSED`` (decision 473): its
@@ -43,9 +45,9 @@ MISSED: dict[str, str] = {
 
 
 def built_root(years: int = YEARS) -> Path:
-    """The scale data root, built once per generator version and kept in .pytest_tmp. Two runs at once each build their
-    own and the second keeps the first's."""
-    folder = TEMP_ROOT / f"scale-v{sample_scale.VERSION}-{years}y"
+    """The scale data root, built once per generator version and schema version and kept in .pytest_tmp. Two runs at once
+    each build their own and the second keeps the first's."""
+    folder = TEMP_ROOT / f"scale-v{sample_scale.VERSION}-s{db.SCHEMA_VERSION}-{years}y"
     root = folder / "DocRepoData"
     if (folder / "built.txt").exists():
         return root
