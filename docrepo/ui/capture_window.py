@@ -496,7 +496,7 @@ class CaptureWindow(QWidget):
         self.reading: items.Reading | None = None
         self._names: items.Names | None = None
         self._typing: items.Typing | None = None
-        self._pick_end: tuple[int, int, int] | None = None  # where the last pick ended: the list doesn't open again there (decision 326)
+        self._pick_end: tuple[int, int, int, int] | None = None  # where the last pick ended, and its name started: the list doesn't open again there (decision 326)
         self._highlighting = False
         self._items_timer = QTimer(self)
         self._items_timer.setSingleShot(True)
@@ -1727,26 +1727,29 @@ class CaptureWindow(QWidget):
         return self.content, self.ref_popup
 
     def _ref_list(self) -> None:
-        """The @ or # list, while a name is being typed after one."""
+        """The @ or # list, while a name is being typed after one; and since release 5.144 (decision 620) the same list
+        for a ``**label,`` or ``**agenda,`` sentence, of the names it takes."""
         if not hasattr(self, "ref_popup"):
             return
         box, popup = self._ref_box()
         cursor = box.textCursor()
         t = None
         if not cursor.hasSelection() and not self.from_capture and box.hasFocus():
-            t = items.typing(cursor.block().text()[:cursor.positionInBlock()])
-            if t and self._pick_end == (id(box), cursor.blockNumber(), cursor.positionInBlock()):
+            t = items.typing(cursor.block().text()[:cursor.positionInBlock()], self.names())
+            if t and self._pick_end == (id(box), cursor.blockNumber(), cursor.positionInBlock(), t.start):
                 t = None  # right after a pick, whose name and space are what's "typed" (round 7's decision 326)
         options = items.options(t, self.names()) if t else []
         if not options:
             popup.hide()
             self._typing = None
             return
-        if t.sigil == "#":
+        tasks = t.sigil == "#" or t.of == "agendas"  # a list with tasks in it: their paths, marks and levels
+        if tasks:
             m = self.ctx.model()
-            options = [replace(o, sub=path_text(m, o.ref) or "Top-level task") if o.ref in m.tasks else o for o in options]
-        popup.subtasks = self._subtask_options if t.sigil == "#" else None
-        popup.task_info = self._task_mark if t.sigil == "#" else None  # each row's dot or ring (release 5.75)
+            options = [replace(o, sub=path_text(m, o.ref) or "Top-level task") if o.ref in m.tasks and (t.sigil == "#" or not o.sub) else o
+                       for o in options]
+        popup.subtasks = self._subtask_options if tasks else None
+        popup.task_info = self._task_mark if tasks else None  # each row's dot or ring (release 5.75)
         self._typing = t
         # Under the cursor, or above it where it wouldn't fit: in the window, or, for the pinned window's list, which is
         # a window of its own, on the screen. The list keeps itself in view as it changes size (release 5.65).
@@ -1777,15 +1780,18 @@ class CaptureWindow(QWidget):
             return
         cursor = box.textCursor()
         cursor.setPosition(cursor.position() - (cursor.positionInBlock() - t.start), QTextCursor.MoveMode.KeepAnchor)
-        words = t.sigil + option.value + " "
-        # Where the pick ends, before it goes in: putting it in reads the list again (round 7's decision 326).
-        self._pick_end = (id(box), cursor.blockNumber(), t.start + len(words))
+        words = items.inserted(t, option)  # a value list's pick: @ for a person, # for a task (release 5.144, decision 622)
+        key = items.remembered(t, option)
+        if key:
+            self.ref_ids[key] = option.ref
+            self._names = None
+        # Where the pick ends, and where its name starts, before it goes in: putting it in reads the list again (round 7's
+        # decision 326). A list that opens there for the next thing, as a value list does after a ** list's pick, isn't this one.
+        self._pick_end = (id(box), cursor.blockNumber(), t.start + len(words), t.start + len(t.lead))
+        self._typing = None
         cursor.insertText(words)
         box.setTextCursor(cursor)
-        if option.ref:
-            self.ref_ids[("#" if t.sigil == "#" else "@") + option.value.lower()] = option.ref
-            self._names = None
-        self._typing = None
+        self._ref_list()
         self.read_items()
 
     # ---- the draft keeps itself (release 5.8), in Drafts (release 5.77) ----
