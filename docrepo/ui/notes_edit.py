@@ -59,6 +59,8 @@ OLD_DAYS = 14   # a capture's mark in the gutter (release 5.85, the task pane re
 #: The mark for each kind of caption, by the first word of what it says ("Email from …", "File", "Update: …").
 MARKS = {"Email": "mail", "File": "file", "Update": "update", "New": "task", "Decision": "decision", "Meeting": "agenda", "Note": "note"}
 PAGE_MIME = "application/x-docrepo-notes-page"
+#: What a pointer line shows before its words (release 5.143), as Task.md prints it; it isn't kept in its markup.
+POINTER_MARK = "↪ "
 PROPORTIONAL = QTextBlockFormat.LineHeightTypes.ProportionalHeight.value
 SAVE_AFTER_MS = 800
 #: The widest a picture shows on the page, in pixels (release 5.27).
@@ -97,6 +99,10 @@ class NotesEdit(RichEdit):
     files_dropped = Signal(list)  # local files dropped on the page (release 5.27)
     focus_changed = Signal(bool)  # the frame round the notes shows where you're typing (decision 130)
     page_set = Signal()  # a page was put in (``set_page``): the outline reads it at once (release 5.113)
+    #: Move to task (release 5.143, decision 613): Alt+Shift+M or the right-click menu, for the window to pick a task.
+    move_requested = Signal()
+    #: A pointer line's Bring the lines back (decision 613): its move's key.
+    bring_back = Signal(str)
     takes_pictures = True
     takes_headings = True  # the format bar's Heading menu (release 5.28); the page folds its headings itself
     #: A document's file, for its picture: set by the browse window.
@@ -137,6 +143,7 @@ class NotesEdit(RichEdit):
         self._restructure.timeout.connect(self.refold)
         self._keys.update({
             "Alt+Shift+D": self.add_today_heading,
+            "Alt+Shift+M": self.move_requested.emit,  # Move to task (release 5.143)
             "Ctrl+Alt+1": lambda: self.set_heading(1), "Ctrl+Alt+2": lambda: self.set_heading(2),
             "Ctrl+Alt+3": lambda: self.set_heading(3), "Ctrl+Alt+0": lambda: self.set_heading(0),
             "Alt+Shift+-": lambda: self.fold_here(True), "Alt+Shift+_": lambda: self.fold_here(True),
@@ -158,11 +165,11 @@ class NotesEdit(RichEdit):
             return None
         href = it.fragment().charFormat().anchorHref()
         scheme, _, ref = href.partition(":")
-        return (scheme, ref) if scheme in ("capture", "document", "task") and ref else None
+        return (scheme, ref) if scheme in ("capture", "document", "task", "moved", "from") and ref else None
 
     def kind(self, block) -> str:
-        """"heading", "caption", "file", "task" (a line that's one link to a task, release 5.83), "picture", "attachment", "cell" (in a
-        table) or "text"."""
+        """"heading", "caption", "file", "task" (a line that's one link to a task, release 5.83), "pointer" and "lead" (where
+        lines went, and where they came from, release 5.143), "picture", "attachment", "cell" (in a table) or "text"."""
         if block.blockFormat().headingLevel():
             return "heading"
         if QTextCursor(block).currentTable() is not None:
@@ -174,7 +181,8 @@ class NotesEdit(RichEdit):
             it += 1
         ref = self.ref_of(block)
         if ref:
-            return "caption" if ref[0] == "capture" else "task" if ref[0] == "task" else "attachment" if block.textList() is not None else "file"
+            return {"capture": "caption", "task": "task", "moved": "pointer", "from": "lead"}.get(
+                ref[0], "attachment" if block.textList() is not None else "file")
         return "text"
 
     def heading_of(self, block):
@@ -198,7 +206,7 @@ class NotesEdit(RichEdit):
             f.setTopMargin(12 if day else {1: 16, 2: 10}.get(level, 8))
             f.setBottomMargin(2 if day else 4)
             f.setLineHeight(115, PROPORTIONAL)
-        elif kind == "caption":
+        elif kind in ("caption", "lead"):
             f.setTopMargin(10)
             f.setLineHeight(115, PROPORTIONAL)
         elif kind == "picture":  # a picture's line is as tall as the picture (release 5.27)
@@ -219,10 +227,10 @@ class NotesEdit(RichEdit):
         elif kind == "heading":
             f.setFontPointSize(tokens.BODY + HEADING_SIZES.get(level, 0.5))
             f.setFontWeight(QFont.Weight.DemiBold)
-        elif kind in ("caption", "file", "task"):
+        elif kind in ("caption", "file", "task", "pointer", "lead"):
             f.setAnchor(True)
             f.setAnchorHref(href)
-            if kind == "caption":
+            if kind in ("caption", "lead"):
                 f.setFontPointSize(tokens.CAPTION)
                 f.setForeground(_grey())
             else:
@@ -324,7 +332,8 @@ class NotesEdit(RichEdit):
                 c.insertText(line.text, cf)
             c.setCharFormat(QTextCharFormat())
             return
-        href = f"{'capture' if line.kind == 'caption' else 'task' if line.kind == 'task' else 'document'}:{line.ref}" if line.kind != "heading" else ""
+        scheme = {"caption": "capture", "task": "task", "pointer": "moved", "lead": "from"}.get(line.kind, "document")
+        href = f"{scheme}:{line.ref}" if line.kind != "heading" else ""
         day = line.kind == "heading" and notes_page.day_of(line.text) is not None
         bf, cf = self._block_format(line.kind, line.level, day), self._char_format(line.kind, line.level, href, day)
         if new_block:
@@ -332,7 +341,7 @@ class NotesEdit(RichEdit):
         else:
             c.setBlockFormat(bf)
             c.setBlockCharFormat(cf)
-        c.insertText(line.text, cf)
+        c.insertText(POINTER_MARK + line.text if line.kind == "pointer" else line.text, cf)
         if line.kind == "file":
             self._quiet_file_words(c.block())
             c.movePosition(QTextCursor.MoveOperation.EndOfBlock)
@@ -550,6 +559,12 @@ class NotesEdit(RichEdit):
             menu.addSeparator()
             menu.addAction("Remove row", lambda: table.removeRows(r, 1) if table.rows() > 1 else None)
             menu.addAction("Remove column", lambda: table.removeColumns(col, 1) if table.columns() > 1 else None)
+        # Move to task (release 5.143, decision 613), and on a pointer line Bring the lines back.
+        menu.addSeparator()
+        menu.addAction("Move to task…\tAlt+Shift+M", self.move_requested.emit)
+        here = self.ref_of(c.block())
+        if here and here[0] == "moved" and (pair := notes_page.pair_of(here[1])) and pair[1].startswith("M"):
+            menu.addAction("Bring the lines back", lambda key=pair[1]: self.bring_back.emit(key))
         self._menu = menu  # kept, so tests can reach it
         menu.popup(event.globalPos())
 
@@ -663,9 +678,12 @@ class NotesEdit(RichEdit):
                 continue
             if kind == "heading":
                 out.append(notes_page.heading_line(" ".join(b.text().split()), b.blockFormat().headingLevel()))
-            elif kind in ("caption", "file", "task"):
+            elif kind in ("caption", "file", "task", "pointer", "lead"):
                 ref = self.ref_of(b)
                 text = " ".join(b.text().split())
+                if kind in ("pointer", "lead"):
+                    out.append(notes_page.write([Line(kind, text.removeprefix(POINTER_MARK.strip()).strip(), ref=ref[1])]))
+                    continue
                 out.append(notes_page.caption_line(text, ref[1]) if kind == "caption" else notes_page.task_line(text, ref[1]) if kind == "task"
                            else notes_page.file_line(text, ref[1]))
             else:
@@ -988,6 +1006,52 @@ class NotesEdit(RichEdit):
         self.setTextCursor(c)
         return True
 
+    def go_to_key(self, key: str, scheme: str = "from") -> bool:
+        """Put the caret on a move's lead line (``from``) or its pointer line (``moved``), unfolding what hides it (release
+        5.143): where a pointer or a lead line was clicked to go."""
+        b = next((x for x in self.blocks() if (r := self.ref_of(x)) and r[0] == scheme and (notes_page.pair_of(r[1]) or ("", ""))[1] == key), None)
+        if b is None:
+            return False
+        self.reveal(b)
+        c = QTextCursor(b)
+        c.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
+        self.setFocus()
+        self.setTextCursor(c)
+        return True
+
+    def line_span(self) -> tuple[int, int, list[str]] | None:
+        """The page's lines a Move to task takes (release 5.143, decision 613): the selection's lines, whole, or else the
+        caret's line with the list items under it; as (start, end, their lines), places in the page as ``page`` writes it.
+        A table counts as its lines, once."""
+        c, doc = self.textCursor(), self.document()
+        if c.hasSelection():
+            first, last = doc.findBlock(c.selectionStart()), doc.findBlock(c.selectionEnd())
+            if c.selectionEnd() == last.position() and last != first:
+                last = last.previous()  # a selection that ends at a line's start doesn't take that line
+        else:
+            first = last = c.block()
+            if first.textList() is not None:  # the list items under it
+                level, b = first.textList().format().indent(), first.next()
+                while b.isValid() and b.textList() is not None and b.textList().format().indent() > level and self.kind(b) == "text":
+                    last, b = b, b.next()
+        out, index, start, end, tables = self._lines_out(), 0, None, None, set()
+        for b in self.blocks():
+            n = 1
+            if self.kind(b) == "cell":
+                table = QTextCursor(b).currentTable()
+                key = table.firstPosition() if table is not None else -1
+                n = 0 if key in tables else len(self.table_lines(table)) if table is not None else 1
+                tables.add(key)
+            if b == first:
+                start = index
+            index += n
+            if b == last:
+                end = index
+                break
+        if start is None or end is None or end <= start:
+            return None
+        return start, end, out[start:end]
+
     def section_summary(self, heading) -> str:
         end, b, captures, lines = self.section_end(heading), heading.next(), 0, 0
         while b.isValid() and b.position() <= end.position():
@@ -1039,7 +1103,7 @@ class NotesEdit(RichEdit):
         Ctrl+Alt+0 makes it text again. A caption, a file line and a list item are left as they are."""
         c = self.textCursor()
         b = c.block()
-        if self.kind(b) in ("caption", "file", "task") or b.textList() is not None:
+        if self.kind(b) in ("caption", "file", "task", "pointer", "lead") or b.textList() is not None:
             return
         c.beginEditBlock()
         bf = b.blockFormat()
@@ -1204,7 +1268,7 @@ class NotesEdit(RichEdit):
             c.endEditBlock()
             self.setTextCursor(c)
             return
-        if kind in ("caption", "file", "task", "picture", "attachment") and not c.hasSelection() and key in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete):
+        if kind in ("caption", "file", "task", "pointer", "lead", "picture", "attachment") and not c.hasSelection() and key in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete):
             self._remove_line(b)
             return
         if key == Qt.Key.Key_Backspace and not c.hasSelection() and c.positionInBlock() == 0 and b.previous().isValid() \
@@ -1227,7 +1291,7 @@ class NotesEdit(RichEdit):
             return
         if kind in ("picture", "attachment") and event.text() and event.text().isprintable() and not mods & Qt.KeyboardModifier.ControlModifier:
             self._to_description(b)  # typing on a picture or a file goes to its description
-        elif kind in ("caption", "file", "task") and event.text() and event.text().isprintable() and not mods & Qt.KeyboardModifier.ControlModifier:
+        elif kind in ("caption", "file", "task", "pointer", "lead") and event.text() and event.text().isprintable() and not mods & Qt.KeyboardModifier.ControlModifier:
             # Typing on a caption goes to the line below it: the caption stays the capture's (decision 109).
             nxt = b.next()
             if nxt.isValid() and self.kind(nxt) == "text" and nxt.isVisible():
@@ -1469,6 +1533,9 @@ class NotesEdit(RichEdit):
             if scheme in ("capture", "document", "task") and ref and not event.modifiers():
                 self.open_ref.emit(ref)
                 return
+            if scheme in ("moved", "from") and ref and not event.modifiers():  # release 5.143: where the lines went, or came from
+                self.open_ref.emit(f"{scheme}:{ref}")
+                return
         super().mousePressEvent(event)
 
     # ---- addresses in the page's words (release 5.67, round 6's decision 315) ----
@@ -1518,7 +1585,7 @@ class NotesEdit(RichEdit):
         scheme = self.anchorAt(pos).partition(":")[0]
         address = self.address_at(pos) if not scheme else None
         mark = self.mark_at(pos)
-        hand = ((row is not None and pos.x() < LEFT) or mark is not None or scheme in ("capture", "document", "task")
+        hand = ((row is not None and pos.x() < LEFT) or mark is not None or scheme in ("capture", "document", "task", "moved", "from")
                 or self.checkbox_at(pos) is not None or (address is not None and event.modifiers() & Qt.KeyboardModifier.ControlModifier))
         self.viewport().setToolTip(f"{mark.text()}. Click to open the capture." if mark is not None
                                    else f"Ctrl+click opens it in your browser: {address}" if address else "")

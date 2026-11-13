@@ -135,6 +135,8 @@ MEETING_NOTES_TIP = ("Meeting notes on this task: the capture window takes a mee
 EDIT_THERE_TIP = "Open its page at these lines, to read or write them there (or double-click a line)"
 #: The bar beside a follow-up's lines opened in its meeting's notes (decision 604), and beside a meeting's unfolded notes.
 NEST_BAR, UNFOLD_BAR = "#9dc0e3", "#d6dce3"
+#: The bar beside lines a pointer line opens into (release 5.143): the success colour, as moved lines aren't a follow-up's.
+MOVED_BAR = "#7fb7a8"
 #: The line between a conversation's emails: a block one pixel high in the rule's grey (Qt draws an <hr> dark).
 RULE = '<p class="rule" style="font-size: 1px; margin-top: 16px; margin-bottom: 0px">&nbsp;</p>'
 SCOPE_NAMES = {"self": "This task", "ancestors": "With parent tasks", "descendants": "With subtasks", "family": "Whole family"}
@@ -1091,6 +1093,11 @@ class Pages:
         if x.kind in ("file", "task"):
             href = f"task:{x.ref}" if x.kind == "task" else f"doc:{x.ref}"
             return f'<p class="{cls}" style="{tight}">{link(href, x.text)}</p>'
+        if x.kind in ("pointer", "lead"):  # release 5.143: where lines went, or came from, a link to that page
+            pair = notes_page.pair_of(x.ref)
+            words = ("↪ " if x.kind == "pointer" else "") + x.text
+            inner = link(f"task:{pair[0]}", words) if pair and pair[0] in self.m.tasks else esc(words)
+            return f'<p class="{"src" if x.kind == "lead" else cls}" style="{tight}">{inner}</p>'
         if x.kind in ("picture", "attachment"):
             words = f"Picture: {x.text}" if x.kind == "picture" else x.text
             return f'<p class="{cls}" style="{tight}; margin-left: {12 * (x.level - 1)}px">• {link(f"doc:{x.ref}", words)}</p>'
@@ -1159,6 +1166,13 @@ class Pages:
                 head = (f'<p class="nl" style="margin-top: 2px; margin-bottom: 2px">{self.page_chip(x.ref, "")} '
                         f'<span class="rel">follow-up, on its page</span></p>')
                 out.append(self._barred(head + "".join(self.note_line_html(y) for y in nb.lines), NEST_BAR, 12))
+                continue
+            # A pointer line opens into the lines it points to, on their page (release 5.143, decisions 604, 613 and 614).
+            pb = all_notes.pointer_block(self.m, x.ref, cache) if x.kind == "pointer" else None
+            if pb is not None:
+                head = (f'<p class="nl" style="margin-top: 2px; margin-bottom: 2px">{self.page_chip(pb.page, "")} '
+                        f'<span class="rel">{"moved there" if pb.key else "on its page"}</span></p>')
+                out.append(self._barred(head + "".join(self.note_line_html(y) for y in pb.lines), MOVED_BAR, 12))
                 continue
             key = " ".join(markup.to_plain(x.text).split()).casefold() if notes and x.kind == "text" else ""
             out.append(self.note_line_html(x, also_on=copies.get(key)))

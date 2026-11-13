@@ -10,6 +10,10 @@ list items) and three more kinds:
   the capture's block and dates it (decisions 109 and 120);
 - a file line: a line that's one link to a document, ``[File: Pump spec.docx, the vendor's datasheet](document:D000012)``
   (decision 96).
+- since release 5.143 (the notes consolidation plan's decisions 613 and 614): a **pointer line**, one link to where lines
+  of the page went, ``[Fill media order · 2 lines moved there](moved:T000023/M20261113091500)``, and on that page their
+  **lead line**, ``[Moved from the notes of Cooling tower kickoff · Tue 3 Nov](from:T000021/M20261113091500)``, the two
+  paired by the move's key; a meeting's ``#task`` section points to its item's capture, ``(moved:T000022/C000033)``;
 - since release 5.27 (decisions 124 to 128): a **picture**, a list item that's one picture of a document,
   ``- ![Picture 2026-10-27 1042.png](document:D000031)``, and an **attachment**, a list item that's one link to a
   document, ``- [File: Pump curve.pdf](document:D000032)``, each with its description as the list item under it; and a
@@ -41,8 +45,10 @@ WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 DAY = re.compile(r"(Mon|Tue|Wed|Thu|Fri|Sat|Sun) (\d{1,2}) (" + "|".join(MONTHS) + r") (\d{4})")
 HEADING = re.compile(r"^(#{1,3}) (.*)$")
-LINK = re.compile(r"^\[((?:[^\]\\]|\\.)*)\]\((capture|document|task):([A-Z]\d+)\)$")
-_LINK_KINDS = {"capture": "caption", "document": "file", "task": "task"}
+LINK = re.compile(r"^\[((?:[^\]\\]|\\.)*)\]\((capture|document|task|moved|from):([A-Z]\d+(?:/[A-Z][0-9-]+)?)\)$")
+_LINK_KINDS = {"capture": "caption", "document": "file", "task": "task", "moved": "pointer", "from": "lead"}
+#: A pointer's or a lead line's ref: the task, then the move's key ("M" and when, or a meeting item's capture).
+_PAIR = re.compile(r"^(T\d+)/([A-Z][0-9-]+)$")
 #: A picture or an attachment on the page (release 5.27): a list item that's one picture of, or link to, a document.
 ITEM = re.compile(r"^((?:  )*)- (!?)\[((?:[^\]\\]|\\.)*)\]\(document:(D\d+)\)$")
 #: The kinds of file a page shows as a picture.
@@ -56,7 +62,8 @@ _TASK_REF = re.compile(r"\]\((T\d+)\)")
 @dataclass(frozen=True)
 class Line:
     """One line of a page, read: a "heading", a "caption", a "file" line, a "task" line (one link to a task made from
-    the notes, release 5.83), a "picture", an "attachment", a table's "row" or a line of "text"."""
+    the notes, release 5.83), a "pointer" or a "lead" line (release 5.143), a "picture", an "attachment", a table's "row"
+    or a line of "text"."""
 
     kind: str
     text: str        # a heading's or a link's text, in words; a text line's markup; a row as it's kept
@@ -132,6 +139,69 @@ def task_lines(lines: list[str], made: list[tuple[str, list[str]]], model: Model
     return out
 
 
+def pointer_line(text: str, task_id: str, key: str) -> str:
+    """Where lines of the page went (release 5.143, decision 613): "Fill media order · 2 lines moved there", one link to
+    the task they're on now and the move's key. A meeting's ``#task`` section points the same way (decision 614), its
+    key the item's capture."""
+    return f"[{_link_text(text)}](moved:{task_id}/{key})"
+
+
+def lead_line(text: str, task_id: str, key: str) -> str:
+    """The line before lines moved onto a page (decision 613): "Moved from the notes of Cooling tower kickoff · Tue 3
+    Nov", one link to the page they came from and the move's key."""
+    return f"[{_link_text(text)}](from:{task_id}/{key})"
+
+
+def pair_of(ref: str) -> tuple[str, str] | None:
+    """A pointer's or a lead line's (task, key)."""
+    m = _PAIR.match(ref)
+    return (m.group(1), m.group(2)) if m else None
+
+
+def moved_block(page: str, key: str) -> tuple[int, int] | None:
+    """The lines a move put on a page: its lead line, and the lines after it to the next day heading, caption, lead line
+    or pointer line; as (first, end). None when it isn't there."""
+    lines = lines_of(page)
+    start = next((i for i, x in enumerate(lines) if x.kind == "lead" and (pair_of(x.ref) or ("", ""))[1] == key), None)
+    if start is None:
+        return None
+    end = start + 1
+    while end < len(lines) and not (lines[end].kind in ("caption", "lead", "pointer") or (lines[end].kind == "heading" and day_of(lines[end].text))):
+        end += 1
+    while end > start + 1 and lines[end - 1].kind == "text" and not lines[end - 1].text.strip():
+        end -= 1
+    return start, end
+
+
+def pointer_index(page: str, key: str) -> int | None:
+    """Where a page's pointer line with this key is."""
+    return next((i for i, x in enumerate(lines_of(page)) if x.kind == "pointer" and (pair_of(x.ref) or ("", ""))[1] == key), None)
+
+
+def section_pointers(lines: list[str], named: list[tuple[str, str, str, list[str]]], model: Model) -> list[str]:
+    """Decision 614 (release 5.143): in a meeting's notes, each note, update or decision a ``#task`` made (``named``: its
+    capture, its task, its kind and its own page lines) is one pointer line on the meeting's page in its lines' place,
+    with the ``#task`` heading line just above it when that names the same task; its words are on the task's page, under
+    its caption. Release 5.8 copied them onto both pages. Lines not found as written are left as they are."""
+    out = list(lines)
+    for capture_id, task_id, kind, item in named:
+        item = _trim_end(list(item))
+        while item and not item[0].strip():
+            item = item[1:]
+        n = len(item)
+        if not n:
+            continue
+        title = model.tasks[task_id].title if task_id in model.tasks else task_id
+        for i in range(len(out) - n + 1):
+            if out[i:i + n] == item:
+                first = i - 1 if i > 0 and _plain_words(out[i - 1]) == _plain_words(f"#{title}") else i
+                count = sum(1 for x in item if x.strip())
+                words = {"decision": "a decision there", "update": "an update there"}.get(kind) or f"{count} line{'s' if count != 1 else ''} there"
+                out[first:i + n] = [pointer_line(f"{title} · {words}", task_id, capture_id)]
+                break
+    return out
+
+
 def file_line(text: str, document_id: str) -> str:
     return f"[{_link_text(text)}](document:{document_id})"
 
@@ -183,6 +253,8 @@ def write(lines: list[Line]) -> str:
             out.append(caption_line(x.text, x.ref))
         elif x.kind == "file":
             out.append(file_line(x.text, x.ref))
+        elif x.kind in ("pointer", "lead"):
+            out.append(f"[{_link_text(x.text)}]({'moved' if x.kind == 'pointer' else 'from'}:{x.ref})")
         elif x.kind in ("picture", "attachment"):
             out.append(item_line(x.kind, x.text, x.ref, x.level))
         elif x.kind == "row":
@@ -335,6 +407,12 @@ def block(model: Model, stories, c: Capture, task_id: str, content: str | None) 
             for x in model.captures.values() if x.from_notes == c.id and x.item == "task" and x.created_task]
     if made:
         text = task_lines(text, made, model, stories.today)
+    if c.item == "notes":  # a meeting's #task sections point to their tasks' pages (release 5.143, decision 614)
+        named = [(x.id, x.task, x.item, note_markup(stories.content_of(x.id), x.formatted, "", task_id))
+                 for x in sorted(model.captures.values(), key=lambda x: x.id)
+                 if x.from_notes == c.id and x.item in ("note", "update", "decision") and x.task and x.task != task_id and not x.discarded]
+        if named:
+            text = section_pointers(text, named, model)
     label = caption_label(stories, c, task_id)
     out = [] if captionless(c, label, text, model) else [caption_line(caption_text(c, label), c.id)]
     out += text
@@ -606,9 +684,13 @@ def capture_ids(page: str) -> list[str]:
 
 
 def words(page: str) -> str:
-    """The page in words, for search: headings, captions and file lines as their text, and markup without its marks."""
+    """The page in words, for search: headings, captions and file lines as their text, and markup without its marks.
+    Pointer and lead lines (release 5.143) aren't words of the page: they say where its lines went, or came from, so the
+    moved words are found once, on their page."""
     out = []
     for x in lines_of(page):
+        if x.kind in ("pointer", "lead"):
+            continue
         if x.kind == "row":
             if not is_separator(x.text):
                 out.append(" ".join(markup.to_plain(c) for c in cells_of(x.text)))
@@ -635,6 +717,13 @@ def task_md(page: str, capture_link: Callable[[str], str | None], document_link:
             target = task_link(x.ref)
             text = markup.escape_inline(x.text).replace("[", "\\[").replace("]", "\\]")
             out.append(f"- [{text}]({target})" if target else f"- {text}")
+        elif x.kind in ("pointer", "lead"):  # release 5.143: a link to the page the lines went to, or came from
+            pair = pair_of(x.ref)
+            target = task_link(pair[0]) if pair else None
+            text = markup.escape_inline(x.text).replace("[", "\\[").replace("]", "\\]")
+            arrow = "↪ " if x.kind == "pointer" else ""
+            out.append((f"{arrow}[{text}]({target})" if target else f"{arrow}{text}") if x.kind == "pointer"
+                       else (f"_[{text}]({target})_" if target else f"_{text}_"))
         elif x.kind == "file":
             out.append(f"- {markup.escape_inline(x.text)}")
         elif x.kind in ("picture", "attachment"):

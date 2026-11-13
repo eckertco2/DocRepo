@@ -7,7 +7,7 @@ from datetime import date, datetime
 
 import pytest
 
-from docrepo import all_notes, edits
+from docrepo import all_notes, edits, notes_page
 from docrepo.captures import read_content
 from docrepo.detail import Pages, PageState
 from docrepo.model import Model
@@ -44,7 +44,12 @@ def test_a_project_reads_its_meetings_as_said(sample_root, ex):
     # Each follow-up's block shows in its meeting's place, so not again on its own; nor the weekly's copy on the survey.
     assert ex.fill not in pages and ex.crane not in pages and ex.blades not in pages
     text = words(an.blocks())
-    assert "Vendor says fill lead time" in text and "rev C" in text and text.count("drawings found") == 1
+    assert "Vendor says fill lead time" in text and "rev C" in text and "drawings found" not in text
+    # Since release 5.143 (decision 614) the weekly's #task section is a pointer line there, opening into its block.
+    weekly = next(b for b in an.blocks() if b.page == ex.weekly)
+    pointer = next(x for x in weekly.lines if x.kind == "pointer" and x.ref.startswith(ex.survey))
+    assert pointer.text == "Structural survey of the fan deck · 1 line there"
+    assert [x.text for x in all_notes.pointer_block(m, pointer.ref).lines] == ["\\- drawings found; survey booked for 17 Nov"]
     assert an.pages == [ex.kickoff, ex.survey, ex.weekly]  # the tree's order; the project's own page says nothing here
 
 
@@ -96,6 +101,21 @@ def test_a_discarded_task_s_page_is_left_out(sample_root, ex):
     assert ex.survey not in all_notes.compose(m, ex.project).pages
 
 
+def test_a_copy_saved_before_5_143_shows_once(sample_root, ex):
+    """A meeting's page saved before release 5.143 holds its #task section's lines, which release 5.8 copied onto the
+    task's page too: All notes shows them once, in the meeting's place, marked "also on" (decision 604)."""
+    conn, root, fs = sample_root
+    lines = notes_page.get(conn, ex.weekly).split("\n")
+    i = next(n for n, x in enumerate(lines) if notes_page.read_line(x).kind == "pointer" and ex.survey in x)
+    lines[i:i + 1] = ["#Structural survey of the fan deck", "\\- drawings found; survey booked for 17 Nov"]  # as 5.142 saved it
+    edits.save_page(conn, root, fs, ex.weekly, "\n".join(lines), datetime(2026, 11, 10, 10, 5))
+    m = Model(conn)
+    pages = Pages(m, TODAY, lambda cid: read_content(root, m.captures[cid]))
+    text = " ".join(re.sub(r"<[^>]+>", " ", pages.all_notes(ex.project, PageState())[0]).replace("&nbsp;", " ").split())
+    assert "#Structural survey of the fan deck · also on Structural survey of the fan deck 's page" in text
+    assert text.count("drawings found") == 1
+
+
 def test_the_page_draws_it(sample_root, ex):
     conn, root, _fs = sample_root
     m = Model(conn)
@@ -104,7 +124,7 @@ def test_the_page_draws_it(sample_root, ex):
     text = " ".join(re.sub(r"<[^>]+>", " ", html).replace("&nbsp;", " ").split())
     assert "Cooling tower kickoff Meeting notes · 10:00 am Edit there Attendees: Priya, Tom, Mike." in text
     assert "Structural survey of the fan deck follow-up, on its page - Structural survey of the fan deck" in text
-    assert "#Structural survey of the fan deck · also on Structural survey of the fan deck 's page" in text
+    assert "Structural survey of the fan deck on its page - drawings found; survey booked for 17 Nov" in text  # 614's pointer, opened
     assert f'name="block:{ex.kickoff}:{ex.kickoff_notes}"' in html and 'name="day:2026-11-03"' in html
     assert f'href="notesgo:{ex.kickoff}:{ex.kickoff_notes}"' in html and f'href="task:{ex.survey}"' in html
     html, _an = pages.all_notes(ex.project, PageState(notes_only=ex.survey))

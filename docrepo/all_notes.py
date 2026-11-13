@@ -50,6 +50,9 @@ class Block:
     label: str = ""
     time: str = ""
     lines: list[notes_page.Line] = field(default_factory=list)
+    #: Lines moved onto the page (release 5.143): the move's key, and the page they came from.
+    key: str = ""
+    came_from: str = ""
 
 
 @dataclass
@@ -86,6 +89,11 @@ def blocks_of(model: Model, task_id: str) -> list[Block]:
             cur = Block(task_id, day, "", len(out), x.ref, parts[2] if len(parts) == 3 else x.text, parts[1] if len(parts) == 3 else "")
             out.append(cur)
             continue
+        if x.kind == "lead":  # lines moved here (release 5.143): a block of their own, led by where they came from
+            pair = notes_page.pair_of(x.ref) or ("", "")
+            cur = Block(task_id, day, "", len(out), None, x.text, "", key=pair[1], came_from=pair[0])
+            out.append(cur)
+            continue
         if cur is None:
             if x.kind == "text" and not x.text.strip():
                 continue
@@ -96,7 +104,7 @@ def blocks_of(model: Model, task_id: str) -> list[Block]:
     for b in out:
         while b.lines and b.lines[-1].kind == "text" and not b.lines[-1].text.strip():
             b.lines.pop()
-        if not b.lines and b.capture is None:
+        if not b.lines and b.capture is None and not b.key:
             continue
         c = model.captures.get(b.capture or "")
         before = kept[-1].at if kept and kept[-1].day == b.day else "00:00"
@@ -123,7 +131,9 @@ def compose(model: Model, task_id: str, weeks: int | None = WEEKS, only: str = "
     rank = {x: i for i, x in enumerate(scope)}
     blocks = [b for x in scope for b in blocks_of(model, x)]
     notes = notes_in_view(model, blocks)
-    kept = [b for b in blocks if b.lines and not shown_in_meeting(model, b, notes)]  # a caption alone says nothing here
+    in_scope = set(scope)
+    # A caption alone says nothing here; lines moved from a page in view show at its pointer line (release 5.143).
+    kept = [b for b in blocks if b.lines and not shown_in_meeting(model, b, notes) and b.came_from not in in_scope]
     pages = sorted({b.page for b in kept}, key=lambda x: rank[x])
     only = only if only in pages else ""
     shown = [b for b in kept if not only or b.page == only]
@@ -154,6 +164,19 @@ def follow_up_block(model: Model, notes_id: str, task_ref: str, cache: dict[str,
     return next((b for b in cache[task_ref] if b.capture == item), None)
 
 
+def pointer_block(model: Model, ref: str, cache: dict[str, list[Block]] | None = None) -> Block | None:
+    """The block a pointer line opens into (release 5.143): the lines a move put on its task's page, by their lead line's
+    key, or a meeting item's block there, by its capture (decision 614)."""
+    pair = notes_page.pair_of(ref)
+    if pair is None or pair[0] not in model.tasks:
+        return None
+    task_ref, key = pair
+    cache = {} if cache is None else cache
+    if task_ref not in cache:
+        cache[task_ref] = blocks_of(model, task_ref)
+    return next((b for b in cache[task_ref] if (b.capture == key if key.startswith("C") else b.key == key)), None)
+
+
 def copied_to(model: Model, notes_id: str) -> dict[str, str]:
     """The tasks a meeting's notes put notes, updates or decisions on, by their ``#`` heading's words in lowercase
     ("#structural survey of the fan deck"): the lines release 5.8 copies, marked "also on its page" (decision 604)."""
@@ -168,4 +191,4 @@ def has_more(model: Model, task_id: str) -> bool:
     """Whether All notes would show more than the page itself: a task under it, or a task line on its page (decision 602)."""
     if any(x in model.tasks and not model.tasks[x].discarded for x in model.descendants_of(task_id)):
         return True
-    return any(x.kind == "task" for x in notes_page.lines_of(model.pages.get(task_id, "")))
+    return any(x.kind in ("task", "pointer") for x in notes_page.lines_of(model.pages.get(task_id, "")))

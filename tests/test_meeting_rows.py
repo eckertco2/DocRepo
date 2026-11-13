@@ -70,7 +70,7 @@ def test_the_unfolded_notes_mark_the_lines_about_the_task(sample_root, ex):
     m = Model(conn)
     row = next(r for r in meeting_rows.rows(m, ex.survey) if r.meeting == ex.weekly)
     lines = meeting_rows.marked_lines(m, row, ex.survey, lambda cid: read_content(root, m.captures[cid]))
-    assert [x.text for x, hit in lines if hit] == ["#Structural survey of the fan deck", "\\- drawings found; survey booked for 17 Nov"]
+    assert [x.text for x, hit in lines if hit] == ["Structural survey of the fan deck · 1 line there"]  # 614's pointer line (5.143)
     row = next(r for r in meeting_rows.rows(m, ex.fill) if r.meeting == ex.kickoff)
     lines = meeting_rows.marked_lines(m, row, ex.fill, lambda cid: read_content(root, m.captures[cid]))
     assert [x.ref for x, hit in lines if hit] == [ex.fill]  # its task line

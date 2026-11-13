@@ -281,6 +281,12 @@ The words used here are defined in `GLOSSARY.md`.
   from, `[Task: Rigging plan · Mike Ortiz · due Wed 14 Oct](task:T000031)`, in its item's place, with the item's text
   kept in its own capture and on the task's own page. A task line opens the task; it's written once, so a later change
   to the task's title or date doesn't change it. A note that's no capture (5.69) gets its task lines the same way.
+  Since release 5.143 (the design workspace's `docs/mods/notes-consolidation-plan.md`, decision 614;
+  `notes_page.section_pointers`), in Meeting notes each note, update or decision a `#` task took is one **pointer
+  line** in its lines' place, `[Structural survey of the fan deck · 1 line there](moved:T000043/C000120)` ("a
+  decision there", "an update there"), taking the `#` heading line above it when that names the same task: the words
+  are on the task's page, under their caption, and no longer copied onto the meeting's too (release 5.8's decision
+  105). Pages saved before keep their copies. A pointer line opens the task's page at its block.
 - **Where it goes** (`notes_page.add_block`): at the end of its day's lines, which run to the next day heading whatever
   other headings come between (release 5.28), or under a new heading for its day, made in date order among the day
   headings (97, 113). Since release 5.69 every task's page has day headings (`Model.uses_day_headings`): decision 119's
@@ -772,6 +778,20 @@ The task page reads top to bottom as the task's story (release 5.21, the visual 
   - **Copy and paste** inside the page keep whole lines as they are (headings, captions, lists); a line's words go in at
     the caret. Text from elsewhere comes in as `RichEdit` takes it. **Alt+Shift+Up and Down** move a line with the list
     items under it, or a folded heading with its section, keeping what each line is; one Ctrl+Z puts it back.
+  - **Move to task** (release 5.143, the notes consolidation plan's decision 613; `edits.move_lines`,
+    `NotesPages.move_to_task`): **Alt+Shift+M**, or Move to task… on the right-click menu, takes the picked lines (a
+    selection, or the caret's line with the list items under it) to the task picked from the `#` list, after the page
+    is saved. They go onto its page under their day's heading (`add_block`), led by a **lead line**,
+    `[Moved from the notes of Cooling tower kickoff · Tue 3 Nov](from:T000041/M20261113091500)`, and the page keeps a
+    **pointer line** in their place, `[Fill media order · 2 lines moved there](moved:T000044/M20261113091500)`, the
+    move's key (`edits.move_key`) pairing the two. Day headings, captions and other moves' lines stay. Both pages
+    change in one transaction, as the owner's edits, with Undo for ten seconds while both are as the move left them;
+    capture.md isn't touched. A click on a pointer line opens the lines on their page, and on a lead line the pointer
+    (`NotesEdit.go_to_key`); a pointer line's menu has **Bring the lines back** (`edits.bring_lines_back`): the lines
+    under its lead line, as they are now, back in its place. Both lines are kept whole as task lines are. All notes
+    opens a pointer line in place, under a green bar, into its lines (`all_notes.pointer_block`); the Meetings section
+    counts lines moved from a meeting ("2 lines moved here"); Task.md prints a pointer line as a link, `↪ [Fill media
+    order · 2 lines moved there](../T000044/Task.md)`.
   - **Saving** a moment after typing stops, and when the editor loses the caret ("Saved 14:10" beside Notes); the Captures
     tab is drawn again when the page's captions change. Page Up and Page Down move the scroll a screen; a wheel notch
     glides (not in the Classic look); the scroll keeps the caret in view.
