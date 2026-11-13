@@ -20,7 +20,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
-from docrepo import agenda, captures, conversations, edits, items, layer0, markup, people, priorities, quick, search, tasks
+from docrepo import agenda, captures, conversations, edits, items, layer0, markup, people, priorities, quick, search, tasks, waits
 from docrepo.config import Settings
 from docrepo.dates import long_date, short, stamp, workday_numbers
 from docrepo.db import next_id, transaction
@@ -744,6 +744,10 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
         edits.copy_files(conn, data_root, fs, created, filed_copies, result.problems)
         search.index_items(conn, data_root, captures=[source_capture.id])
         edits.add_to_pages(conn, data_root, at, [(source_capture.id, None)], result.problems)
+    if capture_id and emails:  # a reply ends the wait it answers, and the reminder it set (release 5.139, decision 581)
+        for task, back in waits.ended_by_captures(conn, [capture_id], at.strftime("%Y-%m-%d %H:%M:%S"), capture_id):
+            if back is not None:
+                tasks.update_task(conn, settings, task, at=at, via=capture_id, reminder=back or None)
     try:  # only the pages this save can reach (release 5.90, the review's F5); the daily work rewrites them all
         after = Model(conn)
         touched = {x for x in (t, created, draft.task, *targets, *on_agendas) if x}

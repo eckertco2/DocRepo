@@ -47,7 +47,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo import db, edits, key_dates, markup, meetings, notes_page, panel_rules, selection
+from docrepo import db, edits, key_dates, markup, meetings, notes_page, panel_rules, selection, waits
 from docrepo.detail import Pages, PageState, esc
 from docrepo.model import Model, Task, is_person
 from docrepo.panel_rules import OPEN_KEY, REST_WIDTH_KEY, Hover, Monitor, Place, Rect
@@ -641,6 +641,9 @@ class TodayPanel(QWidget):
                 # the list rows review joins quiet words (release 5.78).
                 state = "" if t is None or t.discarded else t.state
                 reminder = "reminder" if a.added_by == edits.REMINDER else ""  # a reminder put it here (release 5.116, decision 415)
+                wait = waits.current(m, t.id) if t else None  # its follow-up, or that it's waiting (release 5.139, decisions 580 and 595)
+                if wait is not None:
+                    reminder = f"Follow up: {waits.words(m, wait, today)}" if wait.late(today) else waits.words(m, wait, today, row=True)
                 row = _Row(self, a.id, t.id if t else None, t.title if t else a.note, " · ".join(x for x in (where, reminder, since.rstrip(" ·")) if x),
                            cell, state, edge_of(t))
                 self.rows.append(row)

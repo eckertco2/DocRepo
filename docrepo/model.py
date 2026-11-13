@@ -213,6 +213,29 @@ class TMail:
     capture: str | None
 
 
+@dataclass(frozen=True)
+class Wait:
+    """A wait (release 5.139, ``docrepo.waits``): the owner waits for an answer from ``on`` (person IDs) on a task, since a
+    stamp, until it ends. The line that started it, its email (a T-mail) and Update capture if any, the day its follow-up
+    was set for, the task's own later reminder it keeps, and how it ended: reply, got it or logged again."""
+
+    id: int
+    task: str
+    since: str
+    line: str
+    on: tuple[str, ...]
+    t_mail: int | None
+    capture: str | None
+    follow_up: str | None
+    reminder_before: str | None
+    ended: str | None
+    ended_by: str | None
+
+    def late(self, today: date) -> bool:
+        """Whether its follow-up day has come."""
+        return bool(self.follow_up) and str(self.follow_up) <= today.isoformat()
+
+
 @dataclass
 class Capture:
     id: str
@@ -467,6 +490,15 @@ class Model:
             TMail(r["id"], r["task"], r["kind"], r["reply_capture"], r["reply_pos"], r["opened"], r["conversation"] or "",
                   r["conversation_index"] or "", r["capture"])
             for r in q("SELECT * FROM t_mails ORDER BY id")
+        ]
+        waiting_on: dict[int, list[str]] = {}
+        for r in q("SELECT wait, person FROM wait_people ORDER BY rowid"):
+            waiting_on.setdefault(r["wait"], []).append(r["person"])
+        #: Waits, oldest first (release 5.139).
+        self.waits: list[Wait] = [
+            Wait(r["id"], r["task"], r["since"], r["line"], tuple(waiting_on.get(r["id"], [])), r["t_mail"], r["capture"], r["follow_up"],
+                 r["reminder_before"], r["ended"], r["ended_by"])
+            for r in q("SELECT * FROM waits ORDER BY id")
         ]
         self.documents: dict[str, Document] = {r["id"]: Document(**{k: r[k] for k in r.keys()}) for r in q("SELECT * FROM documents ORDER BY id")}
         self.versions: list[Version] = [Version(**{k: r[k] for k in r.keys()}) for r in q("SELECT * FROM document_versions ORDER BY id")]

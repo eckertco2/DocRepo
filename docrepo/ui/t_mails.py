@@ -165,7 +165,8 @@ def ask_for_update(browse: BrowseWindow, task_id: str, say: Say | None = None) -
         out(f"{ask_update.LABEL}: {e}", True)
         return None
     kept = conversations.record_t_mail(browse.conn, task_id, ask_update.KIND, _stamp(browse), asked.opened.index, untagged=True)
-    browse.refresh()  # its rows and status card say "asked" now
+    ask_update.start_wait(browse.conn, browse.ctx.settings, task_id, kept, browse.ctx.now())  # waiting on them (release 5.139, decision 593)
+    browse.refresh()  # its rows and status card say "waiting on Mike since …" now
     lines, trouble = [f"Opened {ask_update.LABEL} on {title} in Outlook. {ask_update.who_line(ask)}"], bool(ask.missing)
     if ask.to and not asked.to_filled:
         lines.append("Outlook didn't take To, so fill it in there.")

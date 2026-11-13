@@ -34,6 +34,12 @@ Ask for an update (``ask_t_mail``) makes a new T-mail with its To, Subject and
 words filled in: it writes those fields, shows the email so Outlook adds the
 owner's signature, puts the words before it, and still never sends it.
 
+Log progress (release 5.139, the email progress plan's decisions 584 and 590)
+finds the email being written in Outlook's active window (``front_draft``) and,
+on the owner's Enter in its window, sends that draft (``send_draft``), with its
+deferred delivery a minute on; an inline reply, which Outlook won't let a program
+send, or a send Outlook refuses, is brought back to the front (``show_draft``).
+
 Since release 5.127 (the cold-eyes plan's decisions 488 to 495) it reads today's appointments from the default calendar
 for Today's Meetings (``todays_appointments``): only their subject, start, end, location, whether all day, busy status,
 meeting status, sensitivity and whether recurring, never attendees, the organizer or the body. It never starts Outlook
@@ -809,6 +815,116 @@ def watch_send(app: object, on_send) -> object:
 
     handler = type("SendHandler", (_SendHandler,), {"on_send": staticmethod(on_send)})
     return win32com.client.WithEvents(app, handler)
+
+
+# ---- Log progress (release 5.139, the design workspace's docs/mods/email-progress-plan.md, decisions 584 and 590) ----
+OL_INSPECTOR_CLASS = 35  # olInspector: a window of its own, such as a draft
+OL_EXPLORER_CLASS = 34  # olExplorer: Outlook's main window
+
+
+@dataclass
+class FrontDraft:
+    """The email the owner is writing, in front when the Log progress hotkey was pressed (decision 584): the item itself,
+    kept for the send or to bring it back to the front; whether it's an inline reply in the reading pane, which a program
+    can't send; and what DocRepo could read of it. ``copy`` is the email read from its copy without Outlook, for To and
+    what it answers, or None when it couldn't be copied."""
+
+    item: object
+    inline: bool
+    subject: str
+    index: str
+    entry_id: str
+    store_id: str
+    copy: EmailItem | None
+
+
+def _front_item(app: object) -> tuple[object | None, bool]:
+    """The draft in Outlook's active window: a draft's own window (``ActiveInspector``) or the reading pane's inline reply
+    (``ActiveInlineResponse``, empty when none is showing). (None, False) when neither is a mail being written."""
+    try:
+        window = app.ActiveWindow()  # type: ignore[attr-defined]
+        kind = getattr(window, "Class", None)
+    except Exception:  # noqa: BLE001 - no Outlook window has the focus
+        window, kind = None, None
+    candidates: list[tuple[object, bool]] = []
+    if kind == OL_INSPECTOR_CLASS:
+        candidates.append((lambda: window.CurrentItem, False))  # type: ignore[union-attr]
+    if kind in (OL_EXPLORER_CLASS, None):
+        candidates.append((lambda: app.ActiveExplorer().ActiveInlineResponse, True))  # type: ignore[attr-defined]
+    if kind is None:
+        candidates.append((lambda: app.ActiveInspector().CurrentItem, False))  # type: ignore[attr-defined]
+    for read, inline in candidates:
+        try:
+            item = read()
+        except Exception:  # noqa: BLE001, S112 - no such window, or no item in it: the next place is looked at
+            continue
+        if item is not None and getattr(item, "Class", None) == OL_MAIL and not getattr(item, "Sent", False):
+            return item, inline
+    return None, False
+
+
+def front_draft(scratch: Path | None) -> FrontDraft | None:
+    """The email being written in Outlook's active window, for Log progress (decision 584): None when Outlook isn't open
+    or no email is being written there. A draft never saved is saved to Drafts first, as Outlook's AutoSave would, so it
+    has a place; its subject and conversation index are read (the guard allows both), and with ``scratch`` it's copied
+    whole and read without Outlook, for its To and what it answers (the guard refuses To itself). Nothing is sent."""
+    if not outlook_window_open():
+        return None
+    app, _how = connect()
+    item, inline = _front_item(app)
+    if item is None:
+        return None
+    entry_id, store_id = where_kept(item)
+    if not entry_id:
+        try:
+            item.Save()  # type: ignore[attr-defined]
+            entry_id, store_id = where_kept(item)
+        except Exception as e:  # noqa: BLE001 - it's still the owner's draft; only its place is missing
+            record_problem("saving the draft for Log progress", e)
+    copy = None
+    if scratch is not None:
+        try:
+            copy = copy_whole(app, item, scratch)
+        except Exception as e:  # noqa: BLE001 - To is then typed by the owner
+            record_problem("copying the draft whole for Log progress (attached to a new email, never saved)", e)
+    log.info("Outlook: a draft for Log progress, %s, its index %s, copied %s", "inline" if inline else "in its own window",
+             "yes" if index_of(item) else "none", "yes" if copy else "no")
+    return FrontDraft(item, inline, _subject(item), index_of(item), entry_id, store_id, copy)
+
+
+def send_draft(draft: FrontDraft, now: datetime) -> None:
+    """Send the owner's own draft, the one the Log progress window named, on their Enter there (decision 590 A): first
+    its deferred delivery is set a minute on, so it waits in the Outbox as the owner's own delay rule makes mail wait.
+    Never an inline reply (Outlook won't let a program send one). Raises OutlookError when Outlook refuses; the caller then
+    brings the draft to the front for the owner to send."""
+    if draft.inline:
+        raise OutlookError("Outlook won't let a program send a reply in the reading pane.", "sending the draft", "inline")
+    item = draft.item
+    try:
+        item.DeferredDeliveryTime = now + timedelta(minutes=1)  # type: ignore[attr-defined]
+    except Exception as e:  # noqa: BLE001 - the owner's own delay rule may still hold it
+        record_problem("setting the draft's deferred delivery", e)
+    try:
+        item.Send()  # type: ignore[attr-defined]
+    except Exception as e:  # noqa: BLE001
+        detail = record_problem("sending the draft (Send)", e)
+        raise OutlookError(f"Outlook didn't send it ({detail}).", "sending the draft", detail) from e
+    log.info("Outlook: sent a draft for Log progress, deferred a minute")
+
+
+def show_draft(draft: FrontDraft) -> bool:
+    """Bring the draft back to the front for the owner to send (decision 590 B, or A's fallback): its own window, or
+    Outlook's main window for an inline reply. False when Outlook won't."""
+    try:
+        if draft.inline:
+            app, _how = connect()
+            app.ActiveExplorer().Activate()  # type: ignore[attr-defined]
+        else:
+            draft.item.GetInspector.Activate()  # type: ignore[attr-defined]
+        return True
+    except Exception as e:  # noqa: BLE001
+        record_problem("bringing the draft to the front", e)
+        return False
 
 
 def selected_emails(scratch: Path | None = None) -> list[EmailItem]:

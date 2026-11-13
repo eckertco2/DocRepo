@@ -150,6 +150,7 @@ class CaptureApp(QObject):
         self.wheels = Wheels(self)  # the navigation wheels (release 5.41)
         ctx.wheel_palette = self.wheels.palette_commands
         ctx.open_summary = self.wheels.quick_summary  # the quick summary, from a page or Ctrl+K (release 5.131)
+        ctx.log_progress = lambda task=None: self.wheels.log_progress(task, with_email=False)  # the status card's (release 5.139)
         self.panel: TodayPanel | None = None  # the Today side panel, made the first time it opens (release 5.43)
         menu = QMenu()
         menu.addAction("New capture", lambda: self.window.show_capture())
@@ -186,6 +187,7 @@ class CaptureApp(QObject):
             hotkey.HOTKEY_IDS["pin_hotkey"]: self.window.toggle_pin,
             hotkey.HOTKEY_IDS["outlook_hotkey"]: self.window.add_selected_email,
             hotkey.HOTKEY_IDS["today_panel_hotkey"]: lambda: self.today_panel_action("hotkey"),
+            hotkey.HOTKEY_IDS["progress_hotkey"]: lambda: self.wheels.log_progress(),  # release 5.139, decision 583
         }
         self.register_hotkey()
         if db.get_state(ctx.conn, OPEN_KEY) == "1":  # open or closed is remembered across restarts (release 5.43)
@@ -297,6 +299,15 @@ class CaptureApp(QObject):
             self.window.show_capture()
 
     # ---- notifications and reminders ----
+    def progress_logged(self, done, said: str, trouble: bool) -> None:
+        """Log progress kept it (release 5.139): say so from the tray, and bring the lists up to date."""
+        self.notify("Log progress" if not trouble else "Log progress: press Send in Outlook", said)
+        self.ctx.today_changed()
+        if self.browse.isVisible():
+            self.browse.refresh()
+        else:
+            self.browse.dirty = True
+
     def notify(self, title: str, text: str) -> None:
         self.tray.showMessage(title, text, make_icon(), 6000)
 

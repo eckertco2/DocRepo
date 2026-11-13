@@ -100,13 +100,15 @@ def test_the_arrow_asks_for_an_update_and_keeps_it_on_the_task(browse, fake_outl
     assert browse.status.text() == ("Opened Ask for an update on Rigging plan in Outlook. To Mike Ortiz. "
                                     "When you capture the reply, it'll go to Rigging plan.")
     assert not browse.status.property("error")
-    # The status card says so, until a capture lands on the task.
+    # The status card says the task waits on Mike (release 5.139, decision 593), until Got it, or his answer is captured.
     header = browse.task_pane.header
-    assert header.status_asked.isVisibleTo(header) and header.status_asked.text() == "· asked today"
-    assert header.status_asked.toolTip().startswith("You asked for an update on Thu 8 Oct.")
-    captures.add_capture(browse.conn, saved="2026-10-08 15:00:00", source="typed", types=["note"], title="Mike's answer", task=RIGGING)
+    assert header.status_wait.isVisibleTo(header) and header.status_wait.text().startswith("· waiting on Mike since today · follow up ")
+    assert header.status_wait.toolTip().startswith("Waiting on Mike Ortiz since Thu 8 Oct: Asked Mike for an update.")
+    captures.add_capture(browse.conn, saved="2026-10-08 15:00:00", source="typed", types=["note"], title="My own note", task=RIGGING)
     browse.refresh()
-    assert not header.status_asked.isVisibleTo(header)
+    assert header.status_wait.isVisibleTo(header)  # a note of the owner's own isn't the answer
+    browse.got_it(RIGGING)
+    assert not header.status_wait.isVisibleTo(header) and "isn't waiting any more" in browse.status.text()
 
 
 def test_waiting_on_others_has_it_on_a_rows_menu_and_says_asked(browse, fake_outlook):
@@ -118,13 +120,13 @@ def test_waiting_on_others_has_it_on_a_rows_menu_and_says_asked(browse, fake_out
     first.trigger()
     assert calls[-1][1] == ("mike.ortiz@example.com",)
     assert browse.view == "waiting"
-    assert row(browse, RIGGING).data(0, LINE_ROLE).context == "asked today · Mike Ortiz"  # before the person waited on
+    assert row(browse, RIGGING).data(0, LINE_ROLE).context == "waiting on Mike · today · Mike Ortiz"  # before the people
     # The task tree's menu has no Ask for an update; its row says asked, as every list's does.
     browse.set_view("tasks")
     browse.open.update(Model(browse.conn).tasks)
     browse.render_list()
     assert ask_action(browse.tree.row_menu(row(browse, RIGGING))) is None
-    assert "asked today" in row(browse, RIGGING).data(0, LINE_ROLE).muted
+    assert "waiting on Mike · today" in row(browse, RIGGING).data(0, LINE_ROLE).muted
 
 
 def test_a_closed_task_isnt_asked_about(browse, fake_outlook):

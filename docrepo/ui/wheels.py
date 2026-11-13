@@ -52,6 +52,7 @@ class Wheels(QObject):
         self._task_search = None
         self._file_search = None
         self._quick_summary = None
+        self._log_progress = None
         self._reload_timer = QTimer(self, singleShot=True, interval=RELOAD_WAIT_MS, timeout=self._file_changed)
         self._watcher = QFileSystemWatcher(self)
         self._watcher.fileChanged.connect(lambda _p: self._reload_timer.start())
@@ -256,6 +257,27 @@ class Wheels(QObject):
         if self._quick_summary is None:
             self._quick_summary = QuickSummary(self.app)
         self._quick_summary.open_it(self._screen_for(self.snapshot.hwnd if self.snapshot else 0), key)
+
+    def log_progress(self, task: str | None = None, with_email: bool = True) -> None:
+        """Log progress (release 5.139, decision 583): its window, on the email being written in Outlook's active window
+        (decision 584), or on ``task`` with no email (the status card's Log progress…). Outlook is asked only when it's
+        open, and a failure leaves the window for a call or a talk, saying why."""
+        from docrepo import outlook
+        from docrepo.ui.log_progress import LogProgress
+
+        if self._log_progress is None:
+            self._log_progress = LogProgress(self.app)
+        draft, problem = None, ""
+        if with_email:
+            try:
+                draft = outlook.front_draft(outlook.copy_path(self.ctx.fs, self.ctx.data_root))
+            except outlook.OutlookError as e:
+                problem = str(e)
+            except Exception as e:  # noqa: BLE001 - COM or pywin32: the window still opens, for a call or a talk
+                problem = outlook.record_problem("finding the email for Log progress", e)
+        self._log_progress.open_for(draft, task, self._screen_for(self.snapshot.hwnd if self.snapshot else 0))
+        if problem:
+            self._log_progress.message.setText(f"Outlook didn't give DocRepo the email ({problem}).")
 
     def today_panel(self, do: str = "toggle") -> None:
         self.app.today_panel_action(do)
