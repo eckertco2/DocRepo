@@ -12,7 +12,7 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Update**: a capture with the Update box checked, also called a status update. It changes the task's state or another field, or adds an entry to its status log.
 - **Capture input**: everything the owner provides: the content text, files, emails, and their selections (capture type, task, field values, per-file options).
 - **Capture metadata**: what DocRepo records on its own: the ID, the time saved, the source and email headers.
-- **Capture output**: everything a capture creates or changes: a new task, changes to a task, a link to a task, documents, saved copies and summary entries. One capture can have several outputs.
+- **Capture output**: everything a capture creates or changes: a new task, changes to a task, a link to a task, documents, saved files and summary entries. One capture can have several outputs.
 - **Content text**: the text typed or pasted into the capture window's main box, kept with the capture once it's saved.
 - **Formatted content text**: content text with bold, italic, underline, strikethrough, highlights or lists (release 5.7). Its capture.md keeps it as Markdown; everything that reads its words reads it without the marks.
 - **Operator**: `@`, `@L.`, `@__`, `#` or `**` in the content text, saying what a line makes (release 5.8): a person, a lead, no one yet, a task it belongs to, or its kind.
@@ -144,12 +144,13 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 
 ## 4. Files and documents
 
-- **Original**: a file where it already lives, on a local drive or the LAN. DocRepo only reads it.
-- **Document**: DocRepo's record of an original, with an ID such as D000042, a file description and extracted text.
+- **Original**: a file where it already lives, on a local drive or the LAN. DocRepo only reads it: a linked file's original is where DocRepo reads it, and a saved file's is where it came from.
+- **Document**: DocRepo's record of a file, with an ID such as D000042, a file description and extracted text: a saved file or a linked file, an email attachment, a link or a folder.
 - **Extracted text**: the plain text DocRepo pulls out of a file when a capture adds it, kept in `Documents/<id>/extracted.txt` for search and for the differences in document versions. Pulling it out isn't Extract, which is the later processing for the knowledge base.
 - **File description**: the description written for each file added to a capture. It tells people, and later agents, what the file holds without opening it.
-- **Saved copy**: a copy of a file in a task's `Files` folder, made only when Save a copy is checked.
-- **Attachment**: a file inside an Outlook email, saved with that email's capture.
+- **Saved file**: a file of DocRepo's own, in a task's `Files` folder (`Tasks\<task ID>\Files`), named with the day it was saved (release 5.145, the save or link plan's decisions 627 to 634). A file dropped on **Save in DocRepo**, or added with Attach's Save files…, and every attachment of an email, is one. From then on that file is the document: opening it, Show in File Explorer, its extracted text and search all use it, and where it came from is a fact on its page; DocRepo doesn't go back to the original. An unfiled capture keeps its saved files in its own folder until it's filed. It isn't a copy: it's an instance in its own right.
+- **Linked file**: a file DocRepo notes where it is and reads there, never copying it: one dropped on **Link**, added with Link files… or as a path on a line of its own (release 5.145). A folder is always one, and so is a web link, kept by its address. Lists show the link mark beside its name, and its page says "Linked: read where it is".
+- **Attachment**: a file inside an Outlook email. A kept one is always a saved file in the task's Files folder (release 5.145, decision 629), in the capture's own folder until an unfiled capture is filed; one from before release 5.145 stays in its capture's `attachments` folder. The email's `.msg` stays in the capture's folder, as the record of what arrived.
 - **Email layer 0**: the first pass over an Outlook email added to a capture. It gives each of the email's attachments, the links in its body and the pictures in its body a row of its own, each kept or left out with Keep, and records what it kept and left out in the capture. Later layers, such as summaries and tasks from emails, build on it.
 - **The drag's own copy**: the full copy of an email (its `.msg`) that Outlook puts on a drag, which DocRepo's own drop target takes and saves as it is, read without Outlook (release 5.33). An attachment dragged from an email, or a file in a zip folder, comes the same way, as a file with no path on disk.
 - **Conversation**: an Outlook email with its replies and forwards, known by the GUID in their conversation index, the same in each whatever its subject (release 5.101). A conversation follows the task it was last filed to, so an email of it added to a capture fills the task picker, "from conversation". A thread (5) holds one or more conversations. The task page's **Email conversations** (release 5.122) lists a task's conversations, each with the emails that answer one of its emails by In-Reply-To or References, so it shows a thread as one conversation; a conversation's page shows its emails, oldest first.
@@ -160,7 +161,7 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Outlook category**: the task's name DocRepo adds to an Outlook email it files on that task, with Mark filed emails in Outlook on in Settings (release 5.33), so Outlook's own search finds it. It isn't a label.
 - **Link**: a web or SharePoint address kept as a document, with a file description, in place of a file. Its original is the address. DocRepo never opens or fetches it, so it has no extracted text; Copy link puts it on the clipboard.
 - **Pinned file**: a file pinned on a task in its Find files (release 5.35): one of the task's key documents, first on its Overview and listed in its Task.md. Pins are per task.
-- **Document version**: DocRepo's record that a tracked original has changed, with the difference. It isn't a capture; it becomes part of the raw text log of the tasks linked to that document.
+- **Document version**: DocRepo's record that a linked file has changed, with the difference. It isn't a capture; it becomes part of the raw text log of the tasks linked to that document.
 
 ## 5. Summaries and processing
 
@@ -201,7 +202,9 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Content type**: say capture type.
 - **New subtask**: as an option name, say New task. It's a subtask when it has a parent. On a task's own page and menus, say New task under this one (release 5.91).
 - **Delete**, **Take off**, **Take out** and **Put back** (in the windows, release 5.91): say Discard for a record, Remove for a link and Clear for a field. Bring back stays as Discard's opposite, and Add back as Remove's in a what-if. A what-if itself is still deleted, as it holds no record of the owner's: nothing changed until it was applied.
-- **File a copy**: say Save a copy, so "filing" only means linking an unfiled capture.
+- **File a copy**: retired with Save a copy, so "filing" only means linking an unfiled capture.
+- **Saved copy** and **Save a copy** (release 5.145, the save or link plan's decision 631): say saved file, and Saved for the row's switch. A file saved in DocRepo is a file of its own, not a copy. The records keep their names (`saved_copies`, `save_a_copy`).
+- **Tracked original**: say linked file (release 5.145). A linked file's original is still its original.
 - **Task view**: say Find files (release 5.98). Its Notes page tab went with the name: the notes are on the task page.
 - **Set aside**: retired with release 5.77, when the capture window opens fresh each time and a capture closed before it's saved goes to Drafts.
 - **Project notes**: say Note.

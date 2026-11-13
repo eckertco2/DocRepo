@@ -3,7 +3,7 @@
 One recipe wherever a file or a search result is a row: its type's mark in its type's colour, its name, one quiet line
 (where it is, then the words that matched or its description), one short date at the row's end, a chip only for
 something wrong, and marks only on what matched. What a row used to repeat on every line (where it came from, "Saved
-copy", "Current", the day it was checked, a path, an email's headers) is in its preview or its tooltip instead.
+file", "Current", the day it was checked, a path, an email's headers) is in its preview or its tooltip instead.
 
 No Qt here, so it's tested in the fast run; the lists and pages draw it.
 """
@@ -19,8 +19,8 @@ from docrepo.overview import TYPE_NAMES
 _COLOURED = frozenset({"doc", "sheet", "slides", "pdf", "picture", "mail", "drawing", "link"})
 #: Search's groups as their headings say them, plural, with how many follow (decision 430).
 GROUP_NAMES = {"Tagged label": "Tagged labels", "Task": "Tasks", "Notes": "Notes pages", "Capture": "Captures", "Decision": "Decisions", "Document": "Documents",
-               "Saved copy": "Saved copies", "Person": "People", "Label": "Labels"}
-#: A saved copy's name starts with the day it was saved (decision 429 shows the day at the row's end instead).
+               "Saved file": "Saved files", "Person": "People", "Label": "Labels"}
+#: A saved file's name starts with the day it was saved (decision 429 shows the day at the row's end instead).
 _DATED = re.compile(r"^(\d{4}-\d{2}-\d{2}) (.+)$")
 
 
@@ -74,7 +74,7 @@ def place_words(m: Model, place: DocPlace | None) -> str:
 
 
 def dated_name(name: str) -> tuple[str, str]:
-    """A saved copy's name split into the day it starts with and the rest: ("2026-08-03", "Tie-in list.xlsx"). A name that
+    """A saved file's name split into the day it starts with and the rest: ("2026-08-03", "Tie-in list.xlsx"). A name that
     doesn't start with a day comes back whole, with no day."""
     m = _DATED.match(name)
     return (m.group(1), m.group(2)) if m else ("", name)

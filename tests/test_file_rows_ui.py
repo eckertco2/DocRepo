@@ -106,7 +106,7 @@ def test_a_capture_s_file_row_is_two_lines(ctx, tmp_path):
         assert any(lb.accessibleName() == "File" for lb in frame.findChildren(type(e.note)))
         e.widget.show()
         QApplication.processEvents()
-        assert abs(e.desc.geometry().center().y() - e.copy.geometry().center().y()) <= 4  # one line
+        assert abs(e.desc.geometry().center().y() - e.switch.geometry().center().y()) <= 4  # one line (the switch, release 5.145)
     finally:
         w.deleteLater()
 

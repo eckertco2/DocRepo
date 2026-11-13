@@ -159,7 +159,7 @@ CREATE TABLE capture_attachments (
     name    TEXT NOT NULL,
     PRIMARY KEY (capture, pos)
 );
--- A tracked original that changed. It isn't a capture. It joins the raw text log of its document's tasks.
+-- A linked file that changed. It isn't a capture. It joins the raw text log of its document's tasks.
 CREATE TABLE document_versions (
     id           INTEGER PRIMARY KEY,
     document     TEXT NOT NULL REFERENCES documents(id),

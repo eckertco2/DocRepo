@@ -52,7 +52,7 @@ def test_a_snippet_leaves_out_its_rows_own_title():
 
 
 def test_search_headings_are_plural():
-    assert set(GROUP_NAMES) == set(search.GROUPS) and GROUP_NAMES["Person"] == "People" and GROUP_NAMES["Saved copy"] == "Saved copies"
+    assert set(GROUP_NAMES) == set(search.GROUPS) and GROUP_NAMES["Person"] == "People" and GROUP_NAMES["Saved file"] == "Saved files"
 
 
 def test_a_snippet_is_words_not_an_emails_headers():
@@ -80,15 +80,15 @@ def test_the_files_group_lists_files_as_rows(sample_conn):
     html = pages.files_body(t, m.files_of("T000001"))
     assert 'src="ft:pdf"' in html and ">Impeller datasheet rev B.pdf<" in html and ">2026-09-10 Impeller" not in html
     assert "10 Sep" in html and html.index("ft:pdf") < html.index("Find files")
-    # The saved copy and the attachment are one document: one row, the saved copy's, with no kind said.
-    assert html.count('src="ft:pdf"') == 1 and "saved copy" not in html and "email attachment" not in html
-    assert "Saved copy" in html.split("title=")[1]  # where it came from is its tooltip
+    # The saved file and the attachment are one document: one row, the saved file's, with no kind said.
+    assert html.count('src="ft:pdf"') == 1 and "saved file" not in html and "email attachment" not in html
+    assert "Saved file" in html.split("title=")[1]  # where it came from is its tooltip
     assert "Show all" not in html and ">Find files<" in html and "to search, preview and open them" in html
     # Under the Files section's head, which has Find files already, nothing follows the rows unless some are hidden.
     assert "Find files" not in pages.files_body(t, m.files_of("T000001"), intro=False)
     # An old version is a file of its own, and says so; with one row shown, the rest are a click away.
     inst = pages.files_body(m.task("T000008"), m.files_of("T000008"), limit=1, intro=False)
-    assert inst.count("<tr>") == 1 and "Show all 3 in Find files" in inst
+    assert inst.count("<tr>") == 1 and "Show all 2 in Find files" in inst
     every = pages.files_body(m.task("T000008"), m.files_of("T000008"))
     assert every.count("<tr>") == 2 and "old version" in every
     assert pages.files_body(t, []) == '<p class="note">No files yet.</p>'

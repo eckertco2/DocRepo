@@ -1,6 +1,6 @@
 """The Capture wheel's "Email or file" (release 5.42; ``docs/ui-design/wheel-design.md``, section 5): the pinned window, with
 what's selected in the window you were in. Each read hands over exactly as a drop does: files through ``add_paths``, emails
-through ``_read_emails``, so each gets its description, Save a copy and Extract boxes, and an email gets layer 0's rows.
+through ``_read_emails``, so each gets its description, its Saved · Linked switch and Extract box, and an email gets layer 0's rows.
 
 Nothing here freezes DocRepo. File Explorer is read on a thread of its own, and only paths come back. Outlook is asked a
 simple question on a thread of its own first: while a dialog is open in Outlook that question waits there, and after 3 s the

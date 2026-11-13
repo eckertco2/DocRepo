@@ -14,6 +14,14 @@ Since 2026-11-12, releases ship in weekly trains (the design workspace's `docs/m
 
 ## Next train (Thursday 2026-11-19, not pushed yet)
 
+Built for the train of Thursday 2026-11-19 (the owner's answer of 2026-11-13), with 5.146 to 5.148, each merged to `main` at the owner's word. The heading takes the day it's pushed. (Until `main` is merged in, the heading below is the one `main` has since pushed as the train of 2026-11-13.)
+
+| Release | Date | What |
+|---|---|---|
+| 5.145 | 2026-11-13 | Save or link. Files dragged from File Explorer over the capture window meet two zones: **Save in DocRepo** (left), which makes the file a saved file, a file of DocRepo's own in the task's Files folder, read and opened from there from then on, and **Link** (right), which notes where it is and reads it there. The zone under the pointer lights up; a folder is always linked, and one dropped on Save says so. Each row's **Saved · Linked** switch takes Save a copy's place (Attach's **Save files…** and **Link files…**, a path on a line of its own Linked), and the line under the rows says where saved files go. An email's attachments are always saved in the task's Files folder, with no tick; an unfiled capture keeps its saved files in its own folder until filing moves them. The pinned window and Find files take the zones too. "Saved copy" becomes **Saved file** and "Tracked original" **Linked file** (lists, pages, Task.md, `from:saved` and `from:linked`); a linked file has the link mark on the task page, and a saved file's page says where it came from. No schema change (the save or link plan's decisions 627 to 634). |
+
+## Next train (Thursday 2026-11-19, not pushed yet)
+
 Merged to `main` since the train of 2026-11-12: 5.127, 5.128, 5.138, 5.139, 5.140 and 5.142. The heading takes the day it's pushed.
 
 | Release | Date | What |

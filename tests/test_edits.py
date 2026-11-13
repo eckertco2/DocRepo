@@ -51,7 +51,9 @@ def test_filing_an_unfiled_capture(sample_root):
         edits.file_capture(conn, root, fs, "C000022", "T000017", AT)
 
 
-def test_filing_makes_the_saved_copies_that_waited_for_it(sample_root, tmp_path):
+def test_filing_puts_the_saved_files_in_the_tasks_files_folder(sample_root, tmp_path):
+    """Release 5.145 (decision 631): an unfiled capture's saved file is written into its own folder at once, so nothing
+    depends on the original staying put, and filing moves it into the task's Files folder."""
     conn, root, fs = sample_root
     original = tmp_path / "Pump curve.pdf"
     original.write_bytes(b"%PDF-1.4 a made-up pump curve")
@@ -59,11 +61,14 @@ def test_filing_makes_the_saved_copies_that_waited_for_it(sample_root, tmp_path)
 
     r = save_capture(conn, root, fs, SETTINGS, CaptureDraft(content="Pump curve from the vendor.", files=[
         FileRow("Pump curve.pdf", str(original), "The vendor's pump curve", save_a_copy=True)]), AT)
-    assert Model(conn).is_unfiled(Model(conn).captures[r.capture_id])
+    m = Model(conn)
+    assert m.is_unfiled(m.captures[r.capture_id])
+    held = root / "Captures" / "2026" / "10" / r.capture_id / "Files" / "2026-10-08 Pump curve.pdf"
+    assert held.read_bytes() == original.read_bytes() and edits.source_of(root, m, m.captures[r.capture_id].document_ids[0]) == held
     out = edits.file_capture(conn, root, fs, r.capture_id, "T000008", AT)
-    assert "1 saved copy made" in out.message
+    assert "1 saved file put in its Files folder" in out.message
     copy = root / "Tasks" / "T000008" / "Files" / "2026-10-08 Pump curve.pdf"
-    assert copy.read_bytes() == original.read_bytes()
+    assert copy.read_bytes() == original.read_bytes() and not held.exists()  # moved: one file of DocRepo's own
     assert [f.name for f in Model(conn).copies if f.from_capture == r.capture_id] == ["2026-10-08 Pump curve.pdf"]
 
 

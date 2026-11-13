@@ -42,8 +42,10 @@ HINTS = {
     "tag": "Type a tagged label and a space, such as V-110.",
 }
 #: ``from:`` values that name a file's source rather than a sender.
-SOURCE_WORDS = {"attachment": "Email attachment", "attachments": "Email attachment", "original": "Tracked original", "originals": "Tracked original",
-                "copy": "Saved copy", "copies": "Saved copy", "link": "Link", "links": "Link", "pasted": "Pasted on the notes page"}
+#: Release 5.145 (decision 631): saved and linked, with the old words, original and copy, still read the same.
+SOURCE_WORDS = {"attachment": "Email attachment", "attachments": "Email attachment", "linked": "Linked file", "original": "Linked file",
+                "originals": "Linked file", "saved": "Saved file", "copy": "Saved file", "copies": "Saved file", "link": "Link", "links": "Link",
+                "pasted": "Pasted on the notes page"}
 
 # How much a word scores, by where it matched.
 TITLE_START, WORD_START, IN_TITLE, IN_DESC, IN_SOURCE, SLIP, IN_TEXT, IN_FILE_TEXT = 12, 10, 7, 4, 3, 2.5, 2, 1

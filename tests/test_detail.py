@@ -41,7 +41,7 @@ def test_a_task_page(pages):
     order = ["Current status Mon 5 Oct Procedure rev 2 approved. Waiting on the rigging plan.",
              "When Due Fri 30 Oct in 22 days Deadline too · Turnaround ends Starts Mon 19 Oct in 11 days",
              "Who Lead Me 8 h Assignees Tom Becker 60 h Mike Ortiz 60 h", "Subtasks 3 of 3 open New task under this one Rigging plan",
-             "Details T000008 · Created Tue 22 Sep from C000005", "Captures 6 Status log 14 Summaries 1 Files 3 With subtasks ⇅ Oldest first",
+             "Details T000008 · Created Tue 22 Sep from C000005", "Captures 6 Status log 14 Summaries 1 Files 2 With subtasks ⇅ Oldest first",
              "This task September 2026", "Subtasks · 3"]
     at = [words.find(part) for part in order]
     assert -1 not in at and at == sorted(at), dict(zip(order, at))
@@ -245,8 +245,9 @@ def test_the_page_in_parts(pages):
     assert "when_who" not in parts and "rail" not in parts  # When and who is the grid now
     assert parts["details_short"] == "" and "ID T000008" in text(parts["details"]) and "Folder" in text(parts["details"])
     history = text(parts["history"])
-    assert history.startswith("Captures 6 Summaries 1 With subtasks") and "Status log" not in history and "Files 3" not in history  # the tabs
-    assert parts["history_short"] == "6 captures" and parts["files_short"] == "3" and text(parts["files_summary"]) == "3 Find files"  # release 5.98
+    assert history.startswith("Captures 6 Summaries 1 With subtasks") and "Status log" not in history and "Files 2" not in history  # the tabs
+    # Each file once (release 5.145): the saved procedure and its old version, not its original as well.
+    assert parts["history_short"] == "6 captures" and parts["files_short"] == "2" and text(parts["files_summary"]) == "2 Find files"  # release 5.98
     assert "to search, preview and open" not in text(parts["files"])  # Find files is the section's command, not a line in it
     assert "key_dates" not in parts or parts["key_dates"] == ""  # nothing in them
     wide = pages.task_parts("T000008", PageState(), 900)

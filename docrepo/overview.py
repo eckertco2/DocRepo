@@ -38,8 +38,8 @@ TYPE_NAMES = {"doc": "Word", "sheet": "Excel", "slides": "PowerPoint", "pdf": "P
               "drawing": "Drawing", "folder": "Folder", "link": "Link", "other": "Other"}
 TYPE_ORDER = ("doc", "sheet", "slides", "pdf", "drawing", "picture", "mail", "folder", "link", "other")
 #: Where a file came from, in the order Group by Source lists them.
-SOURCES = ("Tracked original", "Email attachment", "Saved copy", "Link", "Pasted on the notes page")
-SOURCE_NAMES = {"Tracked original": "Tracked originals", "Email attachment": "Email attachments", "Saved copy": "Saved copies",
+SOURCES = ("Linked file", "Email attachment", "Saved file", "Link", "Pasted on the notes page")
+SOURCE_NAMES = {"Linked file": "Linked files", "Email attachment": "Email attachments", "Saved file": "Saved files",
                 "Link": "Links", "Pasted on the notes page": "Pasted on the notes page"}
 #: The kinds, in the order the Task view lists them, and their names.
 KINDS = ("file", "email", "note", "task")
@@ -104,7 +104,7 @@ class Record:
     sender: str = ""         # an email's sender, or the sender of the email a file came with
     capture: str = ""        # the capture that brought it, or that it is
     path: str = ""           # a file's original or where DocRepo keeps it; a link's address
-    copy: str = ""           # a saved copy of it, when there is one
+    copy: str = ""           # its saved file, when it has one (release 5.145: the file it is from then on)
     state: str = ""          # a subtask's state
     attachments: list[str] = field(default_factory=list)
     # Its words for matching (docrepo.finder): lower-cased and without accents.
@@ -233,14 +233,14 @@ def build(model: Model, data_root: Path, task_id: str, texts: dict[str, str]) ->
                 continue
             seen.add(doc_id)
             out.append(_file(model, data_root, c, tid, doc_id, copies, text))
-    # Saved copies of documents no capture in the family brought.
+    # Saved files of documents no capture in the family brought.
     for doc_id, f in copies.items():
         if doc_id not in seen and doc_id in model.documents:
             seen.add(doc_id)
             c = model.captures.get(f.from_capture or "")
             at = c.saved if c else model.tasks[f.task].created
             d = model.documents[doc_id]
-            r = Record("file", doc_id, f.task, at, d.name, d.description or "", "", file_type(d.name, d.original), "Saved copy", "a saved copy",
+            r = Record("file", doc_id, f.task, at, d.name, d.description or "", "", file_type(d.name, d.original), "Saved file", "a saved file",
                        capture=f.from_capture or "", path=str(data_root / "Tasks" / f.task / "Files" / f.name),
                        copy=str(data_root / "Tasks" / f.task / "Files" / f.name))
             r.fold(model.tasks[f.task].title)
@@ -270,10 +270,14 @@ def _file(model: Model, data_root: Path, c: Capture, tid: str, doc_id: str, copi
     copy_path = str(data_root / "Tasks" / copy.task / "Files" / copy.name) if copy else ""
     if kind == "link":
         source, path = "Link", d.original or ""
+    elif copy_path:
+        # Release 5.145 (the save or link plan's decision 631): saved on a task here, that file is the document; where it
+        # came from (an email, or where it was) is a fact on its page, and DocRepo doesn't go back to it.
+        source, path = "Saved file", copy_path
     elif d.original:
-        source, path = ("Pasted on the notes page" if c.page_made and kind == "picture" else "Tracked original"), d.original
+        source, path = ("Pasted on the notes page" if c.page_made and kind == "picture" else "Linked file"), d.original
     else:
-        source = "Email attachment"
+        source = "Email attachment"  # kept in its capture's folder: an unfiled capture's, or from before release 5.145
         path = str(capture_folder(data_root, c.id, c.saved) / "attachments" / d.name)
     sender = sender_of(text) if c.source == "outlook_email" else ""
     if c.source == "outlook_email":
@@ -284,7 +288,7 @@ def _file(model: Model, data_root: Path, c: Capture, tid: str, doc_id: str, copi
         came = "an Update" if c.has("update") else "a Note"
     r = Record("file", doc_id, tid, c.saved, d.name, d.description or "", "", kind, source, came, sender, c.id, path, copy_path)
     # Its subtask and the folders it's in are found too: people look for a file where they put it.
-    r.fold(f"{model.tasks[tid].title} {folders_of(path) if source == 'Tracked original' else ''}")
+    r.fold(f"{model.tasks[tid].title} {folders_of(d.original or '') if source in ('Linked file', 'Saved file') else ''}")
     return r
 
 

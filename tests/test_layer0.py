@@ -94,11 +94,14 @@ def test_saving_an_email_with_its_parts(sample_root):
     assert [(d.name, d.description, d.original, d.capture) for d in docs] == [
         ("Coupling guard drawing rev C.pdf", "Drawing.", None, c.id), ("Packing list 4471.xlsx", "Packing list.", None, c.id),
         ("Guard install checklist.docx", "Checklist.", CHECKLIST, None), ("image001.jpg", "Photo of the guard.", None, c.id)]
-    # A picture has no Extract information, and a link neither that nor a saved copy.
-    assert [(d.save_a_copy, d.extract) for d in c.documents] == [(True, True), (True, True), (False, False), (True, False)]
+    # A picture has no Extract information, and stays with its capture; a link has neither; an attachment is always saved
+    # (release 5.145, decision 629).
+    assert [(d.save_a_copy, d.extract) for d in c.documents] == [(True, True), (True, True), (False, False), (False, False)]
     assert c.attachments == ["Coupling guard drawing rev C.pdf", "Packing list 4471.xlsx", "image001.jpg"]
     folder = capture_folder(root, c.id, c.saved)
-    assert sorted(p.name for p in (folder / "attachments").iterdir()) == ["Coupling guard drawing rev C.pdf", "Packing list 4471.xlsx", "image001.jpg"]
+    assert sorted(p.name for p in (folder / "attachments").iterdir()) == ["image001.jpg"]
+    assert [(f.task, f.name) for f in m.copies if f.from_capture == c.id] == [
+        ("T000008", "2026-10-08 Coupling guard drawing rev C.pdf"), ("T000008", "2026-10-08 Packing list 4471.xlsx")]
     assert (folder / "email.msg").read_bytes() == b"MSG"
     assert c.email_layer_0 == ("2 attachments, 1 link and 1 picture kept. Left out: 1 email address, 1 repeated link, 2 other links, "
                                "1 hidden attachment and 2 unticked rows.")
@@ -117,7 +120,9 @@ def test_the_capture_window_shows_each_part(qapp, sample_root):
         assert [(e.row.name, e.keep.isChecked(), e.desc.isEnabled()) for e in parts] == [
             ("Coupling guard drawing rev C.pdf", True, True), ("Packing list 4471.xlsx", True, True), ("install-guide.pdf", True, True),
             ("Guard install checklist.docx", True, True), ("image001.jpg", True, True), ("image002.png", False, False)]
-        assert parts[2].copy.isHidden() and parts[4].extract.isHidden() and not parts[4].copy.isHidden()
+        # A link is linked and can't change; a picture has no switch, as it stays with the capture (release 5.145).
+        assert parts[2].switch.fixed and not parts[2].switch.saved() and parts[4].extract.isHidden() and parts[4].switch is None
+        assert parts[0].switch.fixed and parts[0].switch.saved()  # an attachment is always saved
         assert w.focusWidget() is email_entry.email_desc and w.same_all.isVisibleTo(w)  # the email's own description (round 7's decision 331)
         parts[2].keep.setChecked(False)
         assert not parts[2].desc.isEnabled() and "2 unticked rows" in email_entry.layer0.text()

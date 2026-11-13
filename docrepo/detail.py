@@ -964,9 +964,9 @@ class Pages:
         and only "Show all n in Find files" follows the rows, when some aren't shown."""
         # Release 5.114 (the file rows review's decision 429): each file as a row of a list, not a run of blue links: its type's
         # mark, its name in the text's colour, the subtask it's on, its description under it, and the day it came in at the
-        # end. Where it came from ("Saved copy", "Email attachment") is its tooltip; only an old version says so.
+        # end. Where it came from ("Saved file", "Linked file", "Email attachment") is its tooltip; only an old version says so.
         came = {(c.task, d): c.saved for tid in dict.fromkeys(f.task for f in files) for c in self.m.notes_of(tid) for d in c.document_ids}
-        # Each file once: a saved copy stands for its original on the same task (both are one document), so the list doesn't
+        # Each file once: a saved file stands for its original on the same task (both are one document), so the list doesn't
         # show every name twice; an old version is a file of its own.
         listed, seen = [], set()
         for f in files:
@@ -974,13 +974,13 @@ class Pages:
             if key not in seen:
                 seen.add(key)
                 listed.append(f)
-        names = Counter(dated_name(f.name)[1] if f.kind in ("Saved copy", "Old version") else f.name for f in listed)
+        names = Counter(dated_name(f.name)[1] if f.kind in ("Saved file", "Old version") else f.name for f in listed)
         rows = []
         for f in listed[:limit]:
             d = self.m.documents.get(f.document)
             original = d.original if d and d.original else ""
             kind = file_type(f.name, original)
-            day, shown = dated_name(f.name) if f.kind in ("Saved copy", "Old version") else ("", f.name)
+            day, shown = dated_name(f.name) if f.kind in ("Saved file", "Old version") else ("", f.name)
             day = day or came.get((f.task, f.document), "")[:10]
             if f.kind == "Link":  # it opens in the browser, on a click (release 5.67, decision 315)
                 name = (f'{link(f"opendoc:{f.document}", shown, "Opens in your browser: " + original, "tl")} &nbsp;'
@@ -988,6 +988,9 @@ class Pages:
             elif f.kind == "Folder":  # release 5.66: it opens in File Explorer
                 name = (f'{link(f"opendoc:{f.document}", shown, "Opens in File Explorer: " + original, "tl")} &nbsp;'
                         f'{link("copyaddr:" + quote(original, safe=""), "Copy path", "", "tq")}')
+            elif f.kind == "Linked file":  # release 5.145, decision 631: the link mark, and where it's read
+                name = (link(self.show_key(f), shown, f"{type_name(kind)} · Linked: read where it is, {original}. Click to show it in File Explorer.", "tl")
+                        + ' <img src="lk:link" width="12" height="12" title="Linked: read where it is">')
             else:
                 name = link(self.show_key(f), shown, f"{type_name(kind)} · {f.kind}. Click to show it in File Explorer.", "tl")
             # Only an old version says what it is, and a name two files share.
@@ -1279,8 +1282,8 @@ class Pages:
         return f'<table cellspacing="0" cellpadding="2" style="margin-top: 6px">{"".join(rows)}</table>' if rows else ""
 
     def show_key(self, f) -> str:
-        """The address that shows a file in File Explorer: a saved copy's, else its document's."""
-        if f.kind in ("Saved copy", "Old version"):
+        """The address that shows a file in File Explorer: a saved file's, else its document's."""
+        if f.kind in ("Saved file", "Old version"):
             copy = next((c for c in self.m.copies if c.task == f.task and c.name == f.name), None)
             return f"show:copy:{copy.id}" if copy else f"doc:{f.document}"
         return f"show:doc:{f.document}"
@@ -1469,8 +1472,9 @@ class Pages:
             files = []
             for cd in c.documents:
                 d = self.m.documents[cd.document]
-                choices = (" · Link" if is_link(d.original) else " · Folder" if is_folder(d.original) else "") + (" · Save a copy" if cd.save_a_copy else "") + (
-                    " · Extract information" if cd.extract else "")
+                # Saved or linked (release 5.145, decision 630), as its row said when it was saved.
+                choices = (" · Link" if is_link(d.original) else " · Folder" if is_folder(d.original) else " · Saved" if cd.save_a_copy
+                           else " · Linked" if d.original else "") + (" · Extract information" if cd.extract else "")
                 files.append(f'{link(f"doc:{d.id}", d.name)} <span class="sub">{d.id}{choices}</span>'
                              + (f'<br><span class="sub">{esc(d.description)}</span>' if d.description else ""))
             rows.append(("Files", "<br>".join(files)))
@@ -1497,7 +1501,8 @@ class Pages:
 
     # ---- documents, people and labels ----
     def document_page(self, document_id: str) -> str:
-        """A document's page: its facts, the tasks it's on, its saved copies and its versions."""
+        """A document's page: its facts, where its file is (saved, with where it came from, or linked), the tasks it's on
+        and its versions."""
         m, d = self.m, self.m.documents[document_id]
         tasks = m.document_holders(document_id)
         copies = [f for f in m.copies if f.document == document_id]
@@ -1505,28 +1510,40 @@ class Pages:
         text = {"ok": f"Extracted, {d.text_chars or 0:,} characters", "partial": f"Cut at {d.text_chars or 0:,} characters",
                 "none": f"No text{': ' + d.text_note if d.text_note else ''}", "error": f"Couldn't be read{': ' + d.text_note if d.text_note else ''}"}
         if is_link(d.original):
-            # A link (mods log round 1, M0001): only its address is kept, so it has no text, checks or saved copies.
+            # A link (mods log round 1, M0001): only its address is kept, so it has no text, checks or saved file.
             rows = [("File description", esc(d.description) if d.description else none_text("None yet")), ("ID", d.id),
                     ("Link", f"<span>{esc(d.original)}</span>"), ("Text", esc(f"No text: {NO_TEXT}")),
                     ("Tasks", ", ".join(self.task_link(x) for x in tasks) or none_text("Not filed yet")), *self.tagged_rows("document", d.id)]
             return (f'<p class="crumbs">Link {d.id}</p><h2>{esc(d.name)}</h2>{fields_table(rows)}'
                     '<p class="note">Open link hands it to your default browser, only when you click it (release 5.67). Copy link puts the address on the clipboard. DocRepo never fetches it.</p>')
         if is_folder(d.original):
-            # A folder (release 5.66, round 6's decision 318): kept by where it is, with no text, checks or saved copies.
+            # A folder (release 5.66, round 6's decision 318): kept by where it is, with no text, checks or saved file.
             rows = [("File description", esc(d.description) if d.description else none_text("None yet")), ("ID", d.id),
                     ("Folder", f"<span>{esc(d.original)}</span>"), ("Text", esc(f"No text: {FOLDER_TEXT}")),
                     ("Tasks", ", ".join(self.task_link(x) for x in tasks) or none_text("Not filed yet")), *self.tagged_rows("document", d.id)]
             return (f'<p class="crumbs">Folder {d.id}</p><h2>{esc(d.name)}</h2>{fields_table(rows)}'
                     '<p class="note">Show in File Explorer opens the folder.</p>')
-        rows = [("File description", esc(d.description) if d.description else none_text("None yet")), ("ID", d.id),
-                ("Original", f"<span>{esc(d.original)}</span>" if d.original else f"Email attachment in {self.capture_link(d.capture)}" if d.capture else none_text()),
+        # Release 5.145 (the save or link plan's decision 631): a saved file is a file of its own, and where it came from is
+        # a fact; a linked file is read where it is.
+        saved = [f for f in copies if not f.old]
+        came = min((c.saved for c in m.captures.values() if document_id in c.document_ids), default="")
+        day = f' <span class="sub">{esc(short(to_date(came[:10]), self.today))}</span>' if came else ""
+        if saved:
+            where = [("Saved file", "<br>".join(link(f"show:copy:{f.id}", f"Tasks\\{f.task}\\Files\\{f.name}") for f in saved)),
+                     ("Came from", (f"<span>{esc(d.original)}</span>" if d.original else f"An email, in {self.capture_link(d.capture)}"
+                                    if d.capture else none_text()) + day)]
+        elif d.original:
+            where = [("Linked", f"Read where it is: <span>{esc(d.original)}</span>")]
+        else:
+            where = [("Email attachment", f"In the attachments folder of {self.capture_link(d.capture)}" if d.capture else none_text())]
+        rows = [("File description", esc(d.description) if d.description else none_text("None yet")), ("ID", d.id), *where,
                 ("Status", esc(d.status)), ("Text", esc(text.get(d.text_status or "", "Not read yet"))),
                 ("Last checked", esc(d.checked[:16]) if d.checked else none_text("Not yet")),
                 ("Versions", ", ".join(esc(self.long(v.at)) for v in versions) + f' <span class="sub">{len(versions)} change{"s" if len(versions) > 1 else ""} '
                              f'in the raw text log of its tasks</span>' if versions else none_text("No changes found yet")),
-                ("Tasks", ", ".join(self.task_link(x) for x in tasks) or none_text("Not filed yet")),
-                ("Saved copies", "<br>".join(link(f"show:copy:{f.id}", f"Tasks\\{f.task}\\Files\\{'_old versions' + chr(92) if f.old else ''}{f.name}")
-                                             for f in copies) or none_text())]
+                ("Tasks", ", ".join(self.task_link(x) for x in tasks) or none_text("Not filed yet"))]
+        if any(f.old for f in copies):
+            rows.append(("Old versions", "<br>".join(link(f"show:copy:{f.id}", f"Tasks\\{f.task}\\Files\\_old versions\\{f.name}") for f in copies if f.old)))
         rows += self.tagged_rows("document", d.id)
         return f'<p class="crumbs">Document {d.id}</p><h2>{esc(d.name)}</h2>{fields_table(rows)}'
 

@@ -91,7 +91,7 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser("backup", help="back up docs.db and the data root's files to the backup folder now")
     usage = commands.add_parser("usage", help="how often each wheel command and each kind of thing in the Activity view was used in the last 7 and 30 days. It changes nothing")
     usage.add_argument("--as-of", type=as_of, metavar="WHEN", help=as_of_help)
-    commands.add_parser("check", help="check the data root against docs.db: missing capture.md files, extracted text and saved copies, "
+    commands.add_parser("check", help="check the data root against docs.db: missing capture.md files, extracted text and saved files, "
                                       "the search index and SQLite's quick check. It changes nothing, and writes its list to System\\check-<date>.md")
     commands.add_parser("dump", help="write every table of docs.db as JSON into System\\export\\<date>, for reading outside DocRepo. It reads docs.db "
                                      "and changes nothing in it")
@@ -269,7 +269,7 @@ def cmd_load_sample(args: argparse.Namespace) -> int:
     log.info("load-sample: sample data loaded as of %s, %d files, %d calendar rows, %d pages", when, files, rows, pages)
     print(f"Loaded the sample data into {root}, as of {when:%Y-%m-%d %H:%M}.")
     print(f"  {files} capture.md and extracted.txt files, {rows} capacity calendar rows, {pages} generated pages.")
-    print("  The sample's emails, attachments and saved copies aren't made, so links to them don't open.")
+    print("  The sample's emails, attachments and saved files aren't made, so links to them don't open.")
     return 0
 
 
