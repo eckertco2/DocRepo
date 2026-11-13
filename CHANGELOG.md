@@ -4,6 +4,14 @@ One line per release, newest first: its number, the date it was built, and what 
 
 Since 2026-11-12, releases ship in weekly trains (the design workspace's `docs/mods/cold-eyes-plan.md`, decisions 464 to 468): each train has a heading with the day it was pushed to GitHub, over its releases. Releases keep their own numbers and tags.
 
+## Next train (Thursday 2026-11-19, not pushed yet)
+
+Merged to `main` since the train of 2026-11-13: 5.144. The heading takes the day it's pushed.
+
+| Release | Date | What |
+|---|---|---|
+| 5.144 | 2026-11-13 | The words after `**label,` and `**agenda,` open a list, as `@` and `#` do (the owner's ask of 2026-11-13). On the comma, or at once after picking the name from the `**` list: `**label,` lists the labels a label picker offers, a sublabel under its parent, with **Create label “…”** for a new name; `**agenda,` lists Today, the open meetings and people, then any open task as you type, with the `#` list's marks and levels. Typing narrows it, Up and Down move, Enter or Tab picks, Esc hides it, and after a comma or an “and” it opens again for the next name. A pick puts in what the `@` or `#` list would (`@Tom Becker`, `#Business team meeting`, with its ID kept), or `Today`, or the label, then a space. Both operators now read a name holding “and” or a comma as one (`#Rigging and lifting`, a label “Health and safety”). The same list, no new popup; no schema change. |
+
 ## Train of 2026-11-13
 
 The second weekly train, pushed to GitHub on Friday 2026-11-13, a week early at the owner's word, with everything merged since the train of 2026-11-12: 5.127, 5.128, 5.138, 5.139, 5.140, 5.141 and 5.142. 5.141 fixes an error the owner reported and was to ship alone (decision 466); pushed the same day, it goes with the train. These releases add concepts (Review, Log progress, Today's meetings, waits, All notes and Meetings, schemas 26 to 28), so the next train settles (decision 467). Its corporate test is the design workspace's `handoff/docrepo/train-2026-11-13-test.md`.
