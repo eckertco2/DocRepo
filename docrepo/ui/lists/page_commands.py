@@ -19,6 +19,7 @@ from docrepo.detail import SCOPE_NAMES
 from docrepo.links import is_folder, is_link
 from docrepo.schedule import is_open
 from docrepo.ui import conversation_page, decision_register, t_mails, task_menus
+from docrepo.ui.lists import review as review_list
 from docrepo.ui.icons import icon
 from docrepo.ui.look import LOOK
 from docrepo.views import full_path
@@ -41,6 +42,8 @@ class PageCommands:
             self._action("Open folder", lambda: self.reveal(self.ctx.data_root / "Tasks" / task_id), f"Open Tasks\\{task_id} in File Explorer")
             return
         menu_key = "   " if LOOK.classic else "\t"  # a menu's key column; the Classic look puts the key after the label
+        if self.view == "review":  # the weekly review's step 4 (release 5.128): Mark reviewed first
+            review_list.page_actions(self, task_id)
         self._action("Note", lambda: self.open_capture(task=task_id, mode="note"), "Add a note to this task's notes page", icon_name="note", key="N")
         self._action("Update", lambda: self.open_capture(task=task_id, mode="update"), "Update this task: its state, status, dates and more",
                      icon_name="update", key="U")

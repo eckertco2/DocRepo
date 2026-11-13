@@ -19,6 +19,7 @@ from docrepo.file_rows import doc_places, type_colour, type_icon, type_name
 from docrepo.detail import esc
 from docrepo.links import is_link
 from docrepo.overview import file_type
+from docrepo.model import Model
 from docrepo.schedule import DueDate, is_open
 from docrepo.ui.look import LOOK
 from docrepo.ui.task_forms import BulkEditDialog
@@ -312,17 +313,23 @@ class TaskLists:
             edit = dialog.edit()
             self._do(lambda: edits.bulk_edit(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, ids, edit, self._now()))
 
-    def _list_view(self, view_id: str) -> None:
+    def _list_view(self, view_id: str, controls: bool = True, order: Callable[[Model, list[Node]], list[Node]] | None = None,
+                   extra: Callable[[str], tuple[str, ...]] | None = None) -> None:
+        """A list's view. The weekly review (release 5.128) draws its steps with it too: with ``controls`` False there's no
+        Sort, Group by or Select, ``order`` puts the rows in its own order, and ``extra`` gives a row's quiet words."""
         v, task_list, m = VIEW_IDS[view_id], LIST_IDS[view_id], self.model()
         self._set_head(v.label, v.note + " Dimmed rows are their parents, shown for context.")
         reminders = view_id == "reminders"
         with_keys = view_id == "due"  # key dates have a row each, with Done (release 5.31, decision 150)
         self.tree.set_columns(*_cols(*(with_actions(["Title", "State", "Reminder" if reminders else "Due"], [0, 96, 96], 56)
                                        if reminders or with_keys else (["Title", "State", "Due"], None))))
-        self._sort_box(view_id)
-        grouped = self._group_box(view_id)
-        self._select_controls()
-        nodes = sort_tree(m, list_tree(m, task_list, self.today(), self.ctx.settings.me), self.sorts.get(view_id, "default"), self.today())
+        grouped = None
+        if controls:
+            self._sort_box(view_id)
+            grouped = self._group_box(view_id)
+            self._select_controls()
+        tree = list_tree(m, task_list, self.today(), self.ctx.settings.me)
+        nodes = order(m, tree) if order else sort_tree(m, tree, self.sorts.get(view_id, "default"), self.today())
         if grouped:  # under each sublabel's heading (release 5.9, M0051)
             self._grouped_list(view_id, grouped, nodes)
             if with_keys:
@@ -335,7 +342,7 @@ class TaskLists:
             t = m.task(n.id)
             who = ", ".join(m.person_name(p) for p in t.assignees) if view_id == "waiting" else ""
             when = list_date(task_list, t, self.today()) if reminders else None
-            return self._task_cells(n.id, n.depth, people=who, when=when, use_due=not reminders), full_path(m, n.id)
+            return self._task_cells(n.id, n.depth, people=who, when=when, use_due=not reminders, muted=extra(n.id) if extra else ()), full_path(m, n.id)
 
         self._add_nodes(nodes, row=row)
         if reminders:

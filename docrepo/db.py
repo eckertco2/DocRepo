@@ -26,7 +26,7 @@ from docrepo.safe_fs import SafeFS
 log = logging.getLogger(__name__)
 
 DB_FILE = Path("System") / "docs.db"
-SCHEMA_VERSION = 25
+SCHEMA_VERSION = 26
 #: How long, in seconds, a statement waits for docs.db while another connection holds it (SQLite's busy timeout, release
 #: 5.102) before it gives up with "database is locked". A backup's copy holds it for as long as the copy takes. Python's
 #: own default is 5 seconds.
@@ -635,6 +635,14 @@ DROP TABLE t_mails;
 ALTER TABLE t_mails_new RENAME TO t_mails;
 CREATE INDEX t_mails_conversation ON t_mails (conversation);
 CREATE INDEX t_mails_task ON t_mails (task, opened);
+""",
+    26: """
+-- The weekly review (release 5.128, the cold-eyes plan's decisions 498 and 499): when a task was last marked reviewed, and
+-- its own review interval in weeks (1, 2 or 4; 0 for never). With no interval of its own, an open top-level task is
+-- reviewed as often as Settings says, and any other task isn't. Neither goes into the status log: DocRepo keeps the last
+-- review, not a history of them (decision 503).
+ALTER TABLE tasks ADD COLUMN reviewed TEXT;
+ALTER TABLE tasks ADD COLUMN review_every INTEGER CHECK (review_every IS NULL OR review_every IN (0, 1, 2, 4));
 """,
 }
 

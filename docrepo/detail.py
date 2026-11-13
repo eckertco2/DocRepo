@@ -33,6 +33,7 @@ from docrepo.pages import num
 from docrepo.schedule import due_of, held_on, is_open, start_of
 from docrepo.stories import Event, RawItem, Stories, clip
 from docrepo.task_links import SHOWN, all_documents, links_of
+from docrepo.tasks import review_every_words
 from docrepo.views import CapacityRow, label_tasks, markers
 
 CSS = """
@@ -677,6 +678,14 @@ class Pages:
         if open_ and t.reminder_repeat:  # release 5.117, decision 416
             until = f", until {long_date(to_date(t.reminder_until), today)}" if t.reminder_until else ""
             rows.append(("Repeats", f'{esc(repeats.describe(t.reminder_repeat))}<span class="rel">{esc(until)}</span>'))
+        if open_ and (t.reviewed or t.review_every is not None):  # release 5.128 (the weekly review, decisions 498 and 499)
+            every = review_every_words(t.review_every)
+            if t.reviewed:
+                r = to_date(t.reviewed)
+                rows.append(("Reviewed", f'{esc(long_date(r, today))} <span class="rel">{ago(r, today)}'
+                                         f'{esc(f" · {every.lower()}") if every else ""}</span>'))
+            else:
+                rows.append(("Review", esc(every or "")))
         on = self.m.agendas_on(t.id)
         if on:
             def when_met(target: str) -> str:

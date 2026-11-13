@@ -29,7 +29,7 @@ FIELDS = (
     ("assignee_per_week", "Assignee hours a week"), ("lead_hours", "Lead hours"),
     ("assignee_hours", "Assignee hours"), ("urgent", "Urgent"), ("meeting", "Meeting"), ("plant_event", "Plant event"), ("start", "Start"),
     ("reminder", "Reminder"), ("reminder_repeat", "Reminder repeats"), ("reminder_until", "Reminder until"), ("recurrence", "Recurrence"), ("repeat_until", "Repeat until"), ("title", "Title"),
-    ("description", "Description"), ("labels", "Labels"), ("inherit_labels", "Inherit parent labels"),
+    ("description", "Description"), ("labels", "Labels"), ("inherit_labels", "Inherit parent labels"), ("review_every", "Review every"),
 )
 FIELD_NAMES = dict(FIELDS)
 DATE_FIELDS = ("due", "deadline", "start", "reminder", "repeat_until", "reminder_until")
@@ -112,7 +112,25 @@ def stated(item: Any, key: str) -> Any:
     return getattr(item, key)
 
 
+#: A task's own review interval (release 5.128, the weekly review's decision 499): weeks, 0 being never.
+REVIEW_WEEKS = (1, 2, 4)
+
+
+def review_every_words(weeks: int | None) -> str | None:
+    """An interval as the status log and the task page say it: "Every week", "Every 2 weeks", "Never", or None for the
+    default, which Settings holds."""
+    if weeks is None:
+        return None
+    return "Never" if weeks == 0 else "Every week" if weeks == 1 else f"Every {weeks} weeks"
+
+
 def _normalize(conn: sqlite3.Connection, key: str, value: Any) -> Any:
+    if key == "review_every":  # release 5.128, decision 499
+        if value is None or value == "":
+            return None
+        if isinstance(value, bool) or not isinstance(value, int) or value not in (0, *REVIEW_WEEKS):
+            raise TaskError("Review every is 1, 2 or 4 weeks, or never.")
+        return value
     if key == "reminder_repeat":  # release 5.117, decision 416
         try:
             return repeats.normal(value)
@@ -186,6 +204,8 @@ def _shown(conn: sqlite3.Connection, key: str, value: Any) -> str | None:
         return ", ".join(value) or None
     if key == "reminder_repeat":
         return repeats.describe(value) or None
+    if key == "review_every":
+        return review_every_words(value)
     return value or None
 
 
@@ -265,6 +285,16 @@ def _apply_columns(conn: sqlite3.Connection, task_id: str, columns: dict[str, An
         stored = {k: int(v) if k in FLAG_FIELDS else v for k, v in columns.items()}
         assignments = ", ".join(f"{k} = ?" for k in stored)
         conn.execute(f"UPDATE tasks SET {assignments} WHERE id = ?", (*stored.values(), task_id))  # noqa: S608 - a column or table name of DocRepo's own; values are parameters
+
+
+def set_reviewed(conn: sqlite3.Connection, reviewed: dict[str, str | None]) -> None:
+    """Mark tasks reviewed (release 5.128, the weekly review's decision 498), each with its stored time, or None to take a
+    mark back (Undo). Nothing goes into the status log: DocRepo keeps the last review, not a history (decision 503)."""
+    with transaction(conn):
+        for task_id, at in reviewed.items():
+            if conn.execute("SELECT 1 FROM tasks WHERE id = ?", (task_id,)).fetchone() is None:
+                raise TaskError(f"There's no task {task_id}.")
+            _apply_columns(conn, task_id, {"reviewed": at})
 
 
 def _start_repeat(task: Task, new: dict[str, Any], today: date, workdays: Collection[int]) -> None:

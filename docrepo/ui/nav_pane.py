@@ -23,7 +23,7 @@ from docrepo.views import ASKS, ViewDef
 
 #: Each view's icon, from ``docrepo/ui/icons/``.
 ICONS = {
-    "today": "sun", "unfiled": "unfiled", "tasks": "tasks", "due": "due", "reminders": "reminders", "waiting": "waiting",
+    "today": "sun", "review": "review", "unfiled": "unfiled", "tasks": "tasks", "due": "due", "reminders": "reminders", "waiting": "waiting",
     "mine": "person", "unplanned": "unplanned", "agenda": "agenda", "activity": "activity", "priorities": "priorities", "timeline": "timeline",
     "capacity": "capacity", "people": "people", "labels": "labels", "tagged": "tagged", "templates": "templates", "docs": "file", "discarded": "discarded",
     "settings": "settings",

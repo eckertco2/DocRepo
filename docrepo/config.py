@@ -21,6 +21,9 @@ LOCATION_FILE = "location.json"
 SETTINGS_FILE = Path("Config") / "settings.json"
 CODE_DIR = Path(__file__).resolve().parent.parent
 
+#: The days the weekly review may fall on (release 5.128, decision 502), as ``dates.WEEKDAYS`` names them.
+REVIEW_DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
 #: The folders every data root has. Others (a task's Files folder, for example) appear only when needed.
 DATA_ROOT_FOLDERS = ("Captures", "Tasks", "Documents", "Mods", "Config/prompts", "System/logs")
 
@@ -169,6 +172,11 @@ class Settings:
     quiet_days: int = 21
     summary_pins: list[str] = field(default_factory=list)
     summary_recent: list[str] = field(default_factory=list)
+    #: The weekly review (release 5.128, the cold-eyes plan's decisions 499 and 502): the day Today offers it, as "Fri", and
+    #: how many weeks apart an open top-level task with no interval of its own comes up for review (1, 2 or 4). ``quiet_days``
+    #: is its Gone quiet too (decision 500).
+    review_day: str = "Fri"
+    review_weeks: int = 1
 
     @classmethod
     def load(cls, data_root: Path) -> Settings:
@@ -213,6 +221,12 @@ class Settings:
         if quiet is not None and not (isinstance(quiet, int) and not isinstance(quiet, bool) and 1 <= quiet <= 365):
             log.warning("Ignoring quiet_days in %s: it isn't a number of days from 1 to 365", file)
             del data["quiet_days"]
+        if "review_day" in data and data["review_day"] not in REVIEW_DAYS:  # release 5.128
+            log.warning("Ignoring review_day in %s: it isn't one of %s", file, ", ".join(REVIEW_DAYS))
+            del data["review_day"]
+        if "review_weeks" in data and (isinstance(data["review_weeks"], bool) or data["review_weeks"] not in (1, 2, 4)):
+            log.warning("Ignoring review_weeks in %s: it isn't 1, 2 or 4", file)
+            del data["review_weeks"]
         return cls(**{k: v for k, v in data.items() if k in known})
 
     def reference_link(self, name: str, value: str | None) -> str:
@@ -230,6 +244,9 @@ class Settings:
                 del data[key]
         if data["quiet_days"] == 21:  # release 5.131: written once it's changed from its default, as the optional ones are
             del data["quiet_days"]
+        for key, default in (("review_day", "Fri"), ("review_weeks", 1)):  # release 5.128: the same
+            if data[key] == default:
+                del data[key]
         return fs.write_text(data_root / SETTINGS_FILE, json.dumps(data, indent=2) + "\n")
 
 

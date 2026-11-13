@@ -26,6 +26,7 @@ from docrepo import ask_update, db, edits, key_dates, later
 from docrepo.dates import long_date
 from docrepo.detail import esc
 from docrepo.model import Model
+from docrepo.ui.lists import review as review_list
 from docrepo.ui.tree_view import Line, group_ground, state_icon, with_actions
 from docrepo.views import (
     project_text,
@@ -81,6 +82,7 @@ class TodayList:
         self._button("Add", self.add_today_item)
         self.tree.set_columns(*_cols(*with_actions(["Item", "State", "Due"], [0, 96, 96], 220)))
         grey = group_ground()
+        review_list.today_row(self, grey)  # on the review day, "Weekly review" first (release 5.128, decision 502)
         for name, group in today_groups(m, today):  # each group's items under its heading, which folds (release 5.24)
             head = self.tree.add_row(None, None, [f"<b>{esc(name)}</b>"], grey, selectable=False, span=True)
             for a in group:
