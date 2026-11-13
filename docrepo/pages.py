@@ -149,6 +149,9 @@ class Pages:
             rows.append(("Reminder", t.reminder))
         if t.reminder_repeat:  # release 5.117, decision 416
             rows.append(("Reminder repeats", repeats.describe(t.reminder_repeat) + (f", until {t.reminder_until}" if t.reminder_until else "")))
+        if t.reviewed or t.review_every is not None:  # release 5.128 (the weekly review, decisions 498 and 499)
+            every = {None: "", 0: "never reviewed", 1: "every week"}.get(t.review_every, f"every {t.review_every} weeks")
+            rows.append(("Reviewed", ", ".join(x for x in (t.reviewed[:10] if t.reviewed else "", every) if x)))
         for name, value in t.references.items():  # its reference fields (release 5.9, M0034), as links when they have one (5.67)
             address = reference_link(self.reference_links.get(name), value)
             rows.append((name, f"[{_text(value)}]({address})" if address else value))

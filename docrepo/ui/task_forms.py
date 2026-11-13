@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo import priorities, quick, repeats, templates, ties, timeline
+from docrepo import priorities, quick, repeats, review, templates, ties, timeline
 from docrepo.bulk import BulkEdit, LabelMatch, TaskOutcome, summary
 from docrepo.db import RECURRENCES, STATES
 from docrepo.dates import long_date, to_date
@@ -45,7 +45,7 @@ from docrepo.model import Model, Tie
 from docrepo.pages import num
 from docrepo.parse import Who
 from docrepo.schedule import length_of, placed, start_of, week_of
-from docrepo.tasks import TIE_LINKS, KeyDateRow, hours_values
+from docrepo.tasks import REVIEW_WEEKS, TIE_LINKS, KeyDateRow, hours_values, review_every_words
 from docrepo.ui.tokens import C
 from docrepo.ui.icons import icon, set_fold
 from docrepo.ui.look import LOOK, Help
@@ -896,7 +896,8 @@ class TaskEditDialog(FormDialog):
     def __init__(self, parent: QWidget | None, m: Model, task_id: str, labels: Options, people: Options, pick_task: PickTask | None = None,
                  reference_fields: Sequence[str] = (), today: date | None = None, checklist: QWidget | None = None,
                  link: templates.TaskLink | None = None, workdays: Collection[int] = MON_TO_FRI,
-                 reference_links: Mapping[str, str] | None = None, open_link: Callable[[str], None] | None = None) -> None:
+                 reference_links: Mapping[str, str] | None = None, open_link: Callable[[str], None] | None = None,
+                 review_weeks: int = 1) -> None:
         super().__init__(parent)
         t = m.task(task_id)
         self.m, self.task_id, self._pick_task, self.link = m, task_id, pick_task, link
@@ -1127,6 +1128,19 @@ class TaskEditDialog(FormDialog):
         for w, r, c in ((field("Reminder", self.reminder, "reminder"), 0, 0), (recurrence_field, 0, 1), (self.repeat_field, 1, 1),
                         (field("Reminder repeats", self.reminder_repeat, "reminderRepeats"), 1, 0), (self.reminder_until_field, 2, 0)):
             later_dates.addWidget(w, r, c)
+        # How often it comes up in the weekly review (release 5.128, decision 499): Settings' interval for a project, its own,
+        # or never. Not a date: a project's last review is kept by Mark reviewed, in the review.
+        self.review_every = QComboBox()
+        self.review_every.setAccessibleName("Review every")
+        self.review_every.setToolTip("How often it comes up in Review's Projects step. A top-level task follows Settings unless it "
+                                     "has its own; a subtask comes up only with its own.")
+        default = f"As Settings has it ({(review_every_words(review_weeks) or '').lower()})" if review.is_project_like(m, t) else "Not on its own"
+        self._review_choices = [None, *REVIEW_WEEKS, 0]
+        for n in self._review_choices:
+            self.review_every.addItem(default if n is None else review_every_words(n) or "", n)
+        self.review_every.setCurrentIndex(self._review_choices.index(t.review_every) if t.review_every in self._review_choices else 0)
+        self.review_every.setFixedWidth(240)
+        later_dates.addWidget(field("Review every", self.review_every), 3, 0)
         later_dates.setColumnStretch(0, 1)
         later_dates.setColumnStretch(1, 1)
         ml.addLayout(later_dates)
@@ -1229,7 +1243,7 @@ class TaskEditDialog(FormDialog):
         # template, since its hours and labels carry marks saying whether they follow the template. A Duration or a tie opens it
         # too since release 5.100, when they moved in (decision 395).
         open_more = bool(link or t.plant_event or t.reminder or t.reminder_repeat or t.recurrence or t.calendar_days or m.key_dates_of(task_id)
-                         or t.duration is not None or t.ties or any(t.references.get(n) for n in reference_fields))
+                         or t.duration is not None or t.ties or any(t.references.get(n) for n in reference_fields) or t.review_every is not None)
         self.more.setVisible(open_more)
         set_fold(self.more_button, MORE_OPTIONS, open_more)
         self.more_button.clicked.connect(self._toggle_more)
@@ -1589,7 +1603,7 @@ class TaskEditDialog(FormDialog):
             "duration": typed_days(self.duration) if not recurrence else None, "calendar_days": self.calendar.isChecked() and not recurrence,
             "start": self.start.value(), "due": self.due.value(), "deadline": self.deadline.value(),
             "deadline_desc": self.deadline_desc.text(), "reminder": self.reminder.value(), "recurrence": recurrence,
-            "reminder_repeat": self.reminder_repeat.value(),
+            "reminder_repeat": self.reminder_repeat.value(), "review_every": self.review_every.currentData(),
             "reminder_until": self.reminder_until.value() if self.reminder_repeat.value() else None,
             "repeat_until": self.repeat.value() if recurrence else None, "urgent": self.urgent.isChecked(), "meeting": self.meeting.isChecked(),
             "plant_event": self.plant_event.isChecked(), "parents": list(self.parents), "priority": self.priority.currentData(),
