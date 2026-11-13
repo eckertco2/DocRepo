@@ -688,6 +688,13 @@ def build_report(data_root: Path | None, now: datetime, drags: Sequence[DragNote
     lines += ["", "## Outlook problems since DocRepo started", ""]
     lines += ([f"- {p.at} · {p.step}: {p.detail}" for p in outlook.PROBLEMS] if outlook.PROBLEMS
               else ["None." if drags is not None else "Not available from the command line (they're kept by the running app)."])
+    # Today's meetings (release 5.127): each read's filter is only dates, in Windows' own format, which the corporate test checks.
+    lines += ["", "## Today's calendar: the last reads", "",
+              f"Restrict's date strings for this computer: {outlook.calendar_filter(now.date())}", ""]
+    reads = list(outlook.CALENDAR_READS)
+    lines += (["| When | Filter | Items | Kept | ms | Problem |", "|---|---|---|---|---|---|"]
+              + [f"| {r.at} | {_cell(r.filter) or 'none'} | {r.items} | {r.kept} | {r.ms} | {_cell(r.problem) or 'none'} |" for r in reads]
+              if reads else ["None yet." if drags is not None else "Not available from the command line (they're kept by the running app)."])
     if UNCAUGHT:
         lines += ["", "## Errors nothing caught since DocRepo started", "", *[f"- {at} · {what}" for at, what in UNCAUGHT]]
     lines += ["", f"## DocRepo's log: warnings and errors in the last {LOG_DAYS} days", ""]

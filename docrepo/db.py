@@ -26,7 +26,7 @@ from docrepo.safe_fs import SafeFS
 log = logging.getLogger(__name__)
 
 DB_FILE = Path("System") / "docs.db"
-SCHEMA_VERSION = 25
+SCHEMA_VERSION = 26
 #: How long, in seconds, a statement waits for docs.db while another connection holds it (SQLite's busy timeout, release
 #: 5.102) before it gives up with "database is locked". A backup's copy holds it for as long as the copy takes. Python's
 #: own default is 5 seconds.
@@ -635,6 +635,19 @@ DROP TABLE t_mails;
 ALTER TABLE t_mails_new RENAME TO t_mails;
 CREATE INDEX t_mails_conversation ON t_mails (conversation);
 CREATE INDEX t_mails_task ON t_mails (task, opened);
+""",
+    26: """
+-- Meeting links (release 5.127, the cold-eyes plan's decision 491): an Outlook appointment's subject, by its key (case and
+-- RE:, FW:, Updated: and the like set aside, ``meetings.subject_key``), linked once to a task, its agenda, or to a person,
+-- theirs, so a weekly meeting is linked once. ``subject`` is the subject as it was when linked, for Settings' list.
+CREATE TABLE meeting_links (
+    key     TEXT PRIMARY KEY,
+    subject TEXT NOT NULL,
+    task    TEXT REFERENCES tasks(id),
+    person  TEXT REFERENCES people(id),
+    linked  TEXT NOT NULL,
+    CHECK ((task IS NULL) <> (person IS NULL))
+);
 """,
 }
 

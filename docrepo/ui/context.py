@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 
 from docrepo.config import Settings
+from docrepo.meetings import TodayCalendar
 from docrepo.model import Model
 from docrepo.parse import ParseLabel, ParsePerson
 from docrepo.safe_fs import SafeFS
@@ -40,6 +41,9 @@ class AppContext:
     open_summary: Callable[[str | None], None] = lambda key=None: None
     #: This session's saves that had problems (release 5.91), for the Problems lines of the capture and browse windows.
     problem_log: ProblemLog = field(default_factory=ProblemLog)
+    #: Today's appointments from the Outlook calendar (release 5.127), read at most every 5 minutes, shared by the Today view
+    #: and the Today side panel so they read it once.
+    calendar: TodayCalendar = field(default_factory=TodayCalendar)
     #: The Model last loaded, and the database's state when it was (``model``).
     _model: Model | None = field(default=None, init=False, repr=False)
     _model_at: tuple[int, int] | None = field(default=None, init=False, repr=False)
