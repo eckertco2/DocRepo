@@ -52,7 +52,8 @@ def _kept(browse: BrowseWindow, say: Say, task_id: str | None, kind: str, opened
         say(f"Opened {what} in Outlook, but Outlook gave it no conversation index, so its replies won't find {title} by themselves. "
             "Settings → Troubleshooting report shows why.", True)
         return
-    say(f"Opened {what} from {title} in Outlook. When you capture its replies, they'll go to {title}.", False)
+    say(f"Opened {what} from {title} in Outlook. When you send it, it's captured on {title}, and so are the replies you capture.", False)
+    browse.ctx.t_mail_opened()  # Sent Items is watched for it (release 5.123)
 
 
 def new_t_mail(browse: BrowseWindow, task_id: str, say: Say | None = None) -> None:

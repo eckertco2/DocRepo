@@ -589,6 +589,101 @@ def reply_all(entry_id: str, store_id: str, saved: Path | None) -> Opened:
     return Opened(index, route)
 
 
+# ---- T-mails captured when sent (K8's release C, as release 5.123) ----
+OL_FOLDER_SENT_MAIL = 5  # olFolderSentMail: the default Sent Items folder
+
+
+@dataclass(frozen=True)
+class SentCopy:
+    """An email in Sent Items, as the watch and the sweep see it before anything else is read: its whole conversation
+    index (hex), and where Outlook keeps it."""
+
+    index: str
+    entry_id: str
+    store_id: str
+
+
+def sent_items(app: object) -> object:
+    """Outlook's default Sent Items folder."""
+    return app.Session.GetDefaultFolder(OL_FOLDER_SENT_MAIL)  # type: ignore[attr-defined]
+
+
+def _sent_on(item: object) -> datetime | None:
+    try:
+        v = item.SentOn  # type: ignore[attr-defined]
+        return datetime(v.year, v.month, v.day, v.hour, v.minute, v.second)
+    except Exception:  # noqa: BLE001 - COM, or a value that isn't a time
+        return None
+
+
+def sent_since(folder: object, since: datetime, limit: int) -> list[SentCopy]:
+    """The emails in Sent Items sent since ``since``, newest first, at most ``limit``: each one's conversation index and
+    place only. Nothing else of them is read."""
+    items = folder.Items  # type: ignore[attr-defined]
+    items.Sort("[SentOn]", True)
+    out: list[SentCopy] = []
+    item, seen = items.GetFirst(), 0
+    while item is not None and seen < limit:
+        seen += 1
+        if getattr(item, "Class", None) == OL_MAIL:
+            when = _sent_on(item)
+            if when is not None and when < since - timedelta(minutes=5):  # Outlook's clock and DocRepo's may differ a little
+                break
+            out.append(SentCopy(index_of(item), *where_kept(item)))
+        item = items.GetNext()
+    return out
+
+
+def copy_sent(app: object, copy: SentCopy, scratch: Path | None) -> EmailItem:
+    """A T-mail's sent copy, whole (``copy_whole``), found again by its place; read field by field when it can't be
+    copied. Called only for an email whose index matched a waiting T-mail."""
+    session = app.Session  # type: ignore[attr-defined]
+    try:
+        item = session.GetItemFromID(copy.entry_id, copy.store_id) if copy.store_id else session.GetItemFromID(copy.entry_id)
+    except Exception as e:  # noqa: BLE001
+        detail = record_problem("finding the sent T-mail (GetItemFromID)", e)
+        raise OutlookError(f"Outlook didn't give DocRepo the sent T-mail ({detail}).", "finding the sent T-mail", detail) from e
+    if scratch is not None:
+        try:
+            return copy_whole(app, item, scratch)
+        except Exception as e:  # noqa: BLE001 - read it field by field instead
+            record_problem("copying the sent T-mail whole (attached to a new email, never saved)", e)
+    try:
+        email = email_from_item(item)
+    except Exception as e:  # noqa: BLE001
+        detail = record_problem("reading the sent T-mail", e)
+        raise OutlookError(f"Outlook didn't give DocRepo the sent T-mail ({detail}).", "reading the sent T-mail", detail) from e
+    email.entry_id, email.store_id = copy.entry_id, copy.store_id
+    return email
+
+
+class _SentHandler:
+    """pywin32's handler for Sent Items' ``ItemAdd``. It reads only the new email's index and place, and hands them on;
+    the work is done after the event has returned (``on_sent``, set by ``watch_sent``)."""
+
+    on_sent = None  # set on the class watch_sent makes
+
+    def OnItemAdd(self, item: object) -> None:  # noqa: N802 - Outlook's event name
+        try:
+            if getattr(item, "Class", None) != OL_MAIL:
+                return
+            copy = SentCopy(index_of(item), *where_kept(item))
+        except Exception as e:  # noqa: BLE001 - an event must never raise into Outlook
+            record_problem("reading an email that arrived in Sent Items", e)
+            return
+        if self.on_sent is not None:
+            self.on_sent(copy)
+
+
+def watch_sent(app: object, on_sent) -> object:
+    """Listen for emails arriving in Sent Items (decision 43). Returns the watch, which must be kept for the events to
+    keep coming. ``on_sent`` gets each one's ``SentCopy``, inside the event: it should only schedule the work."""
+    import win32com.client
+
+    handler = type("SentHandler", (_SentHandler,), {"on_sent": staticmethod(on_sent)})
+    return win32com.client.WithEvents(sent_items(app).Items, handler)
+
+
 def show_email(entry_id: str, store_id: str) -> bool:
     """Open a captured email in Outlook, in its own window, found by its place (EntryID and StoreID, kept since release
     5.93): a conversation page's Open in Outlook (release 5.122, the email section plan's decision 460). It only shows the

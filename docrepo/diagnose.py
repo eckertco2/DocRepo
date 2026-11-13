@@ -629,8 +629,10 @@ def antivirus_status() -> list[str]:
 
 
 def build_report(data_root: Path | None, now: datetime, drags: Sequence[DragNote] | None,
-                 check_outlook: Callable[[], tuple[list[Step], str]] | None = None, drops: Sequence[DropNote] | None = None) -> str:
-    """The report as Markdown. ``drags`` and ``drops`` are None from the command line, where there's no capture window."""
+                 check_outlook: Callable[[], tuple[list[Step], str]] | None = None, drops: Sequence[DropNote] | None = None,
+                 t_mails: Sequence[str] | None = None) -> str:
+    """The report as Markdown. ``drags`` and ``drops`` are None from the command line, where there's no capture window;
+    ``t_mails`` is the running app's watch on Sent Items (release 5.123), None without it."""
     check_outlook = check_outlook or outlook_check
     lines = ["# DocRepo troubleshooting report", "",
              f"Made {now:%Y-%m-%d %H:%M}. To bring it to the personal computer, copy it (Copy report) or take the file from "
@@ -685,6 +687,10 @@ def build_report(data_root: Path | None, now: datetime, drags: Sequence[DragNote
         lines += ["", "| When | From Outlook | Files (how, bytes) | Not read | Formats |", "|---|---|---|---|---|"]
         lines += [f"| {d.at} | {'yes' if d.outlook else 'no'} | {_cell(', '.join(f'{f} {n}' for f, n in zip(d.forms, d.sizes))) or 'none'} | "
                   f"{_cell('; '.join(d.problems)) or 'none'} | {_cell(', '.join(d.formats)) or 'none'} |" for d in drops]
+    lines += ["", "## T-mails waiting to be sent", "",
+              "Each T-mail DocRepo opened that it hasn't captured yet, by ID and age, whether DocRepo is watching Outlook's Sent "
+              "Items for them, and the last sweep (release 5.123). A T-mail is looked for 14 days.", ""]
+    lines += [f"- {_cell(x)}" for x in t_mails] if t_mails is not None else ["Not available from the command line (the running app watches)."]
     lines += ["", "## Outlook problems since DocRepo started", ""]
     lines += ([f"- {p.at} · {p.step}: {p.detail}" for p in outlook.PROBLEMS] if outlook.PROBLEMS
               else ["None." if drags is not None else "Not available from the command line (they're kept by the running app)."])
