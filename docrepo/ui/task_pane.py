@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from PySide6.QtCore import QEasingCurve, QEvent, QPoint, QPropertyAnimation, QRect, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QKeySequence, QPainter, QShortcut, QTextCursor
-from PySide6.QtWidgets import (QApplication, QFrame, QHBoxLayout, QLabel, QLayout, QMenu, QScrollArea, QScrollBar, QToolButton, QToolTip,
-                               QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QApplication, QButtonGroup, QFrame, QHBoxLayout, QLabel, QLayout, QMenu, QPushButton, QScrollArea, QScrollBar,
+                               QSizePolicy, QToolButton, QToolTip, QVBoxLayout, QWidget)
 
 from docrepo.ui import tokens
 from docrepo.ui.icons import icon
@@ -81,6 +81,54 @@ class LandmarkBar(QScrollBar):
         return super().event(event)
 
 
+class AllNotesView(FitPageView):
+    """All notes (release 5.140, the notes consolidation plan's decisions 602 to 605): the pages read as one, read only,
+    as tall as its HTML. A double-click on a line opens the page it's on at its block: ``edit_there`` carries the task and
+    the block's capture (empty for lines typed on the page), read from the nearest "block:" anchor above the line."""
+
+    edit_there = Signal(str, str)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setObjectName("allNotes")
+
+    @staticmethod
+    def anchors_of(block) -> list[str]:
+        out, it = [], block.begin()
+        while not it.atEnd():
+            out += it.fragment().charFormat().anchorNames()
+            it += 1
+        return out
+
+    def block_at(self, pos: QPoint) -> tuple[str, str] | None:
+        """The page and capture of the block a point on the view is in."""
+        b = self.cursorForPosition(pos).block()
+        while b.isValid():
+            for name in self.anchors_of(b):
+                if name.startswith("block:"):
+                    _kind, task, capture = name.split(":", 2)
+                    return task, capture
+            b = b.previous()
+        return None
+
+    def anchor_top(self, name: str) -> int | None:
+        """Where an anchor's line starts in the view, or None."""
+        b = self.document().begin()
+        while b.isValid():
+            if name in self.anchors_of(b):
+                return int(self.document().documentLayout().blockBoundingRect(b).top())
+            b = b.next()
+        return None
+
+    def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        found = self.block_at(event.position().toPoint())
+        if found is not None:
+            self.edit_there.emit(*found)
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
+
 class TaskPane(QScrollArea):
     """The task page's one scroll: ``top``, the Notes heading with its menu, ``notes``, and ``bottom``."""
 
@@ -88,6 +136,11 @@ class TaskPane(QScrollArea):
     notes_menu = Signal(str)
     #: The pane crossed a width at which the page lays itself out differently (release 5.84; PageView's did this before).
     layout_changed = Signal()
+    #: The Notes heading's switch (release 5.140, decision 602): "page" for This page, "all" for All notes.
+    notes_mode = Signal(str)
+    #: A link All notes asks the window to follow: a page picked in its outline ("allnotes:only:T…"), or a double-click's
+    #: block ("notesgo:T…:C…", decision 605).
+    all_notes_link = Signal(str)
 
     def __init__(self, css: str, margin: int) -> None:
         super().__init__()
@@ -108,6 +161,7 @@ class TaskPane(QScrollArea):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
         self.top, self.bottom = FitPageView(), FitPageView()
+        self.all_view = AllNotesView()  # All notes (release 5.140), shown in the notes' frame in their place
         for view in (self.top, self.bottom):
             view.document().setDefaultStyleSheet(css)
             view.document().setDocumentMargin(margin)
@@ -195,7 +249,34 @@ class TaskPane(QScrollArea):
         self._outline_hold: int | None = None
         self._hold_value: int | None = None
         QShortcut(QKeySequence("Ctrl+G"), self, context=Qt.ShortcutContext.WidgetWithChildrenShortcut, activated=self._jump_key)
+        # This page or All notes (release 5.140, decision 602): shown when there's more than the page to read; the choice is
+        # kept per task, as a section's fold is.
+        self.mode_strip = QWidget(objectName="typeStrip")
+        self.mode_strip.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        ml = QHBoxLayout(self.mode_strip)
+        ml.setContentsMargins(2, 2, 2, 2)
+        ml.setSpacing(2)
+        self.mode_group = QButtonGroup(self.mode_strip)
+        self.mode_group.setExclusive(True)
+        self.mode_buttons: dict[str, QPushButton] = {}
+        for key, name, tip in (("page", "This page", "This task's notes page, where you read and write its notes"),
+                               ("all", "All notes", "This page and the pages of every task and meeting under it, as one page by day, "
+                                                    "each meeting as it was said: read only")):
+            b = QPushButton(name, objectName="subtle")
+            b.setCheckable(True)
+            b.setChecked(key == "page")
+            b.setToolTip(tip)
+            b.setAccessibleName(f"Notes: {name}")
+            b.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+            b.clicked.connect(lambda _=False, k=key: self.notes_mode.emit(k))
+            self.mode_group.addButton(b)
+            self.mode_buttons[key] = b
+            ml.addWidget(b)
+        self.mode_strip.hide()
+        self.all_mode = False
         hl.addWidget(self.title)
+        hl.addSpacing(8)
+        hl.addWidget(self.mode_strip)
         hl.addSpacing(8)
         hl.addWidget(self.saved)
         hl.addStretch()
@@ -233,7 +314,7 @@ class TaskPane(QScrollArea):
         # The Checklist summary only when the page has a checklist line (R8): Ctrl+1 or the Checklist button makes the first.
         self.summary_box = box
         box.hide()
-        self.summary.changed.connect(lambda n: box.setVisible(n > 0))
+        self.summary.changed.connect(lambda n: box.setVisible(n > 0 and not self.all_mode))
         # The format bar only while the caret is in the notes (R8, decision P6), kept a moment for a click on one of its menus.
         self._bar_timer = QTimer(self)
         self._bar_timer.setSingleShot(True)
@@ -250,6 +331,26 @@ class TaskPane(QScrollArea):
         cl.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         for w in (box, row):
             cl.addWidget(w)
+        # All notes in the frame, in the notes' place (release 5.140, decisions 602 to 605): read only, with an outline of
+        # its days and the pages in it, which narrow it to one.
+        self.all_view.document().setDefaultStyleSheet(css)
+        self.all_view.document().setDocumentMargin(10)
+        self.all_view.edit_there.connect(lambda task, capture: self.all_notes_link.emit(f"notesgo:{task}:{capture}"))
+        self.all_outline = NotesOutline()
+        self.all_outline.picked.connect(self._all_picked)
+        self.all_slot = OutlineSlot(self.all_outline, self._outline_offset_all, self._outline_view_height)
+        self.all_slot.hide()
+        self._all_targets: list[tuple[str, str]] = []
+        self.all_row = QWidget(objectName="allNotesRow")
+        al = QHBoxLayout(self.all_row)
+        al.setContentsMargins(0, 0, 14, 10)
+        al.setSpacing(6)
+        al.addWidget(self.all_slot)
+        al.addWidget(self.all_view, 1)
+        al.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
+        self.all_row.hide()
+        cl.addWidget(self.all_row)
+        self.notes_row = row
         self.card.setMaximumWidth(NOTES_MAX)
         head.setMaximumWidth(NOTES_MAX)
         self.notes.focus_changed.connect(self._card_focus)
@@ -382,13 +483,58 @@ class TaskPane(QScrollArea):
 
     def _relandmark(self) -> None:
         inner = self.widget()
+        if self.all_mode:  # the landmarks are the page's headings, which All notes doesn't show
+            self.verticalScrollBar().set_marks([], inner.height())
+            return
         base = self.notes.viewport().mapTo(inner, QPoint(0, 0)).y()
         marks = [(base + top, level, day, text) for top, level, day, text in self.notes.landmarks()]
         self.verticalScrollBar().set_marks(marks, inner.height())
 
     def views(self) -> list[FitPageView]:
         """Every HTML part of the page, for the browse window to wire its links."""
-        return [self.top, self.bottom, *self.header.views(), self.history.summary]
+        return [self.top, self.bottom, *self.header.views(), self.history.summary, self.all_view]
+
+    # ---- All notes (release 5.140, the notes consolidation plan's decisions 602 to 605) ----
+    def set_mode_switch(self, shown: bool, mode: str) -> None:
+        """The Notes heading's switch, shown when there's more than the page to read, on ``mode``."""
+        self.mode_strip.setVisible(shown)
+        self.mode_buttons["all" if mode == "all" and shown else "page"].setChecked(True)
+        self._fit_head()
+
+    def show_all_notes(self, html: str | None, entries=(), targets=(), current: int = -1) -> None:
+        """All notes in the frame with its outline's ``entries`` (with a ``targets`` entry each: ("day", "2026-11-03"),
+        ("page", "T000022"), or ("", "") for a heading), ``current`` marked; or, with ``html`` None, the page again."""
+        self.all_mode = html is not None
+        self.notes_row.setVisible(not self.all_mode)
+        self.all_row.setVisible(self.all_mode)
+        if self.all_mode:
+            self.summary_box.hide()
+            self.all_view.setHtml(html)
+            self._all_targets = list(targets)
+            self.all_outline.set_entries(list(entries))
+            self.all_outline.current = -1
+            self.all_outline.set_current(current)
+        else:
+            self.summary_box.setVisible(getattr(self.summary, "total", 0) > 0)
+        self._fit_outline()
+        self._landmark_timer.start()
+
+    def _all_picked(self, number: int) -> None:
+        """A day picked in All notes' outline goes there; a page narrows All notes to it (the window draws it again)."""
+        if not 0 <= number < len(self._all_targets):
+            return
+        kind, key = self._all_targets[number]
+        if kind == "day":
+            top = self.all_view.anchor_top(f"day:{key}")
+            if top is not None:
+                y = self.all_view.viewport().mapTo(self.widget(), QPoint(0, top)).y()
+                self.verticalScrollBar().setValue(max(0, y - self.sticky.sizeHint().height() - 8))
+        elif kind == "page":
+            self.all_notes_link.emit(f"allnotes:only:{key}")
+
+    def _outline_offset_all(self) -> int:
+        covered = self.sticky.height() if self.sticky.isVisible() else 0
+        return covered - self.all_slot.mapTo(self.viewport(), QPoint(0, 0)).y()
 
     def show_parts(self, parts: dict[str, str], folds: dict[str, bool], wide: bool) -> None:
         """Draw a task's page from its parts (``Pages.task_parts``): the header, the rail when the pane is wide, and the
@@ -406,8 +552,8 @@ class TaskPane(QScrollArea):
     def _fit_head(self) -> None:
         """The format bar beside the Notes heading while it fits there, or else on a line of its own under it."""
         spare = self.viewport().width() - 2 * self.head_margin - 22
-        need = sum(w.sizeHint().width() + 8 for w in (self.title, self.saved, self.format_bar, self.table_button, self.outline_button,
-                                                      self.jump_button, self.menu_button)
+        need = sum(w.sizeHint().width() + 8 for w in (self.title, self.mode_strip, self.saved, self.format_bar, self.table_button,
+                                                      self.outline_button, self.jump_button, self.menu_button)
                    if not w.isHidden())
         narrow = need > spare
         if narrow == (self.bar_row is not None):
@@ -440,8 +586,21 @@ class TaskPane(QScrollArea):
         return not self.outline_slot.isHidden()
 
     def _fit_outline(self) -> None:
-        """The outline shows when it's on, fits and the page has a heading; Jump to's button shows whenever it doesn't."""
+        """The outline shows when it's on, fits and the page has a heading; Jump to's button shows whenever it doesn't.
+        In All notes (release 5.140) its own outline of days and pages shows instead, and Jump to isn't there."""
         fits = self.outline_fits()
+        if self.all_mode:
+            if self.outline_shown():
+                self.outline_slot.hide()
+            show_all = self.outline_on and fits and self.all_outline.count() > 0
+            self.all_slot.setVisible(show_all)
+            self.outline_button.setVisible(fits)
+            self.outline_button.setChecked(self.outline_on and fits)
+            self.jump_button.setVisible(False)
+            if show_all:
+                self.all_slot.place()
+            return
+        self.all_slot.hide()
         if self.outline.count() == 0 and self.outline_on:
             self.outline.rebuild()
         show = self.outline_on and fits and self.outline.count() > 0
@@ -484,6 +643,9 @@ class TaskPane(QScrollArea):
 
     def _outline_follow_scroll(self) -> None:
         """Mark the heading at the top of the view: the last one whose line has reached it (the first, before any has)."""
+        if self.all_mode:
+            self.all_slot.place()
+            return
         if not self.outline_shown():
             return
         self.outline_slot.place()
@@ -605,4 +767,5 @@ class TaskPane(QScrollArea):
         """Everything the pane shows, as words: what the tests read. The history's words are included whether it's open or
         not, as they were when it was always shown."""
         rail = self.top.toPlainText() if not self.top.isHidden() else ""
-        return "\n".join((self.header.text(), rail, "Notes", self.notes.toPlainText(), "History", self.bottom.toPlainText()))
+        notes = self.all_view.toPlainText() if self.all_mode else self.notes.toPlainText()
+        return "\n".join((self.header.text(), rail, "Notes", notes, "History", self.bottom.toPlainText()))

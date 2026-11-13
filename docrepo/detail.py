@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from urllib.parse import quote
 
-from docrepo import ask_update, capacity, decisions, email_conversations, items, markup, notes_page, repeats, tagged, ties
+from docrepo import all_notes, ask_update, capacity, decisions, email_conversations, items, markup, meeting_rows, notes_page, repeats, tagged, ties
 from docrepo.dates import ago, days_words, long_date, monday_of, short, to_date
 from docrepo.file_rows import dated_name, type_name
 from docrepo.markup import esc
@@ -101,6 +101,10 @@ h2 { font-size: 15pt; font-weight: 600; margin-top: 2px; margin-bottom: 4px; }
 .gk { color: #5a6571; padding-right: 10px; }
 .relb { color: #5a6571; font-weight: 400; }
 .grid { margin-top: 10px; }
+.anday { color: #5a6571; font-size: 9pt; font-weight: 600; margin-top: 14px; margin-bottom: 2px; }
+.src { color: #5a6571; font-size: 9pt; margin-top: 8px; margin-bottom: 2px; }
+.nl { margin: 0; }
+.also { color: #87919c; font-size: 8pt; }
 """
 
 STATE_CLASS = {"Not started": "st-ns", "In progress": "st-ip", "Parked": "st-pk", "Closed": "st-cl"}
@@ -121,6 +125,13 @@ CONVERSATION_TIP = "Open the conversation: every email of it DocRepo holds, olde
 #: The Decisions section's command (release 5.124, decision 479): the decision register, on the clipboard.
 COPY_DECISIONS_TIP = ("Copy the decision register: a table of each decision's date, its words, its task and the meeting it came "
                       "from, for an email or a document")
+#: The Meetings section's command (release 5.140, decision 607): Meeting notes on this task, as M on its page.
+MEETING_NOTES_TIP = ("Meeting notes on this task: the capture window takes a meeting's notes, a new meeting under this task "
+                     "(this time's, for a regular meeting), with its agenda beside them (M)")
+#: All notes' link back to a block's own page (decision 605).
+EDIT_THERE_TIP = "Open its page at these lines, to read or write them there (or double-click a line)"
+#: The bar beside a follow-up's lines opened in its meeting's notes (decision 604), and beside a meeting's unfolded notes.
+NEST_BAR, UNFOLD_BAR = "#9dc0e3", "#d6dce3"
 #: The line between a conversation's emails: a block one pixel high in the rule's grey (Qt draws an <hr> dark).
 RULE = '<p class="rule" style="font-size: 1px; margin-top: 16px; margin-bottom: 0px">&nbsp;</p>'
 SCOPE_NAMES = {"self": "This task", "ancestors": "With parent tasks", "descendants": "With subtasks", "family": "Whole family"}
@@ -273,6 +284,12 @@ class PageState:
     closed: bool = False  # the closed subtasks shown
     conversations: bool = False  # every email conversation shown, not only the newest few (release 5.122)
     decisions: bool = False  # every decision shown, not only the newest few (release 5.124)
+    # Release 5.140 (the notes consolidation plan's decisions 603, 607 and 609): every meeting shown, the meeting whose
+    # notes are unfolded under its row, how many weeks of All notes are shown (0 for all), and the page it's narrowed to.
+    meetings: bool = False
+    meeting_open: str = ""
+    notes_weeks: int = all_notes.WEEKS
+    notes_only: str = ""
 
 
 class Pages:
@@ -437,6 +454,14 @@ class Pages:
             out["subtasks_summary"] = section_head(f'{esc(out["subtasks_short"])} &nbsp;{bar}',
                                                    link(f"new:{t.id}", "New task under this one", "A new task under this one (T)"), raw=True)
             out["subtasks"] = split_section(subtasks)[1]
+        # Meetings (release 5.140, the notes consolidation plan's decision 607): every meeting under the task, or whose
+        # notes made, named or decided something on it or a task under it, newest first, after Subtasks and before
+        # Decisions, with Meeting notes at the right; the section isn't there when there's none.
+        met = meeting_rows.rows(self.m, t.id)
+        if met:
+            out["meetings_short"] = f"{len(met)} · last {self.day(met[0].day)}"
+            out["meetings_summary"] = section_head(out["meetings_short"], link(f"meetingnotes:{t.id}", "Meeting notes", MEETING_NOTES_TIP))
+            out["meetings"] = self.meeting_rows_html(t, met, state)
         ids = self.m.scope_ids(t.id, state.scope)
         # Decisions (release 5.124, decisions 477 to 479): the task's and its subtasks' decisions, newest first, after
         # Subtasks and before Email conversations, with Copy at the right; the section isn't there when they have none.
@@ -966,6 +991,129 @@ class Pages:
         """The decision register the Decisions section's Copy puts on the clipboard (decision 479): every decision on the
         task and the tasks under it (the page's scope), newest first, as Date, Decision, Task and Where."""
         return decisions.rows(self.m, decisions.of_tasks(self.m, self.m.scope_ids(task_id, scope), self.content_of), self.today)
+
+    # ---- Meetings and All notes (release 5.140, the notes consolidation plan's decisions 602 to 607) ----
+    def meeting_rows_html(self, t: Task, found: list[meeting_rows.MeetingRow], state: PageState) -> str:
+        """The Meetings section's body (decision 607): a row per meeting, the newest first, drawn as a decision's row is:
+        the meeting's mark, its name in the text's colour, a grey line saying what it did here, and its day at the end.
+        A click on the name or the chevron unfolds its notes under the row; the first ``SHOWN``, then Show all."""
+        shown = found if state.meetings else found[:meeting_rows.SHOWN]
+        rows = []
+        for r in shown:
+            opened = state.meeting_open == r.meeting
+            tip = "Fold its notes" if opened else "Show its notes here, with the lines about this task marked"
+            name = link(f"meetrow:{r.meeting}", self.m.task(r.meeting).title, tip, "tl")
+            said = meeting_rows.words(self.m, r, t.id, self.content_of)
+            arrow = f'<a href="meetrow:{esc(r.meeting)}" title="{esc(tip)}">{CHEVRON_DOWN if opened else CHEVRON_RIGHT}</a>'
+            rows.append(f'<tr><td valign="top" width="22"><img src="lk:meeting" width="14" height="14"></td>'
+                        f'<td valign="top">{name}{"<br>" + f"<span class=sub>{esc(said)}</span>" if said else ""}</td>'
+                        f'<td valign="top" align="right" class="rel" width="84">{esc(self.day(r.day)) if r.day else ""}&nbsp;{arrow}</td></tr>')
+            if opened:
+                rows.append(f'<tr><td></td><td colspan="2">{self.meeting_unfold(t, r)}</td></tr>')
+        table = f'<table width="100%" cellspacing="0" cellpadding="3">{"".join(rows)}</table>'
+        if len(found) > meeting_rows.SHOWN:
+            words = "Show fewer" if state.meetings else f"Show all {len(found)} meetings"
+            table += f'<p style="margin-top: 4px">{link("fold:meetings", words)}</p>'
+        return table
+
+    def meeting_unfold(self, t: Task, r: meeting_rows.MeetingRow) -> str:
+        """A meeting's notes under its row (decision 607): its page, the lines about this task or a task under it marked,
+        and Open its notes."""
+        lines = [self.note_line_html(x, hit) for x, hit in meeting_rows.marked_lines(self.m, r, t.id, self.content_of) if x.kind != "caption"]
+        body = "".join(lines) or '<p class="note">Its notes page is empty.</p>'
+        foot = link(f"task:{r.meeting}", "Open its notes", f"Open {self.m.task(r.meeting).title}")
+        return self._barred(body + f'<p class="rel" style="margin-top: 4px">{foot}</p>', UNFOLD_BAR, 0)
+
+    @staticmethod
+    def _barred(inner: str, colour: str, indent: int) -> str:
+        """``inner`` with a thin bar down its left side, ``indent`` px in."""
+        pad = f'<td width="{indent}"></td>' if indent else ""
+        return (f'<table width="100%" cellspacing="0" cellpadding="0" style="margin-top: 2px; margin-bottom: 4px"><tr>{pad}'
+                f'<td width="2" bgcolor="{colour}"></td><td width="10"></td><td>{inner}</td></tr></table>')
+
+    def note_line_html(self, x: notes_page.Line, hit: bool = False, also_on: str | None = None) -> str:
+        """One line of a notes page, read only (All notes and a meeting's unfolded notes): a day heading small and grey,
+        the owner's headings in bold, links for file, task, picture and attachment lines, a table's row as its cells, and
+        text with its marks, indented as it's indented. ``hit`` marks it; ``also_on`` names the task a copy of it is on."""
+        cls = "hitline" if hit else "nl"
+        tight = "margin-top: 0px; margin-bottom: 0px"  # Qt takes a paragraph's margins from its style, not a class's
+        if x.kind == "heading":
+            return f'<p class="anday">{esc(x.text)}</p>' if notes_page.day_of(x.text) else f'<p class="{cls}" style="{tight}"><b>{esc(x.text)}</b></p>'
+        if x.kind in ("file", "task"):
+            href = f"task:{x.ref}" if x.kind == "task" else f"doc:{x.ref}"
+            return f'<p class="{cls}" style="{tight}">{link(href, x.text)}</p>'
+        if x.kind in ("picture", "attachment"):
+            words = f"Picture: {x.text}" if x.kind == "picture" else x.text
+            return f'<p class="{cls}" style="{tight}; margin-left: {12 * (x.level - 1)}px">• {link(f"doc:{x.ref}", words)}</p>'
+        if x.kind == "row":
+            if notes_page.is_separator(x.text):
+                return ""
+            cells = " &nbsp;│&nbsp; ".join(markup.inline_html(c) for c in notes_page.cells_of(x.text))
+            return f'<p class="{cls}" style="{tight}">{cells}</p>'
+        text = x.text
+        indent = len(text) - len(text.lstrip(" "))
+        words = markup.to_line_html(text.lstrip(" ")) if text.strip() else "&nbsp;"
+        also = (f' <span class="also">· also on {link(f"task:{also_on}", self.m.task(also_on).title, "", "also")}\'s page</span>'
+                if also_on and also_on in self.m.tasks else "")
+        margin = f"; margin-left: {6 * indent}px" if indent else ""
+        return f'<p class="{cls}" style="{tight}{margin}">{words}{also}</p>'
+
+    def page_chip(self, page: str, here: str) -> str:
+        """The page a block of All notes lives on, as a chip that opens it: "This task" for the page's own; a meeting's
+        with its mark (decision 603)."""
+        if page == here:
+            return chip("This task", "lbl")
+        t = self.m.task(page)
+        mark = '<img src="lk:meeting" width="14" height="14"> ' if t.meeting else ""
+        return f'{mark}<a href="task:{esc(page)}" title="Open {esc(t.title)}"><span class="{"lbl" if t.meeting else "multi"}">&nbsp;{esc(t.title)}&nbsp;</span></a>'
+
+    def all_notes(self, task_id: str, state: PageState) -> tuple[str, all_notes.AllNotes]:
+        """All notes (decisions 602 to 606 and 609): this task's page and every page under it as one, by day, read only,
+        each block led by the page it's on, a meeting's task lines opened in place, and an email as one line that opens
+        its conversation. The last ``state.notes_weeks`` weeks, with Show earlier above them."""
+        an = all_notes.compose(self.m, task_id, state.notes_weeks or None, state.notes_only)
+        cache: dict[str, list[all_notes.Block]] = {}
+        convs = {e.capture: cv.id for cv in email_conversations.for_tasks(self.m, self.m.scope_ids(task_id, "descendants")) for e in cv.emails}
+        out = []
+        if an.only:
+            out.append(f'<p class="rel">Only {esc(self.m.task(an.only).title)}\'s page. {link("allnotes:only:", "Show every page")}</p>')
+        if an.earlier:
+            out.append(f'<p class="rel">{link("allnotes:earlier", f"Show {all_notes.WEEKS} weeks earlier")} · '
+                       f'{link("allnotes:everything", "Show everything")}</p>')
+        for day, blocks in an.days:
+            # A named anchor takes the link colour in Qt, so its words carry their own (the outline goes to it, decision 603).
+            out.append(f'<p class="anday"><a name="day:{day.isoformat()}"><span class="anday">{esc(notes_page.day_title(day))}</span></a></p>')
+            out += [self.all_notes_block(task_id, b, cache, convs) for b in blocks]
+        if not an.days:
+            out.append('<p class="note">No notes yet, on this page or under it.</p>')
+        return "".join(out), an
+
+    def all_notes_block(self, here: str, b: all_notes.Block, cache: dict, convs: dict[str, str]) -> str:
+        """One block of All notes: a line naming its page, what it is and its time, with Edit there; then its lines, a
+        meeting's task lines opened into the follow-ups' blocks (decision 604). An email is one line (decision 606)."""
+        c = self.m.captures.get(b.capture or "")
+        name = f"block:{b.page}:{b.capture or ''}"  # where a double-click finds the block's page (decision 605)
+        when = f' <span class="faint">· {esc(b.time)}</span>' if b.time else ""
+        if c is not None and c.source == "outlook_email":
+            href = f"conv:{here}/{convs[c.id]}" if c.id in convs else f"capture:{c.id}"
+            return (f'<p class="src">{self.page_chip(b.page, here)} <img src="ft:mail" width="14" height="14"> '
+                    f'{link(href, b.label, "Open the conversation" if c.id in convs else "Open the email", "tl")}{when}'
+                    f' <a name="{esc(name)}"><span class="src">· in Email conversations</span></a></p>')
+        notes = c is not None and c.item == "notes"
+        what = "Meeting notes" if notes else b.label or "Notes"
+        edit = link(f"notesgo:{b.page}:{b.capture or ''}", "Edit there", EDIT_THERE_TIP)
+        out = [f'<p class="src">{self.page_chip(b.page, here)} <a name="{esc(name)}"><span class="src">{esc(what)}</span></a>{when} &nbsp;{edit}</p>']
+        copies = all_notes.copied_to(self.m, c.id) if notes and c is not None else {}
+        for x in b.lines:
+            nb = all_notes.follow_up_block(self.m, c.id, x.ref, cache) if notes and c is not None and x.kind == "task" else None
+            if nb is not None:
+                head = (f'<p class="nl" style="margin-top: 2px; margin-bottom: 2px">{self.page_chip(x.ref, "")} '
+                        f'<span class="rel">follow-up, on its page</span></p>')
+                out.append(self._barred(head + "".join(self.note_line_html(y) for y in nb.lines), NEST_BAR, 12))
+                continue
+            key = " ".join(markup.to_plain(x.text).split()).casefold() if notes and x.kind == "text" else ""
+            out.append(self.note_line_html(x, also_on=copies.get(key)))
+        return "".join(out)
 
     # ---- email conversations (release 5.122, the email section plan's decisions 455 to 463) ----
     def me_name(self) -> str | None:
