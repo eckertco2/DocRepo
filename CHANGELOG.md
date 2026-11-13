@@ -14,6 +14,14 @@ Since 2026-11-12, releases ship in weekly trains (the design workspace's `docs/m
 
 ## Next train (Thursday 2026-11-19, not pushed yet)
 
+Built for the push of Thursday 2026-11-19 (the design workspace's `docs/mods/train-2026-11-19-plan.md`), each merged to `main` at the owner's word. The heading takes the day it's pushed.
+
+| Release | Date | What |
+|---|---|---|
+| 5.146 | 2026-11-13 | The email link filter: Settings' Outlook card gets **Always keep** and **Never keep**, a box each with one site a line (a domain, which covers its subdomains, or a domain and the start of a path) and **Restore defaults**, and **Other links** (Keep them, Show them unticked or Leave them out). When an email's links are pulled out, a link on Never keep gets no row and the layer 0 line counts it ("Left out: 5 blocked links."), one on Always keep gets its row, ticked, and one on neither does as Other links says; the longer entry wins when both match, a tie going to Never keep. Never keep starts with meeting links (Zoom, Teams' join, options, dial-in and help links, Google Meet, Webex, GoTo Meeting); Always keep starts empty. A link row's right-click menu puts its site on either list at once, and the window's rows follow. It sorts every email layer 0 reads (the capture window, a T-mail's sent copy, Log progress's, a draft brought back), never a link the owner adds. An email's layer 0 line is now right as soon as it's added. No schema change |
+
+## Next train (Thursday 2026-11-19, not pushed yet)
+
 Merged to `main` since the train of 2026-11-12: 5.127, 5.128, 5.138, 5.139, 5.140 and 5.142. The heading takes the day it's pushed.
 
 | Release | Date | What |

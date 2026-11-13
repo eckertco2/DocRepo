@@ -107,6 +107,7 @@ from docrepo.ui import tokens
 from docrepo.ui.tokens import C
 from docrepo.ui.context import AppContext
 from docrepo.ui import drafts as draft_ui
+from docrepo.ui import link_filter
 from docrepo.ui.drop_target import DropOverlay, DropRead
 from docrepo.ui.icons import icon, icon_size, set_fold
 from docrepo.ui.items_panel import AgendaPanel, ItemCards, OperatorHighlighter, RefPopup, _drop, task_colour, where_text
@@ -2835,9 +2836,11 @@ class CaptureWindow(QWidget):
     def _add_email(self, email: EmailItem, focus: bool = True) -> None:
         """The email's row, then a row for each attachment, link and picture email layer 0 finds in it (mods log round 1,
         M0024). With ``focus``, the cursor goes in the email's own description (round 7's decision 331, release 5.74),
-        attachments or not: before, it went to the first kept part's, so an email with none had nothing to type in."""
-        for row in email_rows(email):
+        attachments or not: before, it went to the first kept part's, so an email with none had nothing to type in. Settings'
+        link lists sort its links (release 5.146, decision 640)."""
+        for row in email_rows(email, link_filter.rules(self)):
             self._add_file(row, "outlook" if row.email else "email", focus=False)
+        self._show_layer0()  # once its parts' rows are there: the email's row was drawn before them (release 5.146)
         self._note_captured_before(email)
         if self._follow_conversation():  # its conversation may fill the task picker (stage K8, release 5.101)
             self.read_items()
@@ -2884,7 +2887,12 @@ class CaptureWindow(QWidget):
         if doc_id:
             return f"Already tracked as {doc_id}, so that record is reused."
         if link:
-            return ("Unwrapped from Outlook's Safe Links. " if part and part.safe else "") + "Only the address is kept, and DocRepo never fetches it."
+            said = "Unwrapped from Outlook's Safe Links. " if part and part.safe else ""
+            if part and part.rule == "keep":  # Settings' link lists (release 5.146, decisions 636 and 637)
+                return said + "Its site is on Always keep. Only the address is kept."
+            if part and part.rule == "other" and not part.keep:
+                return said + "Its site is on neither list, so it starts unticked."
+            return said + "Only the address is kept, and DocRepo never fetches it."
         if is_folder(row.path):
             return "It stays where it is. DocRepo keeps where it is, and reads nothing in it."
         return ""  # a file stays where it is, as files do (decision 434): only what's different is said
@@ -2923,6 +2931,9 @@ class CaptureWindow(QWidget):
         hl.setContentsMargins(18 if row.of else 0, 0, 0, 0)  # an email's parts sit under it
         frame = QFrame(objectName="fileRow")
         hl.addWidget(frame)
+        if link_filter.is_email_link(entry):  # Always keep or Never keep its site (release 5.146, decision 638)
+            frame.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            frame.customContextMenuRequested.connect(lambda pos: link_filter.show_menu(self, entry, frame.mapToGlobal(pos)))
         fl = QVBoxLayout(frame)
         fl.setContentsMargins(8, 5, 6, 6)
         fl.setSpacing(4)
@@ -3008,10 +3019,17 @@ class CaptureWindow(QWidget):
 
     def _show_layer0(self) -> None:
         rows = [e.row for e in self.files]
+        rules = link_filter.rules(self)
         for e in self.files:
             if e.layer0 is not None and e.row.email is not None:
-                e.layer0.setText(f"<b>Email layer 0</b>  {esc(email_layer0_line(e.row.email, rows))} "
-                                 "Each part has its own row below; untick one to leave it out.")
+                links = any(link_filter.is_email_link(x) and x.row.of is e.row.email for x in self.files)
+                e.layer0.setText(f"<b>Email layer 0</b>  {esc(email_layer0_line(e.row.email, rows, rules))} "
+                                 "Each part has its own row below; untick one to leave it out."
+                                 + (" Right-click a link to always or never keep its site's links." if links else ""))
+
+    def links_changed(self) -> None:
+        """Settings' link lists changed (release 5.146): each email's link rows follow (``link_filter.follow``)."""
+        link_filter.follow(self)
 
     def _remove_file(self, entry: FileEntry, from_content: bool = True) -> None:
         # Removing an email removes the rows email layer 0 made for its parts.
