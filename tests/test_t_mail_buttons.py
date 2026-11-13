@@ -207,3 +207,29 @@ def test_an_unfiled_captures_reply_is_opened_but_not_kept(browse, ctx, fake_outl
     browse.on_link(QUrl(f"replyall:{cid}:0"))
     assert fake_outlook[-1][0] == "reply" and Model(browse.conn).t_mails == []
     assert "isn't filed to a task" in browse.status.text()
+
+
+def test_a_new_t_mail_outlook_wont_tag_is_kept_by_its_draft(browse, monkeypatch):
+    """Release 5.141 (the owner's report of 2026-11-12): Outlook's guard refused the index, so the T-mail is kept with its
+    draft's place and known when it's sent."""
+    from docrepo import sent_watch
+
+    monkeypatch.setattr(outlook, "new_t_mail", lambda now: outlook.Opened("", "none", "D1", "S1"))
+    opened: list[int] = []
+    browse.ctx.t_mail_opened = lambda: opened.append(1)
+    browse.select("task", RIGGING)
+    bar(browse)["New T-mail"].click()
+    t = Model(browse.conn).t_mails[-1]
+    assert (t.task, t.kind, t.conversation) == (RIGGING, "new", "")
+    assert sent_watch.drafts(browse.conn)[t.id] == sent_watch.Draft("D1", "S1") and opened == [1]
+    assert browse.status.text() == ("Opened a new T-mail from Rigging plan in Outlook. When you send it, DocRepo files it on "
+                                    "Rigging plan, and its replies follow.")
+    assert not browse.status.property("error")
+
+
+def test_a_new_t_mail_with_no_index_and_no_draft_says_so(browse, monkeypatch):
+    monkeypatch.setattr(outlook, "new_t_mail", lambda now: outlook.Opened("", "none"))
+    browse.select("task", RIGGING)
+    bar(browse)["New T-mail"].click()
+    assert Model(browse.conn).t_mails == [] and browse.status.property("error")
+    assert "Outlook gave it no conversation index" in browse.status.text()

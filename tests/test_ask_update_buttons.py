@@ -153,3 +153,19 @@ def test_it_says_why_when_outlook_isnt_there(browse, monkeypatch):
     ask_action(bar(browse)["More T-mails"].menu()).trigger()
     assert browse.status.text().startswith("Ask for an update: Outlook isn't open") and browse.status.property("error")
     assert Model(browse.conn).t_mails == []
+
+
+def test_an_ask_outlook_wont_tag_is_known_by_its_draft(browse, monkeypatch):
+    """Release 5.141: where Outlook's guard refuses DocRepo's index, the ask is kept with its draft, for its send."""
+    from docrepo import sent_watch
+
+    monkeypatch.setattr(outlook, "ask_t_mail", lambda now, to, subject, words: outlook.AskOpened(outlook.Opened("", "none", "D7", "S1"), True, "html"))
+    opened: list[int] = []
+    browse.ctx.t_mail_opened = lambda: opened.append(1)
+    browse.select("task", RIGGING)
+    ask_action(bar(browse)["More T-mails"].menu()).trigger()
+    t = Model(browse.conn).t_mails[-1]
+    assert (t.task, t.kind, t.conversation) == (RIGGING, "ask", "")
+    assert sent_watch.drafts(browse.conn)[t.id].entry_id == "D7" and opened == [1]
+    assert browse.status.text().endswith("When you send it, DocRepo files it on Rigging plan, and its reply follows.")
+    assert not browse.status.property("error")

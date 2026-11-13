@@ -24,7 +24,12 @@ On the owner's click (the knowledge base's stage K8, release B, as release
 email the owner filed (``reply_all``), and opens it for the owner to write and
 send. A new email Outlook gives no conversation index is saved to Drafts first,
 as Outlook's AutoSave would, and if it still has none, DocRepo gives it one in
-MS-OXOMSG's shape (KB decision 39). It never sends one. Since release 5.125
+MS-OXOMSG's shape (KB decision 39). It never sends one. Where Outlook's security
+guard refuses that (it guards ``PropertyAccessor`` itself), release 5.141 keeps the
+draft's place instead: ``draft_state`` looks at the draft again, reading only its
+subject and index, and ``watch_send`` hears Outlook's ``ItemSend``, reading only
+the email's EntryID, subject and index and never cancelling a send, so the email
+is known when it's sent (``docrepo.sent_watch``). Since release 5.125
 Ask for an update (``ask_t_mail``) makes a new T-mail with its To, Subject and
 words filled in: it writes those fields, shows the email so Outlook adds the
 owner's signature, puts the words before it, and still never sends it.
@@ -373,10 +378,14 @@ def copy_whole(app: object, item: object, scratch: Path) -> EmailItem:
 class Opened:
     """A T-mail Outlook opened: its whole conversation index as hex ("" when Outlook gave none), and how DocRepo got it.
     A new email's: "made" (Outlook gave one at once), "saved" (once saved to Drafts) or "written" (DocRepo gave it one,
-    KB decision 39). A reply's route to the original: "place" (where Outlook keeps it) or "msg" (its saved .msg)."""
+    KB decision 39). A reply's route to the original: "place" (where Outlook keeps it) or "msg" (its saved .msg).
+    A new email's draft place (EntryID, StoreID) too, once it's saved to Drafts: where Outlook's guard refuses DocRepo's
+    index (release 5.141), DocRepo knows the email by its draft until it's sent."""
 
     index: str
     how: str
+    entry_id: str = ""
+    store_id: str = ""
 
 
 def index_of(item: object) -> str:
@@ -450,8 +459,9 @@ def new_t_mail(now: datetime) -> Opened:
         if how != "saved":
             _close_unsaved(item)
         raise OutlookError(f"Outlook didn't open the new email ({detail}).", "opening the new email", detail) from e
+    entry_id, store_id = where_kept(item) if how != "made" else ("", "")  # saved to Drafts: its place there (release 5.141)
     log.info("Outlook: opened a new T-mail, its conversation index %s", how)
-    return Opened(index if conversations.key(index) else "", how)
+    return Opened(index if conversations.key(index) else "", how, entry_id, store_id)
 
 
 # ---- Ask for an update (release 5.125, the cold-eyes plan's decisions 481 to 487) ----
@@ -547,7 +557,8 @@ def ask_t_mail(now: datetime, to: Sequence[str], subject: str, words: str) -> As
             index, how = "", "none"
     log.info("Outlook: opened an Ask for an update, To %s, the words %s, its conversation index %s",
              "filled" if to_filled else "empty", f"in by the {placed}" if placed else "not in", how)
-    return AskOpened(Opened(index if conversations.key(index) else "", how), to_filled, placed)
+    entry_id, store_id = where_kept(item) if how != "made" else ("", "")  # its place in Drafts (release 5.141)
+    return AskOpened(Opened(index if conversations.key(index) else "", how, entry_id, store_id), to_filled, placed)
 
 
 def reply_all(entry_id: str, store_id: str, saved: Path | None) -> Opened:
@@ -596,11 +607,22 @@ OL_FOLDER_SENT_MAIL = 5  # olFolderSentMail: the default Sent Items folder
 @dataclass(frozen=True)
 class SentCopy:
     """An email in Sent Items, as the watch and the sweep see it before anything else is read: its whole conversation
-    index (hex), and where Outlook keeps it."""
+    index (hex), where Outlook keeps it, and (release 5.141) its subject and when it was sent, which the guard allows,
+    for a new T-mail Outlook wouldn't let DocRepo tag. Neither is ever logged."""
 
     index: str
     entry_id: str
     store_id: str
+    subject: str = ""
+    sent: datetime | None = None
+
+
+def _subject(item: object) -> str:
+    try:
+        value = item.Subject  # type: ignore[attr-defined]
+    except Exception:  # noqa: BLE001 - COM raises its own errors
+        return ""
+    return value if isinstance(value, str) else ""
 
 
 def sent_items(app: object) -> object:
@@ -629,7 +651,7 @@ def sent_since(folder: object, since: datetime, limit: int) -> list[SentCopy]:
             when = _sent_on(item)
             if when is not None and when < since - timedelta(minutes=5):  # Outlook's clock and DocRepo's may differ a little
                 break
-            out.append(SentCopy(index_of(item), *where_kept(item)))
+            out.append(SentCopy(index_of(item), *where_kept(item), _subject(item), when))
         item = items.GetNext()
     return out
 
@@ -667,7 +689,7 @@ class _SentHandler:
         try:
             if getattr(item, "Class", None) != OL_MAIL:
                 return
-            copy = SentCopy(index_of(item), *where_kept(item))
+            copy = SentCopy(index_of(item), *where_kept(item), _subject(item), _sent_on(item))
         except Exception as e:  # noqa: BLE001 - an event must never raise into Outlook
             record_problem("reading an email that arrived in Sent Items", e)
             return
@@ -705,6 +727,88 @@ def show_email(entry_id: str, store_id: str) -> bool:
         raise OutlookError(f"Outlook found the email but didn't show it ({detail}).", "showing the email", detail) from e
     log.info("Outlook: showed a captured email, found by its place")
     return True
+
+
+# ---- A new T-mail known by its draft (release 5.141, the design workspace's docs/mods/email-progress-plan.md, decision 582) ----
+#: MAPI_E_NOT_FOUND: the item isn't where its EntryID said, because it was sent (it moved) or deleted.
+NOT_FOUND = 0x8004010F
+
+
+def _codes(error: BaseException) -> set[int]:
+    """A COM error's code and its inner code, as unsigned numbers."""
+    args = getattr(error, "args", ())
+    out = {args[0] & 0xFFFFFFFF} if args and isinstance(args[0], int) else set()
+    if len(args) >= 3 and isinstance(args[2], tuple) and len(args[2]) > 5 and isinstance(args[2][5], int):
+        out.add(args[2][5] & 0xFFFFFFFF)
+    return out
+
+
+@dataclass(frozen=True)
+class DraftState:
+    """A new T-mail's draft, looked at again: still a draft (its subject and its conversation index, both of which the
+    guard allows), or gone (sent, waiting in the Outbox, or deleted)."""
+
+    gone: bool
+    subject: str = ""
+    index: str = ""
+
+
+def draft_state(app: object, entry_id: str, store_id: str) -> DraftState:
+    """Find a new T-mail's draft by its place and read only its subject and index. Gone when Outlook can't find it there
+    any more or it's been sent or handed to the Outbox. Any other failure (Outlook busy, closed) is raised, so the watch
+    tries again later rather than taking a draft for gone."""
+    session = app.Session  # type: ignore[attr-defined]
+    try:
+        item = session.GetItemFromID(entry_id, store_id) if store_id else session.GetItemFromID(entry_id)
+    except Exception as e:  # noqa: BLE001 - COM raises its own errors
+        if NOT_FOUND in _codes(e):
+            return DraftState(True)
+        raise
+    subject, index = _subject(item), index_of(item)
+    try:
+        sent = bool(item.Sent) or bool(item.Submitted)  # type: ignore[attr-defined]
+    except Exception:  # noqa: BLE001 - a draft can't say: it's still one
+        sent = False
+    return DraftState(sent, subject, index)
+
+
+@dataclass(frozen=True)
+class SendSeen:
+    """An email Outlook is sending, as its ``ItemSend`` event shows it, while it's still the draft: its EntryID (a saved
+    draft's, which is how a new T-mail is known), its subject and its conversation index, if it has one yet."""
+
+    entry_id: str
+    subject: str
+    index: str
+
+
+class _SendHandler:
+    """pywin32's handler for Outlook's ``ItemSend``. It reads only the email's EntryID, subject and index and hands them
+    on; it never cancels a send, and the work is done after the event has returned (``on_send``, set by
+    ``watch_send``)."""
+
+    on_send = None  # set on the class watch_send makes
+
+    def OnItemSend(self, item: object, cancel: object = None) -> None:  # noqa: N802 - Outlook's event name
+        try:
+            if getattr(item, "Class", None) != OL_MAIL:
+                return
+            seen = SendSeen(where_kept(item)[0], _subject(item), index_of(item))
+        except Exception as e:  # noqa: BLE001 - an event must never raise into Outlook
+            record_problem("reading an email being sent (ItemSend)", e)
+            return
+        if self.on_send is not None:
+            self.on_send(seen)
+
+
+def watch_send(app: object, on_send) -> object:
+    """Listen for Outlook sending an email (``ItemSend``, which Outlook raises for its Send button and for a program's
+    send alike). Returns the watch, to be kept for the events to keep coming. ``on_send`` gets each ``SendSeen`` inside
+    the event: it should only schedule the work."""
+    import win32com.client
+
+    handler = type("SendHandler", (_SendHandler,), {"on_send": staticmethod(on_send)})
+    return win32com.client.WithEvents(app, handler)
 
 
 def selected_emails(scratch: Path | None = None) -> list[EmailItem]:

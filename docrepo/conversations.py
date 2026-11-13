@@ -305,6 +305,21 @@ def record_t_mail(conn: sqlite3.Connection, task: str, kind: str, opened: str, i
     return cur.lastrowid
 
 
+def learn_index(conn: sqlite3.Connection, t_mail: int, index: str) -> bool:
+    """Give a T-mail kept with no conversation the index Outlook gave its email later (release 5.141): a new email Outlook
+    wouldn't let DocRepo tag gets one only when it's sent. From then on its conversation follows its task, as any T-mail's
+    does. False, and nothing changed, for an index with no key or a T-mail that already has a conversation."""
+    k = key(index)
+    if not k:
+        return False
+    with transaction(conn):
+        changed = conn.execute("UPDATE t_mails SET conversation = ?, conversation_index = ? WHERE id = ? AND conversation IS NULL",
+                               (k, clean_hex(index), t_mail)).rowcount
+    if changed:
+        log.info("T-mail %s: its conversation learned when sent, %s…", t_mail, k[:8])
+    return bool(changed)
+
+
 def reply_task(model: Model, capture: Capture, preferred: str | None = None) -> str | None:
     """The task a Reply all to one of a capture's emails is a T-mail of: ``preferred`` (the task whose page or Find files
     it was clicked on) when the capture belongs to it, else the first task it belongs to that's still there; None for an
