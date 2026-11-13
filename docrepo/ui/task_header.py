@@ -24,12 +24,14 @@ from docrepo.ui.page_view import FitPageView
 
 #: The groups, in the page's order, with their titles. When and who went into the facts grid in release 5.113. Decisions
 #: (release 5.124, the cold-eyes plan's decision 477) come after Subtasks and before Email conversations.
-GROUPS = (("key_dates", "Key dates"), ("agenda", "Agenda"), ("subtasks", "Subtasks"), ("meetings", "Meetings"), ("decisions", "Decisions"),
+GROUPS = (("key_dates", "Key dates"), ("agenda", "Agenda"), ("subtasks", "Subtasks"), ("follow_ups", "Follow-ups"), ("meetings", "Meetings"),
+          ("decisions", "Decisions"),
           ("emails", "Email conversations"), ("links", "Links"), ("files", "Files"), ("details", "Details"))
+#: Since release 5.142 (decision 611) a meeting's page has Follow-ups in Subtasks' place: what its notes made.
 #: Open until the owner folds them: what's dated and what's next, the meetings it was in (release 5.140, the notes
 #: consolidation plan's decision 607), what's been decided (release 5.124) and the task's emails (release 5.122, the
 #: email section plan's decision 455). The rest open on a click, remembered per task.
-OPEN_BY_DEFAULT = frozenset({"key_dates", "agenda", "subtasks", "meetings", "decisions", "emails"})
+OPEN_BY_DEFAULT = frozenset({"key_dates", "agenda", "subtasks", "follow_ups", "meetings", "decisions", "emails"})
 #: How far a section's chevron hangs into the margin, so its title starts on the page's left edge (decision 423).
 HANG = 22
 _TAGS = re.compile(r"<[^>]+>")

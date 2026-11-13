@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-from collections.abc import Callable, Collection
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
@@ -885,6 +885,96 @@ def move_task(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, task_id: st
     tasks.move_parent(conn, task_id, old_parent, new_parent, at=at, via=BROWSE)
     m = Model(conn)
     out = Outcome(moved_line(m, task_id, old_parent, new_parent, bool(had)))
+    write_all_pages(conn, data_root, fs, at, out.problems)
+    return out
+
+
+# ---- Tidy: follow-ups out of their meetings (release 5.142, the notes consolidation plan's decision 612) ----
+@dataclass
+class Tidy:
+    """A follow-up still under the meeting whose notes made it, and the parents Tidy gives it: its others, with the
+    meeting's home task added when none of them is the work (decision 610)."""
+
+    task: str
+    meeting: str
+    parents: list[str]
+
+
+def meetings_in(m: Model, task_id: str | None) -> list[str]:
+    """The live meetings Tidy looks at: on a meeting's page, it and the meetings under it (a series' occurrences); on
+    another task's, the meetings under it; with none, every meeting."""
+    if task_id is None:
+        ids = [t.id for t in m.tasks.values() if t.meeting and not t.discarded]
+    else:
+        ids = ([task_id] if task_id in m.tasks and m.task(task_id).meeting else []) + m.descendants_of(task_id)
+    return [x for x in dict.fromkeys(ids) if x in m.tasks and m.task(x).meeting and not m.task(x).discarded]
+
+
+def follow_ups_to_tidy(m: Model, meetings: Sequence[str]) -> list[Tidy]:
+    """Each live task a meeting's notes made that's still under that meeting (decision 612), oldest first, with where it
+    will go: off the meeting, and under its home task unless it has another parent that isn't a meeting. A meeting with
+    nothing above it is its own home, so its follow-ups stay. A task the owner put under a meeting by hand isn't one."""
+    from docrepo.save import follow_up_home
+
+    out: list[Tidy] = []
+    seen: set[str] = set()
+    for meeting in meetings:
+        notes = {c.id for c in m.captures.values() if c.item == "notes" and c.task == meeting and not c.discarded}
+        home = follow_up_home(m, meeting)
+        for c in sorted(m.captures.values(), key=lambda c: c.id):
+            t = c.created_task
+            if c.from_notes not in notes or c.item != "task" or c.discarded or t not in m.tasks or m.task(t).discarded or t in seen:
+                continue
+            parents = m.parents_of(t)
+            if meeting not in parents:
+                continue
+            rest = [p for p in parents if p != meeting]
+            if not any(p in m.tasks and not m.task(p).meeting for p in rest):
+                if not home or home == meeting or home == t:
+                    continue
+                rest.append(home)
+            seen.add(t)
+            out.append(Tidy(t, meeting, list(dict.fromkeys(rest))))
+    return out
+
+
+def tidy_follow_ups(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, moves: Sequence[Tidy], at: datetime
+                    ) -> tuple[Outcome, list[tuple[str, list[tuple[int, str]], list[tuple[int, str]]]]]:
+    """Move follow-ups out of their meetings (decision 612), as one change: each a Parents line in its status log as
+    "Browse tool". Returns what it said, and each task's parent links before and after, for Undo."""
+    undo: list[tuple[str, list[tuple[int, str]], list[tuple[int, str]]]] = []
+    with transaction(conn):
+        for mv in moves:
+            before = tasks.parent_links(conn, mv.task)
+            tasks.set_parents(conn, mv.task, mv.parents, at=at, via=BROWSE)
+            undo.append((mv.task, before, tasks.parent_links(conn, mv.task)))
+    m = Model(conn)
+    meetings = list(dict.fromkeys(mv.meeting for mv in moves))
+    out_of = m.task(meetings[0]).title if len(meetings) == 1 else f"{len(meetings)} meetings"
+    n = len(moves)
+    out = Outcome(f"Moved {n} follow-up{'s' if n != 1 else ''} out of {out_of}.")
+    write_all_pages(conn, data_root, fs, at, out.problems)
+    log.info("tidied %d follow-ups out of %d meetings", n, len(meetings))
+    return out, undo
+
+
+def undo_tidy(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, undo: Sequence[tuple[str, list[tuple[int, str]], list[tuple[int, str]]]],
+              at: datetime) -> Outcome:
+    """Tidy's Undo (decision 612, as 5.118's): each task back under exactly the parents it had, while they're still what
+    Tidy left; one whose parents have changed since stays, and the line says so."""
+    back, kept = 0, []
+    with transaction(conn):
+        for task_id, had, left in reversed(undo):
+            try:
+                tasks.restore_parents(conn, task_id, had, expect=left, at=at, via=BROWSE)
+                back += 1
+            except tasks.TaskError:
+                kept.append(task_id)
+    m = Model(conn)
+    words = f"Set back: {back} follow-up{'s' if back != 1 else ''} under {'its meeting' if back == 1 else 'their meetings'} again."
+    if kept:
+        words += f" {', '.join(m.task(t).title for t in kept if t in m.tasks)} changed since, so stayed."
+    out = Outcome(words)
     write_all_pages(conn, data_root, fs, at, out.problems)
     return out
 

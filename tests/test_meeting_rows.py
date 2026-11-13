@@ -50,10 +50,10 @@ def test_a_follow_up_lists_the_meetings_that_made_and_named_it(sample_root, ex):
 
 
 def test_a_meeting_never_lists_itself(sample_root, ex):
+    """Since release 5.142 (decision 610) a meeting's follow-ups are under its home task, not under it, so the kickoff
+    holds no task the weekly named, and neither meeting lists anything; never itself."""
     m = Model(sample_root[0])
-    rows = meeting_rows.rows(m, ex.kickoff)
-    assert [r.meeting for r in rows] == [ex.weekly]  # Crane, under the kickoff, was named in the weekly
-    assert meeting_rows.rows(m, ex.weekly) == []
+    assert meeting_rows.rows(m, ex.kickoff) == [] and meeting_rows.rows(m, ex.weekly) == []
 
 
 def test_a_meeting_that_did_nothing_here_says_its_first_words(sample_root, ex):

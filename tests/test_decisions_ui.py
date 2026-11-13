@@ -60,8 +60,10 @@ def browse(ctx):
 
 def test_the_section_comes_after_subtasks_open(browse):
     keys = [k for k, _ in GROUPS]
-    # Since release 5.140 Meetings sits between Subtasks and Decisions (the notes consolidation plan's decision 607).
-    assert keys.index("subtasks") + 2 == keys.index("meetings") + 1 == keys.index("decisions") == keys.index("emails") - 1
+    # Since release 5.140 Meetings sits between Subtasks and Decisions (the notes consolidation plan's decision 607), and
+    # since 5.142 a meeting's Follow-ups in Subtasks' place (decision 611).
+    assert keys.index("subtasks") + 3 == keys.index("meetings") + 1 == keys.index("decisions") == keys.index("emails") - 1
+    assert keys.index("follow_ups") == keys.index("subtasks") + 1
     assert "decisions" in OPEN_BY_DEFAULT
     browse.go_task(REACTOR)
     QApplication.processEvents()
