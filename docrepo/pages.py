@@ -192,7 +192,9 @@ class Pages:
             return None
 
         def task_link(task_id: str) -> str | None:
-            return self._task_link(here, task_id) if task_id in self.m.tasks else None
+            """The path to a task's Task.md, which ``task_md`` makes a link of (a whole link here, from release 5.83 to
+            5.142, printed task lines as a link inside a link)."""
+            return rel_link(here, [*task_dir(task_id), TASK_FILE]) if task_id in self.m.tasks else None
 
         out += ["## Notes", "", *(notes_page.task_md(page, capture_link, document_link, task_link) or ["_No notes yet._"]), ""]
         on_page = notes_page.on_page(self.m, t.id, page)

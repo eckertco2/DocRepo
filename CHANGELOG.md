@@ -6,11 +6,12 @@ Since 2026-11-12, releases ship in weekly trains (the design workspace's `docs/m
 
 ## Next train (Thursday 2026-11-19, not pushed yet)
 
-Merged to `main` since the train of 2026-11-13: 5.144. The heading takes the day it's pushed.
+Merged to `main` since the train of 2026-11-13: 5.143 and 5.144. The heading takes the day it's pushed.
 
 | Release | Date | What |
 |---|---|---|
 | 5.144 | 2026-11-13 | The words after `**label,` and `**agenda,` open a list, as `@` and `#` do (the owner's ask of 2026-11-13). On the comma, or at once after picking the name from the `**` list: `**label,` lists the labels a label picker offers, a sublabel under its parent, with **Create label “…”** for a new name; `**agenda,` lists Today, the open meetings and people, then any open task as you type, with the `#` list's marks and levels. Typing narrows it, Up and Down move, Enter or Tab picks, Esc hides it, and after a comma or an “and” it opens again for the next name. A pick puts in what the `@` or `#` list would (`@Tom Becker`, `#Business team meeting`, with its ID kept), or `Today`, or the label, then a space. Both operators now read a name holding “and” or a comma as one (`#Rigging and lifting`, a label “Health and safety”). The same list, no new popup; no schema change. |
+| 5.143 | 2026-11-13 | **Move to task.** On a notes page, pick some lines (or put the caret on a line: the list items under it come too), press Alt+Shift+M or choose Move to task… on the right-click menu, and pick a task from the `#` list. The lines go onto that task's page under their day's heading, led by "Moved from the notes of Cooling tower kickoff · Tue 3 Nov", and a **pointer line** stays where they were: "↪ Fill media order · 2 lines moved there". A click on either goes to the other. Undo, for ten seconds, sets both pages back; later, the pointer's right-click menu has **Bring the lines back**. Day headings and captions stay with their page, and the meeting's capture keeps its words as typed. **A meeting's `#task` sections are moved, not copied**: when Meeting notes are saved, a note, an update or a decision for a `#` task is on that task's page only, and the meeting's page has a pointer line in its place ("Structural survey of the fan deck · 1 line there"). Pages saved before keep their copies. All notes opens a pointer line in place into its lines, the Meetings section counts the lines moved ("2 lines moved here"), and Task.md prints a pointer as a link; its task lines, a link inside a link since 5.83, are plain links again. No schema change. |
 
 ## Train of 2026-11-13
 

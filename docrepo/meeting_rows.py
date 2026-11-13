@@ -24,7 +24,7 @@ SHOWN = 5
 #: How many characters of a meeting's notes a row shows when it did nothing to the task's tasks.
 SNIPPET = 80
 #: What each kind of item did, as a row says it.
-KINDS = ("made", "note", "update", "decision")
+KINDS = ("made", "note", "update", "decision", "moved")
 
 
 @dataclass
@@ -35,6 +35,7 @@ class Touch:
     task: str
     kind: str
     capture: str
+    n: int = 0  # lines moved (release 5.143)
 
 
 @dataclass
@@ -87,6 +88,17 @@ def rows(model: Model, task_id: str) -> list[MeetingRow]:
         if meeting is None or meeting == task_id or (target == meeting and c.item == "task"):
             continue
         row(meeting).touches.append(Touch(target, "made" if c.item == "task" else c.item, c.id))
+    # Lines moved from a meeting's page to a task in view (release 5.143, decision 613), by its pointer lines.
+    for meeting, body in model.pages.items():
+        t = model.tasks.get(meeting)
+        if t is None or not t.meeting or t.discarded or meeting == task_id:
+            continue
+        for x in notes_page.lines_of(body):
+            pair = notes_page.pair_of(x.ref) if x.kind == "pointer" else None
+            if pair and pair[0] in in_scope and pair[1].startswith("M"):
+                span = notes_page.moved_block(model.pages.get(pair[0], ""), pair[1])
+                lines = model.pages.get(pair[0], "").split("\n")[span[0] + 1:span[1]] if span else []
+                row(meeting).touches.append(Touch(pair[0], "moved", "", sum(1 for y in lines if y.strip())))
     for c in model.captures.values():  # each meeting's notes, for its day and its unfolded lines
         if c.item == "notes" and not c.discarded and c.task in found:
             found[c.task].notes.append(c.id)
@@ -94,7 +106,7 @@ def rows(model: Model, task_id: str) -> list[MeetingRow]:
         r.notes.sort(key=lambda n: model.captures[n].saved)
         t = model.tasks[r.meeting]
         r.day = (model.captures[r.notes[0]].saved[:10] if r.notes else (t.start or t.due or t.created or "")[:10])
-        r.touches.sort(key=lambda x: (KINDS.index(x.kind), model.captures[x.capture].saved))
+        r.touches.sort(key=lambda x: (KINDS.index(x.kind), model.captures[x.capture].saved if x.capture in model.captures else ""))
     return sorted(found.values(), key=lambda r: (r.day, model.tasks[r.meeting].title.lower()), reverse=True)
 
 
@@ -119,6 +131,11 @@ def words(model: Model, r: MeetingRow, task_id: str, content_of=None) -> str:
             if x.kind == kind:
                 per[x.task] = per.get(x.task, 0) + 1
         parts += [f"{_a(n, word)} {'here' if x == task_id else f'{on} {name(x)}'}" for x, n in per.items()]
+    moved: dict[str, int] = {}
+    for x in r.touches:
+        if x.kind == "moved":
+            moved[x.task] = moved.get(x.task, 0) + x.n
+    parts += [f"{n} line{'s' if n != 1 else ''} moved {'here' if x == task_id else f'to {name(x)}'}" for x, n in moved.items()]
     if parts:
         return " · ".join(parts)
     if content_of is not None and r.notes:
@@ -146,6 +163,8 @@ def marked_lines(model: Model, r: MeetingRow, task_id: str, content_of) -> list[
     for line in notes_page.lines_of(model.pages.get(r.meeting, "")):
         if line.kind == "task":
             hit = line.ref in scope
+        elif line.kind == "pointer":
+            hit = (notes_page.pair_of(line.ref) or ("", ""))[0] in scope
         elif line.kind == "text":
             plain = _same(line.text)
             hit = bool(plain) and (plain in wanted or plain.casefold() in titles)
