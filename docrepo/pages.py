@@ -6,7 +6,9 @@ are relative, so they work wherever the data root is. The formats are those in
 the mockup's ``examples.md``, with each task's notes page (release 5.25) printed under Notes, and its raw text log
 listed as Captures. Since release 5.124 a task's page has its decision register under Decisions (``docrepo.decisions``):
 the decisions on it and the tasks under it, newest first, as a table of Date, Decision, Task and Where, each decision a
-link to its capture.md, for agents and the handover pack.
+link to its capture.md, for agents and the handover pack. Since release 5.140 it lists its meetings under Meetings
+(``docrepo.meeting_rows``): every meeting under it, or whose notes made, named or decided something on it or a task under
+it, newest first, as a table of Date, Meeting and What it did here, so an agent finds where each task was talked about.
 """
 from __future__ import annotations
 
@@ -15,7 +17,7 @@ from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import quote
 
-from docrepo import decisions, repeats, tagged, ties
+from docrepo import decisions, meeting_rows, repeats, tagged, ties
 from docrepo.dates import day_diff, days_text, minutes, to_date
 from docrepo.links import reference_link
 from docrepo.model import PRIORITY_NAMES, TODAY, TYPE_NAMES, Capture, FileEntry, Model, StatusEntry, Task, is_person
@@ -198,6 +200,7 @@ class Pages:
                 c = self.m.task(k)
                 out.append(f"| {c.id} | {_cell(link(k))} | {c.state} | {_cell(self._names(c.assignees))} | {c.due or ''} |")
             out.append("")
+        out += self._meetings(here, t)
         out += self._decisions(here, t)
         items = self.m.open_items_for(t.id)
         if items or (t.meeting and is_open(t)):
@@ -226,6 +229,18 @@ class Pages:
         if found:
             out += ["## Links", "", *[f"- [{_text(x.name)}]({_link_target(x.address) if x.kind == 'folder' else x.address})" for x in found], ""]
         return "\n".join(out)
+
+    def _meetings(self, here: list[str], t: Task) -> list[str]:
+        """The task page's Meetings section as a table (release 5.140, the notes consolidation plan's decision 608): each
+        meeting a link to its Task.md, newest first, with what it did here. Nothing when there are none. The words stay on
+        the pages they're on: All notes isn't printed, so every word is in one Task.md."""
+        found = meeting_rows.rows(self.m, t.id)
+        if not found:
+            return []
+        out = ["## Meetings", "", "| Date | Meeting | What it did here |", "|---|---|---|"]
+        for r in found:
+            out.append(f"| {r.day} | {_cell(self._task_link(here, r.meeting))} | {_cell(meeting_rows.words(self.m, r, t.id, self.content_of))} |")
+        return [*out, ""]
 
     def _decisions(self, here: list[str], t: Task) -> list[str]:
         """The decision register (release 5.124, decision 479): the decisions on the task and the tasks under it, newest
@@ -400,7 +415,7 @@ def pages_touched(m: Model, task_ids: Iterable[str]) -> set[str]:
     - the tasks it's tied to (Tied to this), its agenda items' targets and subjects, open or closed, and the tasks
       whose notes page holds a task line for it (a task made from those notes);
     - for a meeting, the tasks of the decisions its notes made, and the tasks above them, whose registers name it (release
-      5.124).
+      5.124); since release 5.140, the tasks of every item its notes made, and the tasks above them, whose Meetings list it.
 
     Call it on the Model from before a change as well as after, since a move, an untie or a discard takes a link away."""
     seeds = {t for t in task_ids if t in m.tasks}
@@ -429,9 +444,10 @@ def pages_touched(m: Model, task_ids: Iterable[str]) -> set[str]:
     for c in m.captures.values():  # a task line on the notes page it was made from (release 5.83)
         if c.created_task in seeds and c.from_notes and c.from_notes in m.captures:
             out.update(m.capture_tasks(m.captures[c.from_notes]))
-        # A decision's Where names the meeting whose notes it came from (release 5.124): its task's register, and those above.
-        if c.item == "decision" and c.from_notes in m.captures and m.captures[c.from_notes].task in seeds:
-            for x in m.capture_tasks(c):
+        # A decision's Where names the meeting whose notes it came from (release 5.124): its task's register, and those above;
+        # and every item's task, and those above, list the meeting under Meetings (release 5.140, decision 608).
+        if c.item in ("task", "note", "update", "decision") and c.from_notes in m.captures and m.captures[c.from_notes].task in seeds:
+            for x in [*m.capture_tasks(c), *([c.created_task] if c.created_task else [])]:
                 out.add(x)
                 out.update(m.ancestors_of(x))
     return {t for t in out if t in m.tasks}

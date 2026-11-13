@@ -10,13 +10,14 @@ from datetime import timedelta
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, QUrl
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QVBoxLayout,
 )
 
-from docrepo import db, edits, notes_page
+from docrepo import all_notes, db, edits, notes_page
 from docrepo.dates import long_date, to_date
 from docrepo.detail import WIDE_PAGE
 from docrepo.safe_fs import WriteRefused
@@ -50,6 +51,12 @@ class NotesPages:
         notes.image_pasted.connect(lambda image: self._picture_pasted(image, pane))
         notes.files_dropped.connect(lambda paths: self._files_dropped(paths, pane))
         pane.notes_menu.connect(lambda which: self._notes_menu(which, pane))
+        # This page or All notes (release 5.140, the notes consolidation plan's decisions 602 to 605), its links, and
+        # Alt+Left back to the All notes a double-click left.
+        pane.notes_mode.connect(lambda mode: self._set_notes_mode(mode, pane))
+        pane.all_notes_link.connect(lambda href: self.on_link(QUrl(href)))
+        QShortcut(QKeySequence("Alt+Left"), pane, context=Qt.ShortcutContext.WidgetWithChildrenShortcut, activated=self._back_to_all_notes)
+        self._all_notes_from: tuple[str, int] | None = None
         # The outline beside the notes (release 5.113): shown until the owner hides it, then kept so for every task.
         pane.set_outline_on(db.get_state(self.conn, "notes_outline") != "0")
         pane.summary.folded.connect(lambda folded: self._save_summary_folded(folded, pane))
@@ -75,14 +82,118 @@ class NotesPages:
         """Draw a task's page: its facts and history as HTML, and its notes page in the editor between them."""
         pane = self.task_pane
         scroll = pane.verticalScrollBar().value() if keep_scroll and pane.task_id == task_id else 0
+        if pane.task_id != task_id:  # a meeting's notes unfolded, and All notes' window and page, are the task's own (5.140)
+            self.state.meeting_open, self.state.notes_only, self.state.notes_weeks = "", "", all_notes.WEEKS
         pages = self.pages()
         width = pane.page_width()
         pane.show_parts(pages.task_parts(task_id, self.state, width), self._page_folds(task_id), width >= WIDE_PAGE)
         self.load_notes(task_id)
+        self._show_notes_mode(task_id, pages)
         self.detail_stack.setCurrentIndex(2)
         pane.verticalScrollBar().setValue(scroll)
         if keep_scroll:
             QTimer.singleShot(0, lambda: pane.verticalScrollBar().setValue(scroll))
+
+    # ---- All notes (release 5.140, the notes consolidation plan's decisions 602 to 605 and 609) ----
+    def _show_notes_mode(self, task_id: str, pages=None) -> None:
+        """The Notes heading's switch, shown when there's more than the page to read, and All notes in the frame when it's
+        on for this task (kept with the page's folds, decision 602)."""
+        pane = self.task_pane
+        more = all_notes.has_more(self.model(), task_id)
+        mode = "all" if more and self._page_folds(task_id).get("all_notes") else "page"
+        pane.set_mode_switch(more, mode)
+        if mode == "all":
+            self.draw_all_notes(task_id, pages)
+        elif pane.all_mode:
+            pane.show_all_notes(None)
+
+    def draw_all_notes(self, task_id: str, pages=None, keep_scroll: bool = False) -> None:
+        """All notes in the frame, with its outline: its days, then the pages in it, each narrowing it to that page."""
+        pane, m = self.task_pane, self.model()
+        scroll = pane.verticalScrollBar().value()
+        html, an = (pages or self.pages()).all_notes(task_id, self.state)
+        entries: list[tuple[int, int, bool, str]] = []
+        targets: list[tuple[str, str]] = []
+        for day, _blocks in an.days:
+            entries.append((len(targets), 1, True, notes_page.day_title(day)))
+            targets.append(("day", day.isoformat()))
+        if len(an.pages) > 1 or an.only:
+            entries.append((len(targets), 1, True, "Pages"))
+            targets.append(("", ""))
+            if an.only:
+                entries.append((len(targets), 2, False, "Every page"))
+                targets.append(("page", ""))
+            for x in an.pages:
+                entries.append((len(targets), 2, False, "This task" if x == task_id else m.task(x).title))
+                targets.append(("page", x))
+        current = next((i for i, t in enumerate(targets) if t == ("page", an.only) and an.only), len(an.days) - 1 if an.days else -1)
+        pane.show_all_notes(html, entries, targets, current)
+        if keep_scroll:
+            QTimer.singleShot(0, lambda: pane.verticalScrollBar().setValue(scroll))
+
+    def _set_notes_mode(self, mode: str, pane: TaskPane | None = None) -> None:
+        """The switch picked This page or All notes: kept for this task, and the frame drawn again."""
+        pane = pane or self.task_pane
+        task_id = pane.task_id
+        if not task_id:
+            return
+        self._save_page_fold("all_notes", mode == "all", pane)
+        if mode == "all":
+            pane.notes.save_now()  # the page's last words, before they're read with the others
+            self.draw_all_notes(task_id)
+        else:
+            pane.show_all_notes(None)
+            self.load_notes(task_id, pane)
+        pane.set_mode_switch(True, mode)
+
+    def all_notes_link(self, kind: str, rest: str) -> None:
+        """All notes' links: Show earlier and Show everything (decision 609), a page from its outline or Every page
+        (decision 603), and Edit there or a double-click, which opens a block on its own page (decision 605)."""
+        st, pane = self.state, self.task_pane
+        if kind == "allnotes":
+            if rest == "earlier":
+                st.notes_weeks = st.notes_weeks + all_notes.WEEKS if st.notes_weeks else 0
+            elif rest == "everything":
+                st.notes_weeks = 0
+            elif rest.startswith("only:"):
+                st.notes_only = rest.removeprefix("only:")
+            if pane.task_id:
+                self.draw_all_notes(pane.task_id, keep_scroll=not rest.startswith("only:"))
+            return
+        task_id, _, capture_id = rest.partition(":")
+        if task_id not in self.model().tasks:
+            return
+        here = pane.task_id
+        folds = self._page_folds(task_id)
+        if folds.get("all_notes"):  # its own page shows the lines (decision 605)
+            folds["all_notes"] = False
+            self.ctx.keep_state(f"page_folds:{task_id}", json.dumps(folds))
+        if here:
+            self._all_notes_from = (here, pane.verticalScrollBar().value())
+        if task_id == here:
+            pane.show_all_notes(None)
+            self.load_notes(task_id, pane)
+            pane.set_mode_switch(True, "page")
+        if capture_id:
+            self.go_to_block(task_id, capture_id)
+        else:
+            self.go_task(task_id)
+        if here:
+            self.say(f"Alt+Left goes back to {self.model().task(here).title}'s All notes.")
+
+    def _back_to_all_notes(self) -> None:
+        """Alt+Left: back to the All notes a double-click or Edit there left, where it was."""
+        back, self._all_notes_from = self._all_notes_from, None
+        if not back or back[0] not in self.model().tasks:
+            return
+        task_id, scroll = back
+        folds = self._page_folds(task_id)
+        folds["all_notes"] = True
+        self.ctx.keep_state(f"page_folds:{task_id}", json.dumps(folds))
+        self.go_task(task_id)
+        if self.task_pane.task_id == task_id and not self.task_pane.all_mode:
+            self._show_notes_mode(task_id)
+        QTimer.singleShot(0, lambda: self.task_pane.verticalScrollBar().setValue(scroll))
 
     def load_notes(self, task_id: str, pane: TaskPane | None = None) -> None:
         """Put the task's notes page in the editor. The same task's page stays as it is unless docs.db holds another

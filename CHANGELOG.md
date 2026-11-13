@@ -4,6 +4,14 @@ One line per release, newest first: its number, the date it was built, and what 
 
 Since 2026-11-12, releases ship in weekly trains (the design workspace's `docs/mods/cold-eyes-plan.md`, decisions 464 to 468): each train has a heading with the day it was pushed to GitHub, over its releases. Releases keep their own numbers and tags.
 
+## Next train (Thursday 2026-11-19, not pushed yet)
+
+Merged to `main` since the train of 2026-11-12. The heading takes the day it's pushed.
+
+| Release | Date | What |
+|---|---|---|
+| 5.140 | 2026-11-12 | Notes across a task, its subtasks and its meetings, read in one place. The Notes heading gets **This page · All notes**, wherever there's more than the page to read: All notes is the task's page and the page of every task and meeting under it as one page, by day, read only, each block led by the page it's on, and each meeting's notes as they were said, each follow-up's task line opened in place into the bullets on its own page, a copied `#task` section shown once and marked "also on its page", an email one line that opens its conversation. Its outline lists the days and the pages, one click narrowing it to a page; it shows the last eight weeks with Show earlier; a double-click on a line, or Edit there, opens that page at those lines, and Alt+Left comes back. The choice is kept per task. A **Meetings** section after Subtasks lists every meeting under the task, or whose notes made, named or decided something on it or a task under it, newest first, each saying what it did here ("made Fill media order, Crane for the fan lift · a decision"); a click unfolds the meeting's notes with the lines about this task marked, and Meeting notes is at its right. Each Task.md lists its meetings too. No schema change. |
+
 ## Train of 2026-11-12
 
 The first weekly train: 5.123, 5.124, 5.125, 5.126, 5.131, 5.133, 5.134, 5.135, 5.136 and 5.137. Its corporate test is the design workspace's `handoff/docrepo/train-2026-11-12-test.md`.
