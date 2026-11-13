@@ -12,7 +12,6 @@ import pytest  # noqa: E402
 from PySide6.QtCore import QUrl  # noqa: E402
 from PySide6.QtWidgets import QApplication, QPushButton  # noqa: E402
 
-from docrepo.ui import tokens  # noqa: E402
 
 from docrepo import edits, tasks  # noqa: E402
 from docrepo.config import Settings  # noqa: E402
@@ -145,7 +144,9 @@ def test_the_overdue_list_has_a_row_for_each_key_date_with_done(browse, ctx):
     browse.set_view("due")
     rows = key_rows(browse)
     assert [it.data(0, KEY_ROLE) for it in rows] == [("task", "T000008")] * 2
-    assert "Order the seals, was due Tue 6 Oct" in rows[0].data(0, HTML_ROLE) and tokens.colour("critical") in rows[0].data(1, HTML_ROLE)
+    # The date is the tile's number since release 5.138 (decision 568): red and minus when late.
+    assert "Order the seals, was due Tue 6 Oct" in rows[0].data(0, HTML_ROLE) and 'class="over"' in rows[0].data(1, HTML_ROLE)
+    assert "\u22122" in rows[0].data(1, HTML_ROLE)
     assert "Target for trial preparations, by Mon 12 Oct" in rows[1].data(0, HTML_ROLE)
     browse.tree.action_strip(rows[0]).findChild(QPushButton).click()  # Done
     assert Model(ctx.conn).key_dates_of("T000008")[1].done == "2026-10-08"

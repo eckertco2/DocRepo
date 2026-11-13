@@ -111,8 +111,9 @@ def test_todays_due_shows_urgent_tasks_first_with_their_chip(browse, ctx):
     head = next(i for i in browse.tree.items() if "Due in the next 7 days" in str(i.data(0, HTML_ROLE)))
     due = [head.child(n).data(0, KEY_ROLE)[1] for n in range(head.childCount()) if head.child(n).data(0, KEY_ROLE)]
     assert due == ["T000012", "T000019"]
-    assert row(browse, "T000012").data(0, LINE_ROLE).chips == (("Urgent", "urgent"),)
-    assert row(browse, "T000019").data(0, LINE_ROLE).chips == ()
+    # Urgent is the tile's flag since release 5.138 (decision 569), not a chip.
+    assert row(browse, "T000012").data(0, LINE_ROLE).flag and row(browse, "T000012").data(0, LINE_ROLE).chips == ()
+    assert not row(browse, "T000019").data(0, LINE_ROLE).flag
 
 
 # ================= release 5.98: Find files, and one Edit and one Add to (decisions 389 to 392) =================
@@ -151,7 +152,7 @@ def test_a_task_rows_menu_has_add_to_and_edit_then_state(browse):
     browse.set_view("tasks")
     menu = browse.tree.row_menu(row(browse, "T000008"))
     subs = [a.menu().title() for a in menu.actions() if a.menu() is not None]
-    assert subs == ["Add to", "Edit", "State"]
+    assert subs == ["State", "Add to", "Edit", "Priority", "Copy"]  # the tile's menu since release 5.138 (decision 573)
     edit = next(a.menu() for a in menu.actions() if a.menu() is not None and a.menu().title() == "Edit")
     assert menu_words(edit)[0] == "Edit task…"
     menu.deleteLater()
@@ -161,9 +162,9 @@ def test_a_today_rows_own_edit_is_left_to_the_edit_menu(browse):
     browse.add_to_today("T000008")
     browse.set_view("today")
     menu = browse.tree.row_menu(row(browse, "T000008"))
-    plain = [a.text() for a in menu.actions() if a.menu() is None and not a.isSeparator()]
-    assert "Edit" not in plain and "Done" in plain and "Note" in plain
-    assert [a.menu().title() for a in menu.actions() if a.menu() is not None][:2] == ["Add to", "Edit"]
+    plain = [a.text().split("\t")[0] for a in menu.actions() if a.menu() is None and not a.isSeparator()]
+    assert "Edit" not in plain and "Done" in plain and "Note…" in plain  # Today's own Note is the tile menu's (release 5.138)
+    assert [a.menu().title() for a in menu.actions() if a.menu() is not None][:3] == ["State", "Add to", "Edit"]
     menu.deleteLater()
 
 
@@ -215,7 +216,7 @@ def test_a_quick_tasks_row_menu_has_put_under_and_it_files_the_task(browse, ctx)
     browse.set_view("today")
     menu = browse.tree.row_menu(row(browse, r.created_task))
     put = next(a for a in menu.actions() if a.text().startswith("Put under…"))
-    assert [a.menu().title() for a in menu.actions() if a.menu() is not None][:2] == ["Add to", "Edit"]
+    assert [a.menu().title() for a in menu.actions() if a.menu() is not None][:3] == ["State", "Add to", "Edit"]
     browse._pick_task = lambda anchor, picked, none, keep=None: picked("T000008")
     put.trigger()
     m = Model(ctx.conn)

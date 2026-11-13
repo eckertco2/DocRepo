@@ -32,7 +32,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from urllib.parse import quote, unquote
 
-from docrepo import capacity, email_conversations, tagged
+from docrepo import capacity, email_conversations, tagged, task_tile
 from docrepo.activity import Activity, Line
 from docrepo.dates import long_date, monday_of, short, to_date
 from docrepo.detail import chip, esc, initials, link
@@ -331,6 +331,7 @@ class Builder:
         self.m, self.today, self.me, self.conn = m, today, me, conn
         self.quiet_days = quiet_days
         self._touched: dict[str, date] | None = None
+        self._marks: task_tile.Marks | None = None  # the task tiles' marks, read once (release 5.138)
         self._activity: Activity | None = None
         self._labels: dict[str, set[str]] | None = None
         self._tags: dict[str, list[str]] = {}
@@ -359,29 +360,38 @@ class Builder:
             return "No date", "faint", "No date"
         return cell.text, {"over": "over", "soon": "caution"}.get(cell.cls, "rel"), cell.tip
 
+    def tile_marks(self) -> task_tile.Marks:
+        if self._marks is None:
+            self._marks = task_tile.marks(self.m, self.today)
+        return self._marks
+
     def task_row(self, t: Task, with_status: bool = True, people: Iterable[str] = ()) -> str:
-        """A task's row (decision 523): its priority as the left edge, its state's mark, its title (a link to its page) with its
-        project in grey, Urgent and quiet, the first sentence of its status and how old that is, and its date at the right."""
+        """A task's row (decision 523), a task tile since release 5.138 (the task tile plan's decision 577): its priority as the
+        left edge, its state's circle (a button: its menu), its title (a link to its page, cut to fit) with Urgent's flag, the
+        two-parents mark, its project in grey and quiet, the first sentence of its status and how old that is, then its marks
+        and the days to its nearer date at the right."""
         edge_cell = (f'<td width="3" valign="top"><img src="edge:{t.priority}" width="3" height="18"></td>' if t.priority in EDGE
                      else '<td width="3"></td>')
         project = project_text(self.m, t.id)
         quiet = self.quiet(t)
-        chips = (f" {chip('Urgent', 'urgent')}" if t.urgent else "") + \
+        tile = task_tile.tile(self.m, t.id, self.today, self.tile_marks())
+        chips = task_tile.extras_html(tile) + \
             (f' <span title="Nothing has touched it for {quiet} days">{chip(f"quiet {quiet} d", "routine")}</span>' if quiet else "")
         status = ""
         if with_status:
             words, at = status_of(self.m, t)
             if words:
                 status = f'<br><span class="sub">“{esc(words)}”{f" · {ago_short(at, self.today)}" if at else ""}</span>'
-        when, cls, tip = self.when(t)
         title = f'{PRIORITY_NAMES.get(t.priority or "", "No")} priority'
         on = [self.first(p) for p in people if p in (*t.leads, *t.assignees)]
         if on:  # several people chosen (decision 558): which of them it's with
             project = " · ".join(x for x in (project, ", ".join(on)) if x)
-        return (f'<tr>{edge_cell}<td width="6"></td><td width="20" valign="top">{self.mark(t)}</td>'
-                f'<td valign="top" title="{esc(title)}">{link(f"task:{t.id}", t.title, quiet="tl")}'
+        days = task_tile.days_html(tile.days, block=False) or '<span class="faint" title="No due date">·</span>'
+        return (f'<tr>{edge_cell}<td width="6"></td><td width="20" valign="top">{task_tile.circle_html(tile)}</td>'
+                f'<td valign="top" title="{esc(title)}">{task_tile.title_html(tile, lambda href, text: link(href, text, quiet="tl"))}'
                 f'{f" &nbsp;<span class=sub>{esc(project)}</span>" if project else ""}{chips}{status}</td>'
-                f'<td align="right" valign="top" class="{cls}" title="{esc(tip)}" style="white-space: nowrap">{esc(when)}</td></tr>')
+                f'<td align="right" valign="top" style="white-space: nowrap">{task_tile.marks_html(tile)}</td>'
+                f'<td align="right" valign="top" width="34" style="white-space: nowrap">{days}</td></tr>')
 
     def task_list(self, key: str, ids: Iterable[str], more: set[str], with_status: bool = True, people: Iterable[str] = ()) -> str:
         """Rows in the attention order: ``SHOWN``, then "n more", which shows the rest in place."""

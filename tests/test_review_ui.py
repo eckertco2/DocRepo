@@ -124,9 +124,11 @@ def test_waiting_on_others_has_ask_for_an_update_and_the_longest_wait_first(brow
     review_list.go(browse)
     review_list.go(browse)
     menu = browse.tree.row_menu(row(browse, ("task", RIGGING)))
-    assert next(a for a in menu.actions() if not a.isSeparator()).text() == "Ask for an update"
+    # The task tile's menu (release 5.138, decision 573): Open, then the step's own, Ask for an update first among them.
+    first, second = [a for a in menu.actions() if not a.isSeparator()][:2]
+    assert first.text().startswith("Open") and second.text() == "Ask for an update"
     line = row(browse, ("task", RIGGING)).data(0, LINE_ROLE)
-    assert "no change for 3 d" in line.muted
+    assert "no change for 3 d" in line.context  # the step's own words, a tile's context (release 5.138)
     shown = [i.data(0, KEY_ROLE)[1] for i in browse.tree.items()
              if i.data(0, KEY_ROLE) and i.data(0, LINE_ROLE) is not None and not i.data(0, LINE_ROLE).dim]
     assert browse.sel == ("task", shown[0])  # the first row in the step's order is open

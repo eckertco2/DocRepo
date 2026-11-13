@@ -17,7 +17,9 @@ from __future__ import annotations
 
 from urllib.parse import unquote
 
-from PySide6.QtCore import QPointF, QRectF, Qt, QUrl, Signal
+from collections.abc import Callable
+
+from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, QUrl, Signal
 from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPainterPath, QPen, QTextDocument
 from PySide6.QtWidgets import QTextBrowser
 
@@ -100,6 +102,21 @@ FILE_MARK = 16
 def file_mark(kind: str, scale: float) -> QImage:
     image, p = _canvas(FILE_MARK, FILE_MARK, scale)
     p.drawPixmap(QPointF(0, 0), tinted(type_icon(kind), tokens.LIGHT[type_colour(kind)], FILE_MARK, scale))
+    p.end()
+    return image
+
+
+#: A tile's marks on a page (release 5.138, the task tile plan's decisions 566 to 570): the icon each draws, its colour and size.
+TILE_MARKS = {"sun": ("sun", "text2", 14), "agenda": ("agenda", "text2", 14), "waiting": ("waiting", "text2", 14),
+              "waiting-late": ("waiting", "caution", 14), "urgent": ("urgent", "critical", 13), "parents": ("parents", "text2", 13),
+              "blank": ("", "", 14)}
+
+
+def tile_mark(key: str, scale: float) -> QImage:
+    name, colour, size = TILE_MARKS[key]
+    image, p = _canvas(size, size, scale)
+    if name:
+        p.drawPixmap(QPointF(0, 0), tinted(name, tokens.LIGHT[colour], size, scale))
     p.end()
     return image
 
@@ -253,6 +270,8 @@ def picture(url: QUrl, scale: float) -> QImage | None:
         return progress(done, total, PROGRESS_WIDTH, scale)
     if kind == "timing":
         return timing_picture(key, scale)
+    if kind == "tm" and key in TILE_MARKS:
+        return tile_mark(key, scale)
     if kind == "chev" and key in ("right", "down"):
         return chevron(key, scale)
     if kind == "lk" and key in LINK_MARKS:
@@ -272,6 +291,9 @@ class PageView(QTextBrowser):
         super().__init__()
         self._images: dict[tuple[str, float], QImage] = {}
         self._layout = -1
+        #: A right-click on a link (release 5.138, the task tile plan's decision 577): given its address and where, it shows a
+        #: menu and says True, as the browse window does for a task's ``task:`` or ``state:`` link; else the page's own menu.
+        self.link_menu: Callable[[str, QPoint], bool] | None = None
 
     def page_width(self) -> int:
         """The width the page's HTML has: the viewport's, less the document's margins."""
@@ -288,6 +310,13 @@ class PageView(QTextBrowser):
                 self._images[key] = image
             return self._images[key]
         return super().loadResource(kind, url)
+
+    def contextMenuEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        href = self.anchorAt(event.pos())
+        if href and self.link_menu is not None and self.link_menu(href, event.globalPos()):
+            event.accept()
+            return
+        super().contextMenuEvent(event)
 
     def resizeEvent(self, event) -> None:  # noqa: N802 - Qt's name
         super().resizeEvent(event)

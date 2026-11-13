@@ -20,7 +20,8 @@ from docrepo.ui import tokens  # noqa: E402
 from docrepo.ui.browse_window import BrowseWindow  # noqa: E402
 from docrepo.ui.capture_window import CaptureWindow  # noqa: E402
 from docrepo.ui.context import AppContext  # noqa: E402
-from docrepo.ui.tree_view import HTML_ROLE, KEY_ROLE, LINE_ROLE, TWO_LINE_ROW, HtmlDelegate, Line, RowTree  # noqa: E402
+from docrepo.ui.tree_view import HTML_ROLE, KEY_ROLE, LINE_ROLE, TILE_GAP, TILE_INSET, TWO_LINE_ROW, HtmlDelegate, Line, RowTree  # noqa: E402
+from docrepo.views import TASK_VIEWS  # noqa: E402
 
 NOW = datetime(2026, 10, 8, 14, 10)
 LONG = "Ring the vendor back about the impeller datasheet, the seals, the coupling and the crane booking before the 2 pm call"
@@ -82,7 +83,10 @@ def test_every_row_in_a_one_line_view_is_its_height(browse, ctx, view, height):
     browse.refresh(render=False)
     browse.open.update(Model(ctx.conn).tasks)  # the whole tree open, chips, labels and deadlines with it
     browse.set_view(view)
-    assert heights(browse, keyed=False) <= {height}, view  # headings too: one height, so Qt can lay them out as one
+    if view in TASK_VIEWS:  # a view of tasks draws its rows as tiles, TILE_GAP apart (release 5.138, decision 571); headings keep it
+        assert heights(browse, keyed=False) <= {height + TILE_GAP}, view
+    else:
+        assert heights(browse, keyed=False) <= {height}, view  # headings too: one height, so Qt can lay them out as one
 
 
 def test_a_long_title_is_cut_not_wrapped(browse, ctx):
@@ -90,7 +94,7 @@ def test_a_long_title_is_cut_not_wrapped(browse, ctx):
     browse.refresh(render=False)
     browse.set_view("today")
     note = next(i for i in browse.tree.items() if (i.data(0, LINE_ROLE) and i.data(0, LINE_ROLE).title == LONG))
-    assert browse.tree.visualItemRect(note).height() == tokens.LIST_ROW
+    assert browse.tree.visualItemRect(note).height() == tokens.LIST_ROW + TILE_GAP  # a tile (release 5.138)
     delegate: HtmlDelegate = browse.tree.itemDelegate()
     fm = QFontMetrics(browse.tree.font())
     parts = delegate._parts(note.data(0, LINE_ROLE), 300, fm, fm, False)
@@ -104,7 +108,8 @@ def test_a_two_line_view_gives_each_item_two_lines(browse, view):
     assert lines, view
     QApplication.processEvents()
     browse.tree.doItemsLayout()
-    assert {browse.tree.visualItemRect(i).height() for i in lines} == {TWO_LINE_ROW}, view
+    gap = TILE_GAP if view in TASK_VIEWS else 0  # tiles (release 5.138, decision 571)
+    assert {browse.tree.visualItemRect(i).height() for i in lines} == {TWO_LINE_ROW + gap}, view
 
 
 def test_an_agenda_item_with_no_note_still_takes_two_lines(browse):
@@ -113,7 +118,7 @@ def test_an_agenda_item_with_no_note_still_takes_two_lines(browse):
     assert any(i.data(0, LINE_ROLE).second == "" for i in rows) and any(i.data(0, LINE_ROLE).second for i in rows)
     QApplication.processEvents()
     browse.tree.doItemsLayout()
-    assert {browse.tree.visualItemRect(i).height() for i in rows} == {TWO_LINE_ROW}
+    assert {browse.tree.visualItemRect(i).height() for i in rows} == {TWO_LINE_ROW + TILE_GAP}
 
 
 # ---- L2: no bold task rows ----
@@ -191,9 +196,9 @@ def test_a_deadline_is_a_diamond_before_the_date_and_recurrence_is_quiet(browse)
     walkthrough = next(i for i in browse.tree.items() if i.data(0, KEY_ROLE) == ("task", "T000002"))
     assert "◆" in walkthrough.data(1, HTML_ROLE) and "deadline" not in walkthrough.data(1, HTML_ROLE)
     weekly = line_of(browse, ("task", "T000010"))
-    assert weekly.chips == () and any("Weekly" in w for w in weekly.muted)  # ↻ Weekly as quiet words, not a chip
+    assert weekly.chips == () and not weekly.muted  # since release 5.138 recurrence leaves the tile (decision 569)
     browse.tree.end()
-    assert browse.tree.columnWidth(1) >= QFontMetrics(browse.tree.font()).horizontalAdvance("◆ 31 Oct · 23 d")  # never cut
+    assert browse.tree.columnWidth(1) >= QFontMetrics(browse.tree.font()).horizontalAdvance("◆ 23")  # never cut
 
 
 def test_the_context_goes_before_the_title_is_cut(qapp):
@@ -237,7 +242,8 @@ def edge_pixel(browse, key) -> str:
     browse.tree.scrollToItem(item)
     QApplication.processEvents()
     rect = browse.tree.visualItemRect(item)
-    return browse.tree.viewport().grab().toImage().pixelColor(1, rect.center().y()).name()
+    x = TILE_INSET + 1 if browse.tree.tiled else 1  # a tile's edge is its own left edge (release 5.138, decision 571)
+    return browse.tree.viewport().grab().toImage().pixelColor(x, rect.center().y()).name()
 
 
 @pytest.mark.parametrize(("bucket", "token"), [("critical", "pri_critical"), ("high", "pri_high"), ("medium", "pri_medium"), ("parking", "pri_parking")])
@@ -300,8 +306,11 @@ def test_todays_rows_and_the_side_panel_show_it_too(browse, ctx):
     assert edge_of(m.task("T000009")) == tokens.colour("pri_medium") and edge_of(m.task("T000016")) == "" and edge_of(None) == ""
 
 
-def test_critical_keeps_its_chip_beside_its_edge(browse, ctx):
+def test_critical_is_its_edge_and_tooltip_not_a_chip(browse, ctx):
+    """Release 5.138 (the task tile plan's decision 569): Critical's chip leaves the tile; its red edge and its tooltip say it."""
     rank(ctx, "T000008", "critical")  # Installation
     browse.refresh(render=False)
     browse.set_view("tasks")
-    assert ("Critical", "pri-critical") in line_of(browse, ("task", "T000008")).chips
+    assert line_of(browse, ("task", "T000008")).chips == ()
+    item = next(i for i in browse.tree.items() if i.data(0, KEY_ROLE) == ("task", "T000008"))
+    assert browse.tree.row_priority(browse.tree.indexFromItem(item)) == "critical"

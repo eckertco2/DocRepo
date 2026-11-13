@@ -22,7 +22,8 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from urllib.parse import quote
 
-from docrepo import all_notes, capacity, decisions, email_conversations, items, markup, meeting_rows, notes_page, repeats, tagged, ties, waits
+from docrepo import (all_notes, capacity, decisions, email_conversations, items, markup, meeting_rows, notes_page, repeats, tagged, task_tile,
+                     ties, waits)
 from docrepo.dates import ago, days_words, long_date, monday_of, short, to_date
 from docrepo.file_rows import dated_name, type_name
 from docrepo.markup import esc
@@ -88,6 +89,7 @@ h2 { font-size: 15pt; font-weight: 600; margin-top: 2px; margin-bottom: 4px; }
 .dt { color: #5a6571; font-size: 9pt; padding-right: 12px; }
 .rel { color: #5a6571; font-size: 9pt; font-weight: 400; }
 .over { color: #b0261e; }
+.tile { background-color: #f4f6f8; border-bottom: 2px solid #ffffff; }
 .stat { background-color: #f4f6f8; }
 .sk { color: #5a6571; font-size: 9pt; }
 .desc { color: #5a6571; margin-top: 4px; }
@@ -778,12 +780,18 @@ class Pages:
         if not items:
             return ""
         rows = []
+        marks = task_tile.marks(self.m, self.today)
         for a in items:
-            what = (f'{self.mark(self.m.task(a.subject))} {self.task_link(a.subject, "tl")}' if a.subject else esc(a.note))
-            note = f' <span class="sub">{esc(clip(a.note, 90))}</span>' if a.subject and a.note else ""
-            rows.append(f'<tr><td>{what}{note}</td><td align="right" class="rel" width="60">{esc(self.day(a.added))}</td></tr>')
+            note = f'<span class="sub">{esc(clip(a.note, 90))}</span>' if a.subject and a.note else ""
+            added = f'<span class="rel">added {esc(self.day(a.added))}</span>'
+            if a.subject and a.subject in self.m.tasks:  # a task tile (release 5.138, decision 577); every row is on this agenda
+                tile = task_tile.tile(self.m, a.subject, self.today, marks, hide=("agenda",))
+                rows.append(task_tile.html(tile, lambda href, text: link(href, text, quiet="tl"), " · ".join(x for x in (note, added) if x)))
+            else:
+                rows.append(f'<tr><td class="tile" width="20"></td><td class="tile">{esc(a.note)} {added}</td><td class="tile"></td>'
+                            f'<td class="tile"></td></tr>')
         return (section("Agenda", f' <span class="rel">{len(items)} open</span> &nbsp;{link(f"agenda:{t.id}", "Open agenda")}')
-                + f'<table width="100%" cellspacing="0" cellpadding="3">{"".join(rows)}</table>')
+                + f'{task_tile.TABLE}{"".join(rows)}</table>')
 
     def work_ids(self, task_id: str) -> list[str]:
         """A task's subtasks that are the work (release 5.142, the notes consolidation plan's decision 611): those that
@@ -815,29 +823,23 @@ class Pages:
         closed = [k for k in kids if k.state == "Closed"]
         shown = [k for k in kids if k.state != "Closed"] + (closed if state.closed else [])
         rows = []
+        marks = task_tile.marks(self.m, self.today)
         for k in shown:
-            # The date alone, as the lists show it; how far off is in the tooltip, in Due's words (release 5.83, R7).
-            dd = due_of(k, self.today)
-            if dd:
-                day = to_date(dd.date)
-                due = esc(long_date(day, self.today))
-                tip = f"{dd.label} {long_date(day, self.today)}, {days_words(day, self.today)}"
-                if day < self.today and is_open(k):
-                    due = f'<span class="over">{due}</span>'
-            else:
-                due, tip = "", "No due date"
+            # A task tile (release 5.138, the task tile plan's decision 577): the circle opens the state menu, the title is cut
+            # to fit, then the flag, the two-parents mark, who it's with, the marks and the days. Before 5.138 the date itself.
             who = ([*k.leads, *k.assignees] or [None])[0]
+            # A follow-up not under the meeting says where it is (release 5.142, decision 611), before who it's with.
             parents = self.m.parents_of(k.id)
-            where = (f' <span class="sub">· under {esc(self.m.task(parents[0]).title)}</span>'
+            where = (f'<span class="sub">· under {esc(self.m.task(parents[0]).title)}</span>'
                      if t.meeting and parents and t.id not in parents else "")
-            rows.append(f'<tr><td width="20" valign="middle">{self.mark(k)}</td><td valign="middle">{self.task_link(k.id, "tl")}{self.markers_html(k)}{where}</td>'
-                        f'<td align="right" valign="middle" class="rel" title="{esc(tip)}">{due}</td>'
-                        f'<td width="28" align="right" valign="middle">{self.avatar(who) if who else ""}</td></tr>')
+            tile = task_tile.tile(self.m, k.id, self.today, marks, under=t.id)
+            context = " ".join(x for x in (where, self.avatar(who) if who else "") if x)
+            rows.append(task_tile.html(tile, lambda href, text: link(href, text, quiet="tl"), context))
         count = f'{sum(is_open(k) for k in kids)} of {len(kids)} open'
         bar = f' <img src="progress:{len(closed)}:{len(kids)}" width="{PROGRESS_WIDTH}" height="4" title="{len(closed)} of {len(kids)} closed">'
         toggle = (f'<p class="more">{link("fold:closed", "Hide closed" if state.closed else f"Show {len(closed)} closed")}</p>' if closed else "")
         return (section(title, f' <span class="rel">{count}</span>{bar} &nbsp;{link(f"new:{t.id}", "New task under this one", "A new task under this one (T)")}')
-                + f'<table width="100%" cellspacing="0" cellpadding="3">{"".join(rows)}</table>{toggle}')
+                + f'{task_tile.TABLE}{"".join(rows)}</table>{toggle}')
 
     def reference_value(self, name: str, value: str) -> str:
         """A reference field's value in Details: a link to its page when Settings gives the field a link address (release

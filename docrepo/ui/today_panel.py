@@ -47,7 +47,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo import db, edits, key_dates, markup, meetings, notes_page, panel_rules, selection, waits
+from docrepo import db, edits, key_dates, markup, meetings, notes_page, panel_rules, selection, task_tile, waits
 from docrepo.detail import Pages, PageState, esc
 from docrepo.model import Model, Task, is_person
 from docrepo.panel_rules import OPEN_KEY, REST_WIDTH_KEY, Hover, Monitor, Place, Rect
@@ -60,7 +60,8 @@ from docrepo.ui.drop_target import DropOverlay, DropRead
 from docrepo.ui.icons import icon, icon_size
 from docrepo.ui.page_view import PageView
 from docrepo.ui import today_meetings
-from docrepo.ui.tree_view import PRIORITY_EDGES, state_icon
+from docrepo.ui.tree_view import PRIORITY_EDGES
+from docrepo.ui import task_tile as tile_ui
 from docrepo.ui.state_menu import UNDO_MS, UndoButton
 from docrepo.ui.style import page_css, style_sheet
 from docrepo.ui.tokens import C
@@ -95,7 +96,8 @@ COVER_FILE = "Drop on a task: DocRepo keeps the file as it's handed over"
 QSS = """
 QWidget#todayPanel {{ background: {content}; border: 1px solid {stroke_strong}; }}
 QWidget#tpTop {{ background: {base}; border-bottom: 1px solid {stroke}; }}
-QFrame#tpRow {{ background: transparent; border-radius: 4px; }}
+QWidget#tpList {{ background: {base}; }}
+QFrame#tpRow {{ background: {content}; border-radius: 4px; }}
 QFrame#tpRow:hover {{ background: {hover}; }}
 QFrame#tpRow[current="true"] {{ background: {selected}; }}
 QFrame#tpRow[drop="true"] {{ background: {selected}; border: 1px solid {accent}; }}
@@ -148,18 +150,28 @@ class _EdgeFrame(QFrame):
             p.end()
 
 
-def due_label(cell: DueCell | None) -> QLabel:
+def due_label(cell: DueCell | task_tile.Days | None) -> QLabel:
     """A row's date, short (release 5.119, decision 442): "8 d", "Today", "3 d late", red when it's late and caution's
     colour within two days, as the browse tool's Due column, a deadline in Due's place with its red ◆, and the whole
-    date in the tooltip ("Due Fri 20 Nov, in 8 d")."""
+    date in the tooltip ("Due Fri 20 Nov, in 8 d"). Since release 5.138 a task's is the tile's number (decision 568):
+    "8", "0", "−3", ◆ before a Deadline in the number's colour."""
     label = QLabel(objectName="tpDue")
     if cell is not None:
         fill_due(label, cell)
     return label
 
 
-def fill_due(label: QLabel, cell: DueCell) -> None:
-    """``due_label``'s words, in a label made already: a meeting's minutes move on in place (release 5.127)."""
+def fill_due(label: QLabel, cell: DueCell | task_tile.Days) -> None:
+    """``due_label``'s words, in a label made already: a meeting's minutes move on in place (release 5.127). A task's
+    days are the tile's number since release 5.138 (decision 568)."""
+    if isinstance(cell, task_tile.Days):
+        colour = tile_ui.days_colour(cell)
+        weight = "; font-weight:600" if cell.kind else ""
+        label.setTextFormat(Qt.TextFormat.RichText)
+        label.setText(f'<span style="color:{tokens.colour(colour)}{weight}">{"◆ " if cell.deadline else ""}{esc(cell.text)}</span>')
+        label.setProperty("days", cell.text)
+        label.setToolTip(cell.tip)
+        return
     label.setTextFormat(Qt.TextFormat.RichText)
     mark = f'<span style="color:{tokens.colour("critical")}">◆</span> ' if cell.deadline else ""
     colour = {"over": "critical", "soon": "caution"}.get(cell.cls)
@@ -170,13 +182,14 @@ def fill_due(label: QLabel, cell: DueCell) -> None:
 
 
 class _Row(_EdgeFrame):
-    """One Today item: a tick box and its title at rest. Widened, a second line under the title: its project, a reminder
-    and how long it's been carried at its left; its state's icon and its date at its right, the date giving way to Later,
-    Done and Remove while the pointer is on it. The title keeps its line to itself (release 5.119, decisions 440 to
-    442). Clicking opens its detail."""
+    """One Today item. A task's is a task tile (release 5.138, the task tile plan's decision 576): at rest its state's
+    circle, its title and the days to its nearer date; widened, Today's Done box before it, its depth ticks and marks, and a
+    second line under it with its project, "reminder" and how long it's been carried, where Later, Done and Remove show
+    while the pointer is on it. A note keeps its tick box, its title and that line. A click opens the panel's detail; a
+    task's double-click opens its page in the browse window (decision 572), and its right-click is the tile's menu (573)."""
 
     def __init__(self, panel: TodayPanel, item_id: int, task_id: str | None, title: str, sub: str, due: DueCell | None,
-                 state: str = "", edge: str = "") -> None:
+                 state: str = "", edge: str = "", tile: task_tile.Tile | None = None) -> None:
         super().__init__(objectName="tpRow")
         self.edge = edge
         self.panel, self.item_id, self.task_id, self.title = panel, item_id, task_id, title
@@ -192,28 +205,24 @@ class _Row(_EdgeFrame):
         text = QVBoxLayout()
         text.setSpacing(0)
         self.title_label = _Elided(title)
-        text.addWidget(self.title_label)
+        self.tile: tile_ui.TileWidget | None = None
+        if task_id and tile is not None:
+            self.tile = tile_ui.TileWidget(tile)
+            self.tile.state_clicked.connect(lambda _task, at: panel.state_clicked(self, at))
+            self.tile.opened.connect(panel.open_in_browse)
+            text.addWidget(self.tile)
+            self.title_label.hide()
+        else:
+            text.addWidget(self.title_label)
         self.second = QWidget()
         second = QHBoxLayout(self.second)
         second.setContentsMargins(0, 0, 0, 0)
         second.setSpacing(4)
         self.subtitle = _Elided(sub, "tpSub")
         second.addWidget(self.subtitle, 1)
-        # The task's state, as its icon (decision 441, as the browse tool's lists have it, decision L7), a button that
-        # opens the state menu (release 5.76, round 7's item 101, decision 361), its name in its tooltip.
+        # A task's state and days are on its tile's own line (decision 576); a note has neither.
         self.state_button: QPushButton | None = None
-        if task_id and state:
-            name, colour = state_icon(state)
-            self.state_button = QPushButton(objectName="tpState")
-            self.state_button.setIcon(icon(name, tokens.colour(colour), size=14))
-            self.state_button.setIconSize(icon_size(14))
-            self.state_button.setAccessibleName(state)
-            self.state_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            self.state_button.setCursor(Qt.CursorShape.PointingHandCursor)
-            self.state_button.setToolTip(f"{state}. Click to change the state.")
-            self.state_button.clicked.connect(lambda: panel.state_clicked(self))
-            second.addWidget(self.state_button)
-        self.due = due_label(due)
+        self.due = due_label(None if self.tile is not None else due)
         second.addWidget(self.due)
         self.buttons = QWidget()
         bl = QHBoxLayout(self.buttons)
@@ -241,8 +250,13 @@ class _Row(_EdgeFrame):
         self.panel.remove(self.item_id)
 
     def set_wide(self, wide: bool) -> None:
+        """At rest a task is its tile alone, without its ticks and marks; widened, the Done box, the marks and the second line
+        come (decision 576). A note keeps its box."""
         self.due.setVisible(bool(self.due.text()))
-        self.second.setVisible(wide and bool(self.subtitle.full or self.due.text() or self.state_button is not None))
+        self.tick.setVisible(wide or self.tile is None)
+        if self.tile is not None:
+            self.tile.set_compact(not wide)
+        self.second.setVisible(wide and bool(self.subtitle.full or self.due.text()))
 
     def enterEvent(self, event) -> None:  # noqa: N802
         super().enterEvent(event)
@@ -259,6 +273,13 @@ class _Row(_EdgeFrame):
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
         if event.button() == Qt.MouseButton.LeftButton and self.rect().contains(event.position().toPoint()):
             self.panel.open_detail(self.item_id)
+
+    def contextMenuEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        if self.task_id is not None:
+            event.accept()
+            self.panel.row_menu(self, event.globalPos())
+            return
+        super().contextMenuEvent(event)
 
 
 class _Grip(QWidget):
@@ -457,11 +478,12 @@ class TodayPanel(QWidget):
         self.scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.list_widget = QWidget()
+        self.list_widget = QWidget(objectName="tpList")
+        self.list_widget.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
         self.list_widget.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)  # the panel's width decides, not its rows
         self.list_lay = QVBoxLayout(self.list_widget)
         self.list_lay.setContentsMargins(4, 4, 4, 4)
-        self.list_lay.setSpacing(1)
+        self.list_lay.setSpacing(2)  # tiles 2 px apart (release 5.138, decision 571)
         self.scroll.setWidget(self.list_widget)
         self.stack.addWidget(self.scroll)
         # The detail
@@ -641,11 +663,15 @@ class TodayPanel(QWidget):
                 # the list rows review joins quiet words (release 5.78).
                 state = "" if t is None or t.discarded else t.state
                 reminder = "reminder" if a.added_by == edits.REMINDER else ""  # a reminder put it here (release 5.116, decision 415)
-                wait = waits.current(m, t.id) if t else None  # its follow-up, or that it's waiting (release 5.139, decisions 580 and 595)
-                if wait is not None:
-                    reminder = f"Follow up: {waits.words(m, wait, today)}" if wait.late(today) else waits.words(m, wait, today, row=True)
+                # Its follow-up once the day has come (release 5.139, decisions 580 and 595); while it's waiting, its tile's
+                # hourglass says so (release 5.138, decision 567).
+                wait = waits.current(m, t.id) if t else None
+                if wait is not None and wait.late(today):
+                    reminder = f"Follow up: {waits.words(m, wait, today)}"
+                tile = (task_tile.tile(m, t.id, today, task_tile.marks(m, today), hide=("today",), flat=True)
+                        if t is not None and not t.discarded else None)
                 row = _Row(self, a.id, t.id if t else None, t.title if t else a.note, " · ".join(x for x in (where, reminder, since.rstrip(" ·")) if x),
-                           cell, state, edge_of(t))
+                           cell, state, edge_of(t), tile)
                 self.rows.append(row)
                 self._add(row)
         if not total:
@@ -776,7 +802,7 @@ class TodayPanel(QWidget):
             is_key_date = isinstance(t, key_dates.Due)
             task = t.task if is_key_date else t
             text = (key_dates.label(t.key_date, today) + " · " + task.title) if is_key_date else task.title
-            cell = due_cell(task, today) if not is_key_date else None
+            cell = task_tile.days(task, today) if not is_key_date else None  # the tile's number (release 5.138, decision 568)
             links = [] if is_key_date else [("Add", "Put it on Today", lambda i=task.id: self.browse.add_to_today(i)),
                                             ("Later", "Off this list until a later day, when its reminder puts it on Today",
                                              lambda i=task.id: self.later(i, None))]
@@ -803,16 +829,47 @@ class TodayPanel(QWidget):
             self._add(line)
 
     # ================= a row's state (release 5.76, round 7's item 101) =================
-    def state_clicked(self, row: _Row) -> None:
-        """A row's state: the browse tool's state menu, under it. The panel stays open while the menu is."""
-        if row.task_id is None or row.state_button is None:
+    def state_clicked(self, row: _Row, at: QPoint | None = None) -> None:
+        """A row's state: the browse tool's state menu, under its circle. The panel stays open while the menu is."""
+        if row.task_id is None or row.tile is None:
             return
-        b = row.state_button
+        if at is None:
+            at = row.tile.mapToGlobal(row.tile.circle_rect().bottomLeft() + QPoint(0, 2))
         self._menu_open = True
         try:
-            self.browse.popup_state_menu(row.task_id, b.mapToGlobal(QPoint(0, b.height() + 2)), after=self.refresh, tell=self.tell_state)
+            self.browse.popup_state_menu(row.task_id, at, after=self.refresh, tell=self.tell_state)
         finally:
             self._menu_open = False
+
+    def row_menu(self, row: _Row, at: QPoint) -> None:
+        """A task's right-click menu (release 5.138, the task tile plan's decisions 573 and 576): the tile's, with Today's own
+        on top. The panel stays open while it is."""
+        if row.task_id is None:
+            return
+        task_id, item_id = row.task_id, row.item_id
+        own = [("Done for today\tSpace", lambda: self.done(item_id), "Off Today; on a task an Update opens on it"),
+               ("Later…", lambda: self.later(task_id, item_id), "Off Today until a later day, when its reminder puts it back"),
+               ("Remove from Today\tDelete", lambda: self.remove(item_id), "Off Today; the task stays as it is")]
+        menu = tile_ui.tile_menu(self.browse, task_id, self, own,
+                                 state_pick=lambda to, branch: self.browse.set_state(task_id, to, branch, self.refresh, self.tell_state))
+        if menu is None:
+            return
+        self._menu_open = True
+        try:
+            self.run_menu(menu, at)
+        finally:
+            self._menu_open = False
+            menu.deleteLater()
+        self.refresh()
+        self._hover_timer.start()
+
+    def run_menu(self, menu: QMenu, at: QPoint) -> None:
+        """Show a menu and wait for it. Tests replace it."""
+        menu.exec(at)
+
+    def open_in_browse(self, task_id: str) -> None:
+        """A tile's double-click (decision 572): the browse window comes forward at the task's page."""
+        tile_ui.open_task(self.browse, task_id)
 
     def tell_state(self, text: str, undo: Callable[[], None] | None) -> None:
         """What a pick did, under the list, with Undo for ten seconds (decision 363)."""

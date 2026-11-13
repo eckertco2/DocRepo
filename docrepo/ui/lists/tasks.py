@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QComboBox,
 )
 
-from docrepo import bulk, edits, key_dates, priorities, waits
+from docrepo import bulk, edits, key_dates, priorities, task_tile, waits
 from docrepo.lists import key_dates_due
 from docrepo.dates import short
 from docrepo.file_rows import doc_places, type_colour, type_icon, type_name
@@ -52,7 +52,9 @@ from docrepo.ui.lists.common import (
     _row_state,
     _row_word,
     _shape,
+    DAYS_COL,
     SELECT_VIEWS,
+    tile_cells,
 )
 
 
@@ -63,9 +65,29 @@ class TaskLists:
     # ---- rows ----
     def _task_cells(self, task_id: str, depth: int, context: bool = False, muted: tuple[str, ...] = (), people: str = "",
                     when: DueDate | None = None, use_due: bool = True) -> list:
-        """A task's row: a ``Line`` (its state's icon, its title, Urgent or Critical as chips, its other marks and ``muted`` as
-        quiet words, and ``people``), then its State in the Classic look, and its date. Regular weight in the new look
-        (decision L2); the Classic look's top-level tasks are bold."""
+        """A task's row. In the new look, a tile (release 5.138, the task tile plan's decisions 563 to 570): its state's icon,
+        its title, Urgent's flag, the two-parents mark, its context (``people``, Waiting on others', after its wait's words
+        "waiting on Dana · Thu"; then ``muted``, a view's own words, such as the weekly review's), its marks, and the days to
+        its nearer date; no labels, recurrence or Critical chip (569). Reminders keeps its reminder's day (``when``) in place
+        of the days. The Classic look keeps its row: labels and marks as words, State, the date."""
+        if LOOK.classic:
+            return self._classic_task_cells(task_id, depth, context, muted, people, when, use_due)
+        m, today = self.model(), self.today()
+        if people:  # Waiting on others: what's waited on first, so a narrow row cuts the names' end (5.139's decision 594)
+            wait = task_tile.marks(m, today).waits.get(task_id)
+            people = f"{wait.words} · {people}" if wait else people
+        line, days = tile_cells(m, task_id, today, context=" · ".join(x for x in (people, *muted) if x), dim=context)
+        if context:
+            return _shape([line, "", ""])
+        line.strong = depth == 0
+        if when is not None or not use_due:
+            days = _due_html(due_cell(m.task(task_id), today, when, use_due))
+        return _shape([line, _row_state(m.task(task_id).state), days])
+
+    def _classic_task_cells(self, task_id: str, depth: int, context: bool = False, muted: tuple[str, ...] = (), people: str = "",
+                            when: DueDate | None = None, use_due: bool = True) -> list:
+        """The Classic look's task row: a ``Line`` (its state's icon, its title, Urgent or Critical as chips, its other marks and
+        ``muted`` as quiet words, and ``people``), then its State, and its date. Its top-level tasks are bold."""
         m, t = self.model(), self.model().task(task_id)
         icon, colour = state_icon(t.state)
         if context:
@@ -166,11 +188,13 @@ class TaskLists:
         expand = self._level_button(True, lambda: self._level(nodes, "expand"), can_open)
         collapse.setVisible(can_fold or can_open or LOOK.classic)  # gone where nothing nests
         expand.setVisible(can_fold or can_open or LOOK.classic)
-        self.tree.set_columns(*_cols(["Title", "State", "Due"]))
+        self.tree.set_columns(*_cols(["Title", "State", "Due"], [0, 96, DAYS_COL]))
 
         def row(n: Node, section: str = "") -> tuple[list, str]:
             dimmed = bool(how or filtered) and not n.match
-            return self._task_cells(n.id, n.depth, dimmed, muted=self._label_words(n.id, section)), full_path(m, n.id)
+            # A tile names no labels (release 5.138, decision 569); the Classic look keeps them as words (decision 235).
+            words = self._label_words(n.id, section) if LOOK.classic else ()
+            return self._task_cells(n.id, n.depth, dimmed, muted=words), full_path(m, n.id)
 
         if how:  # a section per group, each with its tasks in tree shape (release 5.24)
             grey = group_ground()
@@ -321,8 +345,8 @@ class TaskLists:
         self._set_head(v.label, v.note + " Dimmed rows are their parents, shown for context.")
         reminders = view_id == "reminders"
         with_keys = view_id == "due"  # key dates have a row each, with Done (release 5.31, decision 150)
-        self.tree.set_columns(*_cols(*(with_actions(["Title", "State", "Reminder" if reminders else "Due"], [0, 96, 96], 56)
-                                       if reminders or with_keys else (["Title", "State", "Due"], None))))
+        self.tree.set_columns(*_cols(*(with_actions(["Title", "State", "Reminder" if reminders else "Due"], [0, 96, 96 if reminders else DAYS_COL], 56)
+                                       if reminders or with_keys else (["Title", "State", "Due"], [0, 96, DAYS_COL]))))
         grouped = None
         if controls:
             self._sort_box(view_id)
@@ -362,7 +386,10 @@ class TaskLists:
         cell = key_date_cell(d, today)
         marks = ((("⚑", "caution"),) if d.key_date.plant else ()) + ((("◆", "critical"),) if d.key_date.deadline else ())
         line = Line(d.task.title, icon="calendar", icon_tip="Key date", chips=marks, context=d.text(today))
-        return _shape([line, _row_word("Key date"), f'<p align="right" style="{_due_css(cell.cls)}">{esc(cell.text)}</p>'])
+        if LOOK.classic:
+            return _shape([line, _row_word("Key date"), f'<p align="right" style="{_due_css(cell.cls)}">{esc(cell.text)}</p>'])
+        # The same number as a task's tile, so the column reads one way (release 5.138, decision 568).
+        return _shape([line, _row_word("Key date"), task_tile.days_html(task_tile.days_to(d.day, today, "Starts" if d.starts else "Due"))])
 
     def _key_date_actions(self, key_id: int) -> list[tuple[str, Callable[[], None], str]]:
         return [("Done", lambda: self.key_date_done(key_id, True), "Mark this key date done: off Today and this list, and in its task's status log (decision 148)")]

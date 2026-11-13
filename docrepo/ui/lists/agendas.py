@@ -22,11 +22,13 @@ from docrepo.views import (
     current_target,
     full_path,
 )
+from docrepo.ui.look import LOOK
 from docrepo.ui.lists.common import (
     _cols,
     _row_state,
     _row_word,
     _shape,
+    tile_cells,
 )
 
 
@@ -71,6 +73,9 @@ class AgendaList:
                 icon, colour = state_icon(t.state) if t else ("note", "text2")
                 line = Line(t.title if t else a.note, icon=icon, icon_colour=colour, icon_tip=t.state if t else "A note, with no task",
                             second=a.note if t else "")
+                if t is not None and not LOOK.classic:  # a task tile (release 5.138, decision 563): every row is on this agenda
+                    line, _days = tile_cells(m, t.id, self.today(), hide=("agenda",))
+                    line.second = a.note
                 tip = f"{full_path(m, t.id)}\n" if t else ""
                 item = self.tree.add_row(head, key, _shape([line, _row_state(t.state) if t else _row_word("Note"),
                                                             f'<p align="right">{esc(short(date.fromisoformat(a.added[:10]), self.today()))}</p>']),
