@@ -91,6 +91,7 @@ from docrepo.save import (
     default_description,
     email_layer0_line,
     email_rows,
+    follow_up_home,
     item_names,
     meeting_case,
     meeting_name,
@@ -1558,7 +1559,8 @@ class CaptureWindow(QWidget):
         if not self.item_cards.editing():
             own = items.self_fields(self.reading, self.names()) if self.reading and new else None
             home = self._home_name()
-            self.item_cards.show_items(self.reading, own, lambda it: where_text(it, home, self.names(), self.reading), self.names(),
+            follow = self._follow_up_home_name()
+            self.item_cards.show_items(self.reading, own, lambda it: where_text(it, home, self.names(), self.reading, follow), self.names(),
                                        self._stripe)
         cards = self.item_cards
         self.item_cards.setVisible(not self.from_capture and (bool(cards.cards or cards.unread_cards or cards.people_ticks or cards.before_notes)
@@ -1682,6 +1684,15 @@ class CaptureWindow(QWidget):
             if w.kind == "home" and self.task:
                 return task_colour(m, self.task)
         return tokens.colour("stroke_strong")
+
+    def _follow_up_home_name(self) -> str | None:
+        """In Meeting notes, where the follow-ups go, in words (release 5.142, decision 610): the meeting's home task, or the
+        meeting itself when it has none above it. None outside Meeting notes."""
+        if not self.meeting_on:
+            return None
+        m = self.ctx.model()
+        home = follow_up_home(m, self.task)
+        return m.task(home).title if home and home in m.tasks else (self.meet_name.text().strip() or "the meeting")
 
     def _home_name(self) -> str:
         """What the items go under, in words: the meeting, the new task or the picked task."""

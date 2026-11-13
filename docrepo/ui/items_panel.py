@@ -567,12 +567,18 @@ class RefPopup(TaskList):
         return super().handle_key(key)
 
 
-def where_text(it: items.Item, home: str, names: items.Names, r: items.Reading) -> str:
-    """Where an item goes, in words: "Business team meeting 8 Oct and Reactor impeller upgrade"."""
+def where_text(it: items.Item, home: str, names: items.Names, r: items.Reading, follow_home: str | None = None) -> str:
+    """Where an item goes, in words: "Business team meeting 8 Oct and Reactor impeller upgrade". In meeting notes
+    (``follow_home``, the meeting's home task's name; release 5.142, decision 610) a task goes under its # tasks, else
+    under that, never under the meeting."""
     out = []
+    named = any(w.kind == "task" for w in it.where)
     for w in it.where:
         if w.kind == "quick":
             out.append("Quick tasks")
+        elif w.kind == "home" and follow_home is not None and it.kind == "task":
+            if not named:
+                out.append(follow_home)
         elif w.kind == "home":
             out.append(home or "the capture's task")
         elif w.kind == "item":

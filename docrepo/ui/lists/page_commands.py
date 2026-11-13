@@ -18,7 +18,7 @@ from docrepo.captures import capture_md_path
 from docrepo.detail import SCOPE_NAMES
 from docrepo.links import is_folder, is_link
 from docrepo.schedule import is_open
-from docrepo.ui import conversation_page, decision_register, t_mails, task_menus
+from docrepo.ui import conversation_page, decision_register, t_mails, task_menus, tidy_follow_ups
 from docrepo.ui import task_tile as tile_ui
 from docrepo.ui.lists import review as review_list
 from docrepo.ui.icons import icon
@@ -95,6 +95,8 @@ class PageCommands:
         more.addAction("Bring back an edit file…", self.tree_files.import_tree)
         if task_id in m.origins:
             more.addAction("Detach from template…", lambda: self.templates.detach(task_id))
+        if tidy_follow_ups.candidates(self, task_id):  # follow-ups older Meeting notes left under a meeting (release 5.142)
+            more.addAction(tidy_follow_ups.NAME, lambda: tidy_follow_ups.run(self, task_id))
         more.addAction(icon("folder"), "Open folder", lambda: self.reveal(self.ctx.data_root / "Tasks" / task_id))
         b = self._action("More" if LOOK.classic else "", tip="More: New task under this one, Open agenda, Copy, Copy prompt, Save as template, Export tree and Open folder", menu=more,
                          icon_name="more")

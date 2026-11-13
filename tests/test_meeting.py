@@ -71,7 +71,8 @@ def test_notes_of_a_regular_meeting(env):
         ("decision", "T000001", "We go with the 50 t crane"), ("update", "T000015", "Waiting on the vendor quote"),
         ("task", meeting.id, "Book the scaffolding"), ("update", "T000012", "Sling drawing approved")]
     report = m.task(made[1].created_task)
-    assert m.parents_of(report.id) == [meeting.id, "T000001"] and report.assignees == ["P003"] and report.due == "2026-10-09"
+    # Since release 5.142 (decision 610) a follow-up naming a # task goes under it alone, not under the meeting as well.
+    assert m.parents_of(report.id) == ["T000001"] and report.assignees == ["P003"] and report.due == "2026-10-09"
     assert report.leads == [] and report.assignee_hours == 2  # no lead without @L.
     sam = next(p for p in m.people.values() if p.name == "Sam")
     assert m.task(made[4].created_task).assignees == [sam.id] and r.added_people == ["Sam"]
@@ -117,7 +118,7 @@ def test_a_new_meeting_needs_a_name(env):
     m = Model(env[0])
     assert m.parents_of(r.meeting) == [] and m.task(r.meeting).meeting
     send = m.task(m.captures[r.items[0]].created_task)
-    assert m.parents_of(send.id) == [r.meeting, "T000009"]
+    assert m.parents_of(send.id) == ["T000009"]  # its # task alone since release 5.142 (decision 610)
 
 
 def test_items_in_an_ordinary_capture(env):

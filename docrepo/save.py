@@ -287,6 +287,41 @@ def meeting_case(model: Model, task_id: str | None) -> str:
     return "new" if not t or not t.meeting else "regular" if t.recurrence else "oneoff"
 
 
+def meeting_home(conn: sqlite3.Connection, meeting_id: str) -> str:
+    """A meeting's home task (release 5.142, the notes consolidation plan's decision 610): the nearest task above it, by
+    first parents, that isn't a meeting; with none, the topmost meeting (a regular meeting's series with no parent, or the
+    meeting itself). Its follow-ups go under it, not under the meeting."""
+    here, seen = meeting_id, {meeting_id}
+    while True:
+        row = conn.execute("SELECT meeting FROM tasks WHERE id = ?", (here,)).fetchone()
+        if row is None or not row["meeting"]:
+            return here
+        up = conn.execute("SELECT parent FROM task_parents WHERE child = ? ORDER BY id LIMIT 1", (here,)).fetchone()
+        if up is None or up["parent"] in seen:
+            return here
+        here = up["parent"]
+        seen.add(here)
+
+
+def follow_up_home(model: Model, task_id: str | None) -> str | None:
+    """Where Meeting notes on ``task_id`` will put their follow-ups (decision 610), for the item cards before Save: a task
+    that isn't a meeting is the new meeting's home; a meeting's (this time's of a regular meeting, or a one-off) is its
+    own home task; with no task picked, the new top-level meeting itself (None)."""
+    t = model.tasks.get(task_id) if task_id else None
+    if t is None:
+        return None
+    if not t.meeting:
+        return t.id
+    here, seen = t.id, {t.id}
+    while model.tasks[here].meeting and model.parents_of(here):
+        up = model.parents_of(here)[0]
+        if up in seen or up not in model.tasks:
+            break
+        here = up
+        seen.add(here)
+    return here
+
+
 def meeting_name(model: Model, task_id: str | None, today: date) -> str:
     """The name the meeting starts with: a regular meeting's with today's date, a one-off meeting's own, else none."""
     case = meeting_case(model, task_id)
@@ -687,8 +722,11 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
         made: dict[str, int] = {}
         unused = 0
         if (capture_id or page_note) and reading:
+            # Meeting notes' follow-ups go under the meeting's home task, not the meeting (release 5.142, decision 610).
+            follow_home = meeting_home(conn, t) if draft.meeting and t else None
             item_files, made, unused = _save_items(conn, settings, reading, names, content, formatted, via, capture_id, created or t, when, at,
-                                                   person, home_is_new=bool(created or meeting_made), on_agendas=on_agendas)
+                                                   person, home_is_new=bool(created or meeting_made), on_agendas=on_agendas,
+                                                   follow_home=follow_home)
         noted_under = []
         if page_note:
             made_tasks = {r["id"]: r["created_task"] for r in conn.execute(
@@ -779,14 +817,19 @@ def first_line(text: str) -> str:
 
 def _save_items(conn: sqlite3.Connection, settings: Settings, reading: items.Reading, names: items.Names, content: str, formatted: bool,
                 notes_id: str, from_notes: str | None, home: str | None, when: str, at: datetime, person: Callable[[Who], str],
-                home_is_new: bool = False, on_agendas: list[str] | None = None) -> tuple[list[tuple[str, str, bool]], dict[str, int], int]:
+                home_is_new: bool = False, on_agendas: list[str] | None = None,
+                follow_home: str | None = None) -> tuple[list[tuple[str, str, bool]], dict[str, int], int]:
     """Each ticked item as a small capture of its own, linked to the notes (release 5.8): ``from_notes``, the notes'
     capture, or None for a note on a task's page that's no capture (release 5.69). A task item makes its task, under the
     capture's task (or meeting, or new task) and its # tasks; a note, an update or a decision is filed to each of its
     tasks. A parameter (release 5.38), a key date among them, fills in or adds to each of its tasks, logged as
     ``notes_id``'s, with no capture of its own: its line stays in the notes; ``**agenda,`` (release 5.133) puts them on
     agendas, adding each task and target to ``on_agendas``. Returns each item's capture with its block as written (and
-    whether that's markup), how many of each kind were made, and how many lines couldn't be used."""
+    whether that's markup), how many of each kind were made, and how many lines couldn't be used.
+
+    In meeting notes (``follow_home``, the meeting's home task; release 5.142, decision 610) a task item goes under its
+    ``#`` tasks when it has any, else under ``follow_home``, never under the meeting itself; its capture is still the
+    meeting's record, filed to the meeting. A note, an update or a decision with no ``#`` is still the meeting's."""
     on_agendas = on_agendas if on_agendas is not None else []
     lines = content.split("\n")
     files: list[tuple[str, str, bool]] = []
@@ -800,9 +843,15 @@ def _save_items(conn: sqlite3.Connection, settings: Settings, reading: items.Rea
         block_formatted = formatted and markup.is_formatted(block)
         text = block if block_formatted or not formatted else markup.to_plain(block)
         where: list[str] = []
+        named = any(w.kind == "task" for w in it.where)
         for w in it.where:
-            ref = (quick.ensure_parent(conn, settings, at) if w.kind == "quick" else home if w.kind == "home"
-                   else item_task.get(w.ref or "") if w.kind == "item" else w.ref)
+            if w.kind == "home" and it.kind == "task" and follow_home:
+                if named:  # a # task decides alone in meeting notes (decision 610)
+                    continue
+                ref: str | None = follow_home
+            else:
+                ref = (quick.ensure_parent(conn, settings, at) if w.kind == "quick" else home if w.kind == "home"
+                       else item_task.get(w.ref or "") if w.kind == "item" else w.ref)
             if ref and ref not in where:
                 where.append(ref)
         title = it.title or items.KIND_NAMES[it.kind]
@@ -839,7 +888,8 @@ def _save_items(conn: sqlite3.Connection, settings: Settings, reading: items.Rea
                 assignees=[person(x.who()) for x in it.assignees], lead_hours=float(it.lead_hours) if it.lead_hours else None,
                 assignee_hours=float(it.assignee_hours) if it.assignee_hours else None, labels=it.labels, plant_event=it.plant_event)
             item_task[it.key] = task_id
-            captures.add_capture(conn, capture_id=cid, saved=when, source="typed", types=["new_task"], title=title, task=where[0] if where else None,
+            filed = home if follow_home and home else where[0] if where else None  # in meeting notes, the meeting's record
+            captures.add_capture(conn, capture_id=cid, saved=when, source="typed", types=["new_task"], title=title, task=filed,
                                  created_task=task_id, formatted=block_formatted, from_notes=from_notes, item="task")
             files.append((cid, text, block_formatted))
         else:

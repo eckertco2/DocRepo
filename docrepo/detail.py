@@ -448,15 +448,19 @@ class Pages:
             out["agenda_short"] = f"{n_open} open"
             out["agenda_summary"] = section_head(out["agenda_short"], link(f"agenda:{t.id}", "Open agenda"))
             out["agenda"] = split_section(agenda)[1]
+        # Subtasks, the work only, or on a meeting's page its Follow-ups (release 5.142, decision 611).
         subtasks = self.subtask_section(t, state)
         if subtasks:
-            kids = [self.m.task(k) for k in self.m.children_of(t.id)]
+            key = "follow_ups" if t.meeting else "subtasks"
+            kids = [self.m.task(k) for k in (self.follow_up_ids(t) if t.meeting else self.work_ids(t.id))]
             closed = sum(1 for k in kids if k.state == "Closed")
-            out["subtasks_short"] = f"{sum(is_open(k) for k in kids)} of {len(kids)} open"
+            n_open = sum(is_open(k) for k in kids)
+            out[key + "_short"] = (f"{len(kids)} made here · {n_open} open" if t.meeting and all(t.id not in self.m.parents_of(k.id) for k in kids)
+                                   else f"{n_open} of {len(kids)} open")
             bar = f'<img src="progress:{closed}:{len(kids)}" width="{PROGRESS_WIDTH}" height="4" title="{closed} of {len(kids)} closed">'
-            out["subtasks_summary"] = section_head(f'{esc(out["subtasks_short"])} &nbsp;{bar}',
-                                                   link(f"new:{t.id}", "New task under this one", "A new task under this one (T)"), raw=True)
-            out["subtasks"] = split_section(subtasks)[1]
+            out[key + "_summary"] = section_head(f'{esc(out[key + "_short"])} &nbsp;{bar}',
+                                                 link(f"new:{t.id}", "New task under this one", "A new task under this one (T)"), raw=True)
+            out[key] = split_section(subtasks)[1]
         # Meetings (release 5.140, the notes consolidation plan's decision 607): every meeting under the task, or whose
         # notes made, named or decided something on it or a task under it, newest first, after Subtasks and before
         # Decisions, with Meeting notes at the right; the section isn't there when there's none.
@@ -789,9 +793,31 @@ class Pages:
         return (section("Agenda", f' <span class="rel">{len(items)} open</span> &nbsp;{link(f"agenda:{t.id}", "Open agenda")}')
                 + f'{task_tile.TABLE}{"".join(rows)}</table>')
 
+    def work_ids(self, task_id: str) -> list[str]:
+        """A task's subtasks that are the work (release 5.142, the notes consolidation plan's decision 611): those that
+        aren't meetings, which the Meetings section lists instead."""
+        return [k for k in self.m.children_of(task_id) if not self.m.task(k).meeting]
+
+    def follow_up_ids(self, t: Task) -> list[str]:
+        """A meeting's follow-ups (decision 611): the live tasks its notes made, wherever they are now, oldest first, then
+        any other task under it that isn't a meeting."""
+        notes = {c.id for c in self.m.captures.values() if c.item == "notes" and c.task == t.id and not c.discarded}
+        made = [c.created_task for c in sorted(self.m.captures.values(), key=lambda c: c.id)
+                if c.from_notes in notes and c.item == "task" and not c.discarded and c.created_task in self.m.tasks
+                and not self.m.tasks[c.created_task].discarded]
+        return list(dict.fromkeys([*made, *self.work_ids(t.id)]))
+
     def subtask_section(self, t: Task, state: PageState) -> str:
-        """How far along the subtasks are, the ones still to do, and the closed ones behind Show closed."""
-        kids = [self.m.task(k) for k in self.m.children_of(t.id)]
+        """How far along the subtasks are, the ones still to do, and the closed ones behind Show closed. Since release
+        5.142 (decision 611) the work only: the meetings under it are in Meetings. A meeting's page has its Follow-ups."""
+        if t.meeting:
+            return self.task_rows_section("Follow-ups", t, self.follow_up_ids(t), state)
+        return self.task_rows_section("Subtasks", t, self.work_ids(t.id), state)
+
+    def task_rows_section(self, title: str, t: Task, ids: list[str], state: PageState) -> str:
+        """Subtasks' (or a meeting's Follow-ups') rows: the open ones, the closed ones behind Show closed. A follow-up that
+        isn't under the meeting says where it is."""
+        kids = [self.m.task(k) for k in ids]
         if not kids:
             return ""
         closed = [k for k in kids if k.state == "Closed"]
@@ -802,12 +828,17 @@ class Pages:
             # A task tile (release 5.138, the task tile plan's decision 577): the circle opens the state menu, the title is cut
             # to fit, then the flag, the two-parents mark, who it's with, the marks and the days. Before 5.138 the date itself.
             who = ([*k.leads, *k.assignees] or [None])[0]
+            # A follow-up not under the meeting says where it is (release 5.142, decision 611), before who it's with.
+            parents = self.m.parents_of(k.id)
+            where = (f'<span class="sub">· under {esc(self.m.task(parents[0]).title)}</span>'
+                     if t.meeting and parents and t.id not in parents else "")
             tile = task_tile.tile(self.m, k.id, self.today, marks, under=t.id)
-            rows.append(task_tile.html(tile, lambda href, text: link(href, text, quiet="tl"), self.avatar(who) if who else ""))
+            context = " ".join(x for x in (where, self.avatar(who) if who else "") if x)
+            rows.append(task_tile.html(tile, lambda href, text: link(href, text, quiet="tl"), context))
         count = f'{sum(is_open(k) for k in kids)} of {len(kids)} open'
         bar = f' <img src="progress:{len(closed)}:{len(kids)}" width="{PROGRESS_WIDTH}" height="4" title="{len(closed)} of {len(kids)} closed">'
         toggle = (f'<p class="more">{link("fold:closed", "Hide closed" if state.closed else f"Show {len(closed)} closed")}</p>' if closed else "")
-        return (section("Subtasks", f' <span class="rel">{count}</span>{bar} &nbsp;{link(f"new:{t.id}", "New task under this one", "A new task under this one (T)")}')
+        return (section(title, f' <span class="rel">{count}</span>{bar} &nbsp;{link(f"new:{t.id}", "New task under this one", "A new task under this one (T)")}')
                 + f'{task_tile.TABLE}{"".join(rows)}</table>{toggle}')
 
     def reference_value(self, name: str, value: str) -> str:
