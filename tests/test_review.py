@@ -1,4 +1,4 @@
-"""Release 5.128, the weekly review (the cold-eyes plan's section 6, decisions 496 to 503), without Qt: schema 26's two
+"""Release 5.128, the weekly review (the cold-eyes plan's section 6, decisions 496 to 503), without Qt: schema 27's two
 fields, who comes up for review and when (by the week), Mark reviewed with no status log line, Review every in the status
 log, Gone quiet counting what's under a task, No next step's rule, Waiting on others' longest wait first, each step's
 count and the steps Next passes over, the review in hand and Today's line, what Done counts, Settings, and the task
@@ -41,25 +41,25 @@ def make(conn, title: str, at: datetime = AT, **kw) -> str:
     return tasks.create_task(conn, SETTINGS, title=title, at=at, created_by="test", **kw)
 
 
-# ================= schema 26 =================
-def test_schema_26_adds_reviewed_and_review_every(conn):
+# ================= schema 27 =================
+def test_schema_27_adds_reviewed_and_review_every(conn):
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(tasks)")}
     assert {"reviewed", "review_every"} <= cols
-    assert db.SCHEMA_VERSION == 26
+    assert db.SCHEMA_VERSION == 27  # 26 is 5.127's meeting links, merged first
     with pytest.raises(sqlite3.IntegrityError):
         conn.execute("UPDATE tasks SET review_every = 3 WHERE id = ?", (REACTOR,))
     t = Model(conn).task(REACTOR)
     assert t.reviewed is None and t.review_every is None
 
 
-def test_the_version_25_root_comes_up_with_no_reviews_and_its_asks_kept(tmp_path):
+def test_the_version_26_root_comes_up_with_no_reviews_and_its_asks_and_meeting_link_kept(tmp_path):
     import zipfile
     from pathlib import Path
 
     from docrepo.safe_fs import SafeFS
 
-    root = tmp_path / "DocRepoData-v25"
-    with zipfile.ZipFile(Path(__file__).resolve().parent / "fixtures" / "roots" / "v25.zip") as z:
+    root = tmp_path / "DocRepoData-v26"  # schema 26 is 5.127's meeting links; 27 is this release's
+    with zipfile.ZipFile(Path(__file__).resolve().parent / "fixtures" / "roots" / "v26.zip") as z:
         z.extractall(root)
     c = db.connect(SafeFS([root]), root)
     try:
@@ -67,6 +67,7 @@ def test_the_version_25_root_comes_up_with_no_reviews_and_its_asks_kept(tmp_path
         assert all(t.reviewed is None and t.review_every is None for t in m.tasks.values())
         assert sorted((x.task, x.kind) for x in m.t_mails) == [("T000008", "new"), (RIGGING, "ask")]
         assert [t.id for t in review.due_for_review(m, FRI, 1)] == [REACTOR, WALKTHROUGH, HOLIDAY]
+        assert c.execute("SELECT task FROM meeting_links").fetchall()[0][0] == "T000010"
     finally:
         c.close()
 

@@ -29,6 +29,11 @@ Ask for an update (``ask_t_mail``) makes a new T-mail with its To, Subject and
 words filled in: it writes those fields, shows the email so Outlook adds the
 owner's signature, puts the words before it, and still never sends it.
 
+Since release 5.127 (the cold-eyes plan's decisions 488 to 495) it reads today's appointments from the default calendar
+for Today's Meetings (``todays_appointments``): only their subject, start, end, location, whether all day, busy status,
+meeting status, sensitivity and whether recurring, never attendees, the organizer or the body. It never starts Outlook
+to do it, and writes nothing to the calendar.
+
 Each field is read on its own, so a field Outlook refuses (its security guard
 can refuse the sender, the recipients or the body) leaves only that field out.
 Every problem is logged and kept for the troubleshooting report
@@ -43,14 +48,16 @@ import re
 from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
+from time import perf_counter
 from typing import TYPE_CHECKING
 
 from docrepo.layer0 import Part
 from docrepo.save import Attachment, EmailItem, FileRow
 
 if TYPE_CHECKING:
+    from docrepo.meetings import Appointment
     from docrepo.model import Model
     from docrepo.safe_fs import SafeFS
 
@@ -152,10 +159,11 @@ def outlook_window_open() -> bool:
     return bool(ctypes.windll.user32.FindWindowW(OUTLOOK_WINDOW_CLASS, None))
 
 
-def connect() -> tuple[object, str]:
+def connect(quiet: bool = False) -> tuple[object, str]:
     """The running Outlook, and how it was found. GetActiveObject first; Office registers itself late, so when that
     fails but Outlook's window is open, Dispatch joins the running Outlook (it never starts one: the window check
-    comes first)."""
+    comes first). ``quiet`` (today's meetings, read every few minutes, release 5.127): Outlook simply not running isn't
+    kept as a problem."""
     try:
         import pythoncom  # noqa: F401 - pywin32's COM support; importing it starts COM on this thread
         import win32com.client
@@ -164,7 +172,7 @@ def connect() -> tuple[object, str]:
     try:
         return win32com.client.GetActiveObject("Outlook.Application"), "GetActiveObject"
     except Exception as e:  # noqa: BLE001 - COM raises its own errors
-        first = record_problem("finding Outlook (GetActiveObject)", e)
+        first = describe(e) if quiet else record_problem("finding Outlook (GetActiveObject)", e)
     if not outlook_window_open():
         raise OutlookError("Outlook isn't open. Open classic Outlook, select the email, and try again.", "finding Outlook", first)
     try:
@@ -998,3 +1006,175 @@ def refused_note(emails: list[EmailItem]) -> str:
             "Outlook's security guard does this when it doesn't trust programs that ask. If Outlook asks whether to allow access, choose Allow. "
             + ("Otherwise, copy the email's text in Outlook (Ctrl+A, then Ctrl+C) and paste it into the content text. " if text_too else "")
             + "Settings → Troubleshooting report shows Outlook's security settings.")
+
+
+# ---- Today's meetings (release 5.127, the cold-eyes plan's decisions 488 to 495) ----
+OL_FOLDER_CALENDAR = 9  # olFolderCalendar: the default calendar
+OL_PRIVATE, OL_CONFIDENTIAL = 2, 3  # Sensitivity: shown as "Private appointment", its subject and place not read
+OL_MEETING_CANCELED, OL_MEETING_RECEIVED_AND_CANCELED = 5, 7  # MeetingStatus: left out
+#: The only fields read from an appointment (decision 488). Never attendees, the organizer or the body: Outlook's security
+#: guard protects those, and Today doesn't need them. ``tests/test_meetings.py`` checks no other is read.
+CALENDAR_FIELDS = ("Subject", "Start", "End", "Location", "AllDayEvent", "BusyStatus", "MeetingStatus", "Sensitivity", "IsRecurring")
+#: At most this many appointments are read in a day, so a calendar Outlook can't end (a recurrence it expands without end,
+#: should Restrict misread its dates) can't hold DocRepo up.
+CALENDAR_LIMIT = 300
+#: The COM error codes that mean Outlook is busy, and those that mean it refused.
+BUSY_CODES = frozenset({0x80010001, 0x8001010A})
+REFUSED_CODES = frozenset({0x80004004, 0x80070005})
+LOCALE_USER_DEFAULT, DATE_SHORTDATE, TIME_NOSECONDS = 0x0400, 0x1, 0x2
+
+
+class CalendarProblem(OutlookError):
+    """Today's appointments couldn't be read. ``kind``: "closed" (Outlook isn't open), "busy", "refused" or "failed"."""
+
+    def __init__(self, kind: str, message: str, step: str = "", detail: str = "") -> None:
+        super().__init__(message, step, detail)
+        self.kind = kind
+
+
+@dataclass(frozen=True)
+class CalendarRead:
+    """One read of today's calendar, for the troubleshooting report: when, Restrict's filter (only dates, in Windows' own
+    format, which is what the corporate test checks), how many items it gave and how many were kept, how long it took, and
+    its problem. Never a subject or a place."""
+
+    at: str
+    filter: str
+    items: int
+    kept: int
+    ms: int
+    problem: str = ""
+
+
+#: This session's last reads of the calendar, newest last.
+CALENDAR_READS: deque[CalendarRead] = deque(maxlen=5)
+
+
+class _SYSTEMTIME(ctypes.Structure):
+    _fields_ = [(name, ctypes.c_ushort) for name in ("wYear", "wMonth", "wDayOfWeek", "wDay", "wHour", "wMinute", "wSecond", "wMilliseconds")]
+
+
+def restrict_stamp(when: datetime) -> str:
+    """A time as Items.Restrict reads it: Windows' short date and its time without seconds, in the owner's own format
+    (decision 488's note: "11/12/2026 12:00 AM" in the United States, "12/11/2026 00:00" in Britain), as Outlook's own
+    examples build it. Off Windows, the United States' format."""
+    if os.name == "nt":
+        st = _SYSTEMTIME(when.year, when.month, 0, when.day, when.hour, when.minute, 0, 0)
+        day_text, time_text = ctypes.create_unicode_buffer(80), ctypes.create_unicode_buffer(80)
+        k32 = ctypes.windll.kernel32
+        if (k32.GetDateFormatW(LOCALE_USER_DEFAULT, DATE_SHORTDATE, ctypes.byref(st), None, day_text, 80)
+                and k32.GetTimeFormatW(LOCALE_USER_DEFAULT, TIME_NOSECONDS, ctypes.byref(st), None, time_text, 80)):
+            return f"{day_text.value} {time_text.value}"
+    return when.strftime("%m/%d/%Y %I:%M %p")
+
+
+def calendar_filter(day: date) -> str:
+    """Restrict's filter for what's on ``day``: whatever starts before the next midnight and ends after this one, so an
+    all-day event and one that runs over midnight are in it, and yesterday's all-day event isn't."""
+    start = datetime.combine(day, time())
+    return f"[Start] < '{restrict_stamp(start + timedelta(days=1))}' AND [End] > '{restrict_stamp(start)}'"
+
+
+def problem_kind(error: BaseException) -> str:
+    """A COM error's kind: "busy", "refused" or "failed"."""
+    args = getattr(error, "args", ())
+    codes = {args[0] & 0xFFFFFFFF} if args and isinstance(args[0], int) else set()
+    if len(args) >= 3 and isinstance(args[2], tuple) and len(args[2]) > 5 and isinstance(args[2][5], int):
+        codes.add(args[2][5] & 0xFFFFFFFF)
+    return "busy" if codes & BUSY_CODES else "refused" if codes & REFUSED_CODES else "failed"
+
+
+def _minute(value: object) -> datetime | None:
+    """An appointment's time as Outlook gives it, local, to the minute. pywin32 marks it as UTC though it's local, so only
+    its parts are used."""
+    try:
+        return datetime(value.year, value.month, value.day, value.hour, value.minute)  # type: ignore[attr-defined]
+    except (AttributeError, ValueError, TypeError):
+        return None
+
+
+def appointment_of(item: object, day: date, refused: set[str]) -> Appointment | None:
+    """One appointment, from only decision 488's fields, each read on its own (``refused`` gains any Outlook won't give);
+    None for a cancelled one, or one not on ``day`` after all. A private one's subject and place aren't read."""
+    from docrepo.meetings import BUSY, Appointment
+
+    def get(name: str) -> object:
+        try:
+            return getattr(item, name)
+        except Exception:  # noqa: BLE001 - COM raises its own errors; the field is left out
+            refused.add(name)
+            return None
+
+    sensitivity = get("Sensitivity")
+    if get("MeetingStatus") in (OL_MEETING_CANCELED, OL_MEETING_RECEIVED_AND_CANCELED):
+        return None
+    start, end = _minute(get("Start")), _minute(get("End"))
+    midnight = datetime.combine(day, time())
+    if start is None or end is None or not (start < midnight + timedelta(days=1) and end > midnight):
+        return None
+    private = sensitivity in (OL_PRIVATE, OL_CONFIDENTIAL)
+    busy = get("BusyStatus")
+    return Appointment(subject="" if private else _text(get("Subject")), start=start, end=end, location="" if private else _text(get("Location")),
+                       all_day=bool(get("AllDayEvent")), busy=busy if isinstance(busy, int) else BUSY, private=private,
+                       recurring=bool(get("IsRecurring")))
+
+
+def read_calendar(app: object, day: date, limit: int = CALENDAR_LIMIT) -> tuple[list[Appointment], int, set[str]]:
+    """``day``'s appointments in the default calendar, in the order the plan gives: Items, then ``Sort("[Start]")``, then
+    ``IncludeRecurrences``, then ``Restrict`` to the day, walked with GetFirst and GetNext (a collection that includes
+    recurrences has no true Count). Returns them, how many items Restrict gave, and the fields Outlook refused."""
+    folder = app.Session.GetDefaultFolder(OL_FOLDER_CALENDAR)  # type: ignore[attr-defined]
+    items = folder.Items
+    items.Sort("[Start]")
+    items.IncludeRecurrences = True
+    found = items.Restrict(calendar_filter(day))
+    out: list[Appointment] = []
+    refused: set[str] = set()
+    seen = 0
+    item = found.GetFirst()
+    while item is not None and seen < limit:
+        seen += 1
+        appointment = appointment_of(item, day, refused)
+        if appointment is not None:
+            out.append(appointment)
+        item = found.GetNext()
+    return out, seen, refused
+
+
+def _keep_once(step: str, detail: str) -> None:
+    """A calendar problem for the troubleshooting report, unless it's the same as the last one kept (a read every few
+    minutes would otherwise fill the list with one problem)."""
+    if not PROBLEMS or (PROBLEMS[-1].step, PROBLEMS[-1].detail) != (step, detail):
+        PROBLEMS.append(Problem(datetime.now().strftime("%Y-%m-%d %H:%M:%S"), step, detail))
+        log.warning("Outlook: %s failed: %s", step, detail)
+
+
+def todays_appointments(day: date) -> list[Appointment]:
+    """Today's appointments from the running Outlook (decisions 488 and 493). It never starts Outlook: with none running,
+    or none whose window is open, it raises CalendarProblem "closed" and keeps nothing as a problem. Busy, refused and any
+    other failure raise their kind, kept once for the troubleshooting report. Nothing is written to Outlook."""
+    began = perf_counter()
+    stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        app, _how = connect(quiet=True)
+    except OutlookError as e:
+        kind = "closed" if e.step == "finding Outlook" else "failed"
+        if kind != "closed":
+            _keep_once(f"reading today's calendar ({e.step})", e.detail)
+        CALENDAR_READS.append(CalendarRead(stamp, "", 0, 0, 0, kind))
+        raise CalendarProblem(kind, str(e), e.step, e.detail) from e
+    filt = ""
+    try:
+        filt = calendar_filter(day)
+        found, seen, refused = read_calendar(app, day)
+    except Exception as e:  # noqa: BLE001 - COM raises its own errors
+        kind, detail = problem_kind(e), describe(e)
+        _keep_once("reading today's calendar", detail)
+        CALENDAR_READS.append(CalendarRead(stamp, filt, 0, 0, round((perf_counter() - began) * 1000), kind))
+        raise CalendarProblem(kind, f"Outlook didn't give the calendar ({detail}).", "reading today's calendar", detail) from e
+    ms = round((perf_counter() - began) * 1000)
+    if refused:
+        _keep_once("reading today's calendar", "refused " + ", ".join(sorted(refused)))
+    CALENDAR_READS.append(CalendarRead(stamp, filt, seen, len(found), ms, "refused " + ", ".join(sorted(refused)) if refused else ""))
+    log.info("Outlook: read %d of today's appointments (%d items) in %d ms", len(found), seen, ms)
+    return found

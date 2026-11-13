@@ -47,9 +47,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo import db, edits, key_dates, markup, notes_page, panel_rules, selection
+from docrepo import db, edits, key_dates, markup, meetings, notes_page, panel_rules, selection
 from docrepo.detail import Pages, PageState, esc
-from docrepo.model import Model, Task
+from docrepo.model import Model, Task, is_person
 from docrepo.panel_rules import OPEN_KEY, REST_WIDTH_KEY, Hover, Monitor, Place, Rect
 from docrepo.schedule import is_open
 from docrepo.ui import tokens
@@ -59,6 +59,7 @@ from docrepo.ui.context import AppContext
 from docrepo.ui.drop_target import DropOverlay, DropRead
 from docrepo.ui.icons import icon, icon_size
 from docrepo.ui.page_view import PageView
+from docrepo.ui import today_meetings
 from docrepo.ui.tree_view import PRIORITY_EDGES, state_icon
 from docrepo.ui.state_menu import UNDO_MS, UndoButton
 from docrepo.ui.style import page_css, style_sheet
@@ -152,8 +153,13 @@ def due_label(cell: DueCell | None) -> QLabel:
     colour within two days, as the browse tool's Due column, a deadline in Due's place with its red ◆, and the whole
     date in the tooltip ("Due Fri 20 Nov, in 8 d")."""
     label = QLabel(objectName="tpDue")
-    if cell is None:
-        return label
+    if cell is not None:
+        fill_due(label, cell)
+    return label
+
+
+def fill_due(label: QLabel, cell: DueCell) -> None:
+    """``due_label``'s words, in a label made already: a meeting's minutes move on in place (release 5.127)."""
     label.setTextFormat(Qt.TextFormat.RichText)
     mark = f'<span style="color:{tokens.colour("critical")}">◆</span> ' if cell.deadline else ""
     colour = {"over": "critical", "soon": "caution"}.get(cell.cls)
@@ -161,7 +167,6 @@ def due_label(cell: DueCell | None) -> QLabel:
     label.setText(f"{mark}<span{style}>{esc(cell.days)}</span>")
     label.setProperty("days", cell.days)
     label.setToolTip(cell.tip)
-    return label
 
 
 class _Row(_EdgeFrame):
@@ -620,6 +625,8 @@ class TodayPanel(QWidget):
                 w.setParent(None)
                 w.deleteLater()
         self.rows = []
+        self.extras = []
+        self._add_meeting_line(m)  # first, the next meeting (release 5.127, decision 490)
         groups = today_groups(m, today)
         total = sum(len(items) for _, items in groups)
         self.count.setText(f"Today · {total}")
@@ -640,7 +647,6 @@ class TodayPanel(QWidget):
                 self._add(row)
         if not total:
             self._add(QLabel("Nothing on Today.", objectName="tpSub"))
-        self.extras = []
         self._add_due_section(m, today)
         self._add_done_section(m, today)
         self.list_lay.addStretch()
@@ -670,9 +676,9 @@ class TodayPanel(QWidget):
         return is_open
 
     def _add_line(self, text: str, when: DueCell | None, links: list[tuple[str, str, Callable[[], object]]], edge: str = "",
-                  task_id: str | None = None) -> None:
+                  task_id: str | None = None) -> _EdgeFrame:
         """A row under a folded heading: its words, its date, each link's name, tooltip and what it does, its task's
-        priority as its edge, and its task, where a drop on it goes."""
+        priority as its edge, and its task, where a drop on it goes. Returns the row."""
         line = _EdgeFrame(objectName="tpRow")
         line.edge = edge
         line.task_id, line.title = task_id, text
@@ -690,6 +696,73 @@ class TodayPanel(QWidget):
             lay.addWidget(link)
         self.extras.append(line)
         self._add(line)
+        return line
+
+    # ================= the next meeting (release 5.127, the cold-eyes plan's decision 490) =================
+    def _add_meeting_line(self, m: Model) -> None:
+        """The first line: the meeting under way, else the next one, its subject and its minutes ("in 20 min", "now"), with
+        Agenda and Notes once it's linked, or Link…, which opens it on Today in the browse tool. A short quiet line when the
+        calendar couldn't be read; nothing when no meeting is left today, or with the switch off."""
+        self.meeting_line: _EdgeFrame | None = None
+        self.meeting_drawn: tuple = ()
+        day, cal = today_meetings.day_of(self.ctx)
+        if day is None:
+            return
+        self.meeting_drawn = self._meeting_state(day, cal)
+        x = day.lead
+        if x is None:
+            if cal.kind:
+                self._add(QLabel(f"Meetings: {meetings.PROBLEM_WORDS[cal.kind]}", objectName="tpSub"))
+            return
+        target = x.target
+        if target:
+            links = [("Agenda", "Its agenda, in the browse tool", lambda: self._agenda_in_browse(target)),
+                     ("Notes", "Meeting notes, for today's meeting", lambda: today_meetings.open_notes(self.browse, x))]
+        elif x.appointment.key and not x.appointment.private:
+            links = [("Link…", "Link it to a meeting task or a person, on Today in the browse tool", lambda: self._link_in_browse(x))]
+        else:
+            links = []
+        line = self.meeting_line = self._add_line(x.appointment.title, today_meetings.time_cell(x, self._today()), links,
+                                                  task_id=target if target and not is_person(target) else None)
+        # The first line at rest too, unlike the folded sections' rows: its commands only once it's widened.
+        self.extras.remove(line)
+        self.extras += line.findChildren(QPushButton, "tpLink")
+        mark = QLabel()
+        mark.setPixmap(icon("person" if target and is_person(target) else "agenda" if target else "calendar",
+                            tokens.colour("accent" if target else "text2"), size=14).pixmap(icon_size(14)))
+        mark.setToolTip("The meeting under way, or your next one, from your Outlook calendar")
+        line.layout().insertWidget(0, mark)
+        line.setToolTip(meetings.context_words(m, x))
+
+    @staticmethod
+    def _meeting_state(day: meetings.DayMeetings, cal: meetings.TodayCalendar) -> tuple:
+        lead = day.lead
+        return (lead.appointment, lead.when, lead.target) if lead else (cal.kind,)
+
+    def _agenda_in_browse(self, target: str) -> None:
+        self.browse.show_browse()
+        today_meetings.open_agenda(self.browse, target)
+
+    def _link_in_browse(self, x: meetings.Meeting) -> None:
+        """Link… from the panel: the browse tool on Today, where Link…'s list takes the keyboard (the panel never does)."""
+        self.browse.show_browse(view="today")
+        today_meetings.pick_link(self.browse, x)
+
+    def _tick_meeting(self) -> None:
+        """Each minute while it's open: the line's minutes move on in place; a new lead, or a read that failed, draws it
+        again."""
+        day, cal = today_meetings.day_of(self.ctx)
+        if day is None:
+            if self.meeting_drawn or self.meeting_line is not None:
+                self.refresh()
+            return
+        if self._meeting_state(day, cal) != self.meeting_drawn:
+            self.refresh()
+            return
+        if self.meeting_line is not None and day.lead is not None:
+            label = self.meeting_line.findChild(QLabel, "tpDue")
+            if label is not None:
+                fill_due(label, today_meetings.time_cell(day.lead, self._today()))
 
     def _add_due_section(self, m: Model, today: date) -> None:
         mine = db.get_state(self.ctx.conn, TODAY_MINE_KEY) == "1"
@@ -951,8 +1024,9 @@ class TodayPanel(QWidget):
 
     # ================= drops on a task (release 5.106, decisions 407 and 408) =================
     def drop_targets(self) -> list[_EdgeFrame]:
-        """The rows a drop can go to: Today's tasks, and the tasks under Reminders and Due in the next 7 days, as shown."""
-        rows = [*self.rows, *getattr(self, "extras", [])]
+        """The rows a drop can go to: Today's tasks, and the tasks under Reminders and Due in the next 7 days, as shown; and the
+        meeting line's task, once it's linked to one (release 5.127)."""
+        rows = [*self.rows, *getattr(self, "extras", []), getattr(self, "meeting_line", None)]
         return [w for w in rows if isinstance(w, _EdgeFrame) and w.task_id and w.isVisibleTo(self)]
 
     def target_at(self, at: QPoint) -> _EdgeFrame | None:
@@ -1198,6 +1272,9 @@ class TodayPanel(QWidget):
             self.done(current.item_id)
         elif key == Qt.Key.Key_Delete and current is not None:
             self.remove(current.item_id)
+        elif key == Qt.Key.Key_F5:  # the calendar read again (release 5.127, decision 493)
+            today_meetings.read_again(self.ctx)
+            self.refresh()
         else:
             super().keyPressEvent(event)
 
@@ -1251,6 +1328,8 @@ class TodayPanel(QWidget):
     def _new_day(self) -> None:
         if self._built_for != self._today():
             self.refresh()
+        else:
+            self._tick_meeting()
 
 
 def notes_html(page: str) -> str:

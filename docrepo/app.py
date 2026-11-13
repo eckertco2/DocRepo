@@ -257,7 +257,10 @@ class CaptureApp(QObject):
         self.browse.show_browse(view, task)
 
     def settings_changed(self, keys: list[str]) -> None:
-        """Apply what the Settings view changed: a new hotkey works at once."""
+        """Apply what the Settings view changed: a new hotkey works at once, and today's meetings show or go from the Today
+        side panel (release 5.127)."""
+        if "today_meetings" in keys:
+            self.ctx.today_changed()
         if any(k in hotkey.HOTKEY_IDS or k == "wheel_hotkeys" for k in keys):
             self.unregister_hotkeys()
             self.paused = False

@@ -43,7 +43,7 @@ LIST_NOTES = {
     "unplanned": "Open tasks the capacity calendar can't place: people but no hours, or hours but no dates.",
 }
 
-TODAY_NOTE = ("Your list for today. Each item stays until you mark it Done, carrying over to the next day. Put a task on it with D "
+TODAY_NOTE = ("Your list for today, after today's meetings from your Outlook calendar (Settings → Today). Each item stays until you mark it Done, carrying over to the next day. Put a task on it with D "
               "while browsing, or Add to Today on its page. The box makes a quick task (under Quick tasks until Put under… on its "
               "row files it), or a note; Ctrl+Shift+D makes a quick task from anywhere. Below it, reminders whose day has come, and the tasks due in the next "
               "7 days that aren't on it yet, urgent ones first.")

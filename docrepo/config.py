@@ -172,6 +172,9 @@ class Settings:
     quiet_days: int = 21
     summary_pins: list[str] = field(default_factory=list)
     summary_recent: list[str] = field(default_factory=list)
+    #: Today's meetings from the Outlook calendar (release 5.127, the cold-eyes plan's decision 494): Today's first group, and
+    #: the side panel's first line. On by default; off, DocRepo doesn't read the calendar at all.
+    today_meetings: bool = True
     #: The weekly review (release 5.128, the cold-eyes plan's decisions 499 and 502): the day Today offers it, as "Fri", and
     #: how many weeks apart an open top-level task with no interval of its own comes up for review (1, 2 or 4). ``quiet_days``
     #: is its Gone quiet too (decision 500).
@@ -244,6 +247,8 @@ class Settings:
                 del data[key]
         if data["quiet_days"] == 21:  # release 5.131: written once it's changed from its default, as the optional ones are
             del data["quiet_days"]
+        if data["today_meetings"]:  # release 5.127: on by default, so written only once it's turned off
+            del data["today_meetings"]
         for key, default in (("review_day", "Fri"), ("review_weeks", 1)):  # release 5.128: the same
             if data[key] == default:
                 del data[key]

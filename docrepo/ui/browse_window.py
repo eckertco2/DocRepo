@@ -80,7 +80,7 @@ from docrepo.ui.task_picker import TaskPicker
 from docrepo.ui.timeline_view import TimelineView
 from docrepo.ui.state_menu import UNDO_MS, can_change, open_below, picked_line, state_menu
 from docrepo.ui.tree_view import HTML_ROLE, KEY_ROLE, RowTree
-from docrepo.ui import conversation_page, task_menus
+from docrepo.ui import conversation_page, task_menus, today_meetings
 from docrepo.ui.widgets import SAVE_KEYS, DropButton, FlowLayout, Option, ViewStack, ask, label_options, people_options
 from docrepo.views import (
     LIST_IDS,
@@ -209,7 +209,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         for keys, handler in (("N", lambda: self._key("note")), ("T", lambda: self._key("new_task")), ("U", lambda: self._key("update")),
                               ("A", lambda: self._key("agenda")), ("E", lambda: self._key("edit")), ("D", lambda: self._key("today")),
                               ("M", lambda: self._key("meeting")), ("O", lambda: self._key("find_files")),
-                              ("Ctrl+F", self.open_find), ("Ctrl+Shift+F", self.search_box.setFocus), ("F1", self.show_keys), ("F5", self.refresh),
+                              ("Ctrl+F", self.open_find), ("Ctrl+Shift+F", self.search_box.setFocus), ("F1", self.show_keys), ("F5", self.read_again),
                               ("Ctrl+B", lambda: self.show_views_pane(not self.views_button.isChecked())), ("Ctrl+K", self.open_palette),
                               # The weekly review (release 5.128): R marks a project reviewed in step 4.
                               ("R", lambda: None if self._typing() else review_list.mark_reviewed(self))):
@@ -450,6 +450,8 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         self._status_timer.setSingleShot(True)
         self._status_timer.setInterval(9000)
         self._status_timer.timeout.connect(lambda: self.status.setText(""))
+        #: Each minute while Today shows: the next meeting's minutes, and the calendar read again when it's 5 minutes old (release 5.127).
+        self.meetings_timer = today_meetings.start_timer(self)
         #: Undo after a state picked from a row: a link after the line's words, for ten seconds (release 5.76, decision 363).
         self._undo: Callable[[], None] | None = None
         self._status_timer.timeout.connect(lambda: setattr(self, "_undo", None))
@@ -651,6 +653,11 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
             view.reload()
         self.ctx.today_changed()  # and the Today side panel (release 5.43)
 
+    def read_again(self) -> None:
+        """F5: read docs.db again, and today's calendar too (release 5.127, decision 493)."""
+        today_meetings.read_again(self.ctx)
+        self.refresh()
+
     def _exists(self, key: tuple[str, str]) -> bool:
         kind, item = key
         m = self.model()
@@ -830,7 +837,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
                 Command("", "Quick summary: a person, an agenda or a label", lambda: self.ctx.open_summary(None)),
                 Command("", "Find in this view", self.open_find, "Ctrl+F"),
                 Command("", "Show or hide the views", lambda: self.show_views_pane(not self.views_button.isChecked()), "Ctrl+B"),
-                Command("", "Read docs.db again", self.refresh, "F5"),
+                Command("", "Read docs.db and the calendar again", self.read_again, "F5"),
                 Command("", "Keys", self.show_keys, "F1"),
                 Command("", "Hide hints" if LOOK.hints else "Show hints", lambda: self._set_hints(not LOOK.hints)),
                 *self.ctx.wheel_palette()]  # the wheels' slots (release 5.41)
