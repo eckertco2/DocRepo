@@ -39,6 +39,7 @@ from typing import TYPE_CHECKING
 
 from docrepo import conversations
 from docrepo.db import set_state, transaction
+from docrepo.layer0 import LinkRules
 from docrepo.model import Model
 from docrepo.save import CaptureDraft, EmailItem, SaveResult, email_rows, save_capture
 
@@ -226,7 +227,8 @@ def save_sent(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: S
     on its ``t_mails`` row. None when it was captured already."""
     if not still_waiting(conn, t.id):
         return None
-    draft = CaptureDraft(task=t.task, types={"note"}, files=email_rows(email))
+    # Settings' link lists sort its links, as in the capture window (release 5.146, decision 640): Log progress's email too.
+    draft = CaptureDraft(task=t.task, types={"note"}, files=email_rows(email, LinkRules.of(settings)))
     result = save_capture(conn, data_root, fs, settings, draft, at)
     if result.capture_id is None:
         return None

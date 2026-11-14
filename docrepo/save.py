@@ -137,10 +137,11 @@ def default_description(row: FileRow, task_title: str | None) -> str:
     return f"{task_title.strip()} – {how} {kind} – {row.name}" if task_title and task_title.strip() else row.name
 
 
-def email_rows(email: EmailItem) -> list[FileRow]:
-    """An email's row, then a row for each part email layer 0 finds in it, ticked or not as layer 0 starts them."""
+def email_rows(email: EmailItem, rules: layer0.LinkRules | None = None) -> list[FileRow]:
+    """An email's row, then a row for each part email layer 0 finds in it, ticked or not as layer 0 starts them. ``rules``
+    are Settings' link lists (release 5.146, ``layer0.LinkRules.of``), which every caller reading an email passes."""
     return [FileRow(email.subject, email=email),
-            *(FileRow(p.name, p.url or None, part=p, of=email, keep=p.keep) for p in layer0.find(email).parts)]
+            *(FileRow(p.name, p.url or None, part=p, of=email, keep=p.keep) for p in layer0.find(email, rules).parts)]
 
 
 @dataclass
@@ -659,7 +660,7 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
                 title=f"Notes of {meet_name}" if draft.meeting else capture_title(source_kind, title_words, first_file, capture_id),
                 task=t, created_task=created, formatted=formatted,
                 summary=summary or None, summary_type=draft.summary_type if summary else None,
-                email_layer_0=" ".join(email_layer0_line(e, draft.files) for e in emails) or None,
+                email_layer_0=" ".join(email_layer0_line(e, draft.files, layer0.LinkRules.of(settings)) for e in emails) or None,
                 item="notes" if draft.meeting else None, meeting=meeting_made, page_made=draft.page_made,
             )
             # Each email, with what's typed on its row (round 7's item 93, release 5.74), named as the files below are written.
@@ -1022,10 +1023,11 @@ def save_answer(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings:
     return save_capture(conn, data_root, fs, settings, draft, at)
 
 
-def email_layer0_line(email: EmailItem, rows: list[FileRow]) -> str:
-    """Email layer 0's line for one email: the parts its rows kept, and what it and the unticked rows left out."""
+def email_layer0_line(email: EmailItem, rows: list[FileRow], rules: layer0.LinkRules | None = None) -> str:
+    """Email layer 0's line for one email: the parts its rows kept, and what it, the link lists (``rules``, release 5.146)
+    and the unticked rows left out."""
     parts = [r for r in rows if r.of is email and r.part]
-    return layer0.line(layer0.find(email), [r.part.kind for r in parts if r.keep], sum(not r.keep for r in parts))
+    return layer0.line(layer0.find(email, rules), [r.part.kind for r in parts if r.keep], sum(not r.keep for r in parts))
 
 
 def _parsed_title(conn: sqlite3.Connection, source: str, at: datetime, settings: Settings) -> str:
