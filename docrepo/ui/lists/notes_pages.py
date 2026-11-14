@@ -54,6 +54,9 @@ class NotesPages:
         # This page or All notes (release 5.140, the notes consolidation plan's decisions 602 to 605), its links, and
         # Alt+Left back to the All notes a double-click left.
         pane.notes_mode.connect(lambda mode: self._set_notes_mode(mode, pane))
+        # Move to task and Bring the lines back (release 5.143, the notes consolidation plan's decision 613).
+        notes.move_requested.connect(lambda: self.move_to_task(pane))
+        notes.bring_back.connect(lambda key: self.bring_lines_back(pane, key))
         pane.all_notes_link.connect(lambda href: self.on_link(QUrl(href)))
         QShortcut(QKeySequence("Alt+Left"), pane, context=Qt.ShortcutContext.WidgetWithChildrenShortcut, activated=self._back_to_all_notes)
         self._all_notes_from: tuple[str, int] | None = None
@@ -335,12 +338,99 @@ class NotesPages:
             self.ctx.keep_state(f"checklist_folded:{pane.task_id}", "1" if folded else "0")
 
     def open_ref(self, ref: str) -> None:
+        if ref.startswith(("moved:", "from:")):  # a pointer line, or a lead line (release 5.143): the other page, at the move
+            scheme, _, rest = ref.partition(":")
+            pair = notes_page.pair_of(rest)
+            if pair:
+                self.open_move(pair[0], pair[1], "from" if scheme == "moved" else "moved")
+            return
         if ref in self.model().captures:
             self.go_capture(ref)
         elif ref in self.model().documents:
             self.on_link(QUrl(f"doc:{ref}"))
         elif ref in self.model().tasks:  # a task line on a notes page (release 5.83)
             self.go_task(ref)
+
+    # ---- Move to task (release 5.143, the notes consolidation plan's decision 613) ----
+    def move_to_task(self, pane: TaskPane | None = None) -> None:
+        """Alt+Shift+M or the menu: the lines picked (or the caret's, with its list items) go to a task picked from the #
+        list, the page keeping a pointer line where they were; said with Undo."""
+        pane = pane or self.task_pane
+        task_id, notes = pane.task_id, pane.notes
+        if not task_id:
+            return
+        span = notes.line_span()
+        if span is None:
+            self.say("Put the caret on the lines to move, or pick them, then Move to task.")
+            return
+        notes.save_now()
+        start, end, lines = span
+        raw = notes_page.get(self.conn, task_id).split("\n")
+        end = min(end, len(raw))
+        expect = raw[start:end]
+        if [x.rstrip() for x in expect] != [x.rstrip() for x in lines[:len(expect)]]:
+            self.say("The page is still saving. Pick the lines again in a moment.", error=True)
+            return
+        from docrepo.ui.task_picker import TaskPicker
+
+        def picked(target: str | None) -> None:
+            if target:
+                self._move_lines(pane, task_id, start, end, target, expect)
+
+        self._picker = TaskPicker(self, self.model, None, keep=lambda t: t != task_id)
+        self._picker.picked.connect(picked)
+        self._picker.setMinimumWidth(360)
+        self._picker.popup(notes.viewport().mapToGlobal(notes.cursorRect().bottomLeft()))
+
+    def _move_lines(self, pane: TaskPane, task_id: str, start: int, end: int, target: str, expect: list[str]) -> None:
+        conn, ctx = self.conn, self.ctx
+        done = self._do(lambda: edits.move_lines(conn, ctx.data_root, ctx.fs, task_id, start, end, target, self._now(), expect))
+        if not isinstance(done, tuple):
+            return
+        out, moved = done
+        self.load_notes(task_id, pane)
+        undone: list[bool] = []
+
+        def undo() -> None:
+            if not undone:
+                undone.append(True)
+                self._do(lambda: edits.undo_move_lines(conn, ctx.data_root, ctx.fs, moved, self._now()))
+                if pane.task_id == task_id:
+                    self.load_notes(task_id, pane)
+
+        self.say_undo(out.message + (" Problems: " + " ".join(out.problems) if out.problems else ""), undo)
+
+    def bring_lines_back(self, pane: TaskPane | None, key: str) -> None:
+        """A pointer line's Bring the lines back: the moved lines back in its place, off the other page."""
+        pane = pane or self.task_pane
+        task_id = pane.task_id
+        if not task_id:
+            return
+        pane.notes.save_now()
+        out = self._do(lambda: edits.bring_lines_back(self.conn, self.ctx.data_root, self.ctx.fs, task_id, key, self._now()))
+        if isinstance(out, edits.Outcome):
+            self.load_notes(task_id, pane)
+            self.say(out.message)
+
+    def open_move(self, task_id: str, key: str, scheme: str) -> None:
+        """A pointer's other end: the page the lines went to, at their lead line (``from``), or the page they came from,
+        at its pointer (``moved``), on This page."""
+        if task_id not in self.model().tasks:
+            self.say("That task isn't there any more.", error=True)
+            return
+        folds = self._page_folds(task_id)
+        if folds.get("all_notes"):  # its own page shows the line (5.140's All notes is read only)
+            folds["all_notes"] = False
+            self.ctx.keep_state(f"page_folds:{task_id}", json.dumps(folds))
+        if self.sel != ("task", task_id):
+            self.go_task(task_id)
+        elif self.task_pane.all_mode:
+            self._show_notes_mode(task_id)
+        if scheme == "from" and key.startswith("C"):  # a meeting's #task section (decision 614): the item's block there
+            if self.task_pane.notes.go_to(key, self._refs_of(key)):
+                QTimer.singleShot(0, self.task_pane.scroll_to_caret)
+        elif self.task_pane.notes.go_to_key(key, scheme):
+            QTimer.singleShot(0, self.task_pane.scroll_to_caret)
 
     def _refs_of(self, capture_id: str) -> list[str]:
         """A capture's documents: how its block is found on a page when it has no caption (release 5.83)."""

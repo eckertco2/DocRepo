@@ -130,6 +130,133 @@ def save_page(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, task_id: st
     return out
 
 
+# ---- Move to task (release 5.143, the notes consolidation plan's decision 613) ----
+#: The kinds of line a move leaves where they are: what dates the page and ties text to its capture or to a move.
+_STAYS = ("caption", "lead", "pointer")
+
+
+@dataclass
+class MovedLines:
+    """A move, for its Undo: the two pages before and after it."""
+
+    source: str
+    target: str
+    key: str
+    source_before: str
+    source_after: str
+    target_before: str
+    target_after: str
+
+
+def _stays(x: notes_page.Line) -> bool:
+    return x.kind in _STAYS or (x.kind == "heading" and notes_page.day_of(x.text) is not None)
+
+
+def _save_pages(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, bodies: dict[str, str], at: datetime, out: Outcome) -> None:
+    """Pages changed together, as the owner's edits: docs.db and each day's version in one transaction, then the search
+    index, the descriptions and each Task.md."""
+    with transaction(conn):
+        for task_id, body in bodies.items():
+            notes_page.put(conn, task_id, body, at, by_owner=True)
+    search.index_pages(conn, list(bodies))
+    m = Model(conn)
+    for task_id, body in bodies.items():
+        sync_descriptions(conn, data_root, task_id, body)
+        try:
+            write_task_page(m, data_root, fs, task_id, at.date(), at)
+        except OSError as e:
+            out.problems.append(f"{m.task(task_id).title}'s Task.md wasn't updated ({type(e).__name__}).")
+
+
+def move_key(at: datetime, pages: Sequence[str]) -> str:
+    """A move's key: "M" and when it was made, to the second, with a number after it when these pages hold that one."""
+    key, n = "M" + at.strftime("%Y%m%d%H%M%S"), 2
+    while any(f"/{key})" in page for page in pages):
+        key, n = f"M{at.strftime('%Y%m%d%H%M%S')}-{n}", n + 1
+    return key
+
+
+def move_lines(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, source: str, start: int, end: int, target: str, at: datetime,
+               expect: Sequence[str] | None = None) -> tuple[Outcome, MovedLines]:
+    """Move to task (decision 613): the source page's lines ``start`` to ``end`` go onto the target's page, under their
+    day's heading (in date order, decision 113), led by a line saying where they came from; the source page keeps a pointer
+    line where they were. Day headings, captions and other moves' lines stay where they are. ``expect`` is the lines as
+    the editor had them: when the page holds something else there, nothing moves. capture.md isn't touched. One change,
+    as the owner's edit of both pages."""
+    m = Model(conn)
+    if source not in m.tasks or target not in m.tasks:
+        raise EditError("There's no such task.")
+    if source == target:
+        raise EditError("Those lines are on its page already.")
+    if m.task(target).discarded:
+        raise EditError(f"{m.task(target).title} is discarded. Bring it back first.")
+    src = notes_page.get(conn, source)
+    raw = src.split("\n") if src else []
+    if not 0 <= start < end <= len(raw) or (expect is not None and raw[start:end] != list(expect)):
+        raise EditError("The page has changed since those lines were picked. Pick them again.")
+    picked = [(i, notes_page.read_line(raw[i])) for i in range(start, end)]
+    moving = [i for i, x in picked if not _stays(x)]
+    while moving and not raw[moving[-1]].strip():
+        moving.pop()
+    while moving and not raw[moving[0]].strip():
+        moving.pop(0)
+    if not moving:
+        raise EditError("There are no lines of words there to move: day headings and captions stay with their page.")
+    tgt = notes_page.get(conn, target)
+    key = move_key(at, [src, tgt])
+    n = sum(1 for i in moving if raw[i].strip())
+    pointer = notes_page.pointer_line(f"{m.task(target).title} · {n} line{'s' if n != 1 else ''} moved there", target, key)
+    above = [notes_page.read_line(x) for x in raw[:start]]
+    day = next((d for x in reversed(above) if x.kind == "heading" and (d := notes_page.day_of(x.text))), at.date())
+    lead = notes_page.lead_line(f"Moved from the notes of {m.task(source).title} · {notes_page.day_title(day).rsplit(' ', 1)[0]}", source, key)
+    new_src = raw[:moving[0]] + [pointer] + [raw[i] for i in range(moving[0], len(raw)) if i not in set(moving)]
+    new_tgt = notes_page.add_block(tgt, [lead, *(raw[i] for i in moving)], day, True)
+    out = Outcome(f"Moved {n} line{'s' if n != 1 else ''} to {m.task(target).title}.")
+    after_src = "\n".join(new_src)
+    _save_pages(conn, data_root, fs, {source: after_src, target: new_tgt}, at, out)
+    log.info("moved %d lines from %s to %s", n, source, target)
+    return out, MovedLines(source, target, key, src, after_src, tgt, new_tgt)
+
+
+def undo_move_lines(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, moved: MovedLines, at: datetime) -> Outcome:
+    """Move to task's Undo: both pages as they were, while each is still as the move left it."""
+    if notes_page.get(conn, moved.source) != moved.source_after or notes_page.get(conn, moved.target) != moved.target_after:
+        raise EditError("A page has changed since the move, so Undo would undo that too. Bring the lines back from the pointer line instead.")
+    out = Outcome("Set back: the lines are where they were.")
+    _save_pages(conn, data_root, fs, {moved.source: moved.source_before, moved.target: moved.target_before}, at, out)
+    return out
+
+
+def bring_lines_back(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, source: str, key: str, at: datetime) -> Outcome:
+    """A pointer line's Bring the lines back (decision 613): the lines its move put on the other page, as they are there
+    now, back in the pointer's place, and off that page. When they aren't there any more, the pointer stays."""
+    src = notes_page.get(conn, source)
+    at_pointer = notes_page.pointer_index(src, key)
+    if at_pointer is None:
+        raise EditError("That pointer line isn't on the page any more.")
+    pair = notes_page.pair_of(notes_page.lines_of(src)[at_pointer].ref)
+    target = pair[0] if pair else ""
+    tgt = notes_page.get(conn, target) if target else ""
+    span = notes_page.moved_block(tgt, key)
+    if span is None:
+        raise EditError("The moved lines aren't on that page any more, so there's nothing to bring back.")
+    tgt_raw, src_raw = tgt.split("\n"), src.split("\n")
+    lines = tgt_raw[span[0] + 1:span[1]]
+    new_tgt = tgt_raw[:span[0]] + tgt_raw[span[1]:]
+    # A day heading left with nothing under it goes too, as a capture's block's does when it comes off (decision 106).
+    for i in range(len(new_tgt) - 1, -1, -1):
+        x = notes_page.read_line(new_tgt[i])
+        if x.kind == "heading" and notes_page.day_of(x.text):
+            nxt = next((notes_page.read_line(y) for y in new_tgt[i + 1:] if y.strip()), None)
+            if nxt is None or (nxt.kind == "heading" and notes_page.day_of(nxt.text)):
+                del new_tgt[i]
+    m = Model(conn)
+    out = Outcome(f"Brought {len(lines)} line{'s' if len(lines) != 1 else ''} back from {m.task(target).title if target in m.tasks else target}.")
+    _save_pages(conn, data_root, fs, {source: "\n".join(src_raw[:at_pointer] + lines + src_raw[at_pointer + 1:]),
+                                      target: "\n".join(new_tgt).strip("\n")}, at, out)
+    return out
+
+
 def default_page_description(task_title: str, name: str) -> str:
     """What a picture's or a file's description left empty on the page becomes (decision 125, release 5.5's rule)."""
     kind = "Pasted picture" if name.lower().endswith(notes_page.PICTURES) else "Attached document"
