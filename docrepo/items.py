@@ -645,11 +645,37 @@ def _read_yes_no(x: str, c: ReadWith, op: Operator) -> Value:
     return Value(problem="Say yes or no")
 
 
+#: Where a sentence of names splits, the split kept (release 5.144): ``_CHUNK``'s commas, semicolons, & and "and".
+_NAME_SEP = re.compile(r"(\s*(?:,|;|&|\band\b)\s*)", re.I)
+
+
+def _runs(x: str, known: Callable[[str], Any]) -> list[tuple[str, Any]]:
+    """A sentence's names, split as ``_chunks`` splits them, but with the longest run of parts that ``known`` finds taken
+    whole first, from the left: a label or a title may hold "and" or a comma. Each is (its words, what ``known`` gave or
+    None). Release 5.144 (decision 623) carries 5.133's decision 541, the whole sentence tried first, to each part, since
+    the value lists put in whole names: ``**agenda, @Tom and #Rigging and lifting`` is two agendas."""
+    bits = _NAME_SEP.split(x)
+    n = len(bits) // 2 + 1
+
+    def span(i: int, j: int) -> str:
+        return "".join(bits[2 * i:2 * j + 1]).strip()
+
+    out: list[tuple[str, Any]] = []
+    i = 0
+    while i < n:
+        j = next((j for j in range(n - 1, i, -1) if span(i, j) and known(span(i, j)) is not None), i)
+        words = span(i, j)
+        if words:
+            out.append((words, known(words)))
+        i = j + 1
+    return out
+
+
 def _read_labels(x: str, c: ReadWith, op: Operator) -> Value:
     known = {n.lower(): n for n in c.names.labels}
-    chunks = _chunks(x)
-    return (Value({op.task_field: [known.get(k.lower(), k) for k in chunks]}, ", ".join(known.get(k.lower(), f"{k} (new)") for k in chunks))
-            if chunks else _NOTHING)
+    runs = _runs(x, lambda w: known.get(w.lower()))
+    return (Value({op.task_field: [hit or words for words, hit in runs]}, ", ".join(hit or f"{words} (new)" for words, hit in runs))
+            if runs else _NOTHING)
 
 
 def _read_parents(x: str, c: ReadWith, op: Operator) -> Value:
@@ -698,14 +724,13 @@ def _target_name(target: str, names: Names) -> str:
 
 def _read_agenda(x: str, c: ReadWith, op: Operator) -> Value:
     """``**agenda,`` (release 5.133, decisions 540 and 541): the agendas its sentence names, the whole sentence first, since a
-    title may hold "and" or a comma, then each part. Your own agenda is Today, so you aren't one (decision 542)."""
-    whole = _agenda_target(x, c) if x.strip() else None
-    chunks = [x] if whole else _chunks(x)
-    if not chunks:
+    title may hold "and" or a comma, then each part, the longest run of parts that names one first (release 5.144,
+    decision 623). Your own agenda is Today, so you aren't one (decision 542)."""
+    runs = _runs(x, lambda w: _agenda_target(w, c))
+    if not runs:
         return _NOTHING
     found: list[str] = []
-    for chunk in chunks:
-        target = whole or _agenda_target(chunk, c)
+    for chunk, target in runs:
         if target is None:
             return Value(problem=f"No person, meeting or task called {chunk.strip().lstrip('@#').strip()}")
         if is_person(target) and target in c.names.person_by_id and c.names.person_by_id[target].me:
@@ -742,6 +767,7 @@ class Operator:
     gone: str = ""
     reference: bool = False  # a reference field, whose label is its name in Settings
     what: str = ""  # what it does, for the Syntax tab and the README, when its label doesn't say (release 5.133)
+    lists: str = ""  # the list its names are picked from as they're typed, "labels" or "agendas" (release 5.144)
 
 
 OPERATORS: tuple[Operator, ...] = (
@@ -777,11 +803,11 @@ OPERATORS: tuple[Operator, ...] = (
     Operator(("urgent",), label="Urgent", task_field="urgent", read=_read_yes_no),
     Operator(("plant event",), label="Plant event", task_field="plant_event", read=_read_yes_no),
     Operator(("meeting",), label="Meeting", task_field="meeting", read=_read_yes_no),
-    Operator(("label", "labels"), label="Labels", task_field="labels", adds=True, read=_read_labels),
+    Operator(("label", "labels"), label="Labels", task_field="labels", adds=True, read=_read_labels, lists="labels"),
     Operator(("parent", "parents"), label="Parents", task_field="parents", adds=True, whole=True, read=_read_parents),
     # Not a field (release 5.133): the task goes on each agenda named. Its sentence is all value, so a # names an agenda.
     Operator(("agenda", "agendas"), label="Agenda", task_field="agenda", adds=True, whole=True, read=_read_agenda,
-             what="Puts the task on each agenda named: a person's, a meeting's, a task's or Today"),
+             what="Puts the task on each agenda named: a person's, a meeting's, a task's or Today", lists="agendas"),
     # An old form still in the hands (decision 206): this entry comes out once the habit has gone.
     Operator(("date",), gone="Say which date: **start, **due, **deadline or **key date"),
 )
@@ -1338,9 +1364,11 @@ def discussed(r: Reading, subject: str | None) -> bool:
 # ---- typing aids: @ and # open a list that narrows as you type ----
 @dataclass(frozen=True)
 class Typing:
-    sigil: str  # "@", "@L." or "#"
+    sigil: str  # "@", "@L.", "#" or "**"; "" for a value list
     q: str
-    start: int  # where the sigil starts, in the text before the cursor
+    start: int  # where the sigil starts, in the text before the cursor (a value list's name, where it has none)
+    of: str = ""  # a value list's: the operator's ``lists``, "labels" or "agendas" (release 5.144)
+    lead: str = ""  # a value list's: the space a pick puts in first, when none follows the operator's comma
 
 
 @dataclass(frozen=True)
@@ -1349,19 +1377,125 @@ class Option:
     label: str
     sub: str = ""
     ref: str | None = None  # the person's or task's ID
-    add: bool = False  # a new person
+    add: bool = False  # a new person, or a new label
 
 
-def typing(before: str) -> Typing | None:
+#: A ``**name,`` sentence being typed, up to the cursor, with no ** after it (release 5.144): the name, the spaces after its
+#: comma, and its words so far. ``_value_typing`` says whether the name has a value list.
+_VALUE_TYPING = re.compile(r"(?:^|[\s(])\*\*([A-Za-z][^,*\n]{0,40}),( *)((?:(?!\*\*[A-Za-z])[^\n])*)\Z")
+
+
+def typing(before: str, names: Names | None = None) -> Typing | None:
     """The @, @L., # or ** word being typed, from the text before the cursor in its line. A ** list (release 5.92) is for
-    a name and its comma: once the comma's typed, the list goes."""
+    a name and its comma: once the comma's typed, the list goes. With ``names``, a ``**label,`` or ``**agenda,`` sentence
+    has a list too, of the names it takes (release 5.144, ``_value_typing``); an @ or # word in it keeps its own list,
+    unless it ran on past a comma or an "and" to words its list doesn't find."""
     s = _STAR_TYPING.search(before)
     if s:
         return Typing("**", s.group(2) or "", len(before) - len(s.group(1)) - len(s.group(2) or ""))
     m = _TYPING.search(before)
-    if not m or len(m.group(2)) > TYPING_LIMIT:
+    sig = Typing(m.group(1), m.group(2), len(before) - len(m.group(1)) - len(m.group(2))) if m and len(m.group(2)) <= TYPING_LIMIT else None
+    v = _value_typing(before, names) if names is not None else None
+    if v is not None and (sig is None or (sig.start < v.start and not options(sig, names))):
+        return v
+    return sig
+
+
+def _value_typing(before: str, names: Names) -> Typing | None:
+    """The name being typed in a ``**label,`` or ``**agenda,`` sentence (release 5.144, decisions 620 and 623): the words
+    after its comma, or after the last comma, ";", "&" or "and" in them, unless the whole of them starts a name on its
+    list, since a label or a title may hold "and" or a comma. None once the sentence has ended (a parameter's value is one
+    sentence, decision 204), when the operator has no list, or when the name starts with @ or #, whose lists are their own."""
+    m = _VALUE_TYPING.search(before)
+    op = _op_of(_norm(m.group(1)), names) if m else None
+    if op is None or not op.lists:
         return None
-    return Typing(m.group(1), m.group(2), len(before) - len(m.group(1)) - len(m.group(2)))
+    rest, start = m.group(3), m.start(3)
+    if len(sentences(_one_word(rest, names) + " x")) > 1:  # "x": a full stop at the cursor ends it too
+        return None
+    lead = "" if m.group(2) or rest else " "
+    if _NAME_SEP.search(rest) and not re.search(r"(?:^|\s)[@#]", rest) and _starts_one(rest, op.lists, names):
+        return Typing("", rest, start, op.lists, lead)
+    q = _NAME_SEP.split(rest)[-1]
+    if q[:1] in ("@", "#") or len(q) > TYPING_LIMIT:
+        return None
+    return Typing("", q, start + len(rest) - len(q), op.lists, lead)
+
+
+def _starts_one(q: str, lists: str, names: Names) -> bool:
+    """Whether ``q`` starts a name on the list, which may hold "and" or a comma."""
+    low = q.lower()
+    if lists == "labels":
+        every: Iterable[str] = names.labels
+    else:
+        every = ("Today", *(n for p in names.active for n in (p.name, *p.aliases)), *(x.title for x in names.tasks.values() if x.open))
+    return any(n.lower().startswith(low) for n in every)
+
+
+def _label_list(q: str, names: Names) -> list[Option]:
+    """The ``**label,`` list (release 5.144, decision 621): the labels a label picker offers (active ones, a sublabel
+    shown under its parent, "Production line › Line 1", and a parent never on its own), matched as the @ list matches
+    names, by a label's words and its parent's. A name that isn't a label offers to make it, as Save will."""
+    m = names.model
+    if m is not None:
+        known = [(lb.name, m.parent_label(lb.name) or "", ", ".join(k for k in lb.keywords if k.lower() != lb.name.lower()))
+                 for lb in m.active_labels() if not m.is_parent_label(lb.name)]
+    else:
+        known = [(n, "", "") for n in names.labels]
+    found = _ranked(q, [(x, (x[0], f"{x[1]} {x[0]}") if x[1] else (x[0],), ()) for x in known])  # "prod" finds Line 1, as the picker does
+    out = [Option(name, f"{parent} › {name}" if parent else name, keywords) for name, parent, keywords in found][:8]
+    typed = q.strip()
+    if typed and not any(typed.lower() == n.lower() for n in names.labels):
+        out.append(Option(typed, f"Create label “{typed}”", "Made when you save", add=True))
+    return out
+
+
+def _agenda_list(q: str, names: Names) -> list[Option]:
+    """The ``**agenda,`` list (release 5.144, decision 621): what the agenda picker offers. Before typing: Today, the open
+    meetings, then people, as the @ list has them. Typing: Today, people and any open task, matched as the @ and # lists
+    match them, the names that start with what's typed first, then a person ahead of a task, as a bare name is read
+    (decision 541). You aren't on it: your own agenda is Today (decision 542). A name that's on no list finds nothing, as
+    in the # list: an agenda is never a new person."""
+    people = [p for p in names.active if not p.me]
+    m = names.model
+    if not q.strip():
+        meetings = [t for t in m.open_meetings() if t.id in names.tasks] if m is not None else []
+        return ([Option("Today", "Today", "Your own agenda")] + [Option(t.title, t.title, "Meeting", t.id) for t in meetings]
+                + [Option(p.name, p.name, " · ".join(["Person", *p.aliases]), p.id) for p in people][:7])
+    tasks = [x for x in names.tasks.values() if x.open]
+    found = _ranked(q, [("today", ("Today",), ()), *((p, (p.name, *p.aliases), ()) for p in people),
+                        *((x, (x.title, x.id), ancestor_titles(m, x.id)) for x in tasks)])
+    out = []
+    for x in found[:8]:
+        if x == "today":
+            out.append(Option("Today", "Today", "Your own agenda"))
+        elif isinstance(x, RefTask):
+            meeting = m is not None and x.id in m.tasks and m.tasks[x.id].meeting
+            out.append(Option(x.title, x.title, "Meeting" if meeting else "", x.id))
+        else:
+            out.append(Option(x.name, x.name, " · ".join(["Person", *x.aliases]), x.id))
+    return out
+
+
+def inserted(t: Typing, option: Option) -> str:
+    """What a pick puts in for what's typed: the sigil, the name and a space. A value list's pick is what the @ or # list
+    would put in, @ for a person and # for a task, so the line reads as if typed so (release 5.144, decision 622); a label,
+    a new one or Today goes in as it is."""
+    return t.lead + _sigil(t, option) + option.value + " "
+
+
+def remembered(t: Typing, option: Option) -> str | None:
+    """The key a pick's ID is kept under, ahead of names alike ("@tom becker", "#rigging plan"), or None for a pick with
+    no ID."""
+    if not option.ref:
+        return None
+    return (_sigil(t, option) if t.of else "#" if t.sigil == "#" else "@") + option.value.lower()
+
+
+def _sigil(t: Typing, option: Option) -> str:
+    if t.of == "agendas" and option.ref:
+        return "@" if is_person(option.ref) else "#"
+    return t.sigil
 
 
 def _words(name: str) -> set[str]:
@@ -1441,6 +1575,10 @@ def options(t: Typing, names: Names) -> list[Option]:
     after a space go on narrowing it, matching the start of any word of a name, in any order; a task's words also match
     the names on its path (round 7's item 91, release 5.74)."""
     q = t.q.lower()
+    if t.of == "labels":
+        return _label_list(t.q, names)
+    if t.of == "agendas":
+        return _agenda_list(t.q, names)
     if t.sigil == "**":
         return star_options(t.q, names)
     if t.sigil == "#":
