@@ -152,7 +152,7 @@ def test_a_folder_is_kept(window, tmp_path):
     window.set_task("T000008")
     window.add_paths([str(folder)])
     [entry] = window.files
-    assert entry.row.path == str(folder) + "\\" and entry.copy.isHidden() and entry.extract.isHidden()
+    assert entry.row.path == str(folder) + "\\" and entry.switch.fixed and not entry.switch.saved() and entry.extract.isHidden()
     assert entry.what == "What's in this folder?" and "reads nothing in it" in entry.note.text()
     assert held_text([entry.row]) == "1 folder"
     window.add_paths([str(folder)])  # once only

@@ -21,7 +21,7 @@ from docrepo.ui.result_list import (  # noqa: E402
 
 TODAY = date(2026, 10, 8)
 PDF = Record("file", "D000001", "T000001", "2026-10-07 09:15:00", "Impeller datasheet rev B.pdf", desc="Rev B", type="pdf",
-             source="Tracked original", came="an email from Ann Example")
+             source="Linked file", came="an email from Ann Example")
 ATTACHED = Record("file", "D000002", "T000001", "2026-10-06 10:00:00", "Lift plan.docx", type="doc", source="Email attachment",
                   came="an email from Sam Example")
 LINK = Record("file", "D000003", "T000001", "2026-10-05 10:00:00", "Vendor portal", type="link", source="Link", came="a Note")

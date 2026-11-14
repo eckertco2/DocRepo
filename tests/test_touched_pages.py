@@ -110,10 +110,11 @@ def old_versions_of(m: Model, task_id: str) -> list[Version]:
 def old_files_of(m: Model, task_id: str) -> list[FileEntry]:
     from docrepo.links import is_folder, is_link
 
-    out = [FileEntry("Old version" if f.old else "Saved copy", f.name, f.document, task_id) for f in m.copies if f.task == task_id]
-    for doc_id in dict.fromkeys(d for c in old_notes_of(m, task_id) for d in c.document_ids):
+    out = [FileEntry("Old version" if f.old else "Saved file", f.name, f.document, task_id) for f in m.copies if f.task == task_id]
+    saved = {f.document for f in m.copies if f.task == task_id and not f.old}  # release 5.145: each file once
+    for doc_id in dict.fromkeys(d for c in old_notes_of(m, task_id) for d in c.document_ids if d not in saved):
         d = m.documents[doc_id]
-        kind = "Link" if is_link(d.original) else "Folder" if is_folder(d.original) else "Tracked original" if d.original else "Email attachment"
+        kind = "Link" if is_link(d.original) else "Folder" if is_folder(d.original) else "Linked file" if d.original else "Email attachment"
         out.append(FileEntry(kind, d.name, doc_id, task_id))
     return out
 

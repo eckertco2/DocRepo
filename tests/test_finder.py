@@ -48,13 +48,15 @@ def test_a_tasks_records_take_in_its_subtasks(sample_root):
     by = {r.id: r for r in recs}
     assert overview.counts(recs) == {"all": 24, "file": 2, "email": 1, "note": 14, "task": 7}
     datasheet = by["D000001"]
+    # An attachment saved on the task is a saved file (release 5.145, decision 631): that file is it, and the email is
+    # where it came from.
     assert (datasheet.kind, datasheet.type, datasheet.source, datasheet.came, datasheet.sender) == (
-        "file", "pdf", "Email attachment", "Email from Norvane Pumps (vendor)", "Norvane Pumps (vendor)")
-    assert datasheet.path.endswith("attachments\\Impeller datasheet rev B.pdf") or datasheet.path.endswith("attachments/Impeller datasheet rev B.pdf")
-    assert datasheet.copy.endswith("2026-09-10 Impeller datasheet rev B.pdf")  # its saved copy
+        "file", "pdf", "Saved file", "Email from Norvane Pumps (vendor)", "Norvane Pumps (vendor)")
+    assert datasheet.path == datasheet.copy and datasheet.copy.endswith("2026-09-10 Impeller datasheet rev B.pdf")
     procedure = by["D000002"]
-    assert (procedure.task, procedure.source, procedure.came) == ("T000008", "Tracked original", "a Note")
-    assert procedure.path.startswith("\\\\fileserver\\eng\\")
+    assert (procedure.task, procedure.source, procedure.came) == ("T000008", "Saved file", "a Note")
+    assert procedure.path == procedure.copy and procedure.path.endswith("2026-09-22 Installation procedure.docx")
+    assert "impeller upgrade" in procedure.n_src  # still found by the folders it came from
     email = by["C000003"]
     assert email.kind == "email" and email.desc == "From Norvane Pumps (vendor) · 1 attachment" and "Delivery is confirmed" in email.text
     assert by["T000008"].kind == "task" and by["T000008"].desc.startswith("In progress · due 2026-10-30")

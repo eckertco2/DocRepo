@@ -1,4 +1,4 @@
-"""Search in the browse tool: tasks, captures, documents, saved copies, people and labels.
+"""Search in the browse tool: tasks, captures, documents, saved files, people and labels.
 
 A capture's content text is in its capture.md and a document's text in its
 extracted.txt, so their text is copied into a search index in docs.db
@@ -43,7 +43,7 @@ log = logging.getLogger(__name__)
 LIMIT = 40
 #: "Tagged label" comes first (release 5.79, decision 378): a tag typed however it's written names its label. "Decision" is
 #: the captures ``type:decision`` keeps (release 5.124): a search without it lists a decision with the other captures.
-GROUPS = ("Tagged label", "Task", "Notes", "Capture", "Decision", "Document", "Saved copy", "Person", "Label")
+GROUPS = ("Tagged label", "Task", "Notes", "Capture", "Decision", "Document", "Saved file", "Person", "Label")
 
 
 #: The most for each kind when a search says where to look: fewer kinds are listed, so each may be longer.
@@ -88,15 +88,15 @@ class Scope:
         return (self.since is None or d >= self.since.isoformat()) and (self.before is None or d < self.before.isoformat())
 
 
-_FILES = frozenset({"Document", "Saved copy"})
+_FILES = frozenset({"Document", "Saved file"})
 #: What a task holds: a search in a task lists these, and never people or labels.
-_IN_TASK = frozenset({"Task", "Notes", "Capture", "Document", "Saved copy"})
+_IN_TASK = frozenset({"Task", "Notes", "Capture", "Document", "Saved file"})
 #: What may have a sender (``from:``), and what has a day (the dates): people, labels and tagged labels have neither.
-_SENT = frozenset({"Capture", "Document", "Saved copy"})
-_DATED = frozenset({"Task", "Notes", "Capture", "Document", "Saved copy"})
+_SENT = frozenset({"Capture", "Document", "Saved file"})
+_DATED = frozenset({"Task", "Notes", "Capture", "Document", "Saved file"})
 #: What may mention a tagged label (``tag:``).
 _MENTIONS = frozenset({"Task", "Notes", "Capture", "Document"})
-_MAIL = Scope("emails", frozenset({"Capture", "Document", "Saved copy"}), frozenset({"mail"}), emails=True)
+_MAIL = Scope("emails", frozenset({"Capture", "Document", "Saved file"}), frozenset({"mail"}), emails=True)
 #: What ``type:`` may name besides File search's file types (decision 449), each in the singular.
 _KINDS: dict[str, Scope] = {
     "file": Scope("files", _FILES), "document": Scope("files", _FILES),
@@ -108,7 +108,7 @@ _KINDS: dict[str, Scope] = {
     "person": Scope("people", frozenset({"Person"})), "people": Scope("people", frozenset({"Person"})),
     "label": Scope("labels", frozenset({"Label"})),
     "tag": Scope("tagged labels", frozenset({"Tagged label"})), "tagged": Scope("tagged labels", frozenset({"Tagged label"})),
-    "copy": Scope("saved copies", frozenset({"Saved copy"})), "saved": Scope("saved copies", frozenset({"Saved copy"})),
+    "copy": Scope("saved files", frozenset({"Saved file"})), "saved": Scope("saved files", frozenset({"Saved file"})),
     "decision": Scope("decisions", frozenset({"Capture"}), decisions=True),  # release 5.124, decision 476
 }
 _TYPE_SCOPE_NAMES = {"doc": "Word files", "sheet": "Excel files", "slides": "PowerPoint files", "pdf": "PDF files", "picture": "pictures",
@@ -479,7 +479,7 @@ def _bodies(conn: sqlite3.Connection, kind: str, ids: set[str]) -> list[tuple[st
 
 class _Keeper:
     """What a scope's filters keep, item by item (decision 451). from: an email capture by its sender, a file by the email
-    it came with or by its source. The dates: a capture's saved day, a file's first capture's day, a saved copy's day, a
+    it came with or by its source. The dates: a capture's saved day, a file's first capture's day, a saved file's day, a
     task's created day, a notes page's last edit. is:pinned: files pinned on a task. tag: what mentions a tagged label.
     What each needs is read once, and only when a filter needs it."""
 
@@ -540,7 +540,7 @@ class _Keeper:
         if kind == "link":
             return "Link"
         if d.original:
-            return "Pasted on the notes page" if c is not None and c.page_made and kind == "picture" else "Tracked original"
+            return "Pasted on the notes page" if c is not None and c.page_made and kind == "picture" else "Linked file"
         return "Email attachment"
 
     def document(self, doc_id: str) -> bool:
@@ -554,7 +554,7 @@ class _Keeper:
 
         c = self.m.captures.get(f.from_capture) if f.from_capture else None
         day = dated_name(f.name)[0] or (c.saved if c is not None else None)
-        return ((not self.s.sources or "Saved copy" in self.s.sources) and self._sent_by(c) and self.s.on(day)
+        return ((not self.s.sources or "Saved file" in self.s.sources) and self._sent_by(c) and self.s.on(day)
                 and (not self.s.pinned or f.document in self.pinned))
 
 
@@ -572,7 +572,7 @@ def search(conn: sqlite3.Connection, model: Model, query: str, today: date | Non
     m, out = model, []
     keep = _Keeper(conn, m, scope) if scope is not None else None
     in_tasks = scope.tasks if scope else None
-    # The documents on a scope's tasks: those their captures brought, and their saved copies.
+    # The documents on a scope's tasks: those their captures brought, and their saved files.
     on_tasks = {d for c in m.captures.values() if c.task in in_tasks for d in c.document_ids} | {
         f.document for f in m.copies if f.task in in_tasks} if in_tasks is not None else set()
 
@@ -639,9 +639,9 @@ def search(conn: sqlite3.Connection, model: Model, query: str, today: date | Non
         d = m.documents[did]
         out.append(Result("Document", "doc", d.id, d.name, f"{d.id} · {d.description or d.status}", snippet(_after_title(body), words)))
     copies = [f for f in m.copies if not m.task(f.task).discarded and _has_all(words, f.name) and typed(f.name) and here(f.task)
-              and (keep is None or keep.copy(f))] if lists("Saved copy") else []
+              and (keep is None or keep.copy(f))] if lists("Saved file") else []
     for f in copies[:limit]:
-        out.append(Result("Saved copy", "task", f.task, f.name, f"In {m.task(f.task).title}"))
+        out.append(Result("Saved file", "task", f.task, f.name, f"In {m.task(f.task).title}"))
     # People by their email, group and role too (release 5.9, M0031, M0033, M0038).
     people = [p for p in m.people.values() if _has_all(words, p.id, p.name, *p.aliases, p.email, p.group, p.role)] if lists("Person") else []
     for p in people[:limit]:

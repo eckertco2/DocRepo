@@ -245,8 +245,8 @@ def _fill(c: CaptureWindow, row: FileRow) -> None:
         entry.desc.setText(row.description)
     if entry.email_desc is not None:
         entry.email_desc.setText(row.description)
-    if entry.copy is not None:
-        entry.copy.setChecked(row.save_a_copy)
+    if entry.switch is not None:  # Saved or linked, as it was (release 5.145, decision 630)
+        entry.switch.set_saved(row.save_a_copy)
     if entry.extract is not None:
         entry.extract.setChecked(row.extract)
 

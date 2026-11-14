@@ -208,7 +208,7 @@ The table of contents at the top of the data root, with the open agendas.
 
 ## Tasks/T000008/Task.md
 
-A subtask with a saved copy, an old version, a document version, a summary, status changes and a closed agenda item.
+A subtask with a saved file, an old version, a document version, a summary, status changes and a closed agenda item.
 
 ```markdown
 # Installation
@@ -280,9 +280,8 @@ Procedure rev 2 replaces the dial-indicator alignment with a laser alignment to 
 
 ## Files
 
-- Saved copy: [2026-09-22 Installation procedure.docx](Files/2026-09-22%20Installation%20procedure.docx) · D000002
+- Saved file: [2026-09-22 Installation procedure.docx](Files/2026-09-22%20Installation%20procedure.docx) · D000002
 - Old version: [2026-09-22 Installation procedure (replaced 2026-10-05).docx](Files/_old%20versions/2026-09-22%20Installation%20procedure%20%28replaced%202026-10-05%29.docx) · D000002
-- Tracked original: `\\fileserver\eng\Line 1\Impeller upgrade\Installation procedure.docx` · D000002 · [text](../../Documents/D000002/extracted.txt)
 ```
 
 ## Tasks/T000010/Task.md

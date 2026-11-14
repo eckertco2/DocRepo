@@ -211,7 +211,7 @@ def _picture(window) -> None:
 def test_meeting_notes_take_files_as_any_capture_does(window, ctx, tmp_path, monkeypatch):
     """Attach's Files…, a drop on the notes, a path and a link each on its own line, the email selected in Outlook and a
     pasted picture: each row shows under the notes while they're expanded, and Save keeps them on the notes, on the
-    meeting, with Save a copy in the meeting's Files folder."""
+    meeting, with a saved file in the meeting's Files folder."""
     from PySide6.QtWidgets import QFileDialog
 
     from docrepo import captures, outlook
@@ -242,8 +242,8 @@ def test_meeting_notes_take_files_as_any_capture_does(window, ctx, tmp_path, mon
     assert window.files[0].desc.placeholderText() == (
         "What's in this file? Left empty: Business team meeting 8 Oct – Attached document – Pump curve.txt")
     assert "and keeps these notes on it, with 1 email, 3 files, 1 folder and 1 link." in window.does.text()
-    assert window.copy_hint.text().startswith("Save a copy puts the file in the meeting's Files folder, once Save makes the meeting,")
-    window.files[0].copy.setChecked(True)
+    assert window.files_line.text() == "Saved files go in the meeting's Files folder, once Save makes the meeting."
+    window.files[0].switch.buttons[True].click()  # Saved (release 5.145, decision 630)
     window.save()
     assert not window.isVisible() and ctx.messages[-1][1].startswith("Saved C000026. Made the meeting Business team meeting 8 Oct")
     m = Model(ctx.conn)

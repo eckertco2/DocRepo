@@ -63,7 +63,7 @@ def test_the_heading_names_the_filters(browse):
     run(browse, f"type:pdf #{title} datasheet")
     assert browse.view == "search"
     assert browse.pane_title.text().startswith(f"Search PDF files in {title}: datasheet")
-    assert ("doc", "D000001") in keys(browse)  # the PDF, and its saved copy, whose row opens its task
+    assert ("doc", "D000001") in keys(browse)  # the PDF, and its saved file, whose row opens its task
     assert all(k == ("doc", "D000001") or k == ("task", "T000001") for k in keys(browse))
     run(browse, "from:zzzqqq")
     assert any("No email's sender has “zzzqqq” in it." in x for x in lines(browse))

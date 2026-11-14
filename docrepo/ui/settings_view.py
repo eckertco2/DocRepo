@@ -770,7 +770,7 @@ class SettingsView(QWidget):
             ("Troubleshooting report", "DocRepo's versions, a check of reading the email selected in Outlook, recent drags and recent "
                                        "problems. It leaves out email text, names and addresses. Select an email in Outlook first.",
              _row(report, self.try_category, self.try_t_mail)),
-            ("Check the data root", "Captures whose capture.md is missing, documents and saved copies whose files aren't there, the "
+            ("Check the data root", "Captures whose capture.md is missing, documents and saved files that aren't there, the "
                                     "search index, and SQLite's own check of docs.db. Nothing is changed: each line says what you can do.",
              _row(check)),
         ])

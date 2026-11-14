@@ -7,7 +7,7 @@ command). In the backup folder:
 - ``Database\\docs-1.db`` to ``docs-<backup_keep>.db``: copies of docs.db, made
   with SQLite's backup API, so they're whole even while DocRepo is writing.
   Each backup overwrites the oldest copy (or fills an empty slot).
-- ``Files\\``: the data root's files as they are there (captures, saved copies,
+- ``Files\\``: the data root's files as they are there (captures, saved files,
   extracted text, the pages, the settings and the mods log). New and changed
   files are copied; nothing is ever removed, since DocRepo never deletes.
 - ``backup-log.md``: one line per backup, and how to restore from it.

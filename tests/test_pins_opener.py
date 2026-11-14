@@ -52,16 +52,16 @@ def record(**fields) -> Record:
 
 
 def test_open_plans_by_what_a_file_is():
-    assert opener.plan(record(type="doc", source="Tracked original", path="\\\\server\\eng\\Scope.docx")) == opener.Plan("open", "\\\\server\\eng\\Scope.docx")
+    assert opener.plan(record(type="doc", source="Linked file", path="\\\\server\\eng\\Scope.docx")) == opener.Plan("open", "\\\\server\\eng\\Scope.docx")
     attachment = opener.plan(record(type="pdf", source="Email attachment", path="C:\\data\\Captures\\x\\attachments\\Curve.pdf"))
     assert attachment.action == "show" and "not opened" in attachment.reason
     saved = opener.plan(record(type="pdf", source="Email attachment", path="C:\\a\\Curve.pdf", copy="C:\\data\\Tasks\\T1\\Files\\Curve.pdf"))
     assert saved == opener.Plan("open", "C:\\data\\Tasks\\T1\\Files\\Curve.pdf")  # saved to the repo, so it opens
     link = opener.plan(record(type="link", source="Link", path="https://example.sharepoint.com/sites/x"))
     assert link.action == "open_link"  # in the browser, on a click (release 5.67, decision 314); it was copy_link
-    macro = opener.plan(record(type="sheet", source="Tracked original", path="\\\\server\\eng\\Tool.xlsm"))
+    macro = opener.plan(record(type="sheet", source="Linked file", path="\\\\server\\eng\\Tool.xlsm"))
     assert macro.action == "show" and ".xlsm" in macro.reason
-    program = opener.plan(record(type="other", source="Tracked original", path="\\\\server\\eng\\setup.exe"))
+    program = opener.plan(record(type="other", source="Linked file", path="\\\\server\\eng\\setup.exe"))
     assert program.action == "show"
     email = record(kind="email", type="mail", capture="C000003")
     assert opener.plan(email, lambda r: "C:\\data\\Captures\\C000003\\email.msg") == opener.Plan("open", "C:\\data\\Captures\\C000003\\email.msg")

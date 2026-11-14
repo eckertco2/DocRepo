@@ -26,7 +26,7 @@ def test_it_finds_documents_by_their_text_people_by_alias_and_labels(sample_root
     assert ("Document", "D000002") in found(conn, "laser-align")  # in its extracted.txt
     assert found(conn, "Thomas") == [("Person", "P003")]
     assert ("Label", "Safety") in found(conn, "walkthrough")
-    assert ("Saved copy", "T000001") in found(conn, "datasheet rev")
+    assert ("Saved file", "T000001") in found(conn, "datasheet rev")
 
 
 def test_results_carry_the_text_around_the_match(sample_root):
@@ -99,7 +99,7 @@ def test_read_takes_the_filters_and_the_task(sample_root):
     assert read("type:pdf type:word datasheet") == ("PDF files and Word files", "datasheet")
     assert read("pump .xlsx") == ("Excel files", "pump")
     assert read("type:people buyer") == ("People", "buyer")
-    assert read("type:copies rev") == ("Saved copies", "rev")
+    assert read("type:copies rev") == ("Saved files", "rev")
     assert read("type:emails") == ("Emails", "")  # the filter alone
     assert read("type:PDFs datasheet") == ("PDF files", "datasheet")
     assert read("from:tom after:1 sep pump") == ("from tom after 1 Sep", "pump")
@@ -175,7 +175,7 @@ def test_type_lists_only_its_own(sample_root):
     m = Model(conn)
     for typed, kind in (("pdf", "pdf"), ("excel", "sheet"), ("word", "doc"), ("links", "link")):
         for g, i in found(conn, f"type:{typed}"):
-            assert g in ("Document", "Saved copy")
+            assert g in ("Document", "Saved file")
             if g == "Document":
                 assert overview.file_type(m.documents[i].name, m.documents[i].original) == kind
     assert set(found(conn, "type:pdf type:word")) == set(found(conn, "type:pdf")) | set(found(conn, "type:word"))
@@ -203,7 +203,7 @@ def test_the_other_filters_keep_what_they_name(sample_root):
     sender = overview.sender_of(body)
     hits = found(conn, f"from:{sender.split()[0].lower()}")
     assert ("Capture", email.id) in hits
-    assert all(g in ("Capture", "Document", "Saved copy") for g, _ in hits)
+    assert all(g in ("Capture", "Document", "Saved file") for g, _ in hits)
     for g, i in hits:
         if g == "Capture":
             assert m.captures[i].source == "outlook_email"
@@ -240,8 +240,8 @@ def test_a_task_scope_keeps_to_the_task_and_what_is_under_it(sample_root):
     listed = found(conn, f"#{here}")
     assert ("Task", "T000008") in listed and ("Document", link) in listed
     for g, i in listed:
-        assert g in ("Task", "Notes", "Capture", "Document", "Saved copy")
+        assert g in ("Task", "Notes", "Capture", "Document", "Saved file")
         if g == "Capture":
             assert m.captures[i].task in family
-        if g in ("Task", "Notes", "Saved copy"):
+        if g in ("Task", "Notes", "Saved file"):
             assert i in family

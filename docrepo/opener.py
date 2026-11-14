@@ -1,10 +1,12 @@
 """Open (release 5.35; the task overview design's decision 158): what DocRepo may do when the owner opens a file from
 the Task view.
 
-- A **tracked original** or a **saved copy** opens in its own program, through Windows' "open", but only when its type
-  is on the allow-list of documents below: never a macro-enabled file, a program, a script or a shortcut.
-- An **email attachment** isn't opened, keeping the hard rule against launching attachments: it's shown in File
-  Explorer, where Windows' own protections apply. One saved to the repo opens as its saved copy.
+- A **linked file** or a **saved file** (a tracked original and a saved copy until release 5.145) opens in its own
+  program, through Windows' "open", but only when its type is on the allow-list of documents below: never a
+  macro-enabled file, a program, a script or a shortcut.
+- An **email attachment** kept in its capture's folder isn't opened, keeping the hard rule against launching
+  attachments: it's shown in File Explorer, where Windows' own protections apply. One saved in DocRepo (every one a
+  filed capture brings since release 5.145, the save or link plan's decision 629) is a saved file, and opens as one.
 - An **email** (its ``.msg``, kept in its capture's folder) opens in Outlook, which shows it read-only.
 - A **link** opens in the default browser, only on the owner's click (release 5.67, round 6's decision 314; until then
   it was only copied): ``start_link`` hands an http or https address to Windows' "open", as clicking a link in
@@ -69,7 +71,8 @@ def plan(r: Record, email_file: Callable[[Record], str] = lambda r: "") -> Plan:
     if r.source == "Email attachment":
         if r.copy and openable(r.copy):
             return Plan("open", r.copy)
-        return Plan("show", r.path, "Email attachments are shown in File Explorer, not opened from DocRepo. Save it to the repo to open it here.")
+        return Plan("show", r.path, "An email attachment kept in its capture's folder is shown in File Explorer, not opened from DocRepo. "
+                                    "Filed to a task, a capture's attachments are saved in its Files folder, and open from there.")
     path = r.path or r.copy
     if not openable(path):
         ext = Path(path).suffix.lower() or "no extension"

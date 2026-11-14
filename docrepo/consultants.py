@@ -34,7 +34,7 @@ MANIFEST = "manifest.json"
 INDEX = "Index.md"
 MAP_PAGES = ("catalogue", "vocabulary", "topics", "exam")
 #: The kinds of file a consultant reads; an old version, a link and a folder aren't among them.
-KINDS = ("Saved copy", "Tracked original", "Email attachment")
+KINDS = ("Saved file", "Linked file", "Email attachment")
 #: The longest map page DocRepo reads.
 MAX_PAGE_BYTES = 2 * 1024 * 1024
 #: How many of a document's sections its outline in Index.md lists.
@@ -78,7 +78,7 @@ class SourceFile:
 
 
 def scope_files(m: Model, data_root: Path, task_id: str) -> list[SourceFile]:
-    """The files of a task and every task under it, each document once: saved copies, tracked originals and email
+    """The files of a task and every task under it, each document once: saved files, linked files and email
     attachments. Discarded tasks are left out."""
     out: list[SourceFile] = []
     seen: set[str] = set()
@@ -90,9 +90,9 @@ def scope_files(m: Model, data_root: Path, task_id: str) -> list[SourceFile]:
                 continue
             seen.add(f.document)
             d = m.documents[f.document]
-            if f.kind == "Saved copy":
+            if f.kind == "Saved file":
                 path = data_root / "Tasks" / tid / "Files" / f.name
-            elif f.kind == "Tracked original":
+            elif f.kind == "Linked file":
                 path = Path(d.original) if d.original else None
             else:
                 path = data_root.joinpath(*capture_dir(m.captures[d.capture]), "attachments", f.name) if d.capture in m.captures else None

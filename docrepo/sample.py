@@ -118,7 +118,7 @@ def load_sample(conn: sqlite3.Connection, data: dict[str, Any] | None = None) ->
 def write_sample_files(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, data: dict[str, Any] | None = None) -> int:
     """Write the sample captures' capture.md files and the documents' extracted.txt. Returns how many were written.
 
-    The sample's binary files (emails, attachments and saved copies) aren't made.
+    The sample's binary files (emails, attachments and saved files) aren't made.
     """
     data = data or read_sample()
     model = Model(conn)

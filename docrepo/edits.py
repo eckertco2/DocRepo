@@ -2,7 +2,7 @@
 task and its notes page.
 
 Each change happens in one database transaction, then its files are written:
-the capture's capture.md, any saved copies, the search index and the generated
+the capture's capture.md, any saved files, the search index and the generated
 pages. A file that fails never undoes the change; it's reported and logged.
 
 A capture's capture.md is written once and then only ever filed (the hard rules, since release 5.25): its title
@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-from collections.abc import Callable, Collection, Sequence
+from collections.abc import Callable, Collection, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
@@ -21,7 +21,6 @@ from docrepo import activity, agenda, bulk, captures, notes_page, people, priori
 from docrepo.config import Settings
 from docrepo.dates import long_date, stamp, to_date, workday_numbers
 from docrepo.db import transaction
-from docrepo.links import is_link
 from docrepo.lists import reminders_due
 from docrepo.model import TODAY, Model, is_person
 from docrepo.pages import write_pages, write_task_page
@@ -341,29 +340,21 @@ def add_again(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, capture_id:
     return out
 
 
-# ---- saved copies ----
-def source_of(data_root: Path, model: Model, document_id: str) -> Path | None:
-    """Where a document's file is: its tracked original, or an email attachment in its capture's folder. A link has
-    no file, so None: DocRepo never hands one to File Explorer, which would open it in the browser."""
-    d = model.documents[document_id]
-    if is_link(d.original):
-        return None
-    if d.original:
-        return Path(d.original)
-    if d.capture and d.capture in model.captures:
-        c = model.captures[d.capture]
-        return captures.capture_folder(data_root, c.id, c.saved) / "attachments" / d.name
-    return None
+# ---- saved files (release 5.145, the save or link plan's decisions 629 to 634) ----
+def source_of(data_root: Path, model: Model, document_id: str, skip: Iterable[tuple[str, str]] = ()) -> Path | None:
+    """Where a document's file is: its saved file once it has one, else where it's linked, else an email attachment in its
+    capture's folder (``captures.file_of``). A link has no file, so None."""
+    return captures.file_of(data_root, model, document_id, skip)
 
 
-def plan_copies(conn: sqlite3.Connection, task_id: str, documents: list[str], day: str, from_capture: str) -> list[tuple[str, str]]:
-    """Record a saved copy in the task's Files folder for each document. Returns (document, file name) for each."""
-    from docrepo.save import copy_name  # save imports this module
-
-    taken = {r["name"] for r in conn.execute("SELECT name FROM saved_copies WHERE task = ?", (task_id,))}
+def plan_copies(conn: sqlite3.Connection, task_id: str, documents: list[str], day: str, from_capture: str,
+                data_root: Path | None = None) -> list[tuple[str, str]]:
+    """Record a saved file in the task's Files folder for each document. Returns (document, file name) for each. With
+    ``data_root``, a name already taken by a file in the folder isn't used either."""
+    taken = captures.files_taken(conn, data_root, task_id)
     out = []
     for doc in documents:
-        name = copy_name(day, conn.execute("SELECT name FROM documents WHERE id = ?", (doc,)).fetchone()["name"], taken)
+        name = captures.copy_name(day, conn.execute("SELECT name FROM documents WHERE id = ?", (doc,)).fetchone()["name"], taken)
         taken.add(name)
         captures.add_saved_copy(conn, task=task_id, name=name, document=doc, from_capture=from_capture)
         out.append((doc, name))
@@ -371,22 +362,32 @@ def plan_copies(conn: sqlite3.Connection, task_id: str, documents: list[str], da
 
 
 def copy_files(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, task_id: str, copies: list[tuple[str, str]], problems: list[str]) -> None:
-    """Copy each planned saved copy into the task's Files folder."""
+    """Put each planned saved file into the task's Files folder, when an unfiled capture is filed (decisions 629 and 631).
+    A file the capture kept in its own folder (an attachment, or a file dropped on Save) is moved there, so it stays
+    one file of DocRepo's own; one it didn't keep there (from before release 5.145, when Save a copy waited for filing)
+    is copied from where it is."""
     model = Model(conn)
+    planned = {(task_id, name) for _, name in copies}
     for doc, name in copies:
-        source = source_of(data_root, model, doc)
+        source = source_of(data_root, model, doc, skip=planned)
         if source is None:
             continue
+        target = data_root / "Tasks" / task_id / "Files" / name
         try:
-            fs.copy_file(source, data_root / "Tasks" / task_id / "Files" / name)
+            if source.is_relative_to(data_root / "Captures") and source.exists():
+                fs.move(source, target)
+            else:
+                fs.copy_file(source, target)
         except (OSError, FileExistsError) as e:
-            problems.append(f"The copy of {source.name} couldn't be saved ({type(e).__name__}).")
-            log.warning("saved copy %s for %s failed: %s", name, task_id, type(e).__name__)
+            problems.append(f"{source.name} couldn't be put in the task's Files folder ({type(e).__name__}).")
+            log.warning("saved file %s for %s failed: %s", name, task_id, type(e).__name__)
 
 
 # ---- filing a capture ----
-def file_capture_records(conn: sqlite3.Connection, capture_id: str, task_id: str, at: datetime) -> list[tuple[str, str]]:
-    """Link an unfiled capture to a task in docs.db, and plan its saved copies. Returns the copies to make."""
+def file_capture_records(conn: sqlite3.Connection, capture_id: str, task_id: str, at: datetime,
+                         data_root: Path | None = None) -> list[tuple[str, str]]:
+    """Link an unfiled capture to a task in docs.db, and plan its saved files. Returns the saved files to put in the
+    task's Files folder (``copy_files``)."""
     model = Model(conn)
     c = model.captures.get(capture_id)
     if c is None:
@@ -397,9 +398,9 @@ def file_capture_records(conn: sqlite3.Connection, capture_id: str, task_id: str
         raise EditError(f"{capture_id} is already filed.")
     with transaction(conn):
         conn.execute("UPDATE captures SET filed_to = ?, filed = ? WHERE id = ?", (task_id, stamp(at), capture_id))
-        # Save a copy waited for filing: the copies go into the task's Files folder now.
+        # Its saved files (its attachments, and the files dropped on Save) go into the task's Files folder now.
         wanted = [d.document for d in c.documents if d.save_a_copy]
-        return plan_copies(conn, task_id, wanted, at.date().isoformat(), capture_id)
+        return plan_copies(conn, task_id, wanted, at.date().isoformat(), capture_id, data_root)
 
 
 def rewrite_capture_md(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, capture_id: str, content: str | None, problems: list[str]) -> None:
@@ -418,7 +419,7 @@ def file_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, capture_
     before = Model(conn)
     c = before.captures.get(capture_id)
     content = captures.read_content(data_root, c) if c else None  # read before anything changes
-    copies = file_capture_records(conn, capture_id, task_id, at)
+    copies = file_capture_records(conn, capture_id, task_id, at, data_root)
     out = Outcome("")
     rewrite_capture_md(conn, data_root, fs, capture_id, content, out.problems)
     copy_files(conn, data_root, fs, task_id, copies, out.problems)
@@ -426,8 +427,9 @@ def file_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, capture_
     add_to_pages(conn, data_root, at, [(capture_id, None)], out.problems)  # decision 106: on the page when it's filed
     write_touched_pages(conn, data_root, fs, at, out.problems, [task_id, *(before.capture_tasks(c) if c else [])], before)
     title = Model(conn).task(task_id).title
-    out.message = f"Filed {capture_id} to {title}." + (f" {len(copies)} saved cop{'ies' if len(copies) > 1 else 'y'} made." if copies else "")
-    log.info("capture %s filed to %s, %d saved copies", capture_id, task_id, len(copies))
+    out.message = f"Filed {capture_id} to {title}." + (
+        f" {len(copies)} saved file{'s' if len(copies) > 1 else ''} put in its Files folder." if copies else "")
+    log.info("capture %s filed to %s, %d saved files", capture_id, task_id, len(copies))
     return out
 
 
