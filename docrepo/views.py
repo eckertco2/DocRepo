@@ -19,7 +19,7 @@ from datetime import date, timedelta
 from docrepo import capacity, priorities
 from docrepo.dates import day_diff, days_text, long_date, monday_of, short, to_date
 from docrepo.lists import LISTS, TaskList, key_dates_due, list_tasks
-from docrepo.model import AgendaItem, Model, Task
+from docrepo.model import TODAY_BAND_NAMES, TODAY_BANDS, AgendaItem, Model, Task
 from docrepo.schedule import DueDate, due_of, is_open
 
 #: The capacity view's number of weeks.
@@ -553,9 +553,17 @@ def since_text(added: str, today: date) -> str:
 def today_groups(m: Model, today: date) -> list[tuple[str, list[AgendaItem]]]:
     """Today's open items, under their heading: since release 5.148 (decisions 643 and 644) one list in the owner's order,
     "Today", where a carried item keeps its "since Mon" on its row; until the first drag, those carried over first, the
-    oldest first, then today's as they came. Before, Carried over and Added today were two groups. Empty with no items."""
+    oldest first, then today's as they came. Before, Carried over and Added today were two groups. Empty with no items.
+    Since release 5.154 the list is in priority order, its bands in ``today_bands``."""
     items = m.today_items()
     return [("Today", items)] if items else []
+
+
+def today_bands(m: Model) -> list[tuple[str, str, list[AgendaItem]]]:
+    """Today's bands that have items (release 5.154, decision 688), top to bottom: each band's key ("" for Not ranked), its
+    name, and its items in the owner's order."""
+    items = m.today_items()
+    return [(key, TODAY_BAND_NAMES[key], its) for key in TODAY_BANDS if (its := [a for a in items if m.today_band(a) == key])]
 
 
 def today_due_entries(m: Model, today: date, me: str | None, mine_only: bool = False) -> list:

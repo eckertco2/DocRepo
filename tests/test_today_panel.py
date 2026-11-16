@@ -673,7 +673,7 @@ def test_the_width_at_rest_is_the_kept_one_or_the_configs():
     assert panel_rules.rest_width("900", 180, 320) == 320
 
 
-def test_the_grip_is_on_the_inner_edge_and_only_at_rest(app, panel):
+def test_the_grip_is_on_the_inner_edge_at_rest_and_widened(app, panel):
     put_on_today(app)
     assert panel.place_.side == "left" and panel.grip.isVisibleTo(panel)
     assert panel.grip.geometry().right() == panel.width() - 1 and panel.grip.geometry().top() == panel.top.height()
@@ -682,10 +682,12 @@ def test_the_grip_is_on_the_inner_edge_and_only_at_rest(app, panel):
     assert panel.place_.side == "right" and panel.grip.geometry().x() == 0
     panel.hover.open_wide()
     panel._update_state()
-    assert not panel.grip.isVisibleTo(panel)
+    assert panel.grip.isVisibleTo(panel)  # widened too since release 5.154, for the width widened (decision 694)
     panel.hover.contract()
     panel._update_state()
     assert panel.grip.isVisibleTo(panel)
+    panel.open_detail(panel.rows[0].item_id)  # not with a task's page showing
+    assert not panel.grip.isVisibleTo(panel)
 
 
 def test_dragging_the_grip_sets_the_width_at_rest_and_its_kept(app, panel):

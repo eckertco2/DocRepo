@@ -378,6 +378,12 @@ TODAY = "today"
 #: The priorities (mods log round 2, M0029, M0030, decision 23), in order: each bucket's key and name. A task with none
 #: is Not ranked. ``docrepo/priorities.py`` ranks tasks.
 PRIORITY_NAMES = {"critical": "Critical", "high": "High", "medium": "Medium", "parking": "Parking lot"}
+#: Today's bands, top to bottom (release 5.154, the design workspace's ``docs/mods/today-priority-plan.md``, decisions 688
+#: and 693): the priority buckets, with Not ranked ("") between Medium and Parking lot, where a Low would be. A note has no
+#: priority, so it's with Not ranked (decision 692).
+TODAY_BANDS = ("critical", "high", "medium", "", "parking")
+#: Each band's name.
+TODAY_BAND_NAMES = {**PRIORITY_NAMES, "": "Not ranked"}
 
 
 def is_person(item_id: str | None) -> bool:
@@ -862,9 +868,16 @@ class Model:
 
     # ---- Today (mods log round 1, M0016) ----
     def today_items(self) -> list[AgendaItem]:
-        """Today's open items, in the owner's order (release 5.148, decisions 643 to 645): by their places once they have
-        them, and until then the oldest first. They carry over until they're closed."""
-        return sorted(self.open_items_for(TODAY), key=place_key)
+        """Today's open items, in priority order and the owner's order within each band (release 5.154, decision 688):
+        Critical, High, Medium, Not ranked (and notes), Parking lot; within a band by their places once they have them
+        (release 5.148, decisions 643 to 645), and until then the oldest first. They carry over until they're closed."""
+        return sorted(self.open_items_for(TODAY), key=lambda a: (TODAY_BANDS.index(self.today_band(a)), place_key(a)))
+
+    def today_band(self, a: AgendaItem) -> str:
+        """The band a Today item is in (decision 688): its task's priority, or "" for Not ranked and for a note."""
+        t = self.tasks.get(a.subject) if a.subject else None
+        p = (t.priority or "") if t is not None else ""
+        return p if p in TODAY_BANDS else ""
 
     def done_on(self, day: date) -> list[AgendaItem]:
         """Today's items marked Done on ``day``, the latest first."""
