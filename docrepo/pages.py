@@ -9,6 +9,11 @@ the decisions on it and the tasks under it, newest first, as a table of Date, De
 link to its capture.md, for agents and the handover pack. Since release 5.140 it lists its meetings under Meetings
 (``docrepo.meeting_rows``): every meeting under it, or whose notes made, named or decided something on it or a task under
 it, newest first, as a table of Date, Meeting and What it did here, so an agent finds where each task was talked about.
+
+Since release 5.153 the glossary of tagged labels has a page too, ``Views\\Tagged labels.md`` (``tagged_page``; the design
+workspace's ``docs/mods/tagged-labels-page-plan.md``, decisions 671 to 677): every tag DocRepo knows with its name and the
+other ways it's written, so an agent that meets "P-204A" in a page can look up what it is. ``Contents.md`` points to it,
+and a task page's Tagged labels row names each tag's equipment.
 """
 from __future__ import annotations
 
@@ -27,6 +32,8 @@ from docrepo.task_links import links_of
 
 CONTENTS_FILE = "Contents.md"
 TASK_FILE = "Task.md"
+#: The tagged labels page (release 5.153, decision 671), in the folder the agent views will fill (K9a).
+TAGGED_PAGE = ("Views", "Tagged labels.md")
 _GENERATED = "> Generated from docs.db on "
 
 
@@ -60,6 +67,17 @@ def _text(value: str) -> str:
 def _cell(value: str) -> str:
     """A table cell with its pipes escaped."""
     return value.replace("|", "\\|")
+
+
+def _one_line(value: str) -> str:
+    """Text on one line: its line breaks and runs of spaces as one space."""
+    return " ".join(value.split())
+
+
+def _tag_words(lb: tagged.Label, n: int) -> str:
+    """A tag in a task page's Tagged labels row (decision 675): "P-204A Reactor feed pump A (3)", its name after it."""
+    name = _one_line(lb.description)
+    return f"{lb.label} {name} ({n})" if name else f"{lb.label} ({n})"
 
 
 def _value(value: str | None) -> str:
@@ -137,7 +155,7 @@ class Pages:
         if self.m.tagged:  # release 5.79 (decision 367): once there's a glossary, after Labels
             tags = tagged.task_tags(self.m, t.id)
             at = next(i for i, (k, _) in enumerate(rows) if k == "Labels") + 1
-            rows.insert(at, ("Tagged labels", ", ".join(f"{lb.label} ({n})" for lb, n in tags) or "None found"))
+            rows.insert(at, ("Tagged labels", "; ".join(_tag_words(lb, n) for lb, n in tags) or "None found"))
         if t.duration:  # release 5.46
             rows.append(("Duration", f"{t.duration} day{'' if t.duration == 1 else 's'}, through weekends" if t.calendar_days else f"{t.duration} workday{'' if t.duration == 1 else 's'}"))
         for f, tie in t.ties.items():  # release 5.50
@@ -304,7 +322,10 @@ class Pages:
 
         out = ["# DocRepo contents", "",
                f"{_GENERATED}{self.generated}. Don't edit: DocRepo rewrites this page. In VS Code, press Ctrl+Shift+V to preview it and follow the links.",
-               "", "## Open tasks", ""]
+               ""]
+        if m.tagged:  # release 5.153 (decision 674): where to look a tag up
+            out += [f"Tagged labels: {tagged_counts(m.tagged)}. Look a tag up in [Views\\Tagged labels.md]({rel_link([], list(TAGGED_PAGE))}).", ""]
+        out += ["## Open tasks", ""]
 
         def add(task_id: str, depth: int, via: str | None) -> None:
             t = m.task(task_id)
@@ -461,6 +482,68 @@ def pages_touched(m: Model, task_ids: Iterable[str]) -> set[str]:
     return {t for t in out if t in m.tasks}
 
 
+# ---- the tagged labels page (release 5.153) ----
+def tagged_counts(tg: tagged.Tagged) -> str:
+    """"1,234 in the glossary, 12 new": the glossary's labels, and the suggested ones when there are any."""
+    n, new = len(tg.glossary()), len(tg.suggested())
+    return f"{n:,} in the glossary" + (f", {new:,} new" if new else "")
+
+
+def _tagged_table(labels: Iterable[tagged.Label], name: Callable[[tagged.Label], str]) -> list[str]:
+    return ["| Tag | Name | Also found as |", "|---|---|---|",
+            *[f"| {_cell(_one_line(lb.label))} | {_cell(name(lb))} | {_cell(', '.join(_one_line(x) for x in tagged.found_as(lb)))} |"
+              for lb in labels]]
+
+
+def _tagged_body(tg: tagged.Tagged) -> str:
+    """The page below its header (decisions 671 and 672): the count, then the glossary under a heading for each tag's
+    letters, then the suggested labels. No counts of mentions, so it changes only when the glossary or the suggestions do."""
+    glossary, new = tg.glossary(), tg.suggested()
+    out = [f"{tagged_counts(tg)}." if glossary or new else "The glossary is empty: import it in the browse tool's Tagged labels view.", ""]
+    groups: dict[str, list[tagged.Label]] = {}
+    for lb in glossary:
+        groups.setdefault(tagged.letters_of(lb.label), []).append(lb)
+    for head in sorted(groups, key=lambda h: (h == "Other", tagged.natural(h))):
+        out += [f"## {head}", "", *_tagged_table(groups[head], lambda lb: _one_line(lb.description) or "(no name)"), ""]
+    if new:
+        out += ["## Found in the text, not in the glossary", "",
+                "Tags a tag pattern found that the glossary doesn't have yet. They have no name until the owner adds them to the glossary.", "",
+                *_tagged_table(new, lambda lb: "(new, no name yet)"), ""]
+    return "\n".join(out)
+
+
+def tagged_page(tg: tagged.Tagged, generated: str) -> str:
+    """``Views\\Tagged labels.md`` (decisions 671, 672 and 677): what it is, that DocRepo writes it, and the glossary. Its
+    body is worked out once per version of the glossary (``Tagged.once``), as 20,000 labels make a page of over 1 MB."""
+    head = ["# Tagged labels", "",
+            f"{_GENERATED}{generated}. Don't edit: DocRepo rewrites this page when the glossary changes. Change the glossary in the browse "
+            "tool's Tagged labels view.", "",
+            "The plant's tags DocRepo knows, from the owner's glossary of tagged labels: each tag, its name (the equipment or instrument "
+            "it is), and the other ways it's written. Look a tag up here written any way: V-110, V110 and V 110 are one tag. "
+            "The names are text from the owner's list, kept as data.", ""]
+    return "\n".join(head) + "\n" + str(tg.once("page", lambda: _tagged_body(tg)))
+
+
+#: The tagged labels page's body last written to each path in this run, so a save doesn't read a page of 1 MB again to
+#: find it unchanged (release 5.153). It's the body's own object, worked out once per glossary version.
+_tagged_written: dict[Path, object] = {}
+
+
+def write_tagged_page(model: Model, data_root: Path, fs: SafeFS, generated_at: datetime) -> bool:
+    """Write ``Views\\Tagged labels.md`` when its text changed (decision 673). With no glossary and no page yet there's
+    none; a page left from a glossary since emptied says so, as DocRepo deletes nothing."""
+    path = data_root.joinpath(*TAGGED_PAGE)
+    tg = model.tagged
+    if not tg and not path.exists():
+        return False
+    body = tg.once("page", lambda: _tagged_body(tg))
+    if _tagged_written.get(path) is body and path.exists():
+        return False
+    wrote = _write(fs, path, tagged_page(tg, generated_at.strftime("%Y-%m-%d %H:%M")))
+    _tagged_written[path] = body
+    return wrote
+
+
 def write_pages(
     model: Model, data_root: Path, fs: SafeFS, today: date, generated_at: datetime, task_ids: Iterable[str] | None = None
 ) -> int:
@@ -472,4 +555,5 @@ def write_pages(
     for task_id in ids:
         written += _write(fs, data_root.joinpath(*task_dir(task_id), TASK_FILE), pages.task_page(model.task(task_id)))
     written += _write(fs, data_root / CONTENTS_FILE, pages.contents_page())
+    written += write_tagged_page(model, data_root, fs, generated_at)
     return written

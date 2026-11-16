@@ -104,6 +104,22 @@ def spellings(label: str) -> list[str]:
     return list(dict.fromkeys(["-".join(up), "".join(up), " ".join(up)] if len("".join(up)) >= SHORT else ["-".join(up), "".join(up)]))
 
 
+def found_as(lb: Label) -> list[str]:
+    """Every other way a label is found, for the tagged labels page (release 5.153, decision 671): its other spellings
+    (V110 and V 110 for V-110), then its aliases, a tag-shaped one with its own spellings after it."""
+    out = list(spellings(lb.label))
+    for a in lb.aliases:
+        out += spellings(a) if tag_like(a) else [a]
+    return [x for x in dict.fromkeys(out) if x != lb.label]
+
+
+def letters_of(label: str) -> str:
+    """The tagged labels page's heading for a label (decision 671): its first letters in capitals, so FIC-2210 is under
+    FIC and 22-PT-101A under PT; "Other" for one with none."""
+    m = re.search(r"[A-Za-z]+", label)
+    return m.group(0).upper() if m else "Other"
+
+
 def split_aliases(text: str) -> list[str]:
     """Aliases as typed or imported: separated by ``;``, ``,`` or a new line."""
     return [a.strip() for a in re.split(r"[;,\n]", text or "") if a.strip()]
@@ -450,6 +466,7 @@ class _Kept:
         self.labels = labels
         self.patterns, self.never = list(patterns), list(never)
         self._finder: Finder | None = None
+        self.made: dict[str, object] = {}  # what's worked out once per version, such as the tagged labels page's body (release 5.153)
 
     def finder(self) -> Finder:
         if self._finder is None:
@@ -841,6 +858,20 @@ class Tagged:
     def glossary(self) -> list[Label]:
         """The glossary's labels, sorted, without the suggested ones (release 5.80)."""
         return [lb for lb in self.sorted_labels() if lb.status == "glossary"]
+
+    def suggested(self) -> list[Label]:
+        """The suggested labels (release 5.80), sorted: found by a tag pattern, not in the glossary yet."""
+        return [lb for lb in self.sorted_labels() if lb.status == "suggested"]
+
+    def once(self, name: str, make: Callable[[], object]) -> object:
+        """``make()``, worked out once for this version of the glossary and the patterns (release 5.153): kept with the
+        version's labels, so the next Model of the same version has it at once. A Tagged made from labels alone keeps it
+        itself, as it keeps its Finder."""
+        if self._kept is None:
+            self._kept = _Kept(list(self.labels.values()))
+        if name not in self._kept.made:
+            self._kept.made[name] = make()
+        return self._kept.made[name]
 
     def item(self, kind: str, item_id: str) -> list[tuple[Label, Mention | None]]:
         """An item's tagged labels after the owner's own changes, each with what was found (None for one added by hand)."""

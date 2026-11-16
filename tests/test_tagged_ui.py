@@ -73,7 +73,11 @@ def test_the_view_starts_empty_and_import_fills_it(browse, tmp_path, ctx):
     assert "Reactor 1" in page and "D000002" in page and "R-101" in page
     # Task.md has the row now, for the task that holds the document.
     holder = browse.model().document_holders("D000002")[0]
-    assert "| Tagged labels | R-101 (1) |" in (ctx.data_root / "Tasks" / holder / "Task.md").read_text(encoding="utf-8")
+    assert "| Tagged labels | R-101 Reactor 1 (1) |" in (ctx.data_root / "Tasks" / holder / "Task.md").read_text(encoding="utf-8")
+    # The tagged labels page is written with the import (release 5.153, decision 673), and Contents.md points to it.
+    page = (ctx.data_root / "Views" / "Tagged labels.md").read_text(encoding="utf-8")
+    assert "| R-101 | Reactor 1 | R101, R 101, reactor one |" in page
+    assert "Tagged labels: 3 in the glossary." in (ctx.data_root / "Contents.md").read_text(encoding="utf-8")
 
 
 def test_a_documents_chip_removes_and_puts_back_with_undo(browse, tmp_path):

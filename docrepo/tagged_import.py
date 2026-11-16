@@ -5,7 +5,9 @@ decision 371).
   ``.csv`` is read as UTF-8 (or Windows' own encoding when it isn't), with its separator worked out (a comma, a
   semicolon or a tab). Neither is ever changed. Up to MAX_ROWS rows.
 - **Columns:** each column fills the tagged label, its description or its aliases, or is left out, guessed from its
-  header ("Tag No.", "Service", "Other names") and changed in the form.
+  header ("Tag No.", "Service", "Other names") and changed in the form. Since release 5.153 (decision 676) a header with
+  "name" in it ("Equipment Name") fills the description, unless it's a tag's ("Tag Name"), and when no header says which
+  column holds the tags, or two do, it's the one whose cells are most often tag-shaped (``tagged.tag_like``).
 - **The preview** says what Import would do, and nothing is written until then. Importing again merges: new labels are
   added, aliases added to the ones there, and a description that differs replaces DocRepo's unless DocRepo's is kept.
   Nothing is removed. Two rows that are one tag written two ways (V-110 and V110) become one label, the other spelling
@@ -43,12 +45,16 @@ EXPORT_NAME = "Tagged labels"
 FIELDS = (("label", "Tagged label"), ("description", "Description"), ("aliases", "Aliases"), ("skip", "Leave out"))
 FIELD_NAMES = dict(FIELDS)
 #: Header words that suggest a field, tried in order. Aliases and descriptions first, so "Tagged label description" isn't
-#: taken for the label.
+#: taken for the label; a tag's own name or number before descriptions, so "Tag Name" isn't taken for a description, and
+#: "name" with them since release 5.153 (decision 676), so "Equipment Name" is one.
 _GUESSES = (
     ("aliases", ("alias", "aliases", "other name", "other names", "also known as", "aka", "tagged label aliases")),
-    ("description", ("description", "desc", "service", "duty", "tagged label description")),
-    ("label", ("tag", "tag no", "tag number", "tagged label", "label", "equipment", "equipment number", "instrument", "item")),
+    ("label", ("tag name", "tag no", "tag number", "tag id", "tag nr")),
+    ("description", ("description", "desc", "service", "duty", "tagged label description", "name", "equipment name", "instrument name")),
+    ("label", ("tag", "tagged label", "label", "equipment", "equipment number", "instrument", "item")),
 )
+#: The rows below the header whose cells are looked at to find the tags' column (decision 676).
+_SAMPLE = 200
 
 
 def is_csv(path: Path) -> bool:
@@ -112,16 +118,33 @@ def guess_field(header: str) -> str:
     return "skip"
 
 
+def tag_share(rows: list[list[str]], header_row: int, col: int) -> float:
+    """How many of a column's filled cells below the header are tag-shaped (V-110, FIC2210), as a share (decision 676)."""
+    cells = [r[col].strip() for r in rows[header_row + 1:header_row + 1 + _SAMPLE] if col < len(r) and r[col] and r[col].strip()]
+    return sum(tagged.tag_like(c) for c in cells) / len(cells) if cells else 0.0
+
+
 def propose(rows: list[list[str]], header_row: int) -> list[str]:
-    """Each column's field, guessed from its header. One column fills the label: the first guessed, or else the first."""
+    """Each column's field, guessed from its header. One column fills the description: the first guessed. One fills the
+    label (decision 676): of those whose header says it, the one whose cells are most often tag-shaped; with none, the
+    column left out whose cells are most often tag-shaped, when at least half are, or else the first."""
     header = rows[header_row] if header_row < len(rows) else []
     fields = [guess_field(h) for h in header]
-    for f in ("label", "description"):
-        firsts = [i for i, x in enumerate(fields) if x == f]
-        for i in firsts[1:]:
-            fields[i] = "skip"
-    if "label" not in fields and fields:
-        fields[0] = "label"
+    for i in [i for i, x in enumerate(fields) if x == "description"][1:]:
+        fields[i] = "skip"
+    labels = [i for i, x in enumerate(fields) if x == "label"]
+    if labels:
+        best = max(labels, key=lambda i: (tag_share(rows, header_row, i), -i))
+        for i in labels:
+            if i != best:
+                fields[i] = "skip"
+    elif fields:
+        left = [i for i, x in enumerate(fields) if x == "skip"]
+        best = max(left, key=lambda i: (tag_share(rows, header_row, i), -i), default=None)
+        if best is not None and tag_share(rows, header_row, best) >= 0.5:
+            fields[best] = "label"
+        else:
+            fields[0] = "label"
     return fields
 
 
