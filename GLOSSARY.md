@@ -91,7 +91,7 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Review day**: the day of the week, Friday by default, when Today's first line is **Weekly review**, with Start (or Carry on), until a review is finished.
 - **Last talked**: when an item on a person's agenda was last marked Discussed; for a meeting, last discussed.
 - **Answer**: what was said about an agenda item marked Discussed in the quick summary, kept as a note on its task, with the question before it.
-- **Today**: the built-in agenda target that is the owner's to-do list for the day. Its items carry over until they're marked Done.
+- **Today**: the built-in agenda target that is the owner's to-do list for the day. Its items carry over until they're marked Done. Since release 5.148 they're one list in the owner's order, dragged or moved with Alt+Up and Alt+Down, Move to top and Move to bottom; a new item goes at the bottom.
 - **Quick task**: a task made from one line and put on Today, two ways (release 5.99): Today's box (the view's and the side panel's), and Ctrl+Shift+D, whose command the wheels' slots run. Make it a task turns a note on Today into one. It's an ordinary task. A New task with Today ticked in the capture window isn't one: it's an ordinary new task on Today. D on a row is **Add to Today**, which puts the task on Today as it is.
 - **Quick tasks**: the built-in top-level task that quick tasks wait under until **Put under…** on the row's menu (release 5.99), or Edit task, puts them under their real task. DocRepo makes it the first time it's needed.
 - **Today side panel**: the Today view as a floating strip beside the other windows (release 5.43). It has the same items as the Today view, not a list of its own.
