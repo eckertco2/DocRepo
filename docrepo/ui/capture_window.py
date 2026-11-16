@@ -107,11 +107,13 @@ from docrepo.ui import tokens
 from docrepo.ui.tokens import C
 from docrepo.ui.context import AppContext
 from docrepo.ui import drafts as draft_ui
+from docrepo.ui import link_filter
 from docrepo.ui.drop_target import DropOverlay, DropRead
 from docrepo.ui.icons import icon, icon_size, set_fold
 from docrepo.ui.items_panel import AgendaPanel, ItemCards, OperatorHighlighter, RefPopup, _drop, task_colour, where_text
 from docrepo.ui.keymap import KeyMapDialog
 from docrepo.ui.drop_target import MAX_DROP, too_big
+from docrepo.ui.save_link import SAVE, SaveLinkSwitch, SaveLinkZones, zone_at
 from docrepo.ui.explorer import show_in_explorer
 from docrepo.ui.front import bring_to_front
 from docrepo.ui.look import LOOK, Help, KeyBadge, KeyTips, set_hints, tip
@@ -204,7 +206,7 @@ class FileEntry:
     doc: str | None = None  # an already tracked document this file reuses
     widget: QWidget | None = None
     desc: QLineEdit | None = None
-    copy: QCheckBox | None = None
+    switch: SaveLinkSwitch | None = None  # Saved · Linked (release 5.145, decision 630), in Save a copy's old place
     extract: QCheckBox | None = None
     keep: QCheckBox | None = None  # an email's part: whether it's kept
     layer0: QLabel | None = None  # an email's row: what email layer 0 kept and left out
@@ -256,9 +258,12 @@ def _accept_copy(event) -> None:
 
 class ContentEdit(RichEdit):
     """The content text box, with formatting and lists (mods log round 2, M0045). Files and Outlook emails can be dropped
-    on it; ``dropped`` sends read_drop's answer."""
+    on it; ``dropped`` sends read_drop's answer, with the zone a drop of files lands in (release 5.145): files from File
+    Explorer put up the window's two zones, which take the drop, so one reaching the box itself goes by the half of the
+    window it's in, as the zones would (``zone_of``, given the point on the screen)."""
 
-    dropped = Signal(str, list)
+    dropped = Signal(str, list, str)
+    zone_of: Callable[[QPoint], str] | None = None
     #: Whether a web link dropped on it is added as a link, as the pinned window's box does, rather than typed in.
     take_links = False
     #: Headings that fold, while the note is taken (release 5.28, mods log round 4).
@@ -266,14 +271,14 @@ class ContentEdit(RichEdit):
     folds_here = True
 
     #: Called with read_drop's answer when a drag comes in (release 5.33): an email or a file with no path on disk puts
-    #: up the window's DropOverlay, for DocRepo's own drop target.
-    drag_entered: Callable[[str], None] | None = None
+    #: up the window's DropOverlay, for DocRepo's own drop target; files from File Explorer, its two zones (release 5.145).
+    drag_entered: Callable[[str, list[str]], None] | None = None
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # noqa: N802 - Qt's name
         if kind := note_drag("enter", event.mimeData(), self.take_links):
             _accept_copy(event)
             if self.drag_entered:
-                self.drag_entered(kind)
+                self.drag_entered(kind, read_drop(event.mimeData(), self.take_links)[1])
         else:
             super().dragEnterEvent(event)
 
@@ -289,8 +294,10 @@ class ContentEdit(RichEdit):
         if kind:
             _accept_copy(event)
             # The cursor goes where it was dropped: in a note split by # task, the file goes with that section (release 5.32).
-            self.setTextCursor(self.cursorForPosition(event.position().toPoint()))
-            self.dropped.emit(kind, paths)
+            point = event.position().toPoint()
+            self.setTextCursor(self.cursorForPosition(point))
+            zone = self.zone_of(self.mapToGlobal(point)) if kind == "files" and self.zone_of else ""
+            self.dropped.emit(kind, paths, zone)
         else:
             super().dropEvent(event)
 
@@ -483,6 +490,8 @@ class CaptureWindow(QWidget):
         self.pin_window = None  # made the first time it's pinned (docrepo/ui/pin_window.py)
         # DocRepo's own drop target, for emails from Outlook (release 5.33): a cover that's up while one is dragged over.
         self.drop_overlay = DropOverlay(self, self.take_drop)
+        # Files from File Explorer: Save in DocRepo on the left, Link on the right, while they're dragged over (release 5.145).
+        self.zones = SaveLinkZones(self, self.zone_dropped)
         self._saving = False
         self.today_on = False  # Today, beside the capture types (M0037)
         self._missing_paths: dict[str, bool] = {}  # path lines that aren't files DocRepo can find, and whether it's said so
@@ -496,7 +505,7 @@ class CaptureWindow(QWidget):
         self.reading: items.Reading | None = None
         self._names: items.Names | None = None
         self._typing: items.Typing | None = None
-        self._pick_end: tuple[int, int, int] | None = None  # where the last pick ended: the list doesn't open again there (decision 326)
+        self._pick_end: tuple[int, int, int, int] | None = None  # where the last pick ended, and its name started: the list doesn't open again there (decision 326)
         self._highlighting = False
         self._items_timer = QTimer(self)
         self._items_timer.setSingleShot(True)
@@ -706,6 +715,7 @@ class CaptureWindow(QWidget):
         self.content.textChanged.connect(self._content_changed)
         self.content.dropped.connect(self.dropped)
         self.content.drag_entered = self._drag_entered
+        self.content.zone_of = lambda point: zone_at(self.width(), self.mapFromGlobal(point).x())
         self.content.cursorPositionChanged.connect(self._ref_list)
         self.content.cursorPositionChanged.connect(self._tell_missing_paths)
         self.content.list_keys = lambda key: self.ref_popup.handle_key(key)
@@ -743,9 +753,12 @@ class CaptureWindow(QWidget):
         self.attach_button = QPushButton("Attach", objectName="subtle")
         self.attach_button.setIcon(icon("attach"))
         self.attach_button.setProperty("menu", True)
-        tip(self.attach_button, "Add files, a link or the email selected in Outlook. Or drop them anywhere on this window.")
+        tip(self.attach_button, "Save or link files, add a link or the email selected in Outlook. Or drop files on this window: "
+                                "on Save in DocRepo, or on Link.")
         attach_menu = QMenu(self.attach_button)
-        attach_menu.addAction(icon("file"), "Files…", self._pick_files)
+        # Release 5.145 (decision 630): a file saved in DocRepo, a file of its own, or one linked where it is.
+        attach_menu.addAction(icon("file"), "Save files…", lambda: self._pick_files(saved=True))
+        attach_menu.addAction(icon("link"), "Link files…", lambda: self._pick_files(saved=False))
         attach_menu.addAction(icon("link"), "A link…", self.add_link)
         attach_menu.addAction(icon("mail"), "The email selected in Outlook", self.add_outlook)
         self.attach_button.setMenu(attach_menu)
@@ -813,8 +826,13 @@ class CaptureWindow(QWidget):
         self.same_all = QCheckBox("Use the first file's description and choices for every file")
         self.same_all.toggled.connect(self._apply_same_all)
         fa.addWidget(self.same_all)
-        self.copy_hint = Help()
-        fa.addWidget(self.copy_hint)
+        # Where saved files go (release 5.145, decision 630), always; what the choices do, with Show hints on.
+        self.files_line = QLabel(objectName="hint")
+        self.files_line.setWordWrap(True)
+        fa.addWidget(self.files_line)
+        self.files_help = Help("A saved file is a file of its own, named with today's date; a linked file is read where it is. "
+                               "Extract information marks a file for the later processing stage.")
+        fa.addWidget(self.files_help)
         self.lower = QWidget()
         self.lower_layout = QVBoxLayout(self.lower)
         self.lower_layout.setContentsMargins(0, 0, 0, 0)
@@ -945,7 +963,8 @@ class CaptureWindow(QWidget):
                Command("Capture", "Meeting notes", self.toggle_meeting, "Alt+M"),
                Command("Capture", "Expand", self.toggle_expand, "F11"),
                Command("Capture", "Pin it at the bottom right", self.pin, "F12"),
-               Command("Attach", "Files", self._pick_files),
+               Command("Attach", "Save files in DocRepo", lambda: self._pick_files(saved=True)),
+               Command("Attach", "Link files", lambda: self._pick_files(saved=False)),
                Command("Attach", "A link", self.add_link),
                Command("Attach", "The email selected in Outlook", self.add_outlook)]
         out += [Command("Copy prompt", self.prompt_type.itemText(i), lambda n=i: (self.prompt_type.setCurrentIndex(n), self.copy_prompt()))
@@ -1727,26 +1746,29 @@ class CaptureWindow(QWidget):
         return self.content, self.ref_popup
 
     def _ref_list(self) -> None:
-        """The @ or # list, while a name is being typed after one."""
+        """The @ or # list, while a name is being typed after one; and since release 5.144 (decision 620) the same list
+        for a ``**label,`` or ``**agenda,`` sentence, of the names it takes."""
         if not hasattr(self, "ref_popup"):
             return
         box, popup = self._ref_box()
         cursor = box.textCursor()
         t = None
         if not cursor.hasSelection() and not self.from_capture and box.hasFocus():
-            t = items.typing(cursor.block().text()[:cursor.positionInBlock()])
-            if t and self._pick_end == (id(box), cursor.blockNumber(), cursor.positionInBlock()):
+            t = items.typing(cursor.block().text()[:cursor.positionInBlock()], self.names())
+            if t and self._pick_end == (id(box), cursor.blockNumber(), cursor.positionInBlock(), t.start):
                 t = None  # right after a pick, whose name and space are what's "typed" (round 7's decision 326)
         options = items.options(t, self.names()) if t else []
         if not options:
             popup.hide()
             self._typing = None
             return
-        if t.sigil == "#":
+        tasks = t.sigil == "#" or t.of == "agendas"  # a list with tasks in it: their paths, marks and levels
+        if tasks:
             m = self.ctx.model()
-            options = [replace(o, sub=path_text(m, o.ref) or "Top-level task") if o.ref in m.tasks else o for o in options]
-        popup.subtasks = self._subtask_options if t.sigil == "#" else None
-        popup.task_info = self._task_mark if t.sigil == "#" else None  # each row's dot or ring (release 5.75)
+            options = [replace(o, sub=path_text(m, o.ref) or "Top-level task") if o.ref in m.tasks and (t.sigil == "#" or not o.sub) else o
+                       for o in options]
+        popup.subtasks = self._subtask_options if tasks else None
+        popup.task_info = self._task_mark if tasks else None  # each row's dot or ring (release 5.75)
         self._typing = t
         # Under the cursor, or above it where it wouldn't fit: in the window, or, for the pinned window's list, which is
         # a window of its own, on the screen. The list keeps itself in view as it changes size (release 5.65).
@@ -1777,15 +1799,18 @@ class CaptureWindow(QWidget):
             return
         cursor = box.textCursor()
         cursor.setPosition(cursor.position() - (cursor.positionInBlock() - t.start), QTextCursor.MoveMode.KeepAnchor)
-        words = t.sigil + option.value + " "
-        # Where the pick ends, before it goes in: putting it in reads the list again (round 7's decision 326).
-        self._pick_end = (id(box), cursor.blockNumber(), t.start + len(words))
+        words = items.inserted(t, option)  # a value list's pick: @ for a person, # for a task (release 5.144, decision 622)
+        key = items.remembered(t, option)
+        if key:
+            self.ref_ids[key] = option.ref
+            self._names = None
+        # Where the pick ends, and where its name starts, before it goes in: putting it in reads the list again (round 7's
+        # decision 326). A list that opens there for the next thing, as a value list does after a ** list's pick, isn't this one.
+        self._pick_end = (id(box), cursor.blockNumber(), t.start + len(words), t.start + len(t.lead))
+        self._typing = None
         cursor.insertText(words)
         box.setTextCursor(cursor)
-        if option.ref:
-            self.ref_ids[("#" if t.sigil == "#" else "@") + option.value.lower()] = option.ref
-            self._names = None
-        self._typing = None
+        self._ref_list()
         self.read_items()
 
     # ---- the draft keeps itself (release 5.8), in Drafts (release 5.77) ----
@@ -2163,7 +2188,7 @@ class CaptureWindow(QWidget):
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # noqa: N802 - files can be dropped anywhere on the window
         if kind := note_drag("enter", event.mimeData(), links=True):
             _accept_copy(event)
-            self._drag_entered(kind)
+            self._drag_entered(kind, read_drop(event.mimeData(), links=True)[1])
 
     def dragMoveEvent(self, event) -> None:  # noqa: N802
         if read_drop(event.mimeData(), links=True)[0]:
@@ -2174,15 +2199,22 @@ class CaptureWindow(QWidget):
         kind, paths = read_drop(event.mimeData(), links=True)
         if kind:
             _accept_copy(event)
-            self.dropped(kind, paths)
+            self.zones.uncover()
+            # Files the zones didn't take go by the half of the window they landed in, as the zones would.
+            self.dropped(kind, paths, zone_at(self.width(), event.position().x()) if kind == "files" else "")
 
-    def dropped(self, kind: str, paths: list[str]) -> None:
+    def zone_dropped(self, zone: str, paths: list[str]) -> None:
+        """Files dropped on one of the two zones (release 5.145): saved in DocRepo, or linked."""
+        self.dropped("files", paths, zone)
+
+    def dropped(self, kind: str, paths: list[str], zone: str = "") -> None:
         """What a drop on the window, the content text or the pinned window brought: files, an Outlook email, web links,
-        or files DocRepo can't read."""
+        or files DocRepo can't read. Files dropped on Save in DocRepo are saved, any others linked (release 5.145,
+        decision 627)."""
         if self.pin_window is not None:
             self.pin_window.show_message("")
         if kind == "files":
-            self.add_paths(paths)
+            self.add_paths(paths, saved=zone == SAVE)
         elif kind == "links":
             for url in paths:
                 self.add_link_url(url)
@@ -2210,16 +2242,20 @@ class CaptureWindow(QWidget):
         if w.isVisible():
             bring_to_front(w)
 
-    def _drag_entered(self, kind: str) -> None:
+    def _drag_entered(self, kind: str, paths: list[str] | None = None) -> None:
         """A drag of an email from Outlook, or of a file only a program holds, puts up the cover with DocRepo's own drop
-        target, on the pinned window while pinned (release 5.33)."""
+        target (release 5.33); a drag of files from File Explorer, the two zones (release 5.145, decision 627). Each on
+        the pinned window while pinned. A web link gets neither: it's a link (decision 628)."""
+        pinned = self.pinned and self.pin_window is not None
         if kind in ("outlook", "virtual"):
-            (self.pin_window.drop_overlay if self.pinned and self.pin_window is not None else self.drop_overlay).cover(email=kind == "outlook")
+            (self.pin_window.drop_overlay if pinned else self.drop_overlay).cover(email=kind == "outlook")
+        elif kind == "files":
+            (self.pin_window.zones if pinned else self.zones).cover(list(paths or []))
 
     def take_drop(self, found: DropRead) -> None:
         """What DocRepo's own drop target took, after the drop (release 5.33): each email as its .msg, read without
-        Outlook, and each other file (an attachment dragged from an email, a file in a zip folder) as its bytes, saved
-        in the capture's attachments folder."""
+        Outlook, and each other file (an attachment dragged from an email, a file in a zip folder) as its bytes. That
+        file has no place on disk to link to, so it's saved, as an email's attachment is (release 5.145, decision 628)."""
         if self.pin_window is not None:
             self.pin_window.show_message("")
         emails, problems = [], list(found.problems)
@@ -2500,12 +2536,15 @@ class CaptureWindow(QWidget):
         self.same_all.setVisible(sum(e.desc is not None for e in self.files) > 1)
         self._apply_same_all()  # the placeholders name the task, or the meeting
         case = meeting_case(m, self.task) if self.meeting_on else ""
-        where = ("the meeting's Files folder, once Save makes the meeting" if case in ("regular", "new") else
-                 "the new task's Files folder" if new else f"Tasks\\{t.id}\\Files\\" if t else "the task's Files folder once the capture is filed")
-        has_files = any(e.copy is not None and not e.copy.isHidden() for e in self.files)  # rows that offer Save a copy
-        self.copy_hint.setText(f"Save a copy puts the file in {where}, named with today's date. Extract information marks it for the later processing stage."
-                               if has_files else "")
-        self.copy_hint.setVisible(has_files)
+        # Where saved files go (release 5.145, decision 630): "Saved files go in Pump trial's Files folder."
+        where = ("go in the meeting's Files folder, once Save makes the meeting" if case in ("regular", "new") else
+                 "go in the new task's Files folder" if new else f"go in {t.title}'s Files folder" if t else
+                 "stay in the capture's own folder until it's filed, then go in its task's Files folder")
+        # Rows that are or can be saved: a link or a folder alone has nothing to go in a Files folder.
+        has_files = any(e.switch is not None and e.row.keep and (e.switch.saved() or not e.switch.fixed) for e in self.files)
+        self.files_line.setText(f"Saved files {where}." if has_files else "")
+        self.files_line.setVisible(has_files)
+        self.files_help.setVisible(has_files)
         changes = self.update_changes(t) if upd and t else {}
         parts = [(k.replace('_', ' '), v) for k, v in changes.items() if k != "references"] + list(changes.get("references", {}).items())
         if upd and t and self.update_key_dates() is not None:  # release 5.31
@@ -2718,11 +2757,13 @@ class CaptureWindow(QWidget):
         self._fail(f"{names} {verb} DocRepo can find, so it's kept as text and not attached. Check the path (the drive "
                    "and each folder's name), or drop the file on the window.")
 
-    def add_paths(self, paths: list[str]) -> None:
-        """Files and folders dropped, picked or typed. A .msg file is read through Outlook as an email. A folder is kept
-        as where it is (release 5.66, round 6's decision 318). Something that isn't there is left out, and the window
-        says so."""
+    def add_paths(self, paths: list[str], saved: bool = False) -> None:
+        """Files and folders dropped, picked or typed: ``saved`` for those dropped on Save in DocRepo or picked with Save
+        files…, which become saved files; the rest are linked (release 5.145, decisions 627 and 630). A .msg file is read
+        as an email, whichever (decision 628). A folder is kept as where it is (release 5.66, round 6's decision 318), so
+        it's linked, and one dropped on Save says so. Something that isn't there is left out, and the window says so."""
         left_out = []
+        folders_linked = []
         for p in paths:
             path = Path(p)
             if path.suffix.lower() == ".msg":
@@ -2743,16 +2784,22 @@ class CaptureWindow(QWidget):
                 original = folder_original(to_unc(str(path)))
                 if not any((e.row.path or "").lower() == original.lower() for e in self.files):
                     self._add_file(FileRow(folder_name(original), original), "dropped")
+                    if saved:
+                        folders_linked.append(folder_name(original))
+                        self.files[-1].note.setText("Dropped on Save: a folder isn't copied, so it's linked. DocRepo keeps where it is.")
             elif not is_file:
                 left_out.append(f"{path.name or p} can't be found. Check the path (the drive and each folder's name).")
             elif not any((e.row.path or "").lower() == to_unc(str(path)).lower() for e in self.files):
-                self._add_file(FileRow(path.name, to_unc(str(path))), "dropped")
+                self._add_file(FileRow(path.name, to_unc(str(path)), save_a_copy=saved), "dropped")
         if left_out:
             self._fail(" ".join(left_out), self.content)
+        elif folders_linked and self.pinned and self.pin_window is not None:  # its rows aren't in view: the pinned window says so
+            self.pin_window.show_message(f"{and_list(folders_linked)}: a folder isn't copied, so it's linked.")
 
-    def _pick_files(self) -> None:
-        paths, _ = QFileDialog.getOpenFileNames(self, "Add files to the capture")
-        self.add_paths(paths)
+    def _pick_files(self, saved: bool = False) -> None:
+        """Attach's Save files… or Link files… (release 5.145, decision 630)."""
+        paths, _ = QFileDialog.getOpenFileNames(self, "Save files in DocRepo" if saved else "Link files")
+        self.add_paths(paths, saved=saved)
 
     def add_link(self) -> None:
         """Add link…: asks for the address, starting with the clipboard's when it holds one."""
@@ -2835,9 +2882,11 @@ class CaptureWindow(QWidget):
     def _add_email(self, email: EmailItem, focus: bool = True) -> None:
         """The email's row, then a row for each attachment, link and picture email layer 0 finds in it (mods log round 1,
         M0024). With ``focus``, the cursor goes in the email's own description (round 7's decision 331, release 5.74),
-        attachments or not: before, it went to the first kept part's, so an email with none had nothing to type in."""
-        for row in email_rows(email):
+        attachments or not: before, it went to the first kept part's, so an email with none had nothing to type in. Settings'
+        link lists sort its links (release 5.146, decision 640)."""
+        for row in email_rows(email, link_filter.rules(self)):
             self._add_file(row, "outlook" if row.email else "email", focus=False)
+        self._show_layer0()  # once its parts' rows are there: the email's row was drawn before them (release 5.146)
         self._note_captured_before(email)
         if self._follow_conversation():  # its conversation may fill the task picker (stage K8, release 5.101)
             self.read_items()
@@ -2877,14 +2926,22 @@ class CaptureWindow(QWidget):
             return f"Saved as {msg_name(position)} in the capture's folder."
         if part and part.kind != "link":
             size = f"{size_text(part.size)}. " if part.size else ""
-            if part.kind == "picture":
-                return size + ("In the email's body. Small, so probably a logo or signature picture: unticked." if part.small
-                               else "In the email's body. Saved in the capture's attachments folder.")
-            return size + "Saved in the capture's attachments folder."
+            if part.kind == "picture":  # it stays with the capture, on its notes page (release 5.145, decision 629)
+                return size + ("Pasted: kept with the capture, on its notes page." if part.pasted else
+                               "In the email's body. Small, so probably a logo or signature picture: unticked." if part.small
+                               else "In the email's body. Kept with the capture, on its notes page.")
+            # Saved in DocRepo, with no choice (decisions 628 and 629): it has no place on disk to link to.
+            return size + ("An email's attachment is always saved in DocRepo." if row.of is not None
+                           else "A program handed it over, with no place on disk to link to, so it's saved in DocRepo.")
         if doc_id:
             return f"Already tracked as {doc_id}, so that record is reused."
         if link:
-            return ("Unwrapped from Outlook's Safe Links. " if part and part.safe else "") + "Only the address is kept, and DocRepo never fetches it."
+            said = "Unwrapped from Outlook's Safe Links. " if part and part.safe else ""
+            if part and part.rule == "keep":  # Settings' link lists (release 5.146, decisions 636 and 637)
+                return said + "Its site is on Always keep. Only the address is kept."
+            if part and part.rule == "other" and not part.keep:
+                return said + "Its site is on neither list, so it starts unticked."
+            return said + "Only the address is kept, and DocRepo never fetches it."
         if is_folder(row.path):
             return "It stays where it is. DocRepo keeps where it is, and reads nothing in it."
         return ""  # a file stays where it is, as files do (decision 434): only what's different is said
@@ -2923,6 +2980,9 @@ class CaptureWindow(QWidget):
         hl.setContentsMargins(18 if row.of else 0, 0, 0, 0)  # an email's parts sit under it
         frame = QFrame(objectName="fileRow")
         hl.addWidget(frame)
+        if link_filter.is_email_link(entry):  # Always keep or Never keep its site (release 5.146, decision 638)
+            frame.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            frame.customContextMenuRequested.connect(lambda pos: link_filter.show_menu(self, entry, frame.mapToGlobal(pos)))
         fl = QVBoxLayout(frame)
         fl.setContentsMargins(8, 5, 6, 6)
         fl.setSpacing(4)
@@ -2985,15 +3045,20 @@ class CaptureWindow(QWidget):
         opts = QHBoxLayout()  # the description and its two choices on one line (decision 434)
         opts.setSpacing(10)
         opts.addWidget(entry.desc, 1)
-        entry.copy, entry.extract = QCheckBox("Save a copy"), QCheckBox("Extract information")
-        opts.addWidget(entry.copy)
+        # Saved · Linked (release 5.145, decision 630), set by where the file was dropped. A picture stays with the capture,
+        # so it has none; an attachment is always saved, and a folder or a web link always linked.
+        if kind != "picture":
+            fixed = link or folder or kind == "attachment"
+            entry.switch = SaveLinkSwitch(kind == "attachment" or (row.save_a_copy and not fixed), fixed=fixed)
+            entry.switch.setAccessibleName(f"Saved or linked: {row.name}")
+            entry.switch.changed.connect(lambda _on: self._apply_same_all())
+            opts.addWidget(entry.switch)
+        entry.extract = QCheckBox("Extract information")
         opts.addWidget(entry.extract)
         fl.addLayout(opts)
-        entry.copy.setVisible(not link and not folder)  # a link or a folder has nothing to copy or read, and a picture no text
-        entry.extract.setVisible(not link and not folder and kind != "picture")
+        entry.extract.setVisible(not link and not folder and kind != "picture")  # a link or a folder has nothing to read, a picture no text
         entry.desc.textEdited.connect(self._apply_same_all)
-        for box in (entry.copy, entry.extract):
-            box.toggled.connect(self._apply_same_all)
+        entry.extract.toggled.connect(self._apply_same_all)
         self._apply_same_all()
         self.refresh()
         if focus:
@@ -3008,10 +3073,17 @@ class CaptureWindow(QWidget):
 
     def _show_layer0(self) -> None:
         rows = [e.row for e in self.files]
+        rules = link_filter.rules(self)
         for e in self.files:
             if e.layer0 is not None and e.row.email is not None:
-                e.layer0.setText(f"<b>Email layer 0</b>  {esc(email_layer0_line(e.row.email, rows))} "
-                                 "Each part has its own row below; untick one to leave it out.")
+                links = any(link_filter.is_email_link(x) and x.row.of is e.row.email for x in self.files)
+                e.layer0.setText(f"<b>Email layer 0</b>  {esc(email_layer0_line(e.row.email, rows, rules))} "
+                                 "Each part has its own row below; untick one to leave it out."
+                                 + (" Right-click a link to always or never keep its site's links." if links else ""))
+
+    def links_changed(self) -> None:
+        """Settings' link lists changed (release 5.146): each email's link rows follow (``link_filter.follow``)."""
+        link_filter.follow(self)
 
     def _remove_file(self, entry: FileEntry, from_content: bool = True) -> None:
         # Removing an email removes the rows email layer 0 made for its parts.
@@ -3044,8 +3116,11 @@ class CaptureWindow(QWidget):
         first = described[0] if described else None
         for e in described:
             follows = same and e is not first
-            for w in (e.desc, e.copy, e.extract):
-                w.setEnabled(e.row.keep and not follows)
+            for w in (e.desc, e.switch, e.extract):
+                if w is not None:
+                    w.setEnabled(e.row.keep and not follows)
+            if follows and e.switch is not None and first.switch is not None:
+                e.switch.set_saved(first.switch.saved())  # it carries the switch, as it carried Save a copy (decision 630)
             e.desc.setPlaceholderText("Left out" if not e.row.keep else "Same as the first file" if follows
                                       else f"{e.what} Left empty: {self._default_desc(e.row)}")
 
@@ -3067,8 +3142,12 @@ class CaptureWindow(QWidget):
         for e in described:
             source = first if self.same_all.isChecked() and e is not first else e
             e.row.description = source.desc.text()
-            # A choice a row doesn't offer (a link's, a picture's Extract information) stays off.
-            e.row.save_a_copy = source.copy.isChecked() and not e.copy.isHidden()
+            # A choice a row doesn't offer (a link's, a picture's Extract information) stays off; a switch that can't change
+            # keeps its own (release 5.145).
+            if e.switch is None:
+                e.row.save_a_copy = False
+            else:
+                e.row.save_a_copy = e.switch.saved() if e.switch.fixed or source.switch is None else source.switch.saved()
             e.row.extract = source.extract.isChecked() and not e.extract.isHidden()
         for e in self.files:
             if e.email_desc is not None:

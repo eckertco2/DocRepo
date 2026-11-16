@@ -1,5 +1,5 @@
 """Files on meeting notes (release 5.135, decision 547): Save keeps a meeting's files, folders, links, emails and pasted
-pictures on its notes capture, as it keeps a note's, and Save a copy puts a file in the meeting's own Files folder. Run
+pictures on its notes capture, as it keeps a note's, and a saved file goes in the meeting's own Files folder. Run
 without Qt; the window's side is in ``test_meeting_window.py``."""
 from __future__ import annotations
 
@@ -55,7 +55,7 @@ def folder_of(env, capture_id: str) -> Path:
 
 
 def test_this_times_meeting_keeps_the_notes_files(env, tmp_path):
-    """A regular meeting's notes: each kind of file goes on the notes capture, on this time's meeting, and a saved copy
+    """A regular meeting's notes: each kind of file goes on the notes capture, on this time's meeting, and a saved file
     in that meeting's Files folder, not the regular meeting's."""
     conn, root, fs = env
     report = a_file(tmp_path)
@@ -75,17 +75,18 @@ def test_this_times_meeting_keeps_the_notes_files(env, tmp_path):
         "Drawings": ("Business team meeting 8 Oct – Attached folder – Drawings", False),
         "Crane booking": ("Business team meeting 8 Oct – Attached link – Crane booking", False),
         "Picture 2026-10-08 1410.png": ("Business team meeting 8 Oct – Pasted picture – Picture 2026-10-08 1410.png", False),
-        "Lift plan.txt": ("Business team meeting 8 Oct – Attached document – Lift plan.txt", False),
+        "Lift plan.txt": ("Business team meeting 8 Oct – Attached document – Lift plan.txt", True),  # always saved (release 5.145)
     }
     assert [e.subject for e in notes.emails] == ["Crane booking"]
     folder = folder_of(env, r.capture_id)
     assert (folder / "email.msg").exists()
     assert (folder / "attachments" / "Picture 2026-10-08 1410.png").read_bytes() == PNG
-    assert (folder / "attachments" / "Lift plan.txt").read_bytes() == b"Lift plan, made up"
-    # Save a copy goes to the meeting the notes made.
+    # Saved files go to the meeting the notes made: the file dropped on Save, and the email's attachment (release 5.145).
+    assert (root / "Tasks" / meeting.id / "Files" / "2026-10-08 Lift plan.txt").read_bytes() == b"Lift plan, made up"
     assert (root / "Tasks" / meeting.id / "Files" / "2026-10-08 Pump curve.txt").exists()
     assert not (root / "Tasks" / "T000010" / "Files" / "2026-10-08 Pump curve.txt").exists()
-    assert [(c.task, c.name) for c in m.copies if c.from_capture == r.capture_id] == [(meeting.id, "2026-10-08 Pump curve.txt")]
+    assert [(c.task, c.name) for c in m.copies if c.from_capture == r.capture_id] == [
+        (meeting.id, "2026-10-08 Pump curve.txt"), (meeting.id, "2026-10-08 Lift plan.txt")]
     # The original stays where it is.
     assert report.read_text(encoding="utf-8") == "Design point 38 kW"
 

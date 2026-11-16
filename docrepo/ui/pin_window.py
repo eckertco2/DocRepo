@@ -9,7 +9,9 @@ Outlook emails and web links on while finding them in Outlook and File Explorer.
 - the capture types, Note, New task and Update, as small toggles;
 - a box with the capture window's own content text (the same document);
 - a landing row, which lights up while something is dragged over the window: a box for typing or pasting a file's path
-  or a web link (Enter adds it), and a button that adds the email selected in Outlook;
+  or a web link (Enter adds it), and a button that adds the email selected in Outlook. Files from File Explorer split
+  it in two, as the full window does (release 5.145, the save or link plan's decision 627): Save in DocRepo on the
+  left and Link on the right, over the window below its top line;
 - the description of each file, link or email part added, one at a time, with ‹ and › between them;
 - a line for what's been added ("2 files, 1 link added"), or a problem with a drop.
 
@@ -32,6 +34,7 @@ from docrepo.ui import tokens
 from docrepo.ui.capture_window import ContentEdit, FileEntry, _accept_copy, note_drag, read_drop
 from docrepo.ui.icons import icon, icon_size
 from docrepo.ui.drop_target import DropOverlay
+from docrepo.ui.save_link import SaveLinkZones, zone_at
 from docrepo.ui.items_panel import RefPopup
 from docrepo.ui.look import tip
 from docrepo.ui.style import style_sheet
@@ -155,6 +158,7 @@ class PinWindow(QWidget):
         self.text.setPlaceholderText("Type a note, or drop files, emails or links")
         self.text.dropped.connect(self._take)
         self.text.drag_entered = capture._drag_entered
+        self.text.zone_of = lambda point: zone_at(self.width(), self.mapFromGlobal(point).x())
         lay.addWidget(self.text, 1)
         # The @ and # list (release 5.32): a window of its own, as the pinned window is too small to hold it, which
         # never takes the keyboard from the text, so typing goes on while it's open.
@@ -211,6 +215,8 @@ class PinWindow(QWidget):
             QShortcut(QKeySequence(keys), self, handler)
         # DocRepo's own drop target, for emails from Outlook (release 5.33): a cover over the whole window while one is dragged.
         self.drop_overlay = DropOverlay(self, capture.take_drop)
+        # Files from File Explorer: the two zones, below the top line (release 5.145, decision 627).
+        self.zones = SaveLinkZones(self, lambda zone, paths: self._take("files", paths, zone), top=HEAD, compact=True)
         self._index = 0  # which description shows
         self._count = 0  # how many there were at the last sync, to show a new one as it comes
         self._moved: QPoint | None = None  # where it was dragged to, kept until DocRepo restarts
@@ -285,10 +291,11 @@ class PinWindow(QWidget):
         self.status.setVisible(not text)
 
     # ---- adding ----
-    def _take(self, kind: str, paths: list[str]) -> None:
-        """A drop, here or on its box: as on the full window, then the new file's description, ready to type."""
+    def _take(self, kind: str, paths: list[str], zone: str = "") -> None:
+        """A drop, here or on its box: as on the full window, then the new file's description, ready to type. Files go by
+        the zone they were dropped on (release 5.145)."""
         before = len(describable(self.capture))
-        self.capture.dropped(kind, paths)
+        self.capture.dropped(kind, paths, zone)
         if len(describable(self.capture)) > before:
             self.desc.setFocus()
 
@@ -351,7 +358,7 @@ class PinWindow(QWidget):
         if kind := note_drag("enter", event.mimeData(), links=True):
             _accept_copy(event)
             self.drop.over(True)
-            self.capture._drag_entered(kind)
+            self.capture._drag_entered(kind, read_drop(event.mimeData(), links=True)[1])
 
     def dragMoveEvent(self, event) -> None:  # noqa: N802
         if read_drop(event.mimeData(), links=True)[0]:
@@ -362,11 +369,13 @@ class PinWindow(QWidget):
 
     def dropEvent(self, event) -> None:  # noqa: N802
         self.drop.over(False)
+        self.zones.uncover()
         note_drag("drop", event.mimeData(), links=True)
         kind, paths = read_drop(event.mimeData(), links=True)
         if kind:
             _accept_copy(event)
-            self._take(kind, paths)
+            # Files the zones didn't take go by the half they landed in, as the zones would.
+            self._take(kind, paths, zone_at(self.width(), event.position().x()) if kind == "files" else "")
 
     def _escape(self) -> None:
         """Esc closes the @ or # list when it's open, and otherwise closes the pinned window, its capture to Drafts."""

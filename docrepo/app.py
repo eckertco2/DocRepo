@@ -260,9 +260,13 @@ class CaptureApp(QObject):
 
     def settings_changed(self, keys: list[str]) -> None:
         """Apply what the Settings view changed: a new hotkey works at once, and today's meetings show or go from the Today
-        side panel (release 5.127)."""
+        side panel (release 5.127). The link lists (release 5.146): the capture window's email link rows follow, and
+        Settings' boxes show a site a row's right-click menu added."""
         if "today_meetings" in keys:
             self.ctx.today_changed()
+        if any(k in ("links_keep", "links_drop", "other_links") for k in keys):
+            self.window.links_changed()
+            self.browse.settings_view.show_link_lists()
         if any(k in hotkey.HOTKEY_IDS or k == "wheel_hotkeys" for k in keys):
             self.unregister_hotkeys()
             self.paused = False

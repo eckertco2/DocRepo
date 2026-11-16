@@ -1114,7 +1114,8 @@ def test_the_header_s_groups_open_fold_and_are_remembered(browse):
     assert g["subtasks"].is_open and not g["files"].is_open and not g["details"].is_open and "when_who" not in g
     assert not g["key_dates"].present and not g["agenda"].present  # nothing in them
     assert all(x.head.parentWidget() is x for x in g.values())  # each its own row
-    assert "Installation" in header.text() and "Folder" not in header.text() and g["files"].label.text() == "5"
+    # Each file once (release 5.145): a document saved on a task isn't counted again as its original or attachment.
+    assert "Installation" in header.text() and "Folder" not in header.text() and g["files"].label.text() == "3"
     grid = " ".join(header.head.toPlainText().replace("￼", "").split())  # without the faces' pictures
     assert "Lead Me 20 h" in grid and "Status In progress" in grid  # the grid
     g["details"].toggle()

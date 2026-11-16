@@ -48,7 +48,7 @@ def is_folder(original: str | None) -> bool:
 
 
 def keeps_no_text(original: str | None) -> bool:
-    """A link or a folder: kept by where it is, with no text, no saved copy and nothing to extract."""
+    """A link or a folder: kept by where it is, with no text, no saved file and nothing to extract."""
     return is_link(original) or is_folder(original)
 
 

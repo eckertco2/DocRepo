@@ -124,8 +124,9 @@ class TaskRowDelegate(QStyledItemDelegate):
         return mark, kid, "" if top or kid else o.sub, str(n) if n else ""
 
     def slot(self, o: Row, mark: tuple[bool, str] | None) -> bool:
-        """Whether the row has the 8 px slot: a task's, or an entry of a list of tasks that isn't one."""
-        return mark is not None or (self.popup.task_info is not None and can_pick(o) and not o.ref)
+        """Whether the row has the 8 px slot: a task's, or an entry of a list of tasks that isn't one (the picker's None,
+        and since release 5.144 Today and a person in the ``**agenda,`` list)."""
+        return mark is not None or (self.popup.task_info is not None and can_pick(o))
 
     def name_font(self, o: Row, head: bool):
         if isinstance(o, Words):

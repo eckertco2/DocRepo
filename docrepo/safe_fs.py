@@ -191,7 +191,7 @@ class SafeFS:
     def write_copy(self, path: PathLike, data: bytes) -> Path:
         """Write a file the owner dragged in from a program that holds it, exactly as that program handed it over
         (release 5.33, the knowledge base's decision 22): an Outlook email as its .msg file, the email's attachments, or a
-        file inside a zip folder. It's a copy, like Save a copy's. Never overwrites, and atomically, as ``write_text``
+        file inside a zip folder. It's a saved file of DocRepo's own (release 5.145). Never overwrites, and atomically, as ``write_text``
         does."""
         return self._write_new(self.checked_path(path), data)
 

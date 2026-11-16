@@ -16,7 +16,7 @@ from PySide6.QtCore import QPoint, Qt
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QToolButton, QVBoxLayout, QWidget
 
 from docrepo import drafts, msg
-from docrepo.layer0 import Part
+from docrepo.layer0 import LinkRules, Part
 from docrepo.save import Attachment, EmailItem, FileRow, email_rows
 from docrepo.tasks import KeyDateRow
 from docrepo.ui.icons import icon
@@ -114,7 +114,7 @@ def snapshot(c: CaptureWindow) -> tuple[dict[str, Any], list[tuple[str, Callable
             j = email_parts.get(i, 0)
             email_parts[i] = j + 1
             rows.append({"kind": "part", "part_of_email": i, "n": j, "name": row.name, "keep": row.keep, "description": row.description,
-                         "save_a_copy": row.save_a_copy, "extract": row.extract})
+                         "save_a_copy": row.save_a_copy, "extract": row.extract, "path": row.path})
             continue
         record: dict[str, Any] = {"kind": "file", "name": row.name, "path": row.path, "description": row.description,
                                   "save_a_copy": row.save_a_copy, "extract": row.extract, "keep": row.keep, "section": row.section,
@@ -194,12 +194,17 @@ def restore_files(c: CaptureWindow, draft_id: str, data: dict[str, Any]) -> list
             email = emails.get(int(record.get("email") or 0))
             if email is None:
                 continue
-            rows = email_rows(email)
+            # Settings' link lists sort its links as they are now (release 5.146, decision 640): a link put on Never keep since
+            # the draft was kept doesn't come back.
+            rows = email_rows(email, LinkRules.of(c.ctx.settings))
             rows[0].description = str(record.get("description") or "")
             mine = [p for p in parts if p.get("part_of_email") == record.get("email")]
             for j, row in enumerate(rows[1:]):
-                # By its name, else by its place: the email read again from its .msg gives the same parts.
-                p = next((x for x in mine if x.get("name") == row.name), None) or next((x for x in mine if int(x.get("n") or 0) == j), None)
+                # A link by its address (kept since release 5.146), else by its name, else by its place: the email read again
+                # from its .msg gives the same parts.
+                p = (next((x for x in mine if row.path and x.get("path") == row.path), None)
+                     or next((x for x in mine if x.get("name") == row.name and not (row.path and x.get("path"))), None)
+                     or next((x for x in mine if int(x.get("n") or 0) == j and not x.get("path")), None))
                 if p is not None:
                     mine.remove(p)
                     row.keep, row.description = bool(p.get("keep")), str(p.get("description") or "")
@@ -227,6 +232,7 @@ def restore_files(c: CaptureWindow, draft_id: str, data: dict[str, Any]) -> list
                       keep=bool(record.get("keep", True)), section=record.get("section"))
         c._add_file(row, str(record.get("src") or "dropped"), line=record.get("line"), focus=False)
         _fill(c, row)
+    c._show_layer0()  # each email's line, once its parts' rows are back (release 5.146)
     return lost
 
 
@@ -239,8 +245,8 @@ def _fill(c: CaptureWindow, row: FileRow) -> None:
         entry.desc.setText(row.description)
     if entry.email_desc is not None:
         entry.email_desc.setText(row.description)
-    if entry.copy is not None:
-        entry.copy.setChecked(row.save_a_copy)
+    if entry.switch is not None:  # Saved or linked, as it was (release 5.145, decision 630)
+        entry.switch.set_saved(row.save_a_copy)
     if entry.extract is not None:
         entry.extract.setChecked(row.extract)
 

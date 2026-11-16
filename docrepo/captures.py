@@ -6,16 +6,20 @@ there (``read_content``) to show it, search it and edit it.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
+from collections.abc import Iterable
 from pathlib import Path
 
 from docrepo import items, markup
 from docrepo.db import next_id, note_used_id, transaction
+from docrepo.links import is_link, keeps_no_text
 from docrepo.model import Capture, Model
 from docrepo.safe_fs import SafeFS
 
 SOURCES = ("typed", "outlook_email", "file_path")
 CAPTURE_TYPES = ("note", "new_task", "update")
+_FORBIDDEN = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 
 def add_capture(
@@ -51,7 +55,8 @@ def add_document(
     conn: sqlite3.Connection, *, name: str, description: str | None, original: str | None = None, capture: str | None = None,
     status: str = "Current", checked: str | None = None, document_id: str | None = None,
 ) -> str:
-    """Record a document: a tracked original (``original`` is its path) or an email attachment (``capture`` holds it)."""
+    """Record a document: a file where it is (``original`` is its path: a linked file, or where a saved file came from) or
+    an email attachment (``capture`` holds it)."""
     with transaction(conn):
         if document_id:
             note_used_id(conn, document_id)
@@ -65,7 +70,8 @@ def add_document(
 
 
 def link_document(conn: sqlite3.Connection, capture: str, document: str, *, save_a_copy: bool, extract: bool) -> None:
-    """Add a document to a capture's list of files, with its choices."""
+    """Add a document to a capture's list of files, with its choices. ``save_a_copy`` keeps its name and means saved
+    (release 5.145, decision 634): the file is a saved file of DocRepo's own, not linked where it is."""
     with transaction(conn):
         pos = conn.execute("SELECT count(*) FROM capture_documents WHERE capture = ?", (capture,)).fetchone()[0]
         conn.execute(
@@ -112,7 +118,8 @@ def captured_before(conn: sqlite3.Connection, sender: str, subject: str, sent: s
 
 
 def add_attachment(conn: sqlite3.Connection, capture: str, name: str) -> None:
-    """Note an Outlook email's attachment, saved in the capture's attachments folder."""
+    """Note an Outlook email's attachment by its name in the capture's attachments folder. Since release 5.145 a filed
+    capture's attachments are saved files in its task's Files folder instead (decision 629); the name stays its own."""
     with transaction(conn):
         pos = conn.execute("SELECT count(*) FROM capture_attachments WHERE capture = ?", (capture,)).fetchone()[0]
         conn.execute("INSERT INTO capture_attachments (capture, pos, name) VALUES (?, ?, ?)", (capture, pos, name))
@@ -121,7 +128,7 @@ def add_attachment(conn: sqlite3.Connection, capture: str, name: str) -> None:
 def add_version(
     conn: sqlite3.Connection, document: str, *, at: str, difference: str, summary: str | None = None, summary_type: str | None = None
 ) -> int:
-    """Record that a tracked original changed. It joins the raw text log of the document's tasks."""
+    """Record that a linked file changed. It joins the raw text log of the document's tasks."""
     with transaction(conn):
         cur = conn.execute(
             "INSERT INTO document_versions (document, at, difference, summary, summary_type) VALUES (?, ?, ?, ?, ?)",
@@ -134,7 +141,8 @@ def add_saved_copy(
     conn: sqlite3.Connection, *, task: str, name: str, document: str, from_capture: str | None = None,
     replaced: str | None = None, old: bool = False,
 ) -> int:
-    """Record a saved copy in a task's Files folder, or a replaced one in its ``_old versions`` folder."""
+    """Record a saved file in a task's Files folder, or a replaced one in its ``_old versions`` folder. The table keeps its
+    name, ``saved_copies`` (release 5.145, decision 634)."""
     with transaction(conn):
         cur = conn.execute(
             "INSERT INTO saved_copies (task, name, document, from_capture, replaced, old) VALUES (?, ?, ?, ?, ?, ?)",
@@ -146,6 +154,78 @@ def add_saved_copy(
 def capture_folder(data_root: Path, capture_id: str, saved: str) -> Path:
     """A capture's folder, ``Captures\\YYYY\\MM\\<id>``. It never moves."""
     return data_root / "Captures" / saved[:4] / saved[5:7] / capture_id
+
+
+# ---- saved files (release 5.145, the save or link plan's decisions 629 to 634) ----
+def copy_name(day: str, name: str, taken: Iterable[str]) -> str:
+    """A saved file's name: "YYYY-MM-DD name", cleaned of characters Windows forbids, at most 100 characters, and unique
+    among ``taken``, in any case."""
+    lowered = {t.lower() for t in taken}
+    stem, dot, ext = _FORBIDDEN.sub("", name).rpartition(".")
+    if not dot:
+        stem, ext = ext, ""
+    ext = f".{ext}" if ext else ""
+    base = f"{day} {stem}".rstrip(". ")[: 100 - len(ext)].rstrip(". ")
+    candidate, n = base + ext, 2
+    while candidate.lower() in lowered:
+        candidate = f"{base[: 100 - len(ext) - 4]} ({n}){ext}"
+        n += 1
+    return candidate
+
+
+def files_taken(conn: sqlite3.Connection, data_root: Path | None, task_id: str) -> set[str]:
+    """The names a new saved file in a task's Files folder mustn't take: its saved files' and, with ``data_root``, every
+    file already in the folder, such as a picture pasted on its notes page, which has no saved file's record."""
+    taken = {r["name"] for r in conn.execute("SELECT name FROM saved_copies WHERE task = ?", (task_id,))}
+    folder = data_root / "Tasks" / task_id / "Files" if data_root else None
+    if folder is not None and folder.is_dir():
+        taken.update(p.name for p in folder.iterdir())
+    return taken
+
+
+def held_files(data_root: Path, model: Model, capture: Capture) -> dict[str, Path]:
+    """Where a capture saved files in its own folder (decision 631): an unfiled capture's files dropped on Save, in its
+    folder's ``Files``, named as saved files are ("2026-11-13 Pump curve.pdf"), so nothing depends on the original staying
+    put. Worked out again the way they were named: in the capture's order, each name unique. An email's attachments are
+    in its ``attachments`` folder instead, and a link or a folder has no file. A filed capture's saved files go straight
+    into its task's Files folder, so these paths are only where they'd be: ask whether one exists."""
+    folder = capture_folder(data_root, capture.id, capture.saved) / "Files"
+    taken: set[str] = set()
+    out: dict[str, Path] = {}
+    for cd in capture.documents:
+        d = model.documents.get(cd.document)
+        if not cd.save_a_copy or d is None or not d.original or keeps_no_text(d.original):
+            continue
+        name = copy_name(capture.saved[:10], d.name, taken)
+        taken.add(name)
+        out[d.id] = folder / name
+    return out
+
+
+def file_of(data_root: Path, model: Model, document_id: str, skip: Iterable[tuple[str, str]] = ()) -> Path | None:
+    """Where a document's file is (release 5.145, decision 631): its saved file in a task's Files folder, once it has one,
+    as that file is the document from then on; else the one an unfiled capture saved in its own folder; else, for a
+    linked file, where it is; else an email attachment in its capture's ``attachments`` folder. ``skip`` leaves out saved
+    files by (task, name), such as the ones filing is about to make. A link has no file, so None: DocRepo never hands
+    one to File Explorer, which would open it in the browser."""
+    d = model.documents[document_id]
+    if is_link(d.original):
+        return None
+    passed = set(skip)
+    for f in model.saved_of(document_id):
+        if (f.task, f.name) not in passed:
+            return data_root / "Tasks" / f.task / "Files" / f.name
+    if d.original and not keeps_no_text(d.original):
+        for c in model.saving_captures(document_id):
+            held = held_files(data_root, model, c).get(document_id)
+            if held is not None and held.exists():
+                return held
+    if d.original:
+        return Path(d.original)
+    if d.capture and d.capture in model.captures:
+        c = model.captures[d.capture]
+        return capture_folder(data_root, c.id, c.saved) / "attachments" / d.name
+    return None
 
 
 def write_capture_md(fs: SafeFS, data_root: Path, model: Model, capture_id: str, content: str) -> Path:

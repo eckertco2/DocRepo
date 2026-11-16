@@ -6,7 +6,7 @@
   the finished draft in ``System\\Drafts\\Done`` that may still hold it, when one was last changed shortly before the
   capture was saved;
 - documents whose text was read (``text_status`` ok) with no ``extracted.txt``;
-- saved copies whose file isn't in their task's ``Files`` folder;
+- saved files that aren't in their task's ``Files`` folder;
 - captures and documents missing from the search index, or whose entry differs from what it would be now;
 - SQLite's ``PRAGMA quick_check``.
 
@@ -141,9 +141,9 @@ def run_check(conn: sqlite3.Connection, data_root: Path, at: datetime) -> CheckR
     for f in model.copies:
         path = data_root / "Tasks" / f.task / "Files" / ("_old versions" if f.old else "") / f.name
         if not path.exists():
-            copies.append(Finding(f'{f.task}\'s saved copy "{f.name}" isn\'t at `{path.relative_to(data_root)}`.',
-                                  "Copy it back from the backup folder's Files, or from its original."))
-    result.sections["Saved copies that aren't there"] = copies
+            copies.append(Finding(f'{f.task}\'s saved file "{f.name}" isn\'t at `{path.relative_to(data_root)}`.',
+                                  "Copy it back from the backup folder's Files, or from where it came from."))
+    result.sections["Saved files that aren't there"] = copies
 
     indexed = {(r["kind"], r["id"]): r["body"] for r in conn.execute("SELECT kind, id, body FROM search_text")}
     stale = []
@@ -158,7 +158,7 @@ def run_check(conn: sqlite3.Connection, data_root: Path, at: datetime) -> CheckR
             stale.append(Finding(f"{d.id}: {'not in the search index' if body is None else 'its search entry is out of date'}.",
                                  "Rebuild pages, calendar and search brings it up to date."))
     result.sections["The search index"] = stale
-    result.counted = {"captures": len(model.captures), "documents": len(model.documents), "saved copies": len(model.copies)}
+    result.counted = {"captures": len(model.captures), "documents": len(model.documents), "saved files": len(model.copies)}
     log.info("check: %d problems, quick check %s", result.problems, result.database)
     return result
 

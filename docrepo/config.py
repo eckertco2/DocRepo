@@ -12,6 +12,7 @@ import os
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
+from docrepo.layer0 import DEFAULT_DROP, OTHER_LINKS, entry_problem, tidy_list
 from docrepo.safe_fs import SafeFS
 
 log = logging.getLogger(__name__)
@@ -185,6 +186,13 @@ class Settings:
     #: is its Gone quiet too (decision 500).
     review_day: str = "Fri"
     review_weeks: int = 1
+    #: The email link filter (release 5.146, the design workspace's docs/mods/email-link-filter-plan.md, decisions 635 to
+    #: 639): the sites whose links email layer 0 always keeps and never keeps, one entry each (a domain, or a domain and the
+    #: start of a path), and what a link on neither list gets ("keep", "untick" or "leave"). Never keep starts with meeting
+    #: links; Always keep starts empty, as the company's own sites can't be named here. Each is written once it's changed.
+    links_keep: list[str] = field(default_factory=list)
+    links_drop: list[str] = field(default_factory=lambda: list(DEFAULT_DROP))
+    other_links: str = "keep"
 
     @classmethod
     def load(cls, data_root: Path) -> Settings:
@@ -235,6 +243,21 @@ class Settings:
         if "review_weeks" in data and (isinstance(data["review_weeks"], bool) or data["review_weeks"] not in (1, 2, 4)):
             log.warning("Ignoring review_weeks in %s: it isn't 1, 2 or 4", file)
             del data["review_weeks"]
+        for key in ("links_keep", "links_drop"):  # release 5.146: lists of sites; a line that isn't one is left out
+            value = data.get(key)
+            if value is None:
+                continue
+            if not (isinstance(value, list) and all(isinstance(x, str) for x in value)):
+                log.warning("Ignoring %s in %s: it isn't a list of sites", key, file)
+                del data[key]
+                continue
+            bad = [x for x in value if x.strip() and entry_problem(x)]
+            if bad:
+                log.warning("Leaving %d entries out of %s in %s: they aren't sites", len(bad), key, file)
+            data[key] = tidy_list(x for x in value if not entry_problem(x))
+        if "other_links" in data and data["other_links"] not in OTHER_LINKS:
+            log.warning("Ignoring other_links in %s: it isn't one of %s", file, ", ".join(OTHER_LINKS))
+            del data["other_links"]
         return cls(**{k: v for k, v in data.items() if k in known})
 
     def reference_link(self, name: str, value: str | None) -> str:
@@ -257,6 +280,11 @@ class Settings:
         if data["today_meetings"]:  # release 5.127: on by default, so written only once it's turned off
             del data["today_meetings"]
         for key, default in (("review_day", "Fri"), ("review_weeks", 1)):  # release 5.128: the same
+            if data[key] == default:
+                del data[key]
+        # Release 5.146 (decision 639): the link lists and Other links, written once they differ from their start, so an
+        # existing data root gets Never keep's start too, and a list emptied on purpose stays empty.
+        for key, default in (("links_keep", []), ("links_drop", list(DEFAULT_DROP)), ("other_links", "keep")):
             if data[key] == default:
                 del data[key]
         return fs.write_text(data_root / SETTINGS_FILE, json.dumps(data, indent=2) + "\n")

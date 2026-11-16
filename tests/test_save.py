@@ -209,7 +209,9 @@ def test_an_outlook_email_and_its_attachments(env):
     conn, root, _ = env
     folder = root / "Captures" / "2026" / "10" / r.capture_id
     assert (folder / "email.msg").read_bytes() == b"MSG"
-    assert (folder / "attachments" / "Guard drawing rev C.txt").exists()
+    # Release 5.145 (decision 629): an attachment is a saved file, in the task's Files folder; the .msg is the record.
+    assert (root / "Tasks" / "T000008" / "Files" / "2026-10-16 Guard drawing rev C.txt").read_bytes() == b"Mounting holes: four M12"
+    assert not (folder / "attachments").exists()
     model = Model(conn)
     capture = model.captures[r.capture_id]
     assert (capture.source, capture.title, capture.attachments) == ("outlook_email", "Revised coupling guard delivery", ["Guard drawing rev C.txt"])
@@ -244,8 +246,9 @@ def test_two_emails_in_one_capture_keep_their_own_msg_files_and_attachments(env)
     conn, root, _ = env
     folder = root / "Captures" / "2026" / "10" / r.capture_id
     assert ((folder / "email.msg").read_bytes(), (folder / "email 2.msg").read_bytes()) == (b"MSG 1", b"MSG 2")
-    assert (folder / "attachments" / "Notes.txt").read_bytes() == b"Seal kit: part 4471"
-    assert (folder / "attachments" / "notes (2).TXT").read_bytes() == b"Lead time: three weeks"
+    files = root / "Tasks" / "T000008" / "Files"  # release 5.145: each attachment a saved file, with no tick (decision 629)
+    assert (files / "2026-10-16 Notes.txt").read_bytes() == b"Seal kit: part 4471"
+    assert (files / "2026-10-16 notes (2).TXT").read_bytes() == b"Lead time: three weeks"
     model = Model(conn)
     capture = model.captures[r.capture_id]
     assert capture.attachments == ["Notes.txt", "notes (2).TXT"]
@@ -253,9 +256,10 @@ def test_two_emails_in_one_capture_keep_their_own_msg_files_and_attachments(env)
     assert [d.name for d in docs] == ["Notes.txt", "notes (2).TXT"]
     assert [(root / "Documents" / d.id / "extracted.txt").read_text(encoding="utf-8") for d in docs] == [
         "Seal kit: part 4471", "Lead time: three weeks"]
-    assert source_of(root, model, docs[1].id) == folder / "attachments" / "notes (2).TXT"
-    copy = next(c for c in model.copies if c.document == docs[1].id)
-    assert (root / "Tasks" / "T000008" / "Files" / copy.name).read_bytes() == b"Lead time: three weeks"
+    assert source_of(root, model, docs[1].id) == files / "2026-10-16 notes (2).TXT"  # that file is the document now
+    assert [(c.document, c.name) for c in model.copies if c.from_capture == r.capture_id] == [
+        (docs[0].id, "2026-10-16 Notes.txt"), (docs[1].id, "2026-10-16 notes (2).TXT")]
+    assert [d.save_a_copy for d in capture.documents] == [True, True]
     assert not r.problems
 
 

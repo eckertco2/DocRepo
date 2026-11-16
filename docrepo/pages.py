@@ -179,11 +179,14 @@ class Pages:
             return rel_link(here, [*capture_dir(c), "capture.md"]) if c else None
 
         def document_link(document_id: str) -> str | None:
-            """A picture's or attachment's file, when it's DocRepo's: in the task's Files folder (pasted there) or in its
-            capture's attachments folder."""
+            """A picture's or attachment's file, when it's DocRepo's: its saved file in a Files folder (release 5.145,
+            decision 629), in the task's Files folder (pasted there), or in its capture's attachments folder."""
             d = self.m.documents.get(document_id)
             if d is None:
                 return None
+            saved = self.m.saved_of(document_id)
+            if saved:
+                return rel_link(here, ["Tasks", saved[0].task, "Files", saved[0].name])
             if d.capture and d.capture in self.m.captures:
                 return rel_link(here, [*capture_dir(self.m.captures[d.capture]), "attachments", d.name])
             parts = Path(d.original or "").parts
@@ -192,7 +195,9 @@ class Pages:
             return None
 
         def task_link(task_id: str) -> str | None:
-            return self._task_link(here, task_id) if task_id in self.m.tasks else None
+            """The path to a task's Task.md, which ``task_md`` makes a link of (a whole link here, from release 5.83 to
+            5.142, printed task lines as a link inside a link)."""
+            return rel_link(here, [*task_dir(task_id), TASK_FILE]) if task_id in self.m.tasks else None
 
         out += ["## Notes", "", *(notes_page.task_md(page, capture_link, document_link, task_link) or ["_No notes yet._"]), ""]
         on_page = notes_page.on_page(self.m, t.id, page)
@@ -278,11 +283,11 @@ class Pages:
     def _file_line(self, here: list[str], f: FileEntry) -> str:
         d = self.m.documents[f.document]
         text_link = f"[text]({rel_link(here, ['Documents', d.id, 'extracted.txt'])})"
-        if f.kind in ("Saved copy", "Old version"):
+        if f.kind in ("Saved file", "Old version"):
             path = ["Files", "_old versions", f.name] if f.kind == "Old version" else ["Files", f.name]
             return f"- {f.kind}: [{_text(f.name)}]({rel_link(here, [*here, *path])}) · {d.id}"
-        if f.kind == "Tracked original":
-            return f"- Tracked original: `{d.original}` · {d.id} · {text_link}"
+        if f.kind == "Linked file":  # release 5.145, decision 631: read where it is
+            return f"- Linked file: `{d.original}` · {d.id} · {text_link}"
         if f.kind == "Link":  # as code, not a Markdown link: DocRepo's pages never open a link (round 1 plan, decision 5)
             return f"- Link: {_text(f.name)} · `{d.original}` · {d.id}"
         if f.kind == "Folder":  # release 5.66: where it is, with no text

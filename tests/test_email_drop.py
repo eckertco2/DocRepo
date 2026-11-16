@@ -203,7 +203,8 @@ def test_the_msg_and_its_attachments_are_written_as_handed_over(env):
     c = Model(conn).captures[r.capture_id]
     folder = captures.capture_folder(root, c.id, c.saved)
     assert (folder / "email.msg").read_bytes() == data  # the email exactly as Outlook handed it over
-    assert (folder / "attachments" / "Lift plan.txt").read_bytes() == b"Lift plan, made up"
+    # The attachment is a saved file in the task's Files folder (release 5.145, decision 629); the body's picture stays.
+    assert (root / "Tasks" / INSTALLATION / "Files" / f"{c.saved[:10]} Lift plan.txt").read_bytes() == b"Lift plan, made up"
     assert (folder / "attachments" / "image001.png").stat().st_size == 20_000
     md = captures.capture_md_path(root, c).read_text(encoding="utf-8")
     assert "From: Ann Example" in md and "The crane is booked for Tuesday." in md  # the text the guard used to hold back
