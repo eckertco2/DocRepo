@@ -4,6 +4,14 @@ One line per release, newest first: its number, the date it was built, and what 
 
 Since 2026-11-12, releases ship in weekly trains (the design workspace's `docs/mods/cold-eyes-plan.md`, decisions 464 to 468): each train has a heading with the day it was pushed to GitHub, over its releases. Releases keep their own numbers and tags.
 
+## Next train (Thursday 2026-11-19, not pushed yet)
+
+A settling train (decision 467): fixes, polish and consolidation only, after the train of 2026-11-16's concepts. Its plan is the design workspace's `docs/mods/train-2026-11-19-plan.md`.
+
+| Release | Date | What |
+|---|---|---|
+| 5.155 | 2026-11-16 | Log progress: a state to pick, and Done for today. **State** is a dropdown now, just under What you did: **In progress**, **Waiting on a reply** (In progress with a wait, as since 5.139), **Parked** or **Closed**. It opens on Waiting on a reply when Waiting on has people (from the email's To), else In progress, and it keeps in step with Waiting on: another state empties Waiting on and sets Follow up to None, the two rows dimmed with "Pick Waiting on a reply to wait on someone"; a person added picks Waiting on a reply, and the last one taken away In progress; Waiting on a reply with nobody puts the cursor in Waiting on, and Enter there asks who. Parked parks the task with the line as its current status; Closed closes the task alone (its open subtasks stay open, as the line under State says) and its Today item as done; neither starts a wait. A **Today** row, only when the task is on Today: **Done for today**, unticked each time, takes the item off Today as done once it's logged, under Done today, with no Update opened, since the line is the update; its line says when a follow-up brings it back ("Off Today until Tue 13 Oct, if Mike hasn't replied"). With Closed it's ticked and fixed. What Enter did says so ("…: closed. Done for today."). No schema change. |
+
 ## Train of 2026-11-16
 
 Releases 5.145 to 5.151 and 5.153, pushed to GitHub on Monday 2026-11-16, three days before its Thursday, at the owner's word ("I want the train to go out today"), with everything merged by then (the design workspace's `docs/mods/train-2026-11-16-plan.md`). It adds concepts at the owner's word (decision 626), so the next train, Thursday 2026-11-19, settles (decision 467). 5.152 is kept for the workspace, not built yet. Schema 29 (5.148); no new package. Its corporate test is the design workspace's `handoff/docrepo/train-2026-11-16-test.md`, which gathers the eight releases' tests.
