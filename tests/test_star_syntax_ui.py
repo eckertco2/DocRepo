@@ -97,8 +97,8 @@ def test_the_keys_dialog_has_the_syntax_tab(window):
         assert [dialog.tabs.tabText(i) for i in range(dialog.tabs.count())] == ["Keys", "Syntax"]
         text = dialog.syntax.toPlainText()
         for op in items.OPERATORS:
-            if not op.gone:
-                assert f"**{items.star_name(op)}," in text, op.names
+            if not op.gone:  # **today has no comma (release 5.147)
+                assert f"**{items.star_name(op)}{'' if op.alone else ','}" in text, op.names
         assert "**change record," in text and "@Tom to book the crane by Fri" in text and "turnaround" in text
     finally:
         dialog.deleteLater()

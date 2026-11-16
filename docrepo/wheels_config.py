@@ -40,18 +40,21 @@ class ConfigError(Exception):
 
 @dataclass(frozen=True)
 class Arg:
-    """One argument a command takes: its choices, or ``kind`` "bool"; and its default. ``renamed`` maps a choice's old name
-    to its new one (release 5.98), so a file that says the old one still works."""
+    """One argument a command takes: its choices, or ``kind`` "bool", or "text" (a name, such as a saved set's, release
+    5.149: words only, looked up when the slot runs, never run); and its default. ``renamed`` maps a choice's old name to its
+    new one (release 5.98), so a file that says the old one still works."""
 
     name: str
     default: Any
     choices: tuple[str, ...] = ()
-    kind: str = "choice"  # "choice" or "bool"
+    kind: str = "choice"  # "choice", "bool" or "text"
     renamed: tuple[tuple[str, str], ...] = ()
 
     def problem(self, value: Any) -> str | None:
         if self.kind == "bool":
             return None if isinstance(value, bool) else "is true or false"
+        if self.kind == "text":
+            return None if isinstance(value, str) and value.strip() and len(value) <= 200 else "is a name, as text"
         return None if value in self.choices or value in dict(self.renamed) else f"is one of {', '.join(self.choices)}"
 
     def current(self, value: Any) -> Any:
@@ -320,7 +323,14 @@ def load(data_root: Path, registry: Mapping[str, CommandSpec], icons: Iterable[s
 def schema(registry: Mapping[str, CommandSpec], icons: Iterable[str]) -> dict[str, Any]:
     """The JSON schema VS Code checks the file against, from the same table DocRepo checks it with."""
     def slot_for(spec: CommandSpec) -> dict[str, Any]:
-        args = {a.name: {"type": "boolean"} if a.kind == "bool" else {"enum": [*a.choices, *(old for old, _ in a.renamed)]} for a in spec.args}
+        def arg_for(a: Arg) -> dict[str, Any]:
+            if a.kind == "bool":
+                return {"type": "boolean"}
+            if a.kind == "text":  # release 5.149: a saved set's name
+                return {"type": "string", "minLength": 1, "maxLength": 200}
+            return {"enum": [*a.choices, *(old for old, _ in a.renamed)]}
+
+        args = {a.name: arg_for(a) for a in spec.args}
         return {"if": {"properties": {"command": {"const": spec.id}}, "required": ["command"]},
                 "then": {"properties": {"args": {"type": "object", "properties": args, "additionalProperties": False}}}}
 
@@ -418,6 +428,8 @@ DEFAULT_TEXT = """\
         "E": { "label": "Today panel", "icon": "sidebar", "command": "today.panel" },
         // summary.open: the quick summary, a person's, an agenda's or a label's, from one box.
         "S": { "label": "Quick summary", "icon": "agenda", "command": "summary.open" },
+        //   args: "set" opens a saved set by its name, for one used every day: in a place of its own, such as
+        //   "SE": { "label": "Morning meeting", "icon": "people", "command": "summary.open", "args": { "set": "Morning meeting" } }
         // find_files.current: Find files for the task selected in the browse tool, or the last one opened.
         "W": { "label": "Find files", "icon": "open", "command": "find_files.current" },
         // progress.log: Log progress, on the email you're writing in Outlook, or a call or a talk.

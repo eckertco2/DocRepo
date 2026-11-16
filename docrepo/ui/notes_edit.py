@@ -13,6 +13,11 @@ the facts above and the history below (``task_pane``).
   Delete on one removes it, and its capture is then no longer on the page. Enter on a heading or a caption starts a
   line of text under it, and Backspace and Delete never join a line to one.
 - **File lines** open the document.
+- **Task lines** (release 5.150, the notes syntax plan's decision 652) are drawn as their task's tile, from ``tile_of``: the
+  title, cut as a page's tiles are, with the state's circle before it (``tile_state``, the state menu) and the marks and
+  days at the line's right; a right-click is the tile's menu (``tile_menu``). The page keeps the line as written
+  (``PAGE_LINE``). **Change lines** and **set lines** (decisions 653, 654 and 657) are their words and, in grey, what
+  they did, kept whole as a task line is; a click on one opens the task it changed, unless it's ``page_task``.
 - **Copy and paste** inside the page keep whole lines as they are (headings, captions, lists); a line's words go in at
   the caret. Text from elsewhere comes in as ``RichEdit`` takes it.
 - **Moving lines** (Alt+Shift+Up and Down) moves a line with the list items under it, or a folded heading with its
@@ -34,6 +39,7 @@ from collections.abc import Sequence
 from datetime import date
 
 import re
+import sqlite3
 from pathlib import Path
 from urllib.parse import quote
 
@@ -46,8 +52,10 @@ from PySide6.QtWidgets import QSizePolicy, QTextEdit, QWidget
 from docrepo import markup, notes_page
 from docrepo.links import ADDRESS, read_address
 from docrepo.notes_page import Line
+from docrepo.task_tile import page_title
+from docrepo.ui import task_tile as tile_ui
 from docrepo.ui import tokens
-from docrepo.ui.icons import icon
+from docrepo.ui.icons import icon, tinted
 from docrepo.ui.look import LOOK
 from docrepo.ui.rich_edit import FOLDED, HEADING_SIZES, MARKER, NUMBERED, RichEdit, block_markup
 
@@ -61,6 +69,13 @@ MARKS = {"Email": "mail", "File": "file", "Update": "update", "New": "task", "De
 PAGE_MIME = "application/x-docrepo-notes-page"
 #: What a pointer line shows before its words (release 5.143), as Task.md prints it; it isn't kept in its markup.
 POINTER_MARK = "↪ "
+#: A task, change or set line's page line as docs.db keeps it (release 5.150), kept on its characters: the editor shows
+#: a task line as its task's tile and a change line as its words, so the line it writes back is this one.
+PAGE_LINE = QTextFormat.Property.UserProperty.value + 11
+#: The room before a tile's title in a task line, for its state circle (release 5.150, decision 652).
+TILE_INDENT = 24
+#: The kinds of line that are one link, written whole: typing goes to the line below and Backspace removes them.
+LINKED = ("caption", "file", "task", "pointer", "lead", "change", "set")
 PROPORTIONAL = QTextBlockFormat.LineHeightTypes.ProportionalHeight.value
 SAVE_AFTER_MS = 800
 #: The widest a picture shows on the page, in pixels (release 5.27).
@@ -103,10 +118,17 @@ class NotesEdit(RichEdit):
     move_requested = Signal()
     #: A pointer line's Bring the lines back (decision 613): its move's key.
     bring_back = Signal(str)
+    #: A task line drawn as its tile (release 5.150, decision 652): its circle clicked (the task, where the state menu
+    #: goes), and a right-click on it (the task, where the tile's menu goes).
+    tile_state = Signal(str, QPoint)
+    tile_menu = Signal(str, QPoint)
     takes_pictures = True
     takes_headings = True  # the format bar's Heading menu (release 5.28); the page folds its headings itself
     #: A document's file, for its picture: set by the browse window.
     picture_path = None
+    #: A task's tile (``docrepo.task_tile.Tile``) for its task line, or None to draw the line as its words: set by the
+    #: browse window (release 5.150).
+    tile_of = None
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -118,6 +140,7 @@ class NotesEdit(RichEdit):
         self.setPlaceholderText("Notes for this task. Captures saved on it are added here; type anywhere.")
         self.saved_body = ""     # the page as docs.db holds it, as far as this editor knows
         self.day_headings = False
+        self.page_task = ""      # the task whose page this is: a change line on it isn't a link (release 5.150)
         self.on_page_key = None  # the pane's Page Up and Page Down: this box is as tall as its text
         self._quiet = self._moving = False
         self._hover = -1
@@ -165,11 +188,12 @@ class NotesEdit(RichEdit):
             return None
         href = it.fragment().charFormat().anchorHref()
         scheme, _, ref = href.partition(":")
-        return (scheme, ref) if scheme in ("capture", "document", "task", "moved", "from") and ref else None
+        return (scheme, ref) if scheme in ("capture", "document", "task", "moved", "from", "change", "set") and ref else None
 
     def kind(self, block) -> str:
         """"heading", "caption", "file", "task" (a line that's one link to a task, release 5.83), "pointer" and "lead" (where
-        lines went, and where they came from, release 5.143), "picture", "attachment", "cell" (in a table) or "text"."""
+        lines went, and where they came from, release 5.143), "change" and "set" (release 5.150), "picture", "attachment",
+        "cell" (in a table) or "text"."""
         if block.blockFormat().headingLevel():
             return "heading"
         if QTextCursor(block).currentTable() is not None:
@@ -181,7 +205,7 @@ class NotesEdit(RichEdit):
             it += 1
         ref = self.ref_of(block)
         if ref:
-            return {"capture": "caption", "task": "task", "moved": "pointer", "from": "lead"}.get(
+            return {"capture": "caption", "task": "task", "moved": "pointer", "from": "lead", "change": "change", "set": "set"}.get(
                 ref[0], "attachment" if block.textList() is not None else "file")
         return "text"
 
@@ -227,10 +251,10 @@ class NotesEdit(RichEdit):
         elif kind == "heading":
             f.setFontPointSize(tokens.BODY + HEADING_SIZES.get(level, 0.5))
             f.setFontWeight(QFont.Weight.DemiBold)
-        elif kind in ("caption", "file", "task", "pointer", "lead"):
+        elif kind in LINKED:
             f.setAnchor(True)
             f.setAnchorHref(href)
-            if kind in ("caption", "lead"):
+            if kind in ("caption", "lead", "set"):
                 f.setFontPointSize(tokens.CAPTION)
                 f.setForeground(_grey())
             else:
@@ -263,6 +287,140 @@ class NotesEdit(RichEdit):
                 c.mergeCharFormat(fmt)
             if kind == "file":
                 self._quiet_file_words(block)
+            elif kind == "change":
+                self._quiet_change_words(block)
+            elif kind == "task":
+                self._tile_words(block)
+
+    # ---- task lines as tiles, change lines (release 5.150, decisions 652, 654 and 657) ----
+    @staticmethod
+    def stored_line(block) -> str | None:
+        """A task, change or set line's page line, as docs.db keeps it, from its characters (``PAGE_LINE``)."""
+        it = block.begin()
+        while not it.atEnd():
+            value = it.fragment().charFormat().property(PAGE_LINE)
+            if isinstance(value, str) and value:
+                return value
+            it += 1
+        return None
+
+    def tile(self, task_id: str):
+        """The task's tile, from the browse window's ``tile_of``, or None (no model, or a task that's gone)."""
+        if not self.tile_of or not task_id:
+            return None
+        try:
+            return self.tile_of(task_id)
+        except (KeyError, sqlite3.Error):  # a task gone, or the window closing: drawn as its words
+            return None
+
+    def _tile_room(self, t) -> int:
+        """The room a tile's marks and days take at the line's right end."""
+        return tile_ui.DAYS_W + (tile_ui.marks_width(t.marks) + 8 if t.marks else 0) + 8
+
+    def _quiet_change_words(self, block) -> None:
+        """A change line (decision 654): its words in the link's blue when they open another task, in the text's colour
+        on the task's own page, and what it did after them in secondary text."""
+        stored = self.stored_line(block)
+        x = notes_page.read_line(stored) if stored else None
+        if x is None or x.kind != "change":
+            return
+        words = len(x.text)
+        own = QTextCharFormat()
+        own.setForeground(QColor(tokens.colour("accent" if x.ref != self.page_task else "text")))
+        grey = QTextCharFormat()
+        grey.setForeground(_grey())
+        c = QTextCursor(block)
+        for a, b, f in ((0, words, own), (words, len(block.text()), grey)):
+            if b > a:
+                c.setPosition(block.position() + a)
+                c.setPosition(block.position() + b, QTextCursor.MoveMode.KeepAnchor)
+                c.mergeCharFormat(f)
+
+    def _tile_words(self, block) -> None:
+        """A task line drawn as its tile (decision 652): its title in the text's colour, struck when it's closed, with room
+        before it for the state circle and after it for the marks and days, which ``paintEvent`` draws."""
+        ref = self.ref_of(block)
+        t = self.tile(ref[1]) if ref else None
+        if t is None:
+            return
+        bf = block.blockFormat()
+        bf.setTextIndent(TILE_INDENT)
+        bf.setRightMargin(self._tile_room(t))
+        c = QTextCursor(block)
+        c.setBlockFormat(bf)
+        f = QTextCharFormat()
+        f.setForeground(QColor(tokens.colour("text2" if t.closed else "text")))
+        f.setFontStrikeOut(t.closed)
+        c.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
+        c.mergeCharFormat(f)
+
+    def refresh_tiles(self) -> None:
+        """Draw each task line's tile again from the model (a state changed, say): its title's colour and stroke, and its
+        circle, marks and days. The page's words don't change, so nothing is saved."""
+        if self.tile_of is None:
+            return
+        quiet, self._quiet = self._quiet, True
+        try:
+            for b in list(self.blocks()):
+                if self.kind(b) == "task":
+                    self._tile_words(b)
+        finally:
+            self._quiet = quiet
+        self.viewport().update()
+
+    def tile_parts(self, b) -> list[tuple[QRect, str, str, str]]:
+        """Where a task line's tile parts are, in the viewport (decision 652): its circle, then its days and its marks, each
+        with what it is, its task and its tooltip. Empty for a line that isn't drawn as a tile."""
+        ref = self.ref_of(b) if b.isValid() and b.isVisible() and self.kind(b) == "task" else None
+        t = self.tile(ref[1]) if ref else None
+        if t is None:
+            return []
+        r = self._row(b)
+        mid = r.center().y() + 1
+        x = r.left() - TILE_INDENT + 3
+        out = [(QRect(x - 2, mid - tile_ui.STATE // 2 - 2, tile_ui.STATE + 4, tile_ui.STATE + 4), "circle", t.task_id,
+                f"{t.state}. Click to change the state.")]
+        right = self.viewport().width() - int(self.document().documentMargin()) - 2
+        if t.days is not None:
+            out.append((QRect(right - tile_ui.DAYS_W, r.top(), tile_ui.DAYS_W, r.height()), "days", t.task_id, t.days.tip))
+        mx = right - tile_ui.DAYS_W - 8 - tile_ui.marks_width(t.marks)
+        for mk in t.marks:
+            if mk is not None:
+                out.append((QRect(mx, mid - tile_ui.MARK // 2, tile_ui.MARK, tile_ui.MARK), "mark", t.task_id, mk.tip))
+            mx += tile_ui.MARK + tile_ui.MARK_GAP
+        return out
+
+    def _paint_tile(self, p: QPainter, b) -> None:
+        """A task line's circle, marks and days (decision 652), the tile's own, read from the model as it's drawn."""
+        parts = self.tile_parts(b)
+        if not parts:
+            return
+        t = self.tile(parts[0][2])
+        scale = self.devicePixelRatioF()
+        circle = parts[0][0]
+        name, colour = tile_ui.STATE_ICONS.get(t.state, tile_ui.STATE_ICONS["Not started"])
+        p.drawPixmap(QPoint(circle.left() + 2, circle.top() + 2), tinted(name, tokens.colour(colour), tile_ui.STATE, scale))
+        for box, what, _task, _tip in parts[1:]:
+            if what == "days" and t.days is not None:
+                p.setFont(tokens.ui_font(tokens.CAPTION, semibold=True))
+                p.setPen(QColor(tokens.colour(tile_ui.days_colour(t.days))))
+                p.drawText(box, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, ("◆ " if t.days.deadline else "") + t.days.text)
+        if t.marks:
+            edge = self.viewport().width() - int(self.document().documentMargin()) - 2 - tile_ui.DAYS_W - 8
+            tile_ui.paint_marks(p, edge, circle.center().y(), t.marks, scale)
+
+    def tile_hit(self, pos: QPoint) -> tuple[str, str, str] | None:
+        """What's under ``pos`` of a tile's own parts: ("circle", "days" or "mark", its task, its tooltip)."""
+        b = self.cursorForPosition(QPoint(LEFT + TILE_INDENT + 4, pos.y())).block()
+        return next(((what, task, tip) for box, what, task, tip in self.tile_parts(b) if box.contains(pos)), None)
+
+    def tile_block_at(self, pos: QPoint):
+        """The task line drawn as a tile at ``pos``, or None."""
+        b = self.cursorForPosition(pos).block()
+        if not self.tile_parts(b):
+            return None
+        r = self._row(b)
+        return b if r.top() - 3 <= pos.y() <= r.bottom() + 3 else None
 
     def _quiet_file_words(self, block) -> None:
         """A file line reads as its name (release 5.114, the file rows review's decision 434): "File:" before it and its
@@ -332,16 +490,38 @@ class NotesEdit(RichEdit):
                 c.insertText(line.text, cf)
             c.setCharFormat(QTextCharFormat())
             return
+        if line.kind in ("change", "set"):  # release 5.150: its words, then what it did, the page line kept on them
+            bf, cf = self._block_format(line.kind), self._char_format(line.kind, 0, f"{line.kind}:{line.ref}")
+            cf.setProperty(PAGE_LINE, notes_page.write([line]))
+            if new_block:
+                c.insertBlock(bf, QTextCharFormat())
+            else:
+                c.setBlockFormat(bf)
+                c.setBlockCharFormat(QTextCharFormat())
+            if line.kind == "change" and line.level > 0:
+                self._join_list(c, line.level, False)
+            c.insertText(notes_page.DOT.join(w for w in (line.text, line.did) if w), cf)
+            if line.kind == "change":
+                self._quiet_change_words(c.block())
+            c.movePosition(QTextCursor.MoveOperation.EndOfBlock)
+            c.setCharFormat(QTextCharFormat())
+            return
         scheme = {"caption": "capture", "task": "task", "pointer": "moved", "lead": "from"}.get(line.kind, "document")
         href = f"{scheme}:{line.ref}" if line.kind != "heading" else ""
         day = line.kind == "heading" and notes_page.day_of(line.text) is not None
         bf, cf = self._block_format(line.kind, line.level, day), self._char_format(line.kind, line.level, href, day)
+        shown = POINTER_MARK + line.text if line.kind == "pointer" else line.text
+        if line.kind == "task":  # drawn as its tile (decision 652): its title, cut as a page's tiles are; kept as it was
+            cf.setProperty(PAGE_LINE, notes_page.task_line(line.text, line.ref))
+            t = self.tile(line.ref)
+            if t is not None:
+                shown = page_title(t.title)
         if new_block:
             c.insertBlock(bf, cf)
         else:
             c.setBlockFormat(bf)
             c.setBlockCharFormat(cf)
-        c.insertText(POINTER_MARK + line.text if line.kind == "pointer" else line.text, cf)
+        c.insertText(shown, cf)
         if line.kind == "file":
             self._quiet_file_words(c.block())
             c.movePosition(QTextCursor.MoveOperation.EndOfBlock)
@@ -544,7 +724,12 @@ class NotesEdit(RichEdit):
         return False
 
     def contextMenuEvent(self, event) -> None:  # noqa: N802 - Qt's name
-        """Right-click in a table adds or removes its rows and columns; elsewhere, the usual menu."""
+        """Right-click in a table adds or removes its rows and columns; on a task line drawn as its tile, the tile's own menu
+        (release 5.150, decision 652); elsewhere, the usual menu."""
+        tile = self.tile_block_at(event.pos())
+        if tile is not None:
+            self.tile_menu.emit(self.ref_of(tile)[1], event.globalPos())
+            return
         c = self.cursorForPosition(event.pos())
         table = c.currentTable()
         menu = self.createStandardContextMenu(event.pos())
@@ -676,8 +861,14 @@ class NotesEdit(RichEdit):
                 text = self._image_name(b) if kind == "picture" else " ".join(b.text().split())
                 out.append(notes_page.item_line(kind, text, ref[1], level))
                 continue
+            stored = self.stored_line(b) if kind in ("change", "set", "task") else None
             if kind == "heading":
                 out.append(notes_page.heading_line(" ".join(b.text().split()), b.blockFormat().headingLevel()))
+            elif stored:  # release 5.150: the line as it's kept, a change line at the list level it's at now
+                if kind == "change":
+                    x = notes_page.read_line(stored)
+                    stored = notes_page.change_line(x.text, x.ref, x.did, b.textList().format().indent() if b.textList() is not None else 0)
+                out.append(stored)
             elif kind in ("caption", "file", "task", "pointer", "lead"):
                 ref = self.ref_of(b)
                 text = " ".join(b.text().split())
@@ -1103,7 +1294,7 @@ class NotesEdit(RichEdit):
         Ctrl+Alt+0 makes it text again. A caption, a file line and a list item are left as they are."""
         c = self.textCursor()
         b = c.block()
-        if self.kind(b) in ("caption", "file", "task", "pointer", "lead") or b.textList() is not None:
+        if self.kind(b) in LINKED or b.textList() is not None:
             return
         c.beginEditBlock()
         bf = b.blockFormat()
@@ -1268,7 +1459,7 @@ class NotesEdit(RichEdit):
             c.endEditBlock()
             self.setTextCursor(c)
             return
-        if kind in ("caption", "file", "task", "pointer", "lead", "picture", "attachment") and not c.hasSelection() and key in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete):
+        if kind in (*LINKED, "picture", "attachment") and not c.hasSelection() and key in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete):
             self._remove_line(b)
             return
         if key == Qt.Key.Key_Backspace and not c.hasSelection() and c.positionInBlock() == 0 and b.previous().isValid() \
@@ -1291,7 +1482,7 @@ class NotesEdit(RichEdit):
             return
         if kind in ("picture", "attachment") and event.text() and event.text().isprintable() and not mods & Qt.KeyboardModifier.ControlModifier:
             self._to_description(b)  # typing on a picture or a file goes to its description
-        elif kind in ("caption", "file", "task", "pointer", "lead") and event.text() and event.text().isprintable() and not mods & Qt.KeyboardModifier.ControlModifier:
+        elif kind in LINKED and event.text() and event.text().isprintable() and not mods & Qt.KeyboardModifier.ControlModifier:
             # Typing on a caption goes to the line below it: the caption stays the capture's (decision 109).
             nxt = b.next()
             if nxt.isValid() and self.kind(nxt) == "text" and nxt.isVisible():
@@ -1521,7 +1712,15 @@ class NotesEdit(RichEdit):
                 if ref:
                     self.open_ref.emit(ref[1])
                 return
+            hit = self.tile_hit(pos)
+            if hit is not None and hit[0] == "circle":  # a tile's circle opens the state menu (decision 652)
+                self.tile_state.emit(hit[1], self.viewport().mapToGlobal(pos))
+                return
             scheme, _, ref = self.anchorAt(pos).partition(":")
+            if scheme in ("change", "set") and ref and not event.modifiers():  # release 5.150: the task it changed
+                if ref != self.page_task:
+                    self.open_ref.emit(ref)
+                    return
             if event.modifiers() & Qt.KeyboardModifier.ControlModifier:  # Ctrl+click opens a link (release 5.67)
                 if scheme == "document" and ref:
                     self.open_link.emit(f"opendoc:{ref}")
@@ -1582,12 +1781,15 @@ class NotesEdit(RichEdit):
         if hover != self._hover:
             self._hover = hover
             self.viewport().update()
-        scheme = self.anchorAt(pos).partition(":")[0]
+        scheme, _, target = self.anchorAt(pos).partition(":")
         address = self.address_at(pos) if not scheme else None
         mark = self.mark_at(pos)
+        tile = self.tile_hit(pos)
         hand = ((row is not None and pos.x() < LEFT) or mark is not None or scheme in ("capture", "document", "task", "moved", "from")
+                or (scheme in ("change", "set") and target != self.page_task) or (tile is not None and tile[0] == "circle")
                 or self.checkbox_at(pos) is not None or (address is not None and event.modifiers() & Qt.KeyboardModifier.ControlModifier))
         self.viewport().setToolTip(f"{mark.text()}. Click to open the capture." if mark is not None
+                                   else tile[2] if tile is not None
                                    else f"Ctrl+click opens it in your browser: {address}" if address else "")
         self.viewport().setCursor(Qt.CursorShape.PointingHandCursor if hand else Qt.CursorShape.IBeamCursor)
         QTextEdit.mouseMoveEvent(self, event)  # the cursor's shape is set here, for the arrows and links too
@@ -1618,6 +1820,8 @@ class NotesEdit(RichEdit):
                     m = self.mark_of(b)
                     if m is not None:
                         self._paint_mark(p, b, m)
+                    if self.tile_of is not None:  # a task line drawn as its tile (release 5.150)
+                        self._paint_tile(p, b)
             b = b.next()
         p.end()
 

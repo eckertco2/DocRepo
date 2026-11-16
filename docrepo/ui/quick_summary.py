@@ -17,6 +17,9 @@ person's, a label's or an agenda's page. It opens over the window you were in, w
   the task picker, the rest of the line its note.
 - **Copy** (decision 533) puts it on the clipboard as rich text and Markdown; **☆** pins it (decision 534); **Open page**
   shows its page in the browse tool.
+- **Saved sets** (release 5.149, the design workspace's ``docs/mods/summary-sets-plan.md``, decisions 649 to 651): with two
+  subjects or more showing, **Save as…** (Ctrl+S) names the combination and pins it; the box shows its name, its parts in
+  grey after it, and a right-click on it has Rename… and Unpin. A saved set showing has **Rename…** in Save as…'s place.
 
 A link opens what it names in the browse tool: a task's page, a conversation's page, a capture, the Activity view.
 """
@@ -34,8 +37,10 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QInputDialog,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QPushButton,
     QScrollArea,
     QStackedWidget,
@@ -190,7 +195,11 @@ class SubjectDelegate(QStyledItemDelegate):
         name_fm = QFontMetrics(body)
         kind_words = words.get("kind", "")
         room = right - x
-        name = name_fm.elidedText(words["name"], Qt.TextElideMode.ElideRight, max(40, room - (fm.horizontalAdvance(kind_words) + 14 if kind_words else 0)))
+        if words.get("set"):  # a saved set (decision 649): its name whole, then its parts in grey, cut to fit
+            name = name_fm.elidedText(words["name"], Qt.TextElideMode.ElideRight, room)
+            kind_words = fm.elidedText(kind_words, Qt.TextElideMode.ElideRight, max(0, room - name_fm.horizontalAdvance(name) - 8))
+        else:
+            name = name_fm.elidedText(words["name"], Qt.TextElideMode.ElideRight, max(40, room - (fm.horizontalAdvance(kind_words) + 14 if kind_words else 0)))
         p.drawText(QRect(x, r.top(), room, r.height()), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, name)
         if kind_words:
             nx = x + name_fm.horizontalAdvance(name) + 8
@@ -201,9 +210,20 @@ class SubjectDelegate(QStyledItemDelegate):
 
 
 class SubjectList(QListWidget):
-    """The box's list: headings, subjects and New agenda. ``picked`` sends the row's (kind, key)."""
+    """The box's list: headings, subjects and New agenda. ``picked`` sends the row's (kind, key); ``asked`` a right-click's
+    row and where (decision 650)."""
 
     picked = Signal(str, str)
+    asked = Signal(str, str, QPoint)
+
+    def contextMenuEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        item = self.itemAt(event.pos())
+        if item is None:
+            return
+        kind, key, _words = item.data(ROW_ROLE)
+        if kind not in ("head", "new"):
+            self.setCurrentItem(item)
+            self.asked.emit(kind, key, event.globalPos())
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -435,6 +455,11 @@ class QuickSummary(QWidget):
         self.pin_button.setAutoRaise(True)
         self.pin_button.setToolTip("Pin it: first in the box's list (decision 534)")
         self.pin_button.clicked.connect(self.toggle_pin)
+        # Save as… with two subjects or more showing; Rename… on a saved set (decisions 649 and 650).
+        self.save_button = QPushButton("Save as…", objectName="summarySave")
+        self.save_button.setToolTip("Give it a name, and pin it (Ctrl+S)")
+        self.save_button.clicked.connect(self.save_or_rename)
+        self.save_button.hide()
         self.copy_button = QPushButton(icon("copy"), "Copy")
         self.copy_button.setToolTip("Copy it as rich text and Markdown (Ctrl+Shift+C)")
         self.copy_button.clicked.connect(self.copy)
@@ -444,6 +469,7 @@ class QuickSummary(QWidget):
         tl.addWidget(self.chips)
         tl.addWidget(self.box, 1)
         tl.addWidget(self.pin_button)
+        tl.addWidget(self.save_button)
         tl.addWidget(self.copy_button)
         tl.addWidget(self.page_button)
         lay.addWidget(top)
@@ -451,6 +477,7 @@ class QuickSummary(QWidget):
         self.stack = QStackedWidget()
         self.list = SubjectList()
         self.list.picked.connect(self._clicked)
+        self.list.asked.connect(self._row_menu_at)
         self.stack.addWidget(self.list)
         self.scroll = QScrollArea(objectName="summaryScroll")
         self.scroll.setWidgetResizable(True)
@@ -494,6 +521,10 @@ class QuickSummary(QWidget):
         QShortcut(QKeySequence("Ctrl+L"), self, self.focus_box)
         QShortcut(QKeySequence("Ctrl+F"), self, self.focus_box)
         QShortcut(QKeySequence("Ctrl+W"), self, self.hide)
+        QShortcut(QKeySequence("Ctrl+S"), self, self.save_or_rename)
+        #: The saved set what's showing was made from, when a part was added or taken off it: Save as… offers its name, so
+        #: saving under it again changes the set (decision 649).
+        self.from_set = ""
         self._sync_buttons()
 
     # ---- opening ----
@@ -503,23 +534,44 @@ class QuickSummary(QWidget):
     def today(self) -> date:
         return self.ctx.now().date()
 
-    def open_it(self, screen=None, key: str | None = None) -> None:
-        """Show the window at the centre of the monitor: on ``key``'s summary, or with the cursor in the box and its list."""
+    def open_it(self, screen=None, key: str | None = None, set_name: str = "") -> None:
+        """Show the window at the centre of the monitor: on ``key``'s summary, or the saved set called ``set_name`` (a wheel's
+        slot, decision 651), or with the cursor in the box and its list."""
         if screen is not None:
             area = screen.availableGeometry()
             self.move(area.x() + (area.width() - self.width()) // 2, area.y() + max(0, (area.height() - self.height()) // 4))
         bring_to_front(self)
+        if set_name:
+            found = summary.set_named(self.ctx.model(), self.names, set_name, self.ctx.settings.me)
+            if found is not None:
+                self.from_set = ""
+                self.box.clear()
+                self.show_subject(found)
+                return
+            key = None
         if key and self.show_key(key):
             return
         self.box.clear()
         self.show_list("")
         self.box.setFocus()
+        if set_name:
+            self.say(f"No saved set is called {summary.tidy_name(set_name)}: Save as… names one, with two or more showing.", error=True)
+
+    @property
+    def names(self) -> dict[str, str]:
+        """The saved sets' names, by their keys (``Settings.summary_names``)."""
+        return self.ctx.settings.summary_names
+
+    def subject_for(self, key: str) -> Subject | None:
+        """The subject a key names now, with its saved set's name if it's one."""
+        return summary.subject_of(self.ctx.model(), key, self.ctx.settings.me, self.names)
 
     def show_key(self, key: str) -> bool:
-        s = summary.subject_of(self.ctx.model(), key, self.ctx.settings.me)
+        s = self.subject_for(key)
         if s is None:
             self.say("That's gone: it isn't a person, an agenda, a label or a tag any more.")
             return False
+        self.from_set = ""
         self.show_subject(s)
         return True
 
@@ -543,9 +595,14 @@ class QuickSummary(QWidget):
         m = b.m
         rows: list[tuple[str, str, dict]] = []
 
+        pins = self.ctx.settings.summary_pins
+
         def row(s: Subject, number: str = "") -> tuple[str, str, dict]:
             words = {"name": s.name, "kind": summary.KIND_WORDS[s.kind], "count": b.count_line(s), "number": number,
-                     "pinned": s.key in self.ctx.settings.summary_pins}
+                     "pinned": summary.pin_of(pins, s.key) is not None if summary.JOIN in s.key else s.key in pins}
+            if s.saved:  # decision 649: its name, its parts in grey after it, the people mark
+                words.update({"kind": s.parts_words, "set": True})
+                return summary.MANY, s.key, words
             if s.kind == summary.PERSON:
                 from docrepo.detail import initials
 
@@ -553,7 +610,7 @@ class QuickSummary(QWidget):
             return s.kind, s.key, words
 
         if not text.strip():
-            pinned, recent = summary.start_list(m, self.ctx.settings.me, self.ctx.settings.summary_pins, self.ctx.settings.summary_recent)
+            pinned, recent = summary.start_list(m, self.ctx.settings.me, pins, self.ctx.settings.summary_recent, self.names)
             n = 0
             for title, group in (("Pinned", pinned), ("Recent", recent)):
                 if group:
@@ -566,14 +623,18 @@ class QuickSummary(QWidget):
                 rows += [row(s) for s in summary.subjects(m, self.ctx.settings.me)[:summary.START_MAX]]
         else:
             found = summary.matches(m, summary.subjects(m, self.ctx.settings.me), text.strip().lstrip("+"))
+            sets = summary.matching_sets(summary.sets_of(m, self.ctx.settings.me, pins, self.names), text.strip().lstrip("+"))
+            if sets:  # the owner's own names first (decision 649)
+                rows.append(("head", "", {"title": "Saved sets"}))
+                rows += [row(s) for s in sets]
             for kind, title in ((summary.PERSON, "People"), (summary.AGENDA, "Agendas"), (summary.LABEL, "Labels"), (summary.TAG, "Tagged labels")):
                 group = [s for s in found if s.kind == kind]
                 if group:
                     rows.append(("head", "", {"title": title}))
                     rows += [row(s) for s in group]
             words = text.strip().lstrip("+").strip()
-            if words and not words.startswith("@") and not any(s.name.lower() == words.lower() for s in found):
-                rows.append(("head", "", {"title": "Nothing called that" if not found else "Or"}))
+            if words and not words.startswith("@") and not any(s.name.lower() == words.lower() for s in (*sets, *found)):
+                rows.append(("head", "", {"title": "Nothing called that" if not (found or sets) else "Or"}))
                 rows.append(("new", words, {"name": f"New agenda “{words}”…", "kind": "a meeting task"}))
         if self.subject is not None and any(r[0] not in ("head", "new") for r in rows):
             rows.append(("head", "", {"title": f"Enter opens it · Ctrl+Enter adds it to {self.subject.name}"}))
@@ -638,6 +699,7 @@ class QuickSummary(QWidget):
             both = summary.combine([self.subject, picked]) if picked else None
             if both is not None:
                 self.box.clear()
+                self._leaving_set()
                 self.show_subject(both)
                 return
         self.box.clear()
@@ -648,12 +710,19 @@ class QuickSummary(QWidget):
         if self.subject is None:
             return
         rest = summary.combine(p for p in self.subject.each() if p.key != key)
+        self._leaving_set()
         if rest is None:
             self.subject, self.view = None, None
             self._show_chips()
             self.show_list(self.box.text())
             return
         self.show_subject(rest)
+
+    def _leaving_set(self) -> None:
+        """A part added to a saved set, or taken off it: what shows isn't the set any more, but Save as… offers its name."""
+        if self.subject is not None and self.subject.saved:
+            self.from_set = self.subject.name
+            self.say(f"Not {self.subject.name} any more: Save as… (Ctrl+S) under its name changes the set.")
 
     def _show_chips(self) -> None:
         while self.chips_lay.count():
@@ -680,6 +749,9 @@ class QuickSummary(QWidget):
 
     # ---- the summary ----
     def show_subject(self, s: Subject) -> None:
+        s = summary.named(s, self.names)  # the same subjects as a saved set, however picked, are that set (decision 649)
+        if s.saved:
+            self.from_set = ""
         if self.subject is None or self.subject.key != s.key:
             self.answering, self.add_task = None, {}
         self.subject = s
@@ -699,11 +771,15 @@ class QuickSummary(QWidget):
             return
         at = self.scroll.verticalScrollBar().value()
         b = self.builder()
-        s = summary.subject_of(b.m, self.subject.key, self.ctx.settings.me)
+        s = summary.subject_of(b.m, self.subject.key, self.ctx.settings.me, self.names)
         if s is None:
             self.subject = None
+            self._show_chips()
             self.show_list("")
             return
+        if s != self.subject:  # a part gone, or a saved set named, renamed or unpinned since
+            self.subject = s
+            self._show_chips()
         self.view = view = b.build(s, self.more.get(s.key, set()))
         gone = self.discussed.get(s.key, [])
         for agenda in (x for x in view.sections if x.agenda is not None):
@@ -863,12 +939,150 @@ class QuickSummary(QWidget):
     def toggle_pin(self) -> None:
         if self.subject is None:
             return
-        st = self.ctx.settings
         key = self.subject.key
-        st.summary_pins = [k for k in st.summary_pins if k != key] if key in st.summary_pins else [key, *st.summary_pins]
+        if self.is_pinned(key):
+            self.unpin(key)
+            return
+        st = self.ctx.settings
+        st.summary_pins = [key, *st.summary_pins]
         self._save_settings()
-        self.say("Pinned: first in the box's list." if key in st.summary_pins else "Unpinned.")
+        self.say("Pinned: first in the box's list.")
         self._sync_buttons()
+
+    def is_pinned(self, key: str) -> bool:
+        """Whether ``key`` is pinned: a combination's subjects in any order."""
+        pins = self.ctx.settings.summary_pins
+        return key in pins or (summary.JOIN in key and summary.pin_of(pins, key) is not None)
+
+    # ---- saved sets (decisions 649 and 650) ----
+    def ask_name(self, title: str, words: str, name: str) -> str | None:
+        """A name, asked for in a small dialog over the window; None when it's cancelled."""
+        value, ok = QInputDialog.getText(self, title, words, text=name)
+        return value if ok else None
+
+    def save_or_rename(self) -> None:
+        """Ctrl+S, or the header's button: Rename… on a saved set, Save as… on two subjects or more."""
+        s = self.subject
+        if s is None or self.stack.currentWidget() is not self.scroll:
+            return
+        if s.saved:
+            self.rename_set(s.key)
+        elif s.kind == summary.MANY:
+            self.save_as()
+
+    def save_as(self, key: str = "") -> None:
+        """Save as… (decision 649): the combination showing (or ``key``'s, from the box) pinned under a name. A pin of the same
+        subjects is the one that's named; a saved set of that name is replaced, with Undo."""
+        showing = self.subject.key if self.subject is not None else ""
+        key = key or showing
+        s = self.subject_for(key) if key else None
+        if s is None or len(s.each()) < 2:
+            return
+        name = self.ask_name("Save as", f"A name for {s.parts_words}, kept with your pins:", self.from_set if key == showing else "")
+        if name is None:
+            return
+        st = self.ctx.settings
+        before = (list(st.summary_pins), dict(st.summary_names))
+        try:
+            out = summary.save_as(st.summary_pins, st.summary_names, key, name)
+        except ValueError as e:
+            self.say(str(e), error=True)
+            return
+        st.summary_pins, st.summary_names = out.pins, out.names
+        self._save_settings()
+        self.from_set = ""
+        name = summary.tidy_name(name)
+        if out.replaced:
+            words = f"Saved as {name}, in place of the {name} before ({self._parts_words(out.replaced)})."
+        elif summary.pin_of(before[0], key) is not None:
+            words = f"Saved as {name}, where its pin was."
+        else:
+            words = f"Saved as {name}, first in the box's list."
+        self._after_sets_change(words, before)
+
+    def rename_set(self, key: str) -> None:
+        """Rename… (decision 650): a saved set's new name."""
+        st = self.ctx.settings
+        old = st.summary_names.get(key)
+        if old is None:
+            return
+        name = self.ask_name("Rename", f"A new name for {old}:", old)
+        if name is None or summary.tidy_name(name) == old:
+            return
+        before = (list(st.summary_pins), dict(st.summary_names))
+        try:
+            st.summary_names = summary.rename(st.summary_names, key, name)
+        except ValueError as e:
+            self.say(str(e), error=True)
+            return
+        self._save_settings()
+        self._after_sets_change(f"Renamed {old} to {summary.tidy_name(name)}.", before)
+
+    def unpin(self, key: str) -> None:
+        """Unpin, from the ☆ or a row's menu: a saved set's name goes with its pin (decision 650), with Undo."""
+        st = self.ctx.settings
+        before = (list(st.summary_pins), dict(st.summary_names))
+        name = summary.name_of(st.summary_names, key)
+        out = summary.unpin(st.summary_pins, st.summary_names, key)
+        st.summary_pins, st.summary_names = out.pins, out.names
+        self._save_settings()
+        self._after_sets_change(f"Unpinned {name[1]}: its name went with it." if name else "Unpinned.", before)
+
+    def _parts_words(self, key: str) -> str:
+        s = summary.subject_of(self.ctx.model(), key, self.ctx.settings.me)
+        return s.name if s is not None else "gone"
+
+    def _after_sets_change(self, words: str, before: tuple[list[str], dict[str, str]]) -> None:
+        """Draw what changed (the summary's name, or the box's list) and say so, with Undo putting the pins and names back."""
+        def undo() -> None:
+            st = self.ctx.settings
+            st.summary_pins, st.summary_names = list(before[0]), dict(before[1])
+            self._save_settings()
+            self._redraw()
+            self.say("Undone: your pins and names are as they were.")
+
+        self._redraw()
+        self.say(words, undo=undo)
+
+    def _redraw(self) -> None:
+        if self.stack.currentWidget() is self.list or self.subject is None:
+            self.show_list(self.box.text())
+        else:
+            self.render()
+        self._sync_buttons()
+
+    def row_menu(self, kind: str, key: str) -> QMenu | None:
+        """A right-click on a row of the box's list (decision 650): Rename… and Unpin on a saved set; Save as… and Pin or
+        Unpin on a combination; Pin or Unpin on one subject."""
+        s = self.subject_for(key) if kind != "new" else None
+        if s is None:
+            return None
+        menu = QMenu(self)
+        if s.saved:
+            menu.addAction("Rename…", lambda: self.rename_set(s.key))
+        elif len(s.each()) > 1:
+            menu.addAction("Save as…", lambda: self.save_as(s.key))
+        if self.is_pinned(s.key):
+            menu.addAction("Unpin", lambda: self.unpin(s.key))
+        else:
+            menu.addAction("Pin", lambda: self._pin(s.key))
+        return menu
+
+    def _pin(self, key: str) -> None:
+        st = self.ctx.settings
+        st.summary_pins = [key, *st.summary_pins]
+        self._save_settings()
+        self._redraw()
+        self.say("Pinned: first in the box's list.")
+
+    def _row_menu_at(self, kind: str, key: str, at: QPoint) -> None:
+        menu = self.row_menu(kind, key)
+        if menu is None:
+            return
+        try:
+            menu.exec(at)
+        finally:
+            menu.deleteLater()
 
     def copy(self) -> None:
         if self.view is None:
@@ -882,7 +1096,7 @@ class QuickSummary(QWidget):
     def open_page(self) -> None:
         """The subject's page in the browse tool."""
         s, browse = self.subject, self.app.browse
-        if s is None or s.kind == summary.MANY:
+        if s is None or s.kind == summary.MANY or s.saved:
             return
         if s.kind == summary.AGENDA:
             browse.show_agenda(s.ref)
@@ -979,9 +1193,15 @@ class QuickSummary(QWidget):
         on = self.subject is not None and self.stack.currentWidget() is self.scroll
         for b in (self.copy_button, self.page_button, self.pin_button):
             b.setEnabled(on)
-        self.page_button.setEnabled(on and self.subject.kind != summary.MANY)  # several have no one page
-        self.pin_button.setChecked(bool(self.subject) and self.subject.key in self.ctx.settings.summary_pins)
-        self.pin_button.setToolTip("Unpin it" if self.pin_button.isChecked() else "Pin it: first in the box's list")
+        self.page_button.setEnabled(on and self.subject.kind != summary.MANY and not self.subject.saved)  # several have no one page
+        self.pin_button.setChecked(bool(self.subject) and self.is_pinned(self.subject.key))
+        saved = bool(self.subject) and self.subject.saved
+        self.pin_button.setToolTip(("Unpin it: its name goes with it" if saved else "Unpin it") if self.pin_button.isChecked()
+                                   else "Pin it: first in the box's list")
+        # Save as… with two subjects or more; Rename… on a saved set (decisions 649 and 650).
+        self.save_button.setVisible(on and (saved or self.subject.kind == summary.MANY))
+        self.save_button.setText("Rename…" if saved else "Save as…")
+        self.save_button.setToolTip(f"Rename {self.subject.name} (Ctrl+S)" if saved else "Give it a name, and pin it (Ctrl+S)")
         self.setWindowTitle(f"{self.subject.name}: quick summary" if self.subject and on else "Quick summary")
 
     def keyPressEvent(self, event) -> None:  # noqa: N802 - Qt's name

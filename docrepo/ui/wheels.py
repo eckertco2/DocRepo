@@ -250,13 +250,14 @@ class Wheels(QObject):
             self._file_search = FileSearch(self.app)
         self._file_search.open_it(self._screen_for(self.snapshot.hwnd if self.snapshot else 0))
 
-    def quick_summary(self, key: str | None = None) -> None:
-        """The quick summary's window (release 5.131), on the monitor you were on: with its box, or on ``key``'s summary."""
+    def quick_summary(self, key: str | None = None, set_name: str = "") -> None:
+        """The quick summary's window (release 5.131), on the monitor you were on: with its box, on ``key``'s summary, or on
+        the saved set called ``set_name`` (release 5.149, decision 651)."""
         from docrepo.ui.quick_summary import QuickSummary
 
         if self._quick_summary is None:
             self._quick_summary = QuickSummary(self.app)
-        self._quick_summary.open_it(self._screen_for(self.snapshot.hwnd if self.snapshot else 0), key)
+        self._quick_summary.open_it(self._screen_for(self.snapshot.hwnd if self.snapshot else 0), key, set_name)
 
     def log_progress(self, task: str | None = None, with_email: bool = True) -> None:
         """Log progress (release 5.139, decision 583): its window, on the email being written in Outlook's active window
