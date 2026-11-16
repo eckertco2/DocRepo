@@ -356,7 +356,8 @@ def test_put_back_from_done_today(app, panel):
     back = next(b for w in panel.extras for b in w.findChildren(QPushButton) if b.text() == "Back on Today")
     back.click()
     assert any(a.id == item for a in Model(app.ctx.conn).today_items())
-    assert any(r.item_id == item for r in panel.rows) and "Back on Today." in panel.note_label.text()
+    # At the bottom since release 5.148 (decision 645), as a new item goes.
+    assert panel.rows[-1].item_id == item and "Back on Today, at the bottom." in panel.note_label.text()
 
 
 def test_remove_asks_nothing(app, panel):
