@@ -178,6 +178,9 @@ class Settings:
     quiet_days: int = 21
     summary_pins: list[str] = field(default_factory=list)
     summary_recent: list[str] = field(default_factory=list)
+    #: Saved sets (release 5.149, the design workspace's docs/mods/summary-sets-plan.md, decisions 649 and 650): a pinned
+    #: combination's name, by its key in ``summary_pins`` ("person:P003 + agenda:T000010": "Morning meeting").
+    summary_names: dict[str, str] = field(default_factory=dict)
     #: Today's meetings from the Outlook calendar (release 5.127, the cold-eyes plan's decision 494): Today's first group, and
     #: the side panel's first line. On by default; off, DocRepo doesn't read the calendar at all.
     today_meetings: bool = True
@@ -233,6 +236,17 @@ class Settings:
             if value is not None and not (isinstance(value, list) and all(isinstance(x, str) for x in value)):
                 log.warning("Ignoring %s in %s: it isn't a list of words", key, file)
                 del data[key]
+        # Saved sets' names (release 5.149): each a name for a pinned combination; one for anything else is left out.
+        names = data.get("summary_names")
+        if names is not None:
+            if not (isinstance(names, dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in names.items())):
+                log.warning("Ignoring summary_names in %s: it isn't keys and names", file)
+                names = {}
+            pins = set(data.get("summary_pins") or ())
+            kept = {k: " ".join(v.split()) for k, v in names.items() if k in pins and " + " in k and v.strip()}
+            if len(kept) < len(names):
+                log.warning("Leaving %d names out of summary_names in %s: they aren't pinned combinations", len(names) - len(kept), file)
+            data["summary_names"] = kept
         quiet = data.get("quiet_days")
         if quiet is not None and not (isinstance(quiet, int) and not isinstance(quiet, bool) and 1 <= quiet <= 365):
             log.warning("Ignoring quiet_days in %s: it isn't a number of days from 1 to 365", file)
@@ -270,7 +284,7 @@ class Settings:
     def save(self, fs: SafeFS, data_root: Path) -> Path:
         data = asdict(self)
         for key in ("wheel_hotkeys", "today_panel_hotkey", "copilot_folder", "reference_links", "tagged_patterns", "tagged_never",
-                    "summary_pins", "summary_recent", "progress_hotkey"):  # written once they're set, as they're optional (releases 5.41, 5.56, 5.67, 5.80, 5.131 and 5.139)
+                    "summary_pins", "summary_recent", "summary_names", "progress_hotkey"):  # written once they're set, as they're optional (releases 5.41, 5.56, 5.67, 5.80, 5.131, 5.139 and 5.149)
             if not data[key]:
                 del data[key]
         if data["progress_sends"]:  # release 5.139: written once it's turned off

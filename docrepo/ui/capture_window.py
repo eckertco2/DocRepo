@@ -119,7 +119,7 @@ from docrepo.ui.front import bring_to_front
 from docrepo.ui.look import LOOK, Help, KeyBadge, KeyTips, set_hints, tip
 from docrepo.ui.problems import Problems, ProblemsLine
 from docrepo.ui.mods_panel import ModsPanel
-from docrepo.ui.palette import Command, CommandPalette
+from docrepo.ui.palette import Command, CommandPalette, summary_commands
 from docrepo.ui.rich_edit import KEYS as FORMAT_KEYS, FormatBar, RichEdit
 from docrepo.ui.style import style_sheet
 from docrepo.ui.task_forms import BAD_DURATION, HoursRow, days_valid, typed_days
@@ -977,6 +977,7 @@ class CaptureWindow(QWidget):
                 Command("", "Keys", self.show_keys, "F1"),
                 Command("", "Mods log", lambda: self.show_mods(True)),
                 Command("", "Close the window (anything unsaved goes to Drafts)", self.hide, "Esc"),
+                *summary_commands(self.ctx),  # each saved set (release 5.149, decision 651)
                 *self.ctx.wheel_palette()]  # the wheels' slots (release 5.41)
         return out
 

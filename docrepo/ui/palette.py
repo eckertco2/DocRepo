@@ -13,6 +13,7 @@ from difflib import SequenceMatcher
 from PySide6.QtCore import QEvent, Qt
 from PySide6.QtWidgets import QDialog, QLabel, QLineEdit, QTreeWidgetItem, QVBoxLayout, QWidget
 
+from docrepo import summary
 from docrepo.detail import esc
 from docrepo.ui.tree_view import KEY_ROLE, RowTree
 
@@ -37,6 +38,13 @@ class Command:
     @property
     def label(self) -> str:
         return f"{self.group}: {self.name}" if self.group else self.name
+
+
+def summary_commands(ctx) -> list[Command]:
+    """Each saved set (release 5.149, the summary sets plan's decision 651), as "Summary: Morning meeting", in the pins'
+    order: it opens in the quick summary."""
+    st = ctx.settings
+    return [Command("Summary", name, lambda k=key: ctx.open_summary(k)) for key, name in summary.saved_sets(st.summary_names, st.summary_pins)]
 
 
 def score(query: str, text: str) -> float:
