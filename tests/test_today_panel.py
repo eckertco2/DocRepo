@@ -20,6 +20,7 @@ from docrepo.lists import reminders_due  # noqa: E402
 from docrepo.model import Model  # noqa: E402
 from docrepo.panel_rules import Hover, Monitor, Place, Rect  # noqa: E402
 from docrepo.sample import load_sample  # noqa: E402
+from docrepo.save import CaptureDraft, save_capture  # noqa: E402
 from docrepo.ui import today_panel  # noqa: E402
 from docrepo.ui.context import AppContext  # noqa: E402
 from docrepo.ui.lists import today as today_list  # noqa: E402
@@ -392,6 +393,17 @@ def test_clicking_an_item_shows_its_page_to_read(app, panel):
     assert panel._holding()
     panel.close_detail()
     assert panel.stack.currentIndex() == 0 and panel.target_width() == 320
+
+
+def test_a_task_s_page_shows_its_change_lines(app, panel):
+    """Release 5.150 (decision 654): a line whose operators did their work reads as its words and what it did, with 5.148's
+    one list."""
+    save_capture(app.ctx.conn, app.ctx.data_root, app.ctx.fs, app.ctx.settings,
+                 CaptureDraft(content="Ask about the hire rate **agenda, Tom", task="T000008"), NOW)
+    put_on_today(app)
+    panel.open_detail(next(r for r in panel.rows if r.task_id == "T000008").item_id)
+    shown = panel.detail_page.toPlainText()
+    assert "Ask about the hire rate · on Tom Becker's agenda" in shown and "**agenda" not in shown
 
 
 def test_a_note_shows_its_text_with_make_it_a_task(app, panel):
