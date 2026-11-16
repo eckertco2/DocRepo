@@ -4,6 +4,14 @@ One line per release, newest first: its number, the date it was built, and what 
 
 Since 2026-11-12, releases ship in weekly trains (the design workspace's `docs/mods/cold-eyes-plan.md`, decisions 464 to 468): each train has a heading with the day it was pushed to GitHub, over its releases. Releases keep their own numbers and tags.
 
+## Next train (Thursday 2026-11-19, not pushed yet)
+
+Built for the push of Thursday 2026-11-19 (the design workspace's `docs/mods/train-2026-11-19-plan.md`), each merged to `main` at the owner's word. The heading takes the day it's pushed. 5.152 adds a concept (a view and a glossary term) on a train that was to settle (decision 467), at the owner's word ("I want to push the workspace view"), as decision 626 allowed before.
+
+| Release | Date | What |
+|---|---|---|
+| 5.152 | 2026-11-16 | The workspace: a task's page laid out for doing the work, opened by **Work on it** (W), on every task's right-click menu (first on Today's) and the task page's bar, and by a double-click or Enter on a Today row. Beside the views, in three columns: the chain (the project down to the task, a path per parent, then its subtasks: a click on a parent reads its notes in place, on a subtask edits its notes there, Alt+Left comes back); the status card with a quick entry line (Enter keeps an Update, Shift+Enter a note under today, each with Undo), the state's dropdown and Later… or Add to Today, the notes with an outline of every page in the chain, and **Dates**, every date of the task, its parents and its subtasks, soonest first, a day changed in place in Quick edit's words; and the resources (links, files, email conversations, meetings and decisions of the task picked, under it and above it, each saying whose) with a search box. The bar has Done for today, opened from Today, and a place for agent buttons to come. Esc goes back. No schema change. |
+
 ## Train of 2026-11-16
 
 Releases 5.145 to 5.151 and 5.153, pushed to GitHub on Monday 2026-11-16, three days before its Thursday, at the owner's word ("I want the train to go out today"), with everything merged by then (the design workspace's `docs/mods/train-2026-11-16-plan.md`). It adds concepts at the owner's word (decision 626), so the next train, Thursday 2026-11-19, settles (decision 467). 5.152 is kept for the workspace, not built yet. Schema 29 (5.148); no new package. Its corporate test is the design workspace's `handoff/docrepo/train-2026-11-16-test.md`, which gathers the eight releases' tests.

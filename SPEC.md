@@ -930,6 +930,66 @@ A window of its own for one task, built so any of its documents can be found and
 - **Dropping** files, links or an Outlook email on it opens the capture window on its task, as a note, with them added (decision 165). Files from File Explorer meet the two zones, as on the capture window, and each is saved or linked by the one it lands on (release 5.145, decision 633).
 - **Its look:** a white header band, the outline on the base layer, a 1 px stroke between panes; rows of 48 px (32 compact) with the type's mark in its colour (`type_*` tokens, each 3:1 on white; the type is also in the name), matches in the caution tint, the selected row's tint and pill, and a 2 px accent ring when the list has the keyboard.
 
+### 8.11 The workspace (release 5.152)
+The task page laid out for doing the work (the design workspace's `docs/mods/workspace-view-plan.md`, decisions 663 to 670,
+678 to 687 and 698 to 702; `docrepo/workspace.py` without Qt, `docrepo/ui/workspace.py` and `workspace_parts.py`).
+- **Opening it** (663, 667): **Work on it** (W) on a selected task, on every tile's right-click menu (first, and Enter's,
+  on Today's rows) and on the task page's bar. A double-click or Enter on a Today row opens it; everywhere else they open
+  the task page. It takes the list's and the page's room in the browse window, with the views beside it (682); a view
+  picked there leaves it. **Esc**, the back button (named for the view it came from) or **Task page** goes back to that
+  view with the task selected. A capture saved from it leaves it as it is.
+- **The head and the bar** (666, 684, 687): back, WORKSPACE and the task's name, its state, Due and people, and Task page.
+  Then Note, Update, Log progress…, New T-mail (its arrow: Reply all and Ask for an update), Meeting notes, Find files
+  and, opened from Today while the task is on it, **Done for today**, which takes it off Today as Today's Done does and
+  stays here. The bar's end keeps a place for agent buttons, which shows nothing until there is one. With a subtask's
+  notes being edited, the bar starts "↳ On" its name and acts on it, as do N, U, M, O and the quick entry bar.
+- **The chain** (664, 686): UP THE CHAIN, a tile per task from the project down, each with its current status's first
+  words and the day it was written; a task under more than one parent has a path for each, the next "and under" the
+  first, and the task "under both". Nothing is said of a parent's other subtasks. This task's tile says THIS TASK and
+  its waiting mark; then SUBTASKS (its open ones, Show N closed and New task). A click on a parent reads its notes in
+  the middle; on a subtask, edits its notes there (684); on this task, comes back to it. A double-click works on that
+  task (its own workspace). The circle is the state menu, the right-click the tile's menu.
+- **What's gathered** (665, 680, 700): the task picked in the chain (this task until another is), every live task under it
+  at any depth, and every task above it. With this task picked a parent's other subtasks are left out; a parent picked
+  takes in everything under it. The resources and Dates follow it; the line under the search box says whose they are,
+  with Back to this task.
+- **The status card** (664, 678, 701, 702): the picked task's status with its log behind "N changes", its waiting mark,
+  Got it and Log progress…; for a task being edited, the **quick entry bar**: a line where **Enter** keeps an Update
+  capture on the task with the line as its current status, and **Shift+Enter** keeps the line on its notes under
+  today's day heading (starting that day when the page hasn't one), the status left as it was; each with Undo. Then
+  the state's dropdown, and **Later…** (Tomorrow, 3 days, 1 week, 2 weeks, 1 month, Other…, as Today's) while the task
+  is on Today, **Add to Today** while it isn't; neither once it's done for today. A parent's card has no bar (668).
+- **The notes** (664, 668, 683, 684, 685): this task's page, edited in place as on the task page, with This page · All
+  notes; a subtask's page edited the same way under a line saying so; a parent's page read only (668), as All notes
+  shows a page, each day with **Edit there**, which opens that page at those lines, Alt+Left coming back to the
+  workspace as it was. A meeting picked in the resources reads its notes the same way, with Open its notes. **Alt+Left**
+  or Back to this task's notes comes back to this task. The **outline** beside the notes follows the chain (683): each
+  page from the project down to this task, then the pages of the tasks under it, each page's days and headings under
+  its name, and Dates last; a click on another page's line picks that page and goes to the line. DocRepo runs no model:
+  the outline and each tile's status are the summary (669); Copy prompt's Ancestor context gives an LLM the chain.
+- **Dates** (681, 698, 699): every date of what's gathered, soonest first, a day's in the order Deadline, Due, Meeting,
+  Key date, Plant event, Follow-up, Reminder: a task's Due, its Deadline (with its description), its Reminder (unless
+  it's its wait's follow-up), a wait's follow-up ("Follow up with Mike"), its open key dates (a plant activity as a plant
+  event, with its end), and the meetings that are a gathered task's own (gathered, or directly under one) with their next
+  day. Closed tasks' dates are left out. Each row: its day, how far off, its kind, its words (a task's own date its title
+  with ↑ or ↳, else its words and whose it is) and its menu. A line marks today; the earlier ones fold behind Show N
+  earlier. A click on a day turns it into a box: the day typed in Quick edit's words (tomorrow, fri, 24 nov, 2026-11-24,
+  or +3 for three workdays), Enter keeping it, Esc leaving it, with Undo. Dates adds no date kind and retires none (698):
+  a task's field is written by `edits.change_task`, a key date by `edits.set_key_dates` (one with a start and an end
+  moves both), and a follow-up by moving the wait's day and the Reminder it set (the task's own earlier reminder stays;
+  a later one is kept for after), logged as "Follow up"; each change is in the status log. A repeating meeting's next
+  one isn't changed here. A row's menu has Change the day…, Quick edit… and Open, and for a key date Done and Take it
+  off. **Add a key date** puts one on the task being edited: a day in words and what it is ("24 nov Base plate drawing").
+- **The resources** (664, 679, 680, 685): Links, Files, Email conversations, Meetings and Decisions of what's gathered,
+  the picked task's own first, then what's under it, then the tasks above it, the nearest first; each row says whose it
+  is ("↑ on Fan deck", "↳ on Confirm the frame size"), a click on that picking it in the chain. Files has Find files at
+  its right, Email conversations New T-mail, Meetings Meeting notes and Decisions Copy; each section folds. Meetings
+  (685), between Email conversations and Decisions: each meeting, what its notes did here, whose and its day; a click
+  reads its notes in the middle. The **search box** filters every section as it's typed, over each row's name, its second
+  line and whose it is: each section says "2 of 9", the words found are marked, a section with nothing left goes, and Esc
+  or × clears it (a second Esc goes back). It's read from what's gathered: no new index.
+- Nothing is stored for it but what the task page keeps (This page or All notes, per task).
+
 ## 9. First everyday version (phase 5, built)
 
 ### 9.1 Backups

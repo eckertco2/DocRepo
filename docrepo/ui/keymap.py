@@ -22,6 +22,8 @@ KEY_MAP = (
     ("P", "Parse, Plan", "", "On the timeline: Plan mode, to drag dates (Ctrl+Z undoes a drop)", "Alt+P runs Parse and populate"),
     ("M", "Meeting notes", "", "Meeting notes for the selected task: its meeting, or a new one under it", "Alt+M turns meeting notes on or off"),
     ("O", "Open (Find files)", "", "Find files for the selected task: a window of its own for finding and opening its files", ""),
+    ("W", "Work on it", "", "The selected task's workspace: the chain of tasks above it, its notes and theirs, its dates and resources. "
+                            "On Today, Enter and a double-click open it too; Esc goes back", ""),
 )
 OTHER_KEYS = (
     ("Ctrl+Shift+Space", "Opens the capture window (the main hotkey)"),
@@ -41,7 +43,8 @@ OTHER_KEYS = (
     ("Q", "On the Timeline: Quick edit for the selected row (release 5.91; a double-click is Edit task, as everywhere)"),
     ("R", "In Review's Projects step: marks the selected project reviewed (release 5.128)"),
     ("Alt+Right, Alt+Left", "In Review, from its list: the next step, or back, passing over empty ones. On a task page, Alt+Left "
-                            "goes back to the All notes it left"),
+                            "goes back to the All notes it left, or to the workspace Edit there left; in the workspace, back to "
+                            "this task's notes"),
     ("F1", "This list, and the Syntax tab: every ** name, with examples"),
 )
 #: Find files' keys (releases 5.34 and 5.35, as the Task view). Since release 5.98 the task's letters aren't there: its
