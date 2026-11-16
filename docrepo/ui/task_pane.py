@@ -141,6 +141,8 @@ class TaskPane(QScrollArea):
     #: A link All notes asks the window to follow: a page picked in its outline ("allnotes:only:T…"), or a double-click's
     #: block ("notesgo:T…:C…", decision 605).
     all_notes_link = Signal(str)
+    #: The outline beside the notes: the page's headings; the workspace's lists the chain's pages round them (release 5.152).
+    OUTLINE = NotesOutline
 
     def __init__(self, css: str, margin: int) -> None:
         super().__init__()
@@ -294,7 +296,7 @@ class TaskPane(QScrollArea):
         rl = QHBoxLayout(row)
         rl.setContentsMargins(0, 0, 14, 10)
         rl.setSpacing(6)
-        self.outline = NotesOutline(self.notes)
+        self.outline = self.OUTLINE(self.notes)
         self.outline.picked.connect(self._outline_picked)
         self.outline_slot = OutlineSlot(self.outline, self._outline_offset, self._outline_view_height)
         self.outline_slot.hide()

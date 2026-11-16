@@ -37,9 +37,10 @@ class NotesPages:
             self.render_detail(keep_scroll=True)
 
     # ---- the task page with its notes page (release 5.25) ----
-    def wire_notes(self, pane: TaskPane, say: Callable[..., None], open_ref: Callable[[str], None]) -> None:
+    def wire_notes(self, pane: TaskPane, say: Callable[..., None], open_ref: Callable[[str], None], back: bool = True) -> None:
         """A notes page's signals: for the task page's pane (and, from release 5.37 to 5.97, a Task view's Notes page tab),
-        which says things and opens what's clicked in its own window."""
+        which says things and opens what's clicked in its own window. ``back`` gives it Alt+Left back to All notes; the
+        workspace's pane (release 5.152) has the workspace's own Alt+Left instead."""
         notes = pane.notes
         pane.say = say
         notes.changed.connect(lambda body: self._save_notes(body, pane))
@@ -64,15 +65,18 @@ class NotesPages:
         notes.move_requested.connect(lambda: self.move_to_task(pane))
         notes.bring_back.connect(lambda key: self.bring_lines_back(pane, key))
         pane.all_notes_link.connect(lambda href: self.on_link(QUrl(href)))
-        QShortcut(QKeySequence("Alt+Left"), pane, context=Qt.ShortcutContext.WidgetWithChildrenShortcut, activated=self._back_to_all_notes)
+        if back:
+            QShortcut(QKeySequence("Alt+Left"), pane, context=Qt.ShortcutContext.WidgetWithChildrenShortcut, activated=self._back_to_all_notes)
         self._all_notes_from: tuple[str, int] | None = None
         # The outline beside the notes (release 5.113): shown until the owner hides it, then kept so for every task.
         pane.set_outline_on(db.get_state(self.conn, "notes_outline") != "0")
         pane.summary.folded.connect(lambda folded: self._save_summary_folded(folded, pane))
 
     def note_panes(self) -> list[TaskPane]:
-        """Every notes page that's open: the task page's. Until release 5.98 each Task view's Notes page tab had one too."""
-        return [self.task_pane]
+        """Every notes page that's open: the task page's, and the workspace's once it's been opened (release 5.152). Until
+        release 5.98 each Task view's Notes page tab had one too."""
+        ws = getattr(self, "workspace", None)
+        return [self.task_pane] + ([ws.pane] if ws is not None else [])
 
     def save_open_notes(self) -> None:
         for pane in self.note_panes():
@@ -191,7 +195,12 @@ class NotesPages:
             self.say(f"Alt+Left goes back to {self.model().task(here).title}'s All notes.")
 
     def _back_to_all_notes(self) -> None:
-        """Alt+Left: back to the All notes a double-click or Edit there left, where it was."""
+        """Alt+Left: back to the All notes a double-click or Edit there left, where it was; or to the workspace Edit there
+        left (release 5.152, the workspace plan's decision 668)."""
+        from docrepo.ui import workspace as workspace_ui
+
+        if workspace_ui.come_back(self):
+            return
         back, self._all_notes_from = self._all_notes_from, None
         if not back or back[0] not in self.model().tasks:
             return
