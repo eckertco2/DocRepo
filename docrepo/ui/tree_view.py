@@ -43,6 +43,11 @@ LINE_ROLE = Qt.ItemDataRole.UserRole + 5
 #: look it's on the first column, whose icon is the state (the list rows review's decision L7); in the Classic look, on the
 #: State cell.
 STATE_ROLE = Qt.ItemDataRole.UserRole + 6
+#: What a row move calls the row, when it isn't the row's key (release 5.148): a Today item's number, as ("today", 7), since
+#: a task's row is keyed by its task and a note's may have no key. ``allow_row_moves``' callbacks get it.
+MOVE_ROLE = Qt.ItemDataRole.UserRole + 7
+#: A row's lines for its right-click menu only, a ``RowActions`` (release 5.148): ``set_menu_lines``.
+MENU_ROLE = Qt.ItemDataRole.UserRole + 8
 #: The chevron after a Classic State cell's word on hover, and the room it takes.
 STATE_CHEVRON = 12
 
@@ -583,7 +588,10 @@ class RowTree(QTreeWidget):
     def allow_row_moves(self, drop: Callable[[object, object, str], None], can: Callable[[object, object, str], bool], step: Callable[[object, int], None]) -> None:
         """Rows can be dragged here, and Alt+Up and Alt+Down move the current one. ``drop`` gets a row's key, the row it was dropped
         on, and "before", "after" or "in". ``can`` says whether that's allowed. The tree itself moves nothing: ``drop`` changes the
-        records, and the view draws them again."""
+        records, and the view draws them again. A row's ``MOVE_ROLE``, when it has one, stands for it in place of its key
+        (release 5.148). A row that takes no drop in it (no ``ItemIsDropEnabled``) is landed on before or after, by its halves,
+        as Qt draws the line between rows for it. With ``take_file_drops`` too, a drag of a row moves it and a drag of files,
+        links or an email is a file drop (release 5.148, decision 648)."""
         self._moves = (drop, can, step)
         self.setDragEnabled(True)
         self.setAcceptDrops(True)
@@ -624,10 +632,27 @@ class RowTree(QTreeWidget):
         rect = self.visualItemRect(item)
         margin = max(2, min(12, round(rect.height() / 5.5)))
         where = "before" if pos.y() - rect.top() < margin else "after" if rect.bottom() - pos.y() < margin else "in"
-        return item.data(0, KEY_ROLE), where
+        if where == "in" and not item.flags() & Qt.ItemFlag.ItemIsDropEnabled:  # as Qt's own line: the nearer half
+            where = "before" if pos.y() < rect.center().y() else "after"
+        return self.move_key(item), where
+
+    @staticmethod
+    def move_key(item: QTreeWidgetItem | None) -> object:
+        """What a row move calls a row: its ``MOVE_ROLE``, else its key (release 5.148)."""
+        if item is None:
+            return None
+        moved = item.data(0, MOVE_ROLE)
+        return moved if moved is not None else item.data(0, KEY_ROLE)
+
+    def _row_drag(self, event) -> bool:
+        """Whether a drag is one of this list's own rows being moved, rather than files, links or an email to drop on a row
+        (decision 648): told apart by where it comes from. With only row moves on, every drag is a row's, as before."""
+        if not self._moves:
+            return False
+        return not self._file_drops or event.source() is self
 
     def dragEnterEvent(self, event) -> None:  # noqa: N802 - Qt's name
-        if self._file_drops and not self._moves:
+        if self._file_drops and not self._row_drag(event):
             from docrepo.ui.capture_window import note_drag
 
             if note_drag("enter", event.mimeData(), links=True):
@@ -641,24 +666,28 @@ class RowTree(QTreeWidget):
             event.acceptProposedAction()
 
     def dragMoveEvent(self, event) -> None:  # noqa: N802 - Qt's name
-        if self._file_drops and not self._moves:
+        if self._file_drops and not self._row_drag(event):
             if self._file_drop(event):
                 event.setDropAction(Qt.DropAction.CopyAction)
                 event.accept()
             else:
                 event.ignore()
             return
+        if self._moves:
+            self.setDropIndicatorShown(True)  # so Qt works out where its line goes
         super().dragMoveEvent(event)
         if not self._moves:
             return
-        at, key = self._drop_at(event.position().toPoint()), self.currentItem().data(0, KEY_ROLE) if self.currentItem() else None
-        if at and self._moves[1](key, *at):
+        at, key = self._drop_at(event.position().toPoint()), self.move_key(self.currentItem())
+        ok = bool(at and self._moves[1](key, *at))
+        self.setDropIndicatorShown(ok)  # Qt's line or box only where a row can land (release 5.148)
+        if ok:
             event.acceptProposedAction()
         else:
             event.ignore()
 
     def dropEvent(self, event) -> None:  # noqa: N802 - Qt's name
-        if self._file_drops and not self._moves:
+        if self._file_drops and not self._row_drag(event):
             from docrepo.ui.capture_window import note_drag
 
             note_drag("drop", event.mimeData(), links=True)
@@ -674,7 +703,7 @@ class RowTree(QTreeWidget):
         if not self._moves:
             super().dropEvent(event)
             return
-        at, key = self._drop_at(event.position().toPoint()), self.currentItem().data(0, KEY_ROLE) if self.currentItem() else None
+        at, key = self._drop_at(event.position().toPoint()), self.move_key(self.currentItem())
         event.setDropAction(Qt.DropAction.IgnoreAction)  # the records move, and the list is drawn again: Qt moves nothing
         event.accept()
         if at and self._moves[1](key, *at):
@@ -690,7 +719,7 @@ class RowTree(QTreeWidget):
                 return
         alt = event.modifiers() == Qt.KeyboardModifier.AltModifier
         if self._moves and alt and event.key() in (Qt.Key.Key_Up, Qt.Key.Key_Down) and self.currentItem() is not None:
-            self._moves[2](self.currentItem().data(0, KEY_ROLE), -1 if event.key() == Qt.Key.Key_Up else 1)
+            self._moves[2](self.move_key(self.currentItem()), -1 if event.key() == Qt.Key.Key_Up else 1)
             return
         super().keyPressEvent(event)
 
@@ -906,6 +935,11 @@ class RowTree(QTreeWidget):
         if LOOK.classic:
             self.setItemWidget(item, self.columnCount() - 1, ActionStrip(row))
 
+    def set_menu_lines(self, item: QTreeWidgetItem, lines: list[tuple[str, Callable[[], None], str]]) -> None:
+        """Lines for a row's right-click menu only, after its actions, with no button on the row: Today's Move to top and
+        Move to bottom (release 5.148, decision 646)."""
+        item.setData(0, MENU_ROLE, RowActions(lines))
+
     def action_strip(self, item: QTreeWidgetItem) -> ActionStrip | None:
         """The row's strip, showing it if it wasn't. What tests click, as a person would after moving the mouse there."""
         if LOOK.classic:
@@ -1016,17 +1050,19 @@ class RowTree(QTreeWidget):
         if item is None:
             return None
         row = item.data(0, ACTIONS_ROLE)
+        lines = item.data(0, MENU_ROLE)  # the menu's own lines, after the row's actions (release 5.148)
+        lines = list(lines.actions) if lines is not None else []
         task = self.row_task(item) if self.state_menu is not None or self.task_menus is not None or self.tile_menu is not None else None
         menu = QMenu(self)
         menu.setToolTipsVisible(True)
         if task and self.tile_menu is not None:  # a task tile's one menu (decision 573), with the row's own actions in it
             own = [a for a in (row.actions if row is not None else ()) if a[0] not in ("Edit", "Note")]  # the menu has both
-            self.tile_menu(task, menu, own)
+            self.tile_menu(task, menu, [*own, *lines])
             if menu.isEmpty():
                 menu.deleteLater()
                 return None
             return menu
-        for label, clicked, tip in row.actions if row is not None else ():
+        for label, clicked, tip in [*(row.actions if row is not None else ()), *lines]:
             if task and self.task_menus is not None and label == "Edit":
                 continue
             action = menu.addAction(label, clicked)

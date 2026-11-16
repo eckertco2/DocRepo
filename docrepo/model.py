@@ -327,6 +327,9 @@ class AgendaItem:
     closed: str | None
     how: str | None
     closed_by: str | None
+    #: Its place in its list, 1 at the top (schema 29, release 5.148, decision 647): None until Today's items are put in an
+    #: order of the owner's.
+    pos: int | None = None
 
 
 @dataclass(frozen=True)
@@ -380,6 +383,12 @@ PRIORITY_NAMES = {"critical": "Critical", "high": "High", "medium": "Medium", "p
 def is_person(item_id: str | None) -> bool:
     """True when an ID is a person's (P001), as an agenda target can be."""
     return bool(item_id and re.match(r"P\d", item_id))
+
+
+def place_key(a: AgendaItem) -> tuple:
+    """How a list's open agenda items are ordered (release 5.148, decision 647): those with a place by it, then any without
+    one in the order they were added, which is the whole order until the first drag. ``agenda.ORDER`` is the same in SQL."""
+    return (a.pos is None, a.pos or 0, a.added, a.id)
 
 
 def _unique(items: Iterable[str]) -> list[str]:
@@ -853,8 +862,9 @@ class Model:
 
     # ---- Today (mods log round 1, M0016) ----
     def today_items(self) -> list[AgendaItem]:
-        """Today's open items, the oldest first: they carry over until they're closed."""
-        return sorted(self.open_items_for(TODAY), key=lambda a: a.added)
+        """Today's open items, in the owner's order (release 5.148, decisions 643 to 645): by their places once they have
+        them, and until then the oldest first. They carry over until they're closed."""
+        return sorted(self.open_items_for(TODAY), key=place_key)
 
     def done_on(self, day: date) -> list[AgendaItem]:
         """Today's items marked Done on ``day``, the latest first."""

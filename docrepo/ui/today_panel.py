@@ -16,6 +16,11 @@ as an Update on that task, with what was dropped in it (decisions 407 and 408).
 Release 5.119 (``docs/mods/rows-and-bullets-plan.md``, decisions 440 to 443, the owner's voice memo of 2026-11-11): a row's
 title has its line to itself. Its state, as its icon, and its date, short ("8 d"), are on its second line, at the right,
 where Later, Done and Remove show on the pointer; Due in the next 7 days has the short date too.
+
+Release 5.148 (``docs/mods/today-order-plan.md``, decisions 643 to 648): Today's rows are one list in the owner's order.
+While the panel is widened a row can be dragged, with a line where it will land; Alt+Up and Alt+Down move the one the
+keyboard is on, and the right-click menu has Move to top and Move to bottom. The move is the browse tool's own. A row's drag
+is told from a file's by its own format, so a file, link or email dropped on a task's row still opens an Update.
 """
 from __future__ import annotations
 
@@ -29,9 +34,10 @@ from ctypes import wintypes
 from datetime import date
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QEasingCurve, QPoint, QRect, Qt, QTimer, QVariantAnimation
-from PySide6.QtGui import QColor, QCursor, QFontMetrics, QGuiApplication, QPainter, QPen
+from PySide6.QtCore import QByteArray, QEasingCurve, QMimeData, QPoint, QRect, Qt, QTimer, QVariantAnimation
+from PySide6.QtGui import QColor, QCursor, QDrag, QFontMetrics, QGuiApplication, QPainter, QPen
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QFrame,
     QHBoxLayout,
@@ -92,6 +98,8 @@ GRIP_WIDTH = 5
 #: What the cover says while an email, or a file only a program holds, is dragged over the panel (decision 408).
 COVER_EMAIL = "Drop on a task: DocRepo keeps the email whole"
 COVER_FILE = "Drop on a task: DocRepo keeps the file as it's handed over"
+#: A Today row dragged within the panel (release 5.148, decision 643): its item's number. Not a file, link or email.
+ROW_MIME = "application/x-docrepo-today-item"
 
 QSS = """
 QWidget#todayPanel {{ background: {content}; border: 1px solid {stroke_strong}; }}
@@ -101,6 +109,7 @@ QFrame#tpRow {{ background: {content}; border-radius: 4px; }}
 QFrame#tpRow:hover {{ background: {hover}; }}
 QFrame#tpRow[current="true"] {{ background: {selected}; }}
 QFrame#tpRow[drop="true"] {{ background: {selected}; border: 1px solid {accent}; }}
+QFrame#tpDropLine {{ background: {accent}; border: 0; }}
 QLabel#tpTitle {{ color: {text}; }}
 QLabel#tpSub {{ color: {text2}; font-size: {caption}pt; }}
 QLabel#tpDue {{ color: {text2}; font-size: {caption}pt; }}
@@ -238,6 +247,7 @@ class _Row(_EdgeFrame):
         text.addWidget(self.second)
         lay.addLayout(text, 1)
         self.setMouseTracking(True)
+        self._press: QPoint | None = None  # where the left button went down, for a drag (release 5.148)
 
     def done_clicked(self) -> None:
         self.panel.done(self.item_id)
@@ -270,16 +280,28 @@ class _Row(_EdgeFrame):
         self.buttons.hide()
         self.set_wide(self.panel.hover.wide)
 
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        self._press = event.globalPosition().toPoint() if event.button() == Qt.MouseButton.LeftButton else None
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802 - a drag, once the pointer has gone far enough (decision 643)
+        if (self._press is not None and event.buttons() & Qt.MouseButton.LeftButton
+                and (event.globalPosition().toPoint() - self._press).manhattanLength() >= QApplication.startDragDistance()):
+            self._press = None
+            if self.panel.can_drag_rows():
+                event.accept()
+                self.panel.start_row_drag(self)
+                return
+        super().mouseMoveEvent(event)
+
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        self._press = None
         if event.button() == Qt.MouseButton.LeftButton and self.rect().contains(event.position().toPoint()):
             self.panel.open_detail(self.item_id)
 
     def contextMenuEvent(self, event) -> None:  # noqa: N802 - Qt's name
-        if self.task_id is not None:
-            event.accept()
-            self.panel.row_menu(self, event.globalPos())
-            return
-        super().contextMenuEvent(event)
+        event.accept()  # a task's is the tile's menu, a note's Today's own lines (release 5.148)
+        self.panel.row_menu(self, event.globalPos())
 
 
 class _Grip(QWidget):
@@ -418,6 +440,8 @@ class TodayPanel(QWidget):
         self._width_now = settings.rest_width
         self._rest = db.get_state(self.ctx.conn, REST_WIDTH_KEY)  # the width at rest, dragged and kept (decision 406)
         self._dragging = False  # a drag of files, links or an email is over the panel (decision 407)
+        self._moving: int | None = None  # the Today item one of its rows is being dragged to move (release 5.148)
+        self._moved: tuple[int, int, str] | None = None  # where that drag was dropped: the item, the row beside, before or after
         self._drop_at: _EdgeFrame | None = None  # the row a drop would go to, marked
         self._cover_target: _EdgeFrame | None = None  # the same, under the cover
         self._grow = QVariantAnimation(self)
@@ -486,6 +510,9 @@ class TodayPanel(QWidget):
         self.list_lay.setSpacing(2)  # tiles 2 px apart (release 5.138, decision 571)
         self.scroll.setWidget(self.list_widget)
         self.stack.addWidget(self.scroll)
+        # Where a dragged row will land: a line between two rows (release 5.148, decision 643), outside the layout.
+        self.row_line = QFrame(self.list_widget, objectName="tpDropLine")
+        self.row_line.hide()
         # The detail
         detail = QWidget()
         detail.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)  # its buttons mustn't widen the panel at rest
@@ -843,15 +870,22 @@ class TodayPanel(QWidget):
 
     def row_menu(self, row: _Row, at: QPoint) -> None:
         """A task's right-click menu (release 5.138, the task tile plan's decisions 573 and 576): the tile's, with Today's own
-        on top. The panel stays open while it is."""
-        if row.task_id is None:
-            return
+        on top, and Move to top and Move to bottom since release 5.148 (decision 646). A note's has Today's own lines alone.
+        The panel stays open while it is."""
         task_id, item_id = row.task_id, row.item_id
-        own = [("Done for today\tSpace", lambda: self.done(item_id), "Off Today; on a task an Update opens on it"),
-               ("Later…", lambda: self.later(task_id, item_id), "Off Today until a later day, when its reminder puts it back"),
-               ("Remove from Today\tDelete", lambda: self.remove(item_id), "Off Today; the task stays as it is")]
-        menu = tile_ui.tile_menu(self.browse, task_id, self, own,
-                                 state_pick=lambda to, branch: self.browse.set_state(task_id, to, branch, self.refresh, self.tell_state))
+        moves = self._move_lines(row)
+        if task_id is None:
+            menu = QMenu(self)
+            menu.setToolTipsVisible(True)
+            for label, do, tip in (("Done for today\tSpace", lambda: self.done(item_id), "Off Today"),
+                                   ("Remove from Today\tDelete", lambda: self.remove(item_id), "Off Today"), *moves):
+                menu.addAction(label, do).setToolTip(tip)
+        else:
+            own = [("Done for today\tSpace", lambda: self.done(item_id), "Off Today; on a task an Update opens on it"),
+                   ("Later…", lambda: self.later(task_id, item_id), "Off Today until a later day, when its reminder puts it back"),
+                   ("Remove from Today\tDelete", lambda: self.remove(item_id), "Off Today; the task stays as it is"), *moves]
+            menu = tile_ui.tile_menu(self.browse, task_id, self, own,
+                                     state_pick=lambda to, branch: self.browse.set_state(task_id, to, branch, self.refresh, self.tell_state))
         if menu is None:
             return
         self._menu_open = True
@@ -913,9 +947,102 @@ class TodayPanel(QWidget):
         self._hover_timer.start()
 
     def put_back(self, item_id: int) -> None:
-        """Back on Today, on a row of Done today (decision 420)."""
+        """Back on Today, on a row of Done today (decision 420), at the bottom since release 5.148 (decision 645)."""
         self.browse.put_back_today(item_id, tell=self.tell_state)
         self.refresh()
+
+    # ================= the owner's order (release 5.148, decisions 643, 646 and 648) =================
+    def move_item(self, item_id: int, *, to: str | None = None, beside: tuple[int, str] | None = None) -> None:
+        """A move from the panel, the browse tool's own: to the top, the bottom, up or down, or beside another row as a drag
+        drops it. The list is drawn again, with the keyboard still on the item."""
+        self.browse.move_today(item_id, to=to, beside=beside)
+        self.refresh()
+        if 0 <= self.cursor < len(self.rows):
+            self.scroll.ensureWidgetVisible(self.rows[self.cursor])
+
+    def _move_lines(self, row: _Row) -> list[tuple[str, Callable[[], None], str]]:
+        """Move to top and Move to bottom for a row's menu (decision 646), each only where it would move it."""
+        at = self.rows.index(row) if row in self.rows else -1
+        item_id = row.item_id
+        lines: list[tuple[str, Callable[[], None], str]] = []
+        if at > 0:
+            lines.append(("Move to top", lambda: self.move_item(item_id, to="top"), "First on Today. Alt+Up moves it one place"))
+        if 0 <= at < len(self.rows) - 1:
+            lines.append(("Move to bottom", lambda: self.move_item(item_id, to="bottom"), "Last on Today. Alt+Down moves it one place"))
+        return lines
+
+    def can_drag_rows(self) -> bool:
+        """Today's rows are dragged into order while the panel is widened, with its list showing (decision 643)."""
+        return self.hover.wide and self._detail is None and self.stack.currentIndex() == 0 and len(self.rows) > 1
+
+    def start_row_drag(self, row: _Row) -> None:
+        """Drag a Today row to a new place. Its drag carries its item in a format of its own, so it's never taken for a file
+        (decision 648); the move is made once the drag is over, as the rows are drawn again then."""
+        mime = QMimeData()
+        mime.setData(ROW_MIME, QByteArray(str(row.item_id).encode("ascii")))
+        drag = QDrag(row)
+        drag.setMimeData(mime)
+        drag.setPixmap(row.grab())
+        drag.setHotSpot(row.mapFromGlobal(QCursor.pos()))
+        self._moving, self._moved = row.item_id, None
+        try:
+            self.run_drag(drag)
+        finally:
+            self._moving = None
+            self._show_row_line(None)
+        moved, self._moved = self._moved, None
+        if moved is not None:
+            self.move_item(moved[0], beside=(moved[1], moved[2]))
+        self._hover_timer.start()
+
+    def run_drag(self, drag: QDrag) -> None:
+        """Run a row's drag until it's dropped or let go. Tests replace it."""
+        drag.exec(Qt.DropAction.MoveAction)
+
+    def _row_drag(self, event) -> int | None:
+        """The Today item a drag over the panel is moving, when it's one of the panel's own rows; None for a file, link or
+        email (decision 648)."""
+        return self._moving if self._moving is not None and event.mimeData().hasFormat(ROW_MIME) else None
+
+    def row_target(self, at: QPoint) -> tuple[_Row, str] | None:
+        """Where a dragged row would land, for a point on the screen: before or after the Today row under it, by its halves
+        (the gap between two rows is the lower one's); None away from Today's rows."""
+        viewport = self.scroll.viewport()
+        if self.stack.currentIndex() != 0 or not viewport.rect().contains(viewport.mapFromGlobal(at)):
+            return None
+        spans = [(r, r.geometry()) for r in self.rows if r.isVisibleTo(self)]
+        y = self.list_widget.mapFromGlobal(at).y()
+        if not spans or y < spans[0][1].top() - 8 or y > spans[-1][1].bottom() + 8:
+            return None
+        row, box = next(((r, b) for r, b in spans if y <= b.bottom() + 1), spans[-1])
+        return row, "before" if y < box.center().y() else "after"
+
+    def _show_row_line(self, target: tuple[_Row, str] | None) -> None:
+        """The line a dragged row will land on, in the gap before or after the row (decision 643); hidden with None."""
+        if target is None:
+            self.row_line.hide()
+            return
+        row, where = target
+        box = row.geometry()
+        self.row_line.setGeometry(box.left(), box.top() - 2 if where == "before" else box.bottom() + 1, box.width(), 2)
+        self.row_line.show()
+        self.row_line.raise_()
+
+    def _row_drag_over(self, moving: int, event) -> tuple[_Row, str] | None:
+        """A row's drag moved or dropped here: where it would land, with its line shown, or None (away, or where it is now)."""
+        target = self.row_target(self.mapToGlobal(event.position().toPoint()))
+        ids = [r.item_id for r in self.rows]
+        if target is not None and moving in ids:
+            now, at = ids.index(moving), ids.index(target[0].item_id)
+            if at == now or (target[1] == "after" and at == now - 1) or (target[1] == "before" and at == now + 1):
+                target = None  # it would land where it is
+        self._show_row_line(target)
+        if target is None:
+            event.ignore()
+        else:
+            event.setDropAction(Qt.DropAction.MoveAction)
+            event.accept()
+        return target
 
     def add_from_box(self) -> None:
         text = self.box.text().strip()
@@ -990,7 +1117,8 @@ class TodayPanel(QWidget):
     # ================= hovering =================
     def _holding(self) -> bool:
         """What keeps it wide after the pointer leaves: the box has the cursor, a menu is open, or a detail is showing."""
-        return self.box.hasFocus() or self._menu_open or self._detail is not None or self.isActiveWindow() or self._dragging
+        return (self.box.hasFocus() or self._menu_open or self._detail is not None or self.isActiveWindow() or self._dragging
+                or self._moving is not None)
 
     def _hover_ms(self) -> int | None:
         return self.settings.inner_edge_hover_ms if self._on_inner_edge() else None
@@ -1133,6 +1261,10 @@ class TodayPanel(QWidget):
         self._hover_timer.start()
 
     def dragEnterEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        if self._row_drag(event) is not None:  # one of its own rows, being moved (decision 648)
+            event.setDropAction(Qt.DropAction.MoveAction)
+            event.accept()
+            return
         kind = note_drag("enter", event.mimeData(), links=True)
         if not kind:
             event.ignore()
@@ -1144,6 +1276,10 @@ class TodayPanel(QWidget):
             self.drop_cover.cover(email=kind == "outlook")
 
     def dragMoveEvent(self, event) -> None:  # noqa: N802
+        moving = self._row_drag(event)
+        if moving is not None:
+            self._row_drag_over(moving, event)
+            return
         target = self.target_at(self.mapToGlobal(event.position().toPoint())) if read_drop(event.mimeData(), links=True)[0] else None
         self._mark_drop(target)
         if target is not None:
@@ -1153,10 +1289,18 @@ class TodayPanel(QWidget):
             event.ignore()
 
     def dragLeaveEvent(self, event) -> None:  # noqa: N802 - the cover taking the drag over isn't the drag leaving
+        self._show_row_line(None)
         if not self.drop_cover.isVisible():
             self.drag_over()
 
     def dropEvent(self, event) -> None:  # noqa: N802
+        moving = self._row_drag(event)
+        if moving is not None:  # a row moved: kept until the drag is over, when it's made (``start_row_drag``)
+            target = self._row_drag_over(moving, event)
+            self._show_row_line(None)
+            if target is not None:
+                self._moved = (moving, target[0].item_id, target[1])
+            return
         note_drag("drop", event.mimeData(), links=True)
         kind, paths = read_drop(event.mimeData(), links=True)
         target = self.target_at(self.mapToGlobal(event.position().toPoint())) if kind else None
@@ -1324,6 +1468,9 @@ class TodayPanel(QWidget):
                 self.hover.contract()
                 self._update_state()
                 self._give_back()
+        elif key in (Qt.Key.Key_Up, Qt.Key.Key_Down) and event.modifiers() == Qt.KeyboardModifier.AltModifier:
+            if current is not None:  # the item itself, one place (release 5.148, decision 646)
+                self.move_item(current.item_id, to="up" if key == Qt.Key.Key_Up else "down")
         elif key in (Qt.Key.Key_Up, Qt.Key.Key_Down):
             self._move_cursor(self.cursor + (1 if key == Qt.Key.Key_Down else -1))
         elif key in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and current is not None:
