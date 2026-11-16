@@ -490,6 +490,51 @@ def reopen_agenda_item(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, it
     return out
 
 
+def back_on_today(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, item_id: int, at: datetime) -> Outcome:
+    """Back on Today, on a row of Done today (release 5.115, decision 420): the item is open again, and since release 5.148
+    at the bottom of the list, as a new item goes (decision 645). Undo (``reopen_agenda_item``) puts one back in its place."""
+    before = Model(conn)
+    a = next((x for x in before.agenda if x.id == item_id), None)
+    agenda.reopen_item(conn, item_id, at_end=True)
+    out = Outcome("Back on Today, at the bottom.")
+    write_touched_pages(conn, data_root, fs, at, out.problems, [a.subject] if a and a.subject else [], before)
+    log.info("Today item %d back on Today", item_id)
+    return out
+
+
+#: Where Today's moves send an item (release 5.148, decision 646), and what they say.
+MOVES = {"top": "moved to the top", "bottom": "moved to the bottom", "up": "moved up", "down": "moved down"}
+
+
+def move_today_item(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, item_id: int, at: datetime, *, to: str | None = None,
+                    beside: tuple[int, str] | None = None) -> Outcome:
+    """Today in the owner's order (release 5.148, decisions 643 and 646): ``to`` is "top", "bottom", "up" or "down" (Move to
+    top and Move to bottom, Alt+Up and Alt+Down); ``beside`` is a drag's drop, another item and "before" or "after". Every
+    open item gets its place, as at the first drag. A move changes no task, so it goes in no status log and has no Undo;
+    only Contents.md, which lists Today in its order, is written again."""
+    before = Model(conn)
+    a = next((x for x in before.today_items() if x.id == item_id), None)
+    if a is None:
+        raise EditError("That item isn't on Today any more.")
+    order = [x.id for x in before.today_items()]
+    if beside is not None:
+        agenda.move_beside(conn, item_id, beside[0], beside[1])
+        done = "moved"
+    elif to in MOVES:
+        now = order.index(item_id)
+        if (to == "up" and now == 0) or (to == "down" and now == len(order) - 1):
+            return Outcome("")  # at the end already: Alt+Up at the top does nothing
+        agenda.move_item(conn, item_id, {"top": 0, "bottom": len(order), "up": now - 1, "down": now + 1}[to])
+        done = MOVES[to]
+    else:
+        raise EditError(f"A Today item moves to the top, the bottom, up or down, not {to!r}.")
+    what = before.task(a.subject).title if a.subject and a.subject in before.tasks else "The note"
+    out = Outcome(f"{what}: {done}." if agenda.order_of(conn) != order else "")  # dropped where it was: nothing to say
+    write_touched_pages(conn, data_root, fs, at, out.problems, [], before)
+    log.info("Today item %d %s", item_id, done)
+    return out
+
+
 #: Who adds and closes agenda items from the quick summary (release 5.131, decisions 526 and 527), in the agenda and status log.
 SUMMARY = "Quick summary"
 
