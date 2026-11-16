@@ -145,6 +145,23 @@ def test_an_update_and_a_decision_say_what_they_were(root, as_capture):
     assert [(x.kind, x.text, x.did) for x in lines(root, RIGGING)] == [("change", "Rigging plan: crane booked", "Closed")]
 
 
+@pytest.mark.parametrize("as_capture", [False, True], ids=["page note", "capture"])
+def test_today_reads_on_today(root, as_capture):
+    """Release 5.147's ``**today`` (decision 641) is ``**agenda, today`` in one word, so its line reads the same."""
+    save(root, ["Ask about the hire rate **today", "Call the vendor **agenda, today", "#Rigging plan **today",
+                "- @Tom book the 50 t crane **today"], as_capture=as_capture)
+    crane = made(root, "Book the 50 t crane")
+    got = lines(root, INSTALLATION)
+    assert [(x.kind, x.text, x.ref, x.did) for x in got] == [
+        ("change", "Ask about the hire rate", INSTALLATION, "on Today"),
+        ("change", "Call the vendor", INSTALLATION, "on Today"),
+        ("change", "Rigging plan", RIGGING, "on Today"),
+        ("task", got[3].text, crane, ""),
+    ]
+    assert [(x.kind, x.did) for x in lines(root, crane)][1:] == [("set", "on Today")]
+    assert {a.subject for a in Model(root[0]).today_items()} >= {INSTALLATION, RIGGING, crane}
+
+
 def test_every_kind_of_field_says_what_it_did(root):
     """A new task's own lines of fields, on its page: each a change line saying its field and value in words (a priority
     or a yes is no date); one not used (Duration, with a tied Start) stays as typed, as Save's message says."""

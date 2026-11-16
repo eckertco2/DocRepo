@@ -874,9 +874,10 @@ def _save_items(conn: sqlite3.Connection, settings: Settings, reading: items.Rea
             used.add(it.key)
             continue
         if it.kind == "param" and it.op and it.op.task_field == "agenda":  # not a field (release 5.133)
-            added, already = _put_on_agendas(conn, it, where, when, notes_id, on_agendas)
+            added, already, ours = _put_on_agendas(conn, it, where, when, notes_id, on_agendas)
             if added:
                 made["agenda"] = made.get("agenda", 0) + added
+            if added or ours:  # an item an earlier line of this save added does for this one too (release 5.150)
                 used.add(it.key)
             elif not already:
                 unused += 1
@@ -928,15 +929,18 @@ def _put_on_agendas(conn: sqlite3.Connection, it: items.Item, where: list[str], 
     """``**agenda,`` (release 5.133, decisions 543 and 544): each task the line goes on, on each agenda it names, with the
     line's other words as the note; with no task, those words alone. A task already open on an agenda isn't put on it
     again, and none goes on its own. Adds each task and target to ``touched``, for their pages. Returns how many items it
-    added, and how many were there already."""
+    added, how many were there already, and how many of those this same save added (release 5.150)."""
     targets = list(it.value.changes.get("agenda", ())) if it.value else []
-    added = already = 0
+    added = already = ours = 0
     for subject in where or ([None] if it.note else []):
         for target in targets:
             if subject == target:
                 continue
-            if subject and conn.execute("SELECT 1 FROM agenda_items WHERE subject = ? AND target = ? AND closed IS NULL", (subject, target)).fetchone():
+            there = conn.execute("SELECT added, added_by FROM agenda_items WHERE subject = ? AND target = ? AND closed IS NULL",
+                                 (subject, target)).fetchone() if subject else None
+            if there:
                 already += 1
+                ours += (there[0], there[1]) == (when, via)
                 continue
             try:
                 agenda.add_item(conn, subject=subject, target=target, note=it.note, added=when, added_by=via)
@@ -944,7 +948,7 @@ def _put_on_agendas(conn: sqlite3.Connection, it: items.Item, where: list[str], 
                 continue
             added += 1
             touched.extend(x for x in (subject, target) if x)
-    return added, already
+    return added, already, ours
 
 
 def _fill_param(conn: sqlite3.Connection, settings: Settings, it: items.Item, task_id: str, made_here: bool, at: datetime, via: str,
