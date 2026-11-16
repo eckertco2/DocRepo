@@ -14,6 +14,11 @@ list items) and three more kinds:
   of the page went, ``[Fill media order · 2 lines moved there](moved:T000023/M20261113091500)``, and on that page their
   **lead line**, ``[Moved from the notes of Cooling tower kickoff · Tue 3 Nov](from:T000021/M20261113091500)``, the two
   paired by the move's key; a meeting's ``#task`` section points to its item's capture, ``(moved:T000022/C000033)``;
+- since release 5.150 (the notes syntax plan's decisions 653 and 654): a **change line**, a line of notes whose operators
+  did what they say, as its words and then what it did, ``[Rigging plan](change:T000012) · Due Mon 30 Nov · Lead Tom
+  Becker`` (a list item when its line was one, ``- [Seals look worn](change:T000010) · Rigging``), and the **set line**
+  under a made task's first line on its own page, ``[Set from Pump trial's notes](set:T000010) · Due Fri 23 Oct ·
+  Rigging``; ``docrepo.page_lines`` says when a line is one;
 - since release 5.27 (decisions 124 to 128): a **picture**, a list item that's one picture of a document,
   ``- ![Picture 2026-10-27 1042.png](document:D000031)``, and an **attachment**, a list item that's one link to a
   document, ``- [File: Pump curve.pdf](document:D000032)``, each with its description as the list item under it; and a
@@ -31,11 +36,12 @@ from __future__ import annotations
 
 import re
 import sqlite3
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 
-from docrepo import items, markup
+from docrepo import items, markup, page_lines
+from docrepo.config import Settings
 from docrepo.dates import long_date, stamp, to_date
 from docrepo.db import transaction
 from docrepo.model import Capture, Model
@@ -47,6 +53,11 @@ DAY = re.compile(r"(Mon|Tue|Wed|Thu|Fri|Sat|Sun) (\d{1,2}) (" + "|".join(MONTHS)
 HEADING = re.compile(r"^(#{1,3}) (.*)$")
 LINK = re.compile(r"^\[((?:[^\]\\]|\\.)*)\]\((capture|document|task|moved|from):([A-Z]\d+(?:/[A-Z][0-9-]+)?)\)$")
 _LINK_KINDS = {"capture": "caption", "document": "file", "task": "task", "moved": "pointer", "from": "lead"}
+#: A change line or a set line (release 5.150): its list marker, if it has one, its words as a link to its task, and what
+#: it did after them.
+CHANGE = re.compile(r"^((?:  )*- )?\[((?:[^\]\\]|\\.)*)\]\((change|set):(T\d+)\)((?: · .*)?)$")
+#: Between a change line's words and each thing it did.
+DOT = " · "
 #: A pointer's or a lead line's ref: the task, then the move's key ("M" and when, or a meeting item's capture).
 _PAIR = re.compile(r"^(T\d+)/([A-Z][0-9-]+)$")
 #: A picture or an attachment on the page (release 5.27): a list item that's one picture of, or link to, a document.
@@ -62,13 +73,14 @@ _TASK_REF = re.compile(r"\]\((T\d+)\)")
 @dataclass(frozen=True)
 class Line:
     """One line of a page, read: a "heading", a "caption", a "file" line, a "task" line (one link to a task made from
-    the notes, release 5.83), a "pointer" or a "lead" line (release 5.143), a "picture", an "attachment", a table's "row"
-    or a line of "text"."""
+    the notes, release 5.83), a "pointer" or a "lead" line (release 5.143), a "change" or a "set" line (release 5.150), a
+    "picture", an "attachment", a table's "row" or a line of "text"."""
 
     kind: str
     text: str        # a heading's or a link's text, in words; a text line's markup; a row as it's kept
-    level: int = 0   # a heading's level, 1 to 3; a picture's or attachment's list level, from 1
-    ref: str = ""    # a caption's capture, a task line's task, or a file line's, picture's or attachment's document
+    level: int = 0   # a heading's level, 1 to 3; a picture's, attachment's or change line's list level, from 1 (0: none)
+    ref: str = ""    # a caption's capture, a task or change line's task, or a file line's, picture's or attachment's document
+    did: str = ""    # a change or set line's words after its link: what it did, "Due Mon 30 Nov · Lead Tom Becker"
 
 
 # ---- reading and writing lines ----
@@ -76,6 +88,10 @@ def read_line(line: str) -> Line:
     m = HEADING.match(line)
     if m:
         return Line("heading", m.group(2), len(m.group(1)))
+    m = CHANGE.match(line)
+    if m:
+        level = len(m.group(1)) // 2 if m.group(1) else 0  # "- " is level 1
+        return Line(m.group(3), _UNESCAPE.sub(r"\1", m.group(2)), level, m.group(4), m.group(5)[len(DOT):])
     m = LINK.match(line)
     if m:
         return Line(_LINK_KINDS[m.group(2)], _UNESCAPE.sub(r"\1", m.group(1)), ref=m.group(3))
@@ -137,6 +153,20 @@ def task_lines(lines: list[str], made: list[tuple[str, list[str]]], model: Model
                 out[i:i + n] = [task_line(task_line_text(model, task_id, today), task_id)]
                 break
     return out
+
+
+def change_line(words: str, task_id: str, did: str, level: int = 0) -> str:
+    """A change line (release 5.150, decision 654): a line of notes as its words without the operators, a link to the task
+    it changed, and what it did: ``[Rigging plan](change:T000012) · Due Mon 30 Nov · Lead Tom Becker``. ``level``: its
+    list level when its line was a list item."""
+    head = "  " * (level - 1) + "- " if level > 0 else ""
+    return f"{head}[{_link_text(words)}](change:{task_id})" + (f"{DOT}{did}" if did else "")
+
+
+def set_line(words: str, task_id: str, did: str) -> str:
+    """The line under a made task's first line on its own page (decision 653): what the notes' operators set on it,
+    ``[Set from Pump trial's notes](set:T000010) · Due Fri 23 Oct · Rigging``, a link to the notes' page."""
+    return f"[{_link_text(words)}](set:{task_id})" + (f"{DOT}{did}" if did else "")
 
 
 def pointer_line(text: str, task_id: str, key: str) -> str:
@@ -214,8 +244,8 @@ def item_line(kind: str, text: str, document_id: str, level: int = 1) -> str:
 def text_line(line: str) -> str:
     """A line of markup as a page keeps it: one that would read as a heading, a link, a picture or a table's row starts
     with a backslash."""
-    return ("\\" + line if HEADING.match(line) or LINK.match(line) or ITEM.match(line) or line.startswith(("\\#", "\\[", "|", "\\|"))
-            else line)
+    return ("\\" + line if HEADING.match(line) or LINK.match(line) or ITEM.match(line) or CHANGE.match(line)
+            or line.startswith(("\\#", "\\[", "|", "\\|")) else line)
 
 
 # ---- tables (release 5.27, decision 128) ----
@@ -255,6 +285,10 @@ def write(lines: list[Line]) -> str:
             out.append(file_line(x.text, x.ref))
         elif x.kind in ("pointer", "lead"):
             out.append(f"[{_link_text(x.text)}]({'moved' if x.kind == 'pointer' else 'from'}:{x.ref})")
+        elif x.kind == "change":
+            out.append(change_line(x.text, x.ref, x.did, x.level))
+        elif x.kind == "set":
+            out.append(set_line(x.text, x.ref, x.did))
         elif x.kind in ("picture", "attachment"):
             out.append(item_line(x.kind, x.text, x.ref, x.level))
         elif x.kind == "row":
@@ -318,31 +352,45 @@ def own_heading(line: str, task_id: str) -> bool:
     return bool(_OWN_HEADING.fullmatch(words)) and set(_TASK_REF.findall(words)) == {task_id}
 
 
-def capture_markup(c: Capture, content: str | None, title: str = "", own: str | None = None) -> list[str]:
+def capture_markup(c: Capture, content: str | None, title: str = "", own: str | None = None,
+                   rewrite: Mapping[int, str] | None = None) -> list[str]:
     """A capture's note text as page lines (``note_markup``)."""
-    return note_markup(content, c.formatted, title, own)
+    return note_markup(content, c.formatted, title, own, rewrite)
 
 
-def note_markup(content: str | None, formatted: bool, title: str = "", own: str | None = None) -> list[str]:
+def note_markup(content: str | None, formatted: bool, title: str = "", own: str | None = None,
+                rewrite: Mapping[int, str] | None = None) -> list[str]:
     """Note text, as a capture or the capture window keeps it, as page lines: its names as written (``@Tom Becker``),
     its file and link lines left out (they're file lines on the page), and empty lines at its ends dropped. A new task's
     text that's only its title isn't repeated (decision 115). Its headings are the page's headings, at the level they
     were typed (release 5.28, the mods log round 4's decision 132). On ``own``'s page, a # heading naming only that task
-    is left out (release 5.32)."""
+    is left out (release 5.32). ``rewrite`` gives a page line for a line of the text by its number, written as it is:
+    a change line, or a made task's words without its operators (release 5.150, ``page_lines``)."""
     if not content:
         return []
-    if own:
-        content = "\n".join(line for line in content.split("\n") if not own_heading(line, own))
-    content = items.unstore(content)
-    text = content if formatted else markup.escape(content)
-    lines = [line for line in text.split("\n") if not is_file_line(markup.to_plain(line).strip())]
-    while lines and not lines[0].strip():
-        lines.pop(0)
-    while lines and not lines[-1].strip():
-        lines.pop()
-    if title and len(lines) == 1 and re.sub(r"\.\Z", "", markup.to_plain(lines[0]).strip()) == title.strip():
-        return []
-    return [heading_line(h[1], h[0]) if (h := markup.heading_of(line)) else text_line(markup.text_of(line)) for line in lines]
+    rewrite = rewrite or {}
+    raw = content.split("\n")
+    unstored = items.unstore(content)
+    shown = (unstored if formatted else markup.escape(unstored)).split("\n")
+    kept: list[tuple[str, bool]] = []  # each line, and whether it's a page line already
+    for i, line in enumerate(shown):
+        if own and i < len(raw) and own_heading(raw[i], own):
+            continue
+        if i in rewrite:
+            kept.append((rewrite[i], True))
+        elif not is_file_line(markup.to_plain(line).strip()):
+            kept.append((line, False))
+    while kept and not kept[0][1] and not kept[0][0].strip():
+        kept.pop(0)
+    while kept and not kept[-1][1] and not kept[-1][0].strip():
+        kept.pop()
+    if title and len(kept) == 1:
+        line, done = kept[0]
+        words = markup.to_plain(read_line(line).text) if done and read_line(line).kind == "text" else None if done else markup.to_plain(line)
+        if words is not None and re.sub(r"\.\Z", "", words.strip()) == title.strip():
+            return []
+    return [line if done else heading_line(h[1], h[0]) if (h := markup.heading_of(line)) else text_line(markup.text_of(line))
+            for line, done in kept]
 
 
 def _plain_words(line: str) -> str:
@@ -388,24 +436,49 @@ def sub_bullet_tree(model: Model, stories, c: Capture, task_id: str, content: st
     return None
 
 
-def block(model: Model, stories, c: Capture, task_id: str, content: str | None) -> list[str]:
+def rewrite_of(model: Model, stories, c: Capture, task_id: str, content: str | None) -> page_lines.Rewrite:
+    """What release 5.150 writes otherwise in a capture's block on ``task_id``'s page (``page_lines.capture_rewrite``):
+    its change lines, or a made task's own line and set line. ``stories.settings`` names the reference fields."""
+    settings = getattr(stories, "settings", None) or Settings()
+    return page_lines.capture_rewrite(model, c, task_id, content, settings, stories.content_of)
+
+
+def _in_tree(tree: str, first: str, rw: page_lines.Rewrite) -> dict[int, str]:
+    """A made task's own line, rewritten, at its place in the bullet tree its page shows (release 5.120)."""
+    if not rw.lines:
+        return {}
+    line = next(iter(rw.lines.values()))
+    key = _same_line(first)
+    return next(({i: line} for i, x in enumerate(tree.split("\n")) if _same_line(x) == key), {})
+
+
+def block(model: Model, stories, c: Capture, task_id: str, content: str | None, rewrite: bool = True,
+          made_lines: bool = True) -> list[str]:
     """A capture's block on a task's page (decisions 96, 114, 115, 120): its caption, its note text in full, and a file
     line for each of its files. ``content`` is its typed text: an email's own text stays with the email. Since release
     5.83 (the task pane review's R4 and R4b): text that only repeats a file's description isn't written, a block with no
     words of its own beyond its files has no caption, and a task made from the notes is one task line where its
     lines were. Since release 5.120 (decision 446), a task made from a sub-bullet in the capture window's notes has its
-    whole bullet tree as its block's text on its own page (``sub_bullet_tree``)."""
+    whole bullet tree as its block's text on its own page (``sub_bullet_tree``). Since release 5.150 (decisions 653 and
+    654) a line whose operators did what they say is a change line, and a made task's own line loses its operators, with
+    a set line under it (``page_lines``); ``rewrite`` False gives the block as it was written before, and ``made_lines``
+    False as it was before release 5.83, its items' lines as typed (Tidy the notes reads old pages so)."""
     tree = sub_bullet_tree(model, stories, c, task_id, content)
-    text = (note_markup(tree[0], tree[1], "", task_id) if tree else
-            capture_markup(c, content, c.title if c.created_task == task_id else "", task_id))
+    rw = rewrite_of(model, stories, c, task_id, content) if rewrite else page_lines.NONE
+    if tree:
+        first = next((x for x in (content or "").split("\n") if x.strip()), "")
+        text = note_markup(tree[0], tree[1], "", task_id, _in_tree(tree[0], first, rw))
+    else:
+        text = capture_markup(c, content, c.title if c.created_task == task_id else "", task_id, rw.lines)
     docs = [model.documents[d] for d in c.document_ids if d in model.documents]
     descriptions = {_plain_words(d.description) for d in docs if d.description and not made_up(d.description, d.name)}
     words = [w for x in text if (w := _plain_words(x))]
     if words and all(w in descriptions for w in words):
         text = []
+    text += list(rw.after)
     made = [(x.created_task, note_markup(stories.content_of(x.id), x.formatted, "", task_id))
             for x in model.captures.values() if x.from_notes == c.id and x.item == "task" and x.created_task]
-    if made:
+    if made and made_lines:
         text = task_lines(text, made, model, stories.today)
     if c.item == "notes":  # a meeting's #task sections point to their tasks' pages (release 5.143, decision 614)
         named = [(x.id, x.task, x.item, note_markup(stories.content_of(x.id), x.formatted, "", task_id))
@@ -672,7 +745,7 @@ def on_page(model: Model, task_id: str, page: str, stories=None) -> set[str]:
         if c.page_made:
             made.add(c.id)
         elif stories is not None:
-            if not has_caption(block(model, stories, c, task_id, typed_content(c, stories.content_of(c.id)))):
+            if not has_caption(block(model, stories, c, task_id, typed_content(c, stories.content_of(c.id)), rewrite=False)):
                 made.add(c.id)
         elif set(c.document_ids) <= docs:  # without its text to read (Task.md): every file line there, and no caption
             made.add(c.id)
@@ -694,19 +767,33 @@ def words(page: str) -> str:
         if x.kind == "row":
             if not is_separator(x.text):
                 out.append(" ".join(markup.to_plain(c) for c in cells_of(x.text)))
+        elif x.kind in ("change", "set"):  # release 5.150: its words and what it did
+            out.append(DOT.join(w for w in (x.text, x.did) if w))
         else:
             out.append(markup.to_plain(x.text) if x.kind == "text" else x.text)
     return "\n".join(out)
 
 
 def task_md(page: str, capture_link: Callable[[str], str | None], document_link: Callable[[str], str | None] = lambda _: None,
-            task_link: Callable[[str], str | None] = lambda _: None) -> list[str]:
+            task_link: Callable[[str], str | None] = lambda _: None, own: str = "") -> list[str]:
     """The page as Task.md prints it, under "## Notes": headings two levels down, captions as links to the capture's
     capture.md, task lines as links to the task's Task.md (``task_link``), pictures as pictures and attachments as
-    links to their files (``document_link``), and the rest as it's kept (its markup, and a table's rows, read as
-    Markdown)."""
+    links to their files (``document_link``), change lines as their words (a link to the task they changed, unless it's
+    ``own``, the page's) and what they did in italics, a set line in italics, and the rest as it's kept (its markup, and a
+    table's rows, read as Markdown)."""
     out = []
     for x in lines_of(page):
+        if x.kind in ("change", "set"):  # release 5.150 (decisions 653 and 654)
+            target = task_link(x.ref) if x.ref != own else None
+            words = markup.escape_inline(x.text).replace("[", "\\[").replace("]", "\\]")
+            linked = f"[{words}]({target})" if target and words else words
+            did = markup.escape_inline(x.did)
+            if x.kind == "set":
+                out.append(f"_{linked}{DOT}{did}_" if did else f"_{linked}_")
+                continue
+            head = "  " * (x.level - 1) + "- " if x.level > 0 else ""
+            out.append(head + DOT.join(w for w in (linked, f"_{did}_" if did else "") if w))
+            continue
         if x.kind == "heading":
             out.append(f"{'#' * (x.level + 2)} {x.text}")
         elif x.kind == "caption":
@@ -848,6 +935,8 @@ def remove_capture(conn: sqlite3.Connection, model: Model, stories, capture_id: 
             continue
         page = get(conn, task_id)
         new, what = remove_block(page, capture_id, block(model, stories, c, task_id, content), force, c.document_ids)
+        if what == "edited":  # a block written before release 5.150 is as it was added in its old words
+            new, what = remove_block(page, capture_id, block(model, stories, c, task_id, content, rewrite=False), force, c.document_ids)
         if what == "removed":
             put(conn, task_id, new, at)
         out[task_id] = what
@@ -861,7 +950,8 @@ def edited_blocks(model: Model, stories, capture_id: str) -> list[str]:
     out = []
     for task_id in model.capture_tasks(c):
         page = model.pages.get(task_id, "")
-        if remove_block(page, capture_id, block(model, stories, c, task_id, content), refs=c.document_ids)[1] == "edited":
+        if all(remove_block(page, capture_id, block(model, stories, c, task_id, content, rewrite=r), refs=c.document_ids)[1] == "edited"
+               for r in (True, False)):  # as added in either words, before release 5.150 or since
             out.append(task_id)
     return out
 

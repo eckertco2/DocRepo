@@ -21,7 +21,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
-from docrepo import agenda, captures, conversations, edits, items, layer0, markup, people, priorities, quick, search, tasks, waits
+from docrepo import agenda, captures, conversations, edits, items, layer0, markup, page_lines, people, priorities, quick, search, tasks, waits
 from docrepo.captures import copy_name
 from docrepo.config import Settings
 from docrepo.dates import long_date, short, stamp, workday_numbers
@@ -719,19 +719,24 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
         on_agendas: list[str] = []  # the tasks and targets **agenda, lines put on agendas (release 5.133), for their pages
         made: dict[str, int] = {}
         unused = 0
+        used: set[str] = set()  # the items that did something, and each task item's task (release 5.150)
+        item_made: dict[str, str] = {}
         if (capture_id or page_note) and reading:
             # Meeting notes' follow-ups go under the meeting's home task, not the meeting (release 5.142, decision 610).
             follow_home = meeting_home(conn, t) if draft.meeting and t else None
             item_files, made, unused = _save_items(conn, settings, reading, names, content, formatted, via, capture_id, created or t, when, at,
                                                    person, home_is_new=bool(created or meeting_made), on_agendas=on_agendas,
-                                                   follow_home=follow_home)
+                                                   follow_home=follow_home, used=used, made_tasks=item_made)
         noted_under = []
         if page_note:
             made_tasks = {r["id"]: r["created_task"] for r in conn.execute(
                 "SELECT id, created_task FROM captures WHERE id IN (%s)" % ",".join("?" * len(item_files)), [cid for cid, _, _ in item_files])  # noqa: S608 - a column or table name of DocRepo's own; values are parameters
             } if item_files else {}
+            # Its lines whose operators did what they say are change lines (release 5.150), from this save's own reading.
+            said = page_lines.Said(reading, names, used, item_made, at.date(), formatted) if reading else None
             noted_under = edits.add_note(conn, t, items.store(content, names, formatted), formatted, at,
-                                         made=[(made_tasks[cid], items.store(text, names, f)) for cid, text, f in item_files if made_tasks.get(cid)])
+                                         made=[(made_tasks[cid], items.store(text, names, f), f) for cid, text, f in item_files if made_tasks.get(cid)],
+                                         said=said)
         # Meeting notes: the agenda items the notes worked through close as Discussed.
         discussed = 0
         if agenda_task and capture_id:
@@ -774,7 +779,7 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
         typed = items.store(content, names, formatted) if content else ""
         if not draft.page_made:
             edits.add_to_pages(conn, data_root, at, [*([(capture_id, typed)] if capture_id else []), *((cid, None) for cid in result.items)],
-                               result.problems)
+                               result.problems, settings=settings)
     if source_capture and created:
         edits.rewrite_capture_md(conn, data_root, fs, source_capture.id, source_content, result.problems)
         edits.copy_files(conn, data_root, fs, created, filed_copies, result.problems)
@@ -816,7 +821,8 @@ def first_line(text: str) -> str:
 def _save_items(conn: sqlite3.Connection, settings: Settings, reading: items.Reading, names: items.Names, content: str, formatted: bool,
                 notes_id: str, from_notes: str | None, home: str | None, when: str, at: datetime, person: Callable[[Who], str],
                 home_is_new: bool = False, on_agendas: list[str] | None = None,
-                follow_home: str | None = None) -> tuple[list[tuple[str, str, bool]], dict[str, int], int]:
+                follow_home: str | None = None, used: set[str] | None = None,
+                made_tasks: dict[str, str] | None = None) -> tuple[list[tuple[str, str, bool]], dict[str, int], int]:
     """Each ticked item as a small capture of its own, linked to the notes (release 5.8): ``from_notes``, the notes'
     capture, or None for a note on a task's page that's no capture (release 5.69). A task item makes its task, under the
     capture's task (or meeting, or new task) and its # tasks; a note, an update or a decision is filed to each of its
@@ -827,8 +833,12 @@ def _save_items(conn: sqlite3.Connection, settings: Settings, reading: items.Rea
 
     In meeting notes (``follow_home``, the meeting's home task; release 5.142, decision 610) a task item goes under its
     ``#`` tasks when it has any, else under ``follow_home``, never under the meeting itself; its capture is still the
-    meeting's record, filed to the meeting. A note, an update or a decision with no ``#`` is still the meeting's."""
+    meeting's record, filed to the meeting. A note, an update or a decision with no ``#`` is still the meeting's.
+
+    ``used`` gains the key of each item that did something, and ``made_tasks`` each task item's task (release 5.150): a
+    note that's no capture writes its change lines from them (``page_lines.Said``)."""
     on_agendas = on_agendas if on_agendas is not None else []
+    used = used if used is not None else set()
     lines = content.split("\n")
     files: list[tuple[str, str, bool]] = []
     made: dict[str, int] = {}
@@ -861,11 +871,13 @@ def _save_items(conn: sqlite3.Connection, settings: Settings, reading: items.Rea
             for task_id in where:
                 tasks.add_key_dates(conn, task_id, [tasks.KeyDateRow(kd.start, kd.end, description, kd.plant, kd.deadline)], at=at, via=notes_id)
             made["date"] = made.get("date", 0) + 1
+            used.add(it.key)
             continue
         if it.kind == "param" and it.op and it.op.task_field == "agenda":  # not a field (release 5.133)
             added, already = _put_on_agendas(conn, it, where, when, notes_id, on_agendas)
             if added:
                 made["agenda"] = made.get("agenda", 0) + added
+                used.add(it.key)
             elif not already:
                 unused += 1
             continue
@@ -874,6 +886,7 @@ def _save_items(conn: sqlite3.Connection, settings: Settings, reading: items.Rea
             made_here = {*item_task.values(), *([home] if home_is_new and home else [])}
             if any([_fill_param(conn, settings, it, task_id, task_id in made_here, at, notes_id, person) for task_id in where]):
                 made["param"] = made.get("param", 0) + 1
+                used.add(it.key)
             else:
                 unused += 1
             continue
@@ -886,6 +899,8 @@ def _save_items(conn: sqlite3.Connection, settings: Settings, reading: items.Rea
                 assignees=[person(x.who()) for x in it.assignees], lead_hours=float(it.lead_hours) if it.lead_hours else None,
                 assignee_hours=float(it.assignee_hours) if it.assignee_hours else None, labels=it.labels, plant_event=it.plant_event)
             item_task[it.key] = task_id
+            if made_tasks is not None:
+                made_tasks[it.key] = task_id
             filed = home if follow_home and home else where[0] if where else None  # in meeting notes, the meeting's record
             captures.add_capture(conn, capture_id=cid, saved=when, source="typed", types=["new_task"], title=title, task=filed,
                                  created_task=task_id, formatted=block_formatted, from_notes=from_notes, item="task")
@@ -902,6 +917,7 @@ def _save_items(conn: sqlite3.Connection, settings: Settings, reading: items.Rea
                                      title=title, task=task_id, formatted=block_formatted, from_notes=from_notes, item=it.kind)
                 files.append((cid, text, block_formatted))
         made[it.kind] = made.get(it.kind, 0) + 1
+        used.add(it.key)
     return files, {k: made[k] for k in items.KIND_NAMES if k in made}, unused
 
 

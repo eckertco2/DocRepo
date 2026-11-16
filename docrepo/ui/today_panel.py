@@ -1412,6 +1412,9 @@ def notes_html(page: str) -> str:
             out.append(f"<h4>{esc(line.text)}</h4>")
         elif line.kind == "caption":
             out.append(f'<p class="sub">{esc(line.text)}</p>')
+        elif line.kind in ("change", "set"):  # its words, then what it did, quietly (release 5.150, decision 654)
+            did = f'<span class="sub">{" · " if line.text else ""}{esc(line.did)}</span>' if line.did else ""
+            out.append(f'<p{" class=sub" if line.kind == "set" else ""}>{esc(line.text)}{did}</p>')
         else:  # a file, a picture, an attachment or a table's row
             out.append(f"<p>{esc(line.text)}</p>")
     flush()

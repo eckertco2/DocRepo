@@ -125,6 +125,9 @@ class Stories:
         self.content_of = content_of
         self.me_name = me_name
         self._logs: dict[str, list[StatusEntry]] = {}
+        #: The data root's Settings, when known: the reference fields a capture's operators can name, for its notes page's
+        #: change lines (release 5.150, ``notes_page.rewrite_of``).
+        self.settings = None
 
     # ---- values in words ----
     def as_date(self, value: str) -> str:
