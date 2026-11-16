@@ -4,6 +4,14 @@ One line per release, newest first: its number, the date it was built, and what 
 
 Since 2026-11-12, releases ship in weekly trains (the design workspace's `docs/mods/cold-eyes-plan.md`, decisions 464 to 468): each train has a heading with the day it was pushed to GitHub, over its releases. Releases keep their own numbers and tags.
 
+## Next train (Thursday 2026-11-19, not pushed yet)
+
+Built for the push of Thursday 2026-11-19 (the design workspace's `docs/mods/train-2026-11-19-plan.md`), each merged to `main` at the owner's word. The heading takes the day it's pushed.
+
+| Release | Date | What |
+|---|---|---|
+| 5.147 | 2026-11-15 | `**today` puts the task on its line on Today: `**agenda, today` in one word, with no comma and no sentence (the owner's ask of 2026-11-13). It works wherever `**agenda,` does: a task item's line (`- @Mike book the crane **today`), a sub-bullet task, a `#task` line (`#Rigging plan **today.`), New task's own first line, and a plain line under a task, whose words are the Today item's note (`Ask about the hire rate **today`); with no task anywhere they go on Today as a note alone. Its card is `**agenda, today`'s (Agenda, Today), a task already on Today isn't added again, and with `**agenda, Tom` on the same line the task goes on both. `**today,` reads the same, and the words after it stay the line's. The `**` list offers it with its example and puts it in with no comma; the Syntax tab and the Agenda hint list it. No schema change. |
+
 ## Second train of 2026-11-13
 
 A second train, pushed to GitHub on Friday 2026-11-13, the same day as the train of 2026-11-13, at the owner's word ("Let's do a second push today"), with everything merged since it: 5.143 and 5.144. 5.143 adds a command and a kind of line, where the train after one that adds concepts was to settle (decision 467); the owner chose to push it now. Its corporate test is the design workspace's `handoff/docrepo/train-2026-11-13-second-test.md`.
