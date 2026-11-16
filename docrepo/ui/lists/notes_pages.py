@@ -17,11 +17,12 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from docrepo import all_notes, db, edits, notes_page
+from docrepo import all_notes, db, edits, notes_page, task_tile
 from docrepo.dates import long_date, to_date
 from docrepo.detail import WIDE_PAGE
 from docrepo.safe_fs import WriteRefused
 from docrepo.save import SaveError
+from docrepo.ui import task_tile as tile_ui
 from docrepo.ui.notes_edit import OLD_DAYS
 from docrepo.ui.task_pane import TaskPane
 
@@ -54,6 +55,11 @@ class NotesPages:
         # This page or All notes (release 5.140, the notes consolidation plan's decisions 602 to 605), its links, and
         # Alt+Left back to the All notes a double-click left.
         pane.notes_mode.connect(lambda mode: self._set_notes_mode(mode, pane))
+        # A task line is drawn as its task's tile (release 5.150, the notes syntax plan's decision 652): its circle's state
+        # menu, and the tile's right-click menu.
+        notes.tile_of = self._tile_of
+        notes.tile_state.connect(lambda task_id, at: self.popup_state_menu(task_id, at, after=lambda: pane.notes.refresh_tiles()))
+        notes.tile_menu.connect(lambda task_id, at: self._tile_menu(task_id, at, pane))
         # Move to task and Bring the lines back (release 5.143, the notes consolidation plan's decision 613).
         notes.move_requested.connect(lambda: self.move_to_task(pane))
         notes.bring_back.connect(lambda key: self.bring_lines_back(pane, key))
@@ -198,15 +204,33 @@ class NotesPages:
             self._show_notes_mode(task_id)
         QTimer.singleShot(0, lambda: self.task_pane.verticalScrollBar().setValue(scroll))
 
+    def _tile_of(self, task_id: str):
+        """A task line's tile (release 5.150, decision 652): None for a task that's gone or discarded, drawn as its words."""
+        m = self.model()
+        t = m.tasks.get(task_id)
+        return task_tile.tile(m, task_id, self.today()) if t is not None and not t.discarded else None
+
+    def _tile_menu(self, task_id: str, at, pane: TaskPane) -> None:
+        """A task line's right-click menu: the tile's own, as every tile has (decision 573)."""
+        menu = tile_ui.tile_menu(self, task_id, pane, after=lambda: pane.notes.refresh_tiles())
+        if menu is None:
+            return
+        try:
+            self.run_menu(menu, at)
+        finally:
+            menu.deleteLater()
+
     def load_notes(self, task_id: str, pane: TaskPane | None = None) -> None:
         """Put the task's notes page in the editor. The same task's page stays as it is unless docs.db holds another
         version (a capture added to it, say): then it's shown again, or, with unsaved typing, merged into it."""
         pane = pane or self.task_pane
         notes, m = pane.notes, self.model()
         body, day = m.pages.get(task_id, ""), m.uses_day_headings(task_id)
+        notes.page_task = task_id
         if pane.task_id == task_id:
             notes.day_headings = day
             if body == notes.saved_body:
+                notes.refresh_tiles()  # the page is the same, its tasks maybe not
                 return
             if notes.dirty:  # two writers: the typing keeps, the new blocks come in
                 merged = notes_page.merge(notes.saved_body, notes.page(), body, day)

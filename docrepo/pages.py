@@ -217,7 +217,7 @@ class Pages:
             5.142, printed task lines as a link inside a link)."""
             return rel_link(here, [*task_dir(task_id), TASK_FILE]) if task_id in self.m.tasks else None
 
-        out += ["## Notes", "", *(notes_page.task_md(page, capture_link, document_link, task_link) or ["_No notes yet._"]), ""]
+        out += ["## Notes", "", *(notes_page.task_md(page, capture_link, document_link, task_link, t.id) or ["_No notes yet._"]), ""]
         on_page = notes_page.on_page(self.m, t.id, page)
         kids = self.m.children_of(t.id)
         if kids:

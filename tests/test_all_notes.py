@@ -57,8 +57,11 @@ def test_a_task_line_opens_into_the_follow_ups_block(sample_root, ex):
     m = Model(sample_root[0])
     b = all_notes.follow_up_block(m, ex.kickoff_notes, ex.survey)
     assert b is not None and b.page == ex.survey
-    assert [x.text.strip(" \\-") for x in b.lines] == ["Structural survey of the fan deck @Priya Shah \\*\\*due, 20 Nov",
-                                                       "get the 2019 drawings from the archive", "check the cracked panels at the east cell"]
+    # Its own line without its operators, and what they set under its words (release 5.150, decision 653).
+    assert [x.text.strip(" \\-") for x in b.lines] == ["Structural survey of the fan deck Priya Shah",
+                                                       "get the 2019 drawings from the archive", "check the cracked panels at the east cell",
+                                                       "Set from Cooling tower kickoff's notes"]
+    assert (b.lines[-1].kind, b.lines[-1].did) == ("set", "Due Fri 20 Nov")
     assert all_notes.follow_up_block(m, ex.weekly_notes, ex.survey) is None  # the weekly didn't make it
 
 

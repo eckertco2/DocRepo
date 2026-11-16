@@ -1073,7 +1073,7 @@ class Pages:
     def meeting_unfold(self, t: Task, r: meeting_rows.MeetingRow) -> str:
         """A meeting's notes under its row (decision 607): its page, the lines about this task or a task under it marked,
         and Open its notes."""
-        lines = [self.note_line_html(x, hit) for x, hit in meeting_rows.marked_lines(self.m, r, t.id, self.content_of) if x.kind != "caption"]
+        lines = [self.note_line_html(x, hit, page=r.meeting) for x, hit in meeting_rows.marked_lines(self.m, r, t.id, self.content_of) if x.kind != "caption"]
         body = "".join(lines) or '<p class="note">Its notes page is empty.</p>'
         foot = link(f"task:{r.meeting}", "Open its notes", f"Open {self.m.task(r.meeting).title}")
         return self._barred(body + f'<p class="rel" style="margin-top: 4px">{foot}</p>', UNFOLD_BAR, 0)
@@ -1085,14 +1085,28 @@ class Pages:
         return (f'<table width="100%" cellspacing="0" cellpadding="0" style="margin-top: 2px; margin-bottom: 4px"><tr>{pad}'
                 f'<td width="2" bgcolor="{colour}"></td><td width="10"></td><td>{inner}</td></tr></table>')
 
-    def note_line_html(self, x: notes_page.Line, hit: bool = False, also_on: str | None = None) -> str:
+    def note_line_html(self, x: notes_page.Line, hit: bool = False, also_on: str | None = None, page: str = "") -> str:
         """One line of a notes page, read only (All notes and a meeting's unfolded notes): a day heading small and grey,
-        the owner's headings in bold, links for file, task, picture and attachment lines, a table's row as its cells, and
-        text with its marks, indented as it's indented. ``hit`` marks it; ``also_on`` names the task a copy of it is on."""
+        the owner's headings in bold, links for file, picture and attachment lines, a task line as its task's tile and a
+        change line as its words and what it did (release 5.150), a table's row as its cells, and text with its marks,
+        indented as it's indented. ``hit`` marks it; ``also_on`` names the task a copy of it is on; ``page`` is the page
+        it's on, whose own task a change line doesn't link to."""
         cls = "hitline" if hit else "nl"
         tight = "margin-top: 0px; margin-bottom: 0px"  # Qt takes a paragraph's margins from its style, not a class's
         if x.kind == "heading":
             return f'<p class="anday">{esc(x.text)}</p>' if notes_page.day_of(x.text) else f'<p class="{cls}" style="{tight}"><b>{esc(x.text)}</b></p>'
+        if x.kind == "task" and x.ref in self.m.tasks and not self.m.task(x.ref).discarded:  # its tile (decision 652)
+            t = task_tile.tile(self.m, x.ref, self.today)
+            inner = (f"{task_tile.circle_html(t)} {task_tile.title_html(t, lambda href, text: link(href, text, quiet='tl'))}"
+                     f"{task_tile.extras_html(t)} &nbsp;{task_tile.marks_html(t)} {task_tile.days_html(t.days, block=False)}")
+            return f'<p class="{cls}" style="{tight}">{inner}</p>'
+        if x.kind in ("change", "set"):  # its words, then what it did, quietly (decisions 653 and 654)
+            words = (link(f"task:{x.ref}", x.text) if x.text and x.ref in self.m.tasks and x.ref != page else esc(x.text))
+            did = f'<span class="rel">{" · " if x.text else ""}{esc(x.did)}</span>' if x.did else ""
+            if x.kind == "set":
+                return f'<p class="rel" style="{tight}">{words}{did}</p>'
+            margin = f"; margin-left: {12 * (x.level - 1)}px" if x.level > 1 else ""
+            return f'<p class="{cls}" style="{tight}{margin}">{"• " if x.level else ""}{words}{did}</p>'
         if x.kind in ("file", "task"):
             href = f"task:{x.ref}" if x.kind == "task" else f"doc:{x.ref}"
             return f'<p class="{cls}" style="{tight}">{link(href, x.text)}</p>'
@@ -1168,17 +1182,17 @@ class Pages:
             if nb is not None:
                 head = (f'<p class="nl" style="margin-top: 2px; margin-bottom: 2px">{self.page_chip(x.ref, "")} '
                         f'<span class="rel">follow-up, on its page</span></p>')
-                out.append(self._barred(head + "".join(self.note_line_html(y) for y in nb.lines), NEST_BAR, 12))
+                out.append(self._barred(head + "".join(self.note_line_html(y, page=nb.page) for y in nb.lines), NEST_BAR, 12))
                 continue
             # A pointer line opens into the lines it points to, on their page (release 5.143, decisions 604, 613 and 614).
             pb = all_notes.pointer_block(self.m, x.ref, cache) if x.kind == "pointer" else None
             if pb is not None:
                 head = (f'<p class="nl" style="margin-top: 2px; margin-bottom: 2px">{self.page_chip(pb.page, "")} '
                         f'<span class="rel">{"moved there" if pb.key else "on its page"}</span></p>')
-                out.append(self._barred(head + "".join(self.note_line_html(y) for y in pb.lines), MOVED_BAR, 12))
+                out.append(self._barred(head + "".join(self.note_line_html(y, page=pb.page) for y in pb.lines), MOVED_BAR, 12))
                 continue
             key = " ".join(markup.to_plain(x.text).split()).casefold() if notes and x.kind == "text" else ""
-            out.append(self.note_line_html(x, also_on=copies.get(key)))
+            out.append(self.note_line_html(x, also_on=copies.get(key), page=b.page))
         return "".join(out)
 
     # ---- email conversations (release 5.122, the email section plan's decisions 455 to 463) ----

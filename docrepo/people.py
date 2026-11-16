@@ -43,10 +43,15 @@ def _set_list(conn: sqlite3.Connection, table: str, key: str, owner: object, col
                      [(owner, i, v.strip()) for i, v in enumerate(values) if v.strip()])
 
 
+def is_email(text: str) -> bool:
+    """Whether ``text`` reads as an email address: something, @, a domain with a dot (Import people, release 5.151, asks too)."""
+    return re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", text.strip()) is not None
+
+
 def _check_email(email: str | None) -> str | None:
     """An email address, only kept: DocRepo never sends one (mods log round 2, M0031)."""
     email = (email or "").strip()
-    if email and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+    if email and not is_email(email):
         raise PeopleError(f"{email} isn't an email address.")
     return email or None
 

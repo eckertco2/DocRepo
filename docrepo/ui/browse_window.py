@@ -73,14 +73,14 @@ from docrepo.ui.task_pane import TaskPane
 from docrepo.ui.templates_view import TemplatesPane
 from docrepo.ui.tree_import import TreeFilesPane
 from docrepo.ui.priorities_view import PrioritiesView
-from docrepo.ui.palette import Command, CommandPalette
+from docrepo.ui.palette import Command, CommandPalette, summary_commands
 from docrepo.ui.style import CLASSIC_BROWSE, page_css, style_sheet
 from docrepo.ui.task_forms import LabelMatchDialog, TaskEditDialog
 from docrepo.ui.task_picker import TaskPicker
 from docrepo.ui.timeline_view import TimelineView
 from docrepo.ui.state_menu import UNDO_MS, can_change, open_below, picked_line, state_menu
 from docrepo.ui.tree_view import HTML_ROLE, KEY_ROLE, RowTree
-from docrepo.ui import conversation_page, task_menus, tidy_follow_ups, today_meetings
+from docrepo.ui import conversation_page, people_import, task_menus, tidy_follow_ups, tidy_notes, today_meetings
 from docrepo.ui import task_tile as tile_ui
 from docrepo.ui.widgets import SAVE_KEYS, DropButton, FlowLayout, Option, ViewStack, ask, label_options, people_options
 from docrepo.views import (
@@ -135,6 +135,18 @@ from docrepo.ui.lists.common import (  # noqa: F401 - the helpers, here as befor
 
 #: What other modules and the tests read from here (release 5.95): the window, and names that lived here before the move.
 __all__ = ["BrowseWindow", "DETAIL_MIN", "HTML_ROLE", "NAV_FOLDED_KEY", "TODAY_MINE_KEY", "_answers", "priorities_of"]
+
+
+def _in_bar(item) -> bool:
+    """Whether a filter bar's item shows: a widget unless it was hidden on purpose (release 5.151). A widget a view has just
+    added reads as hidden until Qt shows it a moment later, so the bar of a view made only of new widgets (People, Labels,
+    Tagged labels, Templates, Activity, Assigned to me) was hidden whole since release 5.61, which meant to hide only a bar
+    with nothing showing in it."""
+    w = item.widget() if item is not None else None
+    if w is None:
+        return item is not None and not item.isEmpty()
+    return not (w.isHidden() and w.testAttribute(Qt.WidgetAttribute.WA_WState_ExplicitShowHide))
+
 
 class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelLists, DocumentLists, CaptureLists, ActivityList, PlanningHooks, PageCommands, NotesPages, QWidget):
     """The browse tool's window. ``capture`` is the capture window it opens for new captures and updates."""
@@ -833,15 +845,19 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
                     Command("Task", "Apply template", lambda: self.templates.apply([tid])),
                     Command("Task", "Export tree", lambda: self.tree_files.export_task(tid)),
                     Command("Task", "Open folder", lambda: self.reveal(self.ctx.data_root / "Tasks" / tid)),
-                    Command("Task", tidy_follow_ups.NAME, lambda: tidy_follow_ups.run(self, tid))]
+                    Command("Task", tidy_follow_ups.NAME, lambda: tidy_follow_ups.run(self, tid)),
+                    Command("Task", tidy_notes.NAME, lambda: tidy_notes.run(self, tid))]  # release 5.150
         out += [Command("View", v.label, lambda v=v.id: self.set_view(v)) for v in VIEWS]
         # The Urgent view's place in the palette (release 5.97, decision 386): the task tree, Urgent only.
         out.append(Command("View", "Urgent tasks (the task tree, Urgent only)", self.show_urgent))
         out += [Command("", "New capture", lambda: self.open_capture(), self.ctx.settings.hotkey),
                 Command("", "Import a tree file", self.tree_files.import_tree),
+                Command("", people_import.NAME, lambda: people_import.run(self)),  # release 5.151
                 Command("", "Move follow-ups out of every meeting…", lambda: tidy_follow_ups.run(self, None)),  # release 5.142
+                Command("", tidy_notes.EVERY, lambda: tidy_notes.run(self, None)),  # release 5.150
                 Command("", "Search everything", self.search_box.setFocus, "Ctrl+Shift+F"),
                 Command("", "Quick summary: a person, an agenda or a label", lambda: self.ctx.open_summary(None)),
+                *summary_commands(self.ctx),  # each saved set (release 5.149, decision 651)
                 Command("", "Find in this view", self.open_find, "Ctrl+F"),
                 Command("", "Show or hide the views", lambda: self.show_views_pane(not self.views_button.isChecked()), "Ctrl+B"),
                 Command("", "Read docs.db and the calendar again", self.read_again, "F5"),
@@ -967,7 +983,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
             self.tree.setHeaderHidden(self.view in NO_HEADINGS or not any(k is not None for k in self.tree.keys()))
         if self.view in NESTING_VIEWS:
             self._sync_level_buttons()
-        self.filters.setVisible(any(not self.filters_layout.itemAt(i).isEmpty() for i in range(self.filters_layout.count())))
+        self.filters.setVisible(any(_in_bar(self.filters_layout.itemAt(i)) for i in range(self.filters_layout.count())))
         self._apply_find()
 
     def render_detail(self, keep_scroll: bool = False) -> None:

@@ -12,7 +12,10 @@ facts, then its sections in order, each left out when it has nothing:
   folded; Email conversations; What's changed in the last 30 days;
 - **a tagged label** (decision 561): a label's shape, over the tasks whose own fields, notes, captures or documents mention it;
 - **several together** (decisions 555 to 560): each chosen person's and agenda's agenda; the tasks that match, with either
-  of several of one kind and every kind chosen (Mike or Tom, with Vulnerabilities); then emails and what's changed.
+  of several of one kind and every kind chosen (Mike or Tom, with Vulnerabilities); then emails and what's changed;
+- **a saved set** (release 5.149, the design workspace's ``docs/mods/summary-sets-plan.md``, decisions 649 to 651): a
+  pinned combination with a name of its own ("Morning meeting"), kept in ``Settings.summary_names`` beside its key; it shows
+  as its parts do together, under its name.
 
 Every list of tasks is in the **attention order** (decision 523): late first, then urgent or Critical, then by date, the
 soonest first, with no date last; a list shows ``SHOWN`` rows, then "n more". A task is **quiet** (decision 524) when nothing
@@ -27,8 +30,8 @@ from __future__ import annotations
 
 import re
 import sqlite3
-from collections.abc import Iterable
-from dataclasses import dataclass, field
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 from urllib.parse import quote, unquote
 
@@ -48,6 +51,10 @@ KIND_WORDS = {PERSON: "Person", AGENDA: "Agenda", LABEL: "Label", TAG: "Tagged l
 KIND_PLURALS = {PERSON: ("person", "people"), AGENDA: ("agenda", "agendas"), LABEL: ("label", "labels"), TAG: ("tag", "tags")}
 #: How a combination's subjects are joined, in its name and its key (decision 562).
 JOIN = " + "
+#: What a saved set is, on its kind line (decision 650).
+SAVED = "Saved set"
+#: The longest name a saved set takes (decision 649).
+NAME_MAX = 60
 #: The most tagged labels the box lists for what's typed.
 TAGS_LISTED = 8
 #: Rows a list shows before "n more" (decision 523).
@@ -88,16 +95,36 @@ class Subject:
     name: str
     #: Several together (decision 555): the subjects, in the order they were picked; ``kind`` is MANY.
     parts: tuple[Subject, ...] = ()
+    #: A saved set (decision 650): the key it's pinned under, its name being ``name``. Its parts are those still there, so
+    #: with fewer than two left its kind is the one part's, and it keeps its name.
+    kept: str = ""
+    #: A saved set's one part's own name, when it's the only part left (``each`` gives it back).
+    part_name: str = ""
 
     @property
     def key(self) -> str:
         """How Settings keeps it, in pins and recents: "person:P004", "agenda:T000010", "label:Safety", "tag:P204B", or a
-        combination's keys joined: "person:P004 + label:Vulnerabilities" (decision 562)."""
+        combination's keys joined: "person:P004 + label:Vulnerabilities" (decision 562). A saved set's is the key it's
+        pinned under, a part that's gone and all."""
+        if self.kept:
+            return self.kept
         return JOIN.join(p.key for p in self.parts) if self.parts else f"{self.kind}:{self.ref}"
 
     def each(self) -> tuple[Subject, ...]:
-        """The subjects it's made of: its parts, or itself."""
-        return self.parts or (self,)
+        """The subjects it's made of: its parts, or itself (a saved set's one part left, without the set's name)."""
+        if self.parts:
+            return self.parts
+        return (replace(self, name=self.part_name, kept="", part_name=""),) if self.kept else (self,)
+
+    @property
+    def saved(self) -> bool:
+        """Whether it's a saved set (decision 650)."""
+        return bool(self.kept)
+
+    @property
+    def parts_words(self) -> str:
+        """Its parts' names joined, as the box shows a saved set's in grey (decision 649): "P-204B + Tom Becker + …"."""
+        return JOIN.join(p.name for p in self.each())
 
 
 def combine(subjects: Iterable[Subject]) -> Subject | None:
@@ -114,11 +141,13 @@ def combine(subjects: Iterable[Subject]) -> Subject | None:
     return Subject(MANY, JOIN.join(p.key for p in parts), JOIN.join(p.name for p in parts), parts)
 
 
-def subject_of(m: Model, key: str, me: str | None = None) -> Subject | None:
+def subject_of(m: Model, key: str, me: str | None = None, names: Mapping[str, str] | None = None) -> Subject | None:
     """The subject a key names, or None when it's gone (a person retired, a label renamed, a task closed or discarded). A
-    combination's key gives the parts still there, combined."""
+    combination's key gives the parts still there, combined; with ``names`` (``Settings.summary_names``), one that's a saved
+    set has its name (decision 650), however its parts are ordered."""
     if JOIN in key:
-        return combine(x for x in (subject_of(m, k, me) for k in key.split(JOIN)) if x)
+        s = combine(x for x in (subject_of(m, k, me) for k in key.split(JOIN)) if x)
+        return named(s, names, key) if s is not None and names else s
     kind, _, ref = key.partition(":")
     if kind == PERSON and ref in m.people and m.people[ref].status == "active" and ref != me:
         return Subject(PERSON, ref, m.people[ref].name)
@@ -129,6 +158,121 @@ def subject_of(m: Model, key: str, me: str | None = None) -> Subject | None:
     if kind == TAG and ref in m.tagged.by_key:
         return Subject(TAG, ref, m.tagged.by_key[ref].label)
     return None
+
+
+# ---- saved sets (decisions 649 to 651) ----
+def parts_of(key: str) -> frozenset[str]:
+    """A key's parts' keys, in no order: two combinations of the same subjects are the same, however they were picked."""
+    return frozenset(k.strip() for k in key.split(JOIN) if k.strip())
+
+
+def same_parts(a: str, b: str) -> bool:
+    return parts_of(a) == parts_of(b)
+
+
+def pin_of(pins: Iterable[str], key: str) -> str | None:
+    """The pin that's ``key``'s subjects, in any order, or None."""
+    return next((p for p in pins if same_parts(p, key)), None)
+
+
+def tidy_name(name: str) -> str:
+    """A saved set's name as it's kept: its spaces made single, ``NAME_MAX`` letters at most. "" is no name."""
+    return " ".join(name.split())[:NAME_MAX].strip()
+
+
+def name_of(names: Mapping[str, str], key: str) -> tuple[str, str] | None:
+    """The saved set ``key`` is, as (the key it's kept under, its name): its own key, else one of the same parts."""
+    if key in names:
+        return key, names[key]
+    return next(((k, v) for k, v in names.items() if same_parts(k, key)), None)
+
+
+def named(s: Subject, names: Mapping[str, str], key: str = "") -> Subject:
+    """The subject with its saved set's name, when ``key`` (else its own key) is one of ``names``, keys of two subjects or
+    more; else as it is. A saved set's key stays the one it's pinned under, though a part of it has gone (decision 650), and
+    so does its name, though only one part is left."""
+    key = key or s.key
+    if s.saved or JOIN not in key:
+        return s
+    found = name_of(names, key)
+    if found is None:
+        return s
+    key, name = found
+    return replace(s, name=name, kept=key, part_name="" if s.parts else s.name)
+
+
+def set_named(m: Model, names: Mapping[str, str], name: str, me: str | None = None) -> Subject | None:
+    """The saved set called ``name`` (any case, spaces as they come; for a wheel's slot, decision 651), or None."""
+    want = tidy_name(name).lower()
+    key = next((k for k, v in names.items() if tidy_name(v).lower() == want), None)
+    return subject_of(m, key, me, names) if key else None
+
+
+def saved_sets(names: Mapping[str, str], pins: Iterable[str]) -> list[tuple[str, str]]:
+    """Each saved set as (its key, its name), in the pins' order: the command palette's lines (decision 651)."""
+    return [(k, names[k]) for k in dict.fromkeys(pins) if k in names]
+
+
+def sets_of(m: Model, me: str | None, pins: Iterable[str], names: Mapping[str, str]) -> list[Subject]:
+    """The saved sets as subjects, in the pins' order, those with nothing left left out."""
+    return [x for x in (subject_of(m, k, me, names) for k, _name in saved_sets(names, pins)) if x is not None and x.saved]
+
+
+@dataclass
+class Kept:
+    """Pins and names after a change, and what a Save as… put aside: the set it took the name from (its key, "" for
+    none), so Undo can put them back."""
+
+    pins: list[str]
+    names: dict[str, str]
+    replaced: str = ""
+
+
+def save_as(pins: list[str], names: Mapping[str, str], key: str, name: str) -> Kept:
+    """Save as… (decision 649): the combination ``key`` pinned under ``name``. A pin of the same subjects, in any order, is
+    the one that's named, where it is; else it's pinned first. A saved set of that name with other subjects is replaced:
+    the new one takes its place in the pins, and the old one's pin goes with its name."""
+    name = tidy_name(name)
+    if not name:
+        raise ValueError("A saved set needs a name.")
+    pins, names = list(pins), dict(names)
+    same = pin_of(pins, key)
+    other = next((k for k, v in names.items() if v.lower() == name.lower() and not same_parts(k, key)), "")
+    place = pins.index(other) if other in pins else 0
+    if other:
+        pins.remove(other)
+        names.pop(other, None)
+    if same is None:
+        pins.insert(min(place, len(pins)), key)
+        same = key
+    names[same] = name
+    return Kept(pins, names, other)
+
+
+def rename(names: Mapping[str, str], key: str, name: str) -> dict[str, str]:
+    """Rename… (decision 650): the saved set kept under ``key`` gets ``name``. Raises ValueError for no name, or one
+    another saved set has."""
+    name = tidy_name(name)
+    if not name:
+        raise ValueError("A saved set needs a name.")
+    if any(v.lower() == name.lower() and k != key for k, v in names.items()):
+        raise ValueError(f"There's a saved set called {name} already.")
+    return {**names, key: name}
+
+
+def unpin(pins: list[str], names: Mapping[str, str], key: str) -> Kept:
+    """Unpin: the pin of ``key``'s subjects goes, and a saved set's name with it (decision 650)."""
+    gone = pin_of(pins, key) if key not in pins else key
+    return Kept([p for p in pins if p != gone], {k: v for k, v in names.items() if k != gone})
+
+
+def part_counts(parts: Iterable[Subject]) -> list[str]:
+    """A combination's parts counted by kind, in the order each kind was first picked: "1 tag · 2 people · 1 agenda"
+    (decisions 562 and 650)."""
+    counts: dict[str, int] = {}
+    for p in parts:
+        counts[p.kind] = counts.get(p.kind, 0) + 1
+    return [f"{n} {KIND_PLURALS[k][n != 1]}" for k, n in counts.items() if k in KIND_PLURALS]
 
 
 def is_agenda(m: Model, task_id: str) -> bool:
@@ -169,6 +313,15 @@ def matches(m: Model, subs: list[Subject], query: str) -> list[Subject]:
 
     found = [s for s in subs if (not people_only or s.kind == PERSON) and hit(s)]
     return sorted(found, key=lambda s: (not any(n.startswith(words[0]) for n in names(s)),)) + tags
+
+
+def matching_sets(sets: Iterable[Subject], query: str) -> list[Subject]:
+    """The saved sets whose names have a word starting with each word typed, as the box's other subjects match: listed
+    first, as they're the owner's own (decision 649)."""
+    words = query.strip().lower().split()
+    if not words or query.strip().startswith("@"):
+        return []
+    return [s for s in sets if all(any(part.startswith(w) for part in s.name.lower().split()) for w in words)]
 
 
 # ---- what's in a summary ----
@@ -595,6 +748,10 @@ class Builder:
             out = self.tag(s, more)
         else:
             out = self.label(s, more)
+        if s.saved:  # decision 650: its name, and its parts counted ("Saved set · 1 tag · 2 people · 1 agenda"), and any gone
+            gone = len(parts_of(s.kept)) - len(s.each())
+            out.kind_line = " · ".join([SAVED, *part_counts(s.each()), *([f"{gone} gone"] if gone > 0 else [])])
+            out.face = "many"
         out.markdown, out.html = copy_text(self, out)
         return out
 
@@ -916,12 +1073,7 @@ class Builder:
             chips.append(Chip("Nothing open matches all of them", "calm"))
         elif every is not None:
             chips += [Chip(f"<b>{len(open_ids)}</b> open")] + [Chip(f"<b>{crit}</b> Critical")] * bool(crit) + [Chip(f"<b>{quiet}</b> quiet")] * bool(quiet)
-        counts = []
-        for k in (PERSON, AGENDA, LABEL, TAG):
-            n = sum(p.kind == k for p in parts)
-            if n:
-                counts.append(f"{n} {KIND_PLURALS[k][n != 1]}")
-        kind = " · ".join([KIND_WORDS[MANY], *counts])
+        kind = " · ".join([KIND_WORDS[MANY], *part_counts(parts)])
         return Summary(s, kind, "many", facts, chips, sections)
 
     def group_of(self, t: Task, subs: list[str]) -> str:
@@ -1097,12 +1249,14 @@ def copy_text(b: Builder, s: Summary) -> tuple[str, str]:
 
 
 # ---- pins and recents (decision 534) ----
-def start_list(m: Model, me: str | None, pins: list[str], recent: list[str]) -> tuple[list[Subject], list[Subject]]:
+def start_list(m: Model, me: str | None, pins: list[str], recent: list[str],
+               names: Mapping[str, str] | None = None) -> tuple[list[Subject], list[Subject]]:
     """The box's list with nothing typed: the pinned subjects, then the recent ones, ``START_MAX`` in all, each once, those
-    that are gone left out."""
-    pinned = [x for x in (subject_of(m, k, me) for k in dict.fromkeys(pins)) if x]
+    that are gone left out; a saved set by its name (decision 649)."""
+    pinned = [x for x in (subject_of(m, k, me, names) for k in dict.fromkeys(pins)) if x]
     keys = {x.key for x in pinned}
-    recents = [x for x in (subject_of(m, k, me) for k in dict.fromkeys(recent) if k not in keys) if x]
+    recents = [x for x in (subject_of(m, k, me, names) for k in dict.fromkeys(recent) if k not in keys) if x]
+    recents = [x for x in recents if x.key not in keys]  # a recent of a saved set's subjects, in another order, is that set
     room = max(0, START_MAX - len(pinned))
     return pinned[:START_MAX], recents[:room]
 
