@@ -39,7 +39,8 @@ def test_today_items_carry_over_until_done(sample_conn):
     m = Model(conn)
     assert [a.id for a in m.today_items()] == [first, note] and TODAY not in m.agenda_targets()
     assert m.target_name(TODAY) == "Today" and m.meeting_when(TODAY, AT.date()) == ""
-    assert [(g, [a.id for a in items]) for g, items in views.today_groups(m, AT.date())] == [("Carried over", [first]), ("Added today", [note])]
+    # One list since release 5.148 (decision 644): until the first drag, the carried item first, then today's.
+    assert [(g, [a.id for a in items]) for g, items in views.today_groups(m, AT.date())] == [("Today", [first, note])]
     assert views.since_text("2026-10-05 08:05:00", AT.date()) == "Mon" and views.since_text("2026-09-20 08:05:00", AT.date()) == "20 Sep"
     with pytest.raises(agenda.AgendaError, match="closes as Done or Removed"):
         agenda.close_item(conn, first, how="Discussed", closed="2026-10-08 15:20:00", closed_by="Today")

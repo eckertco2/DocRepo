@@ -12,6 +12,14 @@ Since 2026-11-12, releases ship in weekly trains (the design workspace's `docs/m
 |---|---|---|
 | 5.141 | 2026-11-12 | New T-mail works where Outlook's security guard won't let DocRepo tag a new email (the owner's report of 2026-11-12: "giving the new email a conversation index" refused, so the email opened with nothing tying it to its task). Such a T-mail, and an Ask for an update, is kept with its draft and known when it's sent: DocRepo hears Outlook's send, or sees the draft leave Drafts, then finds its copy in Sent Items by its subject and a new conversation's index, files it on the task (5.123's capture) and learns its conversation, so its replies find the task. Nothing is written on the email. No schema change. |
 
+## Train of Thursday 2026-11-26 (not pushed yet)
+
+Built for the train of 2026-11-26 (the design workspace's `docs/mods/train-2026-11-26-plan.md`), none of it with the push of 2026-11-19. The heading takes the day it's pushed.
+
+| Release | Date | What |
+|---|---|---|
+| 5.148 | 2026-11-13 | Today in your order. Carried over and Added today give way to one list, each carried item keeping its "since Mon" on its row, so a task added this morning can go above yesterday's. Drag an item to a new place in the Today view, or in the Today side panel while it's widened, with a line where it will land; Alt+Up and Alt+Down move the selected item one place (in the panel, Up and Down still move between items); Move to top and Move to bottom are on each item's right-click menu, a note's on the panel too. Until the first move the order is what it was: the carried items first, oldest first, then today's. A new item, from Add to Today, the box, a reminder, the capture window, `**agenda, today` or Back on Today, goes at the bottom; Undo after Done or Remove puts one back where it was. A file, link or email dropped on a task's row still opens an Update on it. A move has no Undo and goes in no status log. Contents.md lists Today in this order. Schema 29: `agenda_items.pos`. |
+
 ## Next train (Thursday 2026-11-19, not pushed yet)
 
 Merged to `main` since the train of 2026-11-12: 5.127, 5.128, 5.138, 5.139, 5.140 and 5.142. The heading takes the day it's pushed.
