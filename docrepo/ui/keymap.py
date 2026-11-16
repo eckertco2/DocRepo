@@ -153,10 +153,10 @@ def syntax_html(rows: list[tuple[str, str, str, str]] | None = None) -> str:
                     for n, also, what, ex in rows)
     states = esc(", ".join(n for op in items.OPERATORS if op.state for n in op.names))
     return ("<p class='note'>In any capture: <b>@</b> a person, <b>@L.</b> a lead, <b>@__</b> no one yet, <b>#</b> a task, and <b>**</b> a "
-            "name with its comma, which says what a line is or fills a field. Type @, # or ** for a list. A ** line that reads as nothing "
+            "name with its comma, which says what a line is or fills a field (<b>**today</b> needs no comma). Type @, # or ** for a list. A ** line that reads as nothing "
             "gets an Unread line card; a new name after @ gets an Add … to people card, ticked.</p>"
             f"<table cellspacing='0' cellpadding='4' width='100%'>{worked}</table>"
-            "<p><b>Every ** name</b> (the comma makes it one)</p>"
+            "<p><b>Every ** name</b> (the comma makes it one; **today needs none)</p>"
             "<table cellspacing='0' cellpadding='4' width='100%'><tr><th align='left'>Name</th><th align='left'>Also</th>"
             f"<th align='left'>Makes or fills</th><th align='left'>Example</th></tr>{names}</table>"
             "<p><b>Read with no **</b>, by Parse and populate (Alt+P) and on a line with @ or #: dates in words (by Fri, 5 Nov, next week), "
