@@ -228,7 +228,7 @@ def test_task_md_lists_a_tasks_tagged_labels_only_once_there_is_a_glossary(sampl
     import_csv(conn, tmp_path, TAGS)
     holders = Model(conn).document_holders("D000002")
     page = MdPages(Model(conn), AT.date(), AT).task_page(Model(conn).task(holders[0]))
-    assert "| Labels |" in page and "| Tagged labels | R-101 (1) |" in page
+    assert "| Labels |" in page and "| Tagged labels | R-101 Reactor 1 (1) |" in page  # its name since release 5.153
     assert page.index("| Labels |") < page.index("| Tagged labels |")
 
 
