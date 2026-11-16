@@ -32,6 +32,9 @@ added email), and only after a space, a "(" or the start of a line, so an addres
   parameter's, goes on each, so a task being written in the content text, or the New task itself, can go on an agenda.
   The line's other words are the agenda item's note, unless they made that task; with no task at all they go on the
   agenda as a note alone (``_read_agenda``, ``save._put_on_agendas``).
+- ``**today`` (release 5.147, decisions 641 and 642, the owner's ask of 2026-11-13) is ``**agenda, today`` in one word,
+  with no comma and no sentence (``Operator.alone``): ``- @Mike book the crane **today``. ``**today,`` reads the same, and
+  the words after it stay the line's own.
 
 A ``**`` kind wins; else an ``@`` makes a task; else a ``#`` alone makes a note; a block with none stays in the notes.
 Parameters make their own cards beside whatever the rest of their line makes. ``**`` and a space is never an operator, and
@@ -225,9 +228,21 @@ def _nothing_after(after: str, names: Names) -> bool:
     return not re.sub(r"[\s.:;,]", "", clean(t, scan(t, names), names))
 
 
+def _alone_token(op: Operator, size: int) -> Token:
+    """A parameter with no sentence (release 5.147): it holds only its name, and its comma when it has one."""
+    return Token("param", op=op, label=op.label, size=size, until=size)
+
+
+def _bare_name(rest: str, names: Names) -> str | None:
+    """The ** name at the start of ``rest`` written with no comma: a whole name, not part of a word nor of a **bold**."""
+    return next((n for n in _names_longest(names) if rest[2:2 + len(n)].lower() == n and not _is_word(rest[2 + len(n):3 + len(n)])
+                 and rest[2 + len(n):3 + len(n)] != "*"), None)
+
+
 def _star(rest: str, names: Names) -> Token | None:
-    """A ** at the start of ``rest``: a name from the table and its comma; a kind with nothing to say; or a name written
-    the old way, or not in the table, which makes a card saying so (decisions 205 and 206)."""
+    """A ** at the start of ``rest``: a name from the table and its comma; a kind with nothing to say; a name with no
+    sentence (``**today``), with or without its comma; or a name written the old way, or not in the table, which makes a
+    card saying so (decisions 205 and 206)."""
     m = _NAME.match(rest)
     if m:
         name = _norm(m.group(1))
@@ -237,17 +252,22 @@ def _star(rest: str, names: Names) -> Token | None:
             return _kind_token(op, m.end())
         if op and op.gone:
             return _value_token(rest, m.end(), label=label, problem=op.gone)
+        if op and op.alone:
+            return _alone_token(op, m.end())
         if op:
             return _value_token(rest, m.end(), op=op, label=op.label, names=names)
-        if _UNKNOWN_NAME.fullmatch(name) and len(name.split(" ")) <= 4:
+        # "**today and ask Tom, then …": a name with no sentence, and the line's words after it up to a comma.
+        first = _bare_name(rest, names)
+        if not (first and _op_of(first, names).alone) and _UNKNOWN_NAME.fullmatch(name) and len(name.split(" ")) <= 4:
             return _value_token(rest, m.end(), label=label, problem=f"No field called {name}")
-    bare = next((n for n in _names_longest(names) if rest[2:2 + len(n)].lower() == n and not _is_word(rest[2 + len(n):3 + len(n)])
-                 and rest[2 + len(n):3 + len(n)] != "*"), None)
+    bare = _bare_name(rest, names)
     if not bare:
         return None
     op = _op_of(bare, names)
     head = 2 + len(bare)
     after = rest[head:]
+    if op.alone:  # its full stop is its own at the line's end or before the next **, as **agenda, today.'s is
+        return _alone_token(op, head + (1 if re.match(r"[.:]\s*(?:\Z|\*\*[A-Za-z])", after) else 0))
     mark = 1 if after[:1] in (".", ":") else 0
     if op.item and _nothing_after(after, names):
         return _kind_token(op, head + mark)
@@ -740,6 +760,11 @@ def _read_agenda(x: str, c: ReadWith, op: Operator) -> Value:
     return Value({op.task_field: found}, ", ".join(_target_name(t, c.names) for t in found))
 
 
+def _read_today(x: str, c: ReadWith, op: Operator) -> Value:
+    """``**today`` (release 5.147, decision 641): ``**agenda, today`` in one word. It has no sentence, so it reads nothing."""
+    return Value({op.task_field: [TODAY]}, "Today")
+
+
 def _read_reference(x: str, c: ReadWith, op: Operator) -> Value:
     v = re.sub(r"^(?:#|no\.?(?=\s|\d|\Z)|number)\s*[:#-]?\s*", "", x, flags=re.I).strip()
     return Value({"references": {op.label: v}}, v) if v else _NOTHING
@@ -768,6 +793,9 @@ class Operator:
     reference: bool = False  # a reference field, whose label is its name in Settings
     what: str = ""  # what it does, for the Syntax tab and the README, when its label doesn't say (release 5.133)
     lists: str = ""  # the list its names are picked from as they're typed, "labels" or "agendas" (release 5.144)
+    # A parameter with no sentence (release 5.147, decision 641): its name says it all, with or without its comma, and the
+    # words after it stay the line's.
+    alone: bool = False
 
 
 OPERATORS: tuple[Operator, ...] = (
@@ -808,6 +836,9 @@ OPERATORS: tuple[Operator, ...] = (
     # Not a field (release 5.133): the task goes on each agenda named. Its sentence is all value, so a # names an agenda.
     Operator(("agenda", "agendas"), label="Agenda", task_field="agenda", adds=True, whole=True, read=_read_agenda,
              what="Puts the task on each agenda named: a person's, a meeting's, a task's or Today", lists="agendas"),
+    # **agenda, today in one word (release 5.147, decisions 641 and 642): the same card, read the same way, with no sentence.
+    Operator(("today",), label="Agenda", task_field="agenda", adds=True, read=_read_today, alone=True,
+             what="Puts the task on Today, with no comma or sentence"),
     # An old form still in the hands (decision 206): this entry comes out once the habit has gone.
     Operator(("date",), gone="Say which date: **start, **due, **deadline or **key date"),
 )
@@ -1663,6 +1694,7 @@ STAR_EXAMPLES = {
     "label": "**label, Safety",
     "parent": "**parent, #Installation",
     "agenda": "**agenda, @Tom and #Business team meeting",
+    "today": "@Mike book the crane **today",
 }
 
 
@@ -1673,7 +1705,8 @@ def star_name(op: Operator) -> str:
 
 def star_options(q: str, names: Names) -> list[Option]:
     """The ** list (release 5.92): the kinds first, then the fields (with the reference fields from Settings), each with
-    its example; what's typed narrows it by any of its names. Choosing one puts in "**name, "."""
+    its example; what's typed narrows it by any of its names. Choosing one puts in "**name, ", or "**today " for a name
+    with no sentence (release 5.147)."""
     kinds = [op for op in OPERATORS if op.item and not op.gone]
     fields = [op for op in OPERATORS if not op.item and not op.gone]
     every = [*kinds, *fields, *names.field_ops.values()]
@@ -1683,7 +1716,8 @@ def star_options(q: str, names: Names) -> list[Option]:
         name = star_name(op) if not op.reference else op.label.lower()
         kind = KIND_NAMES.get(op.item, "Update") if op.item else "Field"
         example = STAR_EXAMPLES.get(name) or (f"**{name}, 4471" if op.reference else "")
-        out.append(Option(f"{name},", f"**{name},", f"{kind}: {example}" if example else kind))
+        comma = "" if op.alone else ","
+        out.append(Option(f"{name}{comma}", f"**{name}{comma}", f"{kind}: {example}" if example else kind))
     return out
 
 
@@ -1698,7 +1732,7 @@ def syntax_rows(names: Names | None = None) -> list[tuple[str, str, str, str]]:
         others = ", ".join(f"**{n}," for n in op.names if n != name)
         what = (f"{KIND_NAMES.get(op.item, 'Item')}" + (f", {op.state}" if op.state else "") + (", a plant event" if op.event else "")
                 if op.item else op.what or op.label + (" (adds to the list)" if op.adds else ""))
-        rows.append((f"**{name},", others, what, STAR_EXAMPLES.get(name, "")))
+        rows.append((f"**{name}{'' if op.alone else ','}", others, what, STAR_EXAMPLES.get(name, "")))
     for op in (names.field_ops.values() if names else ()):
         rows.append((f"**{op.label.lower()},", "", f"{op.label} (a reference field, from Settings)", f"**{op.label.lower()}, 4471"))
     return rows

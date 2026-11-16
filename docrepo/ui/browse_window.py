@@ -73,7 +73,7 @@ from docrepo.ui.task_pane import TaskPane
 from docrepo.ui.templates_view import TemplatesPane
 from docrepo.ui.tree_import import TreeFilesPane
 from docrepo.ui.priorities_view import PrioritiesView
-from docrepo.ui.palette import Command, CommandPalette
+from docrepo.ui.palette import Command, CommandPalette, summary_commands
 from docrepo.ui.style import CLASSIC_BROWSE, page_css, style_sheet
 from docrepo.ui.task_forms import LabelMatchDialog, TaskEditDialog
 from docrepo.ui.task_picker import TaskPicker
@@ -844,6 +844,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
                 Command("", tidy_notes.EVERY, lambda: tidy_notes.run(self, None)),  # release 5.150
                 Command("", "Search everything", self.search_box.setFocus, "Ctrl+Shift+F"),
                 Command("", "Quick summary: a person, an agenda or a label", lambda: self.ctx.open_summary(None)),
+                *summary_commands(self.ctx),  # each saved set (release 5.149, decision 651)
                 Command("", "Find in this view", self.open_find, "Ctrl+F"),
                 Command("", "Show or hide the views", lambda: self.show_views_pane(not self.views_button.isChecked()), "Ctrl+B"),
                 Command("", "Read docs.db and the calendar again", self.read_again, "F5"),

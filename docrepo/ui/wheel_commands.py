@@ -84,9 +84,14 @@ def _search_everything(app: CaptureApp, _args: Mapping[str, Any]) -> None:
     app.browse.search_box.selectAll()
 
 
-def _summary_open(app: CaptureApp, _args: Mapping[str, Any]) -> None:
-    """The quick summary (release 5.131, the quick summary plan's decision 517): its window, with the cursor in its box."""
-    app.wheels.quick_summary()
+def _summary_open(app: CaptureApp, args: Mapping[str, Any]) -> None:
+    """The quick summary (release 5.131, the quick summary plan's decision 517): its window, with the cursor in its box; with
+    "set", the saved set of that name (release 5.149, decision 651)."""
+    name = args.get("set", "")
+    if name:
+        app.wheels.quick_summary(set_name=name)
+    else:
+        app.wheels.quick_summary()
 
 
 def _progress_log(app: CaptureApp, _args: Mapping[str, Any]) -> None:
@@ -118,7 +123,7 @@ _ROWS = (
     Registered(CommandSpec("search.files", "File search"), _search_files),
     Registered(CommandSpec("search.everything", "Search everything"), _search_everything),
     Registered(CommandSpec("find_files.current", "Find files for the current task"), _find_files_current),
-    Registered(CommandSpec("summary.open", "The quick summary"), _summary_open),
+    Registered(CommandSpec("summary.open", "The quick summary",(Arg("set", "", kind="text"),)), _summary_open),
     Registered(CommandSpec("progress.log", "Log progress, on the email you're writing in Outlook"), _progress_log),
 )
 REGISTRY: dict[str, Registered] = {r.spec.id: r for r in _ROWS}
