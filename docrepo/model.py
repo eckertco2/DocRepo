@@ -327,6 +327,9 @@ class AgendaItem:
     closed: str | None
     how: str | None
     closed_by: str | None
+    #: Its place in its list, 1 at the top (schema 29, release 5.148, decision 647): None until Today's items are put in an
+    #: order of the owner's.
+    pos: int | None = None
 
 
 @dataclass(frozen=True)
@@ -362,7 +365,9 @@ class Summary:
 
 @dataclass(frozen=True)
 class FileEntry:
-    kind: str  # Saved copy, Old version, Tracked original, Link or Email attachment
+    #: Saved file, Old version, Linked file, Link, Folder or Email attachment (release 5.145, decision 631: a saved file
+    #: was a "Saved copy" and a linked file a "Tracked original"; the records are the same).
+    kind: str
     name: str
     document: str
     task: str
@@ -378,6 +383,12 @@ PRIORITY_NAMES = {"critical": "Critical", "high": "High", "medium": "Medium", "p
 def is_person(item_id: str | None) -> bool:
     """True when an ID is a person's (P001), as an agenda target can be."""
     return bool(item_id and re.match(r"P\d", item_id))
+
+
+def place_key(a: AgendaItem) -> tuple:
+    """How a list's open agenda items are ordered (release 5.148, decision 647): those with a place by it, then any without
+    one in the order they were added, which is the whole order until the first drag. ``agenda.ORDER`` is the same in SQL."""
+    return (a.pos is None, a.pos or 0, a.added, a.id)
 
 
 def _unique(items: Iterable[str]) -> list[str]:
@@ -514,6 +525,8 @@ class Model:
         self._status_by_task: dict[str, list[StatusEntry]] | None = None
         self._agenda_by_subject: dict[str, list[AgendaItem]] | None = None
         self._copies_by_task: dict[str, list[SavedCopy]] | None = None
+        self._saved_by_doc: dict[str, list[SavedCopy]] | None = None  # release 5.145: a document's saved files
+        self._saving: dict[str, list[Capture]] | None = None  # release 5.145: the captures that saved a document
         self._versions_by_task: dict[str, list[Version]] | None = None
         self.status: list[StatusEntry] = [
             StatusEntry(r["task"], r["at"], r["field"], r["from_value"], r["to_value"], r["via"])
@@ -713,13 +726,35 @@ class Model:
         return list(self._captures_by_task.get(task_id, ()))
 
     def copies_of(self, task_id: str) -> list[SavedCopy]:
-        """The task's saved copies, in ID order (release 5.90)."""
+        """The task's saved files and their old versions, in ID order (release 5.90)."""
         if self._copies_by_task is None:
             index: dict[str, list[SavedCopy]] = {}
             for f in self.copies:
                 index.setdefault(f.task, []).append(f)
             self._copies_by_task = index
         return list(self._copies_by_task.get(task_id, ()))
+
+    def saved_of(self, document_id: str) -> list[SavedCopy]:
+        """A document's saved files in tasks' Files folders, not old versions, in ID order (release 5.145, decision 631):
+        once there's one, it's the document's file."""
+        if self._saved_by_doc is None:
+            index: dict[str, list[SavedCopy]] = {}
+            for f in self.copies:
+                if not f.old:
+                    index.setdefault(f.document, []).append(f)
+            self._saved_by_doc = index
+        return list(self._saved_by_doc.get(document_id, ()))
+
+    def saving_captures(self, document_id: str) -> list[Capture]:
+        """The captures that saved a document (``save_a_copy``, which means saved since release 5.145), in ID order."""
+        if self._saving is None:
+            index: dict[str, list[Capture]] = {}
+            for c in self.captures.values():
+                for d in c.documents:
+                    if d.save_a_copy:
+                        index.setdefault(d.document, []).append(c)
+            self._saving = index
+        return list(self._saving.get(document_id, ()))
 
     # ---- discarded tasks and captures (mods log round 1, M0021) ----
     def discarded_tasks(self) -> list[Task]:
@@ -731,12 +766,12 @@ class Model:
         return [c for c in self.captures.values() if c.discarded]
 
     def only_in_discarded(self, document_id: str) -> bool:
-        """True for a document that came in only with discarded captures, and has no saved copy."""
+        """True for a document that came in only with discarded captures, and has no saved file."""
         holding = [c for c in self.captures.values() if document_id in c.document_ids]
         return bool(holding) and all(c.discarded for c in holding) and not any(f.document == document_id for f in self.copies)
 
     def document_holders(self, document_id: str) -> list[str]:
-        """The tasks a document belongs to: those of the captures it came in with, and those it has saved copies in."""
+        """The tasks a document belongs to: those of the captures it came in with, and those it's saved in."""
         if self._holders is None:
             holders: dict[str, list[str]] = {}
             for c in self.live_captures():
@@ -770,11 +805,16 @@ class Model:
         return sorted(out, key=lambda s: s.at)
 
     def files_of(self, task_id: str) -> list[FileEntry]:
-        """Every file connected to a task: its saved copies, then the documents of its captures."""
-        out = [FileEntry("Old version" if f.old else "Saved copy", f.name, f.document, task_id) for f in self.copies_of(task_id)]
-        for doc_id in _unique(d for c in self.notes_of(task_id) for d in c.document_ids):
+        """Every file connected to a task: its saved files, then the documents of its captures: linked files, links,
+        folders, and email attachments kept in their capture's folder (an unfiled capture's, or one from before release
+        5.145, decision 629)."""
+        copies = self.copies_of(task_id)
+        out = [FileEntry("Old version" if f.old else "Saved file", f.name, f.document, task_id) for f in copies]
+        # Each file once (decision 631): a document saved on the task is that saved file, not a linked file or an attachment too.
+        saved = {f.document for f in copies if not f.old}
+        for doc_id in _unique(d for c in self.notes_of(task_id) for d in c.document_ids if d not in saved):
             d = self.documents[doc_id]
-            kind = "Link" if is_link(d.original) else "Folder" if is_folder(d.original) else "Tracked original" if d.original else "Email attachment"
+            kind = "Link" if is_link(d.original) else "Folder" if is_folder(d.original) else "Linked file" if d.original else "Email attachment"
             out.append(FileEntry(kind, d.name, doc_id, task_id))
         return out
 
@@ -822,8 +862,9 @@ class Model:
 
     # ---- Today (mods log round 1, M0016) ----
     def today_items(self) -> list[AgendaItem]:
-        """Today's open items, the oldest first: they carry over until they're closed."""
-        return sorted(self.open_items_for(TODAY), key=lambda a: a.added)
+        """Today's open items, in the owner's order (release 5.148, decisions 643 to 645): by their places once they have
+        them, and until then the oldest first. They carry over until they're closed."""
+        return sorted(self.open_items_for(TODAY), key=place_key)
 
     def done_on(self, day: date) -> list[AgendaItem]:
         """Today's items marked Done on ``day``, the latest first."""

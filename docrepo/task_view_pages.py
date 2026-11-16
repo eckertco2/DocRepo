@@ -104,7 +104,7 @@ def preview(model: Model, r: Record | None, today: date, words: list[str], slips
         rows += [("Type", esc(TYPE_NAMES.get(r.type, "Other")) + size),
                  ("Added", f"{esc(long_date(to_date(r.at), today))} · {link(f'capture:{r.capture}', r.came) if r.capture else esc(r.came)}"),
                  ("In", link(f"scope:{r.task}", model.task(r.task).title, "Show what's in it")),
-                 ("Where", where_html(r.path)), ("Source", esc(r.source) + (" · a saved copy too" if r.copy and r.source != "Saved copy" else ""))]
+                 ("Where", where_html(r.path)), ("Source", esc(r.source) + (" · a saved file too" if r.copy and r.source != "Saved file" else ""))]
         if last_opened:
             rows.append(("Opened", f"{esc(ago(last_opened, today))}, from DocRepo"))
         warn = ('<p class="warn">&nbsp;Not found at its path when it was last opened. Show in File Explorer opens the nearest folder '

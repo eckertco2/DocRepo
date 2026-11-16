@@ -1,11 +1,12 @@
 """Saving a capture from the capture window.
 
 Everything that goes into docs.db happens in one transaction: new people and labels,
-the new task or the update, the capture's record, its documents and saved copies,
-and its agenda items. Then the files are written: capture.md, each document's
-extracted text, the saved copies, each Outlook email's .msg file (email.msg, then
-email 2.msg and so on) and its attachments, and the generated pages. A file that fails never undoes the capture; it's reported
-in the result and the log.
+the new task or the update, the capture's record, its documents and saved files,
+and its agenda items. Then the files are written: capture.md, each Outlook email's .msg file (email.msg, then
+email 2.msg and so on), the saved files (an email's attachments always, and the files dropped on Save in DocRepo: in
+the task's Files folder, or in an unfiled capture's own folder), the email's pictures, each document's extracted text
+(a saved file's read from the file written, release 5.145), and the generated pages. A file that fails never undoes the
+capture; it's reported in the result and the log.
 
 Ported from the mockup's ``capture.js`` (``save``). SPEC section 7 describes it.
 """
@@ -21,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from docrepo import agenda, captures, conversations, edits, items, layer0, markup, people, priorities, quick, search, tasks, waits
+from docrepo.captures import copy_name
 from docrepo.config import Settings
 from docrepo.dates import long_date, short, stamp, workday_numbers
 from docrepo.db import next_id, transaction
@@ -105,6 +107,10 @@ class FileRow:
     """A file, link or email added to the capture, with its description and choices. ``path`` is its original: a file's
     path, or a link (``links.is_link``), which has nothing to copy or read, so its choices are always off.
 
+    ``save_a_copy`` keeps its name and means **saved** (release 5.145, the save or link plan's decisions 630 and 634): the
+    file becomes a saved file of DocRepo's own, in the task's Files folder, rather than a linked file read where it is. An
+    email's attachment is always saved and a picture stays with its capture (decision 629); a link and a folder are linked.
+
     An email's row (``email``) holds its text and becomes its .msg file (``msg_name``). Its description, if typed, is kept with the
     email in ``capture_emails``, not as a document's (round 7's item 93, release 5.74). Each part email
     layer 0 finds in it (``part``: an attachment, a link or a picture) is a row of its own, ``of`` that email, kept only
@@ -137,10 +143,11 @@ def default_description(row: FileRow, task_title: str | None) -> str:
     return f"{task_title.strip()} – {how} {kind} – {row.name}" if task_title and task_title.strip() else row.name
 
 
-def email_rows(email: EmailItem) -> list[FileRow]:
-    """An email's row, then a row for each part email layer 0 finds in it, ticked or not as layer 0 starts them."""
+def email_rows(email: EmailItem, rules: layer0.LinkRules | None = None) -> list[FileRow]:
+    """An email's row, then a row for each part email layer 0 finds in it, ticked or not as layer 0 starts them. ``rules``
+    are Settings' link lists (release 5.146, ``layer0.LinkRules.of``), which every caller reading an email passes."""
     return [FileRow(email.subject, email=email),
-            *(FileRow(p.name, p.url or None, part=p, of=email, keep=p.keep) for p in layer0.find(email).parts)]
+            *(FileRow(p.name, p.url or None, part=p, of=email, keep=p.keep) for p in layer0.find(email, rules).parts)]
 
 
 @dataclass
@@ -333,20 +340,6 @@ def item_names(model: Model, settings: Settings, refs: dict[str, str] | None = N
     return items.names_of(model, _parse_people(model, settings), refs, settings.reference_fields, len(workday_numbers(settings.workdays)))
 
 
-def copy_name(day: str, name: str, taken: set[str]) -> str:
-    """A saved copy's file name: "YYYY-MM-DD name", cleaned of characters Windows forbids, at most 100 characters, and unique."""
-    stem, dot, ext = _FORBIDDEN.sub("", name).rpartition(".")
-    if not dot:
-        stem, ext = ext, ""
-    ext = f".{ext}" if ext else ""
-    base = f"{day} {stem}".rstrip(". ")[: 100 - len(ext)].rstrip(". ")
-    candidate, n = base + ext, 2
-    while candidate.lower() in {t.lower() for t in taken}:
-        candidate = f"{base[: 100 - len(ext) - 4]} ({n}){ext}"
-        n += 1
-    return candidate
-
-
 def msg_name(position: int) -> str:
     """The file a capture's email is saved as, by its place among the capture's emails: email.msg, then email 2.msg and
     so on (release 5.26.1: before it, every email went to email.msg, which Outlook overwrites, so only the last was kept)."""
@@ -522,7 +515,10 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
         if keeps_no_text(row.path):
             row.save_a_copy = row.extract = False  # DocRepo keeps only a link's address (mods log round 1, M0001), or a folder's place
         if row.part and row.part.kind == "picture":
-            row.extract = False  # a picture has no text to read
+            # A picture has no text to read, and stays with its capture, shown on its notes page (release 5.145, decision 629).
+            row.save_a_copy = row.extract = False
+        elif row.part and row.part.kind == "attachment":
+            row.save_a_copy = True  # an email's attachment is always saved in DocRepo (decision 629)
     if draft.meeting:
         draft.types, draft.agenda = {"note"}, []  # meeting notes are a note on the meeting
     is_new, is_upd, is_note = ("new_task" in draft.types, "update" in draft.types, "note" in draft.types)
@@ -576,7 +572,7 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
     filed_copies: list[tuple[str, str]] = []
     added_people: list[str] = []
     documents: list[tuple[str, FileRow, Attachment | None]] = []  # (document ID, its row, the attachment it came from)
-    copies: list[tuple[str, str]] = []  # (document ID, file name) for saved copies
+    copies: list[tuple[str, str]] = []  # (document ID, file name) for saved files in the task's Files folder
     changes: list[tasks.Change] = []
     created = None
     quick_task = is_new and not t and not draft.from_capture and draft.quick  # decision 393: Today alone doesn't make one
@@ -637,7 +633,7 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
             t = meeting_made
             holder_title = meet_name
         if source_capture and created:
-            filed_copies = edits.file_capture_records(conn, source_capture.id, created, at)
+            filed_copies = edits.file_capture_records(conn, source_capture.id, created, at, data_root)
             if summary and not source_capture.summary:
                 conn.execute("UPDATE captures SET summary = ?, summary_type = ? WHERE id = ?", (summary, draft.summary_type, source_capture.id))
         if is_upd and t:
@@ -659,7 +655,7 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
                 title=f"Notes of {meet_name}" if draft.meeting else capture_title(source_kind, title_words, first_file, capture_id),
                 task=t, created_task=created, formatted=formatted,
                 summary=summary or None, summary_type=draft.summary_type if summary else None,
-                email_layer_0=" ".join(email_layer0_line(e, draft.files) for e in emails) or None,
+                email_layer_0=" ".join(email_layer0_line(e, draft.files, layer0.LinkRules.of(settings)) for e in emails) or None,
                 item="notes" if draft.meeting else None, meeting=meeting_made, page_made=draft.page_made,
             )
             # Each email, with what's typed on its row (round 7's item 93, release 5.74), named as the files below are written.
@@ -677,8 +673,9 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
                 desc = row.description.strip() or default_description(row, holder_title)
                 row.description = desc
                 if row.part and row.part.attachment:
-                    # An email's attachment or picture (email layer 0): saved in the capture's attachments folder, under a
-                    # name no other attachment of the capture has (release 5.26.1).
+                    # An email's attachment or picture (email layer 0), under a name no other attachment of the capture has
+                    # (release 5.26.1). An attachment is a saved file, in the task's Files folder (release 5.145, decision
+                    # 629); a picture, or an unfiled capture's attachment, is in the capture's attachments folder.
                     a = row.part.attachment
                     name = attachment_name(a.name, attachment_names)
                     attachment_names.add(name)
@@ -701,10 +698,11 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
                     continue
                 captures.link_document(conn, capture_id, doc, save_a_copy=row.save_a_copy, extract=row.extract)
                 documents.append((doc, row, None))
-            # Save a copy goes into the task's Files folder now, or when an unfiled capture is filed.
+            # A saved file goes into the task's Files folder now (decision 631), or into an unfiled capture's own folder,
+            # and into its task's Files folder when it's filed.
             holder = created or t
             if holder:
-                taken = {r["name"] for r in conn.execute("SELECT name FROM saved_copies WHERE task = ?", (holder,))}
+                taken = captures.files_taken(conn, data_root, holder)
                 for doc, row, _ in documents:
                     if row.save_a_copy:
                         name_row = conn.execute("SELECT name FROM documents WHERE id = ?", (doc,)).fetchone()
@@ -1022,10 +1020,11 @@ def save_answer(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings:
     return save_capture(conn, data_root, fs, settings, draft, at)
 
 
-def email_layer0_line(email: EmailItem, rows: list[FileRow]) -> str:
-    """Email layer 0's line for one email: the parts its rows kept, and what it and the unticked rows left out."""
+def email_layer0_line(email: EmailItem, rows: list[FileRow], rules: layer0.LinkRules | None = None) -> str:
+    """Email layer 0's line for one email: the parts its rows kept, and what it, the link lists (``rules``, release 5.146)
+    and the unticked rows left out."""
     parts = [r for r in rows if r.of is email and r.part]
-    return layer0.line(layer0.find(email), [r.part.kind for r in parts if r.keep], sum(not r.keep for r in parts))
+    return layer0.line(layer0.find(email, rules), [r.part.kind for r in parts if r.keep], sum(not r.keep for r in parts))
 
 
 def _parsed_title(conn: sqlite3.Connection, source: str, at: datetime, settings: Settings) -> str:
@@ -1047,10 +1046,19 @@ def _write_files(
     conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, capture_id: str, emails: list[EmailItem],
     documents: list[tuple[str, FileRow, Attachment | None]], copies: list[tuple[str, str]], holder: str | None, result: SaveResult,
 ) -> None:
-    """Write the capture's other files, after its capture.md and its commit: its emails, attachments, extracted text and
-    saved copies. Each step that fails is noted in ``result.problems`` and the log, and the rest go on."""
+    """Write the capture's other files, after its capture.md and its commit: its emails, its saved files, its pictures,
+    then each document's extracted text. Each step that fails is noted in ``result.problems`` and the log, and the rest go
+    on.
+
+    Release 5.145 (the save or link plan's decisions 629 and 631): an attachment is written straight into the task's Files
+    folder as a saved file, and a file dropped on Save is copied there, so its text is read from that file, which is the
+    document from then on. With no task (an unfiled capture), both stay in the capture's own folder until it's filed: an
+    attachment in its ``attachments``, a saved file in its ``Files`` (``captures.held_files``)."""
     model = Model(conn)
     folder = captures.capture_folder(data_root, capture_id, model.captures[capture_id].saved)
+    saved_names = dict(copies)  # document -> its name in the task's Files folder
+    files = data_root / "Tasks" / holder / "Files" if holder else None
+    held = {} if holder else captures.held_files(data_root, model, model.captures[capture_id])
     # Outlook's SaveAs and SaveAsFile replace a file of the same name without asking, so each email and attachment has a
     # name of its own (release 5.26.1).
     for position, email in enumerate(emails):
@@ -1068,8 +1076,12 @@ def _write_files(
     for doc, row, attachment in documents:
         if attachment:
             name = model.documents[doc].name  # attachment_name made it unique within the capture
-            target = fs.checked_path(folder / "attachments" / name)
+            saved = saved_names.get(doc) if files is not None else None
+            target = fs.checked_path(files / saved if saved else folder / "attachments" / name)
             try:
+                # Outlook's SaveAsFile replaces a file without asking, so one that's there already is never handed to it.
+                if target.exists():
+                    raise FileExistsError(name)
                 fs.makedirs(target.parent)
                 if attachment.data is not None:  # read from the email's .msg, or a file a program handed over (release 5.33)
                     fs.write_copy(target, attachment.data)
@@ -1078,31 +1090,34 @@ def _write_files(
                 sources[doc] = target
             except Exception as e:  # noqa: BLE001
                 result.problems.append(f"The attachment {name} couldn't be saved ({type(e).__name__}).")
+                log.warning("capture %s: attachment %s not saved: %s", capture_id, doc, type(e).__name__)
                 continue
         elif row.path and not keeps_no_text(row.path):
             sources[doc] = Path(row.path)
+            # A file dropped on Save: a file of DocRepo's own from now on, so nothing depends on the original staying put.
+            target = files / saved_names[doc] if files is not None and doc in saved_names else held.get(doc) if row.save_a_copy else None
+            if target is None:
+                continue
+            try:
+                sources[doc] = fs.copy_file(Path(row.path), target)
+            except (OSError, FileExistsError) as e:  # its text is still read from where it is
+                result.problems.append(f"{Path(row.path).name} couldn't be saved in DocRepo ({type(e).__name__}), so it's read where it is for now.")
+                log.warning("capture %s: saved file for %s failed: %s", capture_id, doc, type(e).__name__)
     pictures = {doc for doc, row, _ in documents if row.part and row.part.kind == "picture"}
     for doc, source in sources.items():
-        _record_text(conn, data_root, fs, settings, doc, source, result, picture=doc in pictures)
-    for doc, name in copies:
-        source = sources.get(doc)
-        if not source or not holder:
-            continue
-        try:
-            fs.copy_file(source, data_root / "Tasks" / holder / "Files" / name)
-        except (OSError, FileExistsError) as e:
-            result.problems.append(f"The copy of {source.name} couldn't be saved ({type(e).__name__}).")
-            log.warning("capture %s: saved copy %s failed: %s", capture_id, name, type(e).__name__)
+        _record_text(conn, data_root, fs, settings, doc, source, result, picture=doc in pictures, shown=model.documents[doc].name)
 
 
 def _record_text(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, doc: str, source: Path, result: SaveResult,
-                 picture: bool = False) -> None:
+                 picture: bool = False, shown: str = "") -> None:
     """Pull a document's plain text into Documents/<id>/extracted.txt, and note its size, time and checksum. A picture has
-    no text to read, so that isn't a problem (release 5.33)."""
+    no text to read, so that isn't a problem (release 5.33). ``shown`` is the name a problem says: the document's, not its
+    saved file's dated one."""
+    name = shown or source.name
     try:
         info = file_info(source)
     except OSError as e:
-        result.problems.append(f"{source.name} couldn't be opened ({type(e).__name__}), so its text wasn't saved.")
+        result.problems.append(f"{name} couldn't be opened ({type(e).__name__}), so its text wasn't saved.")
         conn.execute("UPDATE documents SET text_status = 'error', text_note = ? WHERE id = ?", (f"couldn't open it ({type(e).__name__})", doc))
         return
     found = extract_text(source, settings.extracted_text_cap_chars)
@@ -1110,9 +1125,9 @@ def _record_text(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
         try:
             fs.write_text(data_root / "Documents" / doc / "extracted.txt", found.text)
         except OSError as e:
-            result.problems.append(f"The text of {source.name} couldn't be saved ({type(e).__name__}).")
+            result.problems.append(f"The text of {name} couldn't be saved ({type(e).__name__}).")
     if found.status == "error" or found.status == "none" and not picture:
-        result.problems.append(f"{source.name}: {found.note}.")
+        result.problems.append(f"{name}: {found.note}.")
     with transaction(conn):
         conn.execute(
             "UPDATE documents SET text_status = ?, text_chars = ?, text_note = ?, size = ?, modified = ?, sha256 = ?, checked = ? WHERE id = ?",

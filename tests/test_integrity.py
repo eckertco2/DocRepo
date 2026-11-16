@@ -32,7 +32,7 @@ def test_a_clean_sample_has_only_its_unmade_copies(sample_root):
     assert r.database == "ok" and r.counted["captures"] == 24
     assert r.sections["Captures with no capture.md"] == [] and r.sections["The search index"] == []
     assert r.sections["Documents with no extracted text"] == []
-    assert len(r.sections["Saved copies that aren't there"]) == 3  # the sample doesn't make its saved copies
+    assert len(r.sections["Saved files that aren't there"]) == 3  # the sample doesn't make its saved files
 
 
 def test_a_missing_capture_md_is_named_with_its_draft(sample_root):
@@ -72,7 +72,7 @@ def test_the_check_command_keeps_its_list(tmp_path, capsys):
     assert main(["--data-root", str(root), "init"]) == 0
     assert main(["--data-root", str(root), "load-sample"]) == 0
     capsys.readouterr()
-    assert main(["--data-root", str(root), "check"]) == 2  # the sample's saved copies aren't made
+    assert main(["--data-root", str(root), "check"]) == 2  # the sample's saved files aren't made
     out = capsys.readouterr().out
     kept = next(root.glob("System/check-*.md"))
     assert out.startswith("# Data root check") and kept.read_text(encoding="utf-8") in out

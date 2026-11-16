@@ -149,7 +149,8 @@ def test_a_file_description_is_optional(window, ctx, tmp_path):
     window.title.setText("Check the pump curve")
     assert window.files[0].desc.placeholderText().endswith("Left empty: Check the pump curve – Attached document – Pump curve.txt")
     window.set_type("new_task", False)
-    window.files[0].copy.setChecked(True)
+    assert not window.files[0].switch.saved()  # added by a path: linked (release 5.145, decision 630)
+    window.files[0].switch.buttons[True].click()  # Saved
     window.save()
     assert not window.isVisible()
     assert (ctx.data_root / "Tasks" / "T000008" / "Files" / "2026-10-08 Pump curve.txt").exists()  # named from the file, not the description
@@ -507,7 +508,8 @@ def test_drops_that_bring_no_file_say_why(window, tmp_path):
     folder.mkdir()
     _drop(window.content.viewport(), _mime([folder], EXPLORER_FORMATS))  # a folder is kept since release 5.66 (decision 318)
     [entry] = window.files
-    assert (entry.row.name, entry.row.path) == ("Drawings", str(folder) + "\\") and entry.copy.isHidden() and entry.extract.isHidden()
+    assert (entry.row.name, entry.row.path) == ("Drawings", str(folder) + "\\") and entry.extract.isHidden()
+    assert entry.switch.fixed and not entry.switch.saved()  # a folder is linked, and can't change (release 5.145)
 
 
 def test_editing_a_mods_log_entry_from_the_panel(window, ctx):

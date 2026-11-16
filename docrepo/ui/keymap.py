@@ -36,7 +36,8 @@ OTHER_KEYS = (
     ("Ctrl, held", "Shows the Ctrl shortcuts in the window, after half a second"),
     ("1 to 4, 0", "On the Priorities board: puts the selected card in Critical, High, Medium or Parking lot, or takes it out (0)"),
     ("Alt+Up, Alt+Down", "On the Priorities board: moves the selected card up or down in its bucket. The arrow keys move between cards; "
-                         "Enter opens the task. In Templates: moves the selected row among those beside it"),
+                         "Enter opens the task. In Templates: moves the selected row among those beside it. On Today: moves the selected "
+                         "item up or down the list, which keeps that order (release 5.148)"),
     ("Q", "On the Timeline: Quick edit for the selected row (release 5.91; a double-click is Edit task, as everywhere)"),
     ("R", "In Review's Projects step: marks the selected project reviewed (release 5.128)"),
     ("Alt+Right, Alt+Left", "In Review, from its list: the next step, or back, passing over empty ones. On a task page, Alt+Left "
@@ -89,8 +90,9 @@ WHEEL_KEYS = (
 #: The Today side panel (release 5.43), once its hotkey has brought the keyboard to it.
 PANEL_KEYS = (
     ("Up, Down", "Moves between Today's items"),
+    ("Alt+Up, Alt+Down", "Moves the item itself up or down Today's list (release 5.148)"),
     ("Enter", "Shows the item's detail"),
-    ("Space", "Done, asking whether to update the task too"),
+    ("Space", "Done: off Today, and on a task an Update opens on it"),
     ("Delete", "Removes it from Today"),
     ("Esc", "Back from the detail; then it contracts and the keyboard goes back to the window you were in"),
 )

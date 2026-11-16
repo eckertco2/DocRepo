@@ -5,14 +5,16 @@ Since release 5.115 (the design workspace's ``docs/mods/today-reminders-plan.md`
 and Done and Remove tell the Today side panel what they did, with Undo (decisions 420 and 421); Done today's rows have Put
 back; and a file, link or email dropped on a task's row opens an Update with it (decision 419). Since release 5.116, a
 reminder puts its task on Today as an item of its own, so Reminders has no heading here (decision 415), and a task's row on
-Today or Due in the next 7 days has Later (decision 417)."""
+Today or Due in the next 7 days has Later (decision 417). Since release 5.148 (``docs/mods/today-order-plan.md``, decisions 643
+to 648) Today's items are one list in the owner's order: dragged, moved with Alt+Up and Alt+Down, or by Move to top and Move
+to bottom on the right-click menu, while a file dropped on a task's row still opens an Update."""
 from __future__ import annotations
 
 
 from collections.abc import Callable
 from datetime import date
 
-from PySide6.QtCore import QPoint
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QColor, QCursor
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -28,7 +30,7 @@ from docrepo.detail import esc
 from docrepo.model import Model
 from docrepo.ui import today_meetings
 from docrepo.ui.lists import review as review_list
-from docrepo.ui.tree_view import Line, group_ground, state_icon, with_actions
+from docrepo.ui.tree_view import MOVE_ROLE, Line, group_ground, state_icon, with_actions
 from docrepo.views import (
     project_text,
     VIEW_IDS,
@@ -66,7 +68,8 @@ class TodayList:
 
 
     def _today_view(self) -> None:
-        """Today (mods log round 1, M0016): the day's list, items carried over first, then what's been done today."""
+        """Today (mods log round 1, M0016): the day's list in the owner's order (release 5.148), then Due in the next 7 days and
+        what's been done today."""
         m, today = self.model(), self.today()
         self._set_head("Today", VIEW_IDS["today"].note)
         # The box makes a quick task, or a note with the switch (mods log round 2, M0039).
@@ -88,9 +91,9 @@ class TodayList:
         grey = group_ground()
         review_list.today_row(self, grey)  # on the review day, "Weekly review" first (release 5.128, decision 502)
         today_meetings.add_group(self, grey)  # Meetings first, from the Outlook calendar (release 5.127, decision 490)
-        for name, group in today_groups(m, today):  # each group's items under its heading, which folds (release 5.24)
+        for name, group in today_groups(m, today):  # one list in the owner's order, under its heading, which folds (release 5.148)
             head = self.tree.add_row(None, None, [f"<b>{esc(name)}</b>"], grey, selectable=False, span=True)
-            for a in group:
+            for n, a in enumerate(group):
                 t = m.tasks.get(a.subject) if a.subject else None
                 key = ("task", t.id) if t else ("capture", a.added_by) if a.added_by in m.captures else None
                 # One line (decisions L1 and L3): the title, then its project and how long it's been carried, in quiet words.
@@ -114,6 +117,7 @@ class TodayList:
                 item = self.tree.add_row(head, key, _shape([line, _row_state(t.state) if t else _row_word("Note"), days]),
                                          tip=f"{tip}Added {long_date(date.fromisoformat(a.added[:10]), today)}")
                 self.tree.set_actions(item, self._today_actions(a.id, t.id if t else None))
+                self._movable(item, a.id, first=n == 0, last=n == len(group) - 1)
             head.setExpanded(True)
         if not m.today_items():
             self.tree.add_row(None, None, ['<span class="sub">Nothing on Today. Select a task and press D, or type a quick task above.</span>'],
@@ -126,11 +130,59 @@ class TodayList:
                 t = m.tasks.get(a.subject) if a.subject else None
                 line = Line(t.title if t else a.note, icon="state-cl", icon_tip="Done", context=f"Done at {(a.closed or '')[11:16]}", closed=True)
                 item = self.tree.add_row(head, ("task", t.id) if t else None, _shape([line, _row_state(t.state) if t else _row_word("Note"), ""]))
-                self.tree.set_actions(item, [("Back on Today", lambda i=a.id: self.put_back_today(i), "Put it back on Today, as it was")])
+                self.tree.set_actions(item, [("Back on Today", lambda i=a.id: self.put_back_today(i), "Put it back on Today, at the bottom")])
             head.setExpanded(True)
-        # A file, link or email dropped on a task's row (release 5.115, decision 419), as on the Today side panel.
+        # Today's rows dragged into the owner's order, or moved by Alt+Up and Alt+Down (release 5.148, decisions 643 and 646);
+        # no other row is dragged. And a file, link or email dropped on a task's row (release 5.115, decision 419), as on the
+        # Today side panel: told apart by what's dragged (decision 648).
+        self.tree.allow_row_moves(self._today_dropped, self._today_can_drop, self._today_step)
+        for row in self.tree.items():
+            if row.data(0, MOVE_ROLE) is None:
+                row.setFlags(row.flags() & ~Qt.ItemFlag.ItemIsDragEnabled)
         self.tree.take_file_drops(lambda key: isinstance(key, tuple) and key[0] == "task" and key[1] in m.tasks,
                                   lambda key, kind, paths: self.drop_on_task(key[1], kind, paths))
+
+    # ---- Today in the owner's order (release 5.148, decisions 643 to 646) ----
+    def _movable(self, item, item_id: int, first: bool, last: bool) -> None:
+        """A Today item's row: dragged by its number, landed on only before or after (Qt's line between rows), with Move to
+        top and Move to bottom on its right-click menu, each where it would move it."""
+        item.setData(0, MOVE_ROLE, ("today", item_id))
+        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsDropEnabled)
+        lines = [] if first else [("Move to top", lambda: self.move_today(item_id, to="top"), "First on Today. Alt+Up moves it one place")]
+        if not last:
+            lines.append(("Move to bottom", lambda: self.move_today(item_id, to="bottom"), "Last on Today. Alt+Down moves it one place"))
+        self.tree.set_menu_lines(item, lines)
+
+    @staticmethod
+    def _today_can_drop(key: object, target: object, where: str) -> bool:
+        """A Today item lands just before or after another (decision 643), never in one, and nothing else moves here."""
+        return (isinstance(key, tuple) and isinstance(target, tuple) and key[0] == target[0] == "today" and key != target
+                and where in ("before", "after"))
+
+    def _today_dropped(self, key: tuple[str, int], target: tuple[str, int], where: str) -> None:
+        self.move_today(key[1], beside=(target[1], where))
+
+    def _today_step(self, key: object, step: int) -> None:
+        """Alt+Up and Alt+Down on a Today item: one place up or down (decision 646)."""
+        if isinstance(key, tuple) and key[0] == "today":
+            self.move_today(key[1], to="up" if step < 0 else "down")
+
+    def move_today(self, item_id: int, *, to: str | None = None, beside: tuple[int, str] | None = None,
+                   tell: Callable[[str, Callable[[], None] | None], None] | None = None) -> bool:
+        """Move a Today item (decisions 643 and 646): to the top, the bottom, up or down, or beside another as a drag drops it.
+        It stays selected, so Alt+Up can go on. No Undo: it's moved back the same way. ``tell``: the Today side panel's line.
+        True if it moved."""
+        out = self._do(lambda: edits.move_today_item(self.conn, self.ctx.data_root, self.ctx.fs, item_id, self._now(), to=to, beside=beside),
+                       self.sel)
+        if not out:
+            return False
+        if self.view == "today":
+            row = next((r for r in self.tree.items() if r.data(0, MOVE_ROLE) == ("today", item_id)), None)
+            if row is not None and self.tree.currentItem() is not row:
+                self.tree.setCurrentItem(row)
+        if tell is not None and out.message:
+            tell(out.message, None)
+        return True
 
     def _today_due_rows(self, m: Model, today: date, grey: QColor) -> None:
         """Due in the next 7 days (mods log round 2, M0050): tasks overdue or due soon that aren't on Today, urgent ones first
@@ -251,8 +303,9 @@ class TodayList:
         self.say_undo(words, undo)
 
     def put_back_today(self, item_id: int, tell: Callable[[str, Callable[[], None] | None], None] | None = None) -> None:
-        """Back on Today, on a row of Done today (decision 420): the item is on Today again, as Undo puts it."""
-        out = self._do(lambda: edits.reopen_agenda_item(self.conn, self.ctx.data_root, self.ctx.fs, item_id, self._now()), self.sel)
+        """Back on Today, on a row of Done today (decision 420): the item is on Today again, at the bottom since release 5.148
+        (decision 645), as a new item goes."""
+        out = self._do(lambda: edits.back_on_today(self.conn, self.ctx.data_root, self.ctx.fs, item_id, self._now()), self.sel)
         if out and tell is not None:
             tell(out.message, None)
 

@@ -266,7 +266,10 @@ def test_a_restart_keeps_a_draft_whole(window, ctx, tmp_path):
     capture_folder = captures.capture_folder(ctx.data_root, c.id, c.saved)
     assert (capture_folder / "email.msg").read_bytes() == data
     assert c.emails[0].description == "Crane for the Tuesday lift"
-    assert (capture_folder / "attachments" / "Packing list.csv").read_bytes() == b"part,qty\nshackle,4\n"
+    # An attachment is a saved file, in the task's Files folder (release 5.145, decision 629); a pasted picture stays.
+    saved = {f.name for f in m.copies if f.from_capture == c.id}
+    assert f"{c.saved[:10]} Packing list.csv" in saved
+    assert (ctx.data_root / "Tasks" / c.task / "Files" / f"{c.saved[:10]} Packing list.csv").read_bytes() == b"part,qty\nshackle,4\n"
     assert (capture_folder / "attachments" / picture.row.name).read_bytes()[:4] == b"\x89PNG"
     assert listed(ctx) == []
 

@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo import __version__, backup, capacity, db, diagnose, hotkey, outlook, prompts, search, startup, tagged, wheels_config
+from docrepo import __version__, backup, capacity, db, diagnose, hotkey, layer0, outlook, prompts, search, startup, tagged, wheels_config
 from docrepo import tagged_masks as masks
 from docrepo.config import REVIEW_DAYS, Settings, data_root_problem, init_data_root, make_safe_fs, resolve_data_root, save_location
 from docrepo.dates import WEEKDAYS, long_date, stamp
@@ -147,6 +147,28 @@ def check_values(ctx: AppContext, values: dict[str, Any]) -> dict[str, Any]:
         raise SettingsProblem(f"There's no person {out['me']}.")
     if "tagged_patterns" in out or "tagged_never" in out:  # release 5.80
         out.update(check_tagged(out.get("tagged_patterns", ctx.settings.tagged_patterns), out.get("tagged_never", ctx.settings.tagged_never)))
+    out.update(check_link_lists(out))
+    return out
+
+
+def check_link_lists(values: dict[str, Any]) -> dict[str, Any]:
+    """Always keep, Never keep and Other links (release 5.146, decisions 635 and 637), checked and tidied: each list's lines
+    as the box has them, a line that isn't a site refused with its line number. Only the keys ``values`` holds."""
+    out: dict[str, Any] = {}
+    for key, name in (("links_keep", "Always keep"), ("links_drop", "Never keep")):
+        if key not in values:
+            continue
+        lines = [str(x) for x in values[key]]
+        bad = layer0.list_problem(lines)
+        if bad:
+            n, line, why = bad
+            raise SettingsProblem(f"{name}, line {n}: “{line}” can't be used: {why}. Each line is a domain, such as zoom.us, or a "
+                                  "domain and the start of a path, such as teams.microsoft.com/l/meetup-join.")
+        out[key] = layer0.tidy_list(lines)
+    if "other_links" in values:
+        if values["other_links"] not in layer0.OTHER_LINKS:
+            raise SettingsProblem("Other links are kept, shown unticked or left out.")
+        out["other_links"] = values["other_links"]
     return out
 
 
@@ -358,6 +380,38 @@ class ReferenceFields(QWidget):
     def links(self) -> dict[str, str]:
         """Each named reference field's link address, for those that have one."""
         return {r[0].text().strip(): r[1].text().strip() for r in self.rows if r[0].text().strip() and r[1].text().strip()}
+
+
+class SiteList(QWidget):
+    """One of the email link filter's lists (release 5.146, decision 635): a box with one site a line, and Restore defaults
+    under it, which puts the list's start back in the box (decision 639); Save settings keeps it."""
+
+    def __init__(self, name: str, start: tuple[str, ...], placeholder: str) -> None:
+        super().__init__()
+        self.start = start
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 8, 0, 8)
+        lay.setSpacing(4)
+        self.box = QPlainTextEdit()
+        self.box.setAccessibleName(name)
+        self.box.setPlaceholderText(placeholder)
+        self.box.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        self.box.setTabChangesFocus(True)
+        self.box.setFixedSize(380, 132)
+        lay.addWidget(self.box)
+        self.restore = QPushButton("Restore defaults")
+        self.restore.setToolTip(f"Puts {name}'s start back: " + (", ".join(start) if start else "empty"))
+        self.restore.setAccessibleName(f"Restore {name}'s defaults")
+        self.restore.clicked.connect(lambda: self.set(list(self.start)))
+        lay.addWidget(self.restore, 0, Qt.AlignmentFlag.AlignRight)
+
+    def set(self, entries: list[str]) -> None:
+        self.box.setPlainText("\n".join(entries))
+
+    def lines(self) -> list[str]:
+        """Each line as typed, blank ones too, so a refused one is named by its number."""
+        text = self.box.toPlainText()
+        return text.split("\n") if text.strip() else []
 
 
 class SettingsView(QWidget):
@@ -669,6 +723,14 @@ class SettingsView(QWidget):
         self.colour.setFixedWidth(240)
         self.progress_sends = QCheckBox("Log progress sends the email")
         self.progress_sends.setToolTip("Enter in Log progress sends the draft in its own window, held a minute in the Outbox")
+        # The email link filter (release 5.146, decisions 635 to 637 and 639): two lists of sites and Other links.
+        self.links_keep = SiteList("Always keep", (), "Such as example.sharepoint.com\nor intranet.example.com")
+        self.links_drop = SiteList("Never keep", layer0.DEFAULT_DROP, "Such as zoom.us")
+        self.other_links = QComboBox()
+        self.other_links.setAccessibleName("Other links")
+        for value, words in layer0.OTHER_LINKS.items():
+            self.other_links.addItem(words, value)
+        self.other_links.setFixedWidth(240)
         self._card(lay, "Outlook", [
             ("Categories", "When a capture with an Outlook email is saved on a task, DocRepo adds the task's name to the email in "
                            "Outlook as a category, so Outlook's search finds it (category:\"Pump trial\"). Nothing else on the email "
@@ -679,6 +741,15 @@ class SettingsView(QWidget):
                              "line, the wait and the follow-up; it's held a minute in the Outbox, where you can still stop it. A reply in "
                              "the reading pane can't be sent by a program, so it comes back to the front for you to send, as every "
                              "email does with this off.", self.progress_sends),
+            ("Always keep", "When an email's links are pulled out, a link from one of these sites always gets its row, ticked. One "
+                            "a line: a domain, which covers its subdomains, or a domain and the start of a path. Add your "
+                            "SharePoint's and intranet's.", self.links_keep),
+            ("Never keep", "A link from one of these sites never gets a row; the email's layer 0 line counts it as blocked. It "
+                           "starts with the links a meeting invitation carries. When both lists name a link, the longer entry wins. "
+                           "A link row's right-click menu adds its site to either list. Links you add yourself are never "
+                           "left out, and an email's text keeps every link.", self.links_drop),
+            ("Other links", "Links on neither list: kept, shown unticked (kept only if you tick them), or left out and counted as "
+                            "other links.", self.other_links),
         ])
 
     def _build_troubleshooting(self, lay) -> None:
@@ -699,7 +770,7 @@ class SettingsView(QWidget):
             ("Troubleshooting report", "DocRepo's versions, a check of reading the email selected in Outlook, recent drags and recent "
                                        "problems. It leaves out email text, names and addresses. Select an email in Outlook first.",
              _row(report, self.try_category, self.try_t_mail)),
-            ("Check the data root", "Captures whose capture.md is missing, documents and saved copies whose files aren't there, the "
+            ("Check the data root", "Captures whose capture.md is missing, documents and saved files that aren't there, the "
                                     "search index, and SQLite's own check of docs.db. Nothing is changed: each line says what you can do.",
              _row(check)),
         ])
@@ -745,6 +816,7 @@ class SettingsView(QWidget):
                 note = QLabel(what, objectName="hint")
                 note.setWordWrap(True)
                 ll.addWidget(note)
+            ll.addStretch(1)  # beside a tall control (release 5.146's lists) the name and its line stay at the top
             grid.addWidget(left, 2 * i, 0)
             grid.addWidget(control, 2 * i, 1, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             if i < len(rows) - 1 and rows[i + 1][0] is not None:
@@ -828,6 +900,8 @@ class SettingsView(QWidget):
         self.meetings_on.setChecked(s.today_meetings)
         self.meeting_links.load()
         self.progress_sends.setChecked(s.progress_sends)
+        self.show_link_lists()
+        self.other_links.setCurrentIndex(max(0, self.other_links.findData(s.other_links)))
         self.startup_status.setText(f"<b>Start when you sign in:</b> {startup.status()}")
         self.show_backup_status()
         self.error.hide()
@@ -849,7 +923,13 @@ class SettingsView(QWidget):
             "look": self.look.currentData(), "show_hints": self.hints.isChecked(), "outlook_categories": self.categories.isChecked(),
             "outlook_category_colour": self.colour.currentData(), "today_meetings": self.meetings_on.isChecked(),
             "progress_sends": self.progress_sends.isChecked(),
+            "links_keep": self.links_keep.lines(), "links_drop": self.links_drop.lines(), "other_links": self.other_links.currentData(),
         }
+
+    def show_link_lists(self) -> None:
+        """Always keep and Never keep as saved (release 5.146): also when a link row's right-click menu changed one."""
+        self.links_keep.set(self.ctx.settings.links_keep)
+        self.links_drop.set(self.ctx.settings.links_drop)
 
     def save(self) -> list[str]:
         """Save what changed, and say so. Returns the fields that changed: none when nothing did or a value is refused."""

@@ -7,7 +7,7 @@ from datetime import date, datetime
 
 import pytest
 
-from docrepo import items
+from docrepo import agenda, edits, items
 from docrepo.config import Settings
 from docrepo.model import TODAY, Model
 from docrepo.save import CaptureDraft, item_names, save_capture
@@ -207,6 +207,17 @@ def test_a_task_already_on_today_isnt_added_twice(sample_root):
     save(sample_root, "#Rigging plan **today")
     r = save(sample_root, "#Rigging plan **today", minute=5)
     assert [s for s, _ in today(conn)].count(RIGGING) == 1 and r.unused == 0 and not r.made.get("agenda")
+
+
+def test_it_goes_at_the_bottom_of_today_in_the_owners_order(sample_root):
+    conn, root, fs = sample_root
+    at = datetime(2026, 10, 8, 8, 0)
+    for t in ("T000002", "T000001"):
+        edits.add_to_today(conn, root, fs, t, "", at)
+    first, second = (a.id for a in Model(conn).today_items())
+    agenda.move_item(conn, second, 0)  # the owner's order (release 5.148)
+    save(sample_root, "#Rigging plan **today")
+    assert [a.subject for a in Model(conn).today_items()] == ["T000001", "T000002", RIGGING]  # a new item at the bottom (decision 645)
 
 
 def test_saving_with_agenda_tom_puts_it_on_both(sample_root):

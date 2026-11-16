@@ -124,9 +124,9 @@ class DocumentLists:
                     said = "in " + (f"{name}, {self._day(day)}" if day else name)
                     where = said if meeting == c.task else f"{where} · {said}"
             when = self._day(c.saved)
-        elif r.group == "Saved copy":  # its name without the day it starts with, which is the row's date (decision 429)
+        elif r.group == "Saved file":  # its name without the day it starts with, which is the row's date (decision 429)
             kind = file_type(r.title)
-            icon, colour, tip = type_icon(kind), type_colour(kind), "Saved copy"
+            icon, colour, tip = type_icon(kind), type_colour(kind), "Saved file"
             where = m.task(r.id).title if r.id in m.tasks else ""
             day, title = dated_name(r.title)
             when = self._day(day)
@@ -141,7 +141,7 @@ class DocumentLists:
             icon, colour, tip = {"person": "person", "label": "labels", "tagged": "tagged"}.get(r.kind, "file"), "text2", r.kind.capitalize()
             rest = snippet or re.sub(rf"^{re.escape(r.id)}( · )?", "", r.sub)  # no ID (decision L4): it's in the tooltip
         second = " · ".join(x for x in (where, rest) if x)
-        if r.kind == "task" and r.group not in ("Saved copy", "Notes") and r.id in m.tasks and not LOOK.classic:
+        if r.kind == "task" and r.group not in ("Saved file", "Notes") and r.id in m.tasks and not LOOK.classic:
             # A task tile (release 5.138, the task tile plan's decision 563): its depth ticks (search is flat), flag, two-parents
             # mark and marks; no days, as the When column keeps a task's empty (decision 430).
             from docrepo.ui.lists.common import tile_cells

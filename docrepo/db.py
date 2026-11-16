@@ -26,7 +26,7 @@ from docrepo.safe_fs import SafeFS
 log = logging.getLogger(__name__)
 
 DB_FILE = Path("System") / "docs.db"
-SCHEMA_VERSION = 28
+SCHEMA_VERSION = 29
 #: How long, in seconds, a statement waits for docs.db while another connection holds it (SQLite's busy timeout, release
 #: 5.102) before it gives up with "database is locked". A backup's copy holds it for as long as the copy takes. Python's
 #: own default is 5 seconds.
@@ -159,7 +159,7 @@ CREATE TABLE capture_attachments (
     name    TEXT NOT NULL,
     PRIMARY KEY (capture, pos)
 );
--- A tracked original that changed. It isn't a capture. It joins the raw text log of its document's tasks.
+-- A linked file that changed. It isn't a capture. It joins the raw text log of its document's tasks.
 CREATE TABLE document_versions (
     id           INTEGER PRIMARY KEY,
     document     TEXT NOT NULL REFERENCES documents(id),
@@ -699,6 +699,13 @@ DROP TABLE t_mails;
 ALTER TABLE t_mails_new RENAME TO t_mails;
 CREATE INDEX t_mails_conversation ON t_mails (conversation);
 CREATE INDEX t_mails_task ON t_mails (task, opened);
+""",
+    29: """
+-- Today in the owner's order (release 5.148, the design workspace's docs/mods/today-order-plan.md, decisions 643 and 647):
+-- an open agenda item's place in its list, 1 at the top. Empty until the item has a place, then set for every open Today
+-- item at the first drag, Move to top or bottom, or Alt+Up and Alt+Down, and a new item goes after the last. Until then
+-- Today is in the order its items were added. Any agenda could use it, though only Today's are set.
+ALTER TABLE agenda_items ADD COLUMN pos INTEGER;
 """,
 }
 

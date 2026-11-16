@@ -45,6 +45,7 @@ from docrepo.ui.icons import icon
 from docrepo.ui.look import LOOK
 from docrepo.ui.page_view import PageView
 from docrepo.ui.result_list import ResultList, Row
+from docrepo.ui.save_link import SaveLinkZones
 from docrepo.ui.state_menu import UndoButton, can_change, state_menu
 from docrepo.ui import t_mails, task_menus
 from docrepo.ui.style import page_css
@@ -125,6 +126,8 @@ class TaskView(QWidget):
         self.setObjectName("browse")
         self.setStyleSheet(_QSS.format(**tokens.LIGHT))
         self.setAcceptDrops(True)
+        # Files from File Explorer: Save in DocRepo or Link (release 5.145, decision 633), raised over the rest while dragged.
+        self.zones = SaveLinkZones(self, lambda zone, paths: self.take_drop("files", paths, zone))
         #: Opens a file in its own program. Tests replace it.
         self.starter: Callable[[str], None] | None = None
         #: Whether a file is there; on a LAN path it can take seconds, so it's only asked on a worker thread. Tests replace it.
@@ -1427,20 +1430,32 @@ class TaskView(QWidget):
         super().closeEvent(event)
 
     # ---- dropping files and emails on it (decision 165): the capture window takes them, on this task ----
+    # Files from File Explorer meet the two zones, Save in DocRepo and Link, and each is saved or linked by the one it lands
+    # on (release 5.145, the save or link plan's decision 633).
     def dragEnterEvent(self, event) -> None:  # noqa: N802 - Qt's name
         from docrepo.ui.capture_window import read_drop
 
-        kind, _ = read_drop(event.mimeData(), links=True)
+        kind, paths = read_drop(event.mimeData(), links=True)
         if kind:
             event.acceptProposedAction()
+            if kind == "files":
+                self.zones.cover(paths)
 
     def dropEvent(self, event) -> None:  # noqa: N802 - Qt's name
         from docrepo.ui.capture_window import read_drop
+        from docrepo.ui.save_link import zone_at
 
+        self.zones.uncover()
         kind, paths = read_drop(event.mimeData(), links=True)
-        if not kind or self.browse.capture is None:
+        if not kind:
             return
         event.acceptProposedAction()
+        self.take_drop(kind, paths, zone_at(self.width(), event.position().x()) if kind == "files" else "")
+
+    def take_drop(self, kind: str, paths: list[str], zone: str = "") -> None:
+        """A drop, on the zones or the window: the capture window takes it, as a note on this task."""
+        if self.browse.capture is None:
+            return
         self.browse.open_capture(task=self.task_id, mode="note")
-        self.browse.capture.dropped(kind, paths)
+        self.browse.capture.dropped(kind, paths, zone)
         self.say("The capture window has them, as a note on this task. Add a word if you like, and save.")

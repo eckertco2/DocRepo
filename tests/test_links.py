@@ -120,7 +120,8 @@ def test_the_capture_window_takes_links(qapp, sample_root):
         w._sync_paths()
         [entry] = w.files
         assert (entry.row.name, entry.row.path, entry.src) == ("Seal kit spec 2026-11-30.pdf", SPEC, "pasted")
-        assert entry.copy.isHidden() and entry.extract.isHidden() and w.copy_hint.isHidden()
+        # A link is linked and can't change, so nothing here can be saved and there's no line saying where (release 5.145).
+        assert entry.switch.fixed and not entry.switch.saved() and entry.extract.isHidden() and w.files_line.isHidden()
         assert w.focusWidget() is not entry.desc  # typing a link by hand isn't interrupted
         w.content.setPlainText("Seal kit spec:")
         w._sync_paths()

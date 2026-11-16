@@ -551,11 +551,11 @@ def since_text(added: str, today: date) -> str:
 
 
 def today_groups(m: Model, today: date) -> list[tuple[str, list[AgendaItem]]]:
-    """Today's open items in their groups: those carried over from earlier days, then those added today."""
+    """Today's open items, under their heading: since release 5.148 (decisions 643 and 644) one list in the owner's order,
+    "Today", where a carried item keeps its "since Mon" on its row; until the first drag, those carried over first, the
+    oldest first, then today's as they came. Before, Carried over and Added today were two groups. Empty with no items."""
     items = m.today_items()
-    carried = [a for a in items if a.added[:10] < today.isoformat()]
-    fresh = [a for a in items if a.added[:10] >= today.isoformat()]
-    return [g for g in (("Carried over", carried), ("Added today" if carried else "Today", fresh)) if g[1]]
+    return [("Today", items)] if items else []
 
 
 def today_due_entries(m: Model, today: date, me: str | None, mine_only: bool = False) -> list:
