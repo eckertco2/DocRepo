@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
 
-from docrepo import activity, agenda, bulk, captures, notes_page, people, priorities, quick, repeats, search, tasks, waits, whatif
+from docrepo import activity, agenda, bulk, captures, notes_page, page_lines, people, priorities, quick, repeats, search, tasks, waits, whatif
 from docrepo.config import Settings
 from docrepo.dates import long_date, stamp, to_date, workday_numbers
 from docrepo.db import transaction
@@ -68,19 +68,24 @@ def write_touched_pages(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, a
 
 
 # ---- the notes page (release 5.25) ----
-def stories_for(conn: sqlite3.Connection, data_root: Path, at: datetime, model: Model | None = None) -> tuple[Model, Stories]:
+def stories_for(conn: sqlite3.Connection, data_root: Path, at: datetime, model: Model | None = None,
+                settings: Settings | None = None) -> tuple[Model, Stories]:
+    """The model and its Stories, reading captures' words from the data root, with its Settings (release 5.150: a
+    capture's block names its reference fields' operators in its change lines)."""
     model = model or Model(conn)
-    return model, Stories(model, at.date(), lambda cid: captures.read_content(data_root, model.captures[cid]) or "")
+    stories = Stories(model, at.date(), lambda cid: captures.read_content(data_root, model.captures[cid]) or "")
+    stories.settings = settings or page_lines.settings_of(data_root)
+    return model, stories
 
 
 def add_to_pages(conn: sqlite3.Connection, data_root: Path, at: datetime, added: list[tuple[str, str | None]], problems: list[str],
-                 tasks_: list[str] | None = None) -> list[str]:
+                 tasks_: list[str] | None = None, settings: Settings | None = None) -> list[str]:
     """Put each capture's block on its tasks' notes pages (or ``tasks_``), given as (capture, its typed text, or None to
     read it), and index the pages for search. A page that can't be changed is a problem, not a failed change: the
     capture is kept, and its task page's Captures tab offers to add it again. Returns the tasks whose pages changed."""
     changed: list[str] = []
     try:
-        model, stories = stories_for(conn, data_root, at)
+        model, stories = stories_for(conn, data_root, at, settings=settings)
         for capture_id, typed in added:
             if capture_id in model.captures:
                 changed += notes_page.add_capture(conn, model, stories, capture_id, at, typed, tasks_)
@@ -91,17 +96,20 @@ def add_to_pages(conn: sqlite3.Connection, data_root: Path, at: datetime, added:
 
 
 def add_note(conn: sqlite3.Connection, task_id: str, typed: str, formatted: bool, at: datetime,
-             made: list[tuple[str, str]] = ()) -> list[str]:
+             made: Sequence[tuple] = (), said: page_lines.Said | None = None) -> list[str]:
     """A note from the capture window on its task's page, as no capture (release 5.69, the notes workspace plan's
     decisions 341 and 345): under the page's headings with the same words as its own, or under the day's heading
     (``notes_page.place_note``). It's the owner's own edit, so the day's version counts in Activity's Notes edited, and
     the page is indexed for search. ``typed`` is the text as capture.md would keep it. ``made`` is each task its items
-    made, with the item's text as its capture keeps it: on the page each is one task line (release 5.83, R4b). It joins
-    the caller's transaction, so a save that fails keeps nothing and the window keeps the text. Returns the headings
-    it went under."""
-    lines = notes_page.note_markup(typed, formatted, own=task_id)
+    made, with the item's text as its capture keeps it, and whether that's markup: on the page each is one task line (release
+    5.83, R4b; since release 5.150 each item read as its own capture is, so a plain item in formatted notes is found too). ``said``
+    is what the save's items did: each line whose operators did what they say is a change line (release 5.150,
+    ``page_lines``). It joins the caller's transaction, so a save that fails keeps nothing and the window keeps the text.
+    Returns the headings it went under."""
+    rewrite = page_lines.said_rewrite(said, task_id, Model(conn)) if said is not None else None
+    lines = notes_page.note_markup(typed, formatted, own=task_id, rewrite=rewrite)
     if made and lines:
-        lines = notes_page.task_lines(lines, [(tid, notes_page.note_markup(text, formatted, "", task_id)) for tid, text in made],
+        lines = notes_page.task_lines(lines, [(x[0], notes_page.note_markup(x[1], x[2] if len(x) > 2 else formatted, "", task_id)) for x in made],
                                       Model(conn), at.date())
     if not lines:
         return []
@@ -1150,6 +1158,64 @@ def undo_tidy(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, undo: Seque
         words += f" {', '.join(m.task(t).title for t in kept if t in m.tasks)} changed since, so stayed."
     out = Outcome(words)
     write_all_pages(conn, data_root, fs, at, out.problems)
+    return out
+
+
+# ---- Tidy the notes (release 5.150, the notes syntax plan's decision 656) ----
+def notes_to_tidy(model: Model, stories: Stories, task_ids: Iterable[str]) -> list[page_lines.TidyLine]:
+    """Each line on these tasks' pages that Tidy the notes would write otherwise (``page_lines.tidy_lines``), page by page."""
+    out: list[page_lines.TidyLine] = []
+    for task_id in task_ids:
+        t = model.tasks.get(task_id)
+        if t is not None and not t.discarded:
+            out += page_lines.tidy_lines(model, stories, task_id)
+    return out
+
+
+def tidy_notes(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, chosen: Sequence[page_lines.TidyLine], at: datetime
+               ) -> tuple[Outcome, list[tuple[str, str, str]]]:
+    """Tidy the notes (decision 656): the chosen lines written as release 5.150 writes them, the pages saved together as
+    the owner's edits (the day's version, search, Task.md). A line changed since it was listed stays. Returns what it
+    said, and each page before and after, for Undo."""
+    m = Model(conn)
+    by_page: dict[str, list[page_lines.TidyLine]] = {}
+    for t in chosen:
+        by_page.setdefault(t.task, []).append(t)
+    bodies: dict[str, str] = {}
+    undo: list[tuple[str, str, str]] = []
+    n = 0
+    for task_id, lines in by_page.items():
+        before = m.pages.get(task_id, "")
+        after, done = page_lines.apply_tidy(before, lines)
+        if done:
+            bodies[task_id] = after
+            undo.append((task_id, before, after))
+            n += done
+    out = Outcome("")
+    if bodies:
+        _save_pages(conn, data_root, fs, bodies, at, out)
+    pages = len(bodies)
+    if n:
+        where = m.task(next(iter(bodies))).title + "'s notes" if pages == 1 else f"{pages} pages"
+        out.message = f"Tidied {n} line{'s' if n != 1 else ''} on {where}."
+    else:
+        out.message = "Nothing changed: those lines have changed since."
+    log.info("tidied %d lines on %d notes pages", n, pages)
+    return out, undo
+
+
+def undo_tidy_notes(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, undo: Sequence[tuple[str, str, str]], at: datetime) -> Outcome:
+    """Tidy's Undo: each page back as it was, while it's still as Tidy left it; one edited since stays, and the line says so."""
+    m = Model(conn)
+    bodies = {task_id: before for task_id, before, after in undo if m.pages.get(task_id, "") == after}
+    kept = [task_id for task_id, _, after in undo if task_id not in bodies]
+    out = Outcome("")
+    if bodies:
+        _save_pages(conn, data_root, fs, bodies, at, out)
+    n = len(bodies)
+    out.message = f"Set back: {n} page{'s' if n != 1 else ''} as {'it was' if n == 1 else 'they were'}."
+    if kept:
+        out.message += f" {', '.join(m.task(t).title for t in kept if t in m.tasks)} changed since, so stayed."
     return out
 
 

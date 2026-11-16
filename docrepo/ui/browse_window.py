@@ -80,7 +80,7 @@ from docrepo.ui.task_picker import TaskPicker
 from docrepo.ui.timeline_view import TimelineView
 from docrepo.ui.state_menu import UNDO_MS, can_change, open_below, picked_line, state_menu
 from docrepo.ui.tree_view import HTML_ROLE, KEY_ROLE, RowTree
-from docrepo.ui import conversation_page, task_menus, tidy_follow_ups, today_meetings
+from docrepo.ui import conversation_page, task_menus, tidy_follow_ups, tidy_notes, today_meetings
 from docrepo.ui import task_tile as tile_ui
 from docrepo.ui.widgets import SAVE_KEYS, DropButton, FlowLayout, Option, ViewStack, ask, label_options, people_options
 from docrepo.views import (
@@ -833,13 +833,15 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
                     Command("Task", "Apply template", lambda: self.templates.apply([tid])),
                     Command("Task", "Export tree", lambda: self.tree_files.export_task(tid)),
                     Command("Task", "Open folder", lambda: self.reveal(self.ctx.data_root / "Tasks" / tid)),
-                    Command("Task", tidy_follow_ups.NAME, lambda: tidy_follow_ups.run(self, tid))]
+                    Command("Task", tidy_follow_ups.NAME, lambda: tidy_follow_ups.run(self, tid)),
+                    Command("Task", tidy_notes.NAME, lambda: tidy_notes.run(self, tid))]  # release 5.150
         out += [Command("View", v.label, lambda v=v.id: self.set_view(v)) for v in VIEWS]
         # The Urgent view's place in the palette (release 5.97, decision 386): the task tree, Urgent only.
         out.append(Command("View", "Urgent tasks (the task tree, Urgent only)", self.show_urgent))
         out += [Command("", "New capture", lambda: self.open_capture(), self.ctx.settings.hotkey),
                 Command("", "Import a tree file", self.tree_files.import_tree),
                 Command("", "Move follow-ups out of every meeting…", lambda: tidy_follow_ups.run(self, None)),  # release 5.142
+                Command("", tidy_notes.EVERY, lambda: tidy_notes.run(self, None)),  # release 5.150
                 Command("", "Search everything", self.search_box.setFocus, "Ctrl+Shift+F"),
                 Command("", "Quick summary: a person, an agenda or a label", lambda: self.ctx.open_summary(None)),
                 *summary_commands(self.ctx),  # each saved set (release 5.149, decision 651)

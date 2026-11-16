@@ -38,7 +38,11 @@ def test_saving_adds_each_date_line_to_its_task(sample_root):
     log = conn.execute("SELECT field, via FROM status_log WHERE task = 'T000008' AND field = 'Key date'").fetchall()
     # Text alone on a task is no capture (release 5.69): the date is logged as the capture window's, and the page keeps the line.
     assert r.capture_id is None and [tuple(x) for x in log] == [("Key date", "Capture window")]
-    assert "**key date, Dec 1 to 5 trial execution window, plant activity." in notes_page.words(notes_page.get(conn, "T000008"))
+    # The page has each line that made a key date as a change line (release 5.150, decision 654); the one with no date stays as typed.
+    page = notes_page.get(conn, "T000008").split("\n")
+    assert notes_page.change_line("", "T000008", "Key date Trial execution window, Tue 1 Dec to Sat 5 Dec") in page
+    assert notes_page.change_line("Rigging plan", "T000012", "Key date Prep done, Wed 25 Nov") in page
+    assert "**key date, trial planning period." in notes_page.words("\n".join(page))
     assert not any(x.item == "date" for x in Model(conn).captures.values())  # no capture of its own
 
 

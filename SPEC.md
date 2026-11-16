@@ -293,6 +293,28 @@ The words used here are defined in `GLOSSARY.md`.
   decision there", "an update there"), taking the `#` heading line above it when that names the same task: the words
   are on the task's page, under their caption, and no longer copied onto the meeting's too (release 5.8's decision
   105). Pages saved before keep their copies. A pointer line opens the task's page at its block.
+- **Notes without the operators** (release 5.150; the design workspace's `docs/mods/notes-syntax-plan.md`, decisions 652
+  to 657; `docrepo/page_lines.py`): a line whose operators all did what they say is a **change line**, its words without
+  the operators (names as names) and what it did after a dot, its link the task it changed:
+  `[Rigging plan](change:T000012) · Due Mon 30 Nov · Lead Tom Becker`, `[Ask about the hire rate](change:T000008) · on
+  Tom Becker's agenda`, `[Seals look worn](change:T000008) · Rigging` (a list item stays one, `- [ … ](change:…) · …`).
+  A `**` kind says what its item was ("Rigging plan: crane booked · Closed", "… · Decision"), and its item's block on
+  the task it changed reads the same. A made task's own block shows the line it came from without its operators and a
+  **set line** under its words, `[Set from Pump trial's notes](set:T000010) · Due Fri 23 Oct · Rigging`; a line that's
+  only its title isn't repeated. A line whose operator read as nothing (its Unread card, 5.92) or wasn't used (a field
+  already filled, a card unticked) stays as typed, and so does a meeting's `#task` section, a pointer line. What a line
+  did is read from its item (`items.Reading`), never from the page: at Save, a note that's no capture from the save's
+  reading and what its items did (`page_lines.Said`); a capture's block from its words read again as of the day it was
+  saved, each operator checked against what that save left in the status log, the agenda and its item captures
+  (`page_lines.recorded`), so the block is the same whenever it's worked out. Discarding a capture finds its block in
+  either words, written before 5.150 or since. capture.md and the raw text log keep every line as typed; a change line
+  edited on the page changes the page only. In the editor a task line is drawn as its task's tile (its circle opens the
+  state menu, its right-click is the tile's menu) and a change or set line is kept whole, as a task line is; All notes,
+  the Today panel's notes and search show them as their words and what they did, and Task.md prints a change line's words
+  as a link and what it did in italics. **Tidy the notes…** (the task page's More menu, and the command palette for a
+  page or every page) lists each line an older page keeps as typed that 5.150 writes otherwise, before and after, ticked,
+  and changes the ticked ones as the owner's edit, with Undo for ten seconds: a capture's block line by line against the
+  block as it was written, lines typed on the page by the status log and agenda of their day.
 - **Where it goes** (`notes_page.add_block`): at the end of its day's lines, which run to the next day heading whatever
   other headings come between (release 5.28), or under a new heading for its day, made in date order among the day
   headings (97, 113). Since release 5.69 every task's page has day headings (`Model.uses_day_headings`): decision 119's
