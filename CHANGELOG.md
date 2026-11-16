@@ -4,9 +4,9 @@ One line per release, newest first: its number, the date it was built, and what 
 
 Since 2026-11-12, releases ship in weekly trains (the design workspace's `docs/mods/cold-eyes-plan.md`, decisions 464 to 468): each train has a heading with the day it was pushed to GitHub, over its releases. Releases keep their own numbers and tags.
 
-## Next train (Thursday 2026-11-19, not pushed yet)
+## Second train of 2026-11-16
 
-Built for the push of Thursday 2026-11-19 (the design workspace's `docs/mods/train-2026-11-19-plan.md`), each merged to `main` at the owner's word. The heading takes the day it's pushed. 5.152 adds a concept (a view and a glossary term) on a train that was to settle (decision 467), at the owner's word ("I want to push the workspace view"), as decision 626 allowed before.
+Release 5.152 alone, pushed to GitHub on Monday 2026-11-16, a few hours after the train of 2026-11-16, at the owner's word ("I want to push the workspace view", then "As soon as it's built"): the workspace (the design workspace's `docs/mods/workspace-view-plan.md`). It adds a concept (a view and a glossary term) where the train after one that adds concepts was to settle (decision 467); the owner chose to push it now, as decision 626 did before. 5.154 and 5.155, built for Thursday 2026-11-19, aren't merged and aren't in it. No schema change (29) and no new package; the version stays 5.153, the highest release in. Its corporate test is the design workspace's `handoff/docrepo/release-5-152-test.md`.
 
 | Release | Date | What |
 |---|---|---|
