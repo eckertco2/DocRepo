@@ -4,9 +4,9 @@ One line per release, newest first: its number, the date it was built, and what 
 
 Since 2026-11-12, releases ship in weekly trains (the design workspace's `docs/mods/cold-eyes-plan.md`, decisions 464 to 468): each train has a heading with the day it was pushed to GitHub, over its releases. Releases keep their own numbers and tags.
 
-## Next train (Thursday 2026-11-19, not pushed yet)
+## Train of 2026-11-16
 
-Built for the push of Thursday 2026-11-19 (the design workspace's `docs/mods/train-2026-11-19-plan.md`), each merged to `main` at the owner's word. The heading takes the day it's pushed.
+Releases 5.145 to 5.151 and 5.153, pushed to GitHub on Monday 2026-11-16, three days before its Thursday, at the owner's word ("I want the train to go out today"), with everything merged by then (the design workspace's `docs/mods/train-2026-11-16-plan.md`). It adds concepts at the owner's word (decision 626), so the next train, Thursday 2026-11-19, settles (decision 467). 5.152 is kept for the workspace, not built yet. Schema 29 (5.148); no new package. Its corporate test is the design workspace's `handoff/docrepo/train-2026-11-16-test.md`, which gathers the eight releases' tests.
 
 | Release | Date | What |
 |---|---|---|
