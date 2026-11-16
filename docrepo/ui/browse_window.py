@@ -81,6 +81,7 @@ from docrepo.ui.timeline_view import TimelineView
 from docrepo.ui.state_menu import UNDO_MS, can_change, open_below, picked_line, state_menu
 from docrepo.ui.tree_view import HTML_ROLE, KEY_ROLE, RowTree
 from docrepo.ui import conversation_page, people_import, task_menus, tidy_follow_ups, tidy_notes, today_meetings
+from docrepo.ui import workspace as workspace_ui
 from docrepo.ui import task_tile as tile_ui
 from docrepo.ui.widgets import SAVE_KEYS, DropButton, FlowLayout, Option, ViewStack, ask, label_options, people_options
 from docrepo.views import (
@@ -225,7 +226,9 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
                               ("Ctrl+F", self.open_find), ("Ctrl+Shift+F", self.search_box.setFocus), ("F1", self.show_keys), ("F5", self.read_again),
                               ("Ctrl+B", lambda: self.show_views_pane(not self.views_button.isChecked())), ("Ctrl+K", self.open_palette),
                               # The weekly review (release 5.128): R marks a project reviewed in step 4.
-                              ("R", lambda: None if self._typing() else review_list.mark_reviewed(self))):
+                              ("R", lambda: None if self._typing() else review_list.mark_reviewed(self)),
+                              # Work on it (release 5.152, the workspace plan's decision 663): the selected task's workspace.
+                              ("W", lambda: workspace_ui.work_key(self))):
             QShortcut(QKeySequence(keys), self, handler)
         # Review's Next and Back (release 5.128) work from the list pane, so the task page keeps its own Alt+Left, back to
         # All notes (release 5.140): two shortcuts on one key where focus is would fire neither.
@@ -368,8 +371,11 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         # The task tile's one menu (release 5.138, the task tile plan's decision 573): Open, the row's own lines, State, Add to,
         # Ask for an update, Log progress, Note, Update, New task under, Edit, Priority and Copy, in every view of tasks; Ask
         # for an update first among a waiting list's own (Waiting on others, the review's Waiting step).
-        self.tree.tile_menu = lambda task_id, menu, own: tile_ui.fill_menu(self, task_id, menu, own, anchor=self.tree, ask_first=self._asks())
-        self.tree.task_opened = lambda task_id: tile_ui.open_task(self, task_id)  # Enter, as a double-click (decision 572)
+        # Work on it on every tile's menu, first on Today's, where Enter and a double-click open the workspace (release 5.152,
+        # the workspace plan's decisions 663 and 667).
+        self.tree.tile_menu = lambda task_id, menu, own: tile_ui.fill_menu(self, task_id, menu, own, anchor=self.tree, ask_first=self._asks(),
+                                                                         work_first=self.view == TODAY)
+        self.tree.task_opened = lambda task_id: workspace_ui.open_row(self, task_id)  # Enter, as a double-click (decision 572)
         lp.addWidget(self.tree, 1)
         self.middle.addWidget(list_page)
         if LOOK.classic:  # the new look has it on the Timeline's page (decision 229)
@@ -939,6 +945,9 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         return self._filter_widget(b)
 
     def render_list(self) -> None:
+        if workspace_ui.is_open(self):  # the workspace takes the list's and the page's room (release 5.152, decision 682)
+            workspace_ui.render(self)
+            return
         self.detail.setVisible(self.view not in ("capacity", "settings", "timeline", "priorities"))
         if self.view == "priorities":
             self.middle.setCurrentWidget(self.priorities)
@@ -987,6 +996,9 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         self._apply_find()
 
     def render_detail(self, keep_scroll: bool = False) -> None:
+        if workspace_ui.is_open(self):  # the workspace shows the task (release 5.152)
+            self.detail.hide()
+            return
         scroll = self.page.verticalScrollBar().value() if keep_scroll else 0
         self._clear_actions()
         self.sync_toolbar()
@@ -1067,8 +1079,8 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         m = self.model()
         if kind == "task":  # a task tile opens its page (release 5.138, the task tile plan's decision 572): Edit task is E
             t = m.tasks.get(ident)
-            if t is not None and not t.discarded:
-                tile_ui.open_task(self, ident)
+            if t is not None and not t.discarded:  # on Today, its workspace (release 5.152, the workspace plan's decision 667)
+                workspace_ui.open_row(self, ident)
         elif kind == "capture":
             note = next((a for a in m.today_items() if a.subject is None and a.added_by == ident), None) if self.view == TODAY else None
             c = m.captures.get(ident)
@@ -1122,7 +1134,9 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         self.select(*key)
 
     def select(self, kind: str, item: str, tab: str | None = None, update_list: bool = False, keep_row: bool = False) -> None:
-        """Show an item's page. Each task opens with the scope at With subtasks, and its chapters closed."""
+        """Show an item's page. Each task opens with the scope at With subtasks, and its chapters closed. The workspace
+        goes first, when it's open (release 5.152)."""
+        workspace_ui.leave(self)
         new = (kind, item)
         if new != self.sel:
             if kind == "task":
@@ -1206,6 +1220,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         view = self._route_retired(view) or ""
         if view not in VIEW_IDS:
             return
+        workspace_ui.leave(self)  # a place picked in the sidebar leaves the workspace for it (release 5.152, decision 682)
         if view == "capacity" and not LOOK.classic:  # one page for both (decision 229)
             self.timeline.show_capacity()
             view = "timeline"
@@ -1368,7 +1383,9 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
             self.dirty = True
             return
         self.refresh(render=False)
-        if result.created_task:
+        if workspace_ui.is_open(self):  # the workspace stays, drawn again with what was saved (release 5.152)
+            self.render_all()
+        elif result.created_task:
             self.go_task(result.created_task, pin=True, tab="notes")
         elif result.agenda_targets and not result.changes:
             self.show_agenda(result.agenda_targets[0])

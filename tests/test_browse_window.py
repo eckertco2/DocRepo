@@ -859,7 +859,7 @@ def test_one_letter_per_topic(browse, monkeypatch):
     labels = [b.text() or b.accessibleName() for b in browse.actions.findChildren(QPushButton)]
     # More is an icon at the row's end (release 5.21); Find files is the Files group's (5.98); Edit a split button (5.98);
     # New T-mail a split button, Reply all on its arrow (5.105), and since 5.125 Ask for an update too, so the arrow is More T-mails
-    assert labels == ["Note", "Update", "New T-mail", "More T-mails", "Add to", "Edit", "More ways to edit", "More"]
+    assert labels == ["Note", "Update", "New T-mail", "More T-mails", "Add to", "Edit", "More ways to edit", "Work on it", "More"]  # Work on it: release 5.152
 
 
 def test_the_task_page_bar_and_its_links(browse, monkeypatch):

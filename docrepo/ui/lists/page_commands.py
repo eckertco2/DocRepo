@@ -67,6 +67,11 @@ class PageCommands:
         self._split_action(task_commands.EDIT, lambda: self.edit_task(task_id), "Edit task: every field on one page",
                            task_menus.edit_menu(self, task_id, self), "More ways to edit: Move…, Put under…, Also put under…, Remove from under… and Discard…",
                            icon_name="edit", key="E")
+        # Work on it (release 5.152, the workspace plan's decision 663): the task's workspace, for doing the work.
+        from docrepo.ui import workspace as workspace_ui
+
+        self._action(workspace_ui.WORK_ON_IT, lambda: workspace_ui.open_workspace(self, task_id), workspace_ui.WORK_TIP.removesuffix(" (W)"),
+                     primary=True, icon_name="workspace", key="W")
         # More: New task under this one, the agenda, Copy (release 5.9: its people's email addresses, M0031, and each reference field,
         # M0034), Copy prompt for each summary type, and the folder.
         more = QMenu(self)
