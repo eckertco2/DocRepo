@@ -80,7 +80,7 @@ from docrepo.ui.task_picker import TaskPicker
 from docrepo.ui.timeline_view import TimelineView
 from docrepo.ui.state_menu import UNDO_MS, can_change, open_below, picked_line, state_menu
 from docrepo.ui.tree_view import HTML_ROLE, KEY_ROLE, RowTree
-from docrepo.ui import conversation_page, task_menus, tidy_follow_ups, today_meetings
+from docrepo.ui import conversation_page, people_import, task_menus, tidy_follow_ups, today_meetings
 from docrepo.ui import task_tile as tile_ui
 from docrepo.ui.widgets import SAVE_KEYS, DropButton, FlowLayout, Option, ViewStack, ask, label_options, people_options
 from docrepo.views import (
@@ -135,6 +135,18 @@ from docrepo.ui.lists.common import (  # noqa: F401 - the helpers, here as befor
 
 #: What other modules and the tests read from here (release 5.95): the window, and names that lived here before the move.
 __all__ = ["BrowseWindow", "DETAIL_MIN", "HTML_ROLE", "NAV_FOLDED_KEY", "TODAY_MINE_KEY", "_answers", "priorities_of"]
+
+
+def _in_bar(item) -> bool:
+    """Whether a filter bar's item shows: a widget unless it was hidden on purpose (release 5.151). A widget a view has just
+    added reads as hidden until Qt shows it a moment later, so the bar of a view made only of new widgets (People, Labels,
+    Tagged labels, Templates, Activity, Assigned to me) was hidden whole since release 5.61, which meant to hide only a bar
+    with nothing showing in it."""
+    w = item.widget() if item is not None else None
+    if w is None:
+        return item is not None and not item.isEmpty()
+    return not (w.isHidden() and w.testAttribute(Qt.WidgetAttribute.WA_WState_ExplicitShowHide))
+
 
 class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelLists, DocumentLists, CaptureLists, ActivityList, PlanningHooks, PageCommands, NotesPages, QWidget):
     """The browse tool's window. ``capture`` is the capture window it opens for new captures and updates."""
@@ -839,6 +851,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         out.append(Command("View", "Urgent tasks (the task tree, Urgent only)", self.show_urgent))
         out += [Command("", "New capture", lambda: self.open_capture(), self.ctx.settings.hotkey),
                 Command("", "Import a tree file", self.tree_files.import_tree),
+                Command("", people_import.NAME, lambda: people_import.run(self)),  # release 5.151
                 Command("", "Move follow-ups out of every meeting…", lambda: tidy_follow_ups.run(self, None)),  # release 5.142
                 Command("", "Search everything", self.search_box.setFocus, "Ctrl+Shift+F"),
                 Command("", "Quick summary: a person, an agenda or a label", lambda: self.ctx.open_summary(None)),
@@ -967,7 +980,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
             self.tree.setHeaderHidden(self.view in NO_HEADINGS or not any(k is not None for k in self.tree.keys()))
         if self.view in NESTING_VIEWS:
             self._sync_level_buttons()
-        self.filters.setVisible(any(not self.filters_layout.itemAt(i).isEmpty() for i in range(self.filters_layout.count())))
+        self.filters.setVisible(any(_in_bar(self.filters_layout.itemAt(i)) for i in range(self.filters_layout.count())))
         self._apply_find()
 
     def render_detail(self, keep_scroll: bool = False) -> None:

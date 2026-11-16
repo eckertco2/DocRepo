@@ -6,6 +6,7 @@ from __future__ import annotations
 
 
 from docrepo.detail import chip, esc
+from docrepo.ui import people_import
 from docrepo.ui.tree_view import Line
 from docrepo.views import (
     open_count,
@@ -22,6 +23,9 @@ class PeopleAndLabelLists:
                        f"{len(m.active_people())} active")
         self._check("Show retired", self.retired["people"], lambda on: self._set_retired("people", on))
         self._button("Add person", self.add_person)
+        # Import people… (release 5.151, decision 658): a list from a .csv or an .xlsx, with a preview first.
+        self._button(people_import.NAME, lambda: people_import.run(self),
+                     tip="Add and update people from a .csv or an .xlsx list with Name, Email, Role, Group and Aliases columns")
         # Group and role (mods log round 2, M0033, M0038): the aliases go under the name.
         self.tree.set_columns(["Name", "Group", "Role", "Hours a week", "Open tasks"], [0, 120, 130, 90, 76])
         for p in m.people.values():
