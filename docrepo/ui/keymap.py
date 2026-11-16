@@ -36,7 +36,8 @@ OTHER_KEYS = (
     ("Ctrl, held", "Shows the Ctrl shortcuts in the window, after half a second"),
     ("1 to 4, 0", "On the Priorities board: puts the selected card in Critical, High, Medium or Parking lot, or takes it out (0)"),
     ("Alt+Up, Alt+Down", "On the Priorities board: moves the selected card up or down in its bucket. The arrow keys move between cards; "
-                         "Enter opens the task. In Templates: moves the selected row among those beside it"),
+                         "Enter opens the task. In Templates: moves the selected row among those beside it. On Today: moves the selected "
+                         "item up or down the list, which keeps that order (release 5.148)"),
     ("Q", "On the Timeline: Quick edit for the selected row (release 5.91; a double-click is Edit task, as everywhere)"),
     ("R", "In Review's Projects step: marks the selected project reviewed (release 5.128)"),
     ("Alt+Right, Alt+Left", "In Review, from its list: the next step, or back, passing over empty ones. On a task page, Alt+Left "
@@ -89,8 +90,9 @@ WHEEL_KEYS = (
 #: The Today side panel (release 5.43), once its hotkey has brought the keyboard to it.
 PANEL_KEYS = (
     ("Up, Down", "Moves between Today's items"),
+    ("Alt+Up, Alt+Down", "Moves the item itself up or down Today's list (release 5.148)"),
     ("Enter", "Shows the item's detail"),
-    ("Space", "Done, asking whether to update the task too"),
+    ("Space", "Done: off Today, and on a task an Update opens on it"),
     ("Delete", "Removes it from Today"),
     ("Esc", "Back from the detail; then it contracts and the keyboard goes back to the window you were in"),
 )
@@ -151,10 +153,10 @@ def syntax_html(rows: list[tuple[str, str, str, str]] | None = None) -> str:
                     for n, also, what, ex in rows)
     states = esc(", ".join(n for op in items.OPERATORS if op.state for n in op.names))
     return ("<p class='note'>In any capture: <b>@</b> a person, <b>@L.</b> a lead, <b>@__</b> no one yet, <b>#</b> a task, and <b>**</b> a "
-            "name with its comma, which says what a line is or fills a field. Type @, # or ** for a list. A ** line that reads as nothing "
+            "name with its comma, which says what a line is or fills a field (<b>**today</b> needs no comma). Type @, # or ** for a list. A ** line that reads as nothing "
             "gets an Unread line card; a new name after @ gets an Add … to people card, ticked.</p>"
             f"<table cellspacing='0' cellpadding='4' width='100%'>{worked}</table>"
-            "<p><b>Every ** name</b> (the comma makes it one)</p>"
+            "<p><b>Every ** name</b> (the comma makes it one; **today needs none)</p>"
             "<table cellspacing='0' cellpadding='4' width='100%'><tr><th align='left'>Name</th><th align='left'>Also</th>"
             f"<th align='left'>Makes or fills</th><th align='left'>Example</th></tr>{names}</table>"
             "<p><b>Read with no **</b>, by Parse and populate (Alt+P) and on a line with @ or #: dates in words (by Fri, 5 Nov, next week), "
