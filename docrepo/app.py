@@ -151,6 +151,7 @@ class CaptureApp(QObject):
         ctx.wheel_palette = self.wheels.palette_commands
         ctx.open_summary = self.wheels.quick_summary  # the quick summary, from a page or Ctrl+K (release 5.131)
         ctx.log_progress = lambda task=None: self.wheels.log_progress(task, with_email=False)  # the status card's (release 5.139)
+        ctx.open_recent = self.wheels.recent_captures_from_palette  # Recent captures, from Ctrl+K (release 5.158)
         self.panel: TodayPanel | None = None  # the Today side panel, made the first time it opens (release 5.43)
         menu = QMenu()
         menu.addAction("New capture", lambda: self.window.show_capture())
