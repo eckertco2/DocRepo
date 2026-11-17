@@ -1,16 +1,24 @@
 """The Log progress window (release 5.139; the design workspace's ``docs/mods/email-progress-plan.md``, decisions 580 to 598,
-and its mock).
+and its mock; release 5.155, ``docs/mods/log-progress-choices-plan.md``, decisions 695 to 697, and its mock).
 
 A window of its own, on top while it's open, from the Log progress hotkey, the Execution wheel's NE (``progress.log``)
 or the status card's **Log progress…**. At the top, the email it's for: the draft in front in Outlook when the hotkey was
-pressed (decision 584), or "No email: a call or a talk" (decision 592). Then:
+pressed (decision 584), or "No email: a call or a talk" (decision 592). Then, in the order they're read:
 - **Task** (decision 585): from the email's conversation, "from conversation", else the ``#`` list (the shared
   ``TaskPicker``), which opens by itself when no task is known;
 - **What you did** (decision 586): one line, typed, the task's current status;
+- **State** (decision 695, since 5.155): a dropdown of ``progress.STATES``, In progress, Waiting on a reply, Parked and
+  Closed, opening on Waiting on a reply when Waiting on has people, else In progress; the line under it says what Enter
+  does to the task's state;
 - **Waiting on** (decision 587): people chips, from the email's To where its copy gave it, a name typed from People;
-  empty means no wait;
 - **Follow up** (decision 588): Tomorrow to 2 weeks, or None, the last choice remembered; the day it means beside it;
-- **State** (decision 589): what Enter does to it.
+- **Today** (decision 697, since 5.155), only when the task is on Today: **Done for today**, unticked each time the
+  window opens, ticked and fixed with Closed.
+
+State is kept in step with Waiting on and Follow up (decision 695): another state empties Waiting on and sets Follow up
+to None, the two rows dimmed, with "Pick Waiting on a reply to wait on someone"; a person added picks Waiting on a reply,
+and the last one taken away picks In progress; Waiting on a reply picked with nobody takes the email's To people back,
+or puts the cursor in Waiting on.
 
 Enter keeps it all (``docrepo.progress.log_progress``) and then, for a draft in its own window under decision 590 A,
 sends it, a minute deferred; an inline reply, or a send Outlook refuses, comes back to the front for the owner to send.
@@ -26,7 +34,10 @@ from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QButtonGroup,
+    QCheckBox,
+    QComboBox,
     QCompleter,
+    QGraphicsOpacityEffect,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -44,7 +55,9 @@ from docrepo.model import Model
 from docrepo.save import SaveError
 from docrepo.ui import tokens
 from docrepo.ui.front import bring_to_front
-from docrepo.ui.icons import icon
+from docrepo.ui.icons import file_url, icon
+from docrepo.ui.look import LOOK
+from docrepo.ui.state_menu import open_below, state_icon
 from docrepo.ui.style import style_sheet
 from docrepo.ui.task_picker import TaskPicker
 
@@ -54,6 +67,10 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 WIDTH = 600
+#: How far a row that doesn't apply is dimmed (decision 695), as the mock's.
+DIM = 0.45
+#: The Waiting on row's line while another state is picked (decision 695).
+PICK_WAITING = "Pick Waiting on a reply to wait on someone."
 
 
 def email_of(draft: outlook.FrontDraft | None) -> progress.Email | None:
@@ -63,6 +80,14 @@ def email_of(draft: outlook.FrontDraft | None) -> progress.Email | None:
     c = draft.copy
     return progress.Email(draft.subject, draft.index, draft.entry_id, draft.store_id, draft.inline, c.to if c else "",
                           c.in_reply_to if c else "", c.refs if c else "", c.message_id if c else "")
+
+
+def first_names(m: Model, people: list[str]) -> str:
+    """Who, short, as a wait reads: "Dana", "Dana and Mike", "Dana and 2 more"."""
+    names = [m.person_name(p).split()[0] for p in people]
+    if len(names) <= 2:
+        return " and ".join(names)
+    return f"{names[0]} and {len(names) - 1} more"
 
 
 class LogProgress(QWidget):
@@ -81,7 +106,11 @@ class LogProgress(QWidget):
         self.task: str | None = None
         self.task_how = ""
         self.people: list[str] = []
+        self.to_people: list[str] = []  # Waiting on as the email's To gave it, for Waiting on a reply picked again
         self.choice = progress.DEFAULT_FOLLOW_UP
+        self.state_key = progress.IN_PROGRESS
+        self.done_today = False
+        self._dimmed: list[QGraphicsOpacityEffect] = []
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(16, 14, 16, 12)
@@ -95,6 +124,21 @@ class LogProgress(QWidget):
         grid.setHorizontalSpacing(12)
         grid.setVerticalSpacing(10)
         grid.setColumnStretch(1, 1)
+        self._build_task(grid)
+        self._build_state(grid)
+        self._build_waiting(grid)
+        self._build_follow_up(grid)
+        self._build_today(grid)
+        lay.addLayout(grid)
+        self._build_foot(lay)
+
+        self.picker = TaskPicker(self, self.ctx.model, none_entry=None)
+        self.picker.picked.connect(self._task_picked)
+        QShortcut(QKeySequence("Escape"), self, self.hide)
+        QShortcut(QKeySequence("Ctrl+T"), self, self.pick_task)
+
+    # ---- building ----
+    def _build_task(self, grid: QGridLayout) -> None:
         self.task_button = QPushButton(objectName="progressTask")
         self.task_button.setStyleSheet("text-align: left; padding: 6px 10px;")
         self.task_button.setToolTip("The task (Ctrl+T, or #): the # list")
@@ -104,6 +148,28 @@ class LogProgress(QWidget):
         self.line.setPlaceholderText("What you sent or asked, in a line")
         self.line.textEdited.connect(self._line_typed)
         self._row(grid, 1, "What you did", self.line, "Becomes the task's current status, a line in its status log.")
+
+    def _build_state(self, grid: QGridLayout) -> None:
+        """State (decision 695): a dropdown under What you did, each choice with its mark and, in its tooltip, what it does."""
+        box = QWidget()
+        bl = QHBoxLayout(box)
+        bl.setContentsMargins(0, 0, 0, 0)
+        self.state_box = QComboBox(objectName="progressState")
+        self.state_box.setMinimumWidth(220)
+        for n, (key, words, does) in enumerate(progress.STATES):
+            mark = icon("waiting", tokens.LIGHT["accent"]) if key == progress.WAITING else state_icon(progress.TASK_STATE[key])
+            self.state_box.addItem(mark, words, key)
+            self.state_box.setItemData(n, does, Qt.ItemDataRole.ToolTipRole)
+        self.state_box.setToolTip("Where this line leaves the task")
+        self.state_box.activated.connect(lambda n: self.pick_state(self.state_box.itemData(n)))
+        bl.addWidget(self.state_box)
+        bl.addStretch()
+        self._row(grid, 2, "State", box)
+        self.state_note = QLabel(objectName="hint")
+        self.state_note.setWordWrap(True)
+        grid.addWidget(self.state_note, 3, 1)
+
+    def _build_waiting(self, grid: QGridLayout) -> None:
         who = QWidget()
         wl = QHBoxLayout(who)
         wl.setContentsMargins(0, 0, 0, 0)
@@ -115,9 +181,13 @@ class LogProgress(QWidget):
         self.who.returnPressed.connect(self.add_person)
         self.who.installEventFilter(self)
         wl.addWidget(self.who, 1)
+        self.who_name = self._row(grid, 4, "Waiting on", who, "")
         self.who_note = QLabel(objectName="hint")
-        self._row(grid, 2, "Waiting on", who, "")
-        grid.addWidget(self.who_note, 3, 1)
+        self.who_note.setWordWrap(True)
+        grid.addWidget(self.who_note, 5, 1)
+        self._dim(self.who_name, who)
+
+    def _build_follow_up(self, grid: QGridLayout) -> None:
         follow = QWidget()
         fl = QHBoxLayout(follow)
         fl.setContentsMargins(0, 0, 0, 0)
@@ -132,14 +202,28 @@ class LogProgress(QWidget):
             fl.addWidget(b)
         fl.addStretch()
         self.follow.idClicked.connect(self._followed)
-        self._row(grid, 4, "Follow up", follow)
+        self.follow_name = self._row(grid, 6, "Follow up", follow)
         self.follow_note = QLabel(objectName="hint")
         self.follow_note.setWordWrap(True)
-        grid.addWidget(self.follow_note, 5, 1)
-        self.state_line = QLabel(objectName="hint")
-        self._row(grid, 6, "State", self.state_line)
-        lay.addLayout(grid)
+        grid.addWidget(self.follow_note, 7, 1)
+        self._dim(self.follow_name, follow)
 
+    def _build_today(self, grid: QGridLayout) -> None:
+        """Today (decision 697): shown only when the task is on Today."""
+        self.done_box = QCheckBox("Done for today", objectName="progressDone")
+        if not LOOK.classic:  # ticked and fixed with Closed: the new look's tick still shows, in grey
+            grey = tokens.LIGHT["disabled"]
+            self.done_box.setStyleSheet(f'QCheckBox::indicator:checked:disabled {{ background: {grey}; border-color: {grey}; '
+                                        f'image: url("{file_url("tick-white")}"); }}')
+        self.done_box.setToolTip("Take it off Today as done once this is logged: it's under Done today, where Back on Today "
+                                 "puts it back")
+        self.done_box.toggled.connect(self._done_ticked)
+        self.today_name = self._row(grid, 8, "Today", self.done_box)
+        self.today_note = QLabel(objectName="hint")
+        self.today_note.setWordWrap(True)
+        grid.addWidget(self.today_note, 9, 1)
+
+    def _build_foot(self, lay: QVBoxLayout) -> None:
         foot = QHBoxLayout()
         self.message = QLabel(objectName="hint")
         self.message.setWordWrap(True)
@@ -158,19 +242,24 @@ class LogProgress(QWidget):
         self.after.setAlignment(Qt.AlignmentFlag.AlignRight)
         lay.addWidget(self.after)
 
-        self.picker = TaskPicker(self, self.ctx.model, none_entry=None)
-        self.picker.picked.connect(self._task_picked)
-        QShortcut(QKeySequence("Escape"), self, self.hide)
-        QShortcut(QKeySequence("Ctrl+T"), self, self.pick_task)
-
     @staticmethod
-    def _row(grid: QGridLayout, row: int, label: str, widget: QWidget, tip: str = "") -> None:
+    def _row(grid: QGridLayout, row: int, label: str, widget: QWidget, tip: str = "") -> QLabel:
         name = QLabel(label, objectName="hint")
         name.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         grid.addWidget(name, row, 0)
         grid.addWidget(widget, row, 1)
         if tip:
             widget.setToolTip(tip)
+        return name
+
+    def _dim(self, *widgets: QWidget) -> None:
+        """Widgets dimmed while another state than Waiting on a reply is picked (decision 695)."""
+        for w in widgets:
+            effect = QGraphicsOpacityEffect(w)
+            effect.setOpacity(DIM)
+            effect.setEnabled(False)
+            w.setGraphicsEffect(effect)
+            self._dimmed.append(effect)
 
     def model(self) -> Model:
         return self.ctx.model()
@@ -188,8 +277,11 @@ class LogProgress(QWidget):
             self.task = task
         elif self.email is not None:
             self.task, self.task_how = progress.task_for(m, self.email)
-        self.people = progress.people_in(m, self.email.to, self.ctx.settings.me) if self.email and self.email.to else []
+        self.to_people = progress.people_in(m, self.email.to, self.ctx.settings.me) if self.email and self.email.to else []
+        self.people = list(self.to_people)
         self.choice = progress.last_follow_up(self.ctx.conn) if self.people else "none"
+        self.state_key = progress.WAITING if self.people else progress.IN_PROGRESS  # decision 695
+        self.done_today = False  # unticked each time (decision 697)
         self.line.clear()
         self.who.clear()
         self.message.clear()
@@ -226,9 +318,13 @@ class LogProgress(QWidget):
             self.task_button.setText(f"{m.tasks[self.task].title}{how}")
         else:
             self.task_button.setText("# a task")
+        waiting = self.state_key == progress.WAITING
+        self.state_box.setCurrentIndex(next(n for n, s in enumerate(progress.STATES) if s[0] == self.state_key))
+        self.state_note.setText(self.state_words(m))
         while self.chips.count():
             w = self.chips.takeAt(0).widget()
             if w is not None:
+                w.hide()  # gone at once, under the dimmed row's effect too, not when Qt next deletes
                 w.deleteLater()
         for p in self.people:
             chip = QPushButton(f"{m.person_name(p)}  ✕", objectName="today")
@@ -236,8 +332,12 @@ class LogProgress(QWidget):
             chip.clicked.connect(lambda _=False, who=p: self.drop_person(who))
             self.chips.addWidget(chip)
         self.who.setPlaceholderText("Add a person" if self.people else "Nobody: just log it")
-        self.who_note.setText(("From the email's To, matched in People. " if self.email and self.email.to else "Type a name from People. ")
-                              + "Empty: no wait, only the line.")
+        if not waiting:
+            self.who_note.setText(PICK_WAITING)
+        else:
+            self.who_note.setText("From the email's To, matched in People." if self.to_people else "Type a name from People.")
+        for effect in self._dimmed:
+            effect.setEnabled(not waiting)
         if not self.people and self.choice != "none":
             self.choice = "none"
         for b in self.follow.buttons():
@@ -245,12 +345,10 @@ class LogProgress(QWidget):
             b.setChecked(key == self.choice)
             b.setEnabled(bool(self.people) or key == "none")
         day = self.follow_day()
-        name = ", ".join(m.person_name(p).split()[0] for p in self.people[:2]) + (" and others" if len(self.people) > 2 else "")
         title = m.tasks[self.task].title if self.task in m.tasks else "the task"
-        self.follow_note.setText(f"If {name} hasn't replied by {long_date(day, self.today())}, {title} comes back on Today." if day and self.people
-                                 else "No follow-up: nothing comes back by itself.")
-        t = m.tasks.get(self.task or "")
-        self.state_line.setText(f"{t.state} → In progress" if t and t.state in ("Not started", "Parked") else (t.state if t else ""))
+        self.follow_note.setText(f"If {first_names(m, self.people)} hasn't replied by {long_date(day, self.today())}, {title} comes back on Today."
+                                 if day and self.people else "No follow-up: nothing comes back by itself.")
+        self._render_today(m, day)
         sends = self.sends()
         self.enter.setText("Send and log" if sends else "Log")
         self.enter.setToolTip("Enter")
@@ -262,6 +360,52 @@ class LogProgress(QWidget):
             self.after.setText("Outlook won't let a program send a reply in the reading pane: Enter logs, then press Send there.")
         else:
             self.after.setText("Then the email comes to the front: press Send.")
+        self.adjustSize()
+
+    def state_words(self, m: Model) -> str:
+        """The line under State: what Enter does to the task's state (decisions 589, 695 and 696)."""
+        t = m.tasks.get(self.task or "")
+        key = self.state_key
+        if key in (progress.IN_PROGRESS, progress.WAITING):
+            how = ", with the hourglass while you wait." if key == progress.WAITING else ", with nothing to wait for."
+            if t is None:
+                return f"In progress{how}"
+            return f"It stays In progress{how}" if t.state == "In progress" else f"Was {t.state}: it goes In progress{how}"
+        if key == progress.PARKED:
+            return "Parked, with this line as its current status. No wait."
+        below = len(open_below(m, t.id)) if t is not None else 0
+        more = f" Its {below} open subtask{'s stay' if below != 1 else ' stays'} open." if below else ""
+        return f"Closed, with this line as its last status. No wait.{more}"
+
+    def on_today(self, m: Model) -> bool:
+        return bool(self.task) and any(a.subject == self.task for a in m.today_items())
+
+    def _render_today(self, m: Model, day: date | None) -> None:
+        """The Today row (decision 697), only while the task is on Today; ticked and fixed with Closed."""
+        shown = self.on_today(m)
+        for w in (self.today_name, self.done_box, self.today_note):
+            w.setVisible(shown)
+        closed = self.state_key == progress.CLOSED
+        self.done_box.blockSignals(True)
+        self.done_box.setChecked(closed or self.done_today)
+        self.done_box.blockSignals(False)
+        self.done_box.setEnabled(not closed)
+        if not shown:
+            return
+        if not (closed or self.done_today):
+            words = "It's on Today. Tick to take it off as done once this is logged."
+        elif closed:
+            words = "Closed: its Today item closes as done with it."
+        else:
+            words = "It stays under Done today, where Back on Today puts it back."
+            if self.state_key == progress.WAITING and self.people and day:  # the follow-up's reminder brings it back (588)
+                back = waits.reminder_for(m, self.task or "", day)
+                if back == day.isoformat():
+                    words = (f"Off Today until {long_date(day, self.today())}, if {first_names(m, self.people)} hasn't replied: "
+                             "the follow-up brings it back.")
+                elif back:
+                    words = f"Off Today until {long_date(date.fromisoformat(back), self.today())}: its reminder brings it back."
+        self.today_note.setText(words)
 
     def sends(self) -> bool:
         """Whether Enter sends (decision 590 A): a draft in its own window, with Settings' Log progress sends on."""
@@ -276,6 +420,8 @@ class LogProgress(QWidget):
 
     def _task_picked(self, task_id: str | None) -> None:
         if task_id:
+            if task_id != self.task:
+                self.done_today = False  # another task: its Today row starts unticked
             self.task, self.task_how = task_id, ""
             self.render()
             self.line.setFocus()
@@ -284,6 +430,23 @@ class LogProgress(QWidget):
         if text == "#":  # # in an empty line picks the task, as in the capture window
             self.line.clear()
             self.pick_task()
+
+    def pick_state(self, key: str) -> None:
+        """A state picked (decision 695). Another than Waiting on a reply empties Waiting on and sets Follow up to None;
+        Waiting on a reply with nobody takes back the email's To people, or puts the cursor in Waiting on."""
+        self.state_key = key
+        if key != progress.WAITING:
+            self.people, self.choice = [], "none"
+            self.render()
+            return
+        if not self.people:
+            self.people = list(self.to_people)
+        if self.people and self.choice == "none":
+            self.choice = progress.last_follow_up(self.ctx.conn)
+        self.message.clear()
+        self.render()
+        if not self.people:
+            self.who.setFocus()
 
     def add_person(self) -> None:
         words = self.who.text().strip().casefold()
@@ -298,6 +461,7 @@ class LogProgress(QWidget):
             self.people.append(found[0])
             if self.choice == "none":
                 self.choice = progress.last_follow_up(self.ctx.conn)
+        self.state_key = progress.WAITING  # a person added picks Waiting on a reply (decision 695)
         self.who.clear()
         self.message.clear()
         self.render()
@@ -305,19 +469,30 @@ class LogProgress(QWidget):
 
     def drop_person(self, person: str) -> None:
         self.people = [p for p in self.people if p != person]
+        self._nobody_left()
         self.render()
+
+    def _nobody_left(self) -> None:
+        """The last person taken away picks In progress, as the mock has it."""
+        if not self.people and self.state_key == progress.WAITING:
+            self.state_key = progress.IN_PROGRESS
 
     def eventFilter(self, watched, event) -> bool:  # noqa: N802 - Qt's name
         from PySide6.QtCore import QEvent
 
         if watched is self.who and event.type() == QEvent.Type.KeyPress and event.key() == Qt.Key.Key_Backspace and not self.who.text() and self.people:
             self.people.pop()
+            self._nobody_left()
             self.render()
             return True
         return super().eventFilter(watched, event)
 
     def _followed(self, n: int) -> None:
         self.choice = progress.FOLLOW_UPS[n][0]
+        self.render()
+
+    def _done_ticked(self, on: bool) -> None:
+        self.done_today = on
         self.render()
 
     def keyPressEvent(self, event) -> None:  # noqa: N802 - Qt's name
@@ -332,20 +507,25 @@ class LogProgress(QWidget):
         if not self.task:
             self.pick_task()
             return
+        if self.state_key == progress.WAITING and not self.people:
+            self.message.setText(progress.NOBODY)
+            self.who.setFocus()
+            return
         now = self.ctx.now()
         try:
             done = progress.log_progress(self.ctx.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, task_id=self.task,
                                          line=self.line.text(), on=self.people, follow_up=self.follow_day() if self.people else None,
-                                         at=now, email=self.email, choice=self.choice)
+                                         at=now, email=self.email, choice=self.choice, state=self.state_key, done_today=self.done_today)
         except SaveError as e:
             self.message.setText(str(e))
-            (self.task_button if e.focus == "task" else self.line).setFocus()
+            {"task": self.task_button, "who": self.who}.get(e.focus, self.line).setFocus()
             return
         m = self.model()
         title = m.tasks[done.task].title
         wait = f": waiting on {waits.who(m, waits.current(m, done.task))}" if done.wait and waits.current(m, done.task) else ""
         follow = f", follow up {long_date(date.fromisoformat(done.follow_up), self.today())}" if done.follow_up else ""
-        said, trouble = f"Logged on {title}{wait}{follow}.", False
+        state = {progress.PARKED: ": parked", progress.CLOSED: ": closed"}.get(self.state_key, "")
+        said, trouble = f"Logged on {title}{state}{wait}{follow}.", False
         if self.draft is not None:
             sent = False
             if self.sends():
@@ -361,5 +541,7 @@ class LogProgress(QWidget):
                 if not trouble:
                     said = f"{said} Press Send in Outlook."
             self.ctx.t_mail_opened()  # its sent copy is watched for (release 5.123)
+        if done.done_today:  # decision 697: what Enter did says so, last
+            said = f"{said} Done for today."
         self.hide()
         self.app.progress_logged(done, said, trouble)
