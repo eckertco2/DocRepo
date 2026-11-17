@@ -554,7 +554,9 @@ class Model:
             "SELECT task, day, at FROM task_page_versions WHERE by_owner = 1 ORDER BY day, task")]
         #: The tasks made from a template, and where each came from (release 5.44).
         self.origins: dict[str, TemplateOrigin] = template_origins(conn)
-        #: Tagged labels (release 5.79): the glossary, what each item mentions, and the owner's own changes.
+        #: Tagged labels (release 5.79): the glossary, what each item mentions, and the owner's own changes. Since release
+        #: 5.160 (decision 733) the mentions are read from ``conn`` when something first asks for them, all or a few items'
+        #: (``tagged.Tagged``), not here: three years of work hold 132,000, two thirds of this read.
         self.tagged = tagged_load(conn)
 
     # ---- names ----
