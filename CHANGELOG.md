@@ -4,6 +4,14 @@ One line per release, newest first: its number, the date it was built, and what 
 
 Since 2026-11-12, releases ship in weekly trains (the design workspace's `docs/mods/cold-eyes-plan.md`, decisions 464 to 468): each train has a heading with the day it was pushed to GitHub, over its releases. Releases keep their own numbers and tags.
 
+## Next train (Thursday 2026-11-26, not pushed yet)
+
+Releases built for the push of Thursday 2026-11-26 (the design workspace's `docs/mods/train-2026-11-26-plan.md`), each merged to `main` at the owner's word. The train of 2026-11-17 settled (decision 467), so this one may carry concepts. The heading takes the day it's pushed.
+
+| Release | Date | What |
+|---|---|---|
+| 5.161 | 2026-11-17 | A busy task's page, faster. The page of a task with a few hundred captures, which the browse tool draws when it's opened and again after any change that shows on it (a state change, a saved capture, Log progress, a drop on a Today bin), took seconds: for each capture on it, DocRepo went through the whole status log and the whole agenda to say what that capture did ("Due date moved to Fri 23 Oct. Added to Tom Becker's agenda."), and for each task in a story through every capture to find its updates. It now looks each up, from lists it makes once for the page. On three years of made-up work, the page of a task with 359 captures went from 5.3 s to 0.29 s in the browse tool, and a project's page with 24 tasks under it from 16 s to 0.8 s; the scale run's budget, **A task page with 300 notes** (0.3 s), is met for the first time since it was set (0.28 s in the scale run, where it was 4.4 to 8.1 s; 0.23 to 0.41 s over eight measures, a median of 0.26 s, with another release timed beside it). The page is the same, line for line. No schema change. |
+
 ## Train of 2026-11-17
 
 Releases 5.154 and 5.155, pushed to GitHub on Tuesday 2026-11-17, two days before its Thursday, at the owner's word ("Go ahead and push anything that's ready to be pushed"), with everything merged by then (the design workspace's `docs/mods/train-2026-11-19-plan.md`). It settles (decision 467), after the trains of 2026-11-16 that carried concepts: fixes, polish and consolidation only. Schema 29, as before; no new package. Its corporate test is the design workspace's `handoff/docrepo/train-2026-11-17-test.md`, which gathers the two releases' tests.

@@ -36,7 +36,6 @@ MISSED: dict[str, str] = {
     "model": "1.6 s on 2026-11-11: tagged.load reads the JSON of each of 132,000 mentions",
     "counts": "17.2 s on 2026-11-11: Model.only_in_discarded looks through every capture for each of 7,500 documents",
     "search": "314 ms on 2026-11-11: LIKE over 91 MB of documents' text (row 8, ranked search, is its fix)",
-    "page": "4.4 s on 2026-11-11: Stories.note_item looks through all 90,000 status-log rows for each capture on the page",
     "save": "7.6 s on 2026-11-11: save_capture reads the model about five times",
     "tree": "1.5 s on 2026-11-11: the model read again (see model)",
     "daily": "17.1 s on 2026-11-11: tagged.task_tags per page (8 s), capacity.rebuild_task reading every task for each (4.4 s), "
