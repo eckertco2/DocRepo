@@ -22,7 +22,7 @@ from docrepo.config import Settings
 from docrepo.dates import long_date, stamp, to_date, workday_numbers
 from docrepo.db import transaction
 from docrepo.lists import reminders_due
-from docrepo.model import TODAY, Model, is_person
+from docrepo.model import TODAY, TODAY_BAND_NAMES, TODAY_BANDS, Model, is_person
 from docrepo.pages import write_pages, write_task_page
 from docrepo.safe_fs import SafeFS
 from docrepo.schedule import is_open, start_of
@@ -519,27 +519,75 @@ def move_today_item(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, item_
     """Today in the owner's order (release 5.148, decisions 643 and 646): ``to`` is "top", "bottom", "up" or "down" (Move to
     top and Move to bottom, Alt+Up and Alt+Down); ``beside`` is a drag's drop, another item and "before" or "after". Every
     open item gets its place, as at the first drag. A move changes no task, so it goes in no status log and has no Undo;
-    only Contents.md, which lists Today in its order, is written again."""
+    only Contents.md, which lists Today in its order, is written again.
+
+    Since release 5.154 (decision 689) a move keeps to the item's band: the top and the bottom are its band's, up and down
+    stop at its ends, and a drag lands only beside an item of its own band. The places are first set in the order shown,
+    bands and all, so the order kept is the order shown."""
     before = Model(conn)
-    a = next((x for x in before.today_items() if x.id == item_id), None)
+    items = before.today_items()
+    a = next((x for x in items if x.id == item_id), None)
     if a is None:
         raise EditError("That item isn't on Today any more.")
-    order = [x.id for x in before.today_items()]
+    order = [x.id for x in items]
+    band = before.today_band(a)
+    same = [x.id for x in items if before.today_band(x) == band]
+    where = f" of {TODAY_BAND_NAMES[band]}" if len(same) < len(order) else ""  # only when Today has more than one band
     if beside is not None:
-        agenda.move_beside(conn, item_id, beside[0], beside[1])
+        if beside[0] not in same:
+            raise EditError(f"A Today item moves within its band, {TODAY_BAND_NAMES[band]}. Drop it on a bin to change its priority.")
+        place = beside
         done = "moved"
     elif to in MOVES:
-        now = order.index(item_id)
-        if (to == "up" and now == 0) or (to == "down" and now == len(order) - 1):
-            return Outcome("")  # at the end already: Alt+Up at the top does nothing
-        agenda.move_item(conn, item_id, {"top": 0, "bottom": len(order), "up": now - 1, "down": now + 1}[to])
-        done = MOVES[to]
+        now = same.index(item_id)
+        if (to in ("top", "up") and now == 0) or (to in ("bottom", "down") and now == len(same) - 1):
+            return Outcome("")  # at its band's end already: Alt+Up at the top does nothing
+        place = ((same[0], "before") if to == "top" else (same[-1], "after") if to == "bottom"
+                 else (same[now - 1], "before") if to == "up" else (same[now + 1], "after"))
+        done = MOVES[to] + (where if to in ("top", "bottom") else "")
     else:
         raise EditError(f"A Today item moves to the top, the bottom, up or down, not {to!r}.")
+    if agenda.order_of(conn) != order:
+        agenda.place_items(conn, order)  # the order shown, bands and all (decision 688)
+    agenda.move_beside(conn, item_id, place[0], place[1])
     what = before.task(a.subject).title if a.subject and a.subject in before.tasks else "The note"
     out = Outcome(f"{what}: {done}." if agenda.order_of(conn) != order else "")  # dropped where it was: nothing to say
     write_touched_pages(conn, data_root, fs, at, out.problems, [], before)
     log.info("Today item %d %s", item_id, done)
+    return out
+
+
+#: Who sets a priority from Today's bins (release 5.154, decision 691), in the status log.
+TODAY_BINS = "Today"
+
+
+def today_bin(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, item_id: int, bucket: str, at: datetime) -> Outcome:
+    """A Today task dropped on a bin (release 5.154, decisions 690 and 691): its priority is set as a move to another column
+    of the Priorities board sets it (``priorities.place``: to the end of that bucket there, and in its status log), and on
+    Today it goes to the end of its new band. ``bucket`` "" is Not ranked. A note has no priority (decision 692), and a
+    drop on its own band changes nothing. No Undo, as on the board: the bin it came from takes it back."""
+    before = Model(conn)
+    a = next((x for x in before.today_items() if x.id == item_id), None)
+    if a is None:
+        raise EditError("That item isn't on Today any more.")
+    if not a.subject or a.subject not in before.tasks:
+        raise EditError("A note has no priority. Make it a task first, from its menu.")
+    if bucket not in TODAY_BANDS:
+        raise EditError(f"Today's bins are {', '.join(TODAY_BAND_NAMES[b] for b in TODAY_BANDS)}, not {bucket!r}.")
+    if before.today_band(a) == bucket:
+        return Outcome("")
+    title = before.task(a.subject).title
+    priorities.place(conn, a.subject, bucket, None, at=at, via=TODAY_BINS)
+    after = Model(conn)
+    rest = [x for x in after.today_items() if x.id != item_id]
+    rank = TODAY_BANDS.index(bucket)
+    at_end = max((i + 1 for i, x in enumerate(rest) if TODAY_BANDS.index(after.today_band(x)) <= rank), default=0)
+    ids = [x.id for x in rest]
+    ids.insert(at_end, item_id)
+    agenda.place_items(conn, ids)
+    out = Outcome(f"{title}: {TODAY_BAND_NAMES[bucket]}. Its status log says so.")
+    write_all_pages(conn, data_root, fs, at, out.problems)
+    log.info("Today item %d: task %s priority %s, from a bin", item_id, a.subject, bucket or "not ranked")
     return out
 
 

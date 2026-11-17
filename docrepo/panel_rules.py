@@ -13,6 +13,36 @@ STILL_PX = 6
 REST_WIDTH_KEY = "today_panel_rest_width"
 #: The narrowest it can be dragged at rest: a tick box and the start of each title.
 MIN_REST_WIDTH = 100
+#: The width it widens to, set by dragging the inner edge while it's widened (release 5.154, the design workspace's
+#: ``docs/mods/today-priority-plan.md``, decision 694), in docs.db's app_state.
+WIDE_WIDTH_KEY = "today_panel_wide_width"
+#: How much wider than the width at rest the width widened stays, and the most it can take of its screen's width.
+WIDE_OVER_REST = 80
+WIDE_SCREEN_SHARE = 2 / 3
+
+
+def wide_limits(rest: int, screen_width: int) -> tuple[int, int]:
+    """Decision 694: the narrowest and the widest the width widened can be dragged: 80 px wider than the width at rest, up to
+    two thirds of the screen (never less than the narrowest)."""
+    least = rest + WIDE_OVER_REST
+    return least, max(least, int(screen_width * WIDE_SCREEN_SHARE))
+
+
+def wide_width(saved: str | None, default: int, screen_width: int) -> int:
+    """The width the panel widens to: the one dragged and kept, at most two thirds of the screen, or else the wheels config's
+    ``hover_width`` (decision 694)."""
+    try:
+        width = int(saved or "")
+    except ValueError:
+        return default
+    return max(MIN_REST_WIDTH + WIDE_OVER_REST, min(int(screen_width * WIDE_SCREEN_SHARE), width))
+
+
+def dragged_wide(side: str, start: int, dx: int, least: int, most: int) -> int:
+    """Decision 694: the width widened while the inner edge is dragged ``dx`` pixels from ``start``, between ``least`` and
+    ``most`` (``wide_limits``)."""
+    width = start - dx if side == "right" else start + dx
+    return max(least, min(most, width))
 
 
 def dragged_width(side: str, start: int, dx: int, most: int) -> int:

@@ -4,6 +4,14 @@ One line per release, newest first: its number, the date it was built, and what 
 
 Since 2026-11-12, releases ship in weekly trains (the design workspace's `docs/mods/cold-eyes-plan.md`, decisions 464 to 468): each train has a heading with the day it was pushed to GitHub, over its releases. Releases keep their own numbers and tags.
 
+## Next train (Thursday 2026-11-19, not pushed yet)
+
+Releases built for Thursday's train (the design workspace's `docs/mods/train-2026-11-19-plan.md`). The train of 2026-11-16 carried concepts, so this one settles (decision 467): fixes, polish and consolidation only. No schema change, no new package.
+
+| Release | Date | What |
+|---|---|---|
+| 5.154 | 2026-11-16 | Today in priority order (the owner's voice memo of 2026-11-16). Today's items fall into bands, **Critical**, **High**, **Medium**, **Not ranked** and **Parking lot**, each under a quiet heading with its count in the Today view and the widened side panel, and keep your order within each, so a move made before keeps its place in its band. A row drags within its band, and Alt+Up, Alt+Down, Move to top and Move to bottom keep to it too. **Drag a task's row and five narrow bins open down the list's left side**, one per band with its count, its own band's dimmed: drop it on one and the task takes that priority, as a move on the Priorities board does (its status log says so, "Today"), and goes to the end of that band. Not ranked takes the priority off; a note has no priority, sits with Not ranked and opens no bins. There's no Low: Not ranked is where it would be. **The side panel's width widened drags too**: its inner edge, while it's widened, sets the width it widens to, from 80 px wider than the width at rest up to two thirds of the screen, kept, with **Reset the width widened** on the top line's menu; a task's page in the panel opens at least that wide. A double-click on a Today row still opens the workspace, as release 5.152 has it (decision 667). No schema change. |
+
 ## Second train of 2026-11-16
 
 Release 5.152 alone, pushed to GitHub on Monday 2026-11-16, a few hours after the train of 2026-11-16, at the owner's word ("I want to push the workspace view", then "As soon as it's built"): the workspace (the design workspace's `docs/mods/workspace-view-plan.md`). It adds a concept (a view and a glossary term) where the train after one that adds concepts was to settle (decision 467); the owner chose to push it now, as decision 626 did before. 5.154 and 5.155, built for Thursday 2026-11-19, aren't merged and aren't in it. No schema change (29) and no new package; the version stays 5.153, the highest release in. Its corporate test is the design workspace's `handoff/docrepo/release-5-152-test.md`.
