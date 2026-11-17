@@ -38,7 +38,6 @@ MISSED: dict[str, str] = {
              "(0.26 s) and the 15,000 captures (0.11 s)",
     "counts": "17.2 s on 2026-11-11: Model.only_in_discarded looks through every capture for each of 7,500 documents",
     "search": "314 ms on 2026-11-11: LIKE over 91 MB of documents' text (row 8, ranked search, is its fix)",
-    "page": "4.4 s on 2026-11-11: Stories.note_item looks through all 90,000 status-log rows for each capture on the page",
     "save": "7.6 s on 2026-11-11: save_capture reads the model about five times",
     # Release 5.159 (decision 728), built and measured on 2026-11-17 after its fixes: what's left is the model.
     "bin": "3.6 s on 2026-11-17: the one read of the model after the change (see model); its four pages about 0.3 s",
