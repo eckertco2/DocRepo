@@ -551,6 +551,8 @@ def write_pages(
     is one page listing every task: it's made each time, and written only when its text changed, as every page is."""
     pages = Pages(model, today, generated_at, reference_links_of(data_root), _reader(model, data_root))
     ids = list(model.tasks) if task_ids is None else [i for i in task_ids if i in model.tasks]
+    if task_ids is None:  # release 5.160 (decision 734): every page's tagged labels, read in one pass rather than task by task
+        model.tagged.read_all()
     written = 0
     for task_id in ids:
         written += _write(fs, data_root.joinpath(*task_dir(task_id), TASK_FILE), pages.task_page(model.task(task_id)))
