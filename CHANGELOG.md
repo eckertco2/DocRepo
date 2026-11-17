@@ -4,6 +4,14 @@ One line per release, newest first: its number, the date it was built, and what 
 
 Since 2026-11-12, releases ship in weekly trains (the design workspace's `docs/mods/cold-eyes-plan.md`, decisions 464 to 468): each train has a heading with the day it was pushed to GitHub, over its releases. Releases keep their own numbers and tags.
 
+## Next train (Thursday 2026-11-26, not pushed yet)
+
+Releases built for the push of Thursday 2026-11-26 (the design workspace's `docs/mods/train-2026-11-26-plan.md`), each merged to `main` at the owner's word. The train of 2026-11-17 settled (decision 467), so this one may carry concepts. The heading takes the day it's pushed.
+
+| Release | Date | What |
+|---|---|---|
+| 5.162 | 2026-11-17 | The view counts, faster. The numbers beside the browse tool's views, drawn again after most changes made while it's open (a state change, a saved capture, a filed one), took seconds on a large data root: to leave out the documents that came in only with discarded captures, DocRepo went through every capture and every saved file for each document. It now works that out once each time it reads its data and looks each document up, and Unfiled's count looks up the captures that put an item on an agenda rather than going through the agenda for each capture. On three years of made-up work (7,504 documents, 15,024 captures) the counts went from 9.3 s to 0.012 s, and the scale run's budget, **The view counts** (0.3 s), is met for the first time since it was set (7 ms; 17.2 s on 2026-11-11); a state change from the browse tool there went from 15 s to 5 s, and the browse tool's part after a saved note from 10.8 s to 1.3 s, what's left being DocRepo reading its data again. The Documents view and the tagged labels ask the same question, and gain the same way: the Tagged labels view's counts went from 103 s to 0.14 s there. The numbers are the same. No schema change. |
+
 ## Train of 2026-11-17
 
 Releases 5.154 and 5.155, pushed to GitHub on Tuesday 2026-11-17, two days before its Thursday, at the owner's word ("Go ahead and push anything that's ready to be pushed"), with everything merged by then (the design workspace's `docs/mods/train-2026-11-19-plan.md`). It settles (decision 467), after the trains of 2026-11-16 that carried concepts: fixes, polish and consolidation only. Schema 29, as before; no new package. Its corporate test is the design workspace's `handoff/docrepo/train-2026-11-17-test.md`, which gathers the two releases' tests.
