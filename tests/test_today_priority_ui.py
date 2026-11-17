@@ -238,6 +238,111 @@ def test_a_file_over_the_panel_still_isnt_a_bin(app, panel):
     assert not over.isAccepted()
 
 
+# ---- a faster drop (release 5.159, the design workspace's docs/mods/bin-drop-speed-plan.md, decision 730) ----
+def counted(monkeypatch, owner, names: tuple[str, ...], calls: list[str]) -> None:
+    """Each of ``owner``'s methods ``names`` noted in ``calls`` when it's called, and run as it was."""
+    for name in names:
+        was = getattr(owner, name)
+        monkeypatch.setattr(owner, name, lambda *a, _was=was, _name=name, **k: (calls.append(_name), _was(*a, **k))[1])
+
+
+def model_loads(monkeypatch) -> list[int]:
+    """Each Model read from docs.db from now on."""
+    import docrepo.model as model_module
+
+    loads: list[int] = []
+    init = model_module.Model.__init__
+    monkeypatch.setattr(model_module.Model, "__init__", lambda self, conn: (loads.append(1), init(self, conn))[1])
+    return loads
+
+
+def test_a_drop_draws_the_panel_once_and_reads_docs_db_once(app, panel, monkeypatch):
+    """With the browse tool hidden: the panel drawn once, the browse tool not drawn till it's shown, and the one Model the
+    drop read after its change kept for both, so no window reads every table again."""
+    i = put(app)
+    wide(panel)
+    app.browse.hide()
+    calls: list[str] = []
+    counted(monkeypatch, panel, ("refresh",), calls)
+    counted(monkeypatch, app.browse, ("render_nav", "render_list", "render_detail"), calls)
+    loads = model_loads(monkeypatch)
+    monkeypatch.setattr(panel, "run_drag", drop_on_bin(panel, "high", []))
+    panel.start_row_drag(panel_row(panel, i["plain"]))
+    assert calls == ["refresh"] and len(loads) == 1 and app.browse.dirty
+    assert order(app, i) == ["high", "plain", "medium", "note"]  # the end of High, as before (decision 691)
+    assert panel.note_label.text() == "Book the alignment contractor: High. Its status log says so."
+    assert panel.rows[panel.cursor].item_id == i["plain"]  # the keyboard still on it
+    assert [r.item_id for r in panel.rows] == [i["high"], i["plain"], i["medium"], i["note"]]
+    assert "Book the alignment contractor: High." in app.browse.status.text()
+    browse = show_today(app)  # drawn once it's shown, with the drop in it
+    assert rows_in_order(browse.tree)[-4:] == [i["high"], i["plain"], i["medium"], i["note"]] and not browse.dirty
+
+
+def test_a_drop_with_the_browse_tool_showing_draws_its_list_and_page_not_its_counts(app, panel, monkeypatch):
+    """No view's count follows a priority, so the views pane, whose counts take longest, isn't drawn again."""
+    i = put(app)
+    wide(panel)
+    browse = show_today(app)
+    calls: list[str] = []
+    counted(monkeypatch, panel, ("refresh",), calls)
+    counted(monkeypatch, browse, ("render_nav", "render_list", "render_detail"), calls)
+    monkeypatch.setattr(panel, "run_drag", drop_on_bin(panel, "critical", []))
+    panel.start_row_drag(panel_row(panel, i["plain"]))
+    assert calls == ["render_list", "render_detail", "refresh"]
+    assert rows_in_order(browse.tree)[-4:] == [i["plain"], i["high"], i["medium"], i["note"]]
+    assert [r.item_id for r in panel.rows] == [i["plain"], i["high"], i["medium"], i["note"]]
+
+
+def test_a_move_in_a_band_draws_the_panel_once(app, panel, monkeypatch):
+    i = put(app)
+    wide(panel)
+    calls: list[str] = []
+    counted(monkeypatch, panel, ("refresh",), calls)
+    monkeypatch.setattr(panel, "run_drag", drag_to(panel, panel_row(panel, i["plain"]), "before", []))
+    panel.start_row_drag(panel_row(panel, i["note"]))
+    assert calls == ["refresh"] and order(app, i) == ["high", "medium", "note", "plain"]
+
+
+def test_a_board_move_reads_docs_db_once_and_leaves_the_counts(app, panel, monkeypatch):
+    put(app)
+    app.show_browse("priorities")
+    browse = app.browse
+    browse.refresh()
+    QApplication.processEvents()
+    calls: list[str] = []
+    counted(monkeypatch, browse, ("render_nav", "render_list", "render_detail"), calls)
+    loads = model_loads(monkeypatch)
+    browse.move_priority("T000019", "critical", None)
+    assert calls == ["render_list", "render_detail"] and len(loads) == 1
+    assert Model(app.ctx.conn).task("T000019").priority == "critical" and browse.sel == ("task", "T000019")
+    assert "Book the alignment contractor: Critical. Its status log says so." in browse.status.text()
+    assert "T000019" in next(col.ids for col in browse.priorities.columns if col.key == "critical")  # the board drawn again
+
+
+def test_a_model_is_kept_only_while_docs_db_is_as_it_read_it(app):
+    """``AppContext.keep``: a Model read before a later write, or inside a transaction, isn't kept."""
+    c = app.ctx
+    edits.add_to_today(c.conn, c.data_root, c.fs, "T000019", "", NOW)
+    fresh = Model(c.conn)
+    assert c.keep(fresh) and c.model() is fresh
+    stale = Model(c.conn)
+    priorities.place(c.conn, "T000012", "high", None, at=NOW, via=priorities.VIA)
+    assert not c.keep(stale) and c.model() is not stale and c.model().task("T000012").priority == "high"
+    c.conn.execute("BEGIN")
+    try:
+        inside = Model(c.conn)
+        assert inside.read_at is None and not c.keep(inside)
+    finally:
+        c.conn.execute("ROLLBACK")
+    assert not c.keep(None)
+    other = db.connect_memory()  # another connection's Model, however its counts fall
+    try:
+        load_sample(other)
+        assert not c.keep(Model(other))
+    finally:
+        other.close()
+
+
 # ---- the width widened (decision 694) ----
 def test_the_grip_drags_the_width_widened_and_its_kept(app, panel):
     put(app)

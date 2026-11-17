@@ -22,7 +22,7 @@ from docrepo.config import Settings
 from docrepo.dates import long_date, stamp, to_date, workday_numbers
 from docrepo.db import transaction
 from docrepo.lists import reminders_due
-from docrepo.model import TODAY, TODAY_BAND_NAMES, TODAY_BANDS, Model, is_person
+from docrepo.model import TODAY, TODAY_BAND_NAMES, TODAY_BANDS, Model, is_person, place_key
 from docrepo.pages import write_pages, write_task_page
 from docrepo.safe_fs import SafeFS
 from docrepo.schedule import is_open, start_of
@@ -45,6 +45,9 @@ class Outcome:
     message: str
     problems: list[str] = field(default_factory=list)
     moved: str = ""  # release 5.50: what moved with it, in words
+    #: The Model read once the change and its writes were done (release 5.159, decision 730), for the browse tool to keep
+    #: as the shared one (``AppContext.keep``) rather than read docs.db again. None when the change didn't read one.
+    model: Model | None = None
 
 
 def write_all_pages(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, at: datetime, problems: list[str]) -> None:
@@ -55,16 +58,20 @@ def write_all_pages(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, at: d
 
 
 def write_touched_pages(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, at: datetime, problems: list[str],
-                        task_ids: Collection[str], before: Model) -> None:
+                        task_ids: Collection[str], before: Model | None) -> Model:
     """Write only the pages a change to these tasks can reach (release 5.90): ``pages.pages_touched`` of them, in the
-    Model from before the change and after it, and Contents.md."""
+    Model from before the change and after it, and Contents.md. ``before`` is None for a change that takes no link away,
+    such as a priority (release 5.159): what it reaches is then the same before and after. Returns the Model read after
+    the change."""
     from docrepo.pages import pages_touched
 
+    after = Model(conn)
     try:
-        after = Model(conn)
-        write_pages(after, data_root, fs, at.date(), at, pages_touched(after, task_ids) | pages_touched(before, task_ids))
+        touched = pages_touched(after, task_ids) | (pages_touched(before, task_ids) if before is not None else set())
+        write_pages(after, data_root, fs, at.date(), at, touched)
     except OSError as e:
         problems.append(f"The generated pages weren't all updated ({type(e).__name__}).")
+    return after
 
 
 # ---- the notes page (release 5.25) ----
@@ -561,13 +568,20 @@ def move_today_item(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, item_
 TODAY_BINS = "Today"
 
 
-def today_bin(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, item_id: int, bucket: str, at: datetime) -> Outcome:
+def today_bin(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, item_id: int, bucket: str, at: datetime,
+              model: Model | None = None) -> Outcome:
     """A Today task dropped on a bin (release 5.154, decisions 690 and 691): its priority is set as a move to another column
     of the Priorities board sets it (``priorities.place``: to the end of that bucket there, and in its status log), and on
     Today it goes to the end of its new band. ``bucket`` "" is Not ranked. A note has no priority (decision 692), and a
-    drop on its own band changes nothing. No Undo, as on the board: the bin it came from takes it back."""
-    before = Model(conn)
-    a = next((x for x in before.today_items() if x.id == item_id), None)
+    drop on its own band changes nothing. No Undo, as on the board: the bin it came from takes it back.
+
+    Since release 5.159 (the design workspace's ``docs/mods/bin-drop-speed-plan.md``, decisions 729 and 730) a drop writes
+    only the pages a priority can reach, and reads docs.db once, after the change: ``model`` is the Model as docs.db is
+    now, the browse tool's own, read here when it isn't given, and the new order is worked out from it. The Model read
+    after is the outcome's ``model``."""
+    before = model if model is not None else Model(conn)
+    items = before.today_items()
+    a = next((x for x in items if x.id == item_id), None)
     if a is None:
         raise EditError("That item isn't on Today any more.")
     if not a.subject or a.subject not in before.tasks:
@@ -578,15 +592,19 @@ def today_bin(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, item_id: in
         return Outcome("")
     title = before.task(a.subject).title
     priorities.place(conn, a.subject, bucket, None, at=at, via=TODAY_BINS)
-    after = Model(conn)
-    rest = [x for x in after.today_items() if x.id != item_id]
+
+    def band(x) -> str:  # the bands after the change: the task's is the bin's, and every other item's is as it was
+        return bucket if x.subject == a.subject else before.today_band(x)
+
     rank = TODAY_BANDS.index(bucket)
-    at_end = max((i + 1 for i, x in enumerate(rest) if TODAY_BANDS.index(after.today_band(x)) <= rank), default=0)
+    # Today's order after the change, as ``Model.today_items`` sorts it: by band, the owner's order kept within each.
+    rest = sorted((x for x in items if x.id != item_id), key=lambda x: (TODAY_BANDS.index(band(x)), place_key(x)))
+    at_end = max((i + 1 for i, x in enumerate(rest) if TODAY_BANDS.index(band(x)) <= rank), default=0)
     ids = [x.id for x in rest]
     ids.insert(at_end, item_id)
     agenda.place_items(conn, ids)
     out = Outcome(f"{title}: {TODAY_BAND_NAMES[bucket]}. Its status log says so.")
-    write_all_pages(conn, data_root, fs, at, out.problems)
+    out.model = write_touched_pages(conn, data_root, fs, at, out.problems, [a.subject], before)
     log.info("Today item %d: task %s priority %s, from a bin", item_id, a.subject, bucket or "not ranked")
     return out
 
@@ -982,13 +1000,15 @@ def bulk_edit(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: S
 def set_priority(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, task_id: str, bucket: str, before: str | None,
                  at: datetime) -> Outcome:
     """A move on the Priorities board: into ``bucket`` ("" for Not ranked), before the task ``before`` there or at its
-    end. A move to another bucket goes into the status log and the pages are written again; a move within one doesn't."""
+    end. A move to another bucket goes into the status log and the pages are written again; a move within one doesn't.
+    Since release 5.159 (decision 729) only the pages a priority can reach are written, from the one Model read after the
+    change, which is the outcome's ``model``."""
     change = priorities.place(conn, task_id, bucket, before, at=at, via=priorities.VIA)
     title = tasks.get_task(conn, task_id).title
     if change is None:
         return Outcome(f"{title} moved within {priorities.name(bucket)}.")
     out = Outcome(f"{title}: {priorities.name(bucket)}. Its status log says so.")
-    write_all_pages(conn, data_root, fs, at, out.problems)
+    out.model = write_touched_pages(conn, data_root, fs, at, out.problems, [task_id], None)
     log.info("task %s priority: %s", task_id, bucket or "not ranked")
     return out
 

@@ -4,6 +4,14 @@ One line per release, newest first: its number, the date it was built, and what 
 
 Since 2026-11-12, releases ship in weekly trains (the design workspace's `docs/mods/cold-eyes-plan.md`, decisions 464 to 468): each train has a heading with the day it was pushed to GitHub, over its releases. Releases keep their own numbers and tags.
 
+## Next train (Thursday 2026-11-26, not pushed yet)
+
+Releases built for the push of Thursday 2026-11-26 (the design workspace's `docs/mods/train-2026-11-26-plan.md`), each merged to `main` at the owner's word. The train of 2026-11-17 settled (decision 467), so this one may carry concepts. The heading takes the day it's pushed.
+
+| Release | Date | What |
+|---|---|---|
+| 5.159 | 2026-11-17 | A faster drop on Today's bins (the owner's report of 2026-11-17: quite a delay after a task is dropped on a bin). A drop on a bin, and a move to another column of the Priorities board (or Priority on a task's right-click menu), now write only the pages a priority can reach, the task's own `Task.md`, those above and below it and `Contents.md`, rather than every task's; DocRepo reads its data once per drop, not four times, and every window drawn after it uses that; the side panel draws itself once; the browse window, while it's closed, is drawn when it's opened, and while it's open draws its list and the page beside it but not the counts beside the views, which no priority changes; and a drop from the side panel leaves the browse tool's selection where it was. A drag within a band, and Alt+Up and Alt+Down on the board, leave the counts alone too. On three years of made-up work a drop from the side panel went from about a minute to about 3.5 s (15 s while a busy task's page shows in the browse tool, drawn again as it shows the priority), a board move from about a minute to 5 s; what's left is reading the data once (about 2.5 s at that size), so the new budgets in `timings` (0.5 s for a drop and for a board move) are still missed there. Nothing changes in what a drop does. No schema change. |
+
 ## Train of 2026-11-17
 
 Releases 5.154 and 5.155, pushed to GitHub on Tuesday 2026-11-17, two days before its Thursday, at the owner's word ("Go ahead and push anything that's ready to be pushed"), with everything merged by then (the design workspace's `docs/mods/train-2026-11-19-plan.md`). It settles (decision 467), after the trains of 2026-11-16 that carried concepts: fixes, polish and consolidation only. Schema 29, as before; no new package. Its corporate test is the design workspace's `handoff/docrepo/train-2026-11-17-test.md`, which gathers the two releases' tests.
