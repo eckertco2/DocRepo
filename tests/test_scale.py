@@ -38,6 +38,9 @@ MISSED: dict[str, str] = {
     "search": "314 ms on 2026-11-11: LIKE over 91 MB of documents' text (row 8, ranked search, is its fix)",
     "page": "4.4 s on 2026-11-11: Stories.note_item looks through all 90,000 status-log rows for each capture on the page",
     "save": "7.6 s on 2026-11-11: save_capture reads the model about five times",
+    # Release 5.159 (decision 728), built and measured on 2026-11-17 after its fixes: what's left is the model.
+    "bin": "3.6 s on 2026-11-17: the one read of the model after the change (see model); its four pages about 0.3 s",
+    "board": "3.4 s on 2026-11-17: the one read of the model after the change (see model); its four pages about 0.3 s",
     "tree": "1.5 s on 2026-11-11: the model read again (see model)",
     "daily": "17.1 s on 2026-11-11: tagged.task_tags per page (8 s), capacity.rebuild_task reading every task for each (4.4 s), "
              "Model.tied_to per task (2.5 s)",

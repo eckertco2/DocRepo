@@ -63,10 +63,26 @@ class AppContext:
         what's read there could still be rolled back."""
         if self.conn.in_transaction:
             return Model(self.conn)
-        at = (self.conn.total_changes, self.conn.execute("PRAGMA data_version").fetchone()[0])
+        at = self._state()
         if self._model is None or at != self._model_at:
             self._model, self._model_at = Model(self.conn), at
         return self._model
+
+    def _state(self) -> tuple[int, int]:
+        return self.conn.total_changes, self.conn.execute("PRAGMA data_version").fetchone()[0]
+
+    def keep(self, model: Model | None) -> bool:
+        """Keep a Model a change read after its writes (release 5.159, the design workspace's ``docs/mods/bin-drop-speed-plan.md``,
+        decision 730: an ``edits.Outcome``'s ``model``) as the shared one, so the windows drawn after the change don't read
+        every table again. Only when it was read on this connection and docs.db is still as it read it, outside a
+        transaction. True if it was kept."""
+        if model is None or model.read_at is None or self.conn.in_transaction:
+            return False
+        at = self._state()
+        if model.read_at != (id(self.conn), *at):
+            return False
+        self._model, self._model_at = model, at
+        return True
 
     def rolled_back(self, work: Callable[[], object]) -> object:
         """Run ``work``, which rolls back everything it writes (a what-if's picture, release 5.64), keeping the shared Model when

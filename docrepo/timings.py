@@ -3,7 +3,8 @@
 work (``sample_scale``). Not to be confused with ``timing.py``, a template's ties.
 
 It reads and changes nothing. What only reads (the model, the view counts, search, a task page, the task tree and the
-Timeline) is timed on docs.db opened read-only. What writes (saving a capture, the daily work and ``rebuild``) is timed on
+Timeline) is timed on docs.db opened read-only. What writes (saving a capture, a drop on a Today bin and a move on the
+Priorities board since release 5.159, the daily work and ``rebuild``) is timed on
 a copy of docs.db in memory, with a stand-in for SafeFS that counts the files it would write and writes none, so a page is
 still read from the data root to see whether it changed. What it prints, and keeps in ``System\\diagnostics``, is counts and
 times only (decision 472): never a title, a name or a word of content.
@@ -55,6 +56,10 @@ BUDGETS = (
     # Release 5.140 (the notes consolidation plan's decision 609): the task page's budget, for its All notes and Meetings.
     Budget("allnotes", "All notes and Meetings on the busiest project", 0.3),
     Budget("save", "Saving a capture on a task", 0.5),
+    # Release 5.159 (the design workspace's docs/mods/bin-drop-speed-plan.md, decision 728): the data change and its page
+    # writes, given the browse tool's Model as it is before the change.
+    Budget("bin", "A drop on a Today bin", 0.5),
+    Budget("board", "A move to another column of the Priorities board", 0.5),
     Budget("tree", "Refreshing the task tree", 0.5),
     Budget("timeline", "The Timeline over 12 months", 1.0),
     Budget("daily", "The daily work", 10.0),
@@ -243,7 +248,7 @@ def measure(data_root: Path, settings: Settings, now: datetime, words: str = DEF
             t, chart = _clock(lambda: timeline.build(m, today, timeline.default_start(today), 52), runs)
             out.append(Timing("timeline", t, runs, f"{len(chart.rows):,} rows"))
 
-        if wanted & {"save", "daily", "rebuild"}:
+        if wanted & {"save", "bin", "board", "daily", "rebuild"}:
             mem = copy_in_memory(conn)
             fs = CountingFS([data_root])
             try:
@@ -252,6 +257,8 @@ def measure(data_root: Path, settings: Settings, now: datetime, words: str = DEF
                         return save_capture(mem, data_root, fs, settings, CaptureDraft(content=NOTE, task=busiest), now)
                     t, _ = _clock(save, runs)
                     out.append(Timing("save", t, runs, "a note, on the task with the most captures"))
+                if wanted & {"bin", "board"}:
+                    out += _priority_moves(mem, data_root, fs, now, runs, wanted)
                 if "daily" in wanted:
                     def daily() -> int:
                         capacity.rebuild_all(mem, today, settings)
@@ -276,6 +283,55 @@ def measure(data_root: Path, settings: Settings, now: datetime, words: str = DEF
     order = [b.key for b in BUDGETS]
     out.sort(key=lambda x: order.index(x.key))
     log.info("timings: %s", ", ".join(f"{x.key} {x.seconds * 1000:.0f} ms" for x in out))
+    return out
+
+
+def _priority_moves(mem: sqlite3.Connection, data_root: Path, fs: CountingFS, now: datetime, runs: int,
+                    wanted: set[str]) -> list[Timing]:
+    """A drop on a Today bin and a move to another column of the Priorities board (release 5.159, decision 728), each to a
+    band other than its own on every run, on the copy in memory: the data change and its page writes. The drop is given the
+    Model from before it, as the browse tool hands it its own, and the next run the one it read after. Both move the Today
+    task with the most captures; with no task on Today, the open task with the most captures is put there, in the copy."""
+    from docrepo import agenda, edits
+    from docrepo.model import TODAY, TODAY_BANDS, Model
+    from docrepo.pages import pages_touched
+    from docrepo.schedule import is_open
+
+    m = Model(mem)
+    caps = Counter(c.task for c in m.captures.values() if c.task)
+    if not any(a.subject in m.tasks for a in m.today_items()):
+        open_ = [t for t in m.tasks.values() if is_open(t) and not t.discarded]
+        if not open_:
+            return []
+        busiest = max(open_, key=lambda t: (caps[t.id], t.id))
+        agenda.add_item(mem, subject=busiest.id, target=TODAY, note="", added=f"{now:%Y-%m-%d %H:%M:%S}", added_by="Timings")
+        m = Model(mem)
+    item = max((a for a in m.today_items() if a.subject in m.tasks), key=lambda a: (caps[a.subject], -a.id))
+    task = item.subject or ""
+    note = f"its task has {caps[task]:,} captures; {len(pages_touched(m, [task])):,} task pages and Contents.md"
+    out: list[Timing] = []
+
+    def other(n: int) -> str:
+        own = mem.execute("SELECT priority FROM tasks WHERE id = ?", (task,)).fetchone()[0] or ""
+        return [b for b in TODAY_BANDS if b != own][n % (len(TODAY_BANDS) - 1)]
+
+    if "bin" in wanted:
+        held, n = [m], [0]
+
+        def drop() -> object:
+            done = edits.today_bin(mem, data_root, fs, item.id, other(n[0]), now, held[0])
+            held[0], n[0] = done.model or Model(mem), n[0] + 1
+            return done
+        t, _ = _clock(drop, runs)
+        out.append(Timing("bin", t, runs, note))
+    if "board" in wanted:
+        k = [0]
+
+        def move() -> object:
+            k[0] += 1
+            return edits.set_priority(mem, data_root, fs, task, other(k[0]), None, now)
+        t, _ = _clock(move, runs)
+        out.append(Timing("board", t, runs, note))
     return out
 
 
