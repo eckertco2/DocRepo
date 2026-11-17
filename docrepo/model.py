@@ -539,6 +539,10 @@ class Model:
         self._saved_by_doc: dict[str, list[SavedCopy]] | None = None  # release 5.145: a document's saved files
         self._saving: dict[str, list[Capture]] | None = None  # release 5.145: the captures that saved a document
         self._versions_by_task: dict[str, list[Version]] | None = None
+        # Release 5.162 (the design workspace's docs/mods/view-counts-plan.md, decisions 742 and 743): the documents only
+        # discarded captures brought, and the captures that added an agenda item, each worked out once for the view counts.
+        self._discarded_only: frozenset[str] | None = None
+        self._agenda_adders: frozenset[str | None] | None = None
         self.status: list[StatusEntry] = [
             StatusEntry(r["task"], r["at"], r["field"], r["from_value"], r["to_value"], r["via"])
             for r in q("SELECT * FROM status_log ORDER BY id")
@@ -717,8 +721,12 @@ class Model:
         return _unique(out)
 
     def is_unfiled(self, c: Capture) -> bool:
-        """No task, and no agenda item: it waits in the Unfiled view. A discarded capture doesn't."""
-        return not c.discarded and not self.capture_tasks(c) and not any(a.added_by == c.id for a in self.agenda)
+        """No task, and no agenda item: it waits in the Unfiled view. A discarded capture doesn't. The captures that added an
+        agenda item are worked out once (release 5.162, decision 743), where each capture with no task went through the
+        whole agenda."""
+        if self._agenda_adders is None:
+            self._agenda_adders = frozenset(a.added_by for a in self.agenda)
+        return not c.discarded and not self.capture_tasks(c) and c.id not in self._agenda_adders
 
     def unfiled_captures(self) -> list[Capture]:
         """The captures with no task linked yet."""
@@ -779,9 +787,17 @@ class Model:
         return [c for c in self.captures.values() if c.discarded]
 
     def only_in_discarded(self, document_id: str) -> bool:
-        """True for a document that came in only with discarded captures, and has no saved file."""
-        holding = [c for c in self.captures.values() if document_id in c.document_ids]
-        return bool(holding) and all(c.discarded for c in holding) and not any(f.document == document_id for f in self.copies)
+        """True for a document that came in only with discarded captures, and has no saved file (an old version counts as
+        one). Worked out for every document at once, the first time it's asked (release 5.162, decision 742): the view
+        counts, the Documents view and the tagged labels ask it of each document, and each answer went through every
+        capture and every saved file."""
+        if self._discarded_only is None:
+            live: set[str] = set()
+            discarded: set[str] = set()
+            for c in self.captures.values():
+                (discarded if c.discarded else live).update(c.document_ids)
+            self._discarded_only = frozenset(discarded - live - {f.document for f in self.copies})
+        return document_id in self._discarded_only
 
     def document_holders(self, document_id: str) -> list[str]:
         """The tasks a document belongs to: those of the captures it came in with, and those it's saved in."""

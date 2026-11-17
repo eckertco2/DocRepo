@@ -36,7 +36,6 @@ MISSED: dict[str, str] = {
     # Release 5.160 (decisions 733 to 736): the mentions read when asked, and what's left measured on 2026-11-17.
     "model": "0.6 to 0.8 s on 2026-11-17 (1.5 s before release 5.160 read the 132,000 mentions when asked): the status log's 90,000 rows "
              "(0.26 s) and the 15,000 captures (0.11 s)",
-    "counts": "17.2 s on 2026-11-11: Model.only_in_discarded looks through every capture for each of 7,500 documents",
     "search": "314 ms on 2026-11-11: LIKE over 91 MB of documents' text (row 8, ranked search, is its fix)",
     "save": "7.6 s on 2026-11-11: save_capture reads the model about five times",
     # Release 5.159 (decision 728), built and measured on 2026-11-17 after its fixes: what's left is the model.
