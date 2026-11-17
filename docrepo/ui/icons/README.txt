@@ -19,3 +19,4 @@ The notes page's outline (release 5.113) is outline, a panel with a column at it
 The weekly review (release 5.128) is review, a circling arrow around a tick, in the sidebar between Today and Unfiled.
 The task tile (release 5.138) adds parents, two circles joining one, after a task's title when it's under more than one
 parent; and draws sun, agenda and waiting as its marks, and urgent as its flag.
+The workspace (release 5.152) is workspace, a panel in three columns: the chain, the work and the resources, on Work on it.

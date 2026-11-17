@@ -115,9 +115,10 @@ def test_waiting_on_others_has_it_on_a_rows_menu_and_says_asked(browse, fake_out
     calls, _ = fake_outlook
     browse.set_view("waiting")
     menu = browse.tree.row_menu(row(browse, RIGGING))
-    # The tile's menu (release 5.138, decision 573): Open, then this view's own, Ask for an update first among them.
-    first, second = [a for a in menu.actions() if not a.isSeparator()][:2]
-    assert first.text().startswith("Open") and second.text() == "Ask for an update"
+    # The tile's menu (release 5.138, decision 573): Open and Work on it (release 5.152), then this view's own, Ask for an
+    # update first among them.
+    first, work, second = [a for a in menu.actions() if not a.isSeparator()][:3]
+    assert first.text().startswith("Open") and work.text().startswith("Work on it") and second.text() == "Ask for an update"
     second.trigger()
     assert calls[-1][1] == ("mike.ortiz@example.com",)
     assert browse.view == "waiting"

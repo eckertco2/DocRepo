@@ -56,7 +56,7 @@ from PySide6.QtWidgets import (
 from docrepo import db, edits, key_dates, markup, meetings, notes_page, panel_rules, selection, task_tile, waits
 from docrepo.detail import Pages, PageState, esc
 from docrepo.model import Model, Task, is_person
-from docrepo.panel_rules import OPEN_KEY, REST_WIDTH_KEY, Hover, Monitor, Place, Rect
+from docrepo.panel_rules import OPEN_KEY, REST_WIDTH_KEY, WIDE_WIDTH_KEY, Hover, Monitor, Place, Rect
 from docrepo.schedule import is_open
 from docrepo.ui import tokens
 from docrepo.ui.browse_window import TODAY_MINE_KEY
@@ -65,14 +65,14 @@ from docrepo.ui.context import AppContext
 from docrepo.ui.drop_target import DropOverlay, DropRead
 from docrepo.ui.icons import icon, icon_size
 from docrepo.ui.page_view import PageView
-from docrepo.ui import today_meetings
+from docrepo.ui import today_bins, today_meetings
 from docrepo.ui.tree_view import PRIORITY_EDGES
 from docrepo.ui import task_tile as tile_ui
 from docrepo.ui.state_menu import UNDO_MS, UndoButton
 from docrepo.ui.style import page_css, style_sheet
 from docrepo.ui.tokens import C
 from docrepo.ui.wheel_window import animations_on
-from docrepo.views import DueCell, due_cell, project_text, since_text, today_due_entries, today_groups
+from docrepo.views import DueCell, due_cell, project_text, since_text, today_bands, today_due_entries
 
 if TYPE_CHECKING:
     from docrepo.ui.browse_window import BrowseWindow
@@ -114,6 +114,7 @@ QLabel#tpTitle {{ color: {text}; }}
 QLabel#tpSub {{ color: {text2}; font-size: {caption}pt; }}
 QLabel#tpDue {{ color: {text2}; font-size: {caption}pt; }}
 QLabel#tpGroup {{ color: {text2}; font-size: {caption}pt; font-weight: 600; }}
+QLabel#tpBand {{ font-size: {caption}pt; font-weight: 600; padding: 4px 2px 0 2px; }}
 QLabel#tpDone {{ color: {disabled}; text-decoration: line-through; }}
 QToolButton#tpFold {{ border: 0; color: {text2}; font-size: {caption}pt; font-weight: 600; text-align: left; padding: 2px; }}
 QPushButton#tpLink {{ border: 0; background: transparent; color: {accent}; padding: 0 3px; min-height: 0; font-size: {caption}pt; }}
@@ -202,6 +203,7 @@ class _Row(_EdgeFrame):
         super().__init__(objectName="tpRow")
         self.edge = edge
         self.panel, self.item_id, self.task_id, self.title = panel, item_id, task_id, title
+        self.band = ""  # its band on Today (release 5.154, decision 688), set as the list is drawn
         self.setProperty("current", False)
         lay = QHBoxLayout(self)
         lay.setContentsMargins(4, 3, 4, 3)
@@ -305,14 +307,15 @@ class _Row(_EdgeFrame):
 
 
 class _Grip(QWidget):
-    """The panel's inner edge at rest (decision 406): drag it to set the width at rest. The pointer on it doesn't widen
-    the panel, so it can be dragged narrow."""
+    """The panel's inner edge (decision 406): at rest, drag it to set the width at rest, and the pointer on it doesn't widen
+    the panel, so it can be dragged narrow; since release 5.154 (decision 694), while widened, drag it to set the width it
+    widens to, and the panel stays wide while it's dragged."""
 
     def __init__(self, panel: TodayPanel) -> None:
         super().__init__(panel)
         self.panel = panel
         self.setCursor(Qt.CursorShape.SizeHorCursor)
-        self.setToolTip("Drag to set its width at rest. Right-click the top line to reset it")
+        self.setToolTip("Drag to set its width at rest. Right-click the top line to reset it")  # widened: ``_place_grip`` says so
         self.setMouseTracking(True)
         self._from: int | None = None
         self._start = 0
@@ -346,12 +349,12 @@ class _Grip(QWidget):
 
     def mouseMoveEvent(self, event) -> None:  # noqa: N802
         if self._from is not None:
-            self.panel.size_rest(self._start, event.globalPosition().toPoint().x() - self._from)
+            self.panel.size_edge(self._start, event.globalPosition().toPoint().x() - self._from)
 
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
         if self._from is not None:
             self._from = None
-            self.panel.keep_rest()
+            self.panel.keep_edge()
             if not self.rect().contains(event.position().toPoint()):
                 self.panel.on_grip(False)
             self.update()
@@ -439,6 +442,9 @@ class TodayPanel(QWidget):
         self._built_for: date | None = None
         self._width_now = settings.rest_width
         self._rest = db.get_state(self.ctx.conn, REST_WIDTH_KEY)  # the width at rest, dragged and kept (decision 406)
+        self._wide = db.get_state(self.ctx.conn, WIDE_WIDTH_KEY) or None  # the width widened, dragged and kept (decision 694)
+        self._binned: tuple[int, str] | None = None  # a row's drag dropped on a bin: the item and the bin's band (decision 691)
+        self.bins: today_bins.Bins | None = None
         self._dragging = False  # a drag of files, links or an email is over the panel (decision 407)
         self._moving: int | None = None  # the Today item one of its rows is being dragged to move (release 5.148)
         self._moved: tuple[int, int, str] | None = None  # where that drag was dropped: the item, the row beside, before or after
@@ -676,11 +682,17 @@ class TodayPanel(QWidget):
         self.rows = []
         self.extras = []
         self._add_meeting_line(m)  # first, the next meeting (release 5.127, decision 490)
-        groups = today_groups(m, today)
-        total = sum(len(items) for _, items in groups)
+        bands = today_bands(m)  # in priority bands (release 5.154, decision 688), each named while widened
+        total = sum(len(items) for _, _, items in bands)
         self.count.setText(f"Today · {total}")
-        for name, items in groups:
-            self._add(QLabel(name, objectName="tpGroup"))
+        if bands:
+            self._add(QLabel("Today", objectName="tpGroup"))
+        for band, name, items in bands:
+            label = QLabel(f"{name.upper()}  {len(items)}", objectName="tpBand")
+            label.setStyleSheet(f"color: {today_bins.colour_of(band).name()};")
+            label.setToolTip(f"{name}: drag a task onto a bin to change its priority")
+            self.extras.append(label)
+            self._add(label)
             for a in items:
                 t = m.tasks.get(a.subject) if a.subject else None
                 since = f"since {since_text(a.added, today)} · " if a.added[:10] < today.isoformat() else ""
@@ -699,6 +711,7 @@ class TodayPanel(QWidget):
                         if t is not None and not t.discarded else None)
                 row = _Row(self, a.id, t.id if t else None, t.title if t else a.note, " · ".join(x for x in (where, reminder, since.rstrip(" ·")) if x),
                            cell, state, edge_of(t), tile)
+                row.band = band
                 self.rows.append(row)
                 self._add(row)
         if not total:
@@ -961,14 +974,18 @@ class TodayPanel(QWidget):
             self.scroll.ensureWidgetVisible(self.rows[self.cursor])
 
     def _move_lines(self, row: _Row) -> list[tuple[str, Callable[[], None], str]]:
-        """Move to top and Move to bottom for a row's menu (decision 646), each only where it would move it."""
-        at = self.rows.index(row) if row in self.rows else -1
+        """Move to top and Move to bottom for a row's menu (decision 646), each only where it would move it: within its band
+        since release 5.154 (decision 689)."""
+        band = getattr(row, "band", "")
+        same = [r for r in self.rows if getattr(r, "band", "") == band]
+        at = same.index(row) if row in same else -1
+        where = f"in {today_bins.TODAY_BAND_NAMES[band]}" if len(same) < len(self.rows) else "on Today"
         item_id = row.item_id
         lines: list[tuple[str, Callable[[], None], str]] = []
         if at > 0:
-            lines.append(("Move to top", lambda: self.move_item(item_id, to="top"), "First on Today. Alt+Up moves it one place"))
-        if 0 <= at < len(self.rows) - 1:
-            lines.append(("Move to bottom", lambda: self.move_item(item_id, to="bottom"), "Last on Today. Alt+Down moves it one place"))
+            lines.append(("Move to top", lambda: self.move_item(item_id, to="top"), f"First {where}. Alt+Up moves it one place"))
+        if 0 <= at < len(same) - 1:
+            lines.append(("Move to bottom", lambda: self.move_item(item_id, to="bottom"), f"Last {where}. Alt+Down moves it one place"))
         return lines
 
     def can_drag_rows(self) -> bool:
@@ -984,16 +1001,61 @@ class TodayPanel(QWidget):
         drag.setMimeData(mime)
         drag.setPixmap(row.grab())
         drag.setHotSpot(row.mapFromGlobal(QCursor.pos()))
-        self._moving, self._moved = row.item_id, None
+        self._moving, self._moved, self._binned = row.item_id, None, None
+        self._open_bins(row)  # a task's drag opens the bins (release 5.154, decision 690)
         try:
             self.run_drag(drag)
         finally:
             self._moving = None
             self._show_row_line(None)
+            if self.bins is not None:
+                self.bins.close_bins()
         moved, self._moved = self._moved, None
-        if moved is not None:
+        binned, self._binned = self._binned, None
+        if binned is not None:
+            self.bin_item(*binned)
+        elif moved is not None:
             self.move_item(moved[0], beside=(moved[1], moved[2]))
         self._hover_timer.start()
+
+    # ================= the bins (release 5.154, decisions 690 and 691) =================
+    def _open_bins(self, row: _Row) -> None:
+        """The bins down the list's left side, while a task's row is dragged; none for a note (decision 692)."""
+        if not row.task_id:
+            return
+        m = self._model()
+        items = m.today_items()
+        a = next((x for x in items if x.id == row.item_id), None)
+        if a is None:
+            return
+        if self.bins is None:
+            self.bins = today_bins.Bins(self, today_bins.PANEL_WIDTH)
+        viewport = self.scroll.viewport()
+        self.bins.open_for(m.today_band(a), today_bins.counts_of(m, items), QRect(viewport.mapTo(self, QPoint(0, 0)), viewport.size()))
+
+    def _bin_under(self, event) -> str | None | bool:
+        """Where a row's drag is over the bins: the bin's band, None on the bins but not on one a drop would go to, or False
+        away from them."""
+        if self.bins is None or not self.bins.isVisible():
+            return False
+        at = self.mapToGlobal(event.position().toPoint())
+        if not self.bins.over(at):
+            self.bins.set_hot(None)
+            return False
+        found = self.bins.bin_at(at)
+        self.bins.set_hot(found)
+        return found
+
+    def bin_item(self, item_id: int, band: str) -> None:
+        """A task dropped on a bin: its priority set by the browse tool's own (``bin_today``), said on the panel's line, and the
+        list drawn again, with the keyboard still on the item."""
+        self.browse.bin_today(item_id, band, tell=self.tell_state)
+        self.refresh()
+        at = next((i for i, r in enumerate(self.rows) if r.item_id == item_id), -1)
+        if at >= 0:
+            self.cursor = at
+            self._mark_cursor()
+            self.scroll.ensureWidgetVisible(self.rows[at])
 
     def run_drag(self, drag: QDrag) -> None:
         """Run a row's drag until it's dropped or let go. Tests replace it."""
@@ -1032,6 +1094,9 @@ class TodayPanel(QWidget):
         """A row's drag moved or dropped here: where it would land, with its line shown, or None (away, or where it is now)."""
         target = self.row_target(self.mapToGlobal(event.position().toPoint()))
         ids = [r.item_id for r in self.rows]
+        band = next((getattr(r, "band", "") for r in self.rows if r.item_id == moving), "")
+        if target is not None and getattr(target[0], "band", "") != band:
+            target = None  # only within its band (release 5.154, decision 689): a bin changes the band
         if target is not None and moving in ids:
             now, at = ids.index(moving), ids.index(target[0].item_id)
             if at == now or (target[1] == "after" and at == now - 1) or (target[1] == "before" and at == now + 1):
@@ -1117,8 +1182,9 @@ class TodayPanel(QWidget):
     # ================= hovering =================
     def _holding(self) -> bool:
         """What keeps it wide after the pointer leaves: the box has the cursor, a menu is open, or a detail is showing."""
+        grip = getattr(self, "grip", None)
         return (self.box.hasFocus() or self._menu_open or self._detail is not None or self.isActiveWindow() or self._dragging
-                or self._moving is not None)
+                or self._moving is not None or (grip is not None and grip.dragging() and self.hover.wide))
 
     def _hover_ms(self) -> int | None:
         return self.settings.inner_edge_hover_ms if self._on_inner_edge() else None
@@ -1160,30 +1226,68 @@ class TodayPanel(QWidget):
         self.box_row.setVisible(wide and self._detail is None)
 
     def target_width(self) -> int:
+        """At rest, widened, or with a detail (a task's page) showing, at least as wide as it widens to (decision 694)."""
         s = self.settings
-        return s.detail_width if self._detail else s.hover_width if self.hover.wide else self.rest_width()
+        return max(s.detail_width, self.wide_width()) if self._detail else self.wide_width() if self.hover.wide else self.rest_width()
+
+    def _screen_width(self) -> int:
+        return self._screen().availableGeometry().width()
+
+    def wide_width(self) -> int:
+        """The width it widens to: dragged and kept (release 5.154, decision 694), or else the wheels config's."""
+        return panel_rules.wide_width(self._wide, self.settings.hover_width, self._screen_width())
 
     def rest_width(self) -> int:
-        """The width at rest: dragged and kept (decision 406), or else the wheels config's."""
-        return panel_rules.rest_width(self._rest, self.settings.rest_width, self.settings.hover_width)
+        """The width at rest: dragged and kept (decision 406), or else the wheels config's; never past the width widened."""
+        return panel_rules.rest_width(self._rest, self.settings.rest_width, self.wide_width())
 
-    # ================= the width at rest (release 5.106, decision 406) =================
+    # ================= the widths at rest and widened (release 5.106, decision 406; release 5.154, decision 694) =================
     def on_grip(self, on: bool) -> None:
-        """The pointer on the grip counts as off the panel, so it doesn't widen while the edge is dragged."""
+        """At rest the pointer on the grip counts as off the panel, so it doesn't widen while the edge is dragged; widened, it's
+        on the panel, which stays wide."""
         at = QCursor.pos()
-        if on:
+        if on and not self.hover.wide:
             self.hover.pointer_out(self.clock())
         elif self.rect().contains(self.mapFromGlobal(at)):
             self.hover.pointer_in(self.clock(), (at.x(), at.y()))
         self._hover_timer.start()
 
+    def size_edge(self, start: int, dx: int) -> None:
+        """The inner edge dragged: the width widened while it's widened, else the width at rest."""
+        if self.hover.wide and self._detail is None:
+            self.size_wide(start, dx)
+        else:
+            self.size_rest(start, dx)
+
+    def keep_edge(self) -> None:
+        if self.hover.wide and self._detail is None:
+            self.keep_wide()
+        else:
+            self.keep_rest()
+
     def size_rest(self, start: int, dx: int) -> None:
         """The inner edge dragged ``dx`` pixels from where it was, at ``start`` wide: the panel follows at once."""
-        self._rest = str(panel_rules.dragged_width(self.place_.side, start, dx, self.settings.hover_width))
+        self._rest = str(panel_rules.dragged_width(self.place_.side, start, dx, self.wide_width()))
+        self.place_window(animate=False)
+
+    def size_wide(self, start: int, dx: int) -> None:
+        """The inner edge dragged while widened (decision 694): the width it widens to follows at once, from 80 px wider than
+        the width at rest up to two thirds of the screen."""
+        least, most = panel_rules.wide_limits(self.rest_width(), self._screen_width())
+        self._wide = str(panel_rules.dragged_wide(self.place_.side, start, dx, least, most))
         self.place_window(animate=False)
 
     def keep_rest(self) -> None:
         self.ctx.keep_state(REST_WIDTH_KEY, self._rest or "")
+
+    def keep_wide(self) -> None:
+        self.ctx.keep_state(WIDE_WIDTH_KEY, self._wide or "")
+
+    def reset_wide(self) -> None:
+        """Back to the wheels config's width widened (``hover_width``)."""
+        self._wide = None
+        self.ctx.keep_state(WIDE_WIDTH_KEY, "")
+        self.place_window()
 
     def reset_rest(self) -> None:
         """Back to the wheels config's width at rest."""
@@ -1192,15 +1296,18 @@ class TodayPanel(QWidget):
         self.place_window()
 
     def _place_grip(self) -> None:
-        """The grip on the inner edge, below the top line, and only at rest."""
+        """The grip on the inner edge, below the top line: at rest, and since release 5.154 widened too (decision 694), not
+        while a task's page shows or something is dragged over the panel."""
         grip = getattr(self, "grip", None)
         if grip is None:
             return
         top = self.top.height()
         x = 0 if self.place_.side == "right" else self.width() - GRIP_WIDTH
         grip.setGeometry(x, top, GRIP_WIDTH, max(0, self.height() - top))
-        at_rest = not self.hover.wide and self._detail is None and not self._dragging
-        grip.setVisible(at_rest or grip.dragging())
+        shown = self._detail is None and not self._dragging and self._moving is None
+        grip.setToolTip("Drag to set the width it widens to. Right-click the top line to reset it" if self.hover.wide
+                        else "Drag to set its width at rest. Right-click the top line to reset it")
+        grip.setVisible(shown or grip.dragging())
         grip.raise_()
 
     def resizeEvent(self, event) -> None:  # noqa: N802 - Qt's name
@@ -1278,6 +1385,15 @@ class TodayPanel(QWidget):
     def dragMoveEvent(self, event) -> None:  # noqa: N802
         moving = self._row_drag(event)
         if moving is not None:
+            on_bin = self._bin_under(event)
+            if on_bin is not False:  # over the bins: no line, and a drop only on a bin (release 5.154)
+                self._show_row_line(None)
+                if on_bin is None:
+                    event.ignore()
+                else:
+                    event.setDropAction(Qt.DropAction.MoveAction)
+                    event.accept()
+                return
             self._row_drag_over(moving, event)
             return
         target = self.target_at(self.mapToGlobal(event.position().toPoint())) if read_drop(event.mimeData(), links=True)[0] else None
@@ -1295,6 +1411,15 @@ class TodayPanel(QWidget):
 
     def dropEvent(self, event) -> None:  # noqa: N802
         moving = self._row_drag(event)
+        if moving is not None and (on_bin := self._bin_under(event)) is not False:  # a drop on a bin (release 5.154, decision 691)
+            self._show_row_line(None)
+            if on_bin is None:
+                event.ignore()
+            else:
+                self._binned = (moving, on_bin)
+                event.setDropAction(Qt.DropAction.MoveAction)
+                event.accept()
+            return
         if moving is not None:  # a row moved: kept until the drag is over, when it's made (``start_row_drag``)
             target = self._row_drag_over(moving, event)
             self._show_row_line(None)
@@ -1335,6 +1460,7 @@ class TodayPanel(QWidget):
     def _update_state(self) -> None:
         self._apply_wide()
         self.place_window()
+        self._place_grip()  # at once: a task's page or a drag hides it, widening shows it (release 5.154)
 
     # ================= placing =================
     def _read_place(self) -> Place:
@@ -1428,6 +1554,8 @@ class TodayPanel(QWidget):
         menu.addAction("Move to next screen", self.move_to_next_screen)
         reset = menu.addAction("Reset the width at rest", self.reset_rest)
         reset.setEnabled(bool(self._rest))
+        reset_wide = menu.addAction("Reset the width widened", self.reset_wide)  # release 5.154, decision 694
+        reset_wide.setEnabled(bool(self._wide))
         menu.addAction("Hide", lambda: self.action("close"))
         menu.addSeparator()
         menu.addAction("Open wheels config", self.wheels.open_config)
