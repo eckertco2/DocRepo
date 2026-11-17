@@ -4,6 +4,14 @@ One line per release, newest first: its number, the date it was built, and what 
 
 Since 2026-11-12, releases ship in weekly trains (the design workspace's `docs/mods/cold-eyes-plan.md`, decisions 464 to 468): each train has a heading with the day it was pushed to GitHub, over its releases. Releases keep their own numbers and tags.
 
+## Next train (Thursday 2026-11-26, not pushed yet)
+
+Releases built for the push of Thursday 2026-11-26 (the design workspace's `docs/mods/train-2026-11-26-plan.md`), each merged to `main` at the owner's word. The train of 2026-11-17 settled (decision 467), so this one may carry concepts. The heading takes the day it's pushed.
+
+| Release | Date | What |
+|---|---|---|
+| 5.158 | 2026-11-17 | Recent captures, to their notes (the owner's voice memo of 2026-11-17, as they revised it the same day: a saved capture isn't edited in the capture window again; its words are worked on where they live, on its notes page, so nothing its save did runs again). **Recent captures** is on the Capture wheel's NE (up and right) and on Ctrl+K in the browse tool and the capture window: a popup of the last 10 captures saved, newest first, of every kind (notes, meeting notes, an email's capture, a T-mail's sent copy, a new task's or an update's), each row with its kind's icon (meeting notes in the accent), its title, the task whose notes page it opens on (or Unfiled, On an agenda, Not on a notes page) and when it was saved ("9:40", "Mon", "12 Nov"). Typing narrows it by title across every capture, still newest first and at most 10. Up and Down move; Enter, Tab or a click opens one: the browse tool comes forward on the task's notes page at the capture's block, unfolded, with the caret there (meeting notes on the meeting's page). A capture on no notes page opens its own capture page, the status line saying why. A meeting's items and a picture pasted on a page aren't listed: their notes capture and their page stand for them. A `wheels.jsonc` you have gets the slot when its Capture wheel still ends as the default wrote it and NE is free, and the pinned window's suggestion moves to NW; a wheel you changed stays yours. No schema change. |
+
 ## Train of 2026-11-17
 
 Releases 5.154 and 5.155, pushed to GitHub on Tuesday 2026-11-17, two days before its Thursday, at the owner's word ("Go ahead and push anything that's ready to be pushed"), with everything merged by then (the design workspace's `docs/mods/train-2026-11-19-plan.md`). It settles (decision 467), after the trains of 2026-11-16 that carried concepts: fixes, polish and consolidation only. Schema 29, as before; no new package. Its corporate test is the design workspace's `handoff/docrepo/train-2026-11-17-test.md`, which gathers the two releases' tests.
