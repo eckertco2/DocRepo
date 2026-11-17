@@ -12,7 +12,7 @@ import pytest
 
 from docrepo import edits, tasks
 from docrepo.config import Settings
-from docrepo.model import TODAY, Capture, FileEntry, Model, RawEntry, StatusEntry, Version
+from docrepo.model import PRIORITY_NAMES, TODAY, Capture, FileEntry, Model, RawEntry, StatusEntry, Version
 from docrepo.pages import pages_touched, write_pages
 from docrepo.save import CaptureDraft, save_capture
 
@@ -86,6 +86,98 @@ def test_a_save_on_200_tasks_rewrites_only_its_pages(root):
     changed = sorted(p.parent.name for p, ns in pages.items() if p.stat().st_mtime_ns != ns)
     assert changed == [RIGGING]  # its ancestors' pages show nothing of a note on it, so they stay as they were
     assert left_to_write(conn, data_root, fs) == 0
+
+
+# ---- a priority, from Today's bins or the Priorities board (release 5.159, the design workspace's
+# docs/mods/bin-drop-speed-plan.md, decision 729) ----
+def on_today(root, *task_ids: str) -> dict[str, int]:
+    """These tasks on Today, every page written after, and each one's Today item by its task."""
+    conn, data_root, fs = root
+    for t in task_ids:
+        edits.add_to_today(conn, data_root, fs, t, "", AT)
+    write_pages(Model(conn), data_root, fs, AT.date(), AT)
+    return {a.subject: a.id for a in Model(conn).today_items()}
+
+
+def built_pages(monkeypatch) -> list[str]:
+    """The tasks whose Task.md is built from now on, in order."""
+    from docrepo.pages import Pages
+
+    built: list[str] = []
+    page = Pages.task_page
+    monkeypatch.setattr(Pages, "task_page", lambda self, t: (built.append(t.id), page(self, t))[1])
+    return built
+
+
+# A subtask, its parent with subtasks of its own, and a top-level project, each to a band and back to Not ranked.
+PRIORITY_MOVES = [(RIGGING, "high"), (RIGGING, "parking"), (INSTALLATION, "critical"), (IMPELLER, "medium")]
+
+
+@pytest.mark.parametrize("task_id, bucket", PRIORITY_MOVES)
+def test_a_drop_on_a_bin_writes_every_page_it_changes(root, task_id, bucket):
+    """The oracle: after a bin's drop writes only the pages a priority can reach, a full write finds nothing left: no page
+    that changed (its Task.md's Priority and status log, and Contents.md's Today in band order) was missed."""
+    conn, data_root, fs = root
+    items = on_today(root, RIGGING, INSTALLATION, IMPELLER)
+    before = (data_root / "Contents.md").read_text(encoding="utf-8")
+    order = [a.id for a in Model(conn).today_items()]
+    out = edits.today_bin(conn, data_root, fs, items[task_id], bucket, AT)
+    assert out.message and not out.problems
+    page = (data_root / "Tasks" / task_id / "Task.md").read_text(encoding="utf-8")
+    assert f"| Priority | {PRIORITY_NAMES[bucket]} |" in page and f"Priority: None → {PRIORITY_NAMES[bucket]} · Today" in page
+    moved = [a.id for a in Model(conn).today_items()] != order
+    assert ((data_root / "Contents.md").read_text(encoding="utf-8") != before) == moved  # Today's order, in bands
+    assert left_to_write(conn, data_root, fs) == 0
+    edits.today_bin(conn, data_root, fs, items[task_id], "", AT)  # and back to Not ranked
+    assert "| Priority |" not in (data_root / "Tasks" / task_id / "Task.md").read_text(encoding="utf-8")
+    assert left_to_write(conn, data_root, fs) == 0
+
+
+@pytest.mark.parametrize("task_id, bucket", PRIORITY_MOVES)
+def test_a_board_move_writes_every_page_it_changes(root, task_id, bucket):
+    conn, data_root, fs = root
+    out = edits.set_priority(conn, data_root, fs, task_id, bucket, None, AT)
+    assert out.message.endswith("Its status log says so.") and not out.problems
+    assert f"| Priority | {PRIORITY_NAMES[bucket]} |" in (data_root / "Tasks" / task_id / "Task.md").read_text(encoding="utf-8")
+    assert left_to_write(conn, data_root, fs) == 0
+    edits.set_priority(conn, data_root, fs, task_id, "", None, AT)
+    assert left_to_write(conn, data_root, fs) == 0
+
+
+def test_a_priority_builds_only_the_pages_it_can_reach(root, monkeypatch):
+    """Not every task's page (release 5.159): the task's, those above and below it, and Contents.md. Before, a drop on a bin
+    and a board move built all of them, the cost of a drop on a full data root."""
+    conn, data_root, fs = root
+    items = on_today(root, RIGGING)
+    built = built_pages(monkeypatch)
+    edits.today_bin(conn, data_root, fs, items[RIGGING], "high", AT)
+    assert sorted(built) == sorted(pages_touched(Model(conn), [RIGGING])) and len(built) < len(Model(conn).tasks)
+    built.clear()
+    edits.set_priority(conn, data_root, fs, RIGGING, "critical", None, AT)
+    assert sorted(built) == sorted(pages_touched(Model(conn), [RIGGING]))
+    built.clear()
+    edits.set_priority(conn, data_root, fs, RIGGING, "critical", None, AT)  # a move within its column: nothing written
+    assert built == []
+
+
+def test_a_drop_reads_the_model_once_when_its_given_the_one_before(root, monkeypatch):
+    """The browse tool hands its own Model, read as docs.db is, to a bin's drop, which reads docs.db once more, after the
+    change, and gives that Model back for the browse tool to keep (release 5.159, decision 730)."""
+    import docrepo.model as model_module
+
+    conn, data_root, fs = root
+    items = on_today(root, RIGGING, INSTALLATION)
+    shared = Model(conn)
+    loads: list[int] = []
+    init = model_module.Model.__init__
+    monkeypatch.setattr(model_module.Model, "__init__", lambda self, c: (loads.append(1), init(self, c))[1])
+    out = edits.today_bin(conn, data_root, fs, items[RIGGING], "high", AT, model=shared)
+    assert len(loads) == 1 and out.model is not None and out.model.task(RIGGING).priority == "high"
+    assert out.model.read_at == (id(conn), conn.total_changes, conn.execute("PRAGMA data_version").fetchone()[0])
+    assert [a.id for a in out.model.today_items()] == [items[RIGGING], items[INSTALLATION]]  # the end of High: its only one
+    assert shared.task(RIGGING).priority is None  # the Model handed in is only read
+    loads.clear()
+    assert edits.set_priority(conn, data_root, fs, RIGGING, "medium", None, AT).model is not None and len(loads) == 1
 
 
 def test_a_page_is_the_same_built_alone_or_with_all(root):

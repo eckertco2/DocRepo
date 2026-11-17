@@ -463,6 +463,11 @@ class Model:
 
     def __init__(self, conn: sqlite3.Connection) -> None:
         q = conn.execute
+        #: docs.db's state as it was read (release 5.159): the connection, its changes and others', as ``AppContext.model``
+        #: keys its shared Model, so a Model read after a change can be kept as the shared one (``AppContext.keep``). None
+        #: inside a transaction, as what's read there could still be rolled back.
+        self.read_at: tuple[int, int, int] | None = (None if conn.in_transaction
+                                                     else (id(conn), conn.total_changes, q("PRAGMA data_version").fetchone()[0]))
         self.tasks = load_tasks(conn)
         self.people: dict[str, Person] = {
             r["id"]: Person(r["id"], r["name"], r["hours_per_week"], r["status"], r["added_note"], email=r["email"], group=r["person_group"],
@@ -549,7 +554,9 @@ class Model:
             "SELECT task, day, at FROM task_page_versions WHERE by_owner = 1 ORDER BY day, task")]
         #: The tasks made from a template, and where each came from (release 5.44).
         self.origins: dict[str, TemplateOrigin] = template_origins(conn)
-        #: Tagged labels (release 5.79): the glossary, what each item mentions, and the owner's own changes.
+        #: Tagged labels (release 5.79): the glossary, what each item mentions, and the owner's own changes. Since release
+        #: 5.160 (decision 733) the mentions are read from ``conn`` when something first asks for them, all or a few items'
+        #: (``tagged.Tagged``), not here: three years of work hold 132,000, two thirds of this read.
         self.tagged = tagged_load(conn)
 
     # ---- names ----

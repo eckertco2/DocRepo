@@ -39,8 +39,11 @@ class PlanningHooks:
 
     # ---- the Priorities board (mods log round 2, M0029, M0030; release 5.23) ----
     def move_priority(self, task_id: str, bucket: str, before) -> None:
-        """A card dragged, or moved by its key or the buckets above the board."""
-        self._do(lambda: edits.set_priority(self.conn, self.ctx.data_root, self.ctx.fs, task_id, bucket, before, self._now()), ("task", task_id))
+        """A card dragged, or moved by its key or the buckets above the board. No view's count follows a priority, so the
+        views pane isn't drawn again, and only an open Find files window of the task, or of a task above it, reads its
+        records again (release 5.159, decision 730)."""
+        self._do(lambda: edits.set_priority(self.conn, self.ctx.data_root, self.ctx.fs, task_id, bucket, before, self._now()), ("task", task_id),
+                 counts=False, reach=priorities.reach(self.model(), task_id))
 
     def set_timeline_key_date(self, task_id: str, key_id: int, start: str | None, end: str | None, said: str) -> None:
         """A key date dragged in Plan mode, or put back by Ctrl+Z (release 5.31, decision 152): saved and logged."""
@@ -161,8 +164,9 @@ class PlanningHooks:
         self.quick_window.show_near(near)
 
     def nudge_priority(self, task_id: str, step: int, shown: list) -> None:
-        """Alt+Up and Alt+Down on the board: one place up or down in its bucket, not in the status log."""
-        self._do(lambda: priorities.nudge(self.conn, task_id, step, shown), ("task", task_id))
+        """Alt+Up and Alt+Down on the board: one place up or down in its bucket, not in the status log. A place changes no
+        view's count and no Find files window, so neither is drawn again (release 5.159)."""
+        self._do(lambda: priorities.nudge(self.conn, task_id, step, shown), ("task", task_id), counts=False, reach=())
 
     # ---- capacity ----
     def render_capacity(self) -> None:

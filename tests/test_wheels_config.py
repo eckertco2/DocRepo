@@ -47,8 +47,9 @@ def test_an_escaped_quote_doesnt_end_a_string():
 def test_the_default_file_is_the_decided_wheels():
     config = wc.parse(wc.DEFAULT_TEXT, SPECS, ICONS)
     assert [w.id for w in config.wheels] == ["capture", "browse", "execution"]
+    # Release 5.158 (the recent captures plan's decision 723): Recent captures on the Capture wheel's NE.
     assert {d: s.command for d, s in config.wheel("capture").slots.items()} == {
-        "N": "capture.new", "E": "capture.selection", "S": "today.new_item", "W": "capture.meeting"}
+        "N": "capture.new", "E": "capture.selection", "S": "today.new_item", "W": "capture.meeting", "NE": "capture.recent"}
     assert {d: s.command for d, s in config.wheel("browse").slots.items()} == {
         "N": "browse.view", "E": "search.tasks", "S": "search.files", "W": "search.everything"}
     execution = config.wheel("execution").slots
@@ -56,9 +57,13 @@ def test_the_default_file_is_the_decided_wheels():
     # Release 5.131 (the quick summary plan's decision 517): S is the quick summary, no longer held for the agent window.
     assert execution["S"].command == "summary.open" and not execution["S"].held and execution["W"].command == "find_files.current"
     # Release 5.139 (the email progress plan's decision 583): Log progress on NE makes the Execution wheel eight-way
-    # (decision 170: a diagonal item makes it 8-way, and nothing moves); the other two stay crosses.
+    # (decision 170: a diagonal item makes it 8-way, and nothing moves); since release 5.158 the Capture wheel's NE does the
+    # same for it, and only the Browse wheel stays a cross.
     assert execution["NE"].command == "progress.log"
-    assert [w.id for w in config.wheels if w.eight_way] == ["execution"]
+    assert [w.id for w in config.wheels if w.eight_way] == ["capture", "execution"]
+    capture = config.wheel("capture").slots["NE"]
+    assert (capture.label, capture.icon) == ("Recent captures", "activity")
+    assert '// "NW": { "label": "Pinned", "icon": "pin", "command": "capture.pin" }' in wc.DEFAULT_TEXT  # the pin's suggestion moved
 
 
 def test_the_default_file_comments_every_command():
@@ -235,6 +240,53 @@ def test_an_s_slot_you_changed_stays(data_root, fs):
         wc.write_defaults(fs, data_root, SPECS, ICONS)
         assert path.read_bytes().decode("utf-8") == mine
     assert wc.summary_slot(wc.summary_slot(OLD_S)) == wc.summary_slot(OLD_S)
+
+
+OLD_CAPTURE = wc._OLD_CAPTURE_END.replace("{nl}", "\n")
+NEW_CAPTURE = wc._RECENT_END.replace("{nl}", "\n")
+
+
+def test_a_file_from_before_gets_recent_captures_on_the_capture_wheel_s_ne(data_root, fs):
+    """Release 5.158 (the recent captures plan's decision 723), as 5.139 added Log progress: a file whose Capture wheel ends
+    as the default wrote it gets NE, and the pinned window's suggestion moves to NW; every other line stays."""
+    wc.write_defaults(fs, data_root, SPECS, ICONS)
+    path = data_root / wc.CONFIG_FILE
+    assert NEW_CAPTURE in wc.DEFAULT_TEXT
+    old = wc.DEFAULT_TEXT.replace(NEW_CAPTURE, OLD_CAPTURE)
+    assert "capture.recent" not in old and wc.recent_slot(old) == wc.DEFAULT_TEXT
+    path.write_bytes(("// mine\n" + old).encode("utf-8"))
+    wc.write_defaults(fs, data_root, SPECS, ICONS)
+    assert path.read_bytes().decode("utf-8") == "// mine\n" + wc.DEFAULT_TEXT
+    assert wc.load(data_root, SPECS, ICONS).wheel("capture").slots["NE"].command == "capture.recent"
+    # A file with Windows' line endings, as an editor may save it, keeps them.
+    crlf = old.replace("\n", "\r\n")
+    path.write_bytes(crlf.encode("utf-8"))
+    wc.write_defaults(fs, data_root, SPECS, ICONS)
+    assert path.read_bytes().decode("utf-8") == wc.DEFAULT_TEXT.replace("\n", "\r\n")
+    # Once is enough: written again, it's as it was.
+    assert wc.recent_slot(wc.DEFAULT_TEXT) == wc.DEFAULT_TEXT
+
+
+def test_a_capture_wheel_you_changed_or_whose_ne_is_taken_stays(data_root, fs):
+    """Decision 723: only when NE is free and the command isn't named; otherwise the file is left alone, and Recent captures
+    is still on Ctrl+K."""
+    old = wc.DEFAULT_TEXT.replace(NEW_CAPTURE, OLD_CAPTURE)
+    # The pin's suggestion taken up on NE, as its comment says.
+    pinned = old.replace('"command": "capture.meeting" }\n        // capture.pin', '"command": "capture.meeting" },\n        // capture.pin').replace(
+        '        // "NE": { "label": "Pinned"', '        "NE": { "label": "Pinned"')
+    assert wc.parse(pinned, SPECS, ICONS).wheel("capture").slots["NE"].command == "capture.pin"
+    # NE taken at the wheel's start, its end still as the default wrote it.
+    elsewhere = old.replace('"N": { "label": "Blank capture"', '"NE": { "label": "Mine", "command": "capture.pin" },\n        "N": { "label": "Blank capture"')
+    assert wc.parse(elsewhere, SPECS, ICONS).wheel("capture").slots["NE"].label == "Mine" and OLD_CAPTURE in elsewhere
+    named = old.replace("// capture.selection:", "// capture.recent is on my Browse wheel. capture.selection:")
+    renamed = old.replace('"label": "Meeting"', '"label": "Meetings"')
+    wc.write_defaults(fs, data_root, SPECS, ICONS)
+    path = data_root / wc.CONFIG_FILE
+    for mine in (pinned, elsewhere, named, renamed, "{ not json"):
+        assert wc.recent_slot(mine) == mine
+        path.write_bytes(mine.encode("utf-8"))
+        wc.write_defaults(fs, data_root, SPECS, ICONS)
+        assert path.read_bytes().decode("utf-8") == mine
 
 
 def test_a_config_with_a_byte_order_mark_loads(data_root, fs):

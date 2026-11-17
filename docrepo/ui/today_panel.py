@@ -29,7 +29,8 @@ import json
 import logging
 import os
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from ctypes import wintypes
 from datetime import date
 from typing import TYPE_CHECKING
@@ -444,6 +445,7 @@ class TodayPanel(QWidget):
         self._rest = db.get_state(self.ctx.conn, REST_WIDTH_KEY)  # the width at rest, dragged and kept (decision 406)
         self._wide = db.get_state(self.ctx.conn, WIDE_WIDTH_KEY) or None  # the width widened, dragged and kept (decision 694)
         self._binned: tuple[int, str] | None = None  # a row's drag dropped on a bin: the item and the bin's band (decision 691)
+        self._own_drop = False  # a drop of the panel's own is being made: it draws once, after (release 5.159, decision 730)
         self.bins: today_bins.Bins | None = None
         self._dragging = False  # a drag of files, links or an email is over the panel (decision 407)
         self._moving: int | None = None  # the Today item one of its rows is being dragged to move (release 5.148)
@@ -659,8 +661,9 @@ class TodayPanel(QWidget):
         return self.ctx.now().date()
 
     def _today_changed(self) -> None:
-        """The browse tool or the capture window changed Today. Nothing to draw while the panel is closed."""
-        if self.user_open:
+        """The browse tool or the capture window changed Today. Nothing to draw while the panel is closed, or while a drop of
+        its own is being made, as it draws itself once that's done (release 5.159, decision 730)."""
+        if self.user_open and not self._own_drop:
             self.refresh()
 
     def refresh(self) -> None:
@@ -967,8 +970,9 @@ class TodayPanel(QWidget):
     # ================= the owner's order (release 5.148, decisions 643, 646 and 648) =================
     def move_item(self, item_id: int, *, to: str | None = None, beside: tuple[int, str] | None = None) -> None:
         """A move from the panel, the browse tool's own: to the top, the bottom, up or down, or beside another row as a drag
-        drops it. The list is drawn again, with the keyboard still on the item."""
-        self.browse.move_today(item_id, to=to, beside=beside)
+        drops it. The list is drawn again, once (release 5.159), with the keyboard still on the item."""
+        with self._drawn_once():
+            self.browse.move_today(item_id, to=to, beside=beside, follow=False)
         self.refresh()
         if 0 <= self.cursor < len(self.rows):
             self.scroll.ensureWidgetVisible(self.rows[self.cursor])
@@ -1048,14 +1052,25 @@ class TodayPanel(QWidget):
 
     def bin_item(self, item_id: int, band: str) -> None:
         """A task dropped on a bin: its priority set by the browse tool's own (``bin_today``), said on the panel's line, and the
-        list drawn again, with the keyboard still on the item."""
-        self.browse.bin_today(item_id, band, tell=self.tell_state)
+        list drawn again, with the keyboard still on the item. Drawn once (release 5.159, decision 730): the browse tool's
+        word that Today changed doesn't draw it as well, and the browse tool's Today view keeps its own selection."""
+        with self._drawn_once():
+            self.browse.bin_today(item_id, band, tell=self.tell_state, follow=False)
         self.refresh()
         at = next((i for i, r in enumerate(self.rows) if r.item_id == item_id), -1)
         if at >= 0:
             self.cursor = at
             self._mark_cursor()
             self.scroll.ensureWidgetVisible(self.rows[at])
+
+    @contextmanager
+    def _drawn_once(self) -> Iterator[None]:
+        """While the panel's own drop is made: ``today_changed`` doesn't draw the panel, which draws itself once after."""
+        self._own_drop = True
+        try:
+            yield
+        finally:
+            self._own_drop = False
 
     def run_drag(self, drag: QDrag) -> None:
         """Run a row's drag until it's dropped or let go. Tests replace it."""
