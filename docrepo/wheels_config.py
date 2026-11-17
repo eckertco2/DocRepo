@@ -400,9 +400,11 @@ DEFAULT_TEXT = """\
         // today.new_item: a quick task on Today, as Ctrl+Shift+D makes one.
         "S": { "label": "Today item", "icon": "sun", "command": "today.new_item" },
         // capture.meeting: meeting notes.
-        "W": { "label": "Meeting", "icon": "people", "command": "capture.meeting" }
+        "W": { "label": "Meeting", "icon": "people", "command": "capture.meeting" },
+        // capture.recent: the last captures saved; Enter opens one at its block on its notes page, to work on its words there.
+        "NE": { "label": "Recent captures", "icon": "activity", "command": "capture.recent" }
         // capture.pin: the plain pinned window, on no wheel by default. To use it, add a comma after the line above, and:
-        // "NE": { "label": "Pinned", "icon": "pin", "command": "capture.pin" }
+        // "NW": { "label": "Pinned", "icon": "pin", "command": "capture.pin" }
       }
     },
     {
@@ -494,6 +496,45 @@ def progress_slot(text: str) -> str:
     return text.replace(_OLD_W_SLOT, _NE_SLOTS)
 
 
+#: What releases 5.41 to 5.157 wrote last on the Capture wheel (release 5.158 adds NE after it, and moves the pin's
+#: suggestion to NW), with "{nl}" for the file's own line ending.
+_OLD_CAPTURE_END = ('"W": { "label": "Meeting", "icon": "people", "command": "capture.meeting" }{nl}'
+                    '        // capture.pin: the plain pinned window, on no wheel by default. To use it, add a comma after the line above, and:{nl}'
+                    '        // "NE": { "label": "Pinned", "icon": "pin", "command": "capture.pin" }{nl}'
+                    '      }')
+_RECENT_END = ('"W": { "label": "Meeting", "icon": "people", "command": "capture.meeting" },{nl}'
+               '        // capture.recent: the last captures saved; Enter opens one at its block on its notes page, to work on its words there.{nl}'
+               '        "NE": { "label": "Recent captures", "icon": "activity", "command": "capture.recent" }{nl}'
+               '        // capture.pin: the plain pinned window, on no wheel by default. To use it, add a comma after the line above, and:{nl}'
+               '        // "NW": { "label": "Pinned", "icon": "pin", "command": "capture.pin" }{nl}'
+               '      }')
+
+
+def _capture_ne_free(text: str) -> bool:
+    """Whether the file's Capture wheel has no NE slot, read as DocRepo reads the file; False when it can't be read."""
+    try:
+        data = json.loads(strip_comments(text))
+    except ValueError:
+        return False
+    wheels = data.get("wheels") if isinstance(data, dict) else None
+    capture = next((w for w in wheels if isinstance(w, dict) and w.get("id") == "capture"), None) if isinstance(wheels, list) else None
+    return isinstance(capture, dict) and isinstance(capture.get("slots"), dict) and "NE" not in capture["slots"]
+
+
+def recent_slot(text: str) -> str:
+    """Release 5.158 (the recent captures plan's decision 723): a file whose Capture wheel still ends with Meeting as the
+    default wrote it, whose NE is free, and that names Recent captures nowhere, gets Recent captures on the wheel's NE, with
+    the pinned window's suggestion moved to NW. A wheel you've changed stays yours, and so does every other line; the command
+    is still on Ctrl+K."""
+    if "capture.recent" in text:
+        return text
+    nl = "\r\n" if "\r\n" in text else "\n"
+    old = _OLD_CAPTURE_END.replace("{nl}", nl)
+    if text.count(old) != 1 or not _capture_ne_free(text):
+        return text
+    return text.replace(old, _RECENT_END.replace("{nl}", nl))
+
+
 def write_defaults(fs: SafeFS, data_root: Path, registry: Mapping[str, CommandSpec], icons: Iterable[str]) -> None:
     """The config file, if there isn't one, and always the schema beside it, which is DocRepo's own."""
     path = data_root / CONFIG_FILE
@@ -504,7 +545,7 @@ def write_defaults(fs: SafeFS, data_root: Path, registry: Mapping[str, CommandSp
             text = path.read_bytes().decode("utf-8-sig")  # as bytes, so its line endings stay
         except (OSError, UnicodeDecodeError):
             text = ""  # loading it says what's wrong
-        upgraded = progress_slot(summary_slot(draw_at_once(text)))
+        upgraded = recent_slot(progress_slot(summary_slot(draw_at_once(text))))
         if upgraded != text:
             fs.write_text(path, upgraded)
     fs.write_text(data_root / SCHEMA_FILE, json.dumps(schema(registry, icons), indent=1) + "\n")

@@ -24,6 +24,9 @@ except ImportError:  # pragma: no cover - the fallback below
 
 #: How many commands the palette shows at once.
 SHOWN = 12
+#: Recent captures' row in the browse tool's and the capture window's palettes (release 5.158, decision 723), there
+#: whether or not a wheel has its slot.
+RECENT_CAPTURES = "Recent captures: open one on its notes page"
 
 
 @dataclass(frozen=True)

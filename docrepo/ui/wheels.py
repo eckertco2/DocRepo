@@ -53,6 +53,7 @@ class Wheels(QObject):
         self._file_search = None
         self._quick_summary = None
         self._log_progress = None
+        self._recent_captures = None
         self._reload_timer = QTimer(self, singleShot=True, interval=RELOAD_WAIT_MS, timeout=self._file_changed)
         self._watcher = QFileSystemWatcher(self)
         self._watcher.fileChanged.connect(lambda _p: self._reload_timer.start())
@@ -279,6 +280,19 @@ class Wheels(QObject):
         self._log_progress.open_for(draft, task, self._screen_for(self.snapshot.hwnd if self.snapshot else 0))
         if problem:
             self._log_progress.message.setText(f"Outlook didn't give DocRepo the email ({problem}).")
+
+    def recent_captures(self) -> None:
+        """Recent captures (release 5.158, decision 723): the popup of the last captures saved, on the monitor you were on."""
+        from docrepo.ui.recent_captures import RecentCaptures
+
+        if self._recent_captures is None:
+            self._recent_captures = RecentCaptures(self.app)
+        self._recent_captures.open_it(self._screen_for(self.snapshot.hwnd if self.snapshot else 0))
+
+    def recent_captures_from_palette(self) -> None:
+        """From a window's palette (Ctrl+K), which is DocRepo's own: Esc gives the keyboard back to no other program."""
+        self.snapshot = None
+        self.recent_captures()
 
     def today_panel(self, do: str = "toggle") -> None:
         self.app.today_panel_action(do)
