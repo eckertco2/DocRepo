@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
     QPushButton,
 )
 
-from docrepo import db, edits, key_dates, later, waits
+from docrepo import db, edits, key_dates, later, priorities, waits
 from docrepo.dates import long_date
 from docrepo.detail import esc
 from docrepo.model import Model
@@ -187,19 +187,35 @@ class TodayList:
             return None
         return m.today_band(a), today_bins.counts_of(m, items)
 
-    def bin_today(self, item_id: int, band: str, tell: Callable[[str, Callable[[], None] | None], None] | None = None) -> bool:
+    def bin_today(self, item_id: int, band: str, tell: Callable[[str, Callable[[], None] | None], None] | None = None,
+                  follow: bool = True) -> bool:
         """A Today task dropped on a bin: its priority set, and its place the end of its new band (decision 691). It stays
-        selected. ``tell``: the Today side panel's line. True if it changed."""
-        out = self._do(lambda: edits.today_bin(self.conn, self.ctx.data_root, self.ctx.fs, item_id, band, self._now()), self.sel)
+        selected. ``tell``: the Today side panel's line. True if it changed.
+
+        Since release 5.159 (the design workspace's ``docs/mods/bin-drop-speed-plan.md``, decision 730) the drop is given the
+        shared Model, as docs.db is now, and the one it reads after is kept; no view's count follows a priority, so the views
+        pane isn't drawn again (``_do``'s ``counts``); only an open Find files window of the task, or of a task above it,
+        reads its records again. ``follow`` False (the side panel's drop) leaves the Today view's selection as it is, rather
+        than move it to the task and draw its page."""
+        m = self.model()
+        a = next((x for x in m.today_items() if x.id == item_id), None)
+        reach = priorities.reach(m, a.subject) if a is not None and a.subject else set()
+        out = self._do(lambda: edits.today_bin(self.conn, self.ctx.data_root, self.ctx.fs, item_id, band, self._now(), m),
+                       self.sel, counts=False, reach=reach)
         if not out or not out.message:
             return False
-        if self.view == "today":
-            row = next((r for r in self.tree.items() if r.data(0, MOVE_ROLE) == ("today", item_id)), None)
-            if row is not None and self.tree.currentItem() is not row:
-                self.tree.setCurrentItem(row)
+        if follow:
+            self._keep_today_row(item_id)
         if tell is not None:
             tell(out.message, None)
         return True
+
+    def _keep_today_row(self, item_id: int) -> None:
+        """The Today view's row of an item that moved stays the current one, so Alt+Up can go on (decisions 646 and 691)."""
+        if self.view == "today" and self.isVisible():
+            row = next((r for r in self.tree.items() if r.data(0, MOVE_ROLE) == ("today", item_id)), None)
+            if row is not None and self.tree.currentItem() is not row:
+                self.tree.setCurrentItem(row)
 
     def _today_dropped(self, key: tuple[str, int], target: tuple[str, int], where: str) -> None:
         self.move_today(key[1], beside=(target[1], where))
@@ -210,18 +226,17 @@ class TodayList:
             self.move_today(key[1], to="up" if step < 0 else "down")
 
     def move_today(self, item_id: int, *, to: str | None = None, beside: tuple[int, str] | None = None,
-                   tell: Callable[[str, Callable[[], None] | None], None] | None = None) -> bool:
+                   tell: Callable[[str, Callable[[], None] | None], None] | None = None, follow: bool = True) -> bool:
         """Move a Today item (decisions 643 and 646): to the top, the bottom, up or down, or beside another as a drag drops it.
         It stays selected, so Alt+Up can go on. No Undo: it's moved back the same way. ``tell``: the Today side panel's line.
-        True if it moved."""
+        True if it moved. Since release 5.159 a move, which changes no view's count and no Find files window, draws neither
+        again, and ``follow`` False (the side panel's move) leaves the Today view's selection as it is."""
         out = self._do(lambda: edits.move_today_item(self.conn, self.ctx.data_root, self.ctx.fs, item_id, self._now(), to=to, beside=beside),
-                       self.sel)
+                       self.sel, counts=False, reach=())
         if not out:
             return False
-        if self.view == "today":
-            row = next((r for r in self.tree.items() if r.data(0, MOVE_ROLE) == ("today", item_id)), None)
-            if row is not None and self.tree.currentItem() is not row:
-                self.tree.setCurrentItem(row)
+        if follow:
+            self._keep_today_row(item_id)
         if tell is not None and out.message:
             tell(out.message, None)
         return True

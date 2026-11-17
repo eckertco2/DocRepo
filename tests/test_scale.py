@@ -33,11 +33,15 @@ YEARS = 3
 #: Decision 473: the budgets missed on 2026-11-11, when they were first measured, with the time each took then. Each one's
 #: fix is a release of its own; the release that fixes one takes it off this list.
 MISSED: dict[str, str] = {
-    "model": "1.6 s on 2026-11-11: tagged.load reads the JSON of each of 132,000 mentions",
+    # Release 5.160 (decisions 733 to 736): the mentions read when asked, and what's left measured on 2026-11-17.
+    "model": "0.6 to 0.8 s on 2026-11-17 (1.5 s before release 5.160 read the 132,000 mentions when asked): the status log's 90,000 rows "
+             "(0.26 s) and the 15,000 captures (0.11 s)",
     "search": "314 ms on 2026-11-11: LIKE over 91 MB of documents' text (row 8, ranked search, is its fix)",
-    "page": "4.4 s on 2026-11-11: Stories.note_item looks through all 90,000 status-log rows for each capture on the page",
     "save": "7.6 s on 2026-11-11: save_capture reads the model about five times",
-    "tree": "1.5 s on 2026-11-11: the model read again (see model)",
+    # Release 5.159 (decision 728), built and measured on 2026-11-17 after its fixes: what's left is the model.
+    "bin": "3.6 s on 2026-11-17: the one read of the model after the change (see model); its four pages about 0.3 s",
+    "board": "3.4 s on 2026-11-17: the one read of the model after the change (see model); its four pages about 0.3 s",
+    "tree": "0.6 to 0.9 s on 2026-11-17 (1.5 s before release 5.160): the model read again (see model)",
     "daily": "17.1 s on 2026-11-11: tagged.task_tags per page (8 s), capacity.rebuild_task reading every task for each (4.4 s), "
              "Model.tied_to per task (2.5 s)",
 }

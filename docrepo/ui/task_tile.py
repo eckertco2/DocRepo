@@ -124,7 +124,7 @@ def _copy(browse: BrowseWindow, text: str) -> None:
 
 def _priority_menu(browse: BrowseWindow, task_id: str, parent: QMenu) -> QMenu:
     """Priority: the four buckets and Not ranked with the board's keys, the current one ticked, then Urgent."""
-    from docrepo import bulk, edits
+    from docrepo import bulk, edits, priorities
 
     m = browse.model()
     t = m.task(task_id)
@@ -136,8 +136,9 @@ def _priority_menu(browse: BrowseWindow, task_id: str, parent: QMenu) -> QMenu:
         a = menu.addAction(f"{label}{KEY}{k}")
         a.setCheckable(True)
         a.setChecked((t.priority or "") == key)
-        a.triggered.connect(lambda _=False, key=key: browse._do(
-            lambda: edits.set_priority(browse.conn, browse.ctx.data_root, browse.ctx.fs, task_id, key, None, browse._now()), ("task", task_id)))
+        a.triggered.connect(lambda _=False, key=key: browse._do(  # no view's count follows a priority (release 5.159)
+            lambda: edits.set_priority(browse.conn, browse.ctx.data_root, browse.ctx.fs, task_id, key, None, browse._now()), ("task", task_id),
+            counts=False, reach=priorities.reach(m, task_id)))
     menu.addSeparator()
     urgent = menu.addAction(icon("urgent"), "Urgent")
     urgent.setCheckable(True)
