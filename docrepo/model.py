@@ -463,6 +463,11 @@ class Model:
 
     def __init__(self, conn: sqlite3.Connection) -> None:
         q = conn.execute
+        #: docs.db's state as it was read (release 5.159): the connection, its changes and others', as ``AppContext.model``
+        #: keys its shared Model, so a Model read after a change can be kept as the shared one (``AppContext.keep``). None
+        #: inside a transaction, as what's read there could still be rolled back.
+        self.read_at: tuple[int, int, int] | None = (None if conn.in_transaction
+                                                     else (id(conn), conn.total_changes, q("PRAGMA data_version").fetchone()[0]))
         self.tasks = load_tasks(conn)
         self.people: dict[str, Person] = {
             r["id"]: Person(r["id"], r["name"], r["hours_per_week"], r["status"], r["added_note"], email=r["email"], group=r["person_group"],

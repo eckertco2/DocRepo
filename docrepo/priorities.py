@@ -218,6 +218,13 @@ def columns(m: Model, today: date, f: BoardFilter, match: Callable[[str], bool] 
 
 
 # ---- moving a task ----
+def reach(m: Model, task_id: str) -> set[str]:
+    """The tasks whose Find files window can show a task's priority (release 5.159, decision 730): the task's own, whose
+    heading names it, and those above it, which list it among their records. Their windows read their records again
+    after a move to another bucket; the others don't."""
+    return {task_id, *m.ancestors_of(task_id)} if task_id in m.tasks else set()
+
+
 def _ids(conn: sqlite3.Connection, bucket: str) -> list[str]:
     return [r["id"] for r in conn.execute("SELECT id FROM tasks WHERE priority = ? ORDER BY priority_rank, id", (bucket,))]
 

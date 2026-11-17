@@ -132,9 +132,10 @@ def test_each_wheel_is_painted_once_unseen_so_the_first_opening_is_quick(wheel_w
 
 
 def test_a_chord_on_a_cross_selects_nothing_and_stays_open(wheel_window):
-    """Decision 170."""
+    """Decision 170. The Browse wheel is the default's cross (since release 5.158 the Capture wheel has NE, Recent captures)."""
     w = wheel_window
-    open_tapped(w)
+    open_tapped(w, "browse")
+    assert not w.wheel.eight_way
     press(w, UP)
     press(w, RIGHT)
     assert w.lit is None

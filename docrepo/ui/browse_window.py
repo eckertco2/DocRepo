@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from datetime import date
 from pathlib import Path
 
@@ -73,7 +73,7 @@ from docrepo.ui.task_pane import TaskPane
 from docrepo.ui.templates_view import TemplatesPane
 from docrepo.ui.tree_import import TreeFilesPane
 from docrepo.ui.priorities_view import PrioritiesView
-from docrepo.ui.palette import Command, CommandPalette, summary_commands
+from docrepo.ui.palette import RECENT_CAPTURES, Command, CommandPalette, summary_commands
 from docrepo.ui.style import CLASSIC_BROWSE, page_css, style_sheet
 from docrepo.ui.task_forms import LabelMatchDialog, TaskEditDialog
 from docrepo.ui.task_picker import TaskPicker
@@ -136,6 +136,9 @@ from docrepo.ui.lists.common import (  # noqa: F401 - the helpers, here as befor
 
 #: What other modules and the tests read from here (release 5.95): the window, and names that lived here before the move.
 __all__ = ["BrowseWindow", "DETAIL_MIN", "HTML_ROLE", "NAV_FOLDED_KEY", "TODAY_MINE_KEY", "_answers", "priorities_of"]
+
+#: The views with no page beside them (release 5.159): their own page fills the window, so a selection's page isn't drawn.
+NO_PAGE_VIEWS = ("capacity", "settings", "timeline", "priorities")
 
 
 def _in_bar(item) -> bool:
@@ -669,15 +672,17 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         return Pages(self.model(), self.today(), self.content_of, self.ctx.settings.me, self.conn, LOOK.show_help,
                      self.ctx.settings.reference_links)
 
-    def refresh(self, render: bool = True) -> None:
-        """Read docs.db again and show what's there now."""
+    def refresh(self, render: bool = True, reach: Collection[str] | None = None) -> None:
+        """Read docs.db again and show what's there now. ``reach``: the tasks a change can show on (release 5.159), so only
+        their open Find files windows read their records again; None for every one."""
         self.dirty = False
         if self.sel and not self._exists(self.sel):
             self.sel = None
         if render:
             self.render_all()
         for view in list(self.task_views.values()):  # the open Task views read the data again too
-            view.reload()
+            if reach is None or view.task_id in reach:
+                view.reload()
         self.ctx.today_changed()  # and the Today side panel (release 5.43)
 
     def read_again(self) -> None:
@@ -864,6 +869,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
                 Command("", "Search everything", self.search_box.setFocus, "Ctrl+Shift+F"),
                 Command("", "Quick summary: a person, an agenda or a label", lambda: self.ctx.open_summary(None)),
                 *summary_commands(self.ctx),  # each saved set (release 5.149, decision 651)
+                Command("", RECENT_CAPTURES, lambda: self.ctx.open_recent()),  # release 5.158, decision 723
                 Command("", "Find in this view", self.open_find, "Ctrl+F"),
                 Command("", "Show or hide the views", lambda: self.show_views_pane(not self.views_button.isChecked()), "Ctrl+B"),
                 Command("", "Read docs.db and the calendar again", self.read_again, "F5"),
@@ -948,7 +954,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         if workspace_ui.is_open(self):  # the workspace takes the list's and the page's room (release 5.152, decision 682)
             workspace_ui.render(self)
             return
-        self.detail.setVisible(self.view not in ("capacity", "settings", "timeline", "priorities"))
+        self.detail.setVisible(self.view not in NO_PAGE_VIEWS)
         if self.view == "priorities":
             self.middle.setCurrentWidget(self.priorities)
             self.priorities.render(self.model(), self.today(), self.sel[1] if self.sel and self.sel[0] == "task" else None, self.ctx.settings.me)
@@ -1002,6 +1008,9 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         scroll = self.page.verticalScrollBar().value() if keep_scroll else 0
         self._clear_actions()
         self.sync_toolbar()
+        if self.view in NO_PAGE_VIEWS:  # no page shows beside these (release 5.159, decision 730): it's drawn when one does
+            self.actions.hide()
+            return
         s = self.sel
         if s and s[0] == "capture" and s[1] == self.editing:
             self.detail_stack.setCurrentIndex(1)
@@ -1011,10 +1020,10 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         if not s or not self._exists(s):
             self.actions.hide()
             self.page.setHtml('<p class="note">Pick a task, capture or document to see it here.</p>')
-            if not LOOK.classic and self.view not in ("capacity", "settings", "timeline", "priorities"):
+            if not LOOK.classic and self.view not in NO_PAGE_VIEWS:
                 self.detail.hide()  # the list takes the room until something is picked
             return
-        if not LOOK.classic and self.view not in ("capacity", "settings", "timeline", "priorities"):
+        if not LOOK.classic and self.view not in NO_PAGE_VIEWS:
             self.detail.show()
         self.actions.show()
         pages = self.pages()
@@ -1405,17 +1414,32 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
             self.say(result.message)
 
     # ================= changes =================
-    def _do(self, change: Callable[[], object], select: tuple[str, str] | None = None) -> object | None:
-        """Make a change, then show the result. A change that isn't allowed says why and changes nothing."""
+    def _do(self, change: Callable[[], object], select: tuple[str, str] | None = None, counts: bool = True,
+            reach: Collection[str] | None = None) -> object | None:
+        """Make a change, then show the result. A change that isn't allowed says why and changes nothing.
+
+        Since release 5.159 (the design workspace's ``docs/mods/bin-drop-speed-plan.md``, decision 730): the Model a change
+        read after its writes is kept as the shared one (``AppContext.keep``), so nothing reads every table again; the
+        window, while it's hidden, is drawn once it's shown, as after a capture's save; ``counts`` False, for a change no
+        view's count follows (a priority, Today's order), leaves the views pane as it is, since the counts take longest; and
+        ``reach``, the tasks the change can show on, reloads only their open Find files windows (``refresh``)."""
         try:
             out = change()
         except (TaskError, PeopleError, AgendaError, edits.EditError, WriteRefused, OSError, sqlite3.Error, ValueError) as e:
             self.say(str(e), error=True)
             return None
-        self.refresh(render=False)
+        if isinstance(out, edits.Outcome):
+            self.ctx.keep(out.model)
+        self.refresh(render=False, reach=reach)
         if select:
             self.sel = select
-        self.render_all()
+        if not self.isVisible():
+            self.dirty = True
+        elif counts:
+            self.render_all()
+        else:
+            self.render_list()
+            self.render_detail()
         if isinstance(out, edits.Outcome):
             self.say(out.message + (" Problems: " + " ".join(out.problems) if out.problems else ""), bool(out.problems))
         return out
