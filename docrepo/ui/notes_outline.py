@@ -31,6 +31,8 @@ ROW = 26
 INDENT = 12
 
 NUMBER, LEVEL, DAY = Qt.ItemDataRole.UserRole, Qt.ItemDataRole.UserRole + 1, Qt.ItemDataRole.UserRole + 2
+#: A row's count at its right (release 5.157, decision 713): a topic's runs in All notes By topic.
+COUNT = Qt.ItemDataRole.UserRole + 3
 
 
 class _Rows(QStyledItemDelegate):
@@ -63,8 +65,20 @@ class _Rows(QStyledItemDelegate):
         colour = accent if current else QColor(tokens.colour("text2" if day else "text"))
         p.setPen(colour)
         x = r.x() + 10 + INDENT * max(0, level - 1)
-        text = QFontMetrics(font).elidedText(index.data(Qt.ItemDataRole.DisplayRole) or "", Qt.TextElideMode.ElideRight, r.right() - x - 4)
-        p.drawText(QRect(x, r.y(), r.right() - x, r.height()), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, text)
+        right = r.right()
+        count = index.data(COUNT)
+        if count is not None:  # its count in the muted grey, at the right (release 5.157)
+            small = tokens.ui_font(tokens.CAPTION)
+            words = str(count)
+            width = QFontMetrics(small).horizontalAdvance(words)
+            p.setFont(small)
+            p.setPen(QColor(tokens.colour("text2") if not LOOK.classic else "#87919c"))
+            p.drawText(QRect(right - width - 6, r.y(), width + 2, r.height()), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, words)
+            right -= width + 10
+            p.setFont(font)
+            p.setPen(colour)
+        text = QFontMetrics(font).elidedText(index.data(Qt.ItemDataRole.DisplayRole) or "", Qt.TextElideMode.ElideRight, right - x - 4)
+        p.drawText(QRect(x, r.y(), right - x, r.height()), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, text)
         p.restore()
 
 
@@ -83,6 +97,7 @@ class NotesOutline(QListWidget):
         self.notes = notes
         self.current = -1  # the block number of the heading you're in
         self._entries: list[tuple[int, int, bool, str]] | None = []
+        self._counts: dict[int, int] = {}
         self.setFrameShape(QFrame.Shape.NoFrame)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
@@ -118,11 +133,13 @@ class NotesOutline(QListWidget):
             return
         self.set_entries([(b.blockNumber(), level, day, " ".join(b.text().split()) or "(an empty heading)") for b, level, day in self.notes.outline()])
 
-    def set_entries(self, entries: list[tuple[int, int, bool, str]]) -> None:
-        """Show these entries: (a number ``picked`` carries back, level, whether it's a day, words), in order."""
-        if entries == self._entries:
+    def set_entries(self, entries: list[tuple[int, int, bool, str]], counts: dict[int, int] | None = None) -> None:
+        """Show these entries: (a number ``picked`` carries back, level, whether it's a day, words), in order; ``counts``,
+        by an entry's number, shows at its right (release 5.157: a topic's runs)."""
+        counts = counts or {}
+        if entries == self._entries and counts == self._counts:
             return
-        self._entries = entries
+        self._entries, self._counts = entries, counts
         self.clear()
         # A day's year only where the page's days span more than one: "Thu 16 Jul", as the lists write a date.
         years = {d.year for _n, _l, day, text in entries if day and (d := notes_page.day_of(text))}
@@ -132,6 +149,8 @@ class NotesOutline(QListWidget):
             it.setData(NUMBER, number)
             it.setData(LEVEL, level)
             it.setData(DAY, day)
+            if number in counts:
+                it.setData(COUNT, counts[number])
             it.setToolTip(text)
             self.addItem(it)
         self.rebuilt.emit()

@@ -27,6 +27,18 @@ from docrepo.ui.notes_edit import OLD_DAYS
 from docrepo.ui.task_pane import TaskPane
 
 
+def grouped_outline(m, g: topics.Grouped, today, folded: set[str]) -> tuple[list, list, dict[int, int]]:
+    """All notes' outline By meeting or By topic (release 5.157, decision 713), as the outline takes it: its entries, each
+    one's target (("band", task), whose click folds it, or ("anchor", name)) and the topics' counts by entry."""
+    entries, targets, counts = [], [], {}
+    for n, e in enumerate(topics.outline(m, g, today, folded)):
+        entries.append((n, e.level, e.quiet, e.words))
+        targets.append(e.target)
+        if e.count is not None:
+            counts[n] = e.count
+    return entries, targets, counts
+
+
 class NotesPages:
     """The task page's notes page: wiring it, loading and saving it, pictures and files dropped on it, its folds, its references, its history and its menu."""
 
@@ -56,6 +68,8 @@ class NotesPages:
         # This page or All notes (release 5.140, the notes consolidation plan's decisions 602 to 605), its links, and
         # Alt+Left back to the All notes a double-click left.
         pane.notes_mode.connect(lambda mode: self._set_notes_mode(mode, pane))
+        # All notes' Group strip (release 5.157, the notes topics plan's decision 709): kept per task with the switch.
+        pane.notes_group.connect(lambda group: self._set_notes_group(group, pane))
         # A task line is drawn as its task's tile (release 5.150, the notes syntax plan's decision 652): its circle's state
         # menu, and the tile's right-click menu.
         notes.tile_of = self._tile_of
@@ -101,6 +115,7 @@ class NotesPages:
         scroll = pane.verticalScrollBar().value() if keep_scroll and pane.task_id == task_id else 0
         if pane.task_id != task_id:  # a meeting's notes unfolded, and All notes' window and page, are the task's own (5.140)
             self.state.meeting_open, self.state.notes_only, self.state.notes_weeks = "", "", all_notes.WEEKS
+            self.state.notes_folded = set()
         pages = self.pages()
         width = pane.page_width()
         pane.show_parts(pages.task_parts(task_id, self.state, width), self._page_folds(task_id), width >= WIDE_PAGE)
@@ -118,16 +133,43 @@ class NotesPages:
         pane = self.task_pane
         more = all_notes.has_more(self.model(), task_id)
         mode = "all" if more and self._page_folds(task_id).get("all_notes") else "page"
-        pane.set_mode_switch(more, mode)
+        pane.set_mode_switch(more, mode, self.notes_group_of(task_id))
         if mode == "all":
             self.draw_all_notes(task_id, pages)
         elif pane.all_mode:
             pane.show_all_notes(None)
 
+    def notes_group_of(self, task_id: str) -> str:
+        """All notes' grouping on a task (release 5.157, decision 709): "day" until the owner picks another, kept with the
+        page's folds."""
+        group = self._page_folds(task_id).get("notes_group")
+        return group if group in topics.GROUPS else "day"
+
+    def _set_notes_group(self, group: str, pane: TaskPane | None = None) -> None:
+        """The Group strip picked a grouping: kept for this task, and All notes drawn again from its top."""
+        pane = pane or self.task_pane
+        task_id = pane.task_id
+        if not task_id or group not in topics.GROUPS:
+            return
+        folds = self._page_folds(task_id)
+        folds["notes_group"] = group
+        self.ctx.keep_state(f"page_folds:{task_id}", json.dumps(folds))
+        self.draw_all_notes(task_id)
+        pane.set_mode_switch(True, "all", group)
+
     def draw_all_notes(self, task_id: str, pages=None, keep_scroll: bool = False) -> None:
-        """All notes in the frame, with its outline: its days, then the pages in it, each narrowing it to that page."""
+        """All notes in the frame, with its outline: By day, its days, then the pages in it, each narrowing it to that
+        page; By meeting or By topic (release 5.157), each band's task with its occasions or its topics."""
         pane, m = self.task_pane, self.model()
         scroll = pane.verticalScrollBar().value()
+        self.state.notes_group = self.notes_group_of(task_id)
+        if self.state.notes_group != "day":
+            html, g = (pages or self.pages()).grouped_notes(task_id, self.state)
+            entries, targets, counts = grouped_outline(m, g, self.today(), self.state.notes_folded)
+            pane.show_all_notes(html, entries, targets, -1, counts)
+            if keep_scroll:
+                QTimer.singleShot(0, lambda: pane.verticalScrollBar().setValue(scroll))
+            return
         html, an = (pages or self.pages()).all_notes(task_id, self.state)
         entries: list[tuple[int, int, bool, str]] = []
         targets: list[tuple[str, str]] = []
@@ -161,14 +203,17 @@ class NotesPages:
         else:
             pane.show_all_notes(None)
             self.load_notes(task_id, pane)
-        pane.set_mode_switch(True, mode)
+        pane.set_mode_switch(True, mode, self.notes_group_of(task_id))
 
     def all_notes_link(self, kind: str, rest: str) -> None:
         """All notes' links: Show earlier and Show everything (decision 609), a page from its outline or Every page
-        (decision 603), and Edit there or a double-click, which opens a block on its own page (decision 605)."""
+        (decision 603), a band's fold (release 5.157, decision 713), and Edit there or a double-click, which opens a block
+        on its own page (decision 605)."""
         st, pane = self.state, self.task_pane
         if kind == "allnotes":
-            if rest == "earlier":
+            if rest.startswith("fold:"):
+                st.notes_folded ^= {rest.removeprefix("fold:")}
+            elif rest == "earlier":
                 st.notes_weeks = st.notes_weeks + all_notes.WEEKS if st.notes_weeks else 0
             elif rest == "everything":
                 st.notes_weeks = 0

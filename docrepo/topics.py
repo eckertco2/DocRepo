@@ -15,16 +15,24 @@ top-level task's tree. Headings with the same words under the same heading are o
 each saying what it's under, how often it's been used and when last. The headings typed in the same box count with the
 task's own; the line being typed doesn't.
 
-Nothing here touches Qt; ``docrepo.ui.heading_list`` shows the list.
+**All notes grouped** (release 5.157, decisions 709 to 717): All notes read By meeting or By topic, task first. A
+**band** for the task and for each live task under it, in tree order, meetings not among them; a meeting's page goes in
+its home task's band (decision 610). By meeting lists each band's **occasions** oldest first: a meeting (from a block of
+its notes, an item made from them, lines moved from its page, or anything on its page) or a day's other entries
+("Notes", "Email"). By topic lists each band's topics in the order first used, each topic's **runs** (lines of one
+block under it) oldest first, then the lines under no topic heading. Both read every day (decision 714).
+
+Nothing here touches Qt; ``docrepo.ui.heading_list`` shows the list, and ``detail.Pages.grouped_notes`` draws the groupings.
 """
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from functools import lru_cache
 
-from docrepo import markup, notes_page
+from docrepo import markup, meeting_rows, notes_page
+from docrepo.all_notes import Block, blocks_of
 from docrepo.model import Model
 
 #: The words a typed word is matched against the start of: a heading's words split at spaces and punctuation.
@@ -206,3 +214,282 @@ def sub_text(r: Row, today: date) -> str:
     times = "once" if r.times == 1 else "twice" if r.times == 2 else f"{r.times} times"
     when = (("last " if r.times > 1 else "") + short_day(r.last, today)) if r.last else ""
     return " · ".join(x for x in (f"under {r.under}" if r.under else "", times, when) if x)
+
+
+# ---- All notes grouped (release 5.157, decisions 709 to 717) ----
+
+#: All notes' groupings (decision 709), as the Group strip names them, By day first (release 5.140's, as it was).
+GROUPS = {"day": "By day", "meeting": "By meeting", "topic": "By topic"}
+#: What a day's entries that aren't a meeting's are called (decision 710): an email's, and the rest's.
+NOTES, EMAIL = "Notes", "Email"
+#: What By topic calls the lines under no topic heading (decision 711).
+LOOSE = "Not under a topic heading"
+
+
+@dataclass(frozen=True)
+class Occasion:
+    """Where a block came from (decision 710): a meeting (``meeting`` its task, ``label`` its title), or a day's other
+    entries (``label`` "Notes" or "Email"); and the day."""
+
+    label: str
+    day: date
+    meeting: str = ""
+
+
+@dataclass
+class Run:
+    """Lines of one block under one topic, or under none (decision 711): the block, its occasion and the lines, the
+    topic's headings left out. An email's block is a run with no lines: it reads as one line."""
+
+    block: Block
+    occasion: Occasion
+    lines: list[notes_page.Line] = field(default_factory=list)
+
+
+@dataclass
+class Topic:
+    """A topic in a band (decisions 708 and 711): its path as matched (``key``), its words as most recently typed
+    (``path``), and its runs, oldest first."""
+
+    key: tuple[str, ...]
+    path: tuple[str, ...]
+    runs: list[Run] = field(default_factory=list)
+
+    @property
+    def words(self) -> str:
+        return self.path[-1]
+
+
+@dataclass
+class Band:
+    """A task's band (decisions 710 and 711): the task; the tasks between the All notes' task and it (``above``, that
+    task first; none for that task itself); By meeting's occasions, each with its blocks, oldest first; By topic's topics
+    in the order first used, and its runs under no topic heading (``loose``)."""
+
+    task: str
+    above: list[str]
+    occasions: list[tuple[Occasion, list[Block]]] = field(default_factory=list)
+    topics: list[Topic] = field(default_factory=list)
+    loose: list[Run] = field(default_factory=list)
+
+    def ordered(self) -> list[tuple[Topic, int]]:
+        """Its topics as they read, each with its level: each top topic in the order first used, then the topics under it,
+        each under its own (a level 2 topic under its level 1, a level 3 under its level 2)."""
+        known = {t.key for t in self.topics}
+        kids: dict[tuple[str, ...], list[Topic]] = {}
+        tops: list[Topic] = []
+        for t in self.topics:
+            if len(t.key) > 1 and t.key[:-1] in known:
+                kids.setdefault(t.key[:-1], []).append(t)
+            else:
+                tops.append(t)
+        out: list[tuple[Topic, int]] = []
+
+        def walk(t: Topic, level: int) -> None:
+            out.append((t, level))
+            for k in kids.get(t.key, []):
+                walk(k, level + 1)
+        for t in tops:
+            walk(t, 1)
+        return out
+
+    def runs_in(self, topic: Topic) -> int:
+        """How many runs a topic has, with the topics under it (the outline's count, decision 713)."""
+        n = len(topic.key)
+        return sum(len(t.runs) for t in self.topics if t.key[:n] == topic.key)
+
+
+@dataclass
+class Grouped:
+    """A task's All notes grouped (``group``, "meeting" or "topic"): its bands with something to show, in tree order."""
+
+    task: str
+    group: str
+    bands: list[Band]
+
+
+def band_tasks(model: Model, task_id: str) -> tuple[list[str], list[str]]:
+    """The tasks All notes reads (the task and every live task under it, in tree order), and those that have a band
+    (decision 710): the task itself, and the rest that aren't meetings."""
+    scope = [x for x in model.scope_ids(task_id, "descendants") if x in model.tasks and not model.tasks[x].discarded]
+    return scope, [x for x in scope if x == task_id or not model.tasks[x].meeting]
+
+
+def home_band(model: Model, page: str, bands: set[str], scope: set[str], task_id: str) -> str:
+    """The band a page's blocks go in: its own, or for a meeting's page the nearest band above it (its home task, decision
+    610), up its parents within All notes; else the All notes' task."""
+    here, seen = page, {page}
+    while here not in bands:
+        up = next((p for p in model.parents_of(here) if p in scope and p not in seen), None)
+        if up is None:
+            return task_id
+        here = up
+        seen.add(here)
+    return here
+
+
+def above(model: Model, task_id: str, band: str) -> list[str]:
+    """The tasks from the All notes' task down to a band's parent, by the band's first chain through it."""
+    if band == task_id:
+        return []
+    for chain in model.chains_of(band):
+        if task_id in chain:
+            return chain[chain.index(task_id):-1]
+    return [task_id]
+
+
+def is_email(model: Model, b: Block) -> bool:
+    """Whether a block is an email's, which All notes reads as one line (decision 606)."""
+    c = model.captures.get(b.capture or "")
+    return c is not None and c.source == "outlook_email"
+
+
+def occasion_of(model: Model, b: Block) -> Occasion:
+    """A block's occasion (decision 710): the meeting whose notes it is, whose notes made it (``from_notes``), whose page
+    its lines were moved from, or whose page it's on; else the day's emails or other notes."""
+    c = model.captures.get(b.capture or "")
+    meeting = None
+    if c is not None:
+        meeting = meeting_rows.meeting_of(model, c.id if c.item == "notes" else c.from_notes)
+    for x in (b.came_from, b.page):
+        if meeting is None and x in model.tasks and model.tasks[x].meeting and not model.tasks[x].discarded:
+            meeting = x
+    if meeting:
+        return Occasion(model.task(meeting).title, b.day, meeting)
+    return Occasion(EMAIL if is_email(model, b) else NOTES, b.day)
+
+
+def band_blocks(model: Model, task_id: str) -> list[tuple[str, list[Block]]]:
+    """Each band's blocks, oldest first, every day of them (decision 714): its own page's and its meetings' pages', each
+    block with lines. A block an item made from notes, and lines moved from a page, stay in their own page's band: the
+    task line or pointer line where they came from stays one line (decision 710)."""
+    scope, bands = band_tasks(model, task_id)
+    rank = {x: i for i, x in enumerate(scope)}
+    band_set, scope_set = set(bands), set(scope)
+    out: dict[str, list[Block]] = {x: [] for x in bands}
+    for x in scope:
+        out[home_band(model, x, band_set, scope_set, task_id)] += [b for b in blocks_of(model, x) if b.lines]
+    for blocks in out.values():
+        blocks.sort(key=lambda b: (b.day, b.at, rank[b.page], b.order))
+    return [(x, out[x]) for x in bands]
+
+
+def occasions(model: Model, task_id: str) -> Grouped:
+    """All notes By meeting (decision 710): a band per task with something to show, each with its occasions oldest first,
+    each occasion's blocks in the order they came in."""
+    out: list[Band] = []
+    for task, blocks in band_blocks(model, task_id):
+        found: dict[Occasion, list[Block]] = {}
+        for b in blocks:
+            found.setdefault(occasion_of(model, b), []).append(b)
+        if found:
+            out.append(Band(task, above(model, task_id, task), occasions=list(found.items())))
+    return Grouped(task_id, "meeting", out)
+
+
+def by_topic(model: Model, task_id: str) -> Grouped:
+    """All notes By topic (decisions 708 and 711): a band per task with something to show, each with its topics in the
+    order first used and their runs oldest first, then its lines under no topic heading. A topic is a path, its words
+    matched case and spacing aside, read by 708's reach: a topic heading covers what follows it in its block up to the
+    next heading at its level or above."""
+    out: list[Band] = []
+    for task, blocks in band_blocks(model, task_id):
+        band = Band(task, above(model, task_id, task))
+        index: dict[tuple[str, ...], Topic] = {}
+        for b in blocks:
+            o = occasion_of(model, b)
+            if is_email(model, b):
+                band.loose.append(Run(b, o))
+                continue
+            path: list[tuple[int, str]] = []
+            run: Run | None = None
+            for x in b.lines:
+                if x.kind == "heading":
+                    words = heading_words(x.text)
+                    if not words or notes_page.day_of(x.text):
+                        continue
+                    path = [p for p in path if p[0] < x.level] + [(x.level, words)]
+                    key = tuple(same(w) for _lv, w in path)
+                    if key not in index:
+                        index[key] = Topic(key, tuple(w for _lv, w in path))
+                        band.topics.append(index[key])
+                    else:  # spelled as most recently typed, as the heading list spells it (705)
+                        index[key].path = tuple(w for _lv, w in path)
+                    run = None
+                    continue
+                if run is None:
+                    if x.kind == "text" and not x.text.strip():
+                        continue
+                    run = Run(b, o)
+                    key = tuple(same(w) for _lv, w in path)
+                    (index[key].runs if key else band.loose).append(run)
+                run.lines.append(x)
+        for r in [r for t in band.topics for r in t.runs] + band.loose:
+            while r.lines and r.lines[-1].kind == "text" and not r.lines[-1].text.strip():
+                r.lines.pop()
+        if band.topics or band.loose:
+            out.append(band)
+    return Grouped(task_id, "topic", out)
+
+
+def grouped(model: Model, task_id: str, group: str) -> Grouped:
+    """All notes By meeting or By topic."""
+    return by_topic(model, task_id) if group == "topic" else occasions(model, task_id)
+
+
+# ---- their places, for the HTML's anchors and the outline (decision 713) ----
+def band_anchor(task: str) -> str:
+    return f"band:{task}"
+
+
+def occasion_anchor(task: str, n: int) -> str:
+    return f"occ:{task}:{n}"
+
+
+def topic_anchor(task: str, n: int) -> str:
+    return f"topic:{task}:{n}"
+
+
+def loose_anchor(task: str) -> str:
+    return f"loose:{task}"
+
+
+@dataclass(frozen=True)
+class Entry:
+    """A row of the outline (decision 713): where it goes (("band", task), whose click folds the band, or ("anchor",
+    name)), its level, its words, how many runs (a topic's; None for none), and whether it reads in grey."""
+
+    target: tuple[str, str]
+    level: int
+    words: str
+    count: int | None = None
+    quiet: bool = False
+
+
+def runs_words(n: int) -> str:
+    return f"{n} run{'s' if n != 1 else ''}"
+
+
+def occasion_words(o: Occasion, today: date) -> str:
+    """An occasion as a line says it: "Cooling tower weekly 10 Nov · Tue 10 Nov", "Notes · Thu 5 Nov"."""
+    return f"{o.label} · {short_day(o.day, today)}"
+
+
+def outline(model: Model, g: Grouped, today: date, folded: set[str] | frozenset[str] = frozenset()) -> list[Entry]:
+    """The outline of a grouping (decision 713): each band's task, then (unless its band is folded) its occasions, or its
+    topics indented by level with how many runs each has, and its lines under no topic heading."""
+    out: list[Entry] = []
+    for band in g.bands:
+        out.append(Entry(("band", band.task), 1, model.task(band.task).title))
+        if band.task in folded:
+            continue
+        if g.group == "meeting":
+            for n, (o, _blocks) in enumerate(band.occasions):
+                out.append(Entry(("anchor", occasion_anchor(band.task, n)), 2, o.label if o.meeting else occasion_words(o, today),
+                                 quiet=not o.meeting))
+            continue
+        for n, (t, level) in enumerate(band.ordered()):
+            out.append(Entry(("anchor", topic_anchor(band.task, n)), level + 1, t.words, band.runs_in(t)))
+        if band.loose:
+            out.append(Entry(("anchor", loose_anchor(band.task)), 2, LOOSE, len(band.loose), quiet=True))
+    return out

@@ -20,6 +20,7 @@ the middle column is a ``TaskPane``, wired as the task page's is (``NotesPages.w
 """
 from __future__ import annotations
 
+import json
 import sqlite3
 from dataclasses import replace
 from typing import TYPE_CHECKING
@@ -28,7 +29,7 @@ from PySide6.QtCore import QPoint, QRect, QSize, Qt, QTimer, QUrl
 from PySide6.QtGui import QCursor, QKeySequence, QShortcut
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QMenu, QPushButton, QToolButton, QVBoxLayout, QWidget
 
-from docrepo import all_notes, edits, meeting_rows, notes_page, task_tile, waits
+from docrepo import all_notes, edits, meeting_rows, notes_page, task_tile, topics, waits
 from docrepo import workspace as ws
 from docrepo.dates import days_words, long_date, short, to_date
 from docrepo.detail import PageState, esc, link
@@ -38,6 +39,7 @@ from docrepo.save import CaptureDraft, SaveError, save_capture
 from docrepo.tasks import TaskError
 from docrepo.ui import tokens
 from docrepo.ui.icons import icon
+from docrepo.ui.lists.notes_pages import grouped_outline
 from docrepo.ui.look import LOOK
 from docrepo.ui.page_view import PageView
 from docrepo.ui.style import page_css
@@ -230,6 +232,8 @@ class Workspace(QWidget):
         # This page or All notes, All notes' links and the outline's places are the workspace's own (683).
         self.pane.notes_mode.disconnect()
         self.pane.notes_mode.connect(self.set_mode)
+        self.pane.notes_group.disconnect()  # All notes' Group strip (release 5.157), kept as the task page keeps it
+        self.pane.notes_group.connect(self.set_group)
         self.pane.all_notes_link.disconnect()
         self.pane.all_notes_link.connect(self.on_link)
         self.pane.all_view.anchorClicked.connect(lambda url: self.on_link(url.toString()))
@@ -423,7 +427,8 @@ class Workspace(QWidget):
         # The heading's words, the switch and the banner.
         has_more = self.picked == self.here and not self.meeting and all_notes.has_more(m, self.here)
         mode = self.mode if has_more else "page"
-        pane.set_mode_switch(has_more, mode)
+        self.state.notes_group = self.browse.notes_group_of(self.here)
+        pane.set_mode_switch(has_more, mode, self.state.notes_group)
         if self.meeting:
             pane.of_label.setText(f"of {m.task(self.meeting).title}, read only")
             pane.set_banner(ws.banner_html(f"<b>{esc(m.task(self.meeting).title)}</b>: its notes, read only.",
@@ -444,6 +449,11 @@ class Workspace(QWidget):
         if reading:
             html, places = ws.read_html(pages, reading)
             self._show_html(m, pages_in, reading, html, [("anchor", p.anchor, p.level, p.day, p.text) for p in places])
+        elif mode == "all" and self.state.notes_group != "day":  # By meeting or By topic (release 5.157)
+            html, g = pages.grouped_notes(self.here, self.state)
+            entries, targets, counts = grouped_outline(m, g, today, self.state.notes_folded)
+            places = [(*target, level + 1, quiet, words) for target, (_n, level, quiet, words) in zip(targets, entries, strict=True)]
+            self._show_html(m, pages_in, self.here, html, places, counts)
         elif mode == "all":
             html, an = pages.all_notes(self.here, self.state)
             places = [("anchor", f"day:{day.isoformat()}", 2, True, notes_page.day_title(day)) for day, _blocks in an.days]
@@ -508,22 +518,26 @@ class Workspace(QWidget):
         self.pane.places = places
         self.pane.outline.set_frame(b, title, a)
 
-    def _show_html(self, m, pages_in: list[str], shown: str, html: str, places: list[tuple]) -> None:
+    def _show_html(self, m, pages_in: list[str], shown: str, html: str, places: list[tuple], counts: dict[int, int] | None = None) -> None:
+        """Notes read in place or All notes in the middle, with the chain's outline round its ``places`` ((kind, key,
+        level, day, words): an anchor, or since release 5.157 a band, whose click folds it); ``counts`` by place."""
         before, after = self._outline_parts(m, pages_in, shown)
-        entries, targets = [], []
+        entries, targets, shown_counts = [], [], {}
         for place, level, day, text in before:
             entries.append((len(targets), level, day, text))
             targets.append(place)
         current = len(targets)
         entries.append((len(targets), 1, False, m.task(shown).title))
         targets.append(("top",))
-        for _kind, anchor, level, day, text in places:
+        for n, (kind, anchor, level, day, text) in enumerate(places):
+            if counts and n in counts:
+                shown_counts[len(targets)] = counts[n]
             entries.append((len(targets), level, day, text))
-            targets.append(("anchor", anchor))
+            targets.append((kind, anchor))
         for place, level, day, text in after:
             entries.append((len(targets), level, day, text))
             targets.append(place)
-        self.pane.show_all_notes(html, entries, targets, current)
+        self.pane.show_all_notes(html, entries, targets, current, shown_counts)
 
     def draw_resources(self) -> None:
         b = self.browse
@@ -566,6 +580,10 @@ class Workspace(QWidget):
         kind = place[0]
         if kind == "dates":
             self.pane.scroll_to(self.dates)
+        elif kind == "band":  # All notes By meeting or By topic: a band folds or unfolds, and stays in view (713)
+            self.state.notes_folded ^= {place[1]}
+            self.render()
+            QTimer.singleShot(0, lambda: self.pane.scroll_to_anchor(topics.band_anchor(place[1])))
         elif kind == "top":
             self.pane.scroll_to(self.pane.notes_head)
         elif kind == "page":
@@ -598,6 +616,16 @@ class Workspace(QWidget):
         self.pane.notes.save_now()
         self.mode = mode
         self.browse._save_page_fold("all_notes", mode == "all", self.pane)
+        self.render()
+
+    def set_group(self, group: str) -> None:
+        """All notes By day, By meeting or By topic (release 5.157, decision 709), for this task; kept as its task page
+        keeps it."""
+        if group not in topics.GROUPS:
+            return
+        folds = self.browse._page_folds(self.here)
+        folds["notes_group"] = group
+        self.browse.ctx.keep_state(f"page_folds:{self.here}", json.dumps(folds))
         self.render()
 
     # ---- the quick entry bar (678, 701 and 702) ----
@@ -849,7 +877,9 @@ class Workspace(QWidget):
             self.came_from = (self.here, self.picked, self.origin, self.from_today)
             b.say(f"Editing {b.model().task(task_id).title}'s notes on its own page. Alt+Left goes back to the workspace of {title}.")
         elif kind == "allnotes":
-            if rest == "earlier":
+            if rest.startswith("fold:"):  # a band's fold (release 5.157, decision 713)
+                self.state.notes_folded ^= {rest.removeprefix("fold:")}
+            elif rest == "earlier":
                 self.state.notes_weeks = self.state.notes_weeks + all_notes.WEEKS if self.state.notes_weeks else 0
             elif rest == "everything":
                 self.state.notes_weeks = 0

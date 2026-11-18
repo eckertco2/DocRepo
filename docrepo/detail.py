@@ -23,7 +23,7 @@ from datetime import date, timedelta
 from urllib.parse import quote
 
 from docrepo import (all_notes, capacity, decisions, email_conversations, items, markup, meeting_rows, notes_page, repeats, tagged, task_tile,
-                     ties, waits)
+                     ties, topics, waits)
 from docrepo.dates import ago, days_words, long_date, monday_of, short, to_date
 from docrepo.file_rows import dated_name, type_name
 from docrepo.markup import esc
@@ -108,6 +108,11 @@ h2 { font-size: 15pt; font-weight: 600; margin-top: 2px; margin-bottom: 4px; }
 .src { color: #5a6571; font-size: 9pt; margin-top: 8px; margin-bottom: 2px; }
 .nl { margin: 0; }
 .also { color: #87919c; font-size: 8pt; }
+.occ { font-weight: 600; }
+.topic { font-size: 11pt; font-weight: 600; }
+.sub2 { font-weight: 600; }
+.loose { color: #5a6571; font-size: 11pt; font-weight: 600; }
+.tag { color: #5a6571; font-size: 9pt; }
 """
 
 STATE_CLASS = {"Not started": "st-ns", "In progress": "st-ip", "Parked": "st-pk", "Closed": "st-cl"}
@@ -133,6 +138,16 @@ MEETING_NOTES_TIP = ("Meeting notes on this task: the capture window takes a mee
                      "(this time's, for a regular meeting), with its agenda beside them (M)")
 #: All notes' link back to a block's own page (decision 605).
 EDIT_THERE_TIP = "Open its page at these lines, to read or write them there (or double-click a line)"
+#: Release 5.157 (the notes topics plan's decision 716): All notes' pencil, at the end of a day's line (By day) or a band's
+#: (By meeting, By topic), in Edit there's place on every block.
+DAY_PEN_TIP = "Open the day's first lines on their page, to write there (or double-click any line to open its own page)"
+BAND_PEN_TIP = "Open this task's notes page, to write there (or double-click any line to open its own page)"
+PEN = '<img src="lk:edit" width="14" height="14">'
+#: A run of files as one line (decision 715): its paperclip, and the names shown before "+3 more".
+CLIP = '<img src="lk:attach" width="14" height="14">'
+ROLLED_SHOWN = 4
+#: The kinds of line a run of files is made of (decision 715).
+FILE_KINDS = ("file", "picture", "attachment")
 #: The bar beside a follow-up's lines opened in its meeting's notes (decision 604), and beside a meeting's unfolded notes.
 NEST_BAR, UNFOLD_BAR = "#9dc0e3", "#d6dce3"
 #: The bar beside lines a pointer line opens into (release 5.143): the success colour, as moved lines aren't a follow-up's.
@@ -269,6 +284,17 @@ def initials(name: str) -> str:
     return (words[0][0] + (words[-1][0] if len(words) > 1 else "")).upper()
 
 
+def anchored(html: str, name: str) -> str:
+    """HTML with a named anchor at the start of its first paragraph, where Qt keeps it: an anchor between paragraphs is
+    lost. All notes names a block's first line so, where it has no line of its own (release 5.157, decision 716)."""
+    if not name:
+        return html
+    a = f'<a name="{esc(name)}"></a>'
+    i = html.find("<p")
+    j = html.find(">", i) if i >= 0 else -1
+    return html[:j + 1] + a + html[j + 1:] if j >= 0 else f'<p class="nl" style="margin: 0px">{a}</p>{html}'
+
+
 def box(inner: str, cls: str = "box") -> str:
     """HTML inside a full-width box of class ``cls``."""
     return f'<table width="100%" cellspacing="0" cellpadding="7"><tr><td class="{cls}">{inner}</td></tr></table>'
@@ -295,6 +321,10 @@ class PageState:
     meeting_open: str = ""
     notes_weeks: int = all_notes.WEEKS
     notes_only: str = ""
+    # Release 5.157 (the notes topics plan's decisions 709 and 713): All notes' grouping ("day", "meeting" or "topic"),
+    # kept per task with the page's folds, and the bands folded in By meeting and By topic.
+    notes_group: str = "day"
+    notes_folded: set[str] = field(default_factory=set)
 
 
 class Pages:
@@ -1141,12 +1171,14 @@ class Pages:
         return f'{mark}<a href="task:{esc(page)}" title="Open {esc(t.title)}"><span class="{"lbl" if t.meeting else "multi"}">&nbsp;{esc(t.title)}&nbsp;</span></a>'
 
     def all_notes(self, task_id: str, state: PageState) -> tuple[str, all_notes.AllNotes]:
-        """All notes (decisions 602 to 606 and 609): this task's page and every page under it as one, by day, read only,
-        each block led by the page it's on, a meeting's task lines opened in place, and an email as one line that opens
-        its conversation. The last ``state.notes_weeks`` weeks, with Show earlier above them."""
+        """All notes By day (decisions 602 to 606 and 609; 715 and 716 since release 5.157): this task's page and every
+        page under it as one, by day, read only. A day's line ends with the pencil, which opens its first lines on their
+        page; a block's line names its page and what it is only when they change from the block above, its time in grey; a
+        meeting's task lines open in place, a run of files is one line, and an email is one line that opens its
+        conversation. The last ``state.notes_weeks`` weeks, with Show earlier above them."""
         an = all_notes.compose(self.m, task_id, state.notes_weeks or None, state.notes_only)
         cache: dict[str, list[all_notes.Block]] = {}
-        convs = {e.capture: cv.id for cv in email_conversations.for_tasks(self.m, self.m.scope_ids(task_id, "descendants")) for e in cv.emails}
+        convs = self.conversations_of(task_id)
         out = []
         if an.only:
             out.append(f'<p class="rel">Only {esc(self.m.task(an.only).title)}\'s page. {link("allnotes:only:", "Show every page")}</p>')
@@ -1155,45 +1187,235 @@ class Pages:
                        f'{link("allnotes:everything", "Show everything")}</p>')
         for day, blocks in an.days:
             # A named anchor takes the link colour in Qt, so its words carry their own (the outline goes to it, decision 603).
-            out.append(f'<p class="anday"><a name="day:{day.isoformat()}"><span class="anday">{esc(notes_page.day_title(day))}</span></a></p>')
-            out += [self.all_notes_block(task_id, b, cache, convs) for b in blocks]
+            first = blocks[0]
+            pen = self.pen(f"notesgo:{first.page}:{first.capture or ''}", DAY_PEN_TIP)
+            out.append(f'<p class="anday"><a name="day:{day.isoformat()}"><span class="anday">{esc(notes_page.day_title(day))}</span></a>'
+                       f' &nbsp;{pen}</p>')
+            before: tuple[str, str] | None = None
+            for b in blocks:
+                out.append(self.all_notes_block(task_id, b, cache, convs, before))
+                before = (b.page, self.block_what(b))
         if not an.days:
             out.append('<p class="note">No notes yet, on this page or under it.</p>')
         return "".join(out), an
 
-    def all_notes_block(self, here: str, b: all_notes.Block, cache: dict, convs: dict[str, str]) -> str:
-        """One block of All notes: a line naming its page, what it is and its time, with Edit there; then its lines, a
-        meeting's task lines opened into the follow-ups' blocks (decision 604). An email is one line (decision 606)."""
+    def conversations_of(self, task_id: str) -> dict[str, str]:
+        """The email conversation each email capture under a task is in, by its capture: where its line in All notes goes."""
+        return {e.capture: cv.id for cv in email_conversations.for_tasks(self.m, self.m.scope_ids(task_id, "descendants")) for e in cv.emails}
+
+    def block_what(self, b: all_notes.Block) -> str:
+        """What a block of All notes is, as its line says: "Email", "Meeting notes", its caption's words, or "Notes"."""
+        c = self.m.captures.get(b.capture or "")
+        if c is not None and c.source == "outlook_email":
+            return "Email"
+        return "Meeting notes" if c is not None and c.item == "notes" else b.label or "Notes"
+
+    @staticmethod
+    def pen(href: str, tip: str) -> str:
+        """All notes' pencil (decision 716): a link to a page at its lines, in Edit there's place."""
+        return f'<a href="{esc(href)}" title="{esc(tip)}">{PEN}</a>'
+
+    def all_notes_block(self, here: str, b: all_notes.Block, cache: dict, convs: dict[str, str],
+                        before: tuple[str, str] | None = None) -> str:
+        """One block of All notes By day: a line naming its page and what it is, with its time in grey, when they aren't
+        the block above's (``before``, its page and what it is; decision 716); then its lines, a meeting's task lines
+        opened into the follow-ups' blocks (decision 604) and a run of files as one line (715). A block that's only files
+        is that one line, its page and time at its right; an email is one line (decision 606)."""
         c = self.m.captures.get(b.capture or "")
         name = f"block:{b.page}:{b.capture or ''}"  # where a double-click finds the block's page (decision 605)
-        when = f' <span class="faint">· {esc(b.time)}</span>' if b.time else ""
+        when = f' <span class="faint">{esc(b.time)}</span>' if b.time else ""
         if c is not None and c.source == "outlook_email":
             href = f"conv:{here}/{convs[c.id]}" if c.id in convs else f"capture:{c.id}"
             return (f'<p class="src">{self.page_chip(b.page, here)} <img src="ft:mail" width="14" height="14"> '
                     f'{link(href, b.label, "Open the conversation" if c.id in convs else "Open the email", "tl")}{when}'
                     f' <a name="{esc(name)}"><span class="src">· in Email conversations</span></a></p>')
-        notes = c is not None and c.item == "notes"
-        what = "Meeting notes" if notes else b.label or "Notes"
-        edit = link(f"notesgo:{b.page}:{b.capture or ''}", "Edit there", EDIT_THERE_TIP)
-        out = [f'<p class="src">{self.page_chip(b.page, here)} <a name="{esc(name)}"><span class="src">{esc(what)}</span></a>{when} &nbsp;{edit}</p>']
-        copies = all_notes.copied_to(self.m, c.id) if notes and c is not None else {}
-        for x in b.lines:
-            nb = all_notes.follow_up_block(self.m, c.id, x.ref, cache) if notes and c is not None and x.kind == "task" else None
+        what = self.block_what(b)
+        same = (b.page, what) == before
+        files, end = self.file_run(b.lines, 0)
+        if files and end == len(b.lines):
+            right = ("" if same else self.page_chip(b.page, here)) + when
+            return self.files_line(files, right, name)
+        notes = c.id if c is not None and c.item == "notes" else None
+        lines = self.note_lines_html(b.lines, b.page, notes=notes, cache=cache)
+        if same:
+            return anchored(lines, name)
+        return (f'<p class="src">{self.page_chip(b.page, here)} <a name="{esc(name)}"><span class="src">{esc(what)}</span></a>{when}</p>'
+                + lines)
+
+    def note_lines_html(self, lines: list[notes_page.Line], page: str, notes: str | None = None, cache: dict | None = None,
+                        opened: bool = True, anchor: str = "") -> str:
+        """Lines of a block, read only (All notes), each as ``note_line_html`` draws it and a run of files as one line
+        (decision 715). With ``notes`` (a meeting's notes capture) the lines release 5.8 copied to a task's page say so;
+        with ``opened`` too, each task line opens into its follow-up's block and each pointer line into the lines it points
+        to (decision 604); else both stay one line (decision 710). ``anchor`` names the first line, for a double-click."""
+        copies = all_notes.copied_to(self.m, notes) if notes else {}
+        out = []
+        i = 0
+        while i < len(lines):
+            x = lines[i]
+            if x.kind in FILE_KINDS:
+                files, i = self.file_run(lines, i)
+                out.append(self.files_line(files))
+                continue
+            i += 1
+            nb = all_notes.follow_up_block(self.m, notes, x.ref, cache) if opened and notes and x.kind == "task" else None
             if nb is not None:
                 head = (f'<p class="nl" style="margin-top: 2px; margin-bottom: 2px">{self.page_chip(x.ref, "")} '
                         f'<span class="rel">follow-up, on its page</span></p>')
-                out.append(self._barred(head + "".join(self.note_line_html(y, page=nb.page) for y in nb.lines), NEST_BAR, 12))
+                out.append(self._barred(head + self.note_lines_html(nb.lines, nb.page, opened=False), NEST_BAR, 12))
                 continue
             # A pointer line opens into the lines it points to, on their page (release 5.143, decisions 604, 613 and 614).
-            pb = all_notes.pointer_block(self.m, x.ref, cache) if x.kind == "pointer" else None
+            pb = all_notes.pointer_block(self.m, x.ref, cache) if opened and x.kind == "pointer" else None
             if pb is not None:
                 head = (f'<p class="nl" style="margin-top: 2px; margin-bottom: 2px">{self.page_chip(pb.page, "")} '
                         f'<span class="rel">{"moved there" if pb.key else "on its page"}</span></p>')
-                out.append(self._barred(head + "".join(self.note_line_html(y, page=pb.page) for y in pb.lines), MOVED_BAR, 12))
+                out.append(self._barred(head + self.note_lines_html(pb.lines, pb.page, opened=False), MOVED_BAR, 12))
                 continue
-            key = " ".join(markup.to_plain(x.text).split()).casefold() if notes and x.kind == "text" else ""
-            out.append(self.note_line_html(x, also_on=copies.get(key), page=b.page))
-        return "".join(out)
+            key = " ".join(markup.to_plain(x.text).split()).casefold() if copies and x.kind == "text" else ""
+            out.append(self.note_line_html(x, also_on=copies.get(key), page=page))
+        return anchored("".join(out), anchor)
+
+    def file_run(self, lines: list[notes_page.Line], i: int) -> tuple[list[tuple[str, str, str]], int]:
+        """The run of file, attachment and picture lines from ``i``, each with the description line under it: each file's
+        document, name and description (its own words, or its document's unless DocRepo made that up), and where it ends."""
+        out: list[tuple[str, str, str]] = []
+        while i < len(lines) and lines[i].kind in FILE_KINDS:
+            x = lines[i]
+            i += 1
+            d = self.m.documents.get(x.ref)
+            words = x.text.removeprefix("File: ").removeprefix("Picture: ")
+            name, desc = (d.name, "") if d is not None else (words, "")
+            if x.kind == "file":
+                if d is None:
+                    name, _, desc = words.partition(", ")
+                elif words.startswith(d.name):
+                    desc = words[len(d.name):].lstrip(",").strip()
+            elif i < len(lines) and lines[i].kind == "text" and (m := markup.LIST_LINE.match(lines[i].text)) \
+                    and len(m.group(1)) // 2 + 1 == x.level + 1:
+                desc = " ".join(markup.to_plain(lines[i].text[m.end():]).split())
+                i += 1
+            if not desc and d is not None and not notes_page.made_up(d.description, d.name):
+                desc = " ".join((d.description or "").split())
+            out.append((x.ref, name, desc))
+        return out, i
+
+    def files_line(self, files: list[tuple[str, str, str]], right: str = "", anchor: str = "") -> str:
+        """A run of files as one line (decision 715): the paperclip and the files' names, each opening its file with its
+        description in its tooltip, "+3 more" after four (their names in its tooltip); ``right``, at the line's right,
+        is a block's page and time when the block is only files."""
+        sep = ' <span class="faint">·</span> '
+        names = sep.join(link(f"doc:{d}", name, desc or name) for d, name, desc in files[:ROLLED_SHOWN])
+        rest = files[ROLLED_SHOWN:]
+        if rest:
+            names += f'{sep}<span class="rel" title="{esc(", ".join(n for _d, n, _x in rest))}">+{len(rest)} more</span>'
+        a = f'<a name="{esc(anchor)}"></a>' if anchor else ""
+        if right:
+            return (f'<table width="100%" cellspacing="0" cellpadding="0" style="margin-top: 6px; margin-bottom: 2px"><tr>'
+                    f'<td valign="top">{a}{CLIP} {names}</td><td valign="top" align="right" class="src">{right}</td></tr></table>')
+        return f'<p class="nl" style="margin-top: 0px; margin-bottom: 0px">{a}{CLIP} {names}</p>'
+
+    # ---- All notes By meeting and By topic (release 5.157, the notes topics plan's decisions 709 to 717) ----
+    def grouped_notes(self, task_id: str, state: PageState) -> tuple[str, topics.Grouped]:
+        """All notes By meeting or By topic, as ``state.notes_group`` says, every day of it (decision 714): a band per task
+        in tree order, each led by its line (its fold, the tasks above it, its chip and the pencil, decision 716), unless
+        it's folded (713). By meeting, each band's occasions oldest first (710); By topic, its topics in the order first
+        used, each topic's runs oldest first, then its lines under no topic heading (711)."""
+        g = topics.grouped(self.m, task_id, state.notes_group)
+        convs = self.conversations_of(task_id)
+        out = []
+        for band in g.bands:
+            folded = band.task in state.notes_folded
+            out.append(self.band_line(task_id, band, folded))
+            if folded:
+                continue
+            if g.group == "meeting":
+                for n, (o, blocks) in enumerate(band.occasions):
+                    out.append(self.occasion_line(o, topics.occasion_anchor(band.task, n), blocks[0]))
+                    out += [self.grouped_block(b, o, convs, task_id) for b in blocks]
+                continue
+            here = f"block:{band.task}:"  # a double-click on a topic's line opens the band's page
+            for n, (t, level) in enumerate(band.ordered()):
+                # A level 1 topic as a heading, its level 2 and 3 topics as bold lines, not indented (decision 711, P9).
+                style = f"margin-top: {14 if level == 1 else 8}px; margin-bottom: 2px"
+                out.append(f'<p class="{"topic" if level == 1 else "sub2"}" style="{style}">{self.anchors(topics.topic_anchor(band.task, n), here)}'
+                           f'{esc(t.words)} <span class="rel">· {topics.runs_words(band.runs_in(t))}</span></p>')
+                out += self.runs_html(t.runs, convs, task_id)
+            if band.loose:
+                out.append(f'<p class="loose" style="margin-top: 14px; margin-bottom: 2px">{self.anchors(topics.loose_anchor(band.task), here)}'
+                           f'{topics.LOOSE} <span class="rel">· {topics.runs_words(len(band.loose))}</span></p>')
+                out += self.runs_html(band.loose, convs, task_id)
+        if not g.bands:
+            out.append('<p class="note">No notes yet, on this page or under it.</p>')
+        return "".join(out), g
+
+    @staticmethod
+    def anchors(*names: str) -> str:
+        """Named anchors for the start of a line: Qt keeps them only inside a paragraph."""
+        return "".join(f'<a name="{esc(n)}"></a>' for n in names)
+
+    def band_line(self, here: str, band: topics.Band, folded: bool) -> str:
+        """A band's line (decisions 710 and 716): its fold, the tasks from the All notes' task down to it in grey, its chip
+        ("this task" after the All notes' own), and the pencil, which opens its page."""
+        tip = "Unfold this task's notes" if folded else "Fold this task's notes"
+        fold = f'<a href="allnotes:fold:{esc(band.task)}" title="{esc(tip)}">{CHEVRON_RIGHT if folded else CHEVRON_DOWN}</a>'
+        path = " › ".join(self.m.task(x).title for x in band.above)
+        where = f'<span class="rel">{esc(path)} ›</span> ' if path else ""
+        own = ' <span class="rel">this task</span>' if band.task == here else ""
+        pen = self.pen(f"notesgo:{band.task}:", BAND_PEN_TIP)
+        anchors = self.anchors(topics.band_anchor(band.task), f"block:{band.task}:")
+        return (f'<p class="band" style="margin-top: 20px; margin-bottom: 4px">{anchors}{fold} {where}'
+                f'{self.page_chip(band.task, "")}{own} &nbsp;{pen}</p>')
+
+    def occasion_line(self, o: topics.Occasion, anchor: str, first: all_notes.Block) -> str:
+        """By meeting's line for an occasion (decision 710): a meeting's mark and name, which opens it, or "Notes" or
+        "Email"; then its day, once (716)."""
+        mark = '<img src="lk:meeting" width="14" height="14"> ' if o.meeting else ""
+        name = link(f"task:{o.meeting}", o.label, f"Open {o.label}", "tl") if o.meeting else esc(o.label)
+        anchors = self.anchors(anchor, f"block:{first.page}:{first.capture or ''}")
+        return (f'<p class="occ" style="margin-top: 10px; margin-bottom: 2px">{anchors}{mark}{name}'
+                f' <span class="rel">· {esc(topics.short_day(o.day, self.today))}</span></p>')
+
+    def tag_line(self, o: topics.Occasion, anchor: str) -> str:
+        """By topic's grey line naming a run's occasion, when it changes (decision 711): "Cooling tower weekly · Tue 10 Nov"."""
+        mark = '<img src="lk:meeting" width="14" height="14"> ' if o.meeting else ""
+        return f'<p class="tag" style="margin-top: 6px; margin-bottom: 1px">{self.anchors(anchor)}{mark}{esc(topics.occasion_words(o, self.today))}</p>'
+
+    def email_line(self, b: all_notes.Block, convs: dict[str, str], here: str, anchor: str) -> str:
+        """An email's block in By meeting or By topic: one line, its mark and its words, opening its conversation (606)."""
+        c = self.m.captures[b.capture or ""]
+        href = f"conv:{here}/{convs[c.id]}" if c.id in convs else f"capture:{c.id}"
+        return (f'<p class="nl" style="margin-top: 0px; margin-bottom: 0px">{self.anchors(anchor)}<img src="ft:mail" width="14" height="14"> '
+                f'{link(href, b.label, "Open the conversation" if c.id in convs else "Open the email", "tl")}</p>')
+
+    def grouped_block(self, b: all_notes.Block, o: topics.Occasion, convs: dict[str, str], here: str) -> str:
+        """A block under its occasion in By meeting: its lines as written, its topic headings as headings, a task line and
+        a pointer line each one line (decision 710), a run of files one line (715); lines moved from a page that isn't a
+        meeting's led by where they came from."""
+        name = f"block:{b.page}:{b.capture or ''}"
+        if topics.is_email(self.m, b):
+            return self.email_line(b, convs, here, name)
+        c = self.m.captures.get(b.capture or "")
+        lead = f'<p class="tag" style="margin-top: 4px; margin-bottom: 1px">{esc(b.label)}</p>' if b.key and not o.meeting else ""
+        lines = self.note_lines_html(b.lines, b.page, notes=c.id if c is not None and c.item == "notes" else None, opened=False)
+        return anchored(lead + lines, name)
+
+    def runs_html(self, runs: list[topics.Run], convs: dict[str, str], here: str) -> list[str]:
+        """A topic's runs, or a band's lines under no topic heading (decision 711): each run's lines, led by its occasion in
+        grey when that changes from the run above."""
+        out: list[str] = []
+        last: topics.Occasion | None = None
+        for r in runs:
+            name = f"block:{r.block.page}:{r.block.capture or ''}"
+            if r.occasion != last:
+                out.append(self.tag_line(r.occasion, name))
+            last = r.occasion
+            if not r.lines:
+                out.append(self.email_line(r.block, convs, here, name))
+                continue
+            c = self.m.captures.get(r.block.capture or "")
+            out.append(self.note_lines_html(r.lines, r.block.page, notes=c.id if c is not None and c.item == "notes" else None,
+                                            opened=False, anchor=name))
+        return out
 
     # ---- email conversations (release 5.122, the email section plan's decisions 455 to 463) ----
     def me_name(self) -> str | None:

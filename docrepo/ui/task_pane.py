@@ -13,6 +13,7 @@ from PySide6.QtGui import QColor, QFontMetrics, QKeySequence, QPainter, QShortcu
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QFrame, QHBoxLayout, QLabel, QLayout, QMenu, QPushButton, QScrollArea, QScrollBar,
                                QSizePolicy, QToolButton, QToolTip, QVBoxLayout, QWidget)
 
+from docrepo import topics
 from docrepo.ui import tokens
 from docrepo.ui.icons import icon
 from docrepo.ui.look import LOOK
@@ -138,6 +139,8 @@ class TaskPane(QScrollArea):
     layout_changed = Signal()
     #: The Notes heading's switch (release 5.140, decision 602): "page" for This page, "all" for All notes.
     notes_mode = Signal(str)
+    #: All notes' Group strip (release 5.157, decision 709): "day", "meeting" or "topic".
+    notes_group = Signal(str)
     #: A link All notes asks the window to follow: a page picked in its outline ("allnotes:only:T…"), or a double-click's
     #: block ("notesgo:T…:C…", decision 605).
     all_notes_link = Signal(str)
@@ -276,10 +279,44 @@ class TaskPane(QScrollArea):
             ml.addWidget(b)
         self.mode_strip.hide()
         self.all_mode = False
+        # All notes' Group strip (release 5.157, the notes topics plan's decision 709): By day, By meeting or By topic, shown
+        # beside the switch while All notes is on, kept per task as the switch is.
+        self.group_box = QWidget(objectName="notesGroup")
+        self.group_box.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        gl = QHBoxLayout(self.group_box)
+        gl.setContentsMargins(0, 0, 8, 0)  # its gap before Saved, only while it shows: a narrow pane keeps its width
+        gl.setSpacing(6)
+        group_label = QLabel("Group", objectName="notesSaved")
+        group_label.setFont(tokens.ui_font(tokens.CAPTION))
+        gl.addWidget(group_label)
+        self.group_strip = QWidget(objectName="typeStrip")
+        gs = QHBoxLayout(self.group_strip)
+        gs.setContentsMargins(2, 2, 2, 2)
+        gs.setSpacing(2)
+        self.group_group = QButtonGroup(self.group_strip)
+        self.group_group.setExclusive(True)
+        self.group_buttons: dict[str, QPushButton] = {}
+        for key, tip in (("day", "All notes by day, oldest first: each meeting's notes as they were said"),
+                         ("meeting", "All notes by task, then by meeting or day: each task's notes from each meeting, every day of them"),
+                         ("topic", "All notes by task, then by topic heading: each topic's lines from every meeting and day, oldest first, "
+                                   "then the lines under no topic heading")):
+            b = QPushButton(topics.GROUPS[key], objectName="subtle")
+            b.setCheckable(True)
+            b.setChecked(key == "day")
+            b.setToolTip(tip)
+            b.setAccessibleName(f"All notes: {topics.GROUPS[key]}")
+            b.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+            b.clicked.connect(lambda _=False, k=key: self.notes_group.emit(k))
+            self.group_group.addButton(b)
+            self.group_buttons[key] = b
+            gs.addWidget(b)
+        gl.addWidget(self.group_strip)
+        self.group_box.hide()
         hl.addWidget(self.title)
         hl.addSpacing(8)
         hl.addWidget(self.mode_strip)
         hl.addSpacing(8)
+        hl.addWidget(self.group_box)
         hl.addWidget(self.saved)
         hl.addStretch()
         hl.addWidget(self.format_bar)
@@ -497,15 +534,19 @@ class TaskPane(QScrollArea):
         return [self.top, self.bottom, *self.header.views(), self.history.summary, self.all_view]
 
     # ---- All notes (release 5.140, the notes consolidation plan's decisions 602 to 605) ----
-    def set_mode_switch(self, shown: bool, mode: str) -> None:
-        """The Notes heading's switch, shown when there's more than the page to read, on ``mode``."""
+    def set_mode_switch(self, shown: bool, mode: str, group: str = "day") -> None:
+        """The Notes heading's switch, shown when there's more than the page to read, on ``mode``; and while All notes is
+        on, its Group strip on ``group`` (release 5.157)."""
         self.mode_strip.setVisible(shown)
         self.mode_buttons["all" if mode == "all" and shown else "page"].setChecked(True)
+        self.group_box.setVisible(shown and mode == "all")
+        self.group_buttons[group if group in self.group_buttons else "day"].setChecked(True)
         self._fit_head()
 
-    def show_all_notes(self, html: str | None, entries=(), targets=(), current: int = -1) -> None:
+    def show_all_notes(self, html: str | None, entries=(), targets=(), current: int = -1, counts: dict[int, int] | None = None) -> None:
         """All notes in the frame with its outline's ``entries`` (with a ``targets`` entry each: ("day", "2026-11-03"),
-        ("page", "T000022"), or ("", "") for a heading), ``current`` marked; or, with ``html`` None, the page again."""
+        ("page", "T000022"), ("anchor", "topic:T000022:0"), ("band", "T000022"), or ("", "") for a heading), ``current``
+        marked, and ``counts`` (a topic's runs, by its entry's number) at their right; or, with ``html`` None, the page."""
         self.all_mode = html is not None
         self.notes_row.setVisible(not self.all_mode)
         self.all_row.setVisible(self.all_mode)
@@ -513,7 +554,7 @@ class TaskPane(QScrollArea):
             self.summary_box.hide()
             self.all_view.setHtml(html)
             self._all_targets = list(targets)
-            self.all_outline.set_entries(list(entries))
+            self.all_outline.set_entries(list(entries), counts)
             self.all_outline.current = -1
             self.all_outline.set_current(current)
         else:
@@ -522,17 +563,26 @@ class TaskPane(QScrollArea):
         self._landmark_timer.start()
 
     def _all_picked(self, number: int) -> None:
-        """A day picked in All notes' outline goes there; a page narrows All notes to it (the window draws it again)."""
+        """A day, an occasion or a topic picked in All notes' outline goes there; a page narrows All notes to it, and a band
+        (release 5.157, decision 713) folds or unfolds, then goes there (the window draws it again)."""
         if not 0 <= number < len(self._all_targets):
             return
         kind, key = self._all_targets[number]
-        if kind == "day":
-            top = self.all_view.anchor_top(f"day:{key}")
-            if top is not None:
-                y = self.all_view.viewport().mapTo(self.widget(), QPoint(0, top)).y()
-                self.verticalScrollBar().setValue(max(0, y - self.sticky.sizeHint().height() - 8))
+        if kind in ("day", "anchor"):
+            self.all_outline.set_current(number)
+            self.scroll_to_all(f"day:{key}" if kind == "day" else key)
         elif kind == "page":
             self.all_notes_link.emit(f"allnotes:only:{key}")
+        elif kind == "band":
+            self.all_notes_link.emit(f"allnotes:fold:{key}")
+            QTimer.singleShot(0, lambda: self.scroll_to_all(topics.band_anchor(key)))
+
+    def scroll_to_all(self, name: str) -> None:
+        """Scroll All notes so an anchor's line is at the top of the view, under the sticky title line."""
+        top = self.all_view.anchor_top(name)
+        if top is not None:
+            y = self.all_view.viewport().mapTo(self.widget(), QPoint(0, top)).y()
+            self.verticalScrollBar().setValue(max(0, y - self.sticky.sizeHint().height() - 8))
 
     def _outline_offset_all(self) -> int:
         covered = self.sticky.height() if self.sticky.isVisible() else 0
@@ -552,9 +602,10 @@ class TaskPane(QScrollArea):
         QTimer.singleShot(0, self._sticky_check)
 
     def _fit_head(self) -> None:
-        """The format bar beside the Notes heading while it fits there, or else on a line of its own under it."""
+        """The format bar (and All notes' Group strip, release 5.157) beside the Notes heading while they fit there, or else
+        on a line of their own under it."""
         spare = self.viewport().width() - 2 * self.head_margin - 22
-        need = sum(w.sizeHint().width() + 8 for w in (self.title, self.mode_strip, self.saved, self.format_bar, self.table_button,
+        need = sum(w.sizeHint().width() + 8 for w in (self.title, self.mode_strip, self.group_box, self.saved, self.format_bar, self.table_button,
                                                       self.outline_button, self.jump_button, self.menu_button)
                    if not w.isHidden())
         narrow = need > spare
@@ -562,16 +613,20 @@ class TaskPane(QScrollArea):
             return
         if narrow:
             self.head_row.removeWidget(self.format_bar)
+            self.head_row.removeWidget(self.group_box)
             self.bar_row = QHBoxLayout()
             self.bar_row.setContentsMargins(0, 0, 0, 0)
+            self.bar_row.addWidget(self.group_box)
             self.bar_row.addWidget(self.format_bar)
             self.bar_row.addStretch()
             self.head_lines.addLayout(self.bar_row)
         else:
             self.bar_row.removeWidget(self.format_bar)
+            self.bar_row.removeWidget(self.group_box)
             self.head_lines.removeItem(self.bar_row)
             self.bar_row = None
             self.head_row.insertWidget(self.head_row.count() - 2, self.format_bar)
+            self.head_row.insertWidget(self.head_row.indexOf(self.saved), self.group_box)
 
     # ---- the outline (release 5.113) ----
     def set_outline_on(self, on: bool) -> None:

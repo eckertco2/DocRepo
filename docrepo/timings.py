@@ -55,6 +55,8 @@ BUDGETS = (
     Budget("page", "A task page with 300 notes", 0.3),
     # Release 5.140 (the notes consolidation plan's decision 609): the task page's budget, for its All notes and Meetings.
     Budget("allnotes", "All notes and Meetings on the busiest project", 0.3),
+    # Release 5.157 (the notes topics plan's decision 714): All notes By meeting and By topic read every day, not eight weeks.
+    Budget("grouped", "All notes by meeting and by topic, every day, on the busiest project", 0.3),
     Budget("save", "Saving a capture on a task", 0.5),
     # Release 5.159 (the design workspace's docs/mods/bin-drop-speed-plan.md, decision 728): the data change and its page
     # writes, given the browse tool's Model as it is before the change.
@@ -234,6 +236,8 @@ def measure(data_root: Path, settings: Settings, now: datetime, words: str = DEF
                 return len(html) + len(pages.meeting_rows_html(m.task(project), rows, PageState()) if rows else "")
             t, _ = _clock(all_notes, runs)
             out.append(Timing("allnotes", t, runs, f"{under:,} tasks under it"))
+        if "grouped" in wanted and project:
+            out.append(_grouped(m, conn, data_root, settings, today, project, runs))
         if "tree" in wanted:
             def tree() -> int:
                 mm = Model(conn)
@@ -289,6 +293,28 @@ def measure(data_root: Path, settings: Settings, now: datetime, words: str = DEF
     out.sort(key=lambda x: order.index(x.key))
     log.info("timings: %s", ", ".join(f"{x.key} {x.seconds * 1000:.0f} ms" for x in out))
     return out
+
+
+def _grouped(m, conn: sqlite3.Connection, data_root: Path, settings: Settings, today, project: str, runs: int) -> Timing:
+    """All notes By meeting and By topic on the busiest project, every day of it (release 5.157, decision 714): each timed
+    on its own, the slower kept, as each is drawn when it's picked."""
+    from docrepo import topics
+    from docrepo.captures import read_content
+    from docrepo.detail import PageState, Pages
+
+    def drawn(group: str) -> Callable[[], int]:
+        def draw() -> int:
+            pages = Pages(m, today, lambda cid: read_content(data_root, m.captures[cid]) or "" if cid in m.captures else "",
+                          settings.me, conn, hints=False, reference_links=settings.reference_links)
+            return len(pages.grouped_notes(project, PageState(notes_group=group))[0])
+        return draw
+    by_meeting, _ = _clock(drawn("meeting"), runs)
+    by_topic, _ = _clock(drawn("topic"), runs)
+    g = topics.by_topic(m, project)
+    blocks = sum(len(b) for _t, b in topics.band_blocks(m, project))
+    note = (f"by meeting {duration(by_meeting)}, by topic {duration(by_topic)}; {blocks:,} blocks, "
+            f"{sum(len(b.topics) for b in g.bands):,} topics")
+    return Timing("grouped", max(by_meeting, by_topic), runs, note)
 
 
 def _priority_moves(mem: sqlite3.Connection, data_root: Path, fs: CountingFS, now: datetime, runs: int,

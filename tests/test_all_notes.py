@@ -125,10 +125,12 @@ def test_the_page_draws_it(sample_root, ex):
     pages = Pages(m, TODAY, lambda cid: read_content(root, m.captures[cid]))
     html, an = pages.all_notes(ex.project, PageState())
     text = " ".join(re.sub(r"<[^>]+>", " ", html).replace("&nbsp;", " ").split())
-    assert "Cooling tower kickoff Meeting notes · 10:00 am Edit there Attendees: Priya, Tom, Mike." in text
+    # Since release 5.157 (decision 716) the block's line has its time in grey and no Edit there: the day's line has the pencil.
+    assert "Tue 3 Nov 2026 Cooling tower kickoff Meeting notes 10:00 am Attendees: Priya, Tom, Mike." in text and "Edit there" not in text
     assert "Structural survey of the fan deck follow-up, on its page - Structural survey of the fan deck" in text
     assert "Structural survey of the fan deck on its page - drawings found; survey booked for 17 Nov" in text  # 614's pointer, opened
     assert f'name="block:{ex.kickoff}:{ex.kickoff_notes}"' in html and 'name="day:2026-11-03"' in html
     assert f'href="notesgo:{ex.kickoff}:{ex.kickoff_notes}"' in html and f'href="task:{ex.survey}"' in html
+    assert 'src="lk:edit"' in html
     html, _an = pages.all_notes(ex.project, PageState(notes_only=ex.survey))
     assert "Only Structural survey of the fan deck's page." in html and "allnotes:only:" in html
