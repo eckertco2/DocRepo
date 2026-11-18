@@ -66,7 +66,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo import captures, conversations, diagnose, drafts, edits, items, key_dates, msg, notes_page, outlook, timeline
+from docrepo import captures, conversations, diagnose, drafts, edits, items, key_dates, msg, notes_page, outlook, timeline, topics
 from docrepo.dates import short, workday_numbers
 from docrepo.db import RECURRENCES, STATES
 from docrepo.extract import extract_text, to_unc
@@ -720,6 +720,10 @@ class CaptureWindow(QWidget):
         self.content.cursorPositionChanged.connect(self._tell_missing_paths)
         self.content.list_keys = lambda key: self.ref_popup.handle_key(key)
         self.content.left = lambda: self.ref_popup.hide()
+        # The heading list (release 5.156, the notes topics plan's decisions 704 to 708): the picked task's topic headings,
+        # or in Meeting notes the meeting's home task's; it gives way to the @ and # list.
+        self.content.heading_options = self._heading_options
+        self.content.other_list_open = lambda: self.ref_popup.isVisible()
         self.content.link_pasted = self._paste_link
         self.highlighter = OperatorHighlighter(self.content.document())
         self.format_bar = FormatBar(self.content)
@@ -1705,6 +1709,16 @@ class CaptureWindow(QWidget):
             if w.kind == "home" and self.task:
                 return task_colour(m, self.task)
         return tokens.colour("stroke_strong")
+
+    def heading_task(self) -> str | None:
+        """The task whose topic headings the heading list offers (decision 704): in Meeting notes the meeting's home task
+        (decision 610), else the picked task; None with no task, or for a saved capture being looked at."""
+        if self.from_capture or not self.task:
+            return None
+        return follow_up_home(self.ctx.model(), self.task) if self.meeting_on else self.task
+
+    def _heading_options(self, level: int, typed: str, under: str, own: list) -> topics.Listing:
+        return topics.options(self.ctx.model(), self.heading_task(), level, typed, under, own)
 
     def _follow_up_home_name(self) -> str | None:
         """In Meeting notes, where the follow-ups go, in words (release 5.142, decision 610): the meeting's home task, or the

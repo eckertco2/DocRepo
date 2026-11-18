@@ -76,6 +76,7 @@ EDITOR_KEYS = (
     ("Ctrl+Up, Ctrl+Down", "To the paragraph above or below; with Shift, selects as it goes"),
     ("Alt+Shift+Up, Alt+Shift+Down", "Moves the line up or down, with the list items under it"),
     ("Ctrl+Alt+1, 2, 3", "Makes the line a heading at that level, which folds what's under it; Ctrl+Alt+0 makes it text again"),
+    ("Ctrl+Space", "In a heading: the headings already used at its level on the task and its project; Tab or Down then Enter takes one"),
     ("Alt+Shift+-, Alt+Shift++", "Folds or opens the heading the caret is under; or click the arrow beside it"),
 )
 

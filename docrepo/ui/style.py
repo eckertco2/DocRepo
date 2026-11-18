@@ -108,8 +108,8 @@ QFrame#itemCard[kind="self"] { border-left-color: #1d5e98; }
 QFrame#itemCard[kind="date"] { border-left-color: #b07a12; }
 QFrame#itemCard[kind="param"] { border-left-color: #b07a12; }
 QFrame#itemCard QLabel { background: transparent; border: none; }
-QListWidget#refPopup { background: #ffffff; border: 1px solid #b8c1cb; border-radius: 4px; }
-QListWidget#refPopup::item:selected { background: #dbe8f5; color: #1a1f25; }
+QListWidget#refPopup, QListWidget#headingList { background: #ffffff; border: 1px solid #b8c1cb; border-radius: 4px; }
+QListWidget#refPopup::item:selected, QListWidget#headingList::item:selected { background: #dbe8f5; color: #1a1f25; }
 QFrame#taskPicker { background: #ffffff; border: 1px solid #b8c1cb; }
 QListWidget#taskPickerList { background: #ffffff; border: none; }
 QListWidget#taskPickerList::item:selected { background: #dbe8f5; color: #1a1f25; }

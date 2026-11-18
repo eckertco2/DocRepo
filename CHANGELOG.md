@@ -4,6 +4,14 @@ One line per release, newest first: its number, the date it was built, and what 
 
 Since 2026-11-12, releases ship in weekly trains (the design workspace's `docs/mods/cold-eyes-plan.md`, decisions 464 to 468): each train has a heading with the day it was pushed to GitHub, over its releases. Releases keep their own numbers and tags.
 
+## Next train (Thursday 2026-11-26, not pushed yet)
+
+Releases built for the push of Thursday 2026-11-26 (the design workspace's `docs/mods/train-2026-11-26-plan.md`), each merged to `main` at the owner's word. The train of 2026-11-17 settled (decision 467), so this one may carry concepts. The heading takes the day it's pushed.
+
+| Release | Date | What |
+|---|---|---|
+| 5.156 | 2026-11-16 | The heading list (the owner's voice memo of 2026-11-16, 9:22 pm). Make a line a heading (Ctrl+Alt+1, 2 or 3) and start typing: a list opens under it of the **topic headings** already used at that level, on this task and every task under it, then, after "Elsewhere in <the project>", on the rest of its project, each saying what it's under, how often it's been used and when last ("Lead time · under Vendor · twice · last Thu 12 Nov"). It narrows as you type, from the start of any word; on a level 2 or 3 line the headings under its own level 1 heading come first. Down then Enter, Tab (the top row) or a click takes one, keeping the line's level; Enter with nothing highlighted keeps what you typed; Esc closes it; Ctrl+Space opens it at once. On a task's notes page (and the workspace's), and in the capture window for the picked task, or in Meeting notes for the meeting's home task. A topic heading reaches the lines after it up to the next heading at its level or above, never past a caption, lead line or day heading. New: `docrepo/topics.py`, `docrepo/ui/heading_list.py`; the glossary's **Topic heading** and **Heading list** |
+
 ## Train of 2026-11-18
 
 Release 5.163, pushed to GitHub on Wednesday 2026-11-18, alone, a day after the second train of 2026-11-17 and eight days before the Thursday it was built for, at the owner's word ("push today anything that is ready"), with everything merged by then (the design workspace's `docs/mods/train-2026-11-26-plan.md`). A fix, with no view, window, field, `**` name, glossary term or schema change. Schema 29, as before; no new package. Its corporate test is the design workspace's `handoff/docrepo/release-5-163-test.md`.

@@ -209,6 +209,15 @@ class NotesEdit(RichEdit):
                 ref[0], "attachment" if block.textList() is not None else "file")
         return "text"
 
+    # ---- the heading list (release 5.156, the notes topics plan's decisions 704 to 708) ----
+    def headings_markup(self) -> str:
+        """The page as typed so far: the heading list reads this page's headings from the editor, not docs.db."""
+        return self.page()
+
+    def ends_reach(self, block) -> bool:
+        """A day heading, a caption or a lead line ends a topic heading's reach (decision 708)."""
+        return super().ends_reach(block) or self.kind(block) in ("caption", "lead")
+
     def heading_of(self, block):
         """The nearest heading at or above ``block``."""
         b = block

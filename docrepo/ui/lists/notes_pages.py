@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from docrepo import all_notes, db, edits, notes_page, task_tile
+from docrepo import all_notes, db, edits, notes_page, task_tile, topics
 from docrepo.dates import long_date, to_date
 from docrepo.detail import WIDE_PAGE
 from docrepo.safe_fs import WriteRefused
@@ -65,6 +65,10 @@ class NotesPages:
         notes.move_requested.connect(lambda: self.move_to_task(pane))
         notes.bring_back.connect(lambda key: self.bring_lines_back(pane, key))
         pane.all_notes_link.connect(lambda href: self.on_link(QUrl(href)))
+        # The heading list (release 5.156, the notes topics plan's decisions 704 to 708): the page's task's topic headings
+        # and its project's, this page's read from the editor as it's typed.
+        notes.heading_options = lambda level, typed, under, own: topics.options(
+            self.model(), notes.page_task, level, typed, under, own, own_page=notes.page_task)
         if back:
             QShortcut(QKeySequence("Alt+Left"), pane, context=Qt.ShortcutContext.WidgetWithChildrenShortcut, activated=self._back_to_all_notes)
         self._all_notes_from: tuple[str, int] | None = None
