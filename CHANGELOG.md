@@ -4,6 +4,14 @@ One line per release, newest first: its number, the date it was built, and what 
 
 Since 2026-11-12, releases ship in weekly trains (the design workspace's `docs/mods/cold-eyes-plan.md`, decisions 464 to 468): each train has a heading with the day it was pushed to GitHub, over its releases. Releases keep their own numbers and tags.
 
+## Next train (Thursday 2026-11-26, not pushed yet)
+
+Releases built for the push of Thursday 2026-11-26 (the design workspace's `docs/mods/train-2026-11-26-plan.md`), each merged to `main` at the owner's word. The train of 2026-11-17 settled (decision 467), so this one may carry concepts. The heading takes the day it's pushed.
+
+| Release | Date | What |
+|---|---|---|
+| 5.156 | 2026-11-16 | The heading list (the owner's voice memo of 2026-11-16, 9:22 pm). Make a line a heading (Ctrl+Alt+1, 2 or 3) and start typing: a list opens under it of the **topic headings** already used at that level, on this task and every task under it, then, after "Elsewhere in <the project>", on the rest of its project, each saying what it's under, how often it's been used and when last ("Lead time · under Vendor · twice · last Thu 12 Nov"). It narrows as you type, from the start of any word; on a level 2 or 3 line the headings under its own level 1 heading come first. Down then Enter, Tab (the top row) or a click takes one, keeping the line's level; Enter with nothing highlighted keeps what you typed; Esc closes it; Ctrl+Space opens it at once. On a task's notes page (and the workspace's), and in the capture window for the picked task, or in Meeting notes for the meeting's home task. A topic heading reaches the lines after it up to the next heading at its level or above, never past a caption, lead line or day heading. New: `docrepo/topics.py`, `docrepo/ui/heading_list.py`; the glossary's **Topic heading** and **Heading list** |
+
 ## Second train of 2026-11-16
 
 Release 5.152 alone, pushed to GitHub on Monday 2026-11-16, a few hours after the train of 2026-11-16, at the owner's word ("I want to push the workspace view", then "As soon as it's built"): the workspace (the design workspace's `docs/mods/workspace-view-plan.md`). It adds a concept (a view and a glossary term) where the train after one that adds concepts was to settle (decision 467); the owner chose to push it now, as decision 626 did before. 5.154 and 5.155, built for Thursday 2026-11-19, aren't merged and aren't in it. No schema change (29) and no new package; the version stays 5.153, the highest release in. Its corporate test is the design workspace's `handoff/docrepo/release-5-152-test.md`.

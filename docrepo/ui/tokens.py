@@ -432,8 +432,8 @@ QFrame#itemCard { background: $content; border: 1px solid $stroke; border-left: 
 QFrame#itemCard QLabel { background: transparent; border: none; }
 QFrame#itemCard QLabel#itemValue { background: $base; border: 1px solid $stroke; border-bottom: 1px solid $control; border-radius: 4px; padding: 5px 8px; }
 QFrame#itemCard QLabel#itemValue:disabled { color: $disabled; }
-QListWidget#refPopup, QListWidget#suggestions { background: $content; border: 1px solid $stroke_strong; border-radius: 4px; padding: 2px; }
-QListWidget#refPopup::item:selected, QListWidget#suggestions::item:selected { background: $hover; color: $text; }
+QListWidget#refPopup, QListWidget#headingList, QListWidget#suggestions { background: $content; border: 1px solid $stroke_strong; border-radius: 4px; padding: 2px; }
+QListWidget#refPopup::item:selected, QListWidget#headingList::item:selected, QListWidget#suggestions::item:selected { background: $hover; color: $text; }
 QFrame#taskPicker { background: $content; border: 1px solid $stroke_strong; border-radius: 8px; }
 QListWidget#taskPickerList { background: $content; border: none; padding: 0; }
 QListWidget#taskPickerList::item:selected { background: $hover; color: $text; }

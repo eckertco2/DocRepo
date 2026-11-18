@@ -1,0 +1,208 @@
+"""Topic headings and the heading list (release 5.156; the design workspace's ``docs/mods/notes-topics-plan.md``,
+decisions 704 to 708, the owner's voice memo of 2026-11-16).
+
+A **topic heading** is a heading of the owner's on a notes page or in a capture, at level 1, 2 or 3 (release 5.28's
+``# ``, ``## `` and ``### ``), that isn't a day heading. It isn't the glossary's **Heading**, a line of ``#`` tasks.
+
+**Its reach** (decision 708): a topic heading covers the lines after it up to the next heading at its level or above,
+and never past its block: the next caption, lead line or day heading. Its **path** is the topic headings in force over
+it, its own words last ("Vendor › Lead time"); a level missing from a path is left out of it. A **topic** is a path on a
+task's pages, its words matched case and spacing aside.
+
+**The heading list** (decisions 705 and 707): typing in a topic heading lists the topic headings already used at its
+level, from the pages of a task and every task under it, then, after an "Elsewhere in …" row, from the rest of its
+top-level task's tree. Headings with the same words under the same heading are one row, spelled as most recently typed,
+each saying what it's under, how often it's been used and when last. The headings typed in the same box count with the
+task's own; the line being typed doesn't.
+
+Nothing here touches Qt; ``docrepo.ui.heading_list`` shows the list.
+"""
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from datetime import date
+from functools import lru_cache
+
+from docrepo import markup, notes_page
+from docrepo.model import Model
+
+#: The words a typed word is matched against the start of: a heading's words split at spaces and punctuation.
+_WORD_BREAK = re.compile(r"[\s,.;:/()\[\]\-–—›&+]+")
+#: A caption's leading date ("Thu 8 Oct 2026 · 10:42 am · Note"), the day a page with no day headings dates its block by.
+_CAPTION_DAY = re.compile(r"^((?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{1,2} \w{3} \d{4})")
+
+
+@dataclass(frozen=True)
+class Heading:
+    """A topic heading: its level (1 to 3), its words, its path (the topic headings in force over it, its own words last),
+    the day it's dated by (its day heading's, else its caption's; None when the page says none), the page it's on (a
+    task's ID; "" for the box being typed in), and ``n``, its place among the page's heading lines (day headings counted),
+    which a box uses to leave out the line being typed."""
+
+    level: int
+    words: str
+    path: tuple[str, ...]
+    day: date | None
+    page: str = ""
+    n: int = -1
+
+    @property
+    def under(self) -> str:
+        """The topic heading it's under, in words ("" for none)."""
+        return self.path[-2] if len(self.path) > 1 else ""
+
+
+@dataclass(frozen=True)
+class Row:
+    """A row of the heading list: the words (as most recently typed), the level, the topic heading it's under, how many
+    times it's been used, the day it was last used, and whether it's from the task and what's under it (``here``) or
+    elsewhere in its top-level task."""
+
+    words: str
+    level: int
+    under: str
+    times: int
+    last: date | None
+    here: bool
+
+
+@dataclass(frozen=True)
+class Listing:
+    """What the heading list shows: the task's rows, then the rest of its project's under ``elsewhere`` (the top-level
+    task's title, for the "Elsewhere in …" row; "" when the task is top-level)."""
+
+    here: list[Row]
+    others: list[Row]
+    elsewhere: str = ""
+
+    def rows(self) -> list[Row]:
+        return self.here + self.others
+
+
+def same(words: str) -> str:
+    """Words as a heading is matched by: case and spacing aside (as release 5.94's note placing matches them)."""
+    return " ".join(words.split()).casefold()
+
+
+def heading_words(text: str) -> str:
+    """A heading line's words in plain text: its marks dropped."""
+    return " ".join(markup.to_plain(text).split())
+
+
+def sections(page: str, page_id: str = "") -> list[Heading]:
+    """The topic headings on a page (or in a capture's markup), in order, each with its path and day (decision 708). Day
+    headings, captions and lead lines end every topic heading's reach; a day heading or a caption with a date dates what
+    follows. Read once per page's words: the list asks again at every key typed."""
+    return list(_sections(page, page_id))
+
+
+@lru_cache(maxsize=1024)
+def _sections(page: str, page_id: str) -> tuple[Heading, ...]:
+    out: list[Heading] = []
+    path: list[tuple[int, str]] = []
+    day: date | None = None
+    n = -1
+    for x in notes_page.lines_of(page):
+        if x.kind == "heading":
+            n += 1
+            d = notes_page.day_of(x.text)
+            if d is not None:
+                day, path = d, []
+                continue
+            words = heading_words(x.text)
+            if not words:
+                continue
+            path = [p for p in path if p[0] < x.level] + [(x.level, words)]
+            out.append(Heading(x.level, words, tuple(w for _lv, w in path), day, page_id, n))
+            continue
+        if x.kind in ("caption", "lead"):
+            path = []
+            if x.kind == "caption" and (m := _CAPTION_DAY.match(x.text)):
+                day = notes_page.day_of(m.group(1)) or day
+    return tuple(out)
+
+
+def in_force(headings: list[Heading], level: int) -> str:
+    """The topic heading a new heading at ``level`` would be under, from the headings above it in its block, the last
+    first: the nearest one at a lower level. "" for level 1, or with none."""
+    for h in reversed(headings):
+        if h.level < level:
+            return h.words
+    return ""
+
+
+def matches(words: str, typed: str) -> bool:
+    """Whether a heading's words match what's typed: each typed word the start of one of its words, in any order (as the
+    ``#`` list matches, release 5.74)."""
+    have = [w for w in _WORD_BREAK.split(words.casefold()) if w]
+    return all(any(w.startswith(t) for w in have) for t in _WORD_BREAK.split(typed.casefold()) if t)
+
+
+def scope(model: Model, task_id: str) -> tuple[list[str], list[str], str]:
+    """The pages a task's heading list reads (decision 705): the task and every live task under it; then the rest of its
+    top-level task's tree (by its first chain of parents); and that top-level task's title ("" when the task is one)."""
+    live = lambda x: x in model.tasks and not model.tasks[x].discarded  # noqa: E731 - a one-line test
+    here = [x for x in model.scope_ids(task_id, "descendants") if live(x)]
+    top = model.chains_of(task_id)[0][0] if task_id in model.tasks else task_id
+    if top == task_id:
+        return here, [], ""
+    seen = set(here)
+    others = [x for x in model.scope_ids(top, "descendants") if live(x) and x not in seen]
+    return here, others, model.task(top).title
+
+
+def _rows(headings: list[Heading], level: int, here: bool) -> dict[tuple[str, str], Row]:
+    out: dict[tuple[str, str], Row] = {}
+    for h in headings:
+        if h.level != level:
+            continue
+        key = (same(h.under), same(h.words))
+        r = out.get(key)
+        if r is None:
+            out[key] = Row(h.words, level, h.under, 1, h.day, here)
+            continue
+        newer = h.day is not None and (r.last is None or h.day >= r.last)
+        out[key] = Row(h.words if newer else r.words, level, h.under if newer else r.under, r.times + 1,
+                       h.day if newer else r.last, here)
+    return out
+
+
+def _order(rows: list[Row], typed: str, under: str) -> list[Row]:
+    """Decision 707: words starting with what's typed first, then those under the heading in force (705), then the most
+    recently used, then by their words."""
+    t, u = same(typed), same(under)
+    return sorted(rows, key=lambda r: (bool(t) and not same(r.words).startswith(t), bool(u) and same(r.under) != u,
+                                       -(r.last.toordinal() if r.last else 0), same(r.words)))
+
+
+def options(model: Model, task_id: str | None, level: int, typed: str = "", under: str = "",
+            own: list[Heading] | None = None, own_page: str | None = None) -> Listing:
+    """The heading list for a topic heading at ``level`` being typed for ``task_id`` (decisions 705 and 707): the rows
+    whose words match ``typed``, in order. ``under`` is the topic heading in force over the line (``in_force``); ``own``
+    the headings typed in the same box, the line being typed left out, counted with the task's own; with ``own_page``,
+    that task's page is read from ``own`` rather than from docs.db (the notes page being edited, which saves as it goes)."""
+    if not task_id or task_id not in model.tasks or level not in (1, 2, 3):
+        return Listing([], [])
+    here_ids, other_ids, top = scope(model, task_id)
+    mine = [h for x in here_ids if x != own_page for h in sections(model.pages.get(x, ""), x)] + list(own or [])
+    theirs = [h for x in other_ids if x != own_page for h in sections(model.pages.get(x, ""), x)]
+    here = _rows(mine, level, True)
+    others = {k: r for k, r in _rows(theirs, level, False).items() if k not in here}
+    pick = lambda rows: _order([r for r in rows if not typed.strip() or matches(r.words, typed)], typed, under)  # noqa: E731
+    theirs_shown = pick(list(others.values()))
+    return Listing(pick(list(here.values())), theirs_shown, top if theirs_shown else "")
+
+
+def short_day(d: date, today: date) -> str:
+    """A day as the list says it: "Tue 10 Nov", with its year when it isn't this year's."""
+    words = notes_page.day_title(d)
+    return words if d.year != today.year else words.rsplit(" ", 1)[0]
+
+
+def sub_text(r: Row, today: date) -> str:
+    """A row's grey words: what it's under, how often it's been used, and when last ("under Vendor · 3 times · last
+    Tue 10 Nov"; "once · Thu 5 Nov")."""
+    times = "once" if r.times == 1 else "twice" if r.times == 2 else f"{r.times} times"
+    when = (("last " if r.times > 1 else "") + short_day(r.last, today)) if r.last else ""
+    return " · ".join(x for x in (f"under {r.under}" if r.under else "", times, when) if x)

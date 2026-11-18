@@ -212,6 +212,13 @@ class RichEdit(QTextEdit):
     folds_here = False
     #: Whether another box shows the same document (``show_text_of``).
     _shares_text = False
+    #: The heading list (release 5.156, the notes topics plan's decisions 704 to 708): given a topic heading's level, its
+    #: words so far, the topic heading it's under and the box's other topic headings (``topics.Heading``), the box's
+    #: window gives the rows (``topics.options`` for its task). None: no list in this box.
+    heading_options: Callable[[int, str, str, list], object] | None = None
+    #: Whether another list of the box's window is open at the caret (the capture window's @ and # list), which the
+    #: heading list gives way to.
+    other_list_open: Callable[[], bool] | None = None
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -278,10 +285,162 @@ class RichEdit(QTextEdit):
         return self._keys.get(QKeySequence(event.keyCombination()).toString())
 
     def event(self, event) -> bool:  # noqa: D102 - Qt's
-        if event.type() == QEvent.Type.ShortcutOverride and self._key_action(event):
+        if event.type() == QEvent.Type.ShortcutOverride and (self._key_action(event) or self._heading_keys(event)):
             event.accept()  # the key comes to keyPressEvent, not to a shortcut
             return True
+        if event.type() == QEvent.Type.KeyPress and self.heading_options is not None:
+            if self._heading_list_key(event):
+                event.accept()
+                return True
+            handled = super().event(event)
+            self._after_key(event)
+            return handled
         return super().event(event)
+
+    # ---- the heading list (release 5.156, decisions 704 to 708) ----
+    def _heading_keys(self, event) -> bool:
+        """Whether a key is the heading list's before any shortcut: Ctrl+Space on a topic heading (decision 704), and the
+        list's own keys while it shows. Elsewhere Ctrl+Space stays the window's (the Task view's preview)."""
+        if self.heading_options is None or event.type() != QEvent.Type.ShortcutOverride:
+            return False
+        combo = QKeySequence(event.keyCombination()).toString()
+        if combo == "Ctrl+Space":
+            return self.topic_level(self.textCursor().block()) > 0
+        return self._heading_list is not None and self._heading_list.isVisible() and combo in ("Esc", "Tab", "Return", "Enter", "Up", "Down")
+
+    _heading_list = None
+    #: The block the list was shown for, and whether Esc closed it until more is typed (decision 706).
+    _heading_block = -1
+    _heading_shut = False
+
+    def topic_level(self, block) -> int:
+        """A topic heading's level (1 to 3), or 0 for any other line: text, or a day heading (``docrepo.topics``)."""
+        from docrepo import notes_page
+
+        level = block.blockFormat().headingLevel()
+        return level if level in (1, 2, 3) and notes_page.day_of(block.text()) is None else 0
+
+    def headings_markup(self) -> str:
+        """The box's text as markup, which ``topics.sections`` reads for the box's own headings."""
+        return self.value()[0]
+
+    def ends_reach(self, block) -> bool:
+        """Whether a line ends a topic heading's reach above it (decision 708): a day heading here; the notes page adds
+        captions and lead lines."""
+        from docrepo import notes_page
+
+        return bool(block.blockFormat().headingLevel()) and notes_page.day_of(block.text()) is not None
+
+    def heading_under(self, block, level: int) -> str:
+        """The topic heading a heading at ``level`` on ``block`` is under: the nearest one above it at a lower level,
+        within its reach (decision 708)."""
+        from docrepo import topics
+
+        b = block.previous()
+        while b.isValid() and not self.ends_reach(b):
+            lv = self.topic_level(b)
+            if lv and lv < level:
+                return topics.heading_words(b.text())
+            b = b.previous()
+        return ""
+
+    def _heading_n(self, block) -> int:
+        """The block's place among the box's heading lines, day headings counted: ``topics.Heading.n``."""
+        n, b = -1, self.document().begin()
+        while b.isValid():
+            if b.blockFormat().headingLevel():
+                n += 1
+            if b == block:
+                return n
+            b = b.next()
+        return -1
+
+    def hide_heading_list(self) -> None:
+        if self._heading_list is not None:
+            self._heading_list.hide()
+
+    def show_heading_list(self, force: bool = False) -> None:
+        """The heading list for the caret's line (decision 704): when it's a topic heading with something typed, or at
+        once with ``force`` (Ctrl+Space); hidden otherwise, or while the window's other list is open."""
+        from datetime import date
+
+        from docrepo import topics
+        from docrepo.ui.heading_list import HeadingList, rows_of
+        from docrepo.ui.task_list import can_pick
+
+        cursor = self.textCursor()
+        block = cursor.block()
+        level = self.topic_level(block)
+        typed = " ".join(block.text().split())
+        if (self.heading_options is None or not level or cursor.hasSelection() or (not typed and not force) or not self.hasFocus()
+                or (self.other_list_open is not None and self.other_list_open()) or (self._heading_shut and not force)):
+            self.hide_heading_list()
+            return
+        n = self._heading_n(block)
+        own = [h for h in topics.sections(self.headings_markup()) if h.n != n]
+        listing = self.heading_options(level, typed, self.heading_under(block, level), own)
+        rows = rows_of(listing, date.today()) if isinstance(listing, topics.Listing) else []
+        if not any(can_pick(r) for r in rows):
+            self.hide_heading_list()
+            return
+        host = self.window()
+        if self._heading_list is None or self._heading_list.parentWidget() is not host:
+            self._heading_list = HeadingList(host)
+            self._heading_list.picked.connect(self._pick_heading)
+        self._heading_block = block.blockNumber()
+        rect = self.cursorRect(cursor)
+        at = self.viewport().mapTo(host, rect.bottomLeft()) + QPoint(0, 3)
+        above = self.viewport().mapTo(host, rect.topLeft()).y() - 3
+        self._heading_list.show_at(rows, at, above)
+
+    def _heading_list_key(self, event) -> bool:
+        """A key for the open list (decision 706): True when it used the key. Ctrl+Space shows it on a topic heading."""
+        combo = QKeySequence(event.keyCombination()).toString()
+        if combo == "Ctrl+Space":
+            if not self.topic_level(self.textCursor().block()):
+                return False
+            self._heading_shut = False
+            self.show_heading_list(force=True)
+            return True
+        hl = self._heading_list
+        if hl is None or not hl.isVisible() or event.modifiers() & ~Qt.KeyboardModifier.KeypadModifier:
+            return False
+        if event.key() == Qt.Key.Key_Escape:
+            self._heading_shut = True
+        return hl.handle_key(event.key())
+
+    def _after_key(self, event) -> None:
+        """After a key has done its work: typing or deleting in a topic heading narrows the list, or shows it; a key that
+        took the caret off its line hides it."""
+        typed = bool(event.text()) and event.text().isprintable()
+        if typed or event.key() in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete):
+            self._heading_shut = False
+            QTimer.singleShot(0, self.show_heading_list)  # after the window's other list has had its turn
+        elif self._heading_list is not None and self._heading_list.isVisible() and self.textCursor().blockNumber() != self._heading_block:
+            self.hide_heading_list()
+
+    def _pick_heading(self, option) -> None:
+        """A row taken (decision 706): the heading line's words become the row's, at the line's level; the caret goes to
+        the line's end, and the list closes until something more is typed."""
+        block = self.document().findBlockByNumber(self._heading_block)
+        self.hide_heading_list()
+        if not block.isValid() or not self.topic_level(block):
+            return
+        keep = QTextCursor(block)
+        if block.length() > 1:
+            keep.movePosition(QTextCursor.MoveOperation.NextCharacter)
+        fmt = keep.charFormat()
+        c = QTextCursor(block)
+        c.beginEditBlock()
+        c.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
+        c.insertText(option.value, fmt)
+        c.endEditBlock()
+        self.setTextCursor(c)
+        self._heading_shut = True
+
+    def focusOutEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        super().focusOutEvent(event)
+        self.hide_heading_list()
 
     def clear(self) -> None:
         """Empty the box, and start the next text with no formatting."""
