@@ -578,4 +578,9 @@ h2 { font-family: 'Segoe UI'; font-size: ${subtitle}pt; font-weight: 600; margin
 .src { color: $text2; font-size: ${caption}pt; font-weight: 400; margin-top: 8px; margin-bottom: 2px; }
 .nl { margin: 0; }
 .also { color: $text2; font-size: ${caption}pt; }
+.occ { font-weight: 600; }
+.topic { font-size: 12pt; font-weight: 600; }
+.sub2 { font-weight: 600; }
+.loose { color: $text2; font-size: 12pt; font-weight: 600; }
+.tag { color: $text2; font-size: ${caption}pt; }
 """).substitute(LIGHT, caption=CAPTION, subtitle=SUBTITLE)

@@ -258,7 +258,7 @@ The words used here are defined in `GLOSSARY.md`.
 
 ### 6.10 Sample data and tests
 - `docrepo/sample/sample-data.json` is the browse tool mockup's made-up sample data, as of Thursday 2026-10-08 07:58. `load-sample` loads it with its IDs, writes its `capture.md` and `extracted.txt` files (not its emails, attachments or saved files, which are binary), and builds the calendar and pages as of that moment.
-- **At scale** (release 5.126, the cold-eyes plan's decisions 469 to 474): `docrepo/sample_scale.py` makes years of a lead engineer's made-up work from a seed, the same each time: per year 20 projects and 500 tasks, 5,000 captures (1,500 emails, as `capture_emails` rows with no `.msg`), 2,500 documents with about 12 KB of text each, 30,000 status-log rows, 150 agenda items, 1,500 tagged labels and 25 people, ending on the sample's date, with one task holding 300 notes. `load-sample --years N` adds them to the sample. `docrepo/timings.py` times the budgets on it (`timings`, section 5): loading the model, the view counts, Search everything with three words and a task page with 300 notes in 300 ms; saving a capture, a drop on a Today bin, a move to another column of the Priorities board (release 5.159, the design workspace's `docs/mods/bin-drop-speed-plan.md`, decision 728: the data change and its page writes), a state change (release 5.163, `docs/mods/one-read-plan.md`, decision 748: the same, handed the Model from before) and refreshing the task tree in 500 ms; the Timeline over 12 months in 1 s; the daily work in 10 s; `rebuild` in 120 s, on the personal computer (the corporate one is taken as twice as slow). Each is the data's part, without Qt's drawing. `tests/test_scale.py` builds three years once, keeps them in `.pytest_tmp\scale-v<generator version>-3y`, and fails a missed budget with its time; it runs only with `-m scale`, before each train, never in the default or the fast run. A budget missed on the day it's built is marked as expected to fail, with its time, and fixed in a release of its own.
+- **At scale** (release 5.126, the cold-eyes plan's decisions 469 to 474): `docrepo/sample_scale.py` makes years of a lead engineer's made-up work from a seed, the same each time: per year 20 projects and 500 tasks, 5,000 captures (1,500 emails, as `capture_emails` rows with no `.msg`), 2,500 documents with about 12 KB of text each, 30,000 status-log rows, 150 agenda items, 1,500 tagged labels and 25 people, ending on the sample's date, with one task holding 300 notes. `load-sample --years N` adds them to the sample. `docrepo/timings.py` times the budgets on it (`timings`, section 5): loading the model, the view counts, Search everything with three words and a task page with 300 notes in 300 ms (and All notes on the busiest project, release 5.140, and By meeting and By topic every day of it, release 5.157); saving a capture, a drop on a Today bin, a move to another column of the Priorities board (release 5.159, the design workspace's `docs/mods/bin-drop-speed-plan.md`, decision 728: the data change and its page writes), a state change (release 5.163, `docs/mods/one-read-plan.md`, decision 748: the same, handed the Model from before) and refreshing the task tree in 500 ms; the Timeline over 12 months in 1 s; the daily work in 10 s; `rebuild` in 120 s, on the personal computer (the corporate one is taken as twice as slow). Each is the data's part, without Qt's drawing. `tests/test_scale.py` builds three years once, keeps them in `.pytest_tmp\scale-v<generator version>-3y`, and fails a missed budget with its time; it runs only with `-m scale`, before each train, never in the default or the fast run. A budget missed on the day it's built is marked as expected to fail, with its time, and fixed in a release of its own.
 - `tests/fixtures/examples.md` and `tests/fixtures/test-vectors.md` are the mockup's expected results for that data. The tests check every generated page, every `capture.md` example, and the report's capacity, days until due, lists, labels and chains, raw text logs and agendas against them, line for line.
 
 ### 6.11 The notes page (release 5.25)
@@ -804,9 +804,12 @@ The task page reads top to bottom as the task's story (release 5.21, the visual 
     **This page · All notes** (a strip of two, as the Priorities board's Show), shows when there's more than the page to
     read (a task under it, or a task line on its page). All notes takes the notes' place in the frame: the task's page and
     the page of every live task under it, at any depth, cut into blocks (a caption and its lines, or lines a day heading
-    heads), by day, oldest first, and within a day by when each came in, read only. Each block starts with a line naming
+    heads), by day, oldest first, and within a day by when each came in, read only. A block starts with a line naming
     the page it's on (a chip that opens it; "This task" for the page's own; a meeting's with its mark), what it is
-    ("Meeting notes", "Notes", a caption's words) and its time, with **Edit there**. A meeting's notes read as they were
+    ("Meeting notes", "Notes", a caption's words) and its time in grey, only when its page or what it is changes from
+    the block above (release 5.157, decision 716; until then each block had one, with **Edit there**); a block that's
+    only files is its files' line, its page and time at its right; the day's line ends with the pencil, which opens the
+    day's first lines on their page. A meeting's notes read as they were
     said: each task line opens in place, under a thin blue bar, into the block that follow-up's page holds from those
     notes (its bullet tree), wherever that page is; so an item's block from notes in view isn't shown again on its own,
     and a `#task` section that release 5.8 copied shows once, its heading line marked "· also on Structural survey of
@@ -820,6 +823,33 @@ The task page reads top to bottom as the task's story (release 5.21, the visual 
     kept per task with the page's folds (`page_folds:<task>`, `all_notes`). The Checklist summary, the landmarks and
     Jump to are This page's. Read from the pages the model holds; timed by `timings`' "All notes and Meetings on the
     busiest project" (300 ms).
+  - **All notes grouped** (release 5.157, the design workspace's `docs/mods/notes-topics-plan.md`, decisions 709 to 717;
+    `topics.occasions`, `by_topic` and `outline`, `Pages.grouped_notes`): while All notes is on, a **Group** strip
+    beside the switch, **By day · By meeting · By topic**, kept per task with the page's folds (`notes_group`; By day
+    until another is picked), in the workspace's middle column too; in a narrow pane it goes on the line under the heading, with the format bar. By meeting and By topic are task first: a **band**
+    for the task and each live task under it in tree order, meetings not among them (a meeting's page goes in its home
+    task's band, decision 610), each band with something to show led by its line: its fold, the tasks from the All
+    notes' task down to it in grey, its chip ("this task" after its own) and the pencil, which opens its page.
+    **By meeting** (710) lists each band's **occasions** oldest first: a meeting, with its mark, name (a link) and day,
+    from a block of its notes, an item or a follow-up made from them (`from_notes`), lines moved from its page, or
+    anything on its page; else a day's other entries, "Notes" or "Email". Under an occasion its blocks' lines as
+    written, topic headings as bold lines; a task line stays one tile and a pointer line one line, their words being in
+    their own bands; lines moved from a page that isn't a meeting's are led by their lead line's words. **By topic**
+    (711) lists each band's topics in the order first used, a level 1 topic as a heading and its level 2 and 3 topics
+    as bold lines under it, each with its runs; under each its **runs** (a block's lines under that topic, by decision
+    708's reach) oldest first, each led in grey by its occasion only when that changes; then **Not under a topic
+    heading**, the band's other lines by occasion, an email's block as its one line. A topic is its path matched case
+    and spacing aside, spelled as most recently typed; a topic used on two of the band's pages is one. Both read every
+    day (714), not eight weeks: timed by `timings`' "All notes by meeting and by topic, every day, on the busiest
+    project" (300 ms; each grouping drawn on its own, the slower kept). The outline follows the grouping (713): each
+    band's task, then its occasions, or its topics indented by level with their runs counted at the right
+    (`NotesOutline.set_entries`' counts) and Not under a topic heading in grey; a click goes there (`topic:`, `occ:`
+    and `loose:` anchors), and a band's row folds or unfolds its band (`allnotes:fold:<task>`, its line's chevron too;
+    `PageState.notes_folded`, for the visit), its rows going with it. A double-click on any line opens its block's page
+    there, as in By day (each run, occasion, topic and band line holds a `block:` anchor). In every grouping (715) a
+    run of file, attachment and picture lines, with the description lines under them, is one line: a paperclip and the
+    files' names, each opening its file with its description as its tooltip, "+3 more" after four (their names in its
+    tooltip). This page, the editor, doesn't change (717).
   - **The Notes heading** (release 5.113, decision 423) is a section's head over the frame (Notes, Saved, the format
     bar while typing, the outline's button, Jump to and the menu), not a band inside it; the frame round the notes
     (decision 130) is a single line with rounded corners, its bottom edge the accent while you type.
