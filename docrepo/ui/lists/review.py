@@ -241,7 +241,7 @@ def mark_reviewed(w: BrowseWindow, task_id: str | None = None) -> None:
     was = m.task(task_id).reviewed
     due = [t.id for t in review.due_for_review(m, w.today(), w.ctx.settings.review_weeks)]
     after = due[due.index(task_id) + 1] if task_id in due and due.index(task_id) + 1 < len(due) else None
-    out = w._do(lambda: edits.mark_reviewed(w.conn, w.ctx.data_root, w.ctx.fs, w.ctx.settings, task_id, w._now()),
+    out = w._do(lambda: edits.mark_reviewed(w.conn, w.ctx.data_root, w.ctx.fs, w.ctx.settings, task_id, w._now(), w.model()),
                 ("task", after) if after else None)
     if out is None:
         return
@@ -250,7 +250,7 @@ def mark_reviewed(w: BrowseWindow, task_id: str | None = None) -> None:
         w.render_all()
 
     def undo() -> None:
-        w._do(lambda: edits.set_reviewed(w.conn, w.ctx.data_root, w.ctx.fs, task_id, was, w._now()), ("task", task_id))
+        w._do(lambda: edits.set_reviewed(w.conn, w.ctx.data_root, w.ctx.fs, task_id, was, w._now(), w.model()), ("task", task_id))
 
     w.say_undo(out.message, undo)
 
@@ -282,7 +282,7 @@ def review_every_menu(w: BrowseWindow, task_id: str) -> None:
 
 
 def set_review_every(w: BrowseWindow, task_id: str, weeks: int | None) -> None:
-    w._do(lambda: edits.change_task(w.conn, w.ctx.data_root, w.ctx.fs, w.ctx.settings, task_id, w._now(), review_every=weeks), w.sel)
+    w._do(lambda: edits.change_task(w.conn, w.ctx.data_root, w.ctx.fs, w.ctx.settings, task_id, w._now(), w.model(), review_every=weeks), w.sel)
 
 
 # ---- steps 5 and 6 ----

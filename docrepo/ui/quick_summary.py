@@ -844,10 +844,11 @@ class QuickSummary(QWidget):
         rows = [a for sec in (self.view.sections if self.view else ()) for a in sec.agenda or ()]
         row = next((a for a in rows if a.item == item), None)
         try:
-            edits.discuss_agenda_item(ctx.conn, ctx.data_root, ctx.fs, item, ctx.now())
+            done = edits.discuss_agenda_item(ctx.conn, ctx.data_root, ctx.fs, item, ctx.now(), ctx.model())
         except Exception as e:  # noqa: BLE001 - said in the window, as the browse tool does
             self.say(f"It couldn't be marked discussed: {e}", error=True)
             return
+        ctx.keep(done.model)  # release 5.163: the Model read after the change, so the window doesn't read docs.db again
         if row is not None and self.subject is not None:
             row.discussed = True
             self.discussed.setdefault(self.subject.key, []).append(row)
@@ -858,10 +859,11 @@ class QuickSummary(QWidget):
     def _reopen(self, item: int) -> None:
         ctx = self.ctx
         try:
-            edits.reopen_agenda_item(ctx.conn, ctx.data_root, ctx.fs, item, ctx.now())
+            done = edits.reopen_agenda_item(ctx.conn, ctx.data_root, ctx.fs, item, ctx.now(), ctx.model())
         except Exception as e:  # noqa: BLE001
             self.say(f"It couldn't be opened again: {e}", error=True)
             return
+        ctx.keep(done.model)
         for rows in self.discussed.values():
             rows[:] = [a for a in rows if a.item != item]
         self.said.pop(item, None)
@@ -926,10 +928,11 @@ class QuickSummary(QWidget):
             return
         ctx = self.ctx
         try:
-            out = edits.add_agenda_item(ctx.conn, ctx.data_root, ctx.fs, target, picked, words, ctx.now())
+            out = edits.add_agenda_item(ctx.conn, ctx.data_root, ctx.fs, target, picked, words, ctx.now(), ctx.model())
         except Exception as e:  # noqa: BLE001
             self.say(f"It wasn't added: {e}", error=True)
             return
+        ctx.keep(out.model)
         self.add_task.pop(target, None)
         self.say(out.message, problems=out.problems)
         self.render()

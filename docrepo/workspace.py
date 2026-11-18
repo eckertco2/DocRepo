@@ -297,12 +297,14 @@ def _shift(value: str | None, days: int) -> str | None:
     return (to_date(value) + timedelta(days=days)).isoformat() if value else None
 
 
-def change_day(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, row: DateRow, day: date, at: datetime) -> edits.Outcome:
+def change_day(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, row: DateRow, day: date, at: datetime,
+               model: Model | None = None) -> edits.Outcome:
     """Change a date in Dates to ``day`` (decisions 681 and 698), through the calls the task page uses, each change logged:
     a task's field by ``edits.change_task``, a key date by ``edits.set_key_dates`` (one with a start and an end moves
-    both), a wait's follow-up by ``set_follow_up``. Undo is the same call with the row at its new day and the old one."""
+    both), a wait's follow-up by ``set_follow_up``. Undo is the same call with the row at its new day and the old one.
+    ``model``, the browse tool's shared Model, goes to the first and the last as the one from before (release 5.163)."""
     if row.field in ("due", "deadline", "reminder", "start"):
-        return edits.change_task(conn, data_root, fs, settings, row.task, at, **{row.field: day.isoformat()})
+        return edits.change_task(conn, data_root, fs, settings, row.task, at, model=model, **{row.field: day.isoformat()})
     if row.field == "key_date":
         rows = tasks.key_date_rows(conn, row.task)
         moved = (day - row.day).days
@@ -314,7 +316,7 @@ def change_day(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: 
             raise edits.EditError("That key date isn't there any more.")
         return edits.set_key_dates(conn, data_root, fs, settings, row.task, rows, at)
     if row.field == "follow_up":
-        return set_follow_up(conn, data_root, fs, settings, row.task, day, at)
+        return set_follow_up(conn, data_root, fs, settings, row.task, day, at, model)
     raise edits.EditError("A repeating meeting's next one moves with its series: change it in Edit task.")
 
 
@@ -323,10 +325,11 @@ FOLLOW_UP_FIELD = "Follow up"
 
 
 def set_follow_up(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, task_id: str, day: date,
-                  at: datetime) -> edits.Outcome:
+                  at: datetime, model: Model | None = None) -> edits.Outcome:
     """A wait's follow-up moved to ``day`` (decision 681): logged, and the Reminder it set moved with it, as Log progress
-    sets one (``waits.reminder_for``): the task's own earlier reminder stays, and a later one is kept for after."""
-    before = Model(conn)
+    sets one (``waits.reminder_for``): the task's own earlier reminder stays, and a later one is kept for after. ``model``
+    is the Model as docs.db is now, when the caller has one (release 5.163), and the one read after is the outcome's."""
+    before = edits.model_now(conn, model)
     w = waits.current(before, task_id)
     if w is None:
         raise edits.EditError(f"{before.task(task_id).title} isn't waiting any more.")
@@ -344,7 +347,7 @@ def set_follow_up(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, setting
     if reminder != t.reminder:
         tasks.update_task(conn, settings, task_id, at=at, via=edits.BROWSE, reminder=reminder)
     out = edits.Outcome(f"Follow up with {waits.who(before, w)}: {long_date(day, at.date())}.")
-    edits.write_touched_pages(conn, data_root, fs, at, out.problems, [task_id], before)
+    edits.hand_back(out, edits.write_touched_pages(conn, data_root, fs, at, out.problems, [task_id], before))
     return out
 
 

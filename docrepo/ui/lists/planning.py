@@ -68,7 +68,7 @@ class PlanningHooks:
             lambda: edits.change_moves(self.conn, self.ctx.settings, task_id, self._now(), start=start, due=due, dragged=True), task_id)
         if leave is None:
             return self._move_taken_back()
-        out = self._do(lambda: edits.change_task(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, task_id, self._now(),
+        out = self._do(lambda: edits.change_task(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, task_id, self._now(), self.model(),
                                                  start=start, due=due, dragged=True, leave=leave), ("task", task_id))
         if isinstance(out, edits.Outcome) and not out.problems:
             self.say(f"{said} {out.moved}".strip() if out.message != "Nothing changed." else out.message)
@@ -136,7 +136,7 @@ class PlanningHooks:
     def _left_by_move(self, moves: Callable[[], list], task_id: str) -> set[str] | None:
         """What to leave behind, having asked if need be. A change that isn't allowed says why when it's made."""
         try:
-            followed = moves()
+            followed = self.ctx.rolled_back(moves)  # release 5.163: rolled back, so the shared Model stays as it is
         except (TaskError, PeopleError, AgendaError, edits.EditError, ValueError):
             return set()
         return self.ask_move(task_id, followed)

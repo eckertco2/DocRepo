@@ -231,7 +231,8 @@ class TodayList:
         It stays selected, so Alt+Up can go on. No Undo: it's moved back the same way. ``tell``: the Today side panel's line.
         True if it moved. Since release 5.159 a move, which changes no view's count and no Find files window, draws neither
         again, and ``follow`` False (the side panel's move) leaves the Today view's selection as it is."""
-        out = self._do(lambda: edits.move_today_item(self.conn, self.ctx.data_root, self.ctx.fs, item_id, self._now(), to=to, beside=beside),
+        out = self._do(lambda: edits.move_today_item(self.conn, self.ctx.data_root, self.ctx.fs, item_id, self._now(), to=to, beside=beside,
+                                                     model=self.model()),
                        self.sel, counts=False, reach=())
         if not out:
             return False
@@ -313,12 +314,12 @@ class TodayList:
         Undo, for ten seconds, puts back the reminder it had and its Today item."""
         old = self.model().task(task_id).reminder
         args = (self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, task_id)
-        out = self._do(lambda: edits.later(*args, day, self._now(), item_id))
+        out = self._do(lambda: edits.later(*args, day, self._now(), item_id, self.model()))
         if not out:
             return
 
         def undo() -> None:
-            back = self._do(lambda: edits.undo_later(*args, old, self._now(), item_id), self.sel)
+            back = self._do(lambda: edits.undo_later(*args, old, self._now(), item_id, self.model()), self.sel)
             if back and tell is not None:
                 tell(back.message, None)
 
@@ -335,7 +336,7 @@ class TodayList:
         item = next((a for a in self.model().agenda if a.id == item_id), None)
         if item is None:
             return
-        out = self._do(lambda: edits.close_today_item(self.conn, self.ctx.data_root, self.ctx.fs, item_id, how, self._now()))
+        out = self._do(lambda: edits.close_today_item(self.conn, self.ctx.data_root, self.ctx.fs, item_id, how, self._now(), self.model()))
         if not out:
             return
         task = self.model().tasks.get(item.subject) if item.subject else None
@@ -348,7 +349,7 @@ class TodayList:
             words = out.message
 
         def undo() -> None:
-            if not self._do(lambda: edits.reopen_agenda_item(self.conn, self.ctx.data_root, self.ctx.fs, item_id, self._now()), self.sel):
+            if not self._do(lambda: edits.reopen_agenda_item(self.conn, self.ctx.data_root, self.ctx.fs, item_id, self._now(), self.model()), self.sel):
                 return
             kept = self.capture.drop_if_untouched(task.id, opened) if opened and task is not None and self.capture is not None else ""
             if tell is not None:
@@ -362,7 +363,7 @@ class TodayList:
     def put_back_today(self, item_id: int, tell: Callable[[str, Callable[[], None] | None], None] | None = None) -> None:
         """Back on Today, on a row of Done today (decision 420): the item is on Today again, at the bottom since release 5.148
         (decision 645), as a new item goes."""
-        out = self._do(lambda: edits.back_on_today(self.conn, self.ctx.data_root, self.ctx.fs, item_id, self._now()), self.sel)
+        out = self._do(lambda: edits.back_on_today(self.conn, self.ctx.data_root, self.ctx.fs, item_id, self._now(), self.model()), self.sel)
         if out and tell is not None:
             tell(out.message, None)
 

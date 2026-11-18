@@ -75,7 +75,8 @@ class AppContext:
         """Keep a Model a change read after its writes (release 5.159, the design workspace's ``docs/mods/bin-drop-speed-plan.md``,
         decision 730: an ``edits.Outcome``'s ``model``) as the shared one, so the windows drawn after the change don't read
         every table again. Only when it was read on this connection and docs.db is still as it read it, outside a
-        transaction. True if it was kept."""
+        transaction. True if it was kept. Since release 5.163 every change that writes its touched pages hands one back
+        (``edits.hand_back``), and Quick edit and the quick summary keep theirs here too."""
         if model is None or model.read_at is None or self.conn.in_transaction:
             return False
         at = self._state()
@@ -86,13 +87,18 @@ class AppContext:
 
     def rolled_back(self, work: Callable[[], object]) -> object:
         """Run ``work``, which rolls back everything it writes (a what-if's picture, release 5.64), keeping the shared Model when
-        nothing else changed, since ``total_changes`` counts writes that were rolled back too."""
-        before = (self.conn.total_changes, self.conn.execute("PRAGMA data_version").fetchone()[0])
+        nothing else changed, since ``total_changes`` counts writes that were rolled back too.
+
+        Since release 5.163 (decision 746) the Model's own ``read_at`` moves on with it, so a change made after asking what
+        a move would reach (``edits.edit_moves``, rolled back) is handed the shared Model as docs.db is (``edits.model_now``)."""
+        before = self._state()
         try:
             return work()
         finally:
             if self._model_at == before and not self.conn.in_transaction:
-                self._model_at = (self.conn.total_changes, self.conn.execute("PRAGMA data_version").fetchone()[0])
+                self._model_at = self._state()
+                if self._model is not None and self._model.read_at == (id(self.conn), *before):
+                    self._model.read_at = (id(self.conn), *self._model_at)
 
     def keep_state(self, key: str, value: str) -> None:
         """A window's own state (a fold, a view's choices, where a panel is) kept in ``app_state`` (release 5.95). It's a

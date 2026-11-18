@@ -4,7 +4,7 @@ work (``sample_scale``). Not to be confused with ``timing.py``, a template's tie
 
 It reads and changes nothing. What only reads (the model, the view counts, search, a task page, the task tree and the
 Timeline) is timed on docs.db opened read-only. What writes (saving a capture, a drop on a Today bin and a move on the
-Priorities board since release 5.159, the daily work and ``rebuild``) is timed on
+Priorities board since release 5.159, a state change since release 5.163, the daily work and ``rebuild``) is timed on
 a copy of docs.db in memory, with a stand-in for SafeFS that counts the files it would write and writes none, so a page is
 still read from the data root to see whether it changed. What it prints, and keeps in ``System\\diagnostics``, is counts and
 times only (decision 472): never a title, a name or a word of content.
@@ -60,6 +60,9 @@ BUDGETS = (
     # writes, given the browse tool's Model as it is before the change.
     Budget("bin", "A drop on a Today bin", 0.5),
     Budget("board", "A move to another column of the Priorities board", 0.5),
+    # Release 5.163 (the design workspace's docs/mods/one-read-plan.md, decision 748): a state change from a row's state menu,
+    # its data change and its page writes, given the browse tool's Model as it is before the change.
+    Budget("state", "A state change", 0.5),
     Budget("tree", "Refreshing the task tree", 0.5),
     Budget("timeline", "The Timeline over 12 months", 1.0),
     Budget("daily", "The daily work", 10.0),
@@ -248,7 +251,7 @@ def measure(data_root: Path, settings: Settings, now: datetime, words: str = DEF
             t, chart = _clock(lambda: timeline.build(m, today, timeline.default_start(today), 52), runs)
             out.append(Timing("timeline", t, runs, f"{len(chart.rows):,} rows"))
 
-        if wanted & {"save", "bin", "board", "daily", "rebuild"}:
+        if wanted & {"save", "bin", "board", "state", "daily", "rebuild"}:
             mem = copy_in_memory(conn)
             fs = CountingFS([data_root])
             try:
@@ -259,6 +262,8 @@ def measure(data_root: Path, settings: Settings, now: datetime, words: str = DEF
                     out.append(Timing("save", t, runs, "a note, on the task with the most captures"))
                 if wanted & {"bin", "board"}:
                     out += _priority_moves(mem, data_root, fs, now, runs, wanted)
+                if "state" in wanted:
+                    out += _state_change(mem, data_root, fs, settings, now, runs)
                 if "daily" in wanted:
                     def daily() -> int:
                         capacity.rebuild_all(mem, today, settings)
@@ -333,6 +338,33 @@ def _priority_moves(mem: sqlite3.Connection, data_root: Path, fs: CountingFS, no
         t, _ = _clock(move, runs)
         out.append(Timing("board", t, runs, note))
     return out
+
+
+def _state_change(mem: sqlite3.Connection, data_root: Path, fs: CountingFS, settings: Settings, now: datetime, runs: int) -> list[Timing]:
+    """A state change from a row's state menu (release 5.163, decision 748), on the copy in memory: the open task with the
+    most captures to Parked and back on alternate runs, through ``edits.set_states``, the data change and its page writes.
+    It's given the Model from before it, as the browse tool hands it its own, and the next run the one it read after."""
+    from docrepo import edits
+    from docrepo.model import Model
+    from docrepo.pages import pages_touched
+    from docrepo.schedule import is_open
+
+    m = Model(mem)
+    caps = Counter(c.task for c in m.captures.values() if c.task)
+    open_ = [t for t in m.tasks.values() if is_open(t)]
+    if not open_:
+        return []
+    task = max(open_, key=lambda t: (caps[t.id], t.id))
+    was = task.state
+    held, n = [m], [0]
+
+    def change() -> object:
+        done = edits.set_states(mem, data_root, fs, settings, {task.id: "Parked" if n[0] % 2 == 0 else was}, now, held[0])
+        held[0], n[0] = done.model or Model(mem), n[0] + 1
+        return done
+    t, _ = _clock(change, runs)
+    note = f"its task has {caps[task.id]:,} captures; {len(pages_touched(m, [task.id])):,} task pages and Contents.md"
+    return [Timing("state", t, runs, note)]
 
 
 def counts(data_root: Path) -> list[tuple[str, str]]:

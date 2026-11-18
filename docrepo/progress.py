@@ -174,9 +174,10 @@ def log_progress(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
         set_state(conn, LAST_KEY, choice)
     closed_today = False
     if done_today or state == CLOSED:  # under Done today, where Back on Today puts it back (decision 697)
-        item = next((a for a in Model(conn).today_items() if a.subject == task_id), None)
+        now = Model(conn)
+        item = next((a for a in now.today_items() if a.subject == task_id), None)
         if item is not None:
-            edits.close_today_item(conn, data_root, fs, item.id, "Done", at)
+            edits.close_today_item(conn, data_root, fs, item.id, "Done", at, now)
             closed_today = True
     after = Model(conn).task(task_id)
     log.info("Log progress on %s: %s, capture %s, T-mail %s, wait %s, Today item closed %s", task_id, state, capture, t_mail, wait,

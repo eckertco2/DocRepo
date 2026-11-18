@@ -706,14 +706,14 @@ class Workspace(QWidget):
         """A day changed in Dates, with Undo: the same call back to the old day."""
         b = self.browse
         args = (b.conn, b.ctx.data_root, b.ctx.fs, b.ctx.settings)
-        out = b._do(lambda: ws.change_day(*args, row, day, b._now()))
+        out = b._do(lambda: ws.change_day(*args, row, day, b._now(), b.model()))
         if out is None:
             return
         moved = replace(row, day=day)
         words = f"{row.kind} of {b.model().task(row.task).title}: {long_date(day, b.today())}."
 
         def undo() -> None:
-            if b._do(lambda: ws.change_day(*args, moved, row.day, b._now())):
+            if b._do(lambda: ws.change_day(*args, moved, row.day, b._now(), b.model())):
                 b.say(f"{row.kind} of {b.model().task(row.task).title} is back on {long_date(row.day, b.today())}.")
 
         b.say_undo(words + (f" {out.moved}" if getattr(out, "moved", "") else ""), undo)
