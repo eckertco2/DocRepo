@@ -46,8 +46,31 @@ class Outcome:
     problems: list[str] = field(default_factory=list)
     moved: str = ""  # release 5.50: what moved with it, in words
     #: The Model read once the change and its writes were done (release 5.159, decision 730), for the browse tool to keep
-    #: as the shared one (``AppContext.keep``) rather than read docs.db again. None when the change didn't read one.
+    #: as the shared one (``AppContext.keep``) rather than read docs.db again. None when the change didn't read one, or
+    #: read it inside a transaction (release 5.163), as what's read there could still be rolled back.
     model: Model | None = None
+
+
+def read_now(conn: sqlite3.Connection) -> tuple[int, int, int]:
+    """docs.db's state as a Model's ``read_at`` keeps it: this connection, its changes and others'."""
+    return id(conn), conn.total_changes, conn.execute("PRAGMA data_version").fetchone()[0]
+
+
+def model_now(conn: sqlite3.Connection, model: Model | None) -> Model:
+    """The Model as docs.db is now, for a change to read before it writes (release 5.163, the design workspace's
+    ``docs/mods/one-read-plan.md``, decision 746): ``model``, the browse tool's shared one, when it was read on this
+    connection outside a transaction with nothing written since; otherwise docs.db is read here, so a Model handed in that
+    may be stale is never used."""
+    if model is not None and model.read_at is not None and model.read_at == read_now(conn):
+        return model
+    return Model(conn)
+
+
+def hand_back(out: Outcome, after: Model) -> Model:
+    """Put the Model read after a change's writes in its outcome, for the browse tool to keep (release 5.163, decision
+    747), unless it was read inside a transaction (its ``read_at`` is None). Returns it."""
+    out.model = after if after.read_at is not None else None
+    return after
 
 
 def write_all_pages(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, at: datetime, problems: list[str]) -> None:
@@ -429,9 +452,11 @@ def rewrite_capture_md(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, ca
         problems.append(f"capture.md couldn't be written ({type(e).__name__}).")
 
 
-def file_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, capture_id: str, task_id: str, at: datetime) -> Outcome:
-    """File an unfiled capture to a task. Its folder stays where it is; capture.md gets the task and the time it was filed."""
-    before = Model(conn)
+def file_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, capture_id: str, task_id: str, at: datetime,
+                 model: Model | None = None) -> Outcome:
+    """File an unfiled capture to a task. Its folder stays where it is; capture.md gets the task and the time it was filed.
+    ``model`` is the Model as docs.db is now, when the caller has one (``model_now``); the one read after is the outcome's."""
+    before = model_now(conn, model)
     c = before.captures.get(capture_id)
     content = captures.read_content(data_root, c) if c else None  # read before anything changes
     copies = file_capture_records(conn, capture_id, task_id, at, data_root)
@@ -440,8 +465,8 @@ def file_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, capture_
     copy_files(conn, data_root, fs, task_id, copies, out.problems)
     search.index_items(conn, data_root, captures=[capture_id])
     add_to_pages(conn, data_root, at, [(capture_id, None)], out.problems)  # decision 106: on the page when it's filed
-    write_touched_pages(conn, data_root, fs, at, out.problems, [task_id, *(before.capture_tasks(c) if c else [])], before)
-    title = Model(conn).task(task_id).title
+    after = hand_back(out, write_touched_pages(conn, data_root, fs, at, out.problems, [task_id, *(before.capture_tasks(c) if c else [])], before))
+    title = after.task(task_id).title
     out.message = f"Filed {capture_id} to {title}." + (
         f" {len(copies)} saved file{'s' if len(copies) > 1 else ''} put in its Files folder." if copies else "")
     log.info("capture %s filed to %s, %d saved files", capture_id, task_id, len(copies))
@@ -450,10 +475,10 @@ def file_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, capture_
 
 # ---- fixing a capture's title and summary (release 5.25, decision 112) ----
 def edit_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, capture_id: str, title: str, summary: str,
-                 summary_type: str | None, at: datetime) -> Outcome:
+                 summary_type: str | None, at: datetime, model: Model | None = None) -> Outcome:
     """Fix a capture's title or summary. Its words are read, fixed and added to on its tasks' notes pages now, so its
     capture.md stays as it arrived: written once when it's saved, and then only ever filed (the hard rules)."""
-    before = Model(conn)
+    before = model_now(conn, model)
     c = before.captures.get(capture_id)
     if c is None:
         raise EditError(f"There's no capture {capture_id}.")
@@ -465,54 +490,57 @@ def edit_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, capture_
                      (stamp(at), title, summary or None, (summary_type or c.summary_type) if summary else None, capture_id))
     out = Outcome(f"Saved {capture_id}. Its text stays as it arrived; its words are edited on the notes page.")
     search.index_items(conn, data_root, captures=[capture_id])
-    write_touched_pages(conn, data_root, fs, at, out.problems, before.capture_tasks(c), before)
+    hand_back(out, write_touched_pages(conn, data_root, fs, at, out.problems, before.capture_tasks(c), before))
     log.info("capture %s: title or summary edited", capture_id)
     return out
 
 
 # ---- tasks and agendas ----
 def clear_reminder(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, task_id: str, at: datetime,
-                   via: str = "Reminders list") -> Outcome:
+                   via: str = "Reminders list", model: Model | None = None) -> Outcome:
     """Clear a task's reminder from the Reminders list or Today. Its status log records it."""
-    before = Model(conn)
+    before = model_now(conn, model)
     tasks.update_task(conn, settings, task_id, at=at, via=via, reminder=None)
-    out = Outcome(f"{Model(conn).task(task_id).title}: reminder cleared. The change is in its status log.")
-    write_touched_pages(conn, data_root, fs, at, out.problems, [task_id], before)
+    out = Outcome(f"{before.task(task_id).title}: reminder cleared. The change is in its status log.")
+    hand_back(out, write_touched_pages(conn, data_root, fs, at, out.problems, [task_id], before))
     return out
 
 
-def close_agenda_item(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, item_id: int, how: str, at: datetime) -> Outcome:
-    """Close an agenda item as Discussed or Removed, from the Agendas view. Its task stays as it is."""
-    before = Model(conn)
+def close_agenda_item(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, item_id: int, how: str, at: datetime,
+                      model: Model | None = None) -> Outcome:
+    """Close an agenda item as Discussed or Removed, from the Agendas view. Its task stays as it is. Its words are the
+    Model's from before the change (release 5.163), as closing an item changes no title or name."""
+    before = model_now(conn, model)
     agenda.close_item(conn, item_id, how=how, closed=stamp(at), closed_by="Agenda view")
-    m = Model(conn)
-    a = next(x for x in m.agenda if x.id == item_id)
-    what = m.task(a.subject).title if a.subject else "The note"
-    out = Outcome(f"{what}: {how.lower()}. It's off the {m.target_name(a.target)} agenda" + (", and its status log says so." if a.subject else "."))
-    write_touched_pages(conn, data_root, fs, at, out.problems, [x for x in (a.subject, a.target) if x], before)
+    a = next(x for x in before.agenda if x.id == item_id)
+    what = before.task(a.subject).title if a.subject else "The note"
+    out = Outcome(f"{what}: {how.lower()}. It's off the {before.target_name(a.target)} agenda" + (", and its status log says so." if a.subject else "."))
+    hand_back(out, write_touched_pages(conn, data_root, fs, at, out.problems, [x for x in (a.subject, a.target) if x], before))
     log.info("agenda item %d closed as %s", item_id, how)
     return out
 
 
-def reopen_agenda_item(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, item_id: int, at: datetime) -> Outcome:
+def reopen_agenda_item(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, item_id: int, at: datetime,
+                       model: Model | None = None) -> Outcome:
     """Undo for Done on Today and Discussed or Removed on an agenda (release 5.91): the item is open again, as it was."""
-    before = Model(conn)
+    before = model_now(conn, model)
     a = next((x for x in before.agenda if x.id == item_id), None)
     agenda.reopen_item(conn, item_id)
     out = Outcome("Back on Today." if a and a.target == TODAY else "Back on the agenda.")
-    write_touched_pages(conn, data_root, fs, at, out.problems, [x for x in ((a.subject, a.target) if a else ()) if x], before)
+    hand_back(out, write_touched_pages(conn, data_root, fs, at, out.problems, [x for x in ((a.subject, a.target) if a else ()) if x], before))
     log.info("agenda item %d opened again", item_id)
     return out
 
 
-def back_on_today(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, item_id: int, at: datetime) -> Outcome:
+def back_on_today(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, item_id: int, at: datetime,
+                  model: Model | None = None) -> Outcome:
     """Back on Today, on a row of Done today (release 5.115, decision 420): the item is open again, and since release 5.148
     at the bottom of the list, as a new item goes (decision 645). Undo (``reopen_agenda_item``) puts one back in its place."""
-    before = Model(conn)
+    before = model_now(conn, model)
     a = next((x for x in before.agenda if x.id == item_id), None)
     agenda.reopen_item(conn, item_id, at_end=True)
     out = Outcome("Back on Today, at the bottom.")
-    write_touched_pages(conn, data_root, fs, at, out.problems, [a.subject] if a and a.subject else [], before)
+    hand_back(out, write_touched_pages(conn, data_root, fs, at, out.problems, [a.subject] if a and a.subject else [], before))
     log.info("Today item %d back on Today", item_id)
     return out
 
@@ -522,7 +550,7 @@ MOVES = {"top": "moved to the top", "bottom": "moved to the bottom", "up": "move
 
 
 def move_today_item(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, item_id: int, at: datetime, *, to: str | None = None,
-                    beside: tuple[int, str] | None = None) -> Outcome:
+                    beside: tuple[int, str] | None = None, model: Model | None = None) -> Outcome:
     """Today in the owner's order (release 5.148, decisions 643 and 646): ``to`` is "top", "bottom", "up" or "down" (Move to
     top and Move to bottom, Alt+Up and Alt+Down); ``beside`` is a drag's drop, another item and "before" or "after". Every
     open item gets its place, as at the first drag. A move changes no task, so it goes in no status log and has no Undo;
@@ -531,7 +559,7 @@ def move_today_item(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, item_
     Since release 5.154 (decision 689) a move keeps to the item's band: the top and the bottom are its band's, up and down
     stop at its ends, and a drag lands only beside an item of its own band. The places are first set in the order shown,
     bands and all, so the order kept is the order shown."""
-    before = Model(conn)
+    before = model_now(conn, model)
     items = before.today_items()
     a = next((x for x in items if x.id == item_id), None)
     if a is None:
@@ -559,7 +587,7 @@ def move_today_item(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, item_
     agenda.move_beside(conn, item_id, place[0], place[1])
     what = before.task(a.subject).title if a.subject and a.subject in before.tasks else "The note"
     out = Outcome(f"{what}: {done}." if agenda.order_of(conn) != order else "")  # dropped where it was: nothing to say
-    write_touched_pages(conn, data_root, fs, at, out.problems, [], before)
+    hand_back(out, write_touched_pages(conn, data_root, fs, at, out.problems, [], before))
     log.info("Today item %d %s", item_id, done)
     return out
 
@@ -579,7 +607,7 @@ def today_bin(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, item_id: in
     only the pages a priority can reach, and reads docs.db once, after the change: ``model`` is the Model as docs.db is
     now, the browse tool's own, read here when it isn't given, and the new order is worked out from it. The Model read
     after is the outcome's ``model``."""
-    before = model if model is not None else Model(conn)
+    before = model_now(conn, model)
     items = before.today_items()
     a = next((x for x in items if x.id == item_id), None)
     if a is None:
@@ -604,7 +632,7 @@ def today_bin(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, item_id: in
     ids.insert(at_end, item_id)
     agenda.place_items(conn, ids)
     out = Outcome(f"{title}: {TODAY_BAND_NAMES[bucket]}. Its status log says so.")
-    out.model = write_touched_pages(conn, data_root, fs, at, out.problems, [a.subject], before)
+    hand_back(out, write_touched_pages(conn, data_root, fs, at, out.problems, [a.subject], before))
     log.info("Today item %d: task %s priority %s, from a bin", item_id, a.subject, bucket or "not ranked")
     return out
 
@@ -613,54 +641,58 @@ def today_bin(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, item_id: in
 SUMMARY = "Quick summary"
 
 
-def add_agenda_item(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, target: str, subject: str | None, note: str, at: datetime) -> Outcome:
+def add_agenda_item(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, target: str, subject: str | None, note: str, at: datetime,
+                    model: Model | None = None) -> Outcome:
     """The quick summary's add box (release 5.131, decision 527): a note, or a task with the note as the item's words, on a
     person's or a task's agenda. A task already open on that agenda isn't put there twice."""
-    m = Model(conn)
+    m = model_now(conn, model)
     words = " ".join(note.split())
     if subject and any(a.subject == subject for a in m.open_items_for(target)):
         return Outcome(f"{m.task(subject).title} is on that agenda already.")
     agenda.add_item(conn, subject=subject, target=target, note=words, added=stamp(at), added_by=SUMMARY)
     where = f"{m.person_name(target)}'s agenda" if is_person(target) else f"the agenda of {m.target_name(target)}"
     out = Outcome(f"Added to {where}" + (f", on {m.task(subject).title}." if subject else " as a note."))
-    write_touched_pages(conn, data_root, fs, at, out.problems, [x for x in (subject, None if is_person(target) else target) if x], m)
+    hand_back(out, write_touched_pages(conn, data_root, fs, at, out.problems, [x for x in (subject, None if is_person(target) else target) if x], m))
     log.info("quick summary: agenda item on %s", target)
     return out
 
 
-def discuss_agenda_item(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, item_id: int, at: datetime) -> Outcome:
+def discuss_agenda_item(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, item_id: int, at: datetime,
+                        model: Model | None = None) -> Outcome:
     """An agenda item ticked in the quick summary (release 5.131, decision 526): closed as Discussed, by the quick summary.
     Its task stays as it is; ``reopen_agenda_item`` is its Undo."""
-    before = Model(conn)
+    before = model_now(conn, model)
     agenda.close_item(conn, item_id, how="Discussed", closed=stamp(at), closed_by=SUMMARY)
     a = next(x for x in before.agenda if x.id == item_id)
     out = Outcome("Discussed.")
-    write_touched_pages(conn, data_root, fs, at, out.problems, [x for x in (a.subject, None if is_person(a.target) else a.target) if x], before)
+    hand_back(out, write_touched_pages(conn, data_root, fs, at, out.problems, [x for x in (a.subject, None if is_person(a.target) else a.target) if x], before))
     log.info("quick summary: agenda item %d discussed", item_id)
     return out
 
 
-def add_to_today(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, subject: str | None, note: str, at: datetime) -> Outcome:
+def add_to_today(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, subject: str | None, note: str, at: datetime,
+                 model: Model | None = None) -> Outcome:
     """Put a task, or a note, on Today (mods log round 1, M0016). A task already there stays as it is."""
-    m = Model(conn)
+    m = model_now(conn, model)
     if subject and any(a.subject == subject for a in m.today_items()):
         return Outcome(f"{m.task(subject).title} is on Today already.")
     agenda.add_item(conn, subject=subject, target=TODAY, note=" ".join(note.split()), added=stamp(at), added_by=BROWSE)
     out = Outcome(f"{m.task(subject).title} is on Today. Its status log says so." if subject else "Note added to Today.")
-    write_touched_pages(conn, data_root, fs, at, out.problems, [subject] if subject else [], m)
+    hand_back(out, write_touched_pages(conn, data_root, fs, at, out.problems, [subject] if subject else [], m))
     log.info("added to Today: %s", subject or "a note")
     return out
 
 
-def close_today_item(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, item_id: int, how: str, at: datetime) -> Outcome:
-    """Mark a Today item Done, or take it off Today. Its task stays as it is."""
-    before = Model(conn)
+def close_today_item(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, item_id: int, how: str, at: datetime,
+                     model: Model | None = None) -> Outcome:
+    """Mark a Today item Done, or take it off Today. Its task stays as it is. Its words are the Model's from before the
+    change (release 5.163), as closing an item changes no title."""
+    before = model_now(conn, model)
     agenda.close_item(conn, item_id, how=how, closed=stamp(at), closed_by="Today")
-    m = Model(conn)
-    a = next(x for x in m.agenda if x.id == item_id)
-    what = m.task(a.subject).title if a.subject else "The note"
+    a = next(x for x in before.agenda if x.id == item_id)
+    what = before.task(a.subject).title if a.subject else "The note"
     out = Outcome(f"{what}: {'done' if how == 'Done' else 'taken off Today'}." + (" Its status log says so." if a.subject else ""))
-    write_touched_pages(conn, data_root, fs, at, out.problems, [a.subject] if a.subject else [], before)
+    hand_back(out, write_touched_pages(conn, data_root, fs, at, out.problems, [a.subject] if a.subject else [], before))
     log.info("Today item %d closed as %s", item_id, how)
     return out
 
@@ -691,11 +723,15 @@ def next_reminder(task_id: str, model: Model, settings: Settings, today: date) -
     return repeats.following(t.reminder_repeat, t.reminder_until, to_date(t.reminder) if t.reminder else today, today, _workdays(settings))
 
 
-def reminders_to_today(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, at: datetime) -> list[str]:
+def reminders_to_today(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, at: datetime,
+                       model: Model | None = None, keep: Callable[[Model], object] | None = None) -> list[str]:
     """Decision 415: each open task whose reminder has come, today or before, goes on Today by itself, as an item added by
     "Reminder", and the reminder is used up: cleared, with "Put on Today" in its status log. A task already on Today just
-    has its reminder cleared. Returns the tasks whose reminder it used."""
-    before = Model(conn)
+    has its reminder cleared. Returns the tasks whose reminder it used.
+
+    Since release 5.163 (decision 747) ``model`` is the Model as docs.db is now, when the caller has one, and ``keep`` is
+    given the one read after the change (the app's ``AppContext.keep``), as an outcome's ``model`` is."""
+    before = model_now(conn, model)
     today = at.date()
     due = reminders_due(before, today)
     if not due:
@@ -715,109 +751,123 @@ def reminders_to_today(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, se
         if nxt:
             tasks.update_task(conn, settings, t.id, at=at, via=REPEATS, reminder=nxt)
     problems: list[str] = []
-    write_touched_pages(conn, data_root, fs, at, problems, [t.id for t in (*due, *waiting)], before)
+    out = Outcome("", problems)
+    hand_back(out, write_touched_pages(conn, data_root, fs, at, problems, [t.id for t in (*due, *waiting)], before))
+    if keep is not None and out.model is not None:
+        keep(out.model)
     log.info("reminders put on Today: %s", ", ".join(put) or "none new")
     return [t.id for t in (*due, *waiting)]
 
 
 def later(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, task_id: str, day: date, at: datetime,
-          item_id: int | None = None) -> Outcome:
+          item_id: int | None = None, model: Model | None = None) -> Outcome:
     """Later (decision 417): the task's Reminder set to ``day``, so it comes back on Today then (decision 415). Its Today
     item, when it has one, is taken off Today, closed as "Removed" by "Later"; from Due in the next 7 days, the reminder
     keeps it off that list until its day (decision 418)."""
     if day <= at.date():
         raise EditError("Later needs a day after today.")
-    before = Model(conn)
+    before = model_now(conn, model)
     t = before.task(task_id)
     if item_id is not None:
         agenda.close_item(conn, item_id, how="Removed", closed=stamp(at), closed_by=LATER)
     tasks.update_task(conn, settings, task_id, at=at, via=LATER, reminder=day.isoformat())
     off = "off Today" if item_id is not None else "off Due in the next 7 days"
     out = Outcome(f"{t.title}: {off} until {long_date(day, at.date())}, when its reminder puts it back on Today.")
-    write_touched_pages(conn, data_root, fs, at, out.problems, [task_id], before)
+    hand_back(out, write_touched_pages(conn, data_root, fs, at, out.problems, [task_id], before))
     log.info("later: %s until %s", task_id, day.isoformat())
     return out
 
 
 def undo_later(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, task_id: str, reminder: str | None,
-               at: datetime, item_id: int | None = None) -> Outcome:
+               at: datetime, item_id: int | None = None, model: Model | None = None) -> Outcome:
     """Later's Undo: the reminder the task had, and its Today item open again."""
-    before = Model(conn)
+    before = model_now(conn, model)
     if item_id is not None:
         agenda.reopen_item(conn, item_id)
     tasks.update_task(conn, settings, task_id, at=at, via="Undo", reminder=reminder)
     out = Outcome("Back on Today, as it was." if item_id is not None else "Back as it was.")
-    write_touched_pages(conn, data_root, fs, at, out.problems, [task_id], before)
+    hand_back(out, write_touched_pages(conn, data_root, fs, at, out.problems, [task_id], before))
     return out
 
 
-def edit_today_note(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, item_id: int, note: str, at: datetime) -> Outcome:
+def edit_today_note(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, item_id: int, note: str, at: datetime,
+                    model: Model | None = None) -> Outcome:
     """Change a note's text on Today (mods log round 2, M0040)."""
-    before = Model(conn)
+    before = model_now(conn, model)
     agenda.set_note(conn, item_id, note)
     out = Outcome("Note changed.")
     subject = next((a.subject for a in before.agenda if a.id == item_id), None)
-    write_touched_pages(conn, data_root, fs, at, out.problems, [subject] if subject else [], before)
+    hand_back(out, write_touched_pages(conn, data_root, fs, at, out.problems, [subject] if subject else [], before))
     log.info("Today note %d edited", item_id)
     return out
 
 
-def change_task(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, task_id: str, at: datetime, **changes) -> Outcome:
-    """Change a task's fields from the browse tool, such as its title, description or labels."""
-    before = Model(conn)
+def change_task(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, task_id: str, at: datetime,
+                model: Model | None = None, **changes) -> Outcome:
+    """Change a task's fields from the browse tool, such as its title, description or labels. ``model`` is the Model as
+    docs.db is now, when the caller has one (release 5.163); the one read after is the outcome's."""
+    before = model_now(conn, model)
     logged = tasks.update_task(conn, settings, task_id, at=at, via=BROWSE, **changes)
     moved = tasks.moved_words(logged)
     out = Outcome((f"{len(logged)} change{'s' if len(logged) != 1 else ''} in the status log." if logged else "Nothing changed.") + (f" {moved}" if moved else ""), moved=moved)
-    write_touched_pages(conn, data_root, fs, at, out.problems, [task_id, *(f.task for f in logged.followed)], before)
+    hand_back(out, write_touched_pages(conn, data_root, fs, at, out.problems, [task_id, *(f.task for f in logged.followed)], before))
     return out
 
 
-def mark_reviewed(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, task_id: str, at: datetime) -> Outcome:
+def mark_reviewed(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, task_id: str, at: datetime,
+                  model: Model | None = None) -> Outcome:
     """Mark reviewed, in the weekly review's step 4 (release 5.128, decision 498): the task keeps the time, its facts say
     "Reviewed Fri 13 Nov", and it leaves the step until its interval comes round. Nothing goes into the status log
     (decision 503); Undo is ``set_reviewed``."""
     from docrepo import review
 
-    before = Model(conn)
+    before = model_now(conn, model)
     if task_id not in before.tasks:
         raise EditError(f"There's no task {task_id}.")
     tasks.set_reviewed(conn, {task_id: stamp(at)})
-    m = Model(conn)
+    out = Outcome("")
+    m = hand_back(out, write_touched_pages(conn, data_root, fs, at, out.problems, [task_id], before))  # read once, after
     t = m.task(task_id)
     weeks = review.interval(m, t, settings.review_weeks)
     nxt = review.next_review(t, weeks) if weeks else None
     again = f" It comes up again in the week of {long_date(nxt, at.date())}." if nxt else ""
-    out = Outcome(f"{t.title}: reviewed.{again}")
-    write_touched_pages(conn, data_root, fs, at, out.problems, [task_id], before)
+    out.message = f"{t.title}: reviewed.{again}"
     log.info("task %s marked reviewed", task_id)
     return out
 
 
-def set_reviewed(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, task_id: str, reviewed: str | None, at: datetime) -> Outcome:
+def set_reviewed(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, task_id: str, reviewed: str | None, at: datetime,
+                 model: Model | None = None) -> Outcome:
     """Mark reviewed's Undo (release 5.128): the task's last review as it was before."""
-    before = Model(conn)
+    before = model_now(conn, model)
     tasks.set_reviewed(conn, {task_id: reviewed})
-    out = Outcome(f"{Model(conn).task(task_id).title}: back to " + (f"reviewed {long_date(to_date(reviewed), at.date())}." if reviewed else "not reviewed yet."))
-    write_touched_pages(conn, data_root, fs, at, out.problems, [task_id], before)
+    out = Outcome(f"{before.task(task_id).title}: back to " + (f"reviewed {long_date(to_date(reviewed), at.date())}." if reviewed else "not reviewed yet."))
+    hand_back(out, write_touched_pages(conn, data_root, fs, at, out.problems, [task_id], before))
     return out
 
 
-def set_states(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, states: dict[str, str], at: datetime) -> Outcome:
+def set_states(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, states: dict[str, str], at: datetime,
+               model: Model | None = None) -> Outcome:
     """Set tasks' states from a row's state menu (release 5.76, round 7's item 101, decisions 362 to 364): each change a status
     log line as "Browse tool", as Edit task's are, with no capture, all in one transaction, and the pages written once. A
-    whole branch closed at once is one change to take back, and so is its Undo."""
+    whole branch closed at once is one change to take back, and so is its Undo.
+
+    Since release 5.163 (the design workspace's ``docs/mods/one-read-plan.md``, decision 746) it reads docs.db once, after
+    the change: ``model`` is the browse tool's shared Model, used as the one from before when docs.db is still as it was
+    read (``model_now``), and the Model read after the writes is the outcome's ``model``, for the browse tool to keep."""
     logged = 0
-    before = Model(conn)
+    before = model_now(conn, model)
     with transaction(conn):
         for task_id, state in states.items():
             logged += len(tasks.update_task(conn, settings, task_id, at=at, via=BROWSE, state=state))
     out = Outcome(f"{logged} change{'s' if logged != 1 else ''} in the status log." if logged else "Nothing changed.")
-    write_touched_pages(conn, data_root, fs, at, out.problems, list(states), before)
+    hand_back(out, write_touched_pages(conn, data_root, fs, at, out.problems, list(states), before))
     log.info("States set from a row: %d task(s), %d change(s)", len(states), logged)
     return out
 
 
-def edit_task(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, task_id: str, at: datetime, **values) -> Outcome:
+def edit_task(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, task_id: str, at: datetime,
+              model: Model | None = None, **values) -> Outcome:
     """Save the Edit task form (mods log round 1, M0008, M0011): every field on one page, in one transaction.
 
     Only the fields that differ change, each logged as "Browse tool". ``leads`` and ``assignees`` are Who's: someone not on
@@ -827,8 +877,11 @@ def edit_task(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: S
     ``key_dates`` (release 5.31), a list of ``tasks.KeyDateRow``, makes its key dates those, each change logged.
     ``follow`` (release 5.45, decision 184), from the form's chain marks and ↺, says which fields follow its template now.
     ``leave`` (release 5.50, decision 249) names the tasks tied to it that keep their dates.
+
+    Since release 5.163 (decision 746) it reads docs.db once, after the change, as ``set_states`` does: ``model`` is the
+    Model from before when docs.db is still as it was read, and the Model read after is the outcome's ``model``.
     """
-    before = Model(conn)
+    before = model_now(conn, model)
     with transaction(conn):
         logged, added = _edit(conn, settings, task_id, at, values)
     message = f"{len(logged)} change{'s' if len(logged) != 1 else ''} in the status log." if logged else "Nothing changed."
@@ -838,7 +891,7 @@ def edit_task(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: S
     if added:
         message += f" Added {', '.join(added)} to the people list."
     out = Outcome(message, moved=moved)
-    write_touched_pages(conn, data_root, fs, at, out.problems, [task_id, *(f.task for f in logged.followed)], before)
+    hand_back(out, write_touched_pages(conn, data_root, fs, at, out.problems, [task_id, *(f.task for f in logged.followed)], before))
     log.info("task %s edited in the browse tool: %d changes", task_id, len(logged))
     return out
 
@@ -1008,7 +1061,7 @@ def set_priority(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, task_id:
     if change is None:
         return Outcome(f"{title} moved within {priorities.name(bucket)}.")
     out = Outcome(f"{title}: {priorities.name(bucket)}. Its status log says so.")
-    out.model = write_touched_pages(conn, data_root, fs, at, out.problems, [task_id], None)
+    hand_back(out, write_touched_pages(conn, data_root, fs, at, out.problems, [task_id], None))
     log.info("task %s priority: %s", task_id, bucket or "not ranked")
     return out
 

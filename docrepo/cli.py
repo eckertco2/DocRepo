@@ -96,7 +96,7 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser("dump", help="write every table of docs.db as JSON into System\\export\\<date>, for reading outside DocRepo. It reads docs.db "
                                      "and changes nothing in it")
     timings = commands.add_parser("timings", help="time loading, the view counts, search, a task page, saving, a drop on a Today bin and a "
-                                                  "move on the Priorities board (release 5.159), the task tree, the Timeline, "
+                                                  "move on the Priorities board (release 5.159), a state change (release 5.163), the task tree, the Timeline, "
                                                   "the daily work and rebuild against their budgets (release 5.126). It reads docs.db, changes "
                                                   "nothing, prints counts and times only, and keeps them in System\\diagnostics")
     timings.add_argument("--words", default=None, metavar="WORDS", help="the three words Search everything is timed with "

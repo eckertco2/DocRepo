@@ -436,7 +436,8 @@ class CaptureApp(QObject):
     def reminders_to_today(self) -> list[str]:
         """Decision 415: each task whose reminder has come goes on Today, after its notification; the views and the Today
         side panel read it again."""
-        used = edits.reminders_to_today(self.ctx.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, self.ctx.now())
+        used = edits.reminders_to_today(self.ctx.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, self.ctx.now(),
+                                        self.ctx.model(), self.ctx.keep)
         if used:
             self.browse.refresh()
         return used
