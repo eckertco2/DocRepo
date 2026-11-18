@@ -20,7 +20,7 @@ from datetime import date
 
 from docrepo import items, markup
 from docrepo.dates import long_date, short, to_date
-from docrepo.model import TODAY, Capture, Model, StatusEntry, Version, is_person
+from docrepo.model import TODAY, AgendaItem, Capture, Model, StatusEntry, Version, is_person
 from docrepo.text import is_file_line, plain_text, sentences
 
 #: A capture's content text, by its ID ("" when its capture.md can't be read).
@@ -125,6 +125,16 @@ class Stories:
         self.content_of = content_of
         self.me_name = me_name
         self._logs: dict[str, list[StatusEntry]] = {}
+        #: What each capture did on each task (release 5.161, the busy page plan's decision 738): the status log's lines by
+        #: (the capture that made them, their task), and the agenda items by (the capture that added them, their subject),
+        #: each in docs.db's order. Built once, the first time a raw text log entry asks, as a Model doesn't change; a raw
+        #: text log entry went through the whole status log and agenda for each capture before.
+        self._said: dict[tuple[str, str], list[StatusEntry]] | None = None
+        self._added: dict[tuple[str, str | None], list[AgendaItem]] | None = None
+        #: The Update captures picked for each task, in ID order, and the agenda items on each target's agenda, in docs.db's
+        #: order (decision 739), each built once as the two above are.
+        self._updates: dict[str, list[Capture]] | None = None
+        self._agendas: dict[str, list[AgendaItem]] | None = None
         #: The data root's Settings, when known: the reference fields a capture's operators can name, for its notes page's
         #: change lines (release 5.150, ``notes_page.rewrite_of``).
         self.settings = None
@@ -252,6 +262,27 @@ class Stories:
             self._logs[task_id] = sorted(self.m.status_log_of(task_id), key=lambda e: e.at)
         return self._logs[task_id]
 
+    def update_captures(self, task_id: str) -> list[Capture]:
+        """The Update captures picked for a task, discarded ones too, in ID order (release 5.161, decision 739: from one
+        index of every capture, where each task's updates went through them all before)."""
+        if self._updates is None:
+            index: dict[str, list[Capture]] = {}
+            for c in self.m.captures.values():
+                if c.task and c.has("update"):
+                    index.setdefault(c.task, []).append(c)
+            self._updates = index
+        return self._updates.get(task_id, [])
+
+    def agenda_of(self, task_id: str) -> list[AgendaItem]:
+        """The agenda items on a task's agenda, open and closed, in docs.db's order (decision 739: from one index of the
+        agenda, where each task's story went through it all before)."""
+        if self._agendas is None:
+            index: dict[str, list[AgendaItem]] = {}
+            for a in self.m.agenda:
+                index.setdefault(a.target, []).append(a)
+            self._agendas = index
+        return self._agendas.get(task_id, [])
+
     def initial(self, task_id: str, field_name: str, now: str) -> str:
         """A field's value when the task was created: the "from" of its first change, or its value now if it never changed."""
         e = next((x for x in self.log(task_id) if x.field == field_name), None)
@@ -271,8 +302,8 @@ class Stories:
                 g = {"at": e.at, "via": e.via, "changes": []}
                 groups.append(g)
             g["changes"].append(e)
-        for c in self.m.captures.values():
-            if c.task == task_id and c.has("update") and not any(g["via"] == c.id for g in groups):
+        for c in self.update_captures(task_id):
+            if not any(g["via"] == c.id for g in groups):
                 groups.append({"at": c.saved, "via": c.id, "changes": []})
         groups.sort(key=lambda g: g["at"])
 
@@ -373,9 +404,7 @@ class Stories:
                 word = "Subtask closed" if u.state == "Closed" else "Subtask parked" if u.state == "Parked" else "Subtask reopened"
                 events.append(Event(u.at, "sub", task=k, verb=word,
                                     note=u.status if u.status_changed and u.status else self.gist(c, 140) if c else ""))
-        for a in m.agenda:
-            if a.target != task_id:
-                continue
+        for a in self.agenda_of(task_id):
             events.append(Event(a.added, "sub", task=a.subject, text=a.note, verb="Added to the agenda",
                                 note=clip(a.note) if a.subject and a.note else ""))
             if a.closed:
@@ -430,6 +459,19 @@ class Stories:
             out.append(self.note_item(e.capture, task_id) if e.capture else self.version_item(e.version))
         return out
 
+    def made_by(self, capture_id: str, task_id: str) -> tuple[list[StatusEntry], list[AgendaItem]]:
+        """What a capture did on a task: the status log's lines it made there and the agenda items it put the task on, each
+        in docs.db's order (release 5.161, decision 738: looked up, where each capture went through both lists before)."""
+        if self._said is None or self._added is None:
+            said: dict[tuple[str, str], list[StatusEntry]] = {}
+            for e in self.m.status:
+                said.setdefault((e.via, e.task), []).append(e)
+            added: dict[tuple[str, str | None], list[AgendaItem]] = {}
+            for a in self.m.agenda:
+                added.setdefault((a.added_by, a.subject), []).append(a)
+            self._said, self._added = said, added
+        return self._said.get((capture_id, task_id), []), self._added.get((capture_id, task_id), [])
+
     def note_item(self, c: Capture, task_id: str) -> RawItem:
         content = self.words_of(c)
         sender = re.search(r"^From:\s*(.+)$", content, re.M) if c.source == "outlook_email" else None
@@ -438,13 +480,12 @@ class Stories:
             else "File" if c.source == "file_path" else "Update" if is_update else "Decision" if c.item == "decision" else "Note"
         # What the capture did here, in the story's words: "Due date moved to Fri 23 Oct.", "Closed."
         said = []
-        for e in self.m.status:
-            if e.via == c.id and e.task == task_id:
-                said.append(state_words(e.from_value or "", e.to_value or "") + "." if e.field == "State"
-                            else "New current status." if e.field == "Current status" else self.field_sentence(e))
-        for a in self.m.agenda:
-            if a.added_by == c.id and a.subject == task_id:
-                said.append(self.field_sentence(StatusEntry(task_id, a.added, "Agenda", None, self.m.target_name(a.target), c.id, a.target)))
+        changes, added = self.made_by(c.id, task_id)
+        for e in changes:
+            said.append(state_words(e.from_value or "", e.to_value or "") + "." if e.field == "State"
+                        else "New current status." if e.field == "Current status" else self.field_sentence(e))
+        for a in added:
+            said.append(self.field_sentence(StatusEntry(task_id, a.added, "Agenda", None, self.m.target_name(a.target), c.id, a.target)))
         update = " ".join(s for s in said if s)
         did = ("Started this task" if c.created_task == task_id
                else ("" if c.source == "typed" else "Update: ") + update if is_update

@@ -45,6 +45,8 @@ class AppContext:
     open_summary: Callable[[str | None], None] = lambda key=None: None
     #: Opens Log progress (release 5.139, decision 583) on a task, with no email: the status card's Log progress….
     log_progress: Callable[[str | None], None] = lambda task=None: None
+    #: Opens Recent captures (release 5.158, decision 723) from a window's command palette.
+    open_recent: Callable[[], None] = lambda: None
     #: This session's saves that had problems (release 5.91), for the Problems lines of the capture and browse windows.
     problem_log: ProblemLog = field(default_factory=ProblemLog)
     #: Today's appointments from the Outlook calendar (release 5.127), read at most every 5 minutes, shared by the Today view
@@ -61,20 +63,42 @@ class AppContext:
         what's read there could still be rolled back."""
         if self.conn.in_transaction:
             return Model(self.conn)
-        at = (self.conn.total_changes, self.conn.execute("PRAGMA data_version").fetchone()[0])
+        at = self._state()
         if self._model is None or at != self._model_at:
             self._model, self._model_at = Model(self.conn), at
         return self._model
 
+    def _state(self) -> tuple[int, int]:
+        return self.conn.total_changes, self.conn.execute("PRAGMA data_version").fetchone()[0]
+
+    def keep(self, model: Model | None) -> bool:
+        """Keep a Model a change read after its writes (release 5.159, the design workspace's ``docs/mods/bin-drop-speed-plan.md``,
+        decision 730: an ``edits.Outcome``'s ``model``) as the shared one, so the windows drawn after the change don't read
+        every table again. Only when it was read on this connection and docs.db is still as it read it, outside a
+        transaction. True if it was kept. Since release 5.163 every change that writes its touched pages hands one back
+        (``edits.hand_back``), and Quick edit and the quick summary keep theirs here too."""
+        if model is None or model.read_at is None or self.conn.in_transaction:
+            return False
+        at = self._state()
+        if model.read_at != (id(self.conn), *at):
+            return False
+        self._model, self._model_at = model, at
+        return True
+
     def rolled_back(self, work: Callable[[], object]) -> object:
         """Run ``work``, which rolls back everything it writes (a what-if's picture, release 5.64), keeping the shared Model when
-        nothing else changed, since ``total_changes`` counts writes that were rolled back too."""
-        before = (self.conn.total_changes, self.conn.execute("PRAGMA data_version").fetchone()[0])
+        nothing else changed, since ``total_changes`` counts writes that were rolled back too.
+
+        Since release 5.163 (decision 746) the Model's own ``read_at`` moves on with it, so a change made after asking what
+        a move would reach (``edits.edit_moves``, rolled back) is handed the shared Model as docs.db is (``edits.model_now``)."""
+        before = self._state()
         try:
             return work()
         finally:
             if self._model_at == before and not self.conn.in_transaction:
-                self._model_at = (self.conn.total_changes, self.conn.execute("PRAGMA data_version").fetchone()[0])
+                self._model_at = self._state()
+                if self._model is not None and self._model.read_at == (id(self.conn), *before):
+                    self._model.read_at = (id(self.conn), *self._model_at)
 
     def keep_state(self, key: str, value: str) -> None:
         """A window's own state (a fold, a view's choices, where a panel is) kept in ``app_state`` (release 5.95). It's a

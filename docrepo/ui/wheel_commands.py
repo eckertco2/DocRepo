@@ -57,6 +57,12 @@ def _capture_meeting(app: CaptureApp, _args: Mapping[str, Any]) -> None:
     app.window.show_capture(meeting=True)
 
 
+def _capture_recent(app: CaptureApp, _args: Mapping[str, Any]) -> None:
+    """Recent captures (release 5.158, the recent captures plan's decision 723): the last captures saved, and Enter opens one
+    at its block on its notes page, where its words are worked on (decision 722)."""
+    app.wheels.recent_captures()
+
+
 def _today_new_item(app: CaptureApp, _args: Mapping[str, Any]) -> None:
     """Ctrl+Shift+D's command, not a way of its own (release 5.99, the consolidation plan's decision 393)."""
     app.window.open_quick_task()
@@ -114,6 +120,7 @@ _ROWS = (
     Registered(CommandSpec("capture.pin", "The pinned window"), _capture_pin),
     Registered(CommandSpec("capture.selection", "The pinned window with the current email or file"), _capture_selection),
     Registered(CommandSpec("capture.meeting", "Meeting notes"), _capture_meeting),
+    Registered(CommandSpec("capture.recent", "Recent captures: Enter opens one on its notes page"), _capture_recent),
     Registered(CommandSpec("today.new_item", "A quick task on Today (Ctrl+Shift+D's command)"), _today_new_item),
     Registered(CommandSpec("today.panel", "The Today side panel", (Arg("do", "toggle", ("toggle", "open", "close")),)), _today_panel, gives_back=True),
     # A view that's gone (release 5.97: urgent) is still allowed, and leads where it went: the task tree, Urgent only.

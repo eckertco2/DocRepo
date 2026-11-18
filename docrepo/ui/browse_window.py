@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from datetime import date
 from pathlib import Path
 
@@ -73,7 +73,7 @@ from docrepo.ui.task_pane import TaskPane
 from docrepo.ui.templates_view import TemplatesPane
 from docrepo.ui.tree_import import TreeFilesPane
 from docrepo.ui.priorities_view import PrioritiesView
-from docrepo.ui.palette import Command, CommandPalette, summary_commands
+from docrepo.ui.palette import RECENT_CAPTURES, Command, CommandPalette, summary_commands
 from docrepo.ui.style import CLASSIC_BROWSE, page_css, style_sheet
 from docrepo.ui.task_forms import LabelMatchDialog, TaskEditDialog
 from docrepo.ui.task_picker import TaskPicker
@@ -136,6 +136,9 @@ from docrepo.ui.lists.common import (  # noqa: F401 - the helpers, here as befor
 
 #: What other modules and the tests read from here (release 5.95): the window, and names that lived here before the move.
 __all__ = ["BrowseWindow", "DETAIL_MIN", "HTML_ROLE", "NAV_FOLDED_KEY", "TODAY_MINE_KEY", "_answers", "priorities_of"]
+
+#: The views with no page beside them (release 5.159): their own page fills the window, so a selection's page isn't drawn.
+NO_PAGE_VIEWS = ("capacity", "settings", "timeline", "priorities")
 
 
 def _in_bar(item) -> bool:
@@ -669,15 +672,17 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         return Pages(self.model(), self.today(), self.content_of, self.ctx.settings.me, self.conn, LOOK.show_help,
                      self.ctx.settings.reference_links)
 
-    def refresh(self, render: bool = True) -> None:
-        """Read docs.db again and show what's there now."""
+    def refresh(self, render: bool = True, reach: Collection[str] | None = None) -> None:
+        """Read docs.db again and show what's there now. ``reach``: the tasks a change can show on (release 5.159), so only
+        their open Find files windows read their records again; None for every one."""
         self.dirty = False
         if self.sel and not self._exists(self.sel):
             self.sel = None
         if render:
             self.render_all()
         for view in list(self.task_views.values()):  # the open Task views read the data again too
-            view.reload()
+            if reach is None or view.task_id in reach:
+                view.reload()
         self.ctx.today_changed()  # and the Today side panel (release 5.43)
 
     def read_again(self) -> None:
@@ -766,13 +771,14 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         was = {x: m.task(x).state for x in ids}
         if all(state == to for state in was.values()):
             return False
-        out = self._do(lambda: edits.set_states(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, {x: to for x in ids}, self._now()))
+        out = self._do(lambda: edits.set_states(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, {x: to for x in ids}, self._now(),
+                                                self.model()))
         if out is None:
             return False
         line = picked_line(m, task_id, to, len(ids) - 1) + (" Problems: " + " ".join(out.problems) if out.problems else "")
 
         def undo() -> None:
-            back = self._do(lambda: edits.set_states(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, was, self._now()))
+            back = self._do(lambda: edits.set_states(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, was, self._now(), self.model()))
             if back is None:
                 return
             self.say("Set back. The status log keeps both changes.")
@@ -864,6 +870,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
                 Command("", "Search everything", self.search_box.setFocus, "Ctrl+Shift+F"),
                 Command("", "Quick summary: a person, an agenda or a label", lambda: self.ctx.open_summary(None)),
                 *summary_commands(self.ctx),  # each saved set (release 5.149, decision 651)
+                Command("", RECENT_CAPTURES, lambda: self.ctx.open_recent()),  # release 5.158, decision 723
                 Command("", "Find in this view", self.open_find, "Ctrl+F"),
                 Command("", "Show or hide the views", lambda: self.show_views_pane(not self.views_button.isChecked()), "Ctrl+B"),
                 Command("", "Read docs.db and the calendar again", self.read_again, "F5"),
@@ -948,7 +955,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         if workspace_ui.is_open(self):  # the workspace takes the list's and the page's room (release 5.152, decision 682)
             workspace_ui.render(self)
             return
-        self.detail.setVisible(self.view not in ("capacity", "settings", "timeline", "priorities"))
+        self.detail.setVisible(self.view not in NO_PAGE_VIEWS)
         if self.view == "priorities":
             self.middle.setCurrentWidget(self.priorities)
             self.priorities.render(self.model(), self.today(), self.sel[1] if self.sel and self.sel[0] == "task" else None, self.ctx.settings.me)
@@ -1002,6 +1009,9 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         scroll = self.page.verticalScrollBar().value() if keep_scroll else 0
         self._clear_actions()
         self.sync_toolbar()
+        if self.view in NO_PAGE_VIEWS:  # no page shows beside these (release 5.159, decision 730): it's drawn when one does
+            self.actions.hide()
+            return
         s = self.sel
         if s and s[0] == "capture" and s[1] == self.editing:
             self.detail_stack.setCurrentIndex(1)
@@ -1011,10 +1021,10 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         if not s or not self._exists(s):
             self.actions.hide()
             self.page.setHtml('<p class="note">Pick a task, capture or document to see it here.</p>')
-            if not LOOK.classic and self.view not in ("capacity", "settings", "timeline", "priorities"):
+            if not LOOK.classic and self.view not in NO_PAGE_VIEWS:
                 self.detail.hide()  # the list takes the room until something is picked
             return
-        if not LOOK.classic and self.view not in ("capacity", "settings", "timeline", "priorities"):
+        if not LOOK.classic and self.view not in NO_PAGE_VIEWS:
             self.detail.show()
         self.actions.show()
         pages = self.pages()
@@ -1405,17 +1415,36 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
             self.say(result.message)
 
     # ================= changes =================
-    def _do(self, change: Callable[[], object], select: tuple[str, str] | None = None) -> object | None:
-        """Make a change, then show the result. A change that isn't allowed says why and changes nothing."""
+    def _do(self, change: Callable[[], object], select: tuple[str, str] | None = None, counts: bool = True,
+            reach: Collection[str] | None = None) -> object | None:
+        """Make a change, then show the result. A change that isn't allowed says why and changes nothing.
+
+        Since release 5.159 (the design workspace's ``docs/mods/bin-drop-speed-plan.md``, decision 730): the Model a change
+        read after its writes is kept as the shared one (``AppContext.keep``), so nothing reads every table again; the
+        window, while it's hidden, is drawn once it's shown, as after a capture's save; ``counts`` False, for a change no
+        view's count follows (a priority, Today's order), leaves the views pane as it is, since the counts take longest; and
+        ``reach``, the tasks the change can show on, reloads only their open Find files windows (``refresh``).
+
+        Since release 5.163 (the design workspace's ``docs/mods/one-read-plan.md``, decisions 746 and 747) every change that
+        writes its touched pages hands that Model back, and those called here are handed the shared Model (``self.model()``)
+        as the one from before, so a change reads docs.db once, after it."""
         try:
             out = change()
         except (TaskError, PeopleError, AgendaError, edits.EditError, WriteRefused, OSError, sqlite3.Error, ValueError) as e:
             self.say(str(e), error=True)
             return None
-        self.refresh(render=False)
+        if isinstance(out, edits.Outcome):
+            self.ctx.keep(out.model)
+        self.refresh(render=False, reach=reach)
         if select:
             self.sel = select
-        self.render_all()
+        if not self.isVisible():
+            self.dirty = True
+        elif counts:
+            self.render_all()
+        else:
+            self.render_list()
+            self.render_detail()
         if isinstance(out, edits.Outcome):
             self.say(out.message + (" Problems: " + " ".join(out.problems) if out.problems else ""), bool(out.problems))
         return out
@@ -1428,7 +1457,8 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         if not task_id:
             self.say("Pick a task first.", error=True)
             return
-        out = self._do(lambda: edits.file_capture(self.conn, self.ctx.data_root, self.ctx.fs, capture_id, task_id, self._now()), ("capture", capture_id))
+        out = self._do(lambda: edits.file_capture(self.conn, self.ctx.data_root, self.ctx.fs, capture_id, task_id, self._now(), self.model()),
+                       ("capture", capture_id))
         if out and self.ctx.settings.outlook_categories:  # release 5.93: filed later, marked as a save marks it
             marked, trouble = self.mark_emails(capture_id, task_id)
             if marked or trouble:
@@ -1488,23 +1518,24 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         default_type = types[0].name if types else None
         try:
             out = edits.edit_capture(self.conn, self.ctx.data_root, self.ctx.fs, capture_id, self.edit_capture_title.text(),
-                                     self.edit_summary.toPlainText(), default_type, self._now())
+                                     self.edit_summary.toPlainText(), default_type, self._now(), self.model())
         except (edits.EditError, WriteRefused, OSError) as e:
             self.say(str(e), error=True)
             return
+        self.ctx.keep(out.model)  # release 5.163: the Model it read after, so the window doesn't read docs.db again
         self.editing = None
         self._contents.pop(capture_id, None)
         self.refresh()
         self.say(out.message + (" Problems: " + " ".join(out.problems) if out.problems else ""), bool(out.problems))
 
     def clear_reminder(self, task_id: str, via: str = "Reminders list") -> None:
-        self._do(lambda: edits.clear_reminder(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, task_id, self._now(), via))
+        self._do(lambda: edits.clear_reminder(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, task_id, self._now(), via, self.model()))
 
     def close_agenda_item(self, item_id: int, how: str) -> None:
         item = next((a for a in self.model().agenda if a.id == item_id), None)
         if item is None:
             return
-        out = self._do(lambda: edits.close_agenda_item(self.conn, self.ctx.data_root, self.ctx.fs, item_id, how, self._now()))
+        out = self._do(lambda: edits.close_agenda_item(self.conn, self.ctx.data_root, self.ctx.fs, item_id, how, self._now(), self.model()))
         if not out:
             return
         opened = ""
@@ -1516,7 +1547,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
             words = out.message
 
         def undo() -> None:  # release 5.91: the item opens again, and the Update it opened goes if nothing was typed in it
-            if not self._do(lambda: edits.reopen_agenda_item(self.conn, self.ctx.data_root, self.ctx.fs, item_id, self._now())):
+            if not self._do(lambda: edits.reopen_agenda_item(self.conn, self.ctx.data_root, self.ctx.fs, item_id, self._now(), self.model())):
                 return
             kept = ""
             if opened:
@@ -1529,7 +1560,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
     def add_to_today(self, task_id: str) -> None:
         """D, or Add to Today: the task goes on Today, and the window stays where it is. It's no quick task: the task is as it
         was (release 5.99, the consolidation plan's decision 393)."""
-        self._do(lambda: edits.add_to_today(self.conn, self.ctx.data_root, self.ctx.fs, task_id, "", self._now()), self.sel)
+        self._do(lambda: edits.add_to_today(self.conn, self.ctx.data_root, self.ctx.fs, task_id, "", self._now(), self.model()), self.sel)
 
     def set_today_kind(self, kind: str) -> None:
         """Today's box makes a quick task ("task") or a note ("note")."""
@@ -1557,7 +1588,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
     def add_today_text(self, kind: str, text: str) -> bool:
         """The Today side panel's box (release 5.43): a quick task, or a note, from text. True if it was added."""
         if kind == "note":
-            return bool(self._do(lambda: edits.add_to_today(self.conn, self.ctx.data_root, self.ctx.fs, None, text, self._now()), self.sel))
+            return bool(self._do(lambda: edits.add_to_today(self.conn, self.ctx.data_root, self.ctx.fs, None, text, self._now(), self.model()), self.sel))
         return self._save_quick(lambda: add_quick_task(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, text, self._now())) is not None
 
     def make_today_task(self, item_id: int) -> None:
@@ -1583,7 +1614,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
             return
         text = self.ask_text("Edit the note", "The note on Today:", item.note)
         if text is not None and text.strip() != item.note:
-            self._do(lambda: edits.edit_today_note(self.conn, self.ctx.data_root, self.ctx.fs, item_id, text, self._now()), self.sel)
+            self._do(lambda: edits.edit_today_note(self.conn, self.ctx.data_root, self.ctx.fs, item_id, text, self._now(), self.model()), self.sel)
 
     def add_today_note(self) -> None:
         box = getattr(self, "today_note", None)
@@ -1591,7 +1622,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         if not text:
             self.say("Type the note first.", error=True)
             return
-        if self._do(lambda: edits.add_to_today(self.conn, self.ctx.data_root, self.ctx.fs, None, text, self._now()), self.sel):
+        if self._do(lambda: edits.add_to_today(self.conn, self.ctx.data_root, self.ctx.fs, None, text, self._now(), self.model()), self.sel):
             self.today_note.setFocus()
 
     def copy_agenda(self, target: str) -> None:
@@ -1764,7 +1795,8 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         leave = self._left_by_move(lambda: edits.edit_moves(self.conn, self.ctx.settings, task_id, self._now(), **values), task_id)
         if leave is None:
             return False
-        self._do(lambda: edits.edit_task(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, task_id, self._now(), **values, leave=leave))
+        self._do(lambda: edits.edit_task(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, task_id, self._now(), self.model(),
+                                         **values, leave=leave))
         return True
 
     def _ask_text(self, title: str, label: str, text: str) -> str | None:

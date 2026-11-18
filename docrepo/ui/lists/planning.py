@@ -39,8 +39,11 @@ class PlanningHooks:
 
     # ---- the Priorities board (mods log round 2, M0029, M0030; release 5.23) ----
     def move_priority(self, task_id: str, bucket: str, before) -> None:
-        """A card dragged, or moved by its key or the buckets above the board."""
-        self._do(lambda: edits.set_priority(self.conn, self.ctx.data_root, self.ctx.fs, task_id, bucket, before, self._now()), ("task", task_id))
+        """A card dragged, or moved by its key or the buckets above the board. No view's count follows a priority, so the
+        views pane isn't drawn again, and only an open Find files window of the task, or of a task above it, reads its
+        records again (release 5.159, decision 730)."""
+        self._do(lambda: edits.set_priority(self.conn, self.ctx.data_root, self.ctx.fs, task_id, bucket, before, self._now()), ("task", task_id),
+                 counts=False, reach=priorities.reach(self.model(), task_id))
 
     def set_timeline_key_date(self, task_id: str, key_id: int, start: str | None, end: str | None, said: str) -> None:
         """A key date dragged in Plan mode, or put back by Ctrl+Z (release 5.31, decision 152): saved and logged."""
@@ -65,7 +68,7 @@ class PlanningHooks:
             lambda: edits.change_moves(self.conn, self.ctx.settings, task_id, self._now(), start=start, due=due, dragged=True), task_id)
         if leave is None:
             return self._move_taken_back()
-        out = self._do(lambda: edits.change_task(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, task_id, self._now(),
+        out = self._do(lambda: edits.change_task(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, task_id, self._now(), self.model(),
                                                  start=start, due=due, dragged=True, leave=leave), ("task", task_id))
         if isinstance(out, edits.Outcome) and not out.problems:
             self.say(f"{said} {out.moved}".strip() if out.message != "Nothing changed." else out.message)
@@ -133,7 +136,7 @@ class PlanningHooks:
     def _left_by_move(self, moves: Callable[[], list], task_id: str) -> set[str] | None:
         """What to leave behind, having asked if need be. A change that isn't allowed says why when it's made."""
         try:
-            followed = moves()
+            followed = self.ctx.rolled_back(moves)  # release 5.163: rolled back, so the shared Model stays as it is
         except (TaskError, PeopleError, AgendaError, edits.EditError, ValueError):
             return set()
         return self.ask_move(task_id, followed)
@@ -161,8 +164,9 @@ class PlanningHooks:
         self.quick_window.show_near(near)
 
     def nudge_priority(self, task_id: str, step: int, shown: list) -> None:
-        """Alt+Up and Alt+Down on the board: one place up or down in its bucket, not in the status log."""
-        self._do(lambda: priorities.nudge(self.conn, task_id, step, shown), ("task", task_id))
+        """Alt+Up and Alt+Down on the board: one place up or down in its bucket, not in the status log. A place changes no
+        view's count and no Find files window, so neither is drawn again (release 5.159)."""
+        self._do(lambda: priorities.nudge(self.conn, task_id, step, shown), ("task", task_id), counts=False, reach=())
 
     # ---- capacity ----
     def render_capacity(self) -> None:

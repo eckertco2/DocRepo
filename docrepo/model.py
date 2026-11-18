@@ -378,6 +378,12 @@ TODAY = "today"
 #: The priorities (mods log round 2, M0029, M0030, decision 23), in order: each bucket's key and name. A task with none
 #: is Not ranked. ``docrepo/priorities.py`` ranks tasks.
 PRIORITY_NAMES = {"critical": "Critical", "high": "High", "medium": "Medium", "parking": "Parking lot"}
+#: Today's bands, top to bottom (release 5.154, the design workspace's ``docs/mods/today-priority-plan.md``, decisions 688
+#: and 693): the priority buckets, with Not ranked ("") between Medium and Parking lot, where a Low would be. A note has no
+#: priority, so it's with Not ranked (decision 692).
+TODAY_BANDS = ("critical", "high", "medium", "", "parking")
+#: Each band's name.
+TODAY_BAND_NAMES = {**PRIORITY_NAMES, "": "Not ranked"}
 
 
 def is_person(item_id: str | None) -> bool:
@@ -457,6 +463,11 @@ class Model:
 
     def __init__(self, conn: sqlite3.Connection) -> None:
         q = conn.execute
+        #: docs.db's state as it was read (release 5.159): the connection, its changes and others', as ``AppContext.model``
+        #: keys its shared Model, so a Model read after a change can be kept as the shared one (``AppContext.keep``). None
+        #: inside a transaction, as what's read there could still be rolled back.
+        self.read_at: tuple[int, int, int] | None = (None if conn.in_transaction
+                                                     else (id(conn), conn.total_changes, q("PRAGMA data_version").fetchone()[0]))
         self.tasks = load_tasks(conn)
         self.people: dict[str, Person] = {
             r["id"]: Person(r["id"], r["name"], r["hours_per_week"], r["status"], r["added_note"], email=r["email"], group=r["person_group"],
@@ -528,6 +539,10 @@ class Model:
         self._saved_by_doc: dict[str, list[SavedCopy]] | None = None  # release 5.145: a document's saved files
         self._saving: dict[str, list[Capture]] | None = None  # release 5.145: the captures that saved a document
         self._versions_by_task: dict[str, list[Version]] | None = None
+        # Release 5.162 (the design workspace's docs/mods/view-counts-plan.md, decisions 742 and 743): the documents only
+        # discarded captures brought, and the captures that added an agenda item, each worked out once for the view counts.
+        self._discarded_only: frozenset[str] | None = None
+        self._agenda_adders: frozenset[str | None] | None = None
         self.status: list[StatusEntry] = [
             StatusEntry(r["task"], r["at"], r["field"], r["from_value"], r["to_value"], r["via"])
             for r in q("SELECT * FROM status_log ORDER BY id")
@@ -543,7 +558,9 @@ class Model:
             "SELECT task, day, at FROM task_page_versions WHERE by_owner = 1 ORDER BY day, task")]
         #: The tasks made from a template, and where each came from (release 5.44).
         self.origins: dict[str, TemplateOrigin] = template_origins(conn)
-        #: Tagged labels (release 5.79): the glossary, what each item mentions, and the owner's own changes.
+        #: Tagged labels (release 5.79): the glossary, what each item mentions, and the owner's own changes. Since release
+        #: 5.160 (decision 733) the mentions are read from ``conn`` when something first asks for them, all or a few items'
+        #: (``tagged.Tagged``), not here: three years of work hold 132,000, two thirds of this read.
         self.tagged = tagged_load(conn)
 
     # ---- names ----
@@ -704,8 +721,12 @@ class Model:
         return _unique(out)
 
     def is_unfiled(self, c: Capture) -> bool:
-        """No task, and no agenda item: it waits in the Unfiled view. A discarded capture doesn't."""
-        return not c.discarded and not self.capture_tasks(c) and not any(a.added_by == c.id for a in self.agenda)
+        """No task, and no agenda item: it waits in the Unfiled view. A discarded capture doesn't. The captures that added an
+        agenda item are worked out once (release 5.162, decision 743), where each capture with no task went through the
+        whole agenda."""
+        if self._agenda_adders is None:
+            self._agenda_adders = frozenset(a.added_by for a in self.agenda)
+        return not c.discarded and not self.capture_tasks(c) and c.id not in self._agenda_adders
 
     def unfiled_captures(self) -> list[Capture]:
         """The captures with no task linked yet."""
@@ -766,9 +787,17 @@ class Model:
         return [c for c in self.captures.values() if c.discarded]
 
     def only_in_discarded(self, document_id: str) -> bool:
-        """True for a document that came in only with discarded captures, and has no saved file."""
-        holding = [c for c in self.captures.values() if document_id in c.document_ids]
-        return bool(holding) and all(c.discarded for c in holding) and not any(f.document == document_id for f in self.copies)
+        """True for a document that came in only with discarded captures, and has no saved file (an old version counts as
+        one). Worked out for every document at once, the first time it's asked (release 5.162, decision 742): the view
+        counts, the Documents view and the tagged labels ask it of each document, and each answer went through every
+        capture and every saved file."""
+        if self._discarded_only is None:
+            live: set[str] = set()
+            discarded: set[str] = set()
+            for c in self.captures.values():
+                (discarded if c.discarded else live).update(c.document_ids)
+            self._discarded_only = frozenset(discarded - live - {f.document for f in self.copies})
+        return document_id in self._discarded_only
 
     def document_holders(self, document_id: str) -> list[str]:
         """The tasks a document belongs to: those of the captures it came in with, and those it's saved in."""
@@ -862,9 +891,16 @@ class Model:
 
     # ---- Today (mods log round 1, M0016) ----
     def today_items(self) -> list[AgendaItem]:
-        """Today's open items, in the owner's order (release 5.148, decisions 643 to 645): by their places once they have
-        them, and until then the oldest first. They carry over until they're closed."""
-        return sorted(self.open_items_for(TODAY), key=place_key)
+        """Today's open items, in priority order and the owner's order within each band (release 5.154, decision 688):
+        Critical, High, Medium, Not ranked (and notes), Parking lot; within a band by their places once they have them
+        (release 5.148, decisions 643 to 645), and until then the oldest first. They carry over until they're closed."""
+        return sorted(self.open_items_for(TODAY), key=lambda a: (TODAY_BANDS.index(self.today_band(a)), place_key(a)))
+
+    def today_band(self, a: AgendaItem) -> str:
+        """The band a Today item is in (decision 688): its task's priority, or "" for Not ranked and for a note."""
+        t = self.tasks.get(a.subject) if a.subject else None
+        p = (t.priority or "") if t is not None else ""
+        return p if p in TODAY_BANDS else ""
 
     def done_on(self, day: date) -> list[AgendaItem]:
         """Today's items marked Done on ``day``, the latest first."""

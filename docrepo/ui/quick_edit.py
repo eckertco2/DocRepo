@@ -469,15 +469,20 @@ class QuickEdit(QWidget):
         try:
             leave: set[str] = set()
             if self.ask_move is not None:
-                moves = edits.edit_moves(self.ctx.conn, self.ctx.settings, self.task_id, self.ctx.now(), **planning.edit_values(v))
+                # rolled back, so the shared Model stays as it is (release 5.163)
+                moves = self.ctx.rolled_back(lambda: edits.edit_moves(self.ctx.conn, self.ctx.settings, self.task_id, self.ctx.now(),
+                                                                      **planning.edit_values(v)))
                 asked = self.ask_move(self.task_id, moves, self)
                 if asked is None:  # Back: nothing saved, and the window stays as it is
                     return None
                 leave = asked
             out = edits.edit_task(self.ctx.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, self.task_id, self.ctx.now(),
-                                  **planning.edit_values(v), leave=leave)
+                                  self.ctx.model(), **planning.edit_values(v), leave=leave)
         except ValueError as e:
             return self._say(str(e))
+        # Release 5.163 (decision 746): the Model edit_task read after its writes is kept as the shared one, so the views
+        # drawn when it's saved don't read docs.db again, as the browse tool's _do keeps one.
+        self.ctx.keep(out.model)
         self.ctx.notify("Quick edit", f"{self.task.title}: {out.message}" + (" " + " ".join(out.problems) if out.problems else ""))
         self.hide()
         self.saved.emit(self.task_id)

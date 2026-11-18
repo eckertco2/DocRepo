@@ -826,23 +826,130 @@ def choose(conn: sqlite3.Connection, kind: str, item_id: str, key: str, choice: 
                          (kind, item_id, key, choice, at.isoformat(timespec="seconds")))
 
 
-# ---- what the browse tool reads: loaded once with the Model ----
-@dataclass
+# ---- what the browse tool reads: the glossary with the Model, the mentions when first asked for ----
+#: Past this many items read a few at a time (``Tagged.read_items``), a Tagged reads every mention at once (release 5.160,
+#: decision 734). On three years of made-up work an item read with others took about 15 µs, and each of 21,808 in one
+#: pass about 28 µs (0.6 s in all), so a few hundred items' are far quicker; this many is a quarter of those items, past
+#: which a Model is used for a whole view or every page, and one pass serves the rest.
+SOME_MOST = 5000
+#: The most items one query names (``Tagged.read_items``).
+_IN_MOST = 500
+_MENTION_COLUMNS = "kind, id, label, how, n, written"
+
+
+def _mention(r: Iterable) -> Mention:
+    kind, item_id, label, how, n, written = r
+    return Mention(kind, item_id, label, how, n, json.loads(written))
+
+
 class Tagged:
-    """The glossary, every item's mentions and the owner's own changes, as of one read of docs.db."""
+    """The glossary, every item's mentions and the owner's own changes, as of one read of docs.db.
 
-    labels: dict[int, Label] = field(default_factory=dict)
-    mentions: list[Mention] = field(default_factory=list)
-    choices: dict[tuple[str, str], dict[str, str]] = field(default_factory=dict)  # (kind, id) -> key -> choice
-    _kept: _Kept | None = None
+    Since release 5.160 (the design workspace's ``docs/mods/model-read-plan.md``, decisions 733 and 734) the mentions are
+    read when something first asks for them, and kept for this Tagged's life, rather than with the Model: three years of
+    work hold 132,000, and decoding them was two thirds of the Model's read. The glossary (``labels``, ``by_key``, the
+    Finder, ``once``) and the owner's own changes (``choices``) still come with the Model, as they cost a query each.
 
-    def __post_init__(self) -> None:
+    - ``mentions``, ``by_item`` and ``by_label`` read them all, in one pass: what a view over every label wants (the Tagged
+      labels view, a label's page, search's ``tag:``, the quick summary, Find files' tag filter).
+    - ``item`` and ``read_items`` read only the items asked for, by their kind and ID: what a page wants that shows one
+      task's tags (``task_tags``, for Task.md and the task page) or one capture's or document's. Past ``SOME_MOST`` items
+      they read them all.
+
+    Either way each item's mentions are those an eager read had, in the same order.
+
+    **Read later, as of when?** The mentions are read from the connection the Model was read from, when they're asked
+    for, so they are docs.db's as it is then. That's the Model's own state wherever a Model is kept: the browse tool's
+    shared Model (``AppContext.model``) is read again as soon as docs.db changes, apart from writes that leave these tables
+    as they were (a window's own state in ``app_state``, a what-if rolled back); every other Model lives for one change or
+    one drawing. No Model goes to another thread: the worker threads (file search, Find files' second tier, opening a
+    file, a backup) are given records, texts and paths, and sqlite3 refuses a connection on another thread anyway. And a
+    Model held past a later change all the same would see that change's mentions of its items, never an error: every
+    reader keeps to the Model's own items and labels (``live``, ``labels``), so a mention of one it doesn't have is
+    passed over, as a mention of a discarded capture is.
+    """
+
+    def __init__(self, labels: dict[int, Label] | None = None, mentions: Iterable[Mention] | None = None,
+                 choices: dict[tuple[str, str], dict[str, str]] | None = None, _kept: _Kept | None = None,
+                 conn: sqlite3.Connection | None = None) -> None:
+        self.labels: dict[int, Label] = labels if labels is not None else {}
+        #: (kind, id) -> key -> choice
+        self.choices: dict[tuple[str, str], dict[str, str]] = choices if choices is not None else {}
+        self._kept = _kept
         self.by_key = {lb.key: lb for lb in self.labels.values()}
-        self.by_item: dict[tuple[str, str], list[Mention]] = {}
-        self.by_label: dict[int, list[Mention]] = {}
-        for m in self.mentions:
-            self.by_item.setdefault((m.kind, m.id), []).append(m)
-            self.by_label.setdefault(m.label, []).append(m)
+        self._conn = conn  # where the mentions are read from, until they all are
+        self._some: dict[tuple[str, str], list[Mention]] = {}  # the items read so far, before they all are
+        self._mentions: list[Mention] | None = None
+        self._by_item: dict[tuple[str, str], list[Mention]] = {}
+        self._by_label: dict[int, list[Mention]] = {}
+        if mentions is not None or conn is None:
+            self._take(list(mentions or ()))
+
+    def _take(self, mentions: list[Mention]) -> None:
+        self._mentions, self._some, self._conn = mentions, {}, None
+        self._by_item, self._by_label = {}, {}
+        for m in mentions:
+            self._by_item.setdefault((m.kind, m.id), []).append(m)
+            self._by_label.setdefault(m.label, []).append(m)
+
+    @property
+    def loaded(self) -> bool:
+        """Whether every mention has been read."""
+        return self._mentions is not None
+
+    def read_all(self) -> None:
+        """Read every item's mentions now, if they aren't yet (decision 733)."""
+        if self._mentions is None and self._conn is not None:
+            self._take([_mention(r) for r in self._conn.execute(
+                f"SELECT {_MENTION_COLUMNS} FROM tagged_mentions ORDER BY kind, id, label")])  # noqa: S608 - DocRepo's own column names
+
+    @property
+    def mentions(self) -> list[Mention]:
+        """Every item's mentions, by kind and ID: read the first time something asks."""
+        self.read_all()
+        return self._mentions or []
+
+    @property
+    def by_item(self) -> dict[tuple[str, str], list[Mention]]:
+        self.read_all()
+        return self._by_item
+
+    @property
+    def by_label(self) -> dict[int, list[Mention]]:
+        self.read_all()
+        return self._by_label
+
+    def read_items(self, keys: Iterable[tuple[str, str]]) -> None:
+        """Read these items' mentions, by (kind, ID), when every mention isn't read yet (decision 734): a few queries that
+        name them, kept for this Tagged's life. Once ``SOME_MOST`` items have been asked for, every mention at once."""
+        if self._mentions is not None or self._conn is None:
+            return
+        want = [k for k in dict.fromkeys(keys) if k not in self._some]
+        if not want:
+            return
+        if len(self._some) + len(want) > SOME_MOST:
+            self.read_all()
+            return
+        got: dict[tuple[str, str], list[Mention]] = {k: [] for k in want}
+        by_kind: dict[str, list[str]] = {}
+        for kind, item_id in want:
+            by_kind.setdefault(kind, []).append(item_id)
+        for kind, ids in by_kind.items():
+            for i in range(0, len(ids), _IN_MOST):
+                part = ids[i:i + _IN_MOST]
+                marks = ",".join("?" * len(part))
+                sql = f"SELECT {_MENTION_COLUMNS} FROM tagged_mentions WHERE kind = ? AND id IN ({marks}) ORDER BY kind, id, label"  # noqa: S608 - DocRepo's own column names; values are parameters
+                for r in self._conn.execute(sql, (kind, *part)):
+                    got[(r[0], r[1])].append(_mention(r))
+        self._some.update(got)
+
+    def _of(self, kind: str, item_id: str) -> list[Mention]:
+        """One item's mentions: from those read, or read now."""
+        if self._mentions is None:
+            self.read_items([(kind, item_id)])
+        if self._mentions is not None:
+            return self._by_item.get((kind, item_id), [])
+        return self._some.get((kind, item_id), [])
 
     def __bool__(self) -> bool:
         return bool(self.labels)
@@ -876,7 +983,7 @@ class Tagged:
     def item(self, kind: str, item_id: str) -> list[tuple[Label, Mention | None]]:
         """An item's tagged labels after the owner's own changes, each with what was found (None for one added by hand)."""
         own = self.choices.get((kind, item_id), {})
-        out = [(self.labels[m.label], m) for m in self.by_item.get((kind, item_id), []) if m.label in self.labels
+        out = [(self.labels[m.label], m) for m in self._of(kind, item_id) if m.label in self.labels
                and own.get(self.labels[m.label].key) != "removed"]
         have = {lb.key for lb, _ in out}
         out += [(self.by_key[k], None) for k, c in own.items() if c == "added" and k in self.by_key and k not in have]
@@ -887,17 +994,20 @@ class Tagged:
         return [self.by_key[k] for k, c in own.items() if c == "removed" and k in self.by_key]
 
 
-def load(conn: sqlite3.Connection) -> Tagged:
+def load(conn: sqlite3.Connection, lazily: bool = True) -> Tagged:
+    """The glossary and the owner's own changes as docs.db has them, for a Model. Since release 5.160 (decision 733) the
+    mentions are read from ``conn`` when something first asks for them (``Tagged``); ``lazily=False`` reads them now."""
     kept = _glossary(conn)
     labels = {lb.id: lb for lb in kept.labels}
     if not labels:
         return Tagged()
-    mentions = [Mention(r["kind"], r["id"], r["label"], r["how"], r["n"], json.loads(r["written"]))
-                for r in conn.execute("SELECT * FROM tagged_mentions ORDER BY kind, id")]
     choices: dict[tuple[str, str], dict[str, str]] = {}
     for r in conn.execute("SELECT kind, id, key, choice FROM tagged_choices"):
-        choices.setdefault((r["kind"], r["id"]), {})[r["key"]] = r["choice"]
-    return Tagged(labels, mentions, choices, kept)
+        choices.setdefault((r[0], r[1]), {})[r[2]] = r[3]
+    out = Tagged(labels, None, choices, kept, conn)
+    if not lazily:
+        out.read_all()
+    return out
 
 
 def natural(text: str) -> list:
@@ -956,30 +1066,24 @@ def uses_of(model: Model, label: Label) -> list[Use]:
 
 def task_tags(model: Model, task_id: str) -> list[tuple[Label, int]]:
     """A task's tagged labels (decision 367): from its own fields, its notes page, its captures and their documents, and
-    the documents it holds, each item counted once. Each label with how often it's mentioned, the most first."""
+    the documents it holds, each item counted once. Each label with how often it's mentioned, the most first. Only those
+    items' mentions are read, in one go, when the Model hasn't read them all (release 5.160, decision 734)."""
     tg = model.tagged
     if not tg:
         return []
     counts: Counter[int] = Counter()
     for h in tg.finder().find(task_text(model.task(task_id), model)):
         counts[h.label] += 1
-    seen: set[tuple[str, str]] = set()
-
-    def add(kind: str, item_id: str) -> None:
-        if (kind, item_id) in seen:
-            return
-        seen.add((kind, item_id))
+    items: list[tuple[str, str]] = [("page", task_id)]
+    for c in model.notes_of(task_id):
+        items.append(("capture", c.id))
+        items += [("document", d) for d in c.document_ids]
+    items += [("document", d) for d in model.documents if task_id in model.document_holders(d)]
+    items = list(dict.fromkeys(items))  # each item counted once
+    tg.read_items(items)
+    for kind, item_id in items:
         for lb, m in tg.item(kind, item_id):
             counts[lb.id] += m.n if m else 1
-
-    add("page", task_id)
-    for c in model.notes_of(task_id):
-        add("capture", c.id)
-        for d in c.document_ids:
-            add("document", d)
-    for d in model.documents:
-        if task_id in model.document_holders(d):
-            add("document", d)
     return sorted(((tg.labels[i], n) for i, n in counts.items() if i in tg.labels), key=lambda x: (-x[1], natural(x[0].label)))
 
 

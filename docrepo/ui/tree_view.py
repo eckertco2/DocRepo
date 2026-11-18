@@ -548,6 +548,9 @@ class RowTree(QTreeWidget):
         self._moves: tuple[Callable, Callable, Callable] | None = None
         #: Files, links and emails dropped on a row (release 5.115, decision 419): whether a row's key takes one, and what to do.
         self._file_drops: tuple[Callable[[object], bool], Callable[[object, str, list[str]], None]] | None = None
+        #: Today's bins (release 5.154, decision 690): what a row's drag opens them with, and what a drop on one does.
+        self._bin_hooks: tuple[Callable[[object], tuple[str, dict[str, int]] | None], Callable[[object, str], None]] | None = None
+        self._bins = None
         self._hover: QTreeWidgetItem | None = None
         self._strips: list[ActionStrip] = []
         self._widths: list[int] = []
@@ -602,6 +605,7 @@ class RowTree(QTreeWidget):
         """No row moves and no file drops: each view turns on what it takes."""
         self._moves = None
         self._file_drops = None
+        self._bin_hooks = None
         self.setDragEnabled(False)
         self.setAcceptDrops(False)
         self.setDragDropMode(QAbstractItemView.DragDropMode.NoDragDrop)
@@ -612,6 +616,44 @@ class RowTree(QTreeWidget):
         drop, after the drop."""
         self._file_drops = (takes, dropped)
         self.setAcceptDrops(True)
+
+    def set_bins(self, opens: Callable[[object], tuple[str, dict[str, int]] | None], dropped: Callable[[object, str], None]) -> None:
+        """Today's bins (release 5.154, decisions 690 and 691), with row moves on: when a row's drag starts, ``opens`` gets its
+        move key and says the band it's in and each band's count, or None for no bins (a note's drag). While the drag lasts
+        the bins are drawn down the list's left side; a drop on one calls ``dropped`` with the key and the bin's band."""
+        from docrepo.ui.today_bins import VIEW_WIDTH, Bins  # here: today_bins needs nothing of this module, but keeps it light
+
+        self._bin_hooks = (opens, dropped)
+        if self._bins is None:
+            self._bins = Bins(self.viewport(), VIEW_WIDTH)
+
+    def startDrag(self, actions) -> None:  # noqa: N802 - Qt's name
+        """A row's drag. Where the view asks for bins (``set_bins``), they open beside the list while it lasts (release 5.154)."""
+        opened = False
+        if self._bin_hooks and self._bins is not None:
+            found = self._bin_hooks[0](self.move_key(self.currentItem()))
+            if found is not None:
+                self._bins.open_for(found[0], found[1], self.viewport().rect())
+                opened = True
+        try:
+            super().startDrag(actions)
+        finally:
+            if opened:
+                self._bins.close_bins()
+
+    def _over_bins(self, event) -> str | None | bool:
+        """Where a row's drag is over the bins: the bin's band, None on the bins but not on one a drop would go to, or False
+        away from them (the list's own rules then)."""
+        bins = self._bins
+        if not self._bin_hooks or bins is None or not bins.isVisible():
+            return False
+        at = self.viewport().mapToGlobal(event.position().toPoint())
+        if not bins.over(at):
+            bins.set_hot(None)
+            return False
+        found = bins.bin_at(at)
+        bins.set_hot(found)
+        return found
 
     def _file_drop(self, event) -> tuple[object, str, list[str]] | None:
         """A file drop's row key, kind and paths, when it's over a row that takes one."""
@@ -674,6 +716,16 @@ class RowTree(QTreeWidget):
                 event.ignore()
             return
         if self._moves:
+            on_bin = self._over_bins(event)
+            if on_bin is not False:  # over Today's bins: no line, and a drop only on a bin (release 5.154)
+                self.setDropIndicatorShown(False)
+                self.viewport().update()
+                if on_bin is None:
+                    event.ignore()
+                else:
+                    event.setDropAction(Qt.DropAction.MoveAction)
+                    event.accept()
+                return
             self.setDropIndicatorShown(True)  # so Qt works out where its line goes
         super().dragMoveEvent(event)
         if not self._moves:
@@ -702,6 +754,14 @@ class RowTree(QTreeWidget):
             return
         if not self._moves:
             super().dropEvent(event)
+            return
+        on_bin = self._over_bins(event)
+        if on_bin is not False:  # a drop on Today's bins (release 5.154, decision 691)
+            event.setDropAction(Qt.DropAction.IgnoreAction)  # the records change, and the list is drawn again: Qt moves nothing
+            event.accept()
+            if on_bin is not None and self._bin_hooks:
+                key, dropped = self.move_key(self.currentItem()), self._bin_hooks[1]
+                QTimer.singleShot(0, lambda: dropped(key, on_bin))
             return
         at, key = self._drop_at(event.position().toPoint()), self.move_key(self.currentItem())
         event.setDropAction(Qt.DropAction.IgnoreAction)  # the records move, and the list is drawn again: Qt moves nothing

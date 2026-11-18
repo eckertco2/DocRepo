@@ -100,7 +100,7 @@ PANEL_KEYS = (
     ("Delete", "Removes it from Today"),
     ("Esc", "Back from the detail; then it contracts and the keyboard goes back to the window you were in"),
 )
-#: The wheels' task search and file search (release 5.42).
+#: The wheels' task search and file search (release 5.42), and Recent captures (release 5.158).
 SEARCH_KEYS = (
     ("Enter (task search)", "Opens the task's page in the browse tool"),
     ("Ctrl+Enter (task search)", "Opens its Find files"),
@@ -108,7 +108,8 @@ SEARCH_KEYS = (
     ("Ctrl+Enter (file search)", "Shows it in File Explorer"),
     ("Ctrl+Shift+C (file search)", "Copies its path"),
     ("Tab (file search)", "Goes to its task's page"),
-    ("Esc", "Clears what's typed; again, closes it"),
+    ("Enter or Tab (recent captures)", "Opens the capture at its block on its notes page, to work on its words there; on no page, its capture page (release 5.158)"),
+    ("Esc", "Clears what's typed; again, closes it (recent captures: closes it)"),
 )
 
 
