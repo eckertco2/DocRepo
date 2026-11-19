@@ -127,7 +127,8 @@ def test_waiting_on_others_has_ask_for_an_update_and_the_longest_wait_first(brow
     # The task tile's menu (release 5.138, decision 573): Open and Work on it (release 5.152), then the step's own, Ask for
     # an update first among them.
     first, work, second = [a for a in menu.actions() if not a.isSeparator()][:3]
-    assert first.text().startswith("Open") and work.text().startswith("Work on it") and second.text() == "Ask for an update"
+    # Since release 5.174 (decision 815) the first line is what a double-click does: the workspace, as Settings start.
+    assert first.text().startswith("Work on it") and work.text().startswith("Open the task page") and second.text() == "Ask for an update"
     line = row(browse, ("task", RIGGING)).data(0, LINE_ROLE)
     assert "no change for 3 d" in line.context  # the step's own words, a tile's context (release 5.138)
     shown = [i.data(0, KEY_ROLE)[1] for i in browse.tree.items()

@@ -84,13 +84,19 @@ def test_a_today_rows_double_click_opens_the_workspace(setup):
     assert "Gathered from 3 pages: this task, 1 under it and 1 above it." in browse.status.text()
 
 
-def test_enter_on_a_today_row_opens_it_but_elsewhere_opens_the_page(setup):
+def test_enter_and_a_double_click_open_it_as_settings_say(setup):
+    """Release 5.174 (decision 815, in place of 667's Today only): on Today and elsewhere alike, as Open a task in says."""
     browse, work = setup
     browse.tree.task_opened(work.crane)
     assert workspace_ui.is_open(browse)
     browse.workspace.close_to_origin()
     browse.set_view("tasks")
     browse.open.add(work.project)
+    browse.render_list()
+    browse.double_click(row(browse, work.crane))
+    assert workspace_ui.is_open(browse) and browse.workspace.here == work.crane
+    browse.workspace.close_to_origin()
+    browse.ctx.settings.open_tasks_in = "page"
     browse.render_list()
     browse.double_click(row(browse, work.crane))
     assert not workspace_ui.is_open(browse) and browse.sel == ("task", work.crane)
@@ -106,13 +112,15 @@ def test_w_opens_the_selected_tasks_workspace(setup):
     assert browse.workspace.origin == "tasks" and not browse.workspace.from_today
 
 
-def test_every_tiles_menu_has_work_on_it_first_on_today(setup):
+def test_every_tiles_menu_has_what_a_double_click_does_first(setup):
+    """Release 5.174 (decision 815): the first line follows Open a task in, and the second is the other one."""
     browse, work = setup
     from docrepo.ui import task_tile as tile_ui
 
     menu = QMenu()
-    tile_ui.fill_menu(browse, work.crane, menu, work_first=True)
+    tile_ui.fill_menu(browse, work.crane, menu)
     assert labels(menu)[:2] == ["Work on it", "Open the task page"] and menu.defaultAction().text().startswith("Work on it")
+    browse.ctx.settings.open_tasks_in = "page"
     other = QMenu()
     tile_ui.fill_menu(browse, work.crane, other)
     assert labels(other)[:2] == ["Open", "Work on it"] and other.defaultAction().text().startswith("Open")
