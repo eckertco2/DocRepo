@@ -202,6 +202,11 @@ def test_the_workspace_bars_toggle_both_ways(browse):
 def test_w_makes_the_selected_task_current(browse):
     browse.set_view("tasks")
     browse.go_task(HOLIDAY)
+    # W is a command only while nothing is being typed in (`_typing` reads the whole app's focus), so the browse window is
+    # made the one in front first: a window an earlier test file left open may still hold the keyboard in a text box.
+    browse.activateWindow()
     browse.tree.setFocus()
+    QApplication.processEvents()
+    assert not browse._typing()
     workspace_ui.work_key(browse)
     assert now(browse) == HOLIDAY and workspace_ui.is_open(browse) and browse.workspace.current_button.isChecked()
