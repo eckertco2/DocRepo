@@ -1005,8 +1005,9 @@ class TodayPanel(QWidget):
 
     # ================= what the buttons do: the browse tool's own methods =================
     def done(self, item_id: int | None) -> None:
-        """The tick box, Done or Space: off Today, and on a task the capture window opens as an Update on it, with no question
-        (release 5.115, decision 421). What it did is said under the list, with Undo (decision 420)."""
+        """The tick box, Done or Space. On an open task, since release 5.166 (decision 755), Log progress opens for it on
+        Closed, and nothing changes until its Enter. On a note, or a task already closed, it's off Today at once, said under
+        the list with Undo (decisions 420 and 421)."""
         self._close_item(item_id, "Done")
 
     def remove(self, item_id: int | None) -> None:
@@ -1015,7 +1016,7 @@ class TodayPanel(QWidget):
     def _close_item(self, item_id: int | None, how: str) -> None:
         if item_id is None:
             return
-        self.browse.close_today_item(item_id, how, tell=self.tell_state)
+        self.browse.close_today_item(item_id, how, tell=self.tell_state, log=how == "Done")  # a tick opens Log progress (5.166)
         if self._detail and self._detail[1] == item_id:
             self.close_detail()
         self.refresh()

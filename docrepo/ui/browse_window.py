@@ -744,7 +744,11 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         m = self.model()
         if not can_change(m, task_id):
             return None
-        return state_menu(parent, m, task_id, lambda to, branch: self.set_state(task_id, to, branch))
+        return state_menu(parent, m, task_id, lambda to, branch: self.set_state(task_id, to, branch), wait=self.wait_on(task_id))
+
+    def wait_on(self, task_id: str) -> Callable[[], None]:
+        """The state menu's Waiting on a reply… (release 5.166, decision 762): Log progress on the task, on that state."""
+        return lambda: self.ctx.log_progress(task_id, state="Waiting")
 
     def popup_state_menu(self, task_id: str, at: QPoint, after: Callable[[], None] | None = None,
                          tell: Callable[[str, Callable[[], None] | None], None] | None = None) -> None:
@@ -753,7 +757,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         m = self.model()
         if not can_change(m, task_id):
             return
-        menu = state_menu(self, m, task_id, lambda to, branch: self.set_state(task_id, to, branch, after, tell))
+        menu = state_menu(self, m, task_id, lambda to, branch: self.set_state(task_id, to, branch, after, tell), wait=self.wait_on(task_id))
         menu.addSeparator()  # a tile's circle: Log progress… and Got it under the states (release 5.138, decision 567)
         tile_ui.add_wait_lines(self, task_id, menu)
         try:

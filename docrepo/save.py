@@ -227,6 +227,9 @@ class CaptureDraft:
     #: A split note's files that go with more than one of its captures (release 5.165, decision 767), by ``id`` of their
     #: row: None until the first capture saves it, then its document, which the others link to. The parts share this.
     shared: dict[int, str | None] = field(default_factory=dict)
+    #: Waiting on a reply picked in a State list (release 5.166, decision 762): who the saved task (the new task, else the
+    #: updated one) waits on, by person ID; None when it wasn't picked. The wait's follow-up is the task's Reminder.
+    waiting_on: list[str] | None = None
 
     def words(self) -> str:
         """The content text's words, without its marks: what titles, descriptions and Parse and populate read."""
@@ -407,6 +410,8 @@ def _check(draft: CaptureDraft, task_exists: bool) -> None:
         raise SaveError("Pick a task to update first.", "task")
     if not draft.types:
         raise SaveError("Check Note, New task or Update.", "content")
+    if draft.waiting_on is not None and not draft.waiting_on:  # release 5.166, decision 762
+        raise SaveError("Who are you waiting on? Add a name from People in Waiting on, or pick another state.", "waiting")
     if not is_new and not is_upd and not has_body:
         raise SaveError("There's nothing to save yet. Type or paste something, or add a file or an email.", "content")
     if targets and not is_new and not is_upd and not draft.task and not content:
@@ -666,7 +671,7 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
             changes = tasks.update_task(conn, settings, t, at=at, via=via, **update)
             if draft.update_key_dates is not None:  # its key dates as changed in the window (release 5.31)
                 changes += tasks.set_key_dates(conn, t, draft.update_key_dates, at=at, via=via, settings=settings)
-            if not is_new and not keep and not changes and not targets:
+            if not is_new and not keep and not changes and not targets and not draft.waiting_on:
                 raise SaveError("There's nothing to save yet. Change a field, add an agenda, or type the update in the content text.", "content")
         if capture_id:
             first_file = next((f.name for f in draft.files if f.described), None)
@@ -747,6 +752,8 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
                     said = transcripts.next_name(taken)
                     taken.add(said)
                     said_doc = transcripts.record(conn, holder, capture_id, said)
+        if draft.waiting_on and (created or (is_upd and t)):  # Waiting on a reply (release 5.166, decision 762)
+            _start_wait(conn, draft, created or t, words, at, capture_id)
         subject = created if is_new else t if is_upd or draft.split_part else None
         note_text = "" if is_new else plain_text(words)
         for target in list(targets):
@@ -852,6 +859,20 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
         result.message += f" {moved}"
     log.info("capture %s saved: %s", capture_id or "(none kept)", _log_line(draft, result, targets, [d for d, _, _ in documents]))
     return result
+
+
+def _start_wait(conn: sqlite3.Connection, draft: CaptureDraft, task_id: str, words: str, at: datetime, capture_id: str | None) -> None:
+    """Waiting on a reply picked in a State list (release 5.166, decision 762): the task's wait on the people named, its
+    follow-up the task's Reminder as the save leaves it, its line the content text's first line, else the task's title."""
+    m = Model(conn)
+    people = [p for p in dict.fromkeys(draft.waiting_on or []) if p in m.people]
+    if not people:
+        return
+    t = m.task(task_id)
+    follow = date.fromisoformat(t.reminder) if t.reminder else None
+    line = first_line(plain_text(words)) or t.title
+    waits.start(conn, m, task_id, at=waits.stamp_of(at), line=line, on=people, follow_up=follow, via=capture_id or "Capture window",
+                capture=capture_id)
 
 
 def first_line(text: str) -> str:
