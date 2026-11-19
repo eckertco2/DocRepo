@@ -103,7 +103,8 @@ def preview(model: Model, r: Record | None, today: date, words: list[str], slips
         size = f" · {len(text) / 1000:.1f} k characters of text" if text else ""
         rows += [("Type", esc(TYPE_NAMES.get(r.type, "Other")) + size),
                  ("Added", f"{esc(long_date(to_date(r.at), today))} · {link(f'capture:{r.capture}', r.came) if r.capture else esc(r.came)}"),
-                 ("In", link(f"scope:{r.task}", model.task(r.task).title, "Show what's in it")),
+                 # An unfiled capture's file (release 5.165, decision 768) is in no task.
+                 ("In", link(f"scope:{r.task}", model.task(r.task).title, "Show what's in it") if r.task in model.tasks else "Unfiled"),
                  ("Where", where_html(r.path)), ("Source", esc(r.source) + (" · a saved file too" if r.copy and r.source != "Saved file" else ""))]
         if last_opened:
             rows.append(("Opened", f"{esc(ago(last_opened, today))}, from DocRepo"))

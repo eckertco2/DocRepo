@@ -60,7 +60,8 @@ def test_relative_links():
 
 def test_write_pages_skips_pages_whose_only_change_is_the_date(sample_conn, data_root, fs):
     model = Model(sample_conn)
-    assert write_pages(model, data_root, fs, TODAY, SAMPLE_AS_OF) == len(model.tasks) + 1
+    # Every Task.md, Contents.md and, since release 5.169, Views\Stock headings.md.
+    assert write_pages(model, data_root, fs, TODAY, SAMPLE_AS_OF) == len(model.tasks) + 2
     assert (data_root / "Tasks" / "T000008" / "Task.md").read_text(encoding="utf-8") == example_block("Tasks/T000008/Task.md")
     assert write_pages(model, data_root, fs, TODAY, datetime(2026, 10, 8, 9, 0)) == 0
     tasks.update_task(sample_conn, Settings(), "T000012", at=datetime(2026, 10, 8, 9, 5), via="Browse tool", current_status="Sling drawing done.")

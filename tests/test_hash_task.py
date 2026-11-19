@@ -118,11 +118,13 @@ def test_a_note_naming_several_tasks_is_split(env, tmp_path):
     ids = [p.capture_id for p in r.parts]
     assert [m.captures[x].task for x in ids] == [INSTALLATION, RIGGING, None]
     assert r.capture_id == ids[0] and r.picked_task == INSTALLATION
-    assert r.message == (f"Saved 3 captures, one per #task: {ids[0]}, a note on Installation with 1 email and 1 file; {ids[1]}, a note on "
-                         f"Rigging plan with 1 file; {ids[2]}, an unfiled note with 1 file. Each is on Today. Made 1 task from their items.")
-    assert [m.documents[d].name for d in m.captures[ids[0]].document_ids] == ["crane.txt"]
+    assert r.message == (f"Saved 3 captures, one per #task: {ids[0]}, a note on Installation with 1 email and 2 files; {ids[1]}, a note on "
+                         f"Rigging plan with 2 files; {ids[2]}, an unfiled note. Each is on Today. Made 1 task from their items.")
+    # notes.txt, added outside any section, goes to both tasks (release 5.165, decision 767), as one document.
+    assert [m.documents[d].name for d in m.captures[ids[0]].document_ids] == ["crane.txt", "notes.txt"]
+    assert [m.documents[d].name for d in m.captures[ids[1]].document_ids] == ["sling.txt", "notes.txt"]
     assert m.captures[ids[0]].source == "outlook_email" and m.captures[ids[0]].title == "Crane booking"
-    assert [m.documents[d].name for d in m.captures[ids[2]].document_ids] == ["notes.txt"]
+    assert m.captures[ids[2]].document_ids == []
     # Each capture keeps its own lines; the task item under Installation's heading is made from Installation's capture.
     assert "Crane booked for Tuesday." in capture_md(env, ids[0]) and "Sling drawing" not in capture_md(env, ids[0])
     assert "Sling drawing approved." in capture_md(env, ids[1])
@@ -135,6 +137,53 @@ def test_a_note_naming_several_tasks_is_split(env, tmp_path):
     # Add to agenda puts each part on Today: a task's part as its task, the unfiled one as a note.
     today = [a for a in Model(conn).agenda if a.target == TODAY and a.added_by in ids]
     assert sorted((a.subject or "", a.added_by) for a in today) == sorted([(INSTALLATION, ids[0]), (RIGGING, ids[1]), ("", ids[2])])
+
+
+# ---- a file goes to the tasks the capture names (release 5.165, decision 767, amending decision 30) ----
+def test_a_file_added_first_goes_to_each_task_on_one_line(env, tmp_path):
+    """A file added before any text, then a line of only #Installation #Rigging plan: both get it, as one document, its
+    saved file kept once, with the first task named. The line keeps its part because files go with it."""
+    conn = env[0]
+    f = tmp_path / "pump curve.pdf"
+    f.write_bytes(b"%PDF made-up")
+    r = save(env, CaptureDraft(content="#Installation #Rigging plan", files=[FileRow(f.name, str(f), save_a_copy=True)]))
+    m = Model(conn)
+    caps = [m.captures[p.capture_id] for p in r.parts]
+    assert [c.task for c in caps] == [INSTALLATION, RIGGING]
+    (doc,) = set(caps[0].document_ids) | set(caps[1].document_ids)
+    assert caps[0].document_ids == caps[1].document_ids == [doc]
+    assert [(s.task, s.document) for s in m.saved_of(doc)] == [(INSTALLATION, doc)]
+    held = captures.file_of(env[1], m, doc)
+    assert held is not None and held.exists() and held.parent.parent.name == INSTALLATION
+
+
+def test_files_outside_any_section_go_to_every_task(env, tmp_path):
+    conn = env[0]
+    a, b = tmp_path / "crane.txt", tmp_path / "sling.txt"
+    for x in (a, b):
+        x.write_text("made-up file", encoding="utf-8")
+    text = "Call from the vendor.\n\nCrane booked for #Installation and #Rigging plan.\n\n#Rigging plan\nSling approved."
+    reading = items.read(text, names_of(conn), AT.date())
+    assert items.section_tasks_at(reading, 2) == [INSTALLATION, RIGGING] and items.section_tasks_at(reading, 0) == []
+    files = [FileRow(a.name, str(a)), FileRow(b.name, str(b), section=" ".join(items.section_tasks_at(reading, 5)))]
+    r = save(env, CaptureDraft(content=text, files=files))
+    m = Model(conn)
+    got = [(m.captures[p.capture_id].task, [m.documents[d].name for d in m.captures[p.capture_id].document_ids]) for p in r.parts]
+    # The file added with no section goes to both tasks; the one in Rigging plan's section to it alone (as before); the
+    # lines under no # task are still an unfiled capture of their own.
+    assert got == [(INSTALLATION, ["crane.txt"]), (RIGGING, ["crane.txt", "sling.txt"]), (None, [])]
+    assert len({d for p in r.parts if p.capture_id for d in m.captures[p.capture_id].document_ids}) == 2  # one document each
+
+
+def test_a_file_moved_to_unfiled_and_one_with_no_task(env, tmp_path):
+    conn = env[0]
+    f = tmp_path / "crane.txt"
+    f.write_text("made-up file", encoding="utf-8")
+    r = save(env, CaptureDraft(content=NOTE, files=[FileRow(f.name, str(f), section=items.UNFILED)]))
+    m = Model(conn)
+    assert [(m.captures[p.capture_id].task, len(m.captures[p.capture_id].document_ids)) for p in r.parts if p.capture_id][-1] == (None, 1)
+    alone = save(env, CaptureDraft(content="Call from the vendor.", files=[FileRow(f.name, str(f))]))
+    assert alone.parts == [] and Model(conn).captures[alone.capture_id].task is None  # no task named: unfiled, as before
 
 
 def test_what_isnt_split(env):
@@ -267,7 +316,7 @@ def test_files_go_with_the_section_the_cursor_is_in(window, tmp_path):
     assert [e.goes.text() for e in window.files] == ["→ Installation", "→ Rigging plan"] and not window.files[0].goes.isHidden()
     assert window.does.text().startswith("Save splits this by #task: a note on <b>Installation</b> with 1 file and a note on "
                                          "<b>Rigging plan</b> with 1 file.")
-    window._set_goes(window.files[1], None)  # moved by hand to the unfiled capture
+    window._set_goes(window.files[1], items.UNFILED)  # moved by hand to the unfiled capture
     assert window.files[1].goes.text() == "→ Unfiled" and "an unfiled note with 1 file" in window.does.text()
     window._set_goes(window.files[1], RIGGING)
     window.save()

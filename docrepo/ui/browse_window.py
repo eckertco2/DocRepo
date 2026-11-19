@@ -63,7 +63,7 @@ from docrepo.ui.explorer import show_in_explorer
 from docrepo.ui.front import bring_to_front
 from docrepo.ui.problems import ProblemsLine
 from docrepo.ui.settings_view import SettingsView
-from docrepo.ui.search_scope import ScopeList
+from docrepo.ui.search_scope import ScopeList, open_search
 from docrepo.ui import tokens
 from docrepo.ui.icons import icon
 from docrepo.ui.look import LOOK, Help, KeyTips, set_hints, tip, with_key
@@ -227,7 +227,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         for keys, handler in (("N", lambda: self._key("note")), ("T", lambda: self._key("new_task")), ("U", lambda: self._key("update")),
                               ("A", lambda: self._key("agenda")), ("E", lambda: self._key("edit")), ("D", lambda: self._key("today")),
                               ("M", lambda: self._key("meeting")), ("O", lambda: self._key("find_files")),
-                              ("Ctrl+F", self.open_find), ("Ctrl+Shift+F", self.search_box.setFocus), ("F1", self.show_keys), ("F5", self.read_again),
+                              ("Ctrl+F", self.open_find), ("Ctrl+Shift+F", lambda: open_search(self.search_box)), ("F1", self.show_keys), ("F5", self.read_again),
                               ("Ctrl+B", lambda: self.show_views_pane(not self.views_button.isChecked())), ("Ctrl+K", self.open_palette),
                               # The weekly review (release 5.128): R marks a project reviewed in step 4.
                               ("R", lambda: None if self._typing() else review_list.mark_reviewed(self)),
@@ -875,7 +875,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
                 Command("", people_import.NAME, lambda: people_import.run(self)),  # release 5.151
                 Command("", "Move follow-ups out of every meeting…", lambda: tidy_follow_ups.run(self, None)),  # release 5.142
                 Command("", tidy_notes.EVERY, lambda: tidy_notes.run(self, None)),  # release 5.150
-                Command("", "Search everything", self.search_box.setFocus, "Ctrl+Shift+F"),
+                Command("", "Search everything", lambda: open_search(self.search_box), "Ctrl+Shift+F"),
                 Command("", "Quick summary: a person, an agenda or a label", lambda: self.ctx.open_summary(None)),
                 *summary_commands(self.ctx),  # each saved set (release 5.149, decision 651)
                 Command("", RECENT_CAPTURES, lambda: self.ctx.open_recent()),  # release 5.158, decision 723

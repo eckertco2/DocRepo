@@ -116,7 +116,8 @@ def test_a_new_tasks_own_first_line(model):
     r = items.read(text, names, TODAY, home=True, new_task=True)
     own = items.self_fields(r, names)
     assert [x.id for x in own.assignees] == ["P003"] and own.tasks == ["T000012"] and own.text == "Check the coupling alignment"
-    # The other items go under the new task (list items after a line of text aren't nested under it).
+    # The other items go under the new task, its own line being the capture's task (release 5.165 keeps it so: decision
+    # 766's task line holding its bullets is any other item's line).
     assert [(it.kind, it.title, [(w.kind, w.ref) for w in it.where]) for it in r.items] == [
         ("task", "Paint the guard rails", [("home", None)]), ("note", "The old coupling goes back to stores", [("home", None)])]
     assert items.parse_text(r, names) == "Check the coupling alignment"  # Parse and populate reads only the rest
@@ -218,3 +219,34 @@ def test_the_bullet_tree_of_a_sub_bullet():
     assert items.bullet_tree(lines, 1) is None and items.bullet_tree(lines, 0) is None  # a top bullet, and a line of text
     assert items.bullet_tree(lines, 8) == (7, 9)  # no top bullet: from the first of its run
     assert [items.list_level(x) for x in lines[:5]] == [-1, 0, 1, 2, 1]
+
+
+# ---- a task line holds the bullets under it (release 5.165, decision 766) ----
+def test_a_paragraph_task_holds_the_bullets_under_it(model):
+    """Decision 766: a line an operator makes into an item, and that isn't a list item, holds the list items straight
+    after it, at any depth, as a bullet parent does (release 5.120)."""
+    names = names_of(model)
+    text = "@Tom order the seals for pump 3.\n- ask about lead time\n  - two quotes\n- check the gasket size"
+    (seals,) = items.read(text, names, TODAY, home=True).items
+    assert seals.text == "Order the seals for pump 3.\n- ask about lead time\n  - two quotes\n- check the gasket size"
+    assert seals.lines == [0, 1, 2, 3]
+    tagged = items.read("**t, order the seals.\n- ask about lead time", names, TODAY, home=True).items
+    assert [(x.kind, x.text) for x in tagged] == [("task", "Order the seals.\n- ask about lead time")]
+
+
+def test_a_sub_bullet_task_goes_under_a_paragraph_task(model):
+    names = names_of(model)
+    text = "@Tom order the seals #Rigging plan\n- ask about lead time\n  - @Mike get two quotes\n- **n, the old seals go back to stores."
+    seals, mike, note = items.read(text, names, TODAY, home=True).items
+    assert seals.text == "Order the seals\n- ask about lead time"
+    # As under a bullet parent (release 5.120): under the task item, and under the # task its line names.
+    assert mike.parent_item == seals.key and [(w.kind, w.ref) for w in mike.where] == [("item", seals.key), ("task", "T000012")]
+    assert note.kind == "note" and [(w.kind, w.ref) for w in note.where] == [("task", "T000012")]  # the task line's # task
+
+
+def test_a_blank_line_or_plain_text_holds_nothing(model):
+    names = names_of(model)
+    gap = items.read("@Tom order the seals.\n\n- ask about lead time", names, TODAY, home=True)
+    assert [x.text for x in gap.items] == ["Order the seals."] and gap.lines[2].block is None
+    plain = items.read("Pump 3 is noisy.\n- @Mike check the coupling", names, TODAY, home=True).items
+    assert [(x.title, [(w.kind,) for w in x.where]) for x in plain] == [("Check the coupling", [("home",)])]

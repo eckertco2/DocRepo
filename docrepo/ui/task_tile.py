@@ -335,10 +335,13 @@ class TileWidget(QWidget):
         self._pressed_circle = False
         #: At rest in the side panel (decision 576): the circle, the title and the days, without depth ticks or marks.
         self.compact = False
+        #: Words the place adds under the tile's own tooltip: the side panel's project, "reminder" and "since…", which had
+        #: a second line until release 5.165 (decision 772).
+        self.more_tip = ""
         self.setMouseTracking(True)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setAccessibleName(f"{tile.title}, {tile.state}")
-        self.setToolTip(task_tile.tooltip(tile, PRIORITY_NAMES))
+        self._tip()
 
     def sizeHint(self) -> QSize:  # noqa: N802 - Qt's name
         return QSize(160, max(24, QFontMetrics(self._font).height() + 8))
@@ -348,8 +351,17 @@ class TileWidget(QWidget):
 
     def set_tile(self, tile: task_tile.Tile) -> None:
         self.tile = tile
-        self.setToolTip(task_tile.tooltip(tile, PRIORITY_NAMES))
+        self._tip()
         self.update()
+
+    def set_more_tip(self, text: str) -> None:
+        """Words under the tile's own tooltip (decision 772)."""
+        self.more_tip = text
+        self._tip()
+
+    def _tip(self) -> None:
+        own = task_tile.tooltip(self.tile, PRIORITY_NAMES)
+        self.setToolTip(chr(10).join(x for x in (own, self.more_tip) if x))
 
     def set_compact(self, on: bool) -> None:
         if on != self.compact:

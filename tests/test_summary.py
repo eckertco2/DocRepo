@@ -408,3 +408,38 @@ def test_copy_names_each_agenda_then_what_needs_a_word(sample_conn):
     assert "## Business team meeting: to raise" in s.markdown and "needs a word" in s.markdown
     b = builder(sample_conn)
     assert b.count_line(qs.subject_of(b.m, "person:P003 + agenda:T000010", "P001")) == "5 to raise · 3 open"  # Tom has three open tasks, his other work too
+
+
+# ---- routine work comes last (release 5.165, decision 773) ----
+def test_routine_work_is_last_folded_and_out_of_the_chips(sample_conn):
+    """A person's routine tasks and regular meetings go in one folded section, Routine, last, and out of the "late" and
+    "due in 7 days" chips; one waiting on them stays where it would be."""
+    c = sample_conn
+    mike = "P004"
+    c.execute("UPDATE tasks SET recurrence = 'Weekly' WHERE id = ?", (RIGGING,))  # due in 6 days: "soon"
+    c.execute("INSERT INTO task_people (task, person, role) VALUES (?, ?, 'lead'), (?, 'P001', 'assignee')", (RIGGING, mike, RIGGING))
+    c.execute("UPDATE tasks SET recurrence = 'Monthly' WHERE id = ?", (INSTALLATION,))  # the owner leads it, Mike's on it
+    m = Model(c)
+    assert qs.is_routine(m, m.task(RIGGING)) and qs.is_routine(m, m.task(MEETING)) and not qs.is_routine(m, m.task(REACTOR))
+    s = summary_of(c, f"person:{mike}")
+    routine = s.section("routine")
+    assert s.sections[-1] is routine and routine.folded and routine.title == "Routine" and routine.count == "2"
+    assert "Rigging plan" in routine.body and "Business team meeting" in routine.body  # the routine task and the regular meeting
+    assert s.section("waiting_you") is None  # Rigging plan was its one task
+    assert "Installation" in s.section("waiting_on").body and "Installation" not in routine.body  # waiting on Mike: it stays
+    assert not any(ch.kind == "soon" for ch in s.chips)  # Rigging plan's due date doesn't count
+    assert builder(c).person_lists(mike)[1] == [RIGGING]  # the lists by who acts are as they were; the summary moves it
+
+
+def test_a_regular_meetings_occurrences_arent_subjects_and_regular_meetings_come_last(sample_conn):
+    c = sample_conn
+    c.execute("INSERT INTO tasks (id, title, state, meeting, created, created_by) VALUES "
+              "('T000901', 'Business team meeting 8 Oct', 'In progress', 1, '2026-10-08 09:00:00', 'P001'), "
+              "('T000902', 'Pump review', 'In progress', 1, '2026-10-08 09:00:00', 'P001')")
+    c.execute("INSERT INTO task_parents (child, parent) VALUES ('T000901', ?)", (MEETING,))
+    m = Model(c)
+    assert qs.is_routine(m, m.task("T000901"))  # an occurrence
+    agendas = [s.ref for s in qs.subjects(m, "P001") if s.kind == qs.AGENDA]
+    assert "T000901" not in agendas and "T000902" in agendas and MEETING in agendas
+    regular = [x for x in agendas if m.task(x).recurrence]
+    assert regular == [MEETING] and agendas[-len(regular):] == regular  # after the other agendas

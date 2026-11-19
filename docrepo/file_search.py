@@ -14,7 +14,8 @@ from docrepo.overview import Record
 
 
 def records(conn: sqlite3.Connection, model: Model, data_root: Path) -> list[Record]:
-    """Every task's files and emails, newest first. A file on several tasks is one row, on the first task that has it."""
+    """Every task's files and emails, newest first, and the files and links of unfiled captures (release 5.165). A file on
+    several tasks is one row, on the first task that has it."""
     texts = overview.capture_texts(conn, [c.id for c in model.live_captures()])
     seen: set[tuple[str, str]] = set()
     out: list[Record] = []
@@ -26,11 +27,13 @@ def records(conn: sqlite3.Connection, model: Model, data_root: Path) -> list[Rec
             if r.kind in ("file", "email") and key not in seen:
                 seen.add(key)
                 out.append(r)
+    # The files and links of captures with no task (release 5.165, decision 768): what a capture left unfiled is found too.
+    out.extend(r for r in overview.unfiled_files(model, data_root, texts) if ("file", r.id) not in seen)
     out.sort(key=lambda r: r.at, reverse=True)
     return out
 
 
 def task_title(model: Model, r: Record) -> str:
-    """Which task a row is on, as each row says."""
+    """Which task a row is on, as each row says: "Unfiled" for a file of a capture with no task (release 5.165)."""
     t = model.tasks.get(r.task)
-    return t.title if t else ""
+    return t.title if t else "Unfiled" if not r.task and r.capture else ""

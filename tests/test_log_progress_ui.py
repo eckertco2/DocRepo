@@ -42,7 +42,7 @@ def window(qapp, sample_root, monkeypatch):
     w = LogProgress(app)
     w.said = said
     w.outlook_calls = []
-    monkeypatch.setattr(outlook, "send_draft", lambda draft, now: w.outlook_calls.append(("send", draft.subject)), raising=False)
+    monkeypatch.setattr(outlook, "send_draft", lambda draft: w.outlook_calls.append(("send", draft.subject)), raising=False)
     monkeypatch.setattr(outlook, "show_draft", lambda draft: w.outlook_calls.append(("show", draft.subject)) or True, raising=False)
     yield w
     QApplication.processEvents()
@@ -91,7 +91,7 @@ def test_an_inline_reply_is_logged_and_brought_back_to_send(window):
 
 
 def test_a_refused_send_comes_back_to_the_front(window, monkeypatch):
-    def refuse(draft, now):
+    def refuse(draft):
         raise outlook.OutlookError("operation aborted")
 
     monkeypatch.setattr(outlook, "send_draft", refuse, raising=False)
@@ -128,7 +128,7 @@ def test_no_task_opens_the_list_and_no_line_says_so(window):
     assert window.task is None and window.picker.isVisible()
     window._task_picked(RIGGING)
     window.submit()
-    assert "Say in a line" in window.message.text() and window.said == []
+    assert "Say in a line" in window.problems["content"].text() and window.said == []
 
 
 def test_escape_keeps_nothing(window):

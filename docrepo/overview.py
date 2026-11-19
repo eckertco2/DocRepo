@@ -19,7 +19,7 @@ from datetime import date
 from pathlib import Path
 
 from docrepo import markup, notes_page
-from docrepo.captures import capture_folder
+from docrepo.captures import capture_folder, held_files
 from docrepo.links import is_folder, is_link
 from docrepo.model import Capture, Model
 
@@ -288,8 +288,30 @@ def _file(model: Model, data_root: Path, c: Capture, tid: str, doc_id: str, copi
         came = "an Update" if c.has("update") else "a Note"
     r = Record("file", doc_id, tid, c.saved, d.name, d.description or "", "", kind, source, came, sender, c.id, path, copy_path)
     # Its subtask and the folders it's in are found too: people look for a file where they put it.
-    r.fold(f"{model.tasks[tid].title} {folders_of(d.original or '') if source in ('Linked file', 'Saved file') else ''}")
+    r.fold(f"{model.tasks[tid].title if tid in model.tasks else 'Unfiled'} "
+           f"{folders_of(d.original or '') if source in ('Linked file', 'Saved file') else ''}")
     return r
+
+
+def unfiled_files(model: Model, data_root: Path, texts: dict[str, str]) -> list[Record]:
+    """The files and links of captures with no task (release 5.165, decision 768), each once, with no task (``task`` is
+    ""): File search marks them Unfiled, and Tab goes to their capture. A file an unfiled capture saved in its own folder
+    is that file (``captures.held_files``)."""
+    out: list[Record] = []
+    seen: set[str] = set()
+    for c in sorted(model.live_captures(), key=lambda c: (c.saved, c.id)):
+        if model.capture_tasks(c) or not c.document_ids:
+            continue
+        held = held_files(data_root, model, c)
+        for doc_id in c.document_ids:
+            if doc_id in seen or doc_id not in model.documents:
+                continue
+            seen.add(doc_id)
+            r = _file(model, data_root, c, "", doc_id, {}, texts.get(c.id, ""))
+            if doc_id in held and held[doc_id].is_file():
+                r.source, r.path = "Saved file", str(held[doc_id])
+            out.append(r)
+    return out
 
 
 def folders_of(path: str) -> str:

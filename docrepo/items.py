@@ -1034,6 +1034,14 @@ def _tasks_of(toks: list[Token]) -> list[str]:
     return list(dict.fromkeys(x.id for x in toks if x.kind == "task" and x.id))
 
 
+def _holds_bullets(L: Line, names: Names) -> bool:
+    """Whether a line that isn't a list item makes an item (a task, a note, an update or a decision) and so holds the list
+    items under it (release 5.165, decision 766). A line of parameters alone makes only their cards, and holds nothing."""
+    params = [x for x in L.toks if x.kind == "param"]
+    toks = [x for x in L.toks if x.kind != "param" and not x.inside]
+    return not params or any(x.kind in ("type", "person") for x in toks) or bool(toks and clean(L.text, L.toks, names))
+
+
 def _iso(d: date | None) -> str | None:
     return d.isoformat() if d else None
 
@@ -1054,6 +1062,8 @@ def read(content: str, names: Names, today: date, *, labels: Sequence[ParseLabel
         if m and markup.CHECK.match(text):  # a checklist line (decision 87): its @ names stay names; it never makes a task
             toks = [x for x in toks if x.kind == "task"]
         lines.append(Line(n, raw, bool(m), len(m.group(1).replace("\t", "  ")) // 2 if m else -1, m.end() if m else 0, text, toks))
+    # The new task's own line (New task ticked): the first line, whatever it holds.
+    first = next((L for L in lines if L.raw.strip() and not (any(x.kind == "param" for x in L.toks) and not clean(L.text, L.toks, names))), None)
     blocks: list[Block] = []
     headings: list[Heading] = []
     heading: Heading | None = None
@@ -1090,7 +1100,11 @@ def read(content: str, names: Names, today: date, *, labels: Sequence[ParseLabel
         L.block = b.i if b else None
         if L.is_list and b:  # a plain list item outside any block stays in the notes, and holds nothing under it
             stack.append((L.level, b.i))
-    first = next((L for L in lines if L.raw.strip() and not (any(x.kind == "param" for x in L.toks) and not clean(L.text, L.toks, names))), None)
+        elif b and b.owner == L.n and _holds_bullets(L, names) and not (new_task and L is first):
+            # A task line written as a sentence holds the list items straight after it, at any depth, as a bullet parent
+            # does (release 5.165, decision 766): a level under the top bullets'. A blank line or a line of text ends it.
+            # The new task's own line is the capture's task already: the lines under it go under the new task, as before.
+            stack = [(-1, b.i)]
     self_block = None
     if new_task and first:
         self_block = blocks[first.block] if first.block is not None else Block(-1, first.n, [first.n], None, None)
@@ -1344,10 +1358,17 @@ def parse_text(r: Reading, names: Names) -> str:
 class Section:
     """A task's part of the content text, when several # tasks split a note (decision 29): a # heading with the lines
     under it, or a note whose own line names a # task, outside any heading. ``task`` is the first task it names; the
-    parts of one task are joined, in the order written."""
+    parts of one task are joined, in the order written. ``tasks`` is every task its lines' heading or note names, the
+    first among them: a file added in it goes to each (release 5.165, decision 767)."""
 
     task: str
     lines: list[int]
+    tasks: list[str] = field(default_factory=list)
+
+
+#: A file's ``section`` when it's moved by hand to the capture of the lines under no # task (release 5.165, decision 767).
+#: None, a file added outside any section, goes to every task the capture names.
+UNFILED = ""
 
 
 def named_tasks(r: Reading) -> list[str]:
@@ -1356,29 +1377,47 @@ def named_tasks(r: Reading) -> list[str]:
     return list(dict.fromkeys(x.id for L in r.lines for x in L.toks if x.kind == "task" and x.id))
 
 
-def sections(r: Reading) -> tuple[list[Section], list[int]]:
-    """The content text by # task (decision 29): each task's section, and the lines under no # task. A line under a
-    heading is its heading's first task's; before the first heading, a note block naming a # task (with the list items
-    under it) is that task's, and anything else is under no task."""
+def _line_tasks(r: Reading) -> list[list[str]]:
+    """Each line's section's tasks, by line: its heading's, or the note's its block is in, before any heading; [] for a
+    line under no # task."""
     by_block = {it.block: it for it in r.items if it.kind not in PARAM_KINDS}
-    parts: dict[str, Section] = {}
-    rest: list[int] = []
+    out: list[list[str]] = []
     heading: Heading | None = None
     for L in r.lines:
         heading = L.heading or heading
-        task = heading.tasks[0] if heading and heading.tasks else None
-        if task is None and L.block is not None:
+        tasks = list(heading.tasks) if heading and heading.tasks else []
+        if not tasks and L.block is not None:
             b = r.blocks[L.block]
             while b.parent is not None:
                 b = r.blocks[b.parent]
             it = by_block.get(b.i)
             if it and it.on and it.kind == "note" and it.tasks:
-                task = it.tasks[0]
-        if task:
-            parts.setdefault(task, Section(task, [])).lines.append(L.n)
+                tasks = list(it.tasks)
+        out.append(tasks)
+    return out
+
+
+def sections(r: Reading) -> tuple[list[Section], list[int]]:
+    """The content text by # task (decision 29): each task's section, and the lines under no # task. A line under a
+    heading is its heading's first task's; before the first heading, a note block naming a # task (with the list items
+    under it) is that task's, and anything else is under no task."""
+    parts: dict[str, Section] = {}
+    rest: list[int] = []
+    for L, tasks in zip(r.lines, _line_tasks(r)):
+        if tasks:
+            sec = parts.setdefault(tasks[0], Section(tasks[0], [], []))
+            sec.lines.append(L.n)
+            sec.tasks.extend(t for t in tasks if t not in sec.tasks)
         else:
             rest.append(L.n)
     return list(parts.values()), rest
+
+
+def section_tasks_at(r: Reading, line: int) -> list[str]:
+    """The tasks of the section holding ``line`` (the text cursor's), every one its heading or note names: where a file
+    added there goes in a split (decision 30, as release 5.165's decision 767 has it). [] outside any section."""
+    per = _line_tasks(r)
+    return list(per[line]) if 0 <= line < len(per) else []
 
 
 def section_at(r: Reading, line: int) -> str | None:

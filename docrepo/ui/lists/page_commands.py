@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QMenu,
 )
 
-from docrepo import edits, prompts, task_commands
+from docrepo import edits, opener, prompts, task_commands
 from docrepo.captures import capture_md_path
 from docrepo.detail import SCOPE_NAMES
 from docrepo.links import is_folder, is_link
@@ -24,6 +24,21 @@ from docrepo.ui.lists import review as review_list
 from docrepo.ui.icons import icon
 from docrepo.ui.look import LOOK
 from docrepo.views import full_path
+
+#: Starts a picture's file in its own program (``opener.start``'s ``starter``). Tests replace it.
+PICTURE_STARTER: Callable[[str], None] | None = None
+
+
+def open_picture(w, document_id: str) -> None:
+    """Open a notes page's picture in its own program, as a saved file opens (release 5.165, decision 770): through
+    ``opener.start``, whose allow-list has pictures. Its file is in the data root, so it's found at once."""
+    d = w.model().documents.get(document_id)
+    path = edits.source_of(w.ctx.data_root, w.model(), document_id) if d is not None else None
+    if path is None:
+        w.say("That picture's file isn't there any more.", error=True)
+        return
+    problem = opener.start(str(path), PICTURE_STARTER)
+    w.say(problem or f"Opened {d.name}.", error=bool(problem))
 
 
 class PageCommands:
@@ -242,6 +257,8 @@ class PageCommands:
         # (a reference field's link, or one in a note's words), its Copy, Find files' links, and Settings.
         elif kind == "opendoc":
             self.open_document_link(rest)
+        elif kind == "openpic":  # Ctrl+click, a double-click or Open picture on a notes page's picture (release 5.165)
+            open_picture(self, rest)
         elif kind == "openurl":
             self.open_address(unquote(rest))
         elif kind == "copyaddr":

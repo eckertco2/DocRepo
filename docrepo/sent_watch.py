@@ -23,6 +23,13 @@ has no index until it's sent, so nothing could match it. Such a T-mail is kept w
   two T-mails could claim, are all left alone, and the report says so. Its index is then the T-mail's (``learn_index``),
   so its replies find the task, and it's saved like any T-mail's copy. Nothing is ever written on the email.
 
+**A draft DocRepo sent itself** (release 5.164, the design workspace's ``docs/mods/log-progress-whole-plan.md``, decision
+751). Log progress sends the owner's draft (``outlook.send_draft``). Just before it does, the kept draft is marked as
+sent by DocRepo (``sent_by_docrepo``), so nothing of DocRepo's fetches or reads it again on its way out: Classic Outlook
+stops sending an Outbox item that something has opened. Its sent copy is still known by its subject and the time it was
+sent, as a draft seen sent is. When Outlook refuses the send, the mark comes off (``not_sent``) and the draft is watched
+as before, for the owner to send.
+
 This module holds what doesn't need Outlook, so it's tested here: which T-mails wait, the match, and the save.
 ``docrepo.outlook`` reads Sent Items and copies the email; ``docrepo.app`` runs the watch and the sweep.
 """
@@ -60,13 +67,16 @@ SENT_WITHIN = timedelta(minutes=30)
 #: A new conversation's index: its 22-byte header and no reply (MS-OXOMSG 2.2.1.3), as hex.
 NEW_INDEX_HEX = 44
 DRAFT_KEY = "t_mail_draft:"
+#: ``Draft.how`` for a draft Log progress sent itself (release 5.164, decision 751).
+BY_DOCREPO = "docrepo"
 
 
 # ---- a new T-mail's draft (release 5.141) ----
 @dataclass(frozen=True)
 class Draft:
     """Where a new T-mail Outlook wouldn't let DocRepo tag was kept as a draft, its subject when last seen, and when its
-    send was seen ("" while it's still a draft), and how: "send" (``ItemSend``) or "draft" (gone from Drafts)."""
+    send was seen ("" while it's still a draft), and how: "send" (``ItemSend``), "draft" (gone from Drafts) or
+    ``BY_DOCREPO`` (Log progress sent it, release 5.164)."""
 
     entry_id: str
     store_id: str
@@ -89,6 +99,22 @@ def drop_draft(conn: sqlite3.Connection, t_mail: int) -> None:
     """Forget a new T-mail's draft: it has its index now, or it no longer waits."""
     with transaction(conn):
         conn.execute("DELETE FROM app_state WHERE key = ?", (f"{DRAFT_KEY}{t_mail}",))
+
+
+def sent_by_docrepo(conn: sqlite3.Connection, t_mail: int, subject: str, at: datetime) -> None:
+    """Log progress is sending this T-mail's draft (release 5.164, decision 751): it's marked as sent then, by DocRepo, so
+    ``watch_drafts`` never fetches it again; its copy is known by ``subject`` and ``at``. Nothing when no draft is kept
+    (an email with a conversation index is known by it)."""
+    d = drafts(conn).get(t_mail)
+    if d is not None:
+        _save(conn, t_mail, replace(d, subject=subject or d.subject, gone=_stamp(at), how=BY_DOCREPO))
+
+
+def not_sent(conn: sqlite3.Connection, t_mail: int) -> None:
+    """Outlook refused Log progress's send: the draft is kept as before, watched until the owner sends it."""
+    d = drafts(conn).get(t_mail)
+    if d is not None and d.how == BY_DOCREPO:
+        _save(conn, t_mail, replace(d, gone="", how=""))
 
 
 def drafts(conn: sqlite3.Connection) -> dict[int, Draft]:
@@ -183,9 +209,9 @@ def match_drafts(waits: list[TMail], kept: Mapping[int, Draft], copies: list) ->
             gone = datetime.fromisoformat(d.gone)
         except ValueError:
             continue
-        # Seen by the send, it was sent then (Outlook's clock and DocRepo's may differ a little); seen by the draft leaving
+        # Seen by the send, or sent by DocRepo, it was sent then (Outlook's clock and DocRepo's may differ a little); seen by the draft leaving
         # Drafts, it was sent some time after it was opened.
-        since = gone - timedelta(minutes=5) if d.how == "send" else opened - timedelta(minutes=5)
+        since = gone - timedelta(minutes=5) if d.how in ("send", BY_DOCREPO) else opened - timedelta(minutes=5)
         claims[t.id] = [c for c in copies if new_conversation(c.index) and _same_subject(c.subject, d.subject) and c.sent is not None
                         and since <= c.sent <= gone + SENT_WITHIN]
     by_entry: dict[str, int] = {}
@@ -346,7 +372,7 @@ class Watcher:
         kept = drafts(self.conn)
         for s in seen:
             for t_mail, d in kept.items():
-                if s.entry_id and s.entry_id == d.entry_id and not d.gone:
+                if s.entry_id and s.entry_id == d.entry_id and (not d.gone or d.how == BY_DOCREPO):
                     self._sent(t_mail, d, s.subject or d.subject, s.index, "send")
 
     def _sent(self, t_mail: int, d: Draft, subject: str, index: str, how: str) -> None:
@@ -471,8 +497,8 @@ def ages(model: Model, now: datetime, kept: Mapping[int, Draft] | None = None, u
         elif not d.gone:
             known = "known by its draft, still in Drafts"
         else:
-            seen = "the send" if d.how == "send" else "its draft leaving Drafts"
-            known = f"known by its draft, sent at {d.gone[11:16]} (seen by {seen})"
+            seen = {"send": "seen by the send", BY_DOCREPO: "sent by Log progress"}.get(d.how, "seen by its draft leaving Drafts")
+            known = f"known by its draft, sent at {d.gone[11:16]} ({seen})"
             if t.id in (unsure or []):
                 known += "; two sent emails would do, so it's left alone"
         out.append(f"T-mail {t.id} ({t.kind}, on {t.task}), opened {age} ago, {known}")

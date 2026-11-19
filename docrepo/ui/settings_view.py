@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo import __version__, backup, capacity, db, diagnose, hotkey, layer0, outlook, prompts, search, startup, tagged, wheels_config
+from docrepo import __version__, backup, capacity, db, diagnose, hotkey, layer0, outlook, prompts, search, startup, stock_headings, tagged, wheels_config
 from docrepo import tagged_masks as masks
 from docrepo.config import REVIEW_DAYS, Settings, data_root_problem, init_data_root, make_safe_fs, resolve_data_root, save_location
 from docrepo.dates import WEEKDAYS, long_date, stamp
@@ -148,6 +148,11 @@ def check_values(ctx: AppContext, values: dict[str, Any]) -> dict[str, Any]:
     if "tagged_patterns" in out or "tagged_never" in out:  # release 5.80
         out.update(check_tagged(out.get("tagged_patterns", ctx.settings.tagged_patterns), out.get("tagged_never", ctx.settings.tagged_never)))
     out.update(check_link_lists(out))
+    if "stock_headings" in out:  # release 5.169 (decision 791)
+        try:
+            out["stock_headings"] = stock_headings.check(out["stock_headings"])
+        except ValueError as e:
+            raise SettingsProblem(str(e)) from e
     return out
 
 
@@ -231,6 +236,9 @@ def update_settings(ctx: AppContext, values: dict[str, Any]) -> list[str]:
         write_pages(Model(ctx.conn), ctx.data_root, ctx.fs, now.date(), now)
     if "tagged_patterns" in changed or "tagged_never" in changed:  # release 5.80
         apply_tagged(ctx)
+    if "stock_headings" in changed:  # release 5.169 (decision 792): the agents' page, and Contents.md's line to it
+        now = ctx.now()
+        write_pages(Model(ctx.conn), ctx.data_root, ctx.fs, now.date(), now, task_ids=[])
     log.info("settings changed: %s", ", ".join(changed))
     ctx.settings_changed(changed)
     return changed
@@ -465,6 +473,8 @@ class SettingsView(QWidget):
         self._build_parse(lay)
         # ---- tagged labels' patterns, Never a tag and the tester (release 5.80) ----
         self._build_tagged(lay)
+        # ---- stock headings, for every task's notes (release 5.169) ----
+        self._build_stock(lay)
         # ---- files and prompts ----
         self._build_files(lay)
         # ---- Outlook (release 5.33) ----
@@ -673,6 +683,14 @@ class SettingsView(QWidget):
         self.tagged = TaggedSettings(lambda: tagged.read_labels(self.ctx.conn),
                                      lambda patterns, never: tagged.try_everything(self.ctx.conn, Model(self.ctx.conn), patterns, never))
         self.tagged_card = self._card(lay, "Tagged labels", [(None, None, self.tagged)])
+
+    def _build_stock(self, lay) -> None:
+        """Stock headings (release 5.169, the stock headings plan's decision 791), a form of its own
+        (``ui/stock_headings_settings.py``)."""
+        from docrepo.ui.stock_headings_settings import StockHeadingsSettings
+
+        self.stock = StockHeadingsSettings()
+        self.stock_card = self._card(lay, "Stock headings", [(None, None, self.stock)])
 
     def show_tagged(self) -> None:
         """Scroll to the Tagged labels section (the Tagged labels view's Patterns…)."""
@@ -886,6 +904,7 @@ class SettingsView(QWidget):
         self.events.setText(", ".join(s.event_words))
         self.references.set(s.reference_fields, s.reference_links)
         self.tagged.set(s.tagged_patterns, s.tagged_never)
+        self.stock.set(s.stock_headings)
         self.cap.setValue(s.extracted_text_cap_chars)
         self.warn.setValue(s.prompt_warn_chars)
         self.check.setValue(s.doc_check_minutes)
@@ -918,6 +937,7 @@ class SettingsView(QWidget):
             "review_day": self.review_day.currentData(), "review_weeks": self.review_weeks.currentData(), "quiet_days": self.quiet_days.value(),
             "reference_fields": self.references.names(), "reference_links": self.references.links(),
             "tagged_patterns": self.tagged.patterns(), "tagged_never": self.tagged.never(),
+            "stock_headings": self.stock.headings(),
             "extracted_text_cap_chars": self.cap.value(), "prompt_warn_chars": self.warn.value(), "doc_check_minutes": self.check.value(),
             "backup_every_days": self.backup_days.value(), "backup_keep": self.backup_keep.value(),
             "look": self.look.currentData(), "show_hints": self.hints.isChecked(), "outlook_categories": self.categories.isChecked(),
@@ -951,6 +971,8 @@ class SettingsView(QWidget):
                 fresh = sum(1 for lb in tagged.read_labels(self.ctx.conn) if lb.status == "suggested")
                 later += (f" Everything is matched again: {fresh:,} new tagged label{'s are' if fresh != 1 else ' is'} on what mentions "
                           f"{'them' if fresh != 1 else 'it'}, marked new, under Suggested in Tagged labels.")
+            if "stock_headings" in changed:  # release 5.169
+                later += " The heading list offers the stock headings from now on, and Views\\Stock headings.md says what belongs under each."
             self.message(f"Saved {len(changed)} setting{'s' if len(changed) > 1 else ''} to settings.json.{later}")
         return changed
 

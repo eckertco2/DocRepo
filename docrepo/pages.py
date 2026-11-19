@@ -14,6 +14,10 @@ Since release 5.153 the glossary of tagged labels has a page too, ``Views\\Tagge
 workspace's ``docs/mods/tagged-labels-page-plan.md``, decisions 671 to 677): every tag DocRepo knows with its name and the
 other ways it's written, so an agent that meets "P-204A" in a page can look up what it is. ``Contents.md`` points to it,
 and a task page's Tagged labels row names each tag's equipment.
+
+Since release 5.169 the stock headings have one, ``Views\\Stock headings.md`` (``write_stock_page``; the design
+workspace's ``docs/mods/stock-headings-plan.md``, decision 792): each, its level and what belongs under it, so an agent
+reading a task's notes knows what "Path forward" is meant to hold. ``Contents.md`` points to it.
 """
 from __future__ import annotations
 
@@ -22,7 +26,7 @@ from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import quote
 
-from docrepo import decisions, meeting_rows, repeats, tagged, ties
+from docrepo import decisions, meeting_rows, repeats, stock_headings, tagged, ties
 from docrepo.dates import day_diff, days_text, minutes, to_date
 from docrepo.links import reference_link
 from docrepo.model import PRIORITY_NAMES, TODAY, TYPE_NAMES, Capture, FileEntry, Model, StatusEntry, Task, is_person
@@ -35,6 +39,8 @@ CONTENTS_FILE = "Contents.md"
 TASK_FILE = "Task.md"
 #: The tagged labels page (release 5.153, decision 671), in the folder the agent views will fill (K9a).
 TAGGED_PAGE = ("Views", "Tagged labels.md")
+#: The stock headings page (release 5.169, the stock headings plan's decision 792), beside it.
+STOCK_PAGE = ("Views", "Stock headings.md")
 _GENERATED = "> Generated from docs.db on "
 
 
@@ -89,7 +95,7 @@ class Pages:
     """Builds the page texts from a Model, as of ``today``."""
 
     def __init__(self, model: Model, today: date, generated_at: datetime, reference_links: Mapping[str, str] | None = None,
-                 content_of: Callable[[str], str | None] | None = None) -> None:
+                 content_of: Callable[[str], str | None] | None = None, stock: Iterable[stock_headings.StockHeading] = ()) -> None:
         self.m = model
         self.today = today
         self.generated = generated_at.strftime("%Y-%m-%d %H:%M")
@@ -97,6 +103,8 @@ class Pages:
         self.reference_links = dict(reference_links or {})
         #: Reads a capture's content text, for a decision's words (release 5.124); without it, a decision is its title.
         self.content_of = content_of
+        #: Settings' stock headings (release 5.169), which Contents.md names, pointing to their page (decision 792).
+        self.stock = list(stock)
 
     # ---- links ----
     def _task_link(self, from_dir: list[str], task_id: str) -> str:
@@ -349,6 +357,10 @@ class Pages:
                ""]
         if m.tagged:  # release 5.153 (decision 674): where to look a tag up
             out += [f"Tagged labels: {tagged_counts(m.tagged)}. Look a tag up in [Views\\Tagged labels.md]({rel_link([], list(TAGGED_PAGE))}).", ""]
+        if self.stock:  # release 5.169 (decision 792): what a task's stock headings are meant to hold
+            names = [_text(h.name) for h in self.stock]
+            listed = names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
+            out += [f"Stock headings: {listed}. What belongs under each is in [Views\\Stock headings.md]({rel_link([], list(STOCK_PAGE))}).", ""]
         out += ["## Open tasks", ""]
 
         def add(task_id: str, depth: int, via: str | None) -> None:
@@ -571,12 +583,30 @@ def write_tagged_page(model: Model, data_root: Path, fs: SafeFS, generated_at: d
     return wrote
 
 
+def stock_of_root(data_root: Path) -> list[stock_headings.StockHeading]:
+    """Settings' stock headings (release 5.169); the defaults when settings.json can't be read."""
+    from docrepo.config import Settings, SettingsError
+
+    try:
+        return Settings.load(data_root).stock()
+    except SettingsError:
+        return list(stock_headings.DEFAULTS)
+
+
+def write_stock_page(data_root: Path, fs: SafeFS, stock: Iterable[stock_headings.StockHeading]) -> bool:
+    """Write ``Views\\Stock headings.md`` when its text changed (decision 792): it has no date, so it's written once per
+    change of the setting, and once on a data root that hasn't got it."""
+    return _write(fs, data_root.joinpath(*STOCK_PAGE), stock_headings.page(stock))
+
+
 def write_pages(
     model: Model, data_root: Path, fs: SafeFS, today: date, generated_at: datetime, task_ids: Iterable[str] | None = None
 ) -> int:
     """Write Task.md for every task (or only ``task_ids``) and Contents.md. Returns how many files were written. Contents.md
-    is one page listing every task: it's made each time, and written only when its text changed, as every page is."""
-    pages = Pages(model, today, generated_at, reference_links_of(data_root), _reader(model, data_root))
+    is one page listing every task: it's made each time, and written only when its text changed, as every page is. So are
+    the agents' pages beside it: the tagged labels' (release 5.153) and the stock headings' (release 5.169)."""
+    stock = stock_of_root(data_root)
+    pages = Pages(model, today, generated_at, reference_links_of(data_root), _reader(model, data_root), stock)
     ids = list(model.tasks) if task_ids is None else [i for i in task_ids if i in model.tasks]
     if task_ids is None:  # release 5.160 (decision 734): every page's tagged labels, read in one pass rather than task by task
         model.tagged.read_all()
@@ -585,4 +615,5 @@ def write_pages(
         written += _write(fs, data_root.joinpath(*task_dir(task_id), TASK_FILE), pages.task_page(model.task(task_id)))
     written += _write(fs, data_root / CONTENTS_FILE, pages.contents_page())
     written += write_tagged_page(model, data_root, fs, generated_at)
+    written += write_stock_page(data_root, fs, stock)
     return written

@@ -40,6 +40,7 @@ from docrepo.captures import capture_folder
 from docrepo.overview import KIND_NAMES, KINDS, SOURCE_NAMES, SOURCES, TYPE_NAMES, TYPE_ORDER, Record
 from docrepo.search import extracted_text
 from docrepo.ui import tokens
+from docrepo.ui.filter_chips import chips_of
 from docrepo.ui.front import bring_to_front
 from docrepo.ui.icons import icon
 from docrepo.ui.look import LOOK
@@ -765,20 +766,7 @@ class TaskView(QWidget):
             w = self.chip_row.takeAt(0).widget()
             if w:
                 w.deleteLater()
-        f, chips = self.filters, []
-        chips += [(f"Type: {TYPE_NAMES.get(t, t)}", lambda t=t: f.types.discard(t)) for t in sorted(f.types)]
-        chips += [(f"From: {SOURCE_NAMES.get(s, s)}", lambda s=s: f.sources.discard(s)) for s in sorted(f.sources)]
-        chips += [(f"From: {s}", lambda s=s: f.senders.discard(s)) for s in sorted(f.senders)]
-        if f.since:
-            chips.append((f"Since: {f.since:%a %d %b}", lambda: setattr(f, "since", None)))
-        if f.before:
-            chips.append((f"Before: {f.before:%a %d %b}", lambda: setattr(f, "before", None)))
-        if f.pinned:
-            chips.append(("Pinned", lambda: setattr(f, "pinned", False)))
-        if f.missing:
-            chips.append(("Missing", lambda: setattr(f, "missing", False)))
-        tg = self.model().tagged
-        chips += [(f"Tag: {tg.by_key[k].label if k in tg.by_key else k}", lambda k=k: f.tagged.discard(k)) for k in sorted(f.tagged)]
+        chips = chips_of(self.filters, self.model())  # File search's too (release 5.165)
         if self.scope != self.task_id:
             chips.append((f"In: {self.model().task(self.scope).title}", lambda: setattr(self, "scope", self.task_id)))
         for label, undo in chips:
