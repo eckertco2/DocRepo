@@ -219,6 +219,7 @@ A subtask with a saved file, an old version, a document version, a summary, stat
 |---|---|
 | ID | T000008 |
 | State | In progress |
+| Kind | Parent task |
 | Parents | [Reactor impeller upgrade](../T000001/Task.md) |
 | Labels | Line 1 (inherited), Strategic Plan (inherited) |
 | Lead | Me (8 h) |
@@ -297,6 +298,7 @@ A routine meeting with its agenda: open agenda items, one of them a note with no
 |---|---|
 | ID | T000010 |
 | State | In progress |
+| Kind | Routine task |
 | Meeting | Yes |
 | Recurrence | Weekly, no end date |
 | Parents | None (top-level task) |
@@ -360,6 +362,7 @@ A task with two parents. It's also on a meeting's agenda.
 |---|---|
 | ID | T000015 |
 | State | Not started |
+| Kind | Single task |
 | Parents | [Q4 cost reduction](../T000003/Task.md), [Installation](../T000008/Task.md) |
 | Labels | Profitability (inherited), Line 1 (inherited), Strategic Plan (inherited) |
 | Lead | None |

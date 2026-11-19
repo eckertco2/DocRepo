@@ -87,5 +87,5 @@ def test_plant_events_and_reference_fields_on_the_page(sample_conn):
                       references={"Work order #": "48213"})
     model = Model(sample_conn)
     page = Pages(model, TODAY, SAMPLE_AS_OF).task_page(model.task("T000012"))
-    assert "| State | In progress |\n| Plant event | Yes |\n| Parents |" in page
+    assert "| State | In progress |\n| Kind | Single task |\n| Plant event | Yes |\n| Parents |" in page
     assert "| Deadline | None |\n| Work order # | 48213 |\n" in page

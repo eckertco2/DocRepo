@@ -27,6 +27,7 @@ from docrepo.dates import day_diff, days_text, minutes, to_date
 from docrepo.links import reference_link
 from docrepo.model import PRIORITY_NAMES, TODAY, TYPE_NAMES, Capture, FileEntry, Model, StatusEntry, Task, is_person
 from docrepo.safe_fs import SafeFS
+from docrepo.kinds import is_work
 from docrepo.schedule import due_of, is_open, start_of
 from docrepo.task_links import links_of
 
@@ -120,6 +121,23 @@ class Pages:
         return ", ".join(self.m.person_name(p) + own(p) for p in person_ids) or "None"
 
     # ---- Task.md ----
+    #: The rows a collection's Task.md keeps (release 5.167, decision 785): it has no state, dates, hours, people or priority.
+    COLLECTION_ROWS = ("ID", "Kind", "Archived", "Discarded", "From template", "Parents", "Labels", "Tagged labels", "On agendas")
+
+    def _kind_rows(self, t: Task, rows: list[tuple[str, str]]) -> list[tuple[str, str]]:
+        """Task.md's Kind row (release 5.167, decision 785): after State, Single task, Parent task or Routine task; a
+        collection's page says Collection after its ID, with no State row and only ``COLLECTION_ROWS``, and the day it was
+        archived when it was."""
+        from docrepo import kinds
+
+        kind = ("Kind", kinds.name_of(self.m, t))
+        if not t.collection:
+            at = next(i for i, (k, _) in enumerate(rows) if k == "State") + 1
+            return [*rows[:at], kind, *rows[at:]]
+        kept = [r for r in rows if r[0] in self.COLLECTION_ROWS]
+        extra = [kind, *([("Archived", t.closed or "Yes")] if t.state == "Closed" else [])]
+        return [kept[0], *extra, *kept[1:]]
+
     def task_page(self, t: Task) -> str:
         here = task_dir(t.id)
 
@@ -176,8 +194,9 @@ class Pages:
         on = self.m.agendas_on(t.id)
         if on:
             rows.append(("On agendas", ", ".join(self._target(here, a.target) for a in on)))
+        rows = self._kind_rows(t, rows)
         out += ["| Field | Value |", "|---|---|", *[f"| {a} | {_cell(b)} |" for a, b in rows], ""]
-        kds = self.m.key_dates_of(t.id)
+        kds = [] if t.collection else self.m.key_dates_of(t.id)
         if kds:  # release 5.31: its key dates, in its order, with their ticks
             from docrepo.key_dates import when_text
 
@@ -186,7 +205,9 @@ class Pages:
                 marks = ", ".join(x for x, on in (("Plant activity", kd.plant), ("Deadline", kd.deadline), (f"Done {kd.done}", kd.done)) if on)
                 out.append(f"| {_cell(when_text(kd, self.today))} | {_cell(kd.description) or '–'} | {_cell(marks) or '–'} |")
             out.append("")
-        out += ["## Description", "", t.description or "_None._", "", "## Current status", "", t.current_status or "_No status yet._", ""]
+        out += ["## Description", "", t.description or "_None._", ""]
+        if not t.collection:  # a collection isn't work, so it has no status (release 5.167)
+            out += ["## Current status", "", t.current_status or "_No status yet._", ""]
         # The notes page (release 5.25): its headings two levels down, each caption a link to its capture.
         from docrepo import notes_page
 
@@ -224,12 +245,15 @@ class Pages:
             out += ["## Subtasks", "", "| ID | Title | State | Assignees | Due |", "|---|---|---|---|---|"]
             for k in kids:
                 c = self.m.task(k)
-                out.append(f"| {c.id} | {_cell(link(k))} | {c.state} | {_cell(self._names(c.assignees))} | {c.due or ''} |")
+                if c.collection:  # release 5.167: a collection's row says so, with no assignees or Due
+                    out.append(f"| {c.id} | {_cell(link(k))} | Collection |  |  |")
+                else:
+                    out.append(f"| {c.id} | {_cell(link(k))} | {c.state} | {_cell(self._names(c.assignees))} | {c.due or ''} |")
             out.append("")
         out += self._meetings(here, t)
         out += self._decisions(here, t)
         items = self.m.open_items_for(t.id)
-        if items or (t.meeting and is_open(t)):
+        if items or (t.meeting and is_work(t)):
             lines = [f"- {self._agenda_text(here, a.subject, a.note)} · added {a.added[:10]}" for a in items]
             out += ["## Agenda", "", *(lines or ["_No open agenda items._"]), ""]
         log = sorted(self.m.status_log_of(t.id), key=lambda e: e.at, reverse=True)
@@ -329,16 +353,19 @@ class Pages:
 
         def add(task_id: str, depth: int, via: str | None) -> None:
             t = m.task(task_id)
-            bits = [t.id, t.state]
-            if t.recurrence:
-                bits.append(t.recurrence)
-            if t.meeting:
-                bits.append("meeting")
-            due = due_of(t, self.today)
-            if due:
-                bits.append(f"{due.label.lower()} {due.date.isoformat()}")
-            if t.urgent:
-                bits.append("urgent")
+            if t.collection:  # release 5.167 (decision 785): marked as a collection, with none of the work's words
+                bits = [t.id, "collection"]
+            else:
+                bits = [t.id, t.state]
+                if t.recurrence:
+                    bits.append(t.recurrence)
+                if t.meeting:
+                    bits.append("meeting")
+                due = due_of(t, self.today)
+                if due:
+                    bits.append(f"{due.label.lower()} {due.date.isoformat()}")
+                if t.urgent:
+                    bits.append("urgent")
             others = [p for p in m.parents_of(task_id) if p != via] if via else []
             also = f" · also under {', '.join(m.task(o).title for o in others)}" if others else ""
             out.append(f"{'  ' * depth}- {link(task_id)} · {' · '.join(bits)}{also}")
@@ -349,7 +376,7 @@ class Pages:
         for t in m.top_level():
             if is_open(t):
                 add(t.id, 0, None)
-        out += ["", "## Parked", "", *[f"- {link(t.id)} · {t.id}" for t in m.tasks.values() if t.state == "Parked" and not t.discarded]]
+        out += ["", "## Parked", "", *[f"- {link(t.id)} · {t.id}" for t in m.tasks.values() if t.state == "Parked" and not t.discarded and not t.collection]]
         recent = [t for t in m.tasks.values() if t.closed and not t.discarded and day_diff(to_date(t.closed), self.today) <= 30]
         out += ["", "## Closed in the last 30 days", "", *[f"- {link(t.id)} · {t.id} · closed {t.closed}" for t in recent]]
         out += ["", "## Agendas", ""]

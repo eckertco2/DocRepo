@@ -38,7 +38,10 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Task**: the unit of work and the scaffold everything else hangs on: a place in the tree, fields, and the captures linked to it. A New task capture or the Excel import creates it; Update captures and browse-tool edits change it.
 - **Top-level task**: a task with no parent.
 - **Project**: an informal name for a top-level task. There's no separate project object.
-- **Parent task**: any task with subtasks. A task can have more than one parent.
+- **Parent task**: any task with subtasks. A task can have more than one parent. Since release 5.167 it's also a kind: a task with at least one subtask that's a task (a closed one counts; a discarded one and a collection don't), and not routine.
+- **Collection**: a container in the task tree that isn't work (release 5.167): a place for notes, files, links, captures, tasks and other collections. It has a title, parents, labels, a description and a notes page, and no state to show, dates, hours, people, priority, Urgent, Today item, wait, recurrence or review; it's left out of everything that lists work, and the tasks under it are on all of it as any task is. Make it a collection and Make it a task change one into the other, its other fields kept unseen; **Archive** hides one as closed tasks are hidden. Stored as a flag on the task's row. Quick tasks is one.
+- **Kind**: what a task tree entry is: a collection, or a task that's single, a parent or routine (release 5.167). A task's kind is worked out from what's stored, never stored or typed: routine first, then parent, then single. Task.md says it in its Kind row.
+- **Single task**: a task that isn't routine and has no subtask that's a task (release 5.167): most tasks. It becomes a parent task the moment a task is made under it, and single again when the last one is moved away.
 - **Subtask**: a task under a parent task.
 - **Task tree**: all tasks arranged by their parent links, as the browse tool and the task picker show them.
 - **State**: Not started, In progress, Parked or Closed. Closed means done or cancelled. Since release 5.138 a task's state is the circle at the start of its line wherever it's listed, and a click on the circle opens the state menu.
@@ -84,7 +87,7 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Never a tag**: the list in Settings of whole tags (ABC123) and starts with `*` (API*) that no tag pattern makes a tagged label. It applies to patterns only: a glossary label is always found (release 5.80).
 - **Tester** (of tag patterns): Settings' **Try it** box, which marks what the glossary and the patterns find in pasted text as it's typed, and **Try on everything**, which runs the patterns over everything DocRepo holds before they're saved (release 5.80).
 - **Mentioned**: said of an item whose text has a tagged label, and of the label. **Mentioned only** narrows the Tagged labels view to those.
-- **Routine task**: a task with Recurrence set. Its occurrences aren't checked off one by one, and closing the task ends the recurrence.
+- **Routine task**: a task with Recurrence set, or an occurrence of a regular meeting (release 5.167). Its occurrences aren't checked off one by one, and closing the task ends the recurrence. The Timeline leaves routine tasks out unless Show routine is on.
 - **Meeting**: any task with Meeting checked, one-off or routine.
 - **Agenda item**: a temporary link that puts a task, or a note with no task, on the agenda of a meeting, another task or a person. It's added with the capture window's Add to agenda option and stays open until it's closed by hand.
 - **Agenda target**: the meeting, task or person whose agenda an item is on.

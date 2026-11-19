@@ -33,7 +33,7 @@ AVATAR = 20
 MARK = 14
 PROGRESS_HEIGHT = 4
 #: The state marks' colours: secondary text, the accent, Parked's, and secondary text again.
-MARK_COLOURS = {"ns": "text2", "ip": "accent", "pk": "parked", "cl": "text2"}
+MARK_COLOURS = {"ns": "text2", "ip": "accent", "pk": "parked", "cl": "text2", "co": "text2"}  # co: a collection's folder (release 5.167)
 
 
 def layout_of(width: int) -> int:
@@ -77,7 +77,7 @@ def avatar(key: str, scale: float) -> QImage:
 def mark(state: str, scale: float) -> QImage:
     image, p = _canvas(MARK, MARK, scale)
     colour = MARK_COLOURS.get(state, "text2")
-    p.drawPixmap(QPointF(0, 0), tinted(f"state-{state}", tokens.LIGHT.get(colour, colour), MARK, scale))
+    p.drawPixmap(QPointF(0, 0), tinted("folder" if state == "co" else f"state-{state}", tokens.LIGHT.get(colour, colour), MARK, scale))
     p.end()
     return image
 

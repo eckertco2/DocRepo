@@ -26,7 +26,7 @@ from docrepo.safe_fs import SafeFS
 log = logging.getLogger(__name__)
 
 DB_FILE = Path("System") / "docs.db"
-SCHEMA_VERSION = 29
+SCHEMA_VERSION = 30
 #: How long, in seconds, a statement waits for docs.db while another connection holds it (SQLite's busy timeout, release
 #: 5.102) before it gives up with "database is locked". A backup's copy holds it for as long as the copy takes. Python's
 #: own default is 5 seconds.
@@ -706,6 +706,15 @@ CREATE INDEX t_mails_task ON t_mails (task, opened);
 -- item at the first drag, Move to top or bottom, or Alt+Up and Alt+Down, and a new item goes after the last. Until then
 -- Today is in the order its items were added. Any agenda could use it, though only Today's are set.
 ALTER TABLE agenda_items ADD COLUMN pos INTEGER;
+""",
+    30: """
+-- Collections (release 5.167, the design workspace's docs/mods/collections-and-kinds-plan.md, decisions 774 and 778): a
+-- container in the task tree that isn't work, a place for notes, files, links, captures, tasks and other collections. It's
+-- a flag on the task's row, as Meeting and Plant event are, so its page, files and place in the tree stay where they are.
+-- A task's kind (single, parent or routine) is worked out from what's stored, never stored (decision 775). The built-in
+-- Quick tasks, known by its creator, becomes a collection, being one already in all but name.
+ALTER TABLE tasks ADD COLUMN collection INTEGER NOT NULL DEFAULT 0 CHECK (collection IN (0, 1));
+UPDATE tasks SET collection = 1 WHERE created_by = 'DocRepo';
 """,
 }
 

@@ -39,7 +39,7 @@ TICK_SLOT = 12      # the depth ticks' slot, in a flat list
 DAYS_W = 34         # the days number's column
 PRIORITY_EDGES = {"critical": "pri_critical", "high": "pri_high", "medium": "pri_medium", "parking": "pri_parking"}
 STATE_ICONS = {"Not started": ("state-ns", "text2"), "In progress": ("state-ip", "accent"), "Parked": ("state-pk", "parked"),
-               "Closed": ("state-cl", "text2")}
+               "Closed": ("state-cl", "text2"), "Collection": ("folder", "text2")}  # a collection's folder (release 5.167)
 
 
 def marks_width(marks: tuple) -> int:
@@ -240,8 +240,12 @@ def fill_menu(browse: BrowseWindow, task_id: str, menu: QMenu, own: Iterable[Own
     quick.triggered.connect(lambda: browse.quick_edit(task_id, QRect(QCursor.pos(), QSize(1, 1))))
     edit.insertAction(actions[1] if len(actions) > 1 else None, quick)
     menu.addMenu(edit)
-    menu.addMenu(_priority_menu(browse, task_id, menu))
+    if not t.collection:  # a collection has no priority (release 5.167, decision 774)
+        menu.addMenu(_priority_menu(browse, task_id, menu))
     menu.addMenu(_copy_menu(browse, task_id, menu))
+    from docrepo.ui import collections_ui
+
+    collections_ui.add_kind_lines(browse, task_id, menu)  # release 5.167, decision 779
 
 
 def add_wait_lines(browse: BrowseWindow, task_id: str, menu: QMenu) -> None:
@@ -252,7 +256,7 @@ def add_wait_lines(browse: BrowseWindow, task_id: str, menu: QMenu) -> None:
 
     m = browse.model()
     t = m.tasks.get(task_id)
-    if t is None or t.discarded or t.state == "Closed":
+    if t is None or t.discarded or t.state == "Closed" or t.collection:  # a collection isn't work (release 5.167)
         return
     menu.setToolTipsVisible(True)
     logged = menu.addAction(icon("waiting"), "Log progress…", lambda: browse.ctx.log_progress(task_id))

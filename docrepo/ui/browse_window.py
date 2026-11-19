@@ -78,6 +78,7 @@ from docrepo.ui.style import CLASSIC_BROWSE, page_css, style_sheet
 from docrepo.ui.task_forms import LabelMatchDialog, TaskEditDialog
 from docrepo.ui.task_picker import TaskPicker
 from docrepo.ui.timeline_view import TimelineView
+from docrepo.ui.state_menu import MAKE_TASK as STATE_MAKE_TASK
 from docrepo.ui.state_menu import UNDO_MS, can_change, open_below, picked_line, state_menu
 from docrepo.ui.tree_view import HTML_ROLE, KEY_ROLE, RowTree
 from docrepo.ui import conversation_page, people_import, task_menus, tidy_follow_ups, tidy_notes, today_meetings
@@ -767,6 +768,13 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         m = self.model()
         if not can_change(m, task_id):
             return False
+        if to == STATE_MAKE_TASK:  # a collection's Make it a task (release 5.167, decision 781)
+            from docrepo.ui import collections_ui
+
+            collections_ui.make_task(self, task_id)
+            if after is not None:
+                after()
+            return True
         ids = [task_id, *(open_below(m, task_id) if branch else [])]
         was = {x: m.task(x).state for x in ids}
         if all(state == to for state in was.values()):

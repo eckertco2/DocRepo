@@ -32,12 +32,12 @@ from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta
 
-from docrepo import quick
+from docrepo import kinds, quick
 from docrepo.activity import Group, Heading, Line
 from docrepo.dates import WEEKDAYS, monday_of, stamp, to_date
 from docrepo.lists import LISTS, key_dates_due, list_tasks
 from docrepo.model import TODAY, Model, Task
-from docrepo.schedule import due_of, is_open
+from docrepo.schedule import due_of
 from docrepo.summary import touched
 from docrepo.views import Node, last_updated
 
@@ -73,9 +73,19 @@ def step_hint(step: Step, quiet_days: int) -> str:
 
 
 # ---- intervals (decisions 498 and 499) ----
+def top_work(m: Model, t: Task) -> bool:
+    """Top-level work, as the review counts it: a task with no parent that's a task. Since release 5.167 a task under a
+    top-level collection is one (decision 782), but not a quick task waiting under the built-in Quick tasks, which a
+    collection only since that release: those stay out of the review, as they were."""
+    if kinds.work_parents(m, t.id):
+        return False
+    return not any(quick.is_parent(m.task(x)) for x in m.ancestors_of(t.id) if x in m.tasks)
+
+
 def is_project_like(m: Model, t: Task) -> bool:
-    """A task the review takes as a project by default: top-level, and not routine, a meeting, a plant event or Quick tasks."""
-    return not m.parents_of(t.id) and not t.recurrence and not t.meeting and not t.plant_event and not quick.is_parent(t)
+    """A task the review takes as a project by default: top-level work (``top_work``), and not routine, a meeting, a plant
+    event or a collection (Quick tasks among them)."""
+    return not t.recurrence and not t.meeting and not t.plant_event and not t.collection and top_work(m, t)
 
 
 def interval(m: Model, t: Task, default_weeks: int) -> int:
@@ -96,7 +106,7 @@ def is_due(m: Model, t: Task, today: date, default_weeks: int) -> bool:
     """Whether an open task is due for review: it has an interval, and was never reviewed or was last reviewed that many
     weeks ago or more, counting by the week."""
     weeks = interval(m, t, default_weeks)
-    if weeks <= 0 or not is_open(t):
+    if weeks <= 0 or not kinds.is_work(t):
         return False
     nxt = next_review(t, weeks)
     return nxt is None or monday_of(today) >= nxt
@@ -147,8 +157,9 @@ def since_group(m: Model, lines: Iterable[Line], t: Task, start: str, order: dic
 
 # ---- gone quiet and no next step (decisions 500 and 501) ----
 def standing(t: Task) -> bool:
-    """Routine work, a meeting, a plant event or Quick tasks itself: not something that goes quiet or lacks a next step."""
-    return bool(t.recurrence or t.meeting or t.plant_event or quick.is_parent(t))
+    """Routine work, a meeting, a plant event or a collection (Quick tasks among them, release 5.167): not something that
+    goes quiet or lacks a next step."""
+    return bool(t.recurrence or t.meeting or t.plant_event or t.collection)
 
 
 # Worked out once per model, as ``ask_update.asked_all`` is: each read goes through every capture and status log row.
@@ -196,7 +207,7 @@ def gone_quiet(m: Model, today: date, quiet_days: int, leave: Iterable[str] = ()
     last = last_touched(m)
     out: dict[str, int] = {}
     for t in m.tasks.values():
-        if t.id in left or not is_open(t) or standing(t):
+        if t.id in left or not kinds.is_work(t) or standing(t):
             continue
         day = last.get(t.id)
         n = (today - day).days if day else 0
@@ -211,10 +222,10 @@ def no_next_step(m: Model, today: date) -> list[Task]:
     on_today = {a.subject for a in m.today_items() if a.subject}
     order = tree_order(m)
     out = []
-    for t in m.top_level():
-        if not is_open(t) or standing(t) or t.reminder or t.id in on_today or due_of(t, today) is not None:
+    for t in m.tasks.values():  # top-level work: a task under a top-level collection too (release 5.167, decision 782)
+        if not kinds.is_work(t) or standing(t) or t.reminder or t.id in on_today or due_of(t, today) is not None or not top_work(m, t):
             continue
-        if any(x in m.tasks and is_open(m.task(x)) for x in m.children_of(t.id)):
+        if any(x in m.tasks and kinds.is_work(m.task(x)) for x in m.children_of(t.id)):
             continue
         out.append(t)
     return sorted(out, key=lambda t: order.get(t.id, 1 << 30))

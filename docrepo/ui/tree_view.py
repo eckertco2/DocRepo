@@ -71,7 +71,7 @@ MAX_CELL = 220
 
 #: A task's state as the icon before its title (decision L7): the icon, and its colour's token.
 STATE_ICONS = {"Not started": ("state-ns", "text2"), "In progress": ("state-ip", "accent"), "Parked": ("state-pk", "parked"),
-               "Closed": ("state-cl", "text2")}
+               "Closed": ("state-cl", "text2"), "Collection": ("folder", "text2")}  # a collection's folder (release 5.167)
 #: A row action's icon, by its words (decision L5). An action not here keeps its words.
 ACTION_ICONS = {"Edit": "edit", "Note": "note", "Done": "state-cl", "Remove": "close", "Clear": "close", "Discussed": "state-cl",
                 "Add to Today": "sun", "Make it a task": "task"}

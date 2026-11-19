@@ -27,6 +27,16 @@ from docrepo.dates import day_diff, days_words, long_date, to_date
 from docrepo.model import TODAY, Model, Task
 from docrepo.schedule import due_of
 
+# ---- a collection (release 5.167, the design workspace's docs/mods/collections-and-kinds-plan.md, decision 781) ----
+#: What a collection's tile shows where a task's state is: a folder in the circle's place, and its tooltip's word.
+COLLECTION_STATE = "Collection"
+
+
+def shown_state(t: Task) -> str:
+    """A tile's state: the task's own, or ``COLLECTION_STATE`` for a collection, which has no state to show."""
+    return COLLECTION_STATE if getattr(t, "collection", False) else t.state
+
+
 # ---- the title (decision 565) ----
 ELLIPSIS = "…"
 #: A cut keeps at least this many words, or it isn't offered.
@@ -127,8 +137,9 @@ class Days:
 
 def days(task: Task, today: date) -> Days | None:
     """Days to the nearer of the task's Due and Deadline (a Deadline on the same day counts as the Deadline), or to a routine
-    task's next occurrence. None with no date, or for a closed or discarded task. A parked task's number stays grey."""
-    if task.state == "Closed" or getattr(task, "discarded", None):
+    task's next occurrence. None with no date, or for a closed or discarded task, or a collection, which has no dates
+    (release 5.167). A parked task's number stays grey."""
+    if task.state == "Closed" or getattr(task, "discarded", None) or getattr(task, "collection", False):
         return None
     dates: list[tuple[date, str]] = []
     if task.recurrence:
@@ -318,6 +329,9 @@ def tile(m: Model, task_id: str, today: date, marks_: Marks | None = None, *, hi
     t = m.task(task_id)
     marks_ = marks_ if marks_ is not None else marks(m, today)
     d = depth(m, task_id) if flat else -1
+    if t.collection:  # a folder for the circle, and none of the work's priority, flag or days (release 5.167, decision 781)
+        return Tile(task_id, t.title, COLLECTION_STATE, "", False, parents_tip(m, task_id, under), d, depth_tip(m, task_id) if d > 0 else "",
+                    slots(task_id, marks_, hide), None, t.state == "Closed")
     return Tile(task_id, t.title, t.state, t.priority if t.priority and t.state != "Closed" else "", bool(t.urgent),
                 parents_tip(m, task_id, under), d, depth_tip(m, task_id) if d > 0 else "", slots(task_id, marks_, hide),
                 days(t, today), t.state == "Closed")
@@ -339,7 +353,7 @@ def tooltip(t: Tile, priority_names: dict[str, str] | None = None) -> str:
 
 
 # ---- on a page (decision 577) ----
-STATE_KEYS = {"Not started": "ns", "In progress": "ip", "Parked": "pk", "Closed": "cl"}
+STATE_KEYS = {"Not started": "ns", "In progress": "ip", "Parked": "pk", "Closed": "cl", COLLECTION_STATE: "co"}
 
 
 def _img(src: str, size: int, tip: str) -> str:
@@ -360,7 +374,8 @@ def days_html(d: Days | None, align: str = "right", block: bool = True) -> str:
 def circle_html(t: Tile) -> str:
     """A page tile's circle: a ``state:`` link that opens the state menu (decision 564)."""
     key = STATE_KEYS.get(t.state, "ns")
-    return f'<a href="state:{escape(t.task_id)}" title="{escape(t.state)}. Click to change the state.">{_img(f"mark:{key}", 14, t.state)}</a>'
+    said = "A collection. Click to archive it, or make it a task." if t.state == COLLECTION_STATE else f"{t.state}. Click to change the state."
+    return f'<a href="state:{escape(t.task_id)}" title="{escape(said)}">{_img(f"mark:{key}", 14, t.state)}</a>'
 
 
 def title_html(t: Tile, link: Callable[[str, str], str]) -> str:

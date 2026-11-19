@@ -40,7 +40,8 @@ from docrepo.activity import Activity, Line
 from docrepo.dates import long_date, monday_of, short, to_date
 from docrepo.detail import chip, esc, initials, link
 from docrepo.model import PRIORITY_NAMES, TODAY, AgendaItem, Model, Person, Task, is_person
-from docrepo.schedule import DueDate, due_of, is_open
+from docrepo.kinds import is_work
+from docrepo.schedule import DueDate, due_of
 from docrepo.stories import clip
 from docrepo.text import first_sentence
 from docrepo.views import due_cell, last_updated, project_text
@@ -280,7 +281,7 @@ def is_agenda(m: Model, task_id: str) -> bool:
     t = m.tasks.get(task_id)
     if t is None or t.discarded:
         return False
-    return (t.meeting and is_open(t)) or bool(m.open_items_for(task_id))
+    return (t.meeting and is_work(t)) or bool(m.open_items_for(task_id))
 
 
 def subjects(m: Model, me: str | None) -> list[Subject]:
@@ -456,9 +457,16 @@ def touched(m: Model) -> dict[str, date]:
     return out
 
 
+def counted(m: Model, ids: Iterable[str]) -> list[str]:
+    """The tasks a label's or tag's opened, closed and trend figures count, open or closed: not a collection, which isn't
+    work (release 5.167, decision 780)."""
+    return [x for x in ids if not m.task(x).collection]
+
+
 def worklike(t: Task) -> bool:
-    """A task the lists show: live, open (Not started or In progress), and not a meeting, which is an agenda, not work."""
-    return is_open(t) and not t.meeting
+    """A task the lists show: live, open (Not started or In progress), and not a meeting, which is an agenda, not work, nor
+    a collection (release 5.167, decision 780)."""
+    return is_work(t) and not t.meeting
 
 
 def status_of(m: Model, t: Task) -> tuple[str, date | None]:
@@ -503,8 +511,9 @@ class Builder:
         return n if n >= self.quiet_days else 0
 
     def mark(self, t: Task) -> str:
-        key = {"Not started": "ns", "In progress": "ip", "Parked": "pk", "Closed": "cl"}.get(t.state, "ns")
-        return f'<img src="mark:{key}" width="14" height="14" title="{esc(t.state)}">'
+        state = task_tile.shown_state(t)  # a collection's folder (release 5.167)
+        key = task_tile.STATE_KEYS.get(state, "ns")
+        return f'<img src="mark:{key}" width="14" height="14" title="{esc(state)}">'
 
     def when(self, t: Task) -> tuple[str, str, str]:
         """A task's date as a row shows it, its colour's class (decision 522) and its tooltip."""
@@ -922,8 +931,9 @@ class Builder:
         ts = [m.task(x) for x in open_ids]
         subs = m.sublabels(s.ref, active=False) if s.kind == LABEL else []
         month = today - timedelta(days=LABEL_WINDOW_DAYS)
-        opened = sum(1 for x in every if (m.task(x).created or "")[:10] >= month.isoformat())
-        closed = sum(1 for x in every if m.task(x).state == "Closed" and (m.task(x).closed or "")[:10] >= month.isoformat())
+        work = counted(m, every)  # a labelled collection is neither opened nor closed (release 5.167)
+        opened = sum(1 for x in work if (m.task(x).created or "")[:10] >= month.isoformat())
+        closed = sum(1 for x in work if m.task(x).state == "Closed" and (m.task(x).closed or "")[:10] >= month.isoformat())
         oldest = min(ts, key=lambda t: t.created or "9999", default=None)
         oldest_days = (today - to_date(oldest.created[:10])).days if oldest and oldest.created else 0
         groups = {self.group_of(t, subs) for t in ts}
@@ -1059,8 +1069,9 @@ class Builder:
             facts.append(("Last talked", f"{long_date(day, today)} · {ago_short(day, today)}" if day else "Not on record"))
         if filters and every is not None:
             month = (today - timedelta(days=LABEL_WINDOW_DAYS)).isoformat()
-            opened = sum(1 for x in every if (m.task(x).created or "")[:10] >= month)
-            shut = sum(1 for x in every if m.task(x).state == "Closed" and (m.task(x).closed or "")[:10] >= month)
+            work = counted(m, every)  # a labelled collection is neither opened nor closed (release 5.167)
+            opened = sum(1 for x in work if (m.task(x).created or "")[:10] >= month)
+            shut = sum(1 for x in work if m.task(x).state == "Closed" and (m.task(x).closed or "")[:10] >= month)
             facts.append((f"Last {LABEL_WINDOW_DAYS} days", f"opened {opened} · closed {shut}"))
         hot = [m.task(x) for x in {*open_ids, *on_agendas} if x in m.tasks and worklike(m.task(x))]
         late = sum(is_late(m, t, today) for t in hot)
@@ -1111,12 +1122,14 @@ class Builder:
 
     def trend(self, every: list[str]) -> list[int]:
         """How many of these tasks were open at the end of each of the last ``TREND_WEEKS`` weeks, the oldest first: made by
-        then and not closed by then. Parked ones count as open here, as they're still to be done."""
+        then and not closed by then. Parked ones count as open here, as they're still to be done. A collection isn't one
+        (release 5.167)."""
         out = []
+        work = counted(self.m, every)
         for k in range(TREND_WEEKS - 1, -1, -1):
             end = (self.today - timedelta(days=7 * k)).isoformat()
             n = 0
-            for x in every:
+            for x in work:
                 t = self.m.task(x)
                 made = (t.created or "")[:10] <= end
                 shut = t.state == "Closed" and (t.closed or "")[:10] <= end

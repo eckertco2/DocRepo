@@ -20,7 +20,8 @@ from docrepo import capacity, priorities
 from docrepo.dates import day_diff, days_text, long_date, monday_of, short, to_date
 from docrepo.lists import LISTS, TaskList, key_dates_due, list_tasks
 from docrepo.model import TODAY_BAND_NAMES, TODAY_BANDS, AgendaItem, Model, Task
-from docrepo.schedule import DueDate, due_of, is_open
+from docrepo.kinds import is_work
+from docrepo.schedule import DueDate, due_of
 
 #: The capacity view's number of weeks.
 CAPACITY_WEEKS = 9
@@ -104,7 +105,7 @@ def view_counts(m: Model, today: date, me: str | None) -> dict[str, int]:
     counts = {
         "today": len(m.today_items()),
         "unfiled": len(m.unfiled_captures()),
-        "tasks": sum(1 for t in m.tasks.values() if is_open(t)),
+        "tasks": sum(1 for t in m.tasks.values() if is_work(t)),  # a collection isn't counted (release 5.167, decision 780)
         "people": len(m.active_people()),
         "labels": len(m.active_labels()),
         "docs": sum(1 for d in m.documents if not m.only_in_discarded(d)),
@@ -250,10 +251,14 @@ def task_tree(m: Model, f: TreeFilter) -> list[Node]:
     matches with any of the filter's labels and any of its people.
     """
     def pass_state(t: Task) -> bool:
+        if t.collection:  # release 5.167 (decision 781): no state to show; archived, it's hidden as closed tasks are
+            return not t.discarded and (f.closed or t.state != "Closed")
         return (not t.discarded and (f.parked or t.state != "Parked") and (f.closed or t.state != "Closed")
                 and (f.routine or not t.recurrence))
 
     def pass_filter(t: Task) -> bool:
+        if t.collection and (f.people or f.priorities or f.urgent):  # its people, priority and Urgent are kept unseen (779)
+            return False
         return ((not f.labels or any(name in f.labels for name, _ in m.labels_of(t.id)))
                 and (not f.people or any(p in f.people for p in (*t.leads, *t.assignees)))
                 and (not f.priorities or (t.priority or "") in f.priorities)
@@ -689,7 +694,7 @@ def capacity_grid(conn: sqlite3.Connection, m: Model, weeks: list[date]) -> list
 
 
 def open_count(m: Model, test: Callable[[Task], bool]) -> int:
-    return sum(1 for t in m.tasks.values() if is_open(t) and test(t))
+    return sum(1 for t in m.tasks.values() if is_work(t) and test(t))
 
 
 def label_tasks(m: Model, name: str) -> list[tuple[str, bool]]:

@@ -8,7 +8,7 @@ import logging
 
 from docrepo.detail import chip, esc, row_state, state_chip
 from docrepo.model import Model
-from docrepo.schedule import is_open
+from docrepo.kinds import is_work
 from docrepo.ui import tokens
 from docrepo.ui.look import LOOK
 from docrepo.views import (
@@ -74,7 +74,7 @@ def _row_word(word: str) -> str:
 
 def priorities_of(m: Model) -> dict[str, str]:
     """Each open, ranked task's priority bucket, by its ID: its row's left edge (release 5.81, decision L9)."""
-    return {t.id: t.priority for t in m.tasks.values() if t.priority and is_open(t)}
+    return {t.id: t.priority for t in m.tasks.values() if t.priority and is_work(t)}
 
 
 def _shape(cells: list) -> list:
@@ -119,11 +119,12 @@ def tile_cells(m: Model, task_id: str, today, *, context: str = "", flat: bool =
     from docrepo.ui.tree_view import Line, state_icon
 
     t = m.task(task_id)
-    icon, colour = state_icon(t.state)
+    shown = task_tile.shown_state(t)  # a collection's folder (release 5.167)
+    icon, colour = state_icon(shown)
     if dim:
-        return Line(t.title, icon=icon, icon_tip=t.state, dim=True, tile=True), ""
+        return Line(t.title, icon=icon, icon_tip=shown, dim=True, tile=True), ""
     tl = task_tile.tile(m, task_id, today, task_tile.marks(m, today), hide=hide, flat=flat, under=under)
-    line = Line(t.title, icon=icon, icon_colour=colour, icon_tip=t.state, context=context, closed=tl.closed, tile=True, flag=tl.urgent,
+    line = Line(t.title, icon=icon, icon_colour=colour, icon_tip=shown, context=context, closed=tl.closed, tile=True, flag=tl.urgent,
                 parents=tl.parents, depth=tl.depth, depth_tip=tl.depth_tip, marks=tl.marks)
     return line, task_tile.days_html(tl.days)
 

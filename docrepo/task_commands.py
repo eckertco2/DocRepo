@@ -99,9 +99,32 @@ def edit_entries(m: Model, task_id: str) -> list[Entry]:
             SEPARATOR, Entry("Discard…", "discard", tip="Hide it, with a reason, if it was made by mistake. Nothing is deleted.")]
 
 
+def kind_entries(m: Model, task_id: str) -> list[Entry]:
+    """A row's lines for its kind (release 5.167, decision 779): a task's Make it a collection, with everything under it
+    too when there's something under it; a collection's Make it a task (not Quick tasks', which stays one)."""
+    from docrepo import collection_edits as ce
+
+    t = m.tasks.get(task_id)
+    if t is None or t.discarded:
+        return []
+    if t.collection:
+        if quick.is_parent(t):
+            return [Entry(ce.MAKE_TASK, enabled=False, tip="Quick tasks is built in, and stays a collection.")]
+        return [Entry(ce.MAKE_TASK, "make_task", tip="Work again: its state, dates, people and the rest come back as they were")]
+    out = [Entry(ce.MAKE, "collection", tip="A place for notes, files and tasks that isn't work: off Today, the board, the Timeline and the review")]
+    n = len(ce.below(m, task_id))
+    if n:
+        out.append(Entry(ce.MAKE_ALL, "collection_all", tip=f"It and the {n} under it, at every level"))
+    return out
+
+
 def add_to_entries(m: Model, task_id: str, today: date) -> list[Entry]:
-    """The Add to menu (decision 392): Today, or On Today ✓; the open meetings with their next dates; anyone else."""
-    if any(a.subject == task_id for a in m.today_items()):
+    """The Add to menu (decision 392): Today, or On Today ✓; the open meetings with their next dates; anyone else. A
+    collection isn't work, so Today is greyed for one (release 5.167, decision 780)."""
+    t = m.tasks.get(task_id)
+    if t is not None and t.collection:
+        out = [Entry("Today", enabled=False, tip="A collection isn't work: put one of its tasks on Today.")]
+    elif any(a.subject == task_id for a in m.today_items()):
         out = [Entry("On Today ✓   ·   open the Today view", "open_today")]
     else:
         out = [Entry("Today   ·   your list for today, straight away", "today", key="D")]

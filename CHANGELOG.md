@@ -4,6 +4,14 @@ One line per release, newest first: its number, the date it was built, and what 
 
 Since 2026-11-12, releases ship in weekly trains (the design workspace's `docs/mods/cold-eyes-plan.md`, decisions 464 to 468): each train has a heading with the day it was pushed to GitHub, over its releases. Releases keep their own numbers and tags.
 
+## Next train
+
+Built and merged since the last train, for the next one.
+
+| Release | Date | What |
+|---|---|---|
+| 5.167 | 2026-11-18 | Collections and a task's kind (the owner's voice memos of 2026-11-18). The task tree holds two things: **tasks** and **collections**. A collection is a container that isn't work, a place for notes, files, links, captures, tasks and other collections: a task's row's **Make it a collection** (or **Make it a collection, with everything under it**) makes one, taking it off Today and ending its wait, and **Make it a task** brings its state, dates, people and the rest back as they were. A collection has a folder where a task has its state circle, which offers **Archive** (hidden as closed tasks are), **Restore** and Make it a task; Edit task shows its Title, Parents, Labels and Description. It's left out of Today's lists, the lists, the Priorities board, the Timeline, the weekly review, the quick summary's work, Capacity, What-if, Ask for an update, Log progress and Add to Today, and kept in the task tree, the `#` list and the task pickers, search, Activity, All notes and its pages; the tasks under it are on everything as any task is. A task's **kind** is worked out, never stored: **routine** (Recurrence set, or a regular meeting's occurrence), **parent** (a task under it) or **single**, and Task.md says it in a Kind row. The Timeline's **Show routine** starts off, leaving out routine tasks, what's only under them and regular meetings' occurrences, as the task tree does; the Priorities board leaves occurrences out with routine. Quick tasks is a collection. Schema 30. |
+
 ## Second train of 2026-11-18
 
 Releases 5.156 and 5.157, pushed to GitHub on Wednesday 2026-11-18, after the train of 2026-11-18 (5.163) the same day and eight days before the Thursday they were built for, at the owner's word ("push today anything that is ready"), with everything merged by then (the design workspace's `docs/mods/train-2026-11-26-plan.md` and `docs/mods/notes-topics-plan.md`). They add glossary terms (Topic heading, Heading list, Topic, Occasion, By day, By meeting, By topic), so the train after them settles (decision 467). Schema 29, as before; no new package. The version stays 5.163, the highest release in: 5.156 and 5.157 were numbered before it and built after. Their corporate test is the design workspace's `handoff/docrepo/train-2026-11-18-second-test.md`.

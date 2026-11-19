@@ -25,6 +25,8 @@ MARKS = {"Not started": ("state-ns", "text2"), "In progress": ("state-ip", "acce
 UNDO_MS = 10_000
 #: The menu's line for closing a whole branch (decision 364).
 BRANCH = "Closed, with its {n} open subtask{s}"
+#: A collection's pick that makes it a task again (release 5.167, decision 781): ``BrowseWindow.set_state`` knows it.
+MAKE_TASK = "make-task"
 
 
 def state_icon(state: str) -> QIcon:
@@ -68,6 +70,8 @@ def state_menu(parent: QWidget | None, model: Model, task_id: str, pick: Callabl
     """The menu of states for a task: picking one calls ``pick(state, branch)``, where ``branch`` closes its open subtasks too.
     The current state is ticked and is where the keyboard starts. ``title`` names it as a submenu."""
     t = model.task(task_id)
+    if t.collection:
+        return collection_menu(parent, model, task_id, pick, title)
     menu = StateMenu(title, parent)
     menu.setObjectName("stateMenu")
     menu.setToolTipsVisible(True)
@@ -94,8 +98,46 @@ def state_menu(parent: QWidget | None, model: Model, task_id: str, pick: Callabl
     return menu
 
 
+def collection_menu(parent: QWidget | None, model: Model, task_id: str, pick: Callable[[str, bool], None], title: str = "State") -> QMenu:
+    """A collection's menu where a task has its states (release 5.167, decision 781): it has no state to show, so
+    Archive (and Archive, with everything under it) or, archived, Restore; and Make it a task. Archived is stored as
+    Closed, so the picks are a state's, with the same Undo."""
+    from docrepo import collection_edits as ce
+
+    t = model.task(task_id)
+    menu = QMenu("Collection" if title == "State" else title, parent)
+    menu.setObjectName("collectionMenu")
+    menu.setToolTipsVisible(True)
+    menu.setIcon(icon("folder", tokens.LIGHT["text2"]))
+    if t.state == "Closed":
+        a = menu.addAction(ce.RESTORE, lambda: pick(ce.restored_state(model, task_id), False))
+        a.setToolTip("Back among the open collections, with what's under it as it is")
+    elif ce.can_archive(model, task_id):
+        a = menu.addAction(ce.ARCHIVE, lambda: pick("Closed", False))
+        a.setToolTip("Hidden as closed tasks are, and shown with them. What's under it stays as it is.")
+        n = len(open_below(model, task_id))
+        if n:
+            a = menu.addAction(ce.ARCHIVE_ALL, lambda: pick("Closed", True))
+            a.setToolTip(f"It and the {n} open under it: collections archived, tasks closed. One Undo takes them all back.")
+    if not quick_built_in(model, task_id):
+        menu.addSeparator()
+        a = menu.addAction(ce.MAKE_TASK, lambda: pick(MAKE_TASK, False))
+        a.setToolTip("Work again: its state, dates, people and the rest come back as they were")
+    return menu
+
+
+def quick_built_in(model: Model, task_id: str) -> bool:
+    from docrepo import quick
+
+    return quick.is_parent(model.task(task_id))
+
+
 def picked_line(model: Model, task_id: str, state: str, others: int) -> str:
-    """What the status line says after a pick: "Closed: Order gaskets." or "Closed: Clean up and its 3 open subtasks."."""
+    """What the status line says after a pick: "Closed: Order gaskets." or "Closed: Clean up and its 3 open subtasks.".
+    A collection's says "Archived: Job aids." or "Restored: Job aids." (release 5.167)."""
+    if model.task(task_id).collection:
+        more = f" and {others} under it" if others else ""
+        return f"{'Archived' if state == 'Closed' else 'Restored'}: {model.task(task_id).title}{more}."
     more = f" and its {others} open subtask{'s' if others != 1 else ''}" if others else ""
     return f"{state}: {model.task(task_id).title}{more}."
 

@@ -31,11 +31,11 @@ from collections.abc import Collection
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 
-from docrepo import capacity, key_dates, quick, tasks, ties
+from docrepo import capacity, key_dates, kinds, tasks, ties
 from docrepo.dates import add_months, long_date, monday_of, to_date
 from docrepo.model import KeyDate, Model, Task
 from docrepo.pages import num
-from docrepo.schedule import days_in, due_of, is_open, start_of, week_of, windows
+from docrepo.schedule import days_in, due_of, start_of, week_of, windows
 from docrepo.stories import and_list
 
 #: What the rows can be ordered and their titles coloured by (decision 133), and "parent:" with a parent label's name.
@@ -489,8 +489,19 @@ def build(m: Model, today: date, start: date, weeks: int, order: str = "top", la
         return ((not labels or any(name in labels for name, _ in m.labels_of(t.id)))
                 and (not people or any(p in people for p in (*t.leads, *t.assignees))))
 
-    def base(t: Task) -> bool:
-        return is_open(t) and not quick.is_parent(t) and not (t.recurrence and not routine) and match(t)
+    hidden: dict[str, bool] = {}
+
+    def out_with_routine(task_id: str) -> bool:
+        """With Show routine off (release 5.167, decision 783): a routine task (a regular meeting's occurrences too) and
+        everything reached only through one, as the task tree hides a routine task's subtree."""
+        if task_id not in hidden:
+            hidden[task_id] = True  # a loop can't be reached only through itself
+            parents = [x for x in m.parents_of(task_id) if x in m.tasks]
+            hidden[task_id] = kinds.is_routine(m, m.task(task_id)) or (bool(parents) and all(out_with_routine(x) for x in parents))
+        return hidden[task_id]
+
+    def base(t: Task) -> bool:  # a collection isn't work (decision 780), Quick tasks being one
+        return kinds.is_work(t) and (routine or not out_with_routine(t.id)) and match(t)
 
     def dated(t: Task) -> bool:
         wins, dl = marks(t, start, end)
@@ -529,10 +540,21 @@ def build(m: Model, today: date, start: date, weeks: int, order: str = "top", la
 
     rows: list[Row] = []
 
+    def through(ids: list[str]) -> list[str]:
+        """The rows ``ids`` make: a collection has no row of its own, so its tasks stand in its place (decision 782); a
+        routine task has none while Show routine is off (decision 783)."""
+        out: list[str] = []
+        for x in ids:
+            t = m.tasks.get(x)
+            if t is None or (not routine and out_with_routine(x)):
+                continue
+            out += through(m.children_of(x)) if kinds.is_collection(t) else [x]
+        return list(dict.fromkeys(out))
+
     def walk(ids: list[str], depth: int) -> None:
-        for task_id in ordered([x for x in ids if has(x)]):
+        for task_id in ordered([x for x in through(ids) if has(x)]):
             t = m.task(task_id)
-            kids = [x for x in m.children_of(task_id) if has(x)]
+            kids = [x for x in through(m.children_of(task_id)) if has(x)]
             own = task_id in shown and dated(t)
             wins, dl = marks(t, start, end) if own else ((), None)
             due = due_of(t, today)
@@ -548,7 +570,7 @@ def build(m: Model, today: date, start: date, weeks: int, order: str = "top", la
                 walk(kids, depth + 1)
 
     walk([focus] if focus and focus in m.tasks else [t.id for t in m.top_level()], 0)
-    # The built-in Quick tasks (mods log round 2) has no dates of its own, so it's left out of them.
+    # A collection (release 5.167), the built-in Quick tasks among them, has no dates of its own, so it's left out of them.
     undated = () if plan and not list_undated else tuple(t.id for t in m.tasks.values() if base(t) and is_undated(t, today, m))
     return Timeline(start, weeks, tuple(rows), undated, bands(m, start, end), tuple(name for _, name in keys) if order != "top" else (),
                     typed_days)
@@ -573,7 +595,7 @@ def bands(m: Model, start: date, end: date) -> tuple[Band, ...]:
 
 def tasks_during(m: Model, band: Band, today: date) -> int:
     """How many open tasks, other than plant events and the key date's own task, have a window in a plant event's days."""
-    return sum(1 for t in m.tasks.values() if is_open(t) and not t.plant_event and not quick.is_parent(t)
+    return sum(1 for t in m.tasks.values() if kinds.is_work(t) and not t.plant_event
                and not (band.key_date is not None and t.id == band.task)
                and any(a <= band.end and b >= band.start for a, b in windows(t, today + _FAR)))
 

@@ -58,7 +58,7 @@ from docrepo import db, edits, key_dates, markup, meetings, notes_page, panel_ru
 from docrepo.detail import Pages, PageState, esc
 from docrepo.model import Model, Task, is_person
 from docrepo.panel_rules import OPEN_KEY, REST_WIDTH_KEY, WIDE_WIDTH_KEY, Hover, Monitor, Place, Rect
-from docrepo.schedule import is_open
+from docrepo.kinds import is_work
 from docrepo.ui import tokens
 from docrepo.ui.browse_window import TODAY_MINE_KEY
 from docrepo.ui.capture_window import note_drag, read_drop
@@ -142,7 +142,7 @@ class _Elided(QLabel):
 
 def edge_of(t: Task | None) -> str:
     """An open task's priority, as the colour of its row's left edge (release 5.81, decision L9), or "" for none."""
-    return tokens.colour(PRIORITY_EDGES[t.priority]) if t is not None and is_open(t) and t.priority in PRIORITY_EDGES else ""
+    return tokens.colour(PRIORITY_EDGES[t.priority]) if t is not None and is_work(t) and t.priority in PRIORITY_EDGES else ""
 
 
 class _EdgeFrame(QFrame):
