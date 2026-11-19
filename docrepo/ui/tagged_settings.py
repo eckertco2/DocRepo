@@ -45,7 +45,7 @@ TYPING_MS = 150
 TRIED_SHOWN = 30
 #: How each kind of hit is marked in the tester: a token for its background, and its words in the legend.
 HOW = {
-    "label": ("success_bg", "glossary label"), "alias": ("info_bg", "alias"), "pair": ("info_bg", "alias"),
+    "label": ("success_bg", "on the tag list"), "alias": ("info_bg", "alias"), "pair": ("info_bg", "alias"),
     "word": ("info_bg", "word alias"), "new": ("caution_bg", "new, from a pattern"), "never": ("", "Never a tag"),
 }
 
@@ -76,7 +76,7 @@ def marked(text: str, hits: list[tagged.Hit]) -> str:
 
 def legend() -> str:
     swatch = lambda key, words: f'<span style="background-color:{tokens.colour(key)}">&nbsp;{words}&nbsp;</span>'  # noqa: E731
-    return " ".join([swatch("success_bg", "glossary label"), swatch("info_bg", "alias"),
+    return " ".join([swatch("success_bg", "on the tag list"), swatch("info_bg", "alias"),
                      f'<span style="background-color:{tokens.colour("info_bg")}; text-decoration:underline">&nbsp;word alias&nbsp;</span>',
                      swatch("caution_bg", "new, from a pattern"),
                      f'<span style="color:{tokens.colour("text2")}; text-decoration:line-through">Never a tag</span>'])
@@ -121,8 +121,8 @@ class TaggedSettings(QWidget):
     # ---- the patterns ----
     def _build_patterns(self, lay: QVBoxLayout) -> None:
         lay.addWidget(QLabel("Tag patterns", objectName="fieldLabel"))
-        intro = QLabel("A glossary label is found however its parts are joined, with nothing to set here. A pattern finds tags "
-                       "that aren't in the glossary yet: each one found is put on what mentions it at once, marked new, and waits "
+        intro = QLabel("A label on the tag list is found however its parts are joined, with nothing to set here. A pattern finds tags "
+                       "that aren't on the tag list yet: each one found is put on what mentions it at once, marked new, and waits "
                        "under Suggested in the Tagged labels view. They're your plant's conventions, kept in settings.json in the "
                        "data root.", objectName="hint")
         intro.setWordWrap(True)
@@ -223,7 +223,7 @@ class TaggedSettings(QWidget):
         lay.addSpacing(8)
         lay.addWidget(QLabel("Never a tag", objectName="fieldLabel"))
         note = QLabel("Whole tags, or starts with *, that no pattern makes a tagged label, separated by commas: ABC123, API*. Not a "
-                      "tag adds to it. A glossary label is always found.", objectName="hint")
+                      "tag adds to it. A label on the tag list is always found.", objectName="hint")
         note.setWordWrap(True)
         lay.addWidget(note)
         self.never_box = QLineEdit()
@@ -239,7 +239,7 @@ class TaggedSettings(QWidget):
         lay.addWidget(QLabel("Try it", objectName="fieldLabel"))
         self.try_box = QPlainTextEdit()
         self.try_box.setPlaceholderText("Paste or type some text, such as: Seal faces for P-204A/B are late, and FIC-221 reads high.")
-        self.try_box.setAccessibleName("Text to try the glossary and patterns on")
+        self.try_box.setAccessibleName("Text to try the tag list and patterns on")
         self.try_box.setFixedHeight(72)
         self.try_box.textChanged.connect(lambda: self._timer.start())
         lay.addWidget(self.try_box)
@@ -333,7 +333,7 @@ class TaggedSettings(QWidget):
     def try_everything(self) -> None:
         patterns, never = self.draft()
         if not patterns:
-            self.tried.setHtml(f'<p style="color:{tokens.colour("text2")}">Add a pattern first: a glossary label needs none.</p>')
+            self.tried.setHtml(f'<p style="color:{tokens.colour("text2")}">Add a pattern first: a label on the tag list needs none.</p>')
             self.tried.show()
             return
         found, items = self.try_all(patterns, never)

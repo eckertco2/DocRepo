@@ -202,7 +202,7 @@ def test_a_discarded_capture_mentions_nothing(sample_root, tmp_path):
 def test_adding_and_editing_check_what_they_are_given(sample_root, tmp_path):
     conn, _, _ = sample_root
     import_csv(conn, tmp_path, TAGS)
-    with pytest.raises(tagged.TaggedError, match="V-110 is in the glossary already, and V 110 is it written another way"):
+    with pytest.raises(tagged.TaggedError, match="V-110 is on the tag list already, and V 110 is it written another way"):
         tagged.add_label(conn, "V 110", AT)
     v110 = next(lb for lb in tagged.read_labels(conn) if lb.label == "V-110")
     with pytest.raises(tagged.TaggedError, match="is R-101's already"):

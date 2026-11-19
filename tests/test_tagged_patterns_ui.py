@@ -150,7 +150,7 @@ def test_suggested_comes_first_most_mentioned_with_where_its_seen(browse, ctx):
     keys = [k for k in browse.tree.keys() if k]
     assert keys == [("tagged", "PDT4410"), ("tagged", "TT2215"), ("tagged", "V110")] and browse.sel == ("tagged", "PDT4410")
     texts = [str(browse.tree.topLevelItem(i).data(0, HTML_ROLE)) for i in range(browse.tree.topLevelItemCount())]
-    assert "Suggested" in texts[0] and "Glossary" in texts[3]
+    assert "Suggested" in texts[0] and "Tag list" in texts[3]
     m = Model(ctx.conn)
     top = m.task(m.chains_of("T000008")[0][0]).title
     assert "From Instrument tag" in texts[1] and f"in {esc(top)} and 1 more" in texts[1]  # its task, and the unfiled capture
@@ -158,7 +158,7 @@ def test_suggested_comes_first_most_mentioned_with_where_its_seen(browse, ctx):
     assert "Tagged label · suggested" in page and "New: found by the Instrument tag pattern" in page
     layout = browse.actions_layout
     labels = [layout.itemAt(i).widget().text() for i in range(layout.count()) if layout.itemAt(i).widget()]
-    assert {"Add to glossary…", "Same as…", "Not a tag"} <= set(labels) and "Edit…" not in labels
+    assert {"Add to the tag list…", "Same as…", "Not a tag"} <= set(labels) and "Edit…" not in labels
 
 
 def test_add_to_glossary_through_its_dialog(browse, ctx):
@@ -169,7 +169,7 @@ def test_add_to_glossary_through_its_dialog(browse, ctx):
     browse.refresh()
 
     def run(dialog):
-        assert isinstance(dialog, TaggedLabelDialog) and dialog.windowTitle() == "Add PDT-4410 to the glossary"
+        assert isinstance(dialog, TaggedLabelDialog) and dialog.windowTitle() == "Add PDT-4410 to the tag list"
         dialog.description.setText("Filter differential pressure")
         return True
     browse.run_dialog = run
@@ -177,8 +177,8 @@ def test_add_to_glossary_through_its_dialog(browse, ctx):
     tagged_list.accept(browse, "PDT4410")
     lb = browse.model().tagged.by_key["PDT4410"]
     assert lb.status == "glossary" and lb.description == "Filter differential pressure"
-    assert "is in the glossary now" in browse.status.text() and browse.sel == ("tagged", "PDT4410")
-    assert "Found by the Instrument tag pattern, then added to the glossary" in browse.page.toPlainText()
+    assert "is on the tag list now" in browse.status.text() and browse.sel == ("tagged", "PDT4410")
+    assert "Found by the Instrument tag pattern, then added to the tag list" in browse.page.toPlainText()
 
 
 def test_same_as_moves_its_mentions_to_another_label(browse, ctx, monkeypatch):
