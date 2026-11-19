@@ -1,4 +1,4 @@
-"""The browse tool's form for importing the tagged labels' glossary from Excel or CSV (release 5.79, decision 371).
+"""The browse tool's form for importing the tag list from Excel or CSV (release 5.79, decision 371).
 
 Pick the file (and an .xlsx's sheet); each column gets a dropdown for what it fills, proposed from its header; the
 preview says what Import would add, change, merge and refuse. Nothing is written until Import, and the file is only
@@ -44,7 +44,7 @@ class TaggedImportDialog(QDialog):
     def __init__(self, parent: QWidget | None, ctx: AppContext) -> None:
         super().__init__(parent)
         self.ctx = ctx
-        self.setWindowTitle("Import tagged labels")
+        self.setWindowTitle("Import the tag list")
         self.setStyleSheet(f"QDialog {{ background: {C.content}; }} QLabel#error {{ background: {C.critical_bg}; color: {C.critical}; padding: 6px 10px; }}")
         self.resize(820, 680)
         self.path: Path | None = None

@@ -25,7 +25,7 @@ from docrepo.views import ASKS, ViewDef
 ICONS = {
     "today": "sun", "review": "review", "unfiled": "unfiled", "tasks": "tasks", "due": "due", "reminders": "reminders", "waiting": "waiting",
     "mine": "person", "unplanned": "unplanned", "agenda": "agenda", "activity": "activity", "priorities": "priorities", "timeline": "timeline",
-    "capacity": "capacity", "people": "people", "labels": "labels", "tagged": "tagged", "templates": "templates", "docs": "file", "discarded": "discarded",
+    "capacity": "capacity", "people": "people", "labels": "labels", "tagged": "tagged", "glossaries": "tagged", "templates": "templates", "docs": "file", "discarded": "discarded",
     "settings": "settings",
 }
 #: The views pinned at the foot (decision 83).

@@ -78,23 +78,23 @@ def view(w: BrowseWindow) -> None:
     labels, counts, more = rows(w)
     sug = tagged.suggestions(m) if tg else []
     mentioned = sum(1 for lb in tg.glossary() if counts.get(lb.id))
-    total = f"{len(tg.glossary()):,} in the glossary, {mentioned:,} mentioned" + (f", {len(sug):,} suggested" if sug else "")
+    total = f"{len(tg.glossary()):,} on the tag list, {mentioned:,} mentioned" + (f", {len(sug):,} suggested" if sug else "")
     w._set_head("Tagged labels", "Plant tags found in every capture, email, document and notes page, however their parts are joined. "
-                "The glossary is in docs.db.", total if tg else "")
+                "The tag list is in docs.db.", total if tg else "")
     if tg:
         w._check("Mentioned only", bool(w.tagged_mentioned), lambda on: set_mentioned(w, on), "Only the labels something mentions")
     w._button("Import…", lambda: import_glossary(w))
-    w._button("Export…", lambda: export(w), enabled=bool(tg.glossary()), tip="Write the glossary as a CSV to Exports in the data root")
+    w._button("Export…", lambda: export(w), enabled=bool(tg.glossary()), tip="Write the tag list as a CSV to Exports in the data root")
     w._button("Add…", lambda: add(w), tip="Add a tagged label by hand")
     w._button("Patterns…", lambda: show_patterns(w), tip="Tag patterns, Never a tag and the tester, in Settings")
     w.tree.set_columns(["Tagged label", "Aliases", "Items"], [0, 180, 60])
     if not tg:
-        w.tree.add_row(None, None, ['<span class="sub">No glossary yet. Import the plant&#8217;s tag list from Excel or CSV: a tagged '
+        w.tree.add_row(None, None, ['<span class="sub">No tag list yet. Import the plant&#8217;s tag list from Excel or CSV: a tagged '
                                     'label, its description and its aliases in each row. Or add tag patterns in Settings, and the tags '
                                     'they find are suggested here.</span>'], selectable=False)
         return
     if sug:  # release 5.80: what the patterns found, waiting for the owner (decision 374)
-        w.tree.add_row(None, None, [f'<b>Suggested</b> <span class="sub">{len(sug):,} · found by a tag pattern, not in the glossary: '
+        w.tree.add_row(None, None, [f'<b>Suggested</b> <span class="sub">{len(sug):,} · found by a tag pattern, not on the tag list: '
                                     'open one to add it, make it an alias or turn it down</span>'], group_ground(), selectable=False, span=True)
         for s in sug[:ROWS]:
             lb = s.label
@@ -105,7 +105,7 @@ def view(w: BrowseWindow) -> None:
                            tip=f"{lb.label}: new, found by the {lb.pattern} pattern")
         if len(sug) > ROWS:
             w.tree.add_row(None, None, [f'<span class="sub">And {len(sug) - ROWS:,} more suggested.</span>'], selectable=False)
-        w.tree.add_row(None, None, [f'<b>Glossary</b> <span class="sub">{len(tg.glossary()):,}</span>'], group_ground(), selectable=False, span=True)
+        w.tree.add_row(None, None, [f'<b>Tag list</b> <span class="sub">{len(tg.glossary()):,}</span>'], group_ground(), selectable=False, span=True)
     for lb in labels:
         # The row recipe (the list rows review): the label, its description quiet after it, as People's aliases are.
         cell = (esc(lb.label) + (f' <span class="sub">{esc(lb.description)}</span>' if lb.description else "") if LOOK.classic
@@ -116,10 +116,10 @@ def view(w: BrowseWindow) -> None:
         w.tree.add_row(None, None, [f'<span class="sub">And {more:,} more. Search finds any of them, however it&#8217;s typed.</span>'],
                        selectable=False)
     if not labels and tg.glossary():
-        w.tree.add_row(None, None, [f'<span class="sub">Nothing mentions any of the glossary&#8217;s {len(tg.glossary()):,} labels yet. '
+        w.tree.add_row(None, None, [f'<span class="sub">Nothing mentions any of the tag list&#8217;s {len(tg.glossary()):,} labels yet. '
                                     'Untick Mentioned only to list them.</span>'], selectable=False)
     elif not labels:
-        w.tree.add_row(None, None, ['<span class="sub">No glossary yet: Add to glossary on a suggestion, or Import… the plant&#8217;s '
+        w.tree.add_row(None, None, ['<span class="sub">No tag list yet: Add to the tag list on a suggestion, or Import… the plant&#8217;s '
                                     'tag list.</span>'], selectable=False)
 
 
@@ -132,14 +132,14 @@ def set_mentioned(w: BrowseWindow, on: bool) -> None:
 def actions(w: BrowseWindow, key: str) -> None:
     lb = w.model().tagged.by_key.get(key)
     if lb is not None and lb.status == "suggested":  # release 5.80, item 107
-        w._action("Add to glossary…", lambda: accept(w, key), "Make it an ordinary tagged label, with a description", primary=True)
+        w._action("Add to the tag list…", lambda: accept(w, key), "Make it an ordinary tagged label, with a description", primary=True)
         w._action("Same as…", lambda: same_as(w, key), "Make it an alias of another tagged label, and move its mentions there")
         w._action("Not a tag", lambda: not_a_tag(w, key), "Remove it everywhere and put it on Never a tag, so no pattern suggests it again")
         w._action("Patterns…", lambda: show_patterns(w), "Tag patterns, Never a tag and the tester, in Settings")
         return
     w._action("Edit…", lambda: edit(w, key), "Change its description and aliases", icon_name="edit")
-    w._action("Import…", lambda: import_glossary(w), "Import the glossary from Excel or CSV")
-    w._action("Export…", lambda: export(w), "Write the glossary as a CSV to Exports in the data root")
+    w._action("Import…", lambda: import_glossary(w), "Import the tag list from Excel or CSV")
+    w._action("Export…", lambda: export(w), "Write the tag list as a CSV to Exports in the data root")
 
 
 def write_pages(w: BrowseWindow, out: edits.Outcome, task_ids: list[str] | None = None) -> None:
@@ -216,14 +216,14 @@ def choose_label(w: BrowseWindow, names: list[str], label: str) -> str | None:
 def accept(w: BrowseWindow, key: str) -> None:
     """Add to glossary: a suggestion becomes an ordinary tagged label, with a description and any aliases."""
     lb = w.model().tagged.by_key[key]
-    dialog = TaggedLabelDialog(w, lb.label, "", [], check_aliases=alias_check(w, lb.id), title=f"Add {lb.label} to the glossary")
+    dialog = TaggedLabelDialog(w, lb.label, "", [], check_aliases=alias_check(w, lb.id), title=f"Add {lb.label} to the tag list")
     if not w.run_dialog(dialog):
         return
     _, description, aliases = dialog.values()
 
     def change() -> edits.Outcome:
         tagged.accept(w.conn, key, description, aliases)
-        out = edits.Outcome(f"{lb.label} is in the glossary now: it's found however it's written, and no longer marked new.")
+        out = edits.Outcome(f"{lb.label} is on the tag list now: it's found however it's written, and no longer marked new.")
         write_pages(w, out)
         return out
     w._do(change, ("tagged", key))
@@ -237,7 +237,7 @@ def same_as(w: BrowseWindow, key: str) -> None:
     lb = tg.by_key[key]
     glossary = tg.glossary()
     if not glossary:
-        w.say("There's no glossary label to make it an alias of yet. Import the glossary, or Add to glossary.", error=True)
+        w.say("There's no tagged label on the tag list to make it an alias of yet. Import the tag list, or Add to the tag list.", error=True)
         return
     value = choose_label(w, [x.label for x in glossary], lb.label)
     if not value or not value.strip():
@@ -245,7 +245,7 @@ def same_as(w: BrowseWindow, key: str) -> None:
     target = next((x for x in glossary if x.key == tagged.key_of(value)), None) or tagged.label_named(
         tagged.Tagged({x.id: x for x in glossary}), value)
     if target is None:
-        w.say(f"{value.strip()} isn't in the glossary. Pick a tagged label from it.", error=True)
+        w.say(f"{value.strip()} isn't on the tag list. Pick a tagged label from it.", error=True)
         return
 
     def change() -> edits.Outcome:
@@ -294,7 +294,7 @@ def add(w: BrowseWindow, label: str = "") -> str | None:
 
     def change() -> edits.Outcome:
         tagged.add_label(w.conn, name, w._now(), description, aliases)
-        out = edits.Outcome(f"Added {name} to the glossary, and matched everything again.")
+        out = edits.Outcome(f"Added {name} to the tag list, and matched everything again.")
         write_pages(w, out)
         return out
     if w._do(change) is None:
@@ -308,7 +308,7 @@ def add(w: BrowseWindow, label: str = "") -> str | None:
 # ---- the owner's own changes on a capture or document (decision 376) ----
 def pick(w: BrowseWindow, names: list[str]) -> str | None:
     """A tagged label to add by hand: picked from the glossary, or typed. ``w.pick_tagged`` calls this; tests replace it."""
-    value, ok = QInputDialog.getItem(w, "Add a tagged label", "A tagged label from the glossary, or a new one:", names, 0, True)
+    value, ok = QInputDialog.getItem(w, "Add a tagged label", "A tagged label from the tag list, or a new one:", names, 0, True)
     return value if ok else None
 
 
@@ -351,7 +351,7 @@ def add_to(w: BrowseWindow, item_kind: str, item_id: str) -> None:
         return
     key = tagged.key_of(value)
     if key not in tg.by_key:
-        if not w.confirm("Add to the glossary", f"{value.strip()} isn't in the glossary. Add it, then put it on this "
+        if not w.confirm("Add to the tag list", f"{value.strip()} isn't on the tag list. Add it, then put it on this "
                                                 f"{'capture' if item_kind == 'capture' else 'document'}?"):
             return
         key = add(w, value.strip())

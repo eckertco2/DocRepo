@@ -1862,7 +1862,7 @@ class Pages:
         page; ``item`` ("capture:C000123") adds × to remove it from that item. A suggested one, new from a pattern (release
         5.80, decision 374), is marked new, with the pattern's name on hover."""
         if lb.status == "suggested":
-            tip = f"New: found by the {lb.pattern or ''} pattern, and not in the glossary yet"
+            tip = f"New: found by the {lb.pattern or ''} pattern, and not on the tag list yet"
             out = (f'<a href="tagged:{quote(lb.key, safe="")}" title="{esc(tip)}"><span class="tgn">&nbsp;{esc(lb.label)}&nbsp;</span></a>'
                    '<span class="tgw">&nbsp;new</span>')
         else:
@@ -1878,7 +1878,7 @@ class Pages:
         """A capture's or document's tagged labels, each with × (decision 376), then Add, and any removed by the owner."""
         tg = self.m.tagged
         chips = [self.tagged_chip(lb, m.n if m else 0, f"{kind}:{item_id}") for lb, m in tg.item(kind, item_id)]
-        add = link(f"taggedadd:{kind}:{item_id}", "Add", "Add a tagged label by hand, from the glossary", "tq")
+        add = link(f"taggedadd:{kind}:{item_id}", "Add", "Add a tagged label by hand, from the tag list", "tq")
         removed = tg.removed(kind, item_id)
         back = ('<br><span class="sub">Removed by you: ' + ", ".join(
             link(f"taggedback:{kind}:{item_id}:{quote(lb.key, safe='')}", lb.label, "Add it back") for lb in removed) + "</span>") if removed else ""
@@ -1929,6 +1929,30 @@ class Pages:
             return f'{link(f"task:{t.id}", f"Notes of {t.title}")} <span class="sub">{t.id} · its notes page</span>', "", [t.id]
         return f'{self.task_link(t.id)} <span class="sub">{t.id} · the task&#8217;s own fields</span>', t.created or "", [t.id]
 
+    #: The most glossary rows a tagged label's page shows for it (release 5.171): a tag in more than this many is rare.
+    GLOSSARY_ROWS = 5
+
+    def _glossary_rows(self, key: str, description: str = "") -> list[tuple[str, str]]:
+        """A tagged label's rows in the glossaries with a tag column (release 5.171, the glossaries plan's decision 805):
+        for each, the glossary's name and the row's other columns, "Line: Line 2 · Service: Reactor feed"."""
+        if self.conn is None:
+            return []
+        from docrepo import glossaries
+
+        try:
+            found = glossaries.rows_for_tag(self.conn, key)
+        except sqlite3.Error:
+            return []
+        out = []
+        for tr in found[:self.GLOSSARY_ROWS]:
+            g = tr.glossary
+            cells = [f'<span class="sub">{esc(c)}:</span> {esc(tr.cells[i])}' for i, c in enumerate(g.columns)
+                     if i != g.tag_column and i < len(tr.cells) and tr.cells[i] and tr.cells[i] != description]  # not the label's own description again
+            out.append((f"In {esc(g.name)}", " · ".join(cells) or none_text("Nothing else in its row")))
+        if len(found) > self.GLOSSARY_ROWS:
+            out.append(("", none_text(f"And {len(found) - self.GLOSSARY_ROWS} more rows in the glossaries")))
+        return out
+
     def tagged_page(self, key: str) -> str:
         """A tagged label's page (decision 379): its description and aliases, how it's found, how it's written, and every
         item that mentions it, newest first, under each top-level task, with the words around it."""
@@ -1941,12 +1965,13 @@ class Pages:
         source = f" from {esc(lb.source)}" if lb.source else ""
         suggested = lb.status == "suggested"
         came = {"import": f"Imported{source}", "hand": "Added by hand",
-                "pattern": f"Found by the {esc(lb.pattern or '')} pattern" + ("" if suggested else ", then added to the glossary")}.get(lb.came, "")
-        found = (f"New: found by the <b>{esc(lb.pattern or '')}</b> pattern, spelled as its mask is, and not in the glossary"
-                 if suggested else "In the glossary: " + (f"however its parts are joined ({esc(', '.join(tagged.spellings(lb.label)))})"
+                "pattern": f"Found by the {esc(lb.pattern or '')} pattern" + ("" if suggested else ", then added to the tag list")}.get(lb.came, "")
+        found = (f"New: found by the <b>{esc(lb.pattern or '')}</b> pattern, spelled as its mask is, and not on the tag list"
+                 if suggested else "On the tag list: " + (f"however its parts are joined ({esc(', '.join(tagged.spellings(lb.label)))})"
                                                           if len(tagged.spellings(lb.label)) > 1 else "as it's written")
                  + (", and by its aliases" if lb.aliases else ""))
         rows = [*([] if suggested else [("Description", esc(lb.description) or none_text("None")),
+                                        *self._glossary_rows(key, lb.description),
                                         ("Aliases", esc("; ".join(lb.aliases)) or none_text("None"))]),
                 ("How it's found", found),
                 ("Written as", ", ".join(f'<span class="tg">&nbsp;{esc(w)}&nbsp;</span> <span class="tq">{n}</span>'
@@ -1964,7 +1989,7 @@ class Pages:
         body = "".join(f'<p class="sec">{self.task_link(g) if g else "Not filed yet"} <span class="sub">{len(groups[g])}</span></p>'
                        + "".join(e for _, e in sorted(groups[g], key=lambda x: x[0], reverse=True)) for g in order)
         crumbs = "Tagged label" if lb.status == "glossary" else "Tagged label · suggested"
-        what = ('<p class="note">Suggested (decision 374): it&#8217;s on what mentions it already, marked new. <b>Add to glossary</b> '
+        what = ('<p class="note">Suggested (decision 374): it&#8217;s on what mentions it already, marked new. <b>Add to the tag list</b> '
                 'makes it an ordinary tagged label, with a description. <b>Same as…</b> makes it an alias of another label and moves '
                 'its mentions there. <b>Not a tag</b> removes it everywhere and puts it on Never a tag, so no pattern suggests it '
                 'again.</p>') if suggested else ""
