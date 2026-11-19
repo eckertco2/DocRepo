@@ -132,7 +132,7 @@ def test_the_menu_is_the_same_from_state_on_in_the_tree_and_on_today(browse, ctx
     tree_menu = browse.tree.row_menu(row(browse, REACTOR))
     browse.set_view("today")
     today_menu = browse.tree.row_menu(row(browse, REACTOR))
-    assert labels(tree_menu)[0] == "Open"
+    assert labels(tree_menu)[:2] == ["Work on it", "Open the task page"]  # as Settings' Open a task in says (release 5.174, decision 815)
     assert tail(tree_menu) == tail(today_menu)
     assert tail(tree_menu)[:2] == ["State", "Add to"]
     assert {"Note…", "Update…", "New task under this one…", "Edit", "Priority", "Copy"} <= set(tail(tree_menu))
@@ -174,7 +174,7 @@ def test_a_board_card_and_a_timeline_card_get_the_tile_menu(browse, monkeypatch)
     monkeypatch.setattr(browse, "run_menu", lambda menu, at: shown.append(labels(menu)))
     browse.card_menu(REACTOR, QPoint(0, 0))
     browse.card_menu(REACTOR, QPoint(0, 0), open_it=False)
-    assert shown[0][0] == "Open" and "Priority" in shown[0]
+    assert shown[0][0] == "Work on it" and "Priority" in shown[0]
     assert shown[1][0] != "Open" and "State" in shown[1]
 
 
@@ -192,7 +192,7 @@ def test_a_right_click_on_a_task_link_on_a_page_is_the_tile_menu(browse, monkeyp
     shown = []
     monkeypatch.setattr(browse, "run_menu", lambda menu, at: shown.append(labels(menu)))
     assert browse.page_link_menu(f"task:{REACTOR}", QPoint(0, 0))
-    assert shown and shown[0][0] == "Open"
+    assert shown and shown[0][0] == "Work on it"
     assert not browse.page_link_menu("person:P001", QPoint(0, 0))
 
 

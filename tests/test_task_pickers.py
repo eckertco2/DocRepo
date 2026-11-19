@@ -346,7 +346,11 @@ def search(env):
     s.deleteLater()
 
 
-def test_task_search_walks_the_tree_with_right_and_left(search):
+def test_task_search_walks_the_tree_with_right_and_left(search, monkeypatch):
+    from docrepo.ui import task_open
+
+    # A task opened opens as Settings' Open a task in says (release 5.174, decision 815), through the one helper.
+    monkeypatch.setattr(task_open, "open_task", lambda browse, task_id, other=False, **_: search.app.opened.append(("open", task_id, other)))
     p = search.picker
     assert "Enter opens its page" in p.note.text() and p.note.isVisible()
     p.search.setText("verif")
@@ -358,7 +362,7 @@ def test_task_search_walks_the_tree_with_right_and_left(search):
     assert p.list.depth == 0 and current(p) == "Verification walkthrough readiness"
     key(p, Qt.Key.Key_Right)
     key(p, Qt.Key.Key_Return)
-    assert search.app.opened == [("page", "T000017")]
+    assert search.app.opened == [("open", "T000017", False)]
 
 
 def test_task_search_ctrl_enter_does_the_other(search):
