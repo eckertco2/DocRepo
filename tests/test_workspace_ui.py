@@ -401,7 +401,7 @@ def test_the_page_says_its_words(setup):
     browse, work = setup
     w = opened(browse, work.crane)
     text = w.text()
-    for words in ("Crane for the fan lift", "Current status", "Asked Mike for the crane vendor's quote", "Follow up with Mike",
+    for words in ("Crane for the fan lift", "Latest update", "Asked Mike for the crane vendor's quote", "Follow up with Mike",
                   "Crane on site", "Cooling tower weekly 10 Nov"):
         assert words in text, words
     assert w.pane.facts.isHidden() and w.pane.history.isHidden()

@@ -222,7 +222,7 @@ def _projects(w: BrowseWindow) -> None:
 def project_actions(w: BrowseWindow, task_id: str) -> list[tuple[str, Callable[[], None], str]]:
     """Step 4's commands on a project's row (decision 497): Mark reviewed (R), Update, Park, Close and Review every…."""
     return [("Mark reviewed", lambda: mark_reviewed(w, task_id), "Reviewed: off this step until its interval comes round (R)"),
-            ("Update", lambda: w.open_capture(task=task_id, mode="update"), "Update its status, state or dates in the capture window (U)"),
+            ("Update", lambda: w.open_capture(task=task_id, mode="update"), "Update its state, latest update or dates in the capture window (U)"),
             ("Park", lambda: w.set_state(task_id, "Parked"), "Park it: off the lists and the review until you take it up again"),
             ("Close", lambda: close(w, task_id), "Close it; with open subtasks, they close too, after asking"),
             ("Review every…", lambda: review_every_menu(w, task_id), "How often it comes up for review: every 1, 2 or 4 weeks, or never")]

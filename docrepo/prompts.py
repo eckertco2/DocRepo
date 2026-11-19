@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from docrepo.model import Model
+from docrepo.tasks import shown_name
 from docrepo.safe_fs import SafeFS
 
 log = logging.getLogger(__name__)
@@ -136,7 +137,7 @@ def task_blocks(
         if "description" in st.fields and t.description:
             blocks.append((f"Description, {t.title}", t.description))
         if "current_status" in st.fields and t.current_status:
-            blocks.append((f"Current status, {t.title}", t.current_status))
+            blocks.append((f"Latest update, {t.title}", t.current_status))
         raw = model.raw_log_of(tid)
         if include_raw and "raw_text_all" in st.fields:
             for e in raw:
@@ -156,7 +157,7 @@ def task_blocks(
         if "summary_log" in st.fields:
             blocks += [(f"Summary, {t.title}, {s.at[:16]}", s.text) for s in model.summaries_of(tid)]
         if "status_log" in st.fields:
-            blocks += [(f"Status change, {t.title}, {e.at[:16]}", f"{e.field}: {e.from_value or 'None'} -> {e.to_value or 'None'}")
+            blocks += [(f"History, {t.title}, {e.at[:16]}", f"{shown_name(e.field)}: {e.from_value or 'None'} -> {e.to_value or 'None'}")
                        for e in model.status_log_of(tid)]
         if "events" in st.fields and t.deadline:
             blocks.append((f"Event, {t.title}", f"{t.deadline}: {t.deadline_desc or 'deadline'}"))

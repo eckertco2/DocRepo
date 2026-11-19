@@ -26,13 +26,13 @@ def test_the_preview_changes_nothing_and_apply_does_what_it_showed(sample_conn):
     assert [o.task for o in shown] == ["T000012", "T000016"] and not any(o.problem for o in shown)
     assert [c.field for c in shown[0].changes] == ["Due", "Assignees", "Labels"]  # T000012 is already In progress
     assert [c.field for c in shown[1].changes] == ["State", "Due", "Assignees", "Labels"]
-    assert bulk.summary(shown) == "2 tasks change, 7 changes in their status logs."
+    assert bulk.summary(shown) == "2 tasks change, 7 changes in their histories."
     done = bulk.run(conn, SETTINGS, ["T000012", "T000016"], edit, AT, VIA)
     assert [(o.task, o.changes) for o in done] == [(o.task, o.changes) for o in shown]
     m = Model(conn)
     assert m.task("T000012").assignees == ["P004", "P003"] and m.task("T000016").labels == ["Safety", "Lifting"]
     assert ("Assignees", "Mike Ortiz", "Mike Ortiz, Tom Becker") in logged(conn, "T000012")
-    assert bulk.summary(done, done=True) == "Changed 2 tasks: 7 changes in their status logs."
+    assert bulk.summary(done, done=True) == "Changed 2 tasks: 7 changes in their histories."
 
 
 def test_people_replaced_labels_removed_and_dates_cleared(sample_conn):
@@ -42,7 +42,7 @@ def test_people_replaced_labels_removed_and_dates_cleared(sample_conn):
     t = Model(conn).task("T000019")
     assert (t.labels, t.leads, t.deadline) == ([], ["P002"], None)
     assert logged(conn, "T000019") == [("Deadline", "2026-10-19", None), ("Lead", "Me", "Priya Shah"), ("Labels", "Safety", None)]
-    assert bulk.summary(out) == "1 task changes, 3 changes in its status log."
+    assert bulk.summary(out) == "1 task changes, 3 changes in its history."
     nothing = bulk.run(conn, SETTINGS, ["T000019"], bulk.BulkEdit(remove_labels=["Line 1"]), AT, VIA)  # inherited, not its own
     assert nothing[0].changes == [] and bulk.summary(nothing, done=True) == "Nothing changed."
 
@@ -54,7 +54,7 @@ def test_moving_several_tasks_skips_one_that_would_go_under_itself(sample_conn):
     m = Model(conn)
     assert m.parents_of("T000016") == ["T000012"] and m.parents_of("T000008") == ["T000001"]
     assert logged(conn, "T000016") == [("Parents", None, "Rigging plan")]
-    assert bulk.summary(out, done=True) == "Changed 1 task: 1 change in its status log. 2 were left as they were."
+    assert bulk.summary(out, done=True) == "Changed 1 task: 1 change in its history. 2 were left as they were."
     also = bulk.run(conn, SETTINGS, ["T000015"], bulk.BulkEdit(parent="T000009", parent_how="also"), AT, VIA)
     assert Model(conn).parents_of("T000015") == ["T000003", "T000008", "T000009"] and len(also[0].changes) == 1
     moved = bulk.run(conn, SETTINGS, ["T000015"], bulk.BulkEdit(parent="T000009"), AT, VIA)
@@ -65,7 +65,7 @@ def test_moving_several_tasks_skips_one_that_would_go_under_itself(sample_conn):
 def test_bulk_edit_writes_the_pages(sample_root):
     conn, root, fs = sample_root
     out = edits.bulk_edit(conn, root, fs, SETTINGS, ["T000016", "T000017"], bulk.BulkEdit(fields={"reminder": "2026-10-12"}), AT)
-    assert out.message == "Changed 2 tasks: 2 changes in their status logs." and not out.problems
+    assert out.message == "Changed 2 tasks: 2 changes in their histories." and not out.problems
     assert "Reminder: None → 2026-10-12 · Browse tool" in (root / "Tasks" / "T000017" / "Task.md").read_text(encoding="utf-8")
 
 
@@ -91,7 +91,7 @@ def test_plant_event_ticked_or_unticked_for_several(sample_conn):
     """Release 5.9 (M0028): Edit selected ticks or unticks Plant event; a task that already has it isn't changed."""
     conn = sample_conn
     done = bulk.run(conn, SETTINGS, ["T000012", "T000016"], bulk.BulkEdit(fields={"plant_event": True}), AT, VIA)
-    assert bulk.summary(done, done=True) == "Changed 2 tasks: 2 changes in their status logs."
+    assert bulk.summary(done, done=True) == "Changed 2 tasks: 2 changes in their histories."
     assert ("Plant event", "No", "Yes") in logged(conn, "T000012")
     again = bulk.preview(conn, SETTINGS, ["T000012"], bulk.BulkEdit(fields={"plant_event": True}), AT, VIA)
     assert not again[0].changes

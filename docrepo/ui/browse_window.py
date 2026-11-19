@@ -797,11 +797,11 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
             back = self._do(lambda: edits.set_states(self.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, was, self._now(), self.model()))
             if back is None:
                 return
-            self.say("Set back. The status log keeps both changes.")
+            self.say("Set back. The history keeps both changes.")
             if after is not None:
                 after()
             if tell is not None:
-                tell("Set back. The status log keeps both changes.", None)
+                tell("Set back. The history keeps both changes.", None)
 
         self.say_undo(line, undo)
         if after is not None:
@@ -1854,7 +1854,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
     def discard_capture(self, capture_id: str) -> None:
         reason = self.ask_reason("Discard capture", f"Discard {capture_id}? It leaves its tasks' raw text logs, the Unfiled view and "
                                                     "search, and is kept in the Discarded view, where Bring back restores it. Its folder "
-                                                    "stays, and any changes it made to tasks stay in their status logs.\n\nWhy?")
+                                                    "stays, and any changes it made to tasks stay in their histories.\n\nWhy?")
         if reason is None:
             return
         # Its block comes off its tasks' notes pages; one edited there stays unless you say (decision 106).

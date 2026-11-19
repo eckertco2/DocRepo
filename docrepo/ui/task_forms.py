@@ -917,7 +917,7 @@ class TaskEditDialog(FormDialog):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(24, 20, 24, 20)
         outer.setSpacing(12)
-        outer.addWidget(Help("Each change goes into the task's status log as Browse tool. For a change that comes with a note, use Update "
+        outer.addWidget(Help("Each change goes into the task's history as Browse tool. For a change that comes with a note, use Update "
                              "in the capture window instead."))
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -978,7 +978,7 @@ class TaskEditDialog(FormDialog):
             g.addWidget(note)
         self.status = QPlainTextEdit(t.current_status)
         self.status.setFixedHeight(64 if LOOK.classic else 60)
-        g.addWidget(field("Current status", self.status, "status"))
+        g.addWidget(field("Latest update", self.status, "status"))
         self.description = QPlainTextEdit(t.description)
         self.description.setFixedHeight(96 if LOOK.classic else 80)
         description_field = field("Description", self.description)
@@ -1708,7 +1708,7 @@ class BulkEditDialog(FormDialog):
         outer.setContentsMargins(24, 20, 24, 20)
         outer.setSpacing(12)
         outer.addWidget(Help("Only what you set here changes; everything else stays as it is on each task. Each task gets its own "
-                             "status log entries, as Browse tool. Check the preview, then Apply."))
+                             "changes in its history, as Browse tool. Check the preview, then Apply."))
         form = QWidget(objectName="capture")
         g = QVBoxLayout(form)
         g.setContentsMargins(0, 0, 0, 0)
@@ -1858,7 +1858,7 @@ class BulkEditDialog(FormDialog):
         elif edit.empty:
             self.outcomes = []
             self.preview.setHtml('<p class="note">Set something above to change it on every ticked task. The preview shows what each '
-                                 "task's status log would get.</p>")
+                                 "task's history would get.</p>")
         else:
             self.outcomes = self._preview_fn(edit)
             self.preview.setHtml(_preview_html(self.m, self.outcomes))
@@ -1880,7 +1880,7 @@ class LabelMatchDialog(FormDialog):
         lay.setContentsMargins(24, 20, 24, 20)
         lay.setSpacing(12)
         keywords = next((lb.keywords for lb in m.labels if lb.name == label), [])
-        note = QLabel(f"Open tasks whose title, description or current status mentions {', '.join(keywords) or label}, and that don't have "
+        note = QLabel(f"Open tasks whose title, description or latest update mentions {', '.join(keywords) or label}, and that don't have "
                       f"the label {label} yet. A keyword can catch more than it should, so tick the ones to label. Nothing is labelled until "
                       "you click Apply.", objectName="hint")
         note.setWordWrap(True)

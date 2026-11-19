@@ -319,7 +319,7 @@ def test_a_board_move_reads_docs_db_once_and_leaves_the_counts(app, panel, monke
     browse.move_priority("T000019", "critical", None)
     assert calls == ["render_list", "render_detail"] and len(loads) == 1
     assert Model(app.ctx.conn).task("T000019").priority == "critical" and browse.sel == ("task", "T000019")
-    assert "Book the alignment contractor: Critical. Its status log says so." in browse.status.text()
+    assert "Book the alignment contractor: Critical. Its history says so." in browse.status.text()
     assert "T000019" in next(col.ids for col in browse.priorities.columns if col.key == "critical")  # the board drawn again
 
 

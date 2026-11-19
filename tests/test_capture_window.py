@@ -105,7 +105,7 @@ def test_a_quick_update_checks_update_itself(window, ctx):
     window.parse()
     assert window.types == {"update"} and window.u_state.currentText() == "Closed"
     assert window.u_status.toPlainText() == "Sling drawing approved by Tom."
-    assert "2 changed fields go into its status log" in window.does.text()
+    assert "2 changed fields go into its history" in window.does.text()
     window.save()
     assert Model(ctx.conn).task("T000012").state == "Closed"
 
@@ -122,7 +122,7 @@ def test_an_updates_first_sentence_is_its_current_status(window, ctx):
     window.u_status.setPlainText(Model(ctx.conn).task("T000009").current_status or "")
     window.parse()
     assert window.u_status.toPlainText() == (Model(ctx.conn).task("T000009").current_status or "")
-    assert "Update: Current status" not in window.found_label.text()
+    assert "Update: Latest update" not in window.found_label.text()
 
 
 def test_an_update_changes_only_what_differs(window, ctx):
@@ -542,7 +542,7 @@ def test_what_parse_and_populate_understood_sits_under_the_content_text(window):
     window.content.setPlainText("Closed. The coupling is in.")
     window.parse()
     assert window.found_box.isVisibleTo(window) and window.clear_found.isVisibleTo(window)
-    assert "Understood" in window.found_label.text() and "Current status" in window.found_label.text()
+    assert "Understood" in window.found_label.text() and "Latest update" in window.found_label.text()
     window.clear_found.click()
     assert not window.found_box.isVisibleTo(window)
     window._arrange(600)

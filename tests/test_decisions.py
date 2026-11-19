@@ -219,7 +219,7 @@ def test_task_md_has_the_register(env, meeting):
     write_pages(env[4](), root, env[2], TODAY, datetime(2026, 10, 9, 9, 0))
     md =(root / "Tasks" / REACTOR / "Task.md").read_text(encoding="utf-8")
     at = md.index("## Decisions")
-    assert md.index("## Subtasks") < at < md.index("## Status log")
+    assert md.index("## Subtasks") < at < md.index("## History")
     lines = md[at:].splitlines()
     assert lines[2:4] == ["| Date | Decision | Task | Where |", "|---|---|---|---|"]
     assert re.fullmatch(r"\| 2026-10-08 \| \[We go with the 50 t crane\. It's cheaper than two lifts\.\]\(\.\./\.\./Captures/2026/10/C\d+/capture\.md\) "

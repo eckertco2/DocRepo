@@ -312,7 +312,7 @@ def test_remove_from_under_on_a_rows_menu_says_so_with_undo_which_puts_it_back(b
     browse._status_link("undo")
     m = Model(browse.conn)
     assert m.parents_of("T000008") == ["T000001"] and m.children_of("T000001") == siblings  # second of four again
-    assert browse.status.text() == "Set back: Installation is under Reactor impeller upgrade again. The status log keeps both changes."
+    assert browse.status.text() == "Set back: Installation is under Reactor impeller upgrade again. The history keeps both changes."
     assert [(e.from_value, e.to_value) for e in m.status_log_of("T000008") if getattr(e, "field", None) == "Parents"] == [
         ("Reactor impeller upgrade", None), (None, "Reactor impeller upgrade")]
     menu.deleteLater()

@@ -50,7 +50,7 @@ SAMPLES = 3
 
 #: What a column can fill, in the order the form lists them.
 FIELDS = (
-    ("title", "Title"), ("description", "Description"), ("extra", "Add to the description"), ("current_status", "Current status"),
+    ("title", "Title"), ("description", "Description"), ("extra", "Add to the description"), ("current_status", "Latest update"),
     ("state", "State"), ("start", "Start"), ("due", "Due"), ("deadline", "Deadline"), ("deadline_desc", "Deadline description"),
     ("leads", "Lead"), ("assignees", "Assignees"), ("labels", "Labels"), ("label", "A label (yes or no)"), ("urgent", "Urgent"),
     ("lead_hours", "Lead hours"), ("assignee_hours", "Assignee hours"), ("ignore", "Leave out"),
@@ -69,7 +69,7 @@ _GUESSES = (
     ("start", ("start", "start date", "begin", "kick off", "kickoff")),
     ("lead_hours", ("lead hours",)),
     ("assignee_hours", ("assignee hours", "hours", "effort", "estimate")),
-    ("current_status", ("status update", "current status", "update", "latest", "comments", "comment", "notes", "progress", "status")),
+    ("current_status", ("latest update", "status update", "current status", "update", "latest", "comments", "comment", "notes", "progress", "status")),
     ("state", ("state", "stage", "phase")),
     ("description", ("description", "scope", "details", "summary", "objective", "purpose")),
     ("leads", ("lead", "owner", "responsible", "manager", "pm", "champion", "sponsor")),

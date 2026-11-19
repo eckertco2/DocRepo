@@ -505,7 +505,7 @@ def clear_reminder(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settin
     """Clear a task's reminder from the Reminders list or Today. Its status log records it."""
     before = model_now(conn, model)
     tasks.update_task(conn, settings, task_id, at=at, via=via, reminder=None)
-    out = Outcome(f"{before.task(task_id).title}: reminder cleared. The change is in its status log.")
+    out = Outcome(f"{before.task(task_id).title}: reminder cleared. The change is in its history.")
     hand_back(out, write_touched_pages(conn, data_root, fs, at, out.problems, [task_id], before))
     return out
 
@@ -518,7 +518,7 @@ def close_agenda_item(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, ite
     agenda.close_item(conn, item_id, how=how, closed=stamp(at), closed_by="Agenda view")
     a = next(x for x in before.agenda if x.id == item_id)
     what = before.task(a.subject).title if a.subject else "The note"
-    out = Outcome(f"{what}: {how.lower()}. It's off the {before.target_name(a.target)} agenda" + (", and its status log says so." if a.subject else "."))
+    out = Outcome(f"{what}: {how.lower()}. It's off the {before.target_name(a.target)} agenda" + (", and its history says so." if a.subject else "."))
     hand_back(out, write_touched_pages(conn, data_root, fs, at, out.problems, [x for x in (a.subject, a.target) if x], before))
     log.info("agenda item %d closed as %s", item_id, how)
     return out
@@ -679,7 +679,7 @@ def today_bin(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, item_id: in
         agenda.place_items(conn, ids)
     name = TODAY_BAND_NAMES[bucket]
     if urgent is None:
-        words = f"{name}. Its status log says so."
+        words = f"{name}. Its history says so."
     elif urgent:
         words = f"{name}, urgent."
     elif mine:  # unticked, but its date still puts it first
@@ -707,7 +707,7 @@ def undo_today_bin(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, undo: 
             tasks.update_task(conn, settings or Settings(), undo.task, at=at, via="Undo", urgent=undo.urgent)
         open_ids = {a.id for a in before.today_items()}
         agenda.place_items(conn, [x for x in undo.order if x in open_ids])
-    out = Outcome("Set back. The status log keeps both changes.")
+    out = Outcome("Set back. The history keeps both changes.")
     hand_back(out, write_touched_pages(conn, data_root, fs, at, out.problems, [undo.task], before))
     log.info("Today item %d: bin drop undone", undo.item_id)
     return out
@@ -755,7 +755,7 @@ def add_to_today(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, subject:
     if subject and any(a.subject == subject for a in m.today_items()):
         return Outcome(f"{m.task(subject).title} is on Today already.")
     agenda.add_item(conn, subject=subject, target=TODAY, note=" ".join(note.split()), added=stamp(at), added_by=BROWSE)
-    out = Outcome(f"{m.task(subject).title} is on Today. Its status log says so." if subject else "Note added to Today.")
+    out = Outcome(f"{m.task(subject).title} is on Today. Its history says so." if subject else "Note added to Today.")
     hand_back(out, write_touched_pages(conn, data_root, fs, at, out.problems, [subject] if subject else [], m))
     log.info("added to Today: %s", subject or "a note")
     return out
@@ -769,7 +769,7 @@ def close_today_item(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, item
     agenda.close_item(conn, item_id, how=how, closed=stamp(at), closed_by="Today")
     a = next(x for x in before.agenda if x.id == item_id)
     what = before.task(a.subject).title if a.subject else "The note"
-    out = Outcome(f"{what}: {'done' if how == 'Done' else 'taken off Today'}." + (" Its status log says so." if a.subject else ""))
+    out = Outcome(f"{what}: {'done' if how == 'Done' else 'taken off Today'}." + (" Its history says so." if a.subject else ""))
     hand_back(out, write_touched_pages(conn, data_root, fs, at, out.problems, [a.subject] if a.subject else [], before))
     log.info("Today item %d closed as %s", item_id, how)
     return out
@@ -887,7 +887,7 @@ def change_task(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings:
     before = model_now(conn, model)
     logged = tasks.update_task(conn, settings, task_id, at=at, via=BROWSE, **changes)
     moved = tasks.moved_words(logged)
-    out = Outcome((f"{len(logged)} change{'s' if len(logged) != 1 else ''} in the status log." if logged else "Nothing changed.") + (f" {moved}" if moved else ""), moved=moved)
+    out = Outcome((f"{len(logged)} change{'s' if len(logged) != 1 else ''} in the history." if logged else "Nothing changed.") + (f" {moved}" if moved else ""), moved=moved)
     hand_back(out, write_touched_pages(conn, data_root, fs, at, out.problems, [task_id, *(f.task for f in logged.followed)], before))
     return out
 
@@ -938,7 +938,7 @@ def set_states(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: 
     with transaction(conn):
         for task_id, state in states.items():
             logged += len(tasks.update_task(conn, settings, task_id, at=at, via=BROWSE, state=state))
-    out = Outcome(f"{logged} change{'s' if logged != 1 else ''} in the status log." if logged else "Nothing changed.")
+    out = Outcome(f"{logged} change{'s' if logged != 1 else ''} in the history." if logged else "Nothing changed.")
     hand_back(out, write_touched_pages(conn, data_root, fs, at, out.problems, list(states), before))
     log.info("States set from a row: %d task(s), %d change(s)", len(states), logged)
     return out
@@ -962,7 +962,7 @@ def edit_task(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: S
     before = model_now(conn, model)
     with transaction(conn):
         logged, added = _edit(conn, settings, task_id, at, values)
-    message = f"{len(logged)} change{'s' if len(logged) != 1 else ''} in the status log." if logged else "Nothing changed."
+    message = f"{len(logged)} change{'s' if len(logged) != 1 else ''} in the history." if logged else "Nothing changed."
     moved = tasks.moved_words(logged)
     if moved:
         message += f" {moved}"
@@ -1066,7 +1066,7 @@ def apply_whatif(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
     made = [d for d in done if d is not None and not d.problem]
     failed = [d.problem for d in done if d is not None and d.problem]
     followed = {x for d in made for x in d.followed} - {x for d in made for x in d.changed}
-    message = f"Applied {len(made)} change{'' if len(made) == 1 else 's'} from {w.name}. Each is in its task's status log."
+    message = f"Applied {len(made)} change{'' if len(made) == 1 else 's'} from {w.name}. Each is in its task's history."
     if followed:
         message += f" Moved {len(followed)} tied task{'' if len(followed) == 1 else 's'} with them."
     out = Outcome(message)
@@ -1083,7 +1083,7 @@ def set_key_dates(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, setting
     """Make a task's key dates these, in this order, from the browse tool: each change logged as "Browse tool"."""
     logged = tasks.set_key_dates(conn, task_id, rows, at=at, via=BROWSE, settings=settings, leave=leave)
     moved = tasks.moved_words(logged)
-    out = Outcome((f"{len(logged)} change{'s' if len(logged) != 1 else ''} in the status log." if logged else "Nothing changed.") + (f" {moved}" if moved else ""), moved=moved)
+    out = Outcome((f"{len(logged)} change{'s' if len(logged) != 1 else ''} in the history." if logged else "Nothing changed.") + (f" {moved}" if moved else ""), moved=moved)
     write_all_pages(conn, data_root, fs, at, out.problems)
     return out
 
@@ -1138,7 +1138,7 @@ def set_priority(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, task_id:
     title = tasks.get_task(conn, task_id).title
     if change is None:
         return Outcome(f"{title} moved within {priorities.name(bucket)}.")
-    out = Outcome(f"{title}: {priorities.name(bucket)}. Its status log says so.")
+    out = Outcome(f"{title}: {priorities.name(bucket)}. Its history says so.")
     hand_back(out, write_touched_pages(conn, data_root, fs, at, out.problems, [task_id], None))
     log.info("task %s priority: %s", task_id, bucket or "not ranked")
     return out
@@ -1448,7 +1448,7 @@ def undo_move(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, task_id: st
     m = Model(conn)
     name, parents = m.task(task_id).title, [m.task(p).title for p in m.parents_of(task_id)]
     where = f"under {' and '.join(parents)} again" if parents else "a top-level task again"
-    out = Outcome(f"Set back: {name} is {where}. The status log keeps both changes.")
+    out = Outcome(f"Set back: {name} is {where}. The history keeps both changes.")
     write_all_pages(conn, data_root, fs, at, out.problems)
     log.info("task %s set back under %d parents", task_id, len(parents))
     return out

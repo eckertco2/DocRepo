@@ -299,7 +299,7 @@ class QuickEdit(QWidget):
         foot.addWidget(self.message, 1)
         foot.addStretch()
         self.save_button = QPushButton("Save", objectName="primary")
-        tip(self.save_button, "Save the changes to the task, with a line for each in its status log", "Ctrl+Enter")
+        tip(self.save_button, "Save the changes to the task, with a line for each in its history", "Ctrl+Enter")
         self.save_button.clicked.connect(self.save)
         foot.addWidget(self.save_button)
         lay.addLayout(foot)

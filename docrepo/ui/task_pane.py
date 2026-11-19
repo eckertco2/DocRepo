@@ -182,7 +182,8 @@ class TaskPane(QScrollArea):
         fl.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         fl.addWidget(self.header, 1)
         fl.addWidget(self.top, 0, Qt.AlignmentFlag.AlignTop)
-        self.history = Expander("history", "History", css, margin, body=self.bottom)
+        # "Captures and summaries" since release 5.173, its two tabs: History is the changes behind the update card now (decision 811).
+        self.history = Expander("history", "Captures and summaries", css, margin, body=self.bottom)
         self._layout, self._margin = -1, margin
         for view in self.views():
             view.viewport().installEventFilter(self)
@@ -825,4 +826,4 @@ class TaskPane(QScrollArea):
         not, as they were when it was always shown."""
         rail = self.top.toPlainText() if not self.top.isHidden() else ""
         notes = self.all_view.toPlainText() if self.all_mode else self.notes.toPlainText()
-        return "\n".join((self.header.text(), rail, "Notes", notes, "History", self.bottom.toPlainText()))
+        return "\n".join((self.header.text(), rail, "Notes", notes, "Captures and summaries", self.bottom.toPlainText()))

@@ -39,7 +39,7 @@ from docrepo.parse import Who
 from docrepo.safe_fs import SafeFS
 from docrepo.schedule import length_of
 from docrepo.stories import clip
-from docrepo.tasks import FIELD_NAMES, LINK_NAMES, RATE_FIELDS, RATES, TEMPLATE_LINK, TIE_LINKS, WEEK_RATES, Change, TaskError, _normalize, hours_values, stated, worked_out
+from docrepo.tasks import FIELD_NAMES, LINK_NAMES, RATE_FIELDS, RATES, TEMPLATE_LINK, TIE_LINKS, WEEK_RATES, Change, TaskError, _normalize, hours_values, shown_name, stated, worked_out
 from docrepo.timing import RowTie
 
 log = logging.getLogger(__name__)
@@ -301,7 +301,7 @@ def _change_line(m: Model, key: str, before, after) -> str:
     """One field's change in a preview: "Assignee hours 30 h → 10 h", or "Duration 5 days → 3 days"."""
     if key == "description":
         return "Description reworded"
-    return f"{FIELD_NAMES[key]} {field_text(m, key, before)} → {field_text(m, key, after)}"
+    return f"{shown_name(FIELD_NAMES[key])} {field_text(m, key, before)} → {field_text(m, key, after)}"
 
 
 def work_of(t) -> float:
@@ -489,7 +489,7 @@ def _own_words(m: Model, t, key: str) -> str:
         if key == tie_key:
             tie = t.ties.get(f)
             return f"{f} tie, {ties.words(tie, ties.name_in(m, tie))}" if tie else f"{f} date"
-    return f"{FIELD_NAMES[key].lower()} {field_text(m, key, stated(t, key))}"
+    return f"{shown_name(FIELD_NAMES[key]).lower()} {field_text(m, key, stated(t, key))}"
 
 
 def _can_repeat(lib: Library, row: Row, title: str) -> None:
@@ -1589,7 +1589,7 @@ def save_row(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Se
     stayed = len(plan.items) - reached
     if plan.items:
         moved = f" {plural(plan.followed, 'more task')} moved with {'it' if reached == 1 else 'them'}." if plan.followed else ""
-        message = f"{plural(reached, 'task')} changed" + (f", {stayed} left as {'it was' if stayed == 1 else 'they were'}" if stayed else "") + f".{moved} Each status log says so."
+        message = f"{plural(reached, 'task')} changed" + (f", {stayed} left as {'it was' if stayed == 1 else 'they were'}" if stayed else "") + f".{moved} Each history says so."
     elif not plan.changed and plan.notes_changed:
         message = "Saved. Starting notes reach only new tasks."
     elif not plan.changed:
@@ -1646,7 +1646,7 @@ def save_timing(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings:
     if not plan.changed:
         return edits.Outcome("Nothing changed.")
     if n or kept:
-        message = f"{plural(n, 'task')} changed" + (f", {kept} kept {'its date' if kept == 1 else 'their dates'} with a new gap" if kept else "") + ". Each status log says so."
+        message = f"{plural(n, 'task')} changed" + (f", {kept} kept {'its date' if kept == 1 else 'their dates'} with a new gap" if kept else "") + ". Each history says so."
     else:
         message = "Saved. No task's date changes."
     out = edits.Outcome(message)

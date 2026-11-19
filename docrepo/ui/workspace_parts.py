@@ -168,12 +168,12 @@ class EntryBox(QLineEdit):
 
 @dataclass
 class CardFacts:
-    """What the status card shows: whose it is (empty for this task's), its name ("Current status"), when it was written,
+    """What the status card shows: whose it is (empty for this task's), its name ("Latest update"), when it was written,
     the waiting mark, its body and log as HTML, how many changes, and the quick entry bar's state: whether it's there (a
     task being edited), the task's state, and which of Later… or Add to Today shows (702)."""
 
     whose: str = ""
-    name: str = "Current status"
+    name: str = "Latest update"
     when: str = ""
     when_tip: str = ""
     wait: str = ""
@@ -247,7 +247,7 @@ class StatusCard(QFrame):
         self.whose.setFont(tokens.ui_font(tokens.CAPTION, semibold=True))
         self.whose.setTextFormat(Qt.TextFormat.RichText)
         self.whose.linkActivated.connect(self.link)
-        self.name = QLabel("Current status", objectName="statusName")
+        self.name = QLabel("Latest update", objectName="statusName")
         self.name.setFont(tokens.ui_font(tokens.CAPTION, semibold=True))
         self.when = QLabel("", objectName="statusWhen")
         self.when.setFont(tokens.ui_font(tokens.CAPTION))
@@ -286,7 +286,7 @@ class StatusCard(QFrame):
             self.box.addAction(icon("update"), QLineEdit.ActionPosition.LeadingPosition)
         self.hint = QLabel("Enter update · Shift+Enter note", objectName="hint")
         self.hint.setMinimumWidth(1)  # it gives way first when the card is narrow
-        self.hint.setToolTip("Enter keeps an update: its words become the current status. Shift+Enter keeps a note under today's day.")
+        self.hint.setToolTip("Enter keeps an update: its words become the latest update. Shift+Enter keeps a note under today's day.")
         self.state_button = StateButton(objectName="wsState")
         self.state_button.setToolTip("Change the state")
         self.state_button.clicked.connect(lambda: self.state_clicked.emit(self.state_button.mapToGlobal(self.state_button.rect().bottomLeft())))

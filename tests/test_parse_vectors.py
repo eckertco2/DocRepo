@@ -52,7 +52,7 @@ def show(r: ParseResult) -> str:
         return ", ".join(NAMES[w.id] if w.id else f"{w.name} (new person)" for w in ws)
 
     parts = [
-        r.title and f'Title "{r.title}"', r.state and f"State {r.state}", r.status and f'Current status "{r.status}"',
+        r.title and f'Title "{r.title}"', r.state and f"State {r.state}", r.status and f'Latest update "{r.status}"',
         r.due and f"Due {r.due}", r.deadline and f"Deadline {r.deadline}",
         r.deadline_desc and f'Deadline description "{r.deadline_desc}"', r.reminder and f"Reminder {r.reminder}",
         r.start and f"Start {r.start}", r.recurrence and f"Recurrence {r.recurrence}", r.urgent and "Urgent", r.plant_event and "Plant event",

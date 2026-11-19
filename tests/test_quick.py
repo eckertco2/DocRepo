@@ -86,7 +86,7 @@ def test_filing_a_quick_task_with_edit_task(env):
     r = add_quick_task(conn, root, fs, SETTINGS, "Check the guard drawings", AT)
     out = edits.edit_task(conn, root, fs, SETTINGS, r.created_task, AT, parents=["T000008"])
     m = Model(conn)
-    assert m.parents_of(r.created_task) == ["T000008"] and out.message == "1 change in the status log."
+    assert m.parents_of(r.created_task) == ["T000008"] and out.message == "1 change in the history."
     entry = next(e for e in m.status_log_of(r.created_task) if e.field == "Parents")
     assert (entry.field, entry.from_value, entry.to_value, entry.via) == ("Parents", "Quick tasks", "Installation", "Browse tool")
     assert edits.edit_task(conn, root, fs, SETTINGS, r.created_task, AT, parents=["T000008"]).message == "Nothing changed."

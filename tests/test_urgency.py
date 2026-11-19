@@ -128,7 +128,7 @@ def test_a_bins_upper_part_ticks_urgent_and_its_lower_part_unticks_it(band, data
     assert out.message.endswith("Medium. Still first: it's due Fri 9 Oct.")
     # None keeps the tick, as before.
     out = edits.today_bin(conn, data_root, fs, i["a"], "parking", AT, settings=SETTINGS)
-    assert out.message.endswith("Parking lot. Its status log says so.") and not Model(conn).task("T000012").urgent
+    assert out.message.endswith("Parking lot. Its history says so.") and not Model(conn).task("T000012").urgent
 
 
 def test_a_bin_drop_is_undone_priority_tick_and_place(band, data_root, fs):
@@ -139,4 +139,4 @@ def test_a_bin_drop_is_undone_priority_tick_and_place(band, data_root, fs):
     back = edits.undo_today_bin(conn, data_root, fs, out.undo, AT, settings=SETTINGS)
     m = Model(conn)
     assert m.task("T000012").priority == "high" and not m.task("T000012").urgent and order(conn) == before
-    assert back.message == "Set back. The status log keeps both changes."
+    assert back.message == "Set back. The history keeps both changes."

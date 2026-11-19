@@ -1431,9 +1431,9 @@ def apply_edit(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: 
     with transaction(conn):
         made = _apply_template(conn, settings, plan, on, at) if plan.kind == "template" else _apply_tasks(conn, settings, plan, on, at)
     left = len(plan.changes) - len(on)
-    where = "Each status log says so."
+    where = "Each history says so."
     if plan.kind == "template":
-        where = "Each task's status log and the template's Changes list say so." if Library(conn).trees(int(plan.id)) else "No tasks follow it yet."
+        where = "Each task's history and the template's Changes list say so." if Library(conn).trees(int(plan.id)) else "No tasks follow it yet."
     out = edits.Outcome(f"Applied {templates.plural(len(on), 'change')}" + (f", {left} left as {'it was' if left == 1 else 'they were'}" if left else "") + f". {where}")
     _kept(fs, data_root, reading, name, at, out.problems)
     if made:

@@ -23,7 +23,7 @@ from docrepo.schedule import is_open
 #: The fields Edit selected sets the same on every task. A date set to None is cleared.
 SET_FIELDS = ("state", "due", "deadline", "reminder", "plant_event")  # Plant event: release 5.9, M0028
 #: Where a label's keywords are looked for, with their names in the list of matches.
-SEARCHED = (("title", "Title"), ("description", "Description"), ("current_status", "Current status"))
+SEARCHED = (("title", "Title"), ("description", "Description"), ("current_status", "Latest update"))
 
 
 @dataclass
@@ -134,7 +134,7 @@ def summary(outcomes: list[TaskOutcome], done: bool = False) -> str:
     changed = [o for o in outcomes if o.changes]
     count = sum(len(o.changes) for o in outcomes)
     one = len(changed) == 1
-    logs = f"{count} change{'s' if count != 1 else ''} in {'its status log' if one else 'their status logs'}"
+    logs = f"{count} change{'s' if count != 1 else ''} in {'its history' if one else 'their histories'}"
     if not changed:
         text = "Nothing changed." if done else "Nothing changes."
     elif done:

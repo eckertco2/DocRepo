@@ -72,11 +72,11 @@ def due_text(pages: Pages, task: Task, today: date) -> str:
 
 def status_and_latest(pages: Pages, task: Task, records: list[Record], today: date) -> str:
     """The status block (the page's one tint) beside the latest note, update or email, which picks it in the list."""
-    name = "Final status" if task.state == "Closed" else "Current status"
+    name = "Last update" if task.state == "Closed" else "Latest update"
     since = pages.status_since(task)
     when = f' <span class="rel">{esc(pages.long(since))} · {ago(since, today)}</span>' if task.current_status and since else ""
     # No Add one here since release 5.98 (decision 390): an update is the task page's, a click away.
-    body = multiline(task.current_status) if task.current_status else '<span class="sub">No status yet.</span>'
+    body = multiline(task.current_status) if task.current_status else '<span class="sub">No update yet.</span>'
     status = f'<span class="sk">{name}</span>{when}<br>{body}'
     newest = next(iter(sorted((r for r in records if r.kind in ("note", "email") and r.type != "page"), key=lambda r: r.at, reverse=True)), None)
     if newest is None:

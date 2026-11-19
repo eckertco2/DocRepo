@@ -572,7 +572,7 @@ class EditReviewDialog(_Window):
         self.outer.addWidget(self.error)
         foot = QHBoxLayout()
         foot.addWidget(_words("Anything unticked stays as it is. A task you untick keeps its value and stops following." if plan.kind == "template"
-                              else "Anything unticked stays as it is. Each status log says what changed, from an edit file.", "hint"), 1)
+                              else "Anything unticked stays as it is. Each history says what changed, from an edit file.", "hint"), 1)
         self.commit_button = QPushButton(objectName="primary")
         self.commit_button.setDefault(True)
         self.commit_button.clicked.connect(lambda _=False: self.save())

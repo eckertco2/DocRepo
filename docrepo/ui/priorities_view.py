@@ -415,7 +415,7 @@ class PrioritiesView(QWidget):
         self.title.setTextFormat(Qt.TextFormat.RichText)
         lay.addWidget(self.title)
         lay.addWidget(Help("Open tasks by priority. Rank them by dragging, or with the keys on each column. A move to another column "
-                           "goes into the task's status log. Urgent stays a flag of its own; parked, closed and routine tasks aren't here."))
+                           "goes into the task's history. Urgent stays a flag of its own; parked, closed and routine tasks aren't here."))
         self.controls = QWidget()
         self.controls_layout = FlowLayout(self.controls, spacing=8)
         lay.addWidget(self.controls)
@@ -710,7 +710,7 @@ class PrioritiesView(QWidget):
         def names(ids: list[str]) -> str:
             return ", ".join(esc(m.person_name(p)) for p in ids) or "None"
 
-        status = f'<br><span style="color:{muted}">Status: {esc(clip(t.current_status, 160))}</span>' if t.current_status else ""
+        status = f'<br><span style="color:{muted}">Latest update: {esc(clip(t.current_status, 160))}</span>' if t.current_status else ""
         self.strip_text.setText(f"<b>{esc(t.title)}</b> {_chip(t.state, *STATE_COLOURS.get(t.state, ('text2', 'hover')))}{' ' + _urgent() if t.urgent else ''}"
                                 f'<br><span style="color:{muted}">{esc(path_text(m, t.id) or "Top-level task")}</span>'
                                 f"<br>{when} · Lead: {names(t.leads)} · Assignees: {names(t.assignees)}{status}")

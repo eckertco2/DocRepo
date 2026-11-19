@@ -331,7 +331,7 @@ def caption_label(stories, c: Capture, task_id: str) -> str:
     if c.created_task == task_id:
         return "New task"
     if kind == "Update":
-        did = did.removeprefix("Update: ").replace("New current status.", "").strip()
+        did = did.removeprefix("Update: ").replace("New update.", "").strip()
         return f"Update: {did}" if did else "Update"
     if kind.startswith("Email"):
         about = "; ".join(e.description for e in c.emails if e.description)  # round 7's item 93

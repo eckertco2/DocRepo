@@ -597,7 +597,7 @@ class CaptureWindow(QWidget):
         for key, label, letter in (("note", "Note", "N"), ("new_task", "New task", "T"), ("update", "Update", "U")):
             box = QCheckBox(label, objectName="typeToggle")
             tip(box, {"note": "Reference information, or a note on the picked task", "new_task": "A new task, from this text",
-                      "update": "A status update to the picked task"}[key], f"Alt+{letter}")
+                      "update": "An update to the picked task"}[key], f"Alt+{letter}")
             box.clicked.connect(lambda checked, k=key: self.set_type(k, checked))
             self.type_boxes[key] = box
             types.addWidget(box)
@@ -1114,7 +1114,7 @@ class CaptureWindow(QWidget):
         self.u_due, self.u_deadline = DateField(), DateField()
         self.u_status = QPlainTextEdit()
         self.u_status.setFixedHeight(56)
-        g.addWidget(field("Current status", self.u_status, "status"))
+        g.addWidget(field("Latest update", self.u_status, "status"))
         grid = QGridLayout()
         grid.setHorizontalSpacing(16)
         grid.addWidget(field("Due", self.u_due, "due"), 0, 0)
@@ -2598,8 +2598,8 @@ class CaptureWindow(QWidget):
         if upd and t and self.update_key_dates() is not None:  # release 5.31
             parts.append(("key dates", f"{len(self.u_keydates.rows())} in all"))
         self.changes_label.setText(
-            "Status log: " + "; ".join(f"{k} → {self._short(v)}" for k, v in parts)
-            if parts else "Prefilled with the task's current values. Each change goes into its status log.")
+            "History: " + "; ".join(f"{k} → {self._short(v)}" for k, v in parts)
+            if parts else "Prefilled with the task's current values. Each change goes into its history.")
         self.does.setText(self._does(m, len(parts)))
         if self.from_capture:
             self.does.setText(f"Save creates {'a subtask under <b>' + esc(t.title) + '</b>' if t else 'a top-level task'} from "
@@ -2682,8 +2682,8 @@ class CaptureWindow(QWidget):
                     else "a top-level task")
             parts.append(f"creates {what}" + (", with this content text as its description" if text else ""))
         if upd and t:
-            parts.append(f"updates {name}: " + (f"{n_changes} changed field{'s go' if n_changes > 1 else ' goes'} into its status log" if n_changes
-                                                   else "this goes into its status log" if text else "nothing has changed yet"))
+            parts.append(f"updates {name}: " + (f"{n_changes} changed field{'s go' if n_changes > 1 else ' goes'} into its history" if n_changes
+                                                   else "this goes into its history" if text else "nothing has changed yet"))
         targets = self._targets()
         if note and not new and t and not upd and not self.files and not self.summary.toPlainText().strip():
             # Text alone is no capture (release 5.69, the notes workspace plan's decision 345): it goes on the task's page.

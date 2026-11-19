@@ -336,7 +336,7 @@ class TaskView(QWidget):
                 w.deleteLater()
         btn = QPushButton("Task page", objectName="subtle" if not LOOK.classic else "")
         btn.setIcon(icon("open"))
-        btn.setToolTip("Open it in the browse tool: its notes, status, commands and Details")
+        btn.setToolTip("Open it in the browse tool: its notes, latest update, commands and Details")
         btn.clicked.connect(lambda _=False: self.open_task_page())
         btn.setEnabled(not self.model().task(self.task_id).discarded)
         self.commands.addWidget(btn)
@@ -1261,7 +1261,7 @@ class TaskView(QWidget):
         self.say(text)
         if undo is not None:
             self._foot_timer.start(10_000)
-            self.foot_undo.offer(undo, "Put it back under the parents it had, where it was. The status log keeps both changes.")
+            self.foot_undo.offer(undo, "Put it back under the parents it had, where it was. The history keeps both changes.")
         else:
             self.foot_undo.forget()
 

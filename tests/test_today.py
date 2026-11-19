@@ -56,7 +56,7 @@ def test_today_items_carry_over_until_done(sample_conn):
 
 def test_adding_from_the_browse_tool_and_the_pages(sample_root):
     conn, root, fs = sample_root
-    assert edits.add_to_today(conn, root, fs, "T000012", "", AT).message == "Rigging plan is on Today. Its status log says so."
+    assert edits.add_to_today(conn, root, fs, "T000012", "", AT).message == "Rigging plan is on Today. Its history says so."
     assert edits.add_to_today(conn, root, fs, "T000012", "", AT).message == "Rigging plan is on Today already."
     assert edits.add_to_today(conn, root, fs, None, "  Call the crane company  back ", AT).message == "Note added to Today."
     m = Model(conn)
@@ -67,7 +67,7 @@ def test_adding_from_the_browse_tool_and_the_pages(sample_root):
     page = TaskPages(m, AT.date(), lambda _: "", "P001", conn).task_page("T000012", PageState())
     assert 'href="agenda:today"' in page  # its On agendas row links to the Today view
     item = m.today_items()[0]
-    assert edits.close_today_item(conn, root, fs, item.id, "Done", AT).message == "Rigging plan: done. Its status log says so."
+    assert edits.close_today_item(conn, root, fs, item.id, "Done", AT).message == "Rigging plan: done. Its history says so."
     later = Pages(Model(conn), date(2026, 10, 9), AT).contents_page()
     assert "- Call the crane company back · since 2026-10-08" in later  # carried over to the next day
 

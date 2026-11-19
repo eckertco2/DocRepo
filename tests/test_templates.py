@@ -641,7 +641,7 @@ def test_saving_from_the_browse_tool_says_what_it_did(trial, data_root, fs):
     conn, r = trial
     a, b = _two_trees(conn, r)
     out = templates.save_row(conn, data_root, fs, SETTINGS, r["prep_a"], CHANGED, AT, [b[2]])
-    assert out.message == "1 task changed, 1 left as it was. Each status log says so." and not out.problems
+    assert out.message == "1 task changed, 1 left as it was. Each history says so." and not out.problems
     assert "| Assignees | Priya Shah (10 h) |" in (data_root / "Tasks" / a[2] / "Task.md").read_text(encoding="utf-8")
     assert templates.save_row(conn, data_root, fs, SETTINGS, r["prep_a"], {**CHANGED, "notes": "Words"}, AT).message == "Saved. Starting notes reach only new tasks."
     assert templates.save_row(conn, data_root, fs, SETTINGS, r["prep_a"], {**CHANGED, "notes": "Words"}, AT).message == "Nothing changed."

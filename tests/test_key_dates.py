@@ -80,7 +80,7 @@ def test_due_on_today_and_the_lists(sample_conn):
 def test_edit_task_saves_them_and_task_md_prints_them(sample_root):
     conn, root, fs = sample_root
     out = edits.edit_task(conn, root, fs, SETTINGS, "T000008", AT, key_dates=TRIAL)
-    assert out.message == "3 changes in the status log."
+    assert out.message == "3 changes in the history."
     md = (root / "Tasks" / "T000008" / "Task.md").read_text(encoding="utf-8")
     assert "## Key dates" in md and "| Tue 1 Dec to Sat 5 Dec | Trial execution window | Plant activity |" in md
     assert "| by Wed 14 Oct | Target for trial preparations | Deadline |" in md

@@ -79,7 +79,7 @@ def test_a_drop_on_a_bin_sets_the_priority_and_goes_to_the_end_of_the_band(today
     conn, i = today
     out = edits.today_bin(conn, data_root, fs, i["plain"], "high", AT)
     m = Model(conn)
-    assert m.task("T000012").priority == "high" and out.message == "Rigging plan: High. Its status log says so."
+    assert m.task("T000012").priority == "high" and out.message == "Rigging plan: High. Its history says so."
     assert ids(conn) == [i["high"], i["plain"], i["medium"], i["note"], i["parking"]]  # the end of High (decision 691)
     line = [e for e in m.status_log_of("T000012") if e.field == priorities.FIELD][-1]
     assert (line.from_value, line.to_value, line.via) == (None, "High", edits.TODAY_BINS)

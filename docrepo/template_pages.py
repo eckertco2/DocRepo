@@ -12,7 +12,7 @@ from docrepo.detail import PROGRESS_WIDTH, box, chip, esc, group, label_href, li
 from docrepo.dates import long_date, to_date
 from docrepo.model import Model
 from docrepo.pages import num
-from docrepo.tasks import FIELD_NAMES, LINK_NAMES, TIE_LINKS, rate_total, stated
+from docrepo.tasks import FIELD_NAMES, LINK_NAMES, TIE_LINKS, rate_total, shown_name, stated
 from docrepo.templates import Library, Row, days_text, field_text, own_fields, own_ties, plural, summary
 
 
@@ -87,7 +87,7 @@ def _own_text(m: Model, key: str, task) -> str:
         if key == tie_key:
             tie = task.ties.get(f)
             return f"{LINK_NAMES[key].lower()} {ties.words(tie, ties.name_in(m, tie))}" if tie else f"no {LINK_NAMES[key].lower()}"
-    name = FIELD_NAMES[key].lower()
+    name = shown_name(FIELD_NAMES[key]).lower()
     return f"{name} {field_text(None, key, stated(task, key))}" if key in ("lead_hours", "assignee_hours", "duration") and stated(task, key) is not None else name
 
 

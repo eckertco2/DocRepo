@@ -58,7 +58,7 @@ ACTIVITY_NOTE = ("What happened, under the tasks it happened to: captures, chang
                  "item's note.")
 PRIORITIES_NOTE = ("Open tasks by priority. Drag a card to another column or within its own, or use the keys: 1 to 4 put the selected "
                    "card in a bucket and 0 takes it out, Alt+Up and Alt+Down move it within its bucket, the arrow keys move between "
-                   "cards, and Enter opens the task. A move to another column goes into the task's status log. Urgent stays a flag "
+                   "cards, and Enter opens the task. A move to another column goes into the task's history. Urgent stays a flag "
                    "of its own; parked, closed and routine tasks aren't here.")
 TEMPLATES_NOTE = ("Trees of tasks without dates. Nothing here shows on the task tree, the lists, the timeline or Capacity until you make "
                   "tasks from it.")
