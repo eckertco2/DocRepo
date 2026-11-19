@@ -418,7 +418,9 @@ DEFAULT_TEXT = """\
         // search.files: file search, across every task's files and saved emails.
         "S": { "label": "File search", "icon": "file", "command": "search.files" },
         // search.everything: the browse tool, with the cursor in Search everything.
-        "W": { "label": "Search everything", "icon": "search", "command": "search.everything" }
+        "W": { "label": "Search everything", "icon": "search", "command": "search.everything" },
+        // glossary.lookup: a glossary's rows, narrowed as you type; Enter copies a row's tag, to paste where you were.
+        "NE": { "label": "Glossary lookup", "icon": "tagged", "command": "glossary.lookup" }
       }
     },
     {
@@ -552,6 +554,42 @@ def discussion_slot(text: str) -> str:
     return text.replace(_OLD_MEETING_COMMENT, _MEETING_COMMENT).replace(_OLD_MEETING_SLOT, _MEETING_SLOT)
 
 
+#: The Browse wheel's last slot as releases 5.41 to 5.171 wrote it, with "{nl}" for the file's own line ending, and what
+#: release 5.172 writes in its place: the glossary lookup on its NE after it (the glossaries plan's decision 808).
+_OLD_BROWSE_END = ('"W": { "label": "Search everything", "icon": "search", "command": "search.everything" }{nl}'
+                   '      }')
+_LOOKUP_END = ('"W": { "label": "Search everything", "icon": "search", "command": "search.everything" },{nl}'
+               "        // glossary.lookup: a glossary's rows, narrowed as you type; Enter copies a row's tag, to paste where you were.{nl}"
+               '        "NE": { "label": "Glossary lookup", "icon": "tagged", "command": "glossary.lookup" }{nl}'
+               '      }')
+
+
+def _slot_free(text: str, wheel_id: str, direction: str) -> bool:
+    """Whether the file's wheel ``wheel_id`` has no slot at ``direction``, read as DocRepo reads the file; False when it
+    can't be read or has no such wheel."""
+    try:
+        data = json.loads(strip_comments(text))
+    except ValueError:
+        return False
+    wheels = data.get("wheels") if isinstance(data, dict) else None
+    wheel = next((w for w in wheels if isinstance(w, dict) and w.get("id") == wheel_id), None) if isinstance(wheels, list) else None
+    return isinstance(wheel, dict) and isinstance(wheel.get("slots"), dict) and direction not in wheel["slots"]
+
+
+def lookup_slot(text: str) -> str:
+    """Release 5.172 (the glossaries plan's decision 808): a file whose Browse wheel, the one with the searches, still ends
+    with Search everything as the default wrote it, whose NE (its first diagonal) is free, and that names the lookup nowhere,
+    gets the glossary lookup on the wheel's NE, once. A wheel you've changed stays yours, and so does every other line; the
+    command is still on Ctrl+K and its own hotkey."""
+    if "glossary.lookup" in text:
+        return text
+    nl = "\r\n" if "\r\n" in text else "\n"
+    old = _OLD_BROWSE_END.replace("{nl}", nl)
+    if text.count(old) != 1 or not _slot_free(text, "browse", "NE"):
+        return text
+    return text.replace(old, _LOOKUP_END.replace("{nl}", nl))
+
+
 def write_defaults(fs: SafeFS, data_root: Path, registry: Mapping[str, CommandSpec], icons: Iterable[str]) -> None:
     """The config file, if there isn't one, and always the schema beside it, which is DocRepo's own."""
     path = data_root / CONFIG_FILE
@@ -562,7 +600,7 @@ def write_defaults(fs: SafeFS, data_root: Path, registry: Mapping[str, CommandSp
             text = path.read_bytes().decode("utf-8-sig")  # as bytes, so its line endings stay
         except (OSError, UnicodeDecodeError):
             text = ""  # loading it says what's wrong
-        upgraded = discussion_slot(recent_slot(progress_slot(summary_slot(draw_at_once(text)))))
+        upgraded = lookup_slot(discussion_slot(recent_slot(progress_slot(summary_slot(draw_at_once(text))))))
         if upgraded != text:
             fs.write_text(path, upgraded)
     fs.write_text(data_root / SCHEMA_FILE, json.dumps(schema(registry, icons), indent=1) + "\n")

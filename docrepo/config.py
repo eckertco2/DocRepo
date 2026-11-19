@@ -135,6 +135,8 @@ class Settings:
     today_panel_hotkey: str = ""
     #: Log progress (release 5.139, the design workspace's docs/mods/email-progress-plan.md, decision 583): off until set.
     progress_hotkey: str = ""
+    #: The glossary lookup (release 5.172, the design workspace's docs/mods/glossaries-plan.md, decision 808): off until set.
+    lookup_hotkey: str = ""
     #: Whether Log progress's Enter sends the draft in its own window (decision 590 A); off, Enter logs and brings the draft
     #: back to the front for the owner to send (590 B).
     progress_sends: bool = True
@@ -178,6 +180,8 @@ class Settings:
     quiet_days: int = 21
     summary_pins: list[str] = field(default_factory=list)
     summary_recent: list[str] = field(default_factory=list)
+    #: The glossaries the lookup opened last, by ID, the latest first (release 5.172, decision 807).
+    glossary_recent: list[str] = field(default_factory=list)
     #: Saved sets (release 5.149, the design workspace's docs/mods/summary-sets-plan.md, decisions 649 and 650): a pinned
     #: combination's name, by its key in ``summary_pins`` ("person:P003 + agenda:T000010": "Morning meeting").
     summary_names: dict[str, str] = field(default_factory=dict)
@@ -235,7 +239,7 @@ class Settings:
                 never = []
             data["tagged_never"] = never
         # The quick summary's pins and recents (release 5.131): lists of words; anything else is left out.
-        for key in ("summary_pins", "summary_recent"):
+        for key in ("summary_pins", "summary_recent", "glossary_recent"):  # and the glossary lookup's (release 5.172)
             value = data.get(key)
             if value is not None and not (isinstance(value, list) and all(isinstance(x, str) for x in value)):
                 log.warning("Ignoring %s in %s: it isn't a list of words", key, file)
@@ -303,7 +307,7 @@ class Settings:
     def save(self, fs: SafeFS, data_root: Path) -> Path:
         data = asdict(self)
         for key in ("wheel_hotkeys", "today_panel_hotkey", "copilot_folder", "reference_links", "tagged_patterns", "tagged_never",
-                    "summary_pins", "summary_recent", "summary_names", "progress_hotkey"):  # written once they're set, as they're optional (releases 5.41, 5.56, 5.67, 5.80, 5.131, 5.139 and 5.149)
+                    "summary_pins", "summary_recent", "summary_names", "progress_hotkey", "lookup_hotkey", "glossary_recent"):  # written once they're set, as they're optional (releases 5.41, 5.56, 5.67, 5.80, 5.131, 5.139, 5.149 and 5.172)
             if not data[key]:
                 del data[key]
         if data["progress_sends"]:  # release 5.139: written once it's turned off

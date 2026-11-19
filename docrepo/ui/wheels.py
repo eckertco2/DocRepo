@@ -54,6 +54,7 @@ class Wheels(QObject):
         self._quick_summary = None
         self._log_progress = None
         self._recent_captures = None
+        self._glossary_lookup = None
         self._reload_timer = QTimer(self, singleShot=True, interval=RELOAD_WAIT_MS, timeout=self._file_changed)
         self._watcher = QFileSystemWatcher(self)
         self._watcher.fileChanged.connect(lambda _p: self._reload_timer.start())
@@ -293,6 +294,19 @@ class Wheels(QObject):
         """From a window's palette (Ctrl+K), which is DocRepo's own: Esc gives the keyboard back to no other program."""
         self.snapshot = None
         self.recent_captures()
+
+    def glossary_lookup(self) -> None:
+        """The glossary lookup (release 5.172, decision 808): its popup, on the monitor you were on."""
+        from docrepo.ui.glossary_lookup import GlossaryLookup
+
+        if self._glossary_lookup is None:
+            self._glossary_lookup = GlossaryLookup(self.app)
+        self._glossary_lookup.open_it(self._screen_for(self.snapshot.hwnd if self.snapshot else 0))
+
+    def glossary_lookup_from_palette(self) -> None:
+        """From a window's palette (Ctrl+K), which is DocRepo's own: Esc gives the keyboard back to no other program."""
+        self.snapshot = None
+        self.glossary_lookup()
 
     def today_panel(self, do: str = "toggle") -> None:
         self.app.today_panel_action(do)

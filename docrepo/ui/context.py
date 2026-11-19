@@ -47,6 +47,8 @@ class AppContext:
     log_progress: Callable[[str | None], None] = lambda task=None: None
     #: Opens Recent captures (release 5.158, decision 723) from a window's command palette.
     open_recent: Callable[[], None] = lambda: None
+    #: Opens the glossary lookup (release 5.172, decision 808) from a window's command palette.
+    open_lookup: Callable[[], None] = lambda: None
     #: This session's saves that had problems (release 5.91), for the Problems lines of the capture and browse windows.
     problem_log: ProblemLog = field(default_factory=ProblemLog)
     #: Today's appointments from the Outlook calendar (release 5.127), read at most every 5 minutes, shared by the Today view
