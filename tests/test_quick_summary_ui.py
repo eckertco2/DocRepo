@@ -317,10 +317,14 @@ def test_pin_keeps_it_first_in_the_box(window, ctx):
     assert "label:Safety" not in ctx.settings.summary_pins
 
 
-def test_links_open_in_the_browse_tool(window):
+def test_links_open_in_the_browse_tool(window, monkeypatch):
+    from docrepo.ui import task_open
+
+    opened: list[str] = []  # a task's link opens it as Settings' Open a task in says (release 5.174, decision 815)
+    monkeypatch.setattr(task_open, "open_task", lambda browse, task_id, other=False, **_: opened.append(task_id))
     window.open_it(None, "label:Line 1")
     window.on_link(QUrl(f"task:{RIGGING}"))
-    assert window.shown[-1] == (None, RIGGING)
+    assert opened == [RIGGING]
     window.on_link(QUrl("activity:label:Line%201:2026-09-08"))
     act = window.app.browse.act
     assert act["win"] == "range" and act["from"] == "2026-09-08" and act["labels"] == ["Line 1"] and window.app.browse.view == "activity"

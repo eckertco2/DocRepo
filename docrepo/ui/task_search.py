@@ -67,14 +67,17 @@ class TaskSearch(QWidget):
             return
         self._chose = True
         held = self.picker.modifiers | QGuiApplication.keyboardModifiers()  # Ctrl with Enter, or with a click
-        self.open_task(task_id, bool(held & Qt.KeyboardModifier.ControlModifier))
+        self.open_task(task_id, bool(held & Qt.KeyboardModifier.ControlModifier), bool(held & Qt.KeyboardModifier.ShiftModifier))
 
-    def open_task(self, task_id: str, other: bool = False) -> None:
-        """The chosen task: as the wheel's slot says, or the other way with Ctrl."""
+    def open_task(self, task_id: str, other: bool = False, shift: bool = False) -> None:
+        """The chosen task: as the wheel's slot says, or the other way with Ctrl. A task opened (not its files) opens as
+        Settings' Open a task in says, or the other way with Shift (release 5.174, decision 815)."""
         if (self.then == "find_files") != other:
             self.app.browse.open_task_view(task_id)
         else:
-            self.app.show_browse(None, task_id)
+            from docrepo.ui import task_open
+
+            task_open.open_task(self.app.browse, task_id, other=shift)
 
     def _search_everything(self, text: str) -> None:
         """Nothing matched: what was typed carries to Search everything."""

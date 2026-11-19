@@ -286,8 +286,10 @@ class FileSearch(QWidget):
             if not r.task and r.capture:  # an unfiled capture's file (release 5.165, decision 768): its capture
                 self.app.show_browse()
                 self.browse.go_capture(r.capture)
-            else:
-                self.app.show_browse(None, r.task)
+            else:  # its task, as Settings' Open a task in says, Shift the other way (release 5.174, decision 815)
+                from docrepo.ui import task_open
+
+                task_open.open_task(self.app.browse, r.task, other=task_open.shift_held())
         elif name == "copy":
             QGuiApplication.clipboard().setText(opener.copy_text([r.path]) if r.path else "")
             self.foot.setText(f"Copied the path of {r.title}.")

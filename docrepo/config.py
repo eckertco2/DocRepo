@@ -15,6 +15,9 @@ from pathlib import Path
 from docrepo.layer0 import DEFAULT_DROP, OTHER_LINKS, entry_problem, tidy_list
 from docrepo.safe_fs import SafeFS
 
+#: Open a task in (release 5.174, decision 815): each choice and its words in Settings.
+OPEN_TASKS_IN = {"workspace": "Its workspace", "page": "Its page"}
+
 log = logging.getLogger(__name__)
 
 ENV_DATA_ROOT = "DOCREPO_DATA_ROOT"
@@ -204,6 +207,10 @@ class Settings:
     #: headings for every task's notes, each {"name": ..., "level": 1 to 3, "description": what belongs under it}. Four
     #: ship (``stock_headings.DEFAULTS``); the list is written once it differs from them, so an emptied list stays empty.
     stock_headings: list[dict] = field(default_factory=lambda: _stock_defaults())
+    #: Open a task in (release 5.174, the design workspace's docs/mods/today-workspace-carry-plan.md, decision 815): "workspace"
+    #: or "page". What opening a task from a list, a tile, Task search, the quick summary or File search does; the other one
+    #: is the tile menu's second line, and Shift. A link inside a page always goes to the task's page. Written once it's changed.
+    open_tasks_in: str = "workspace"
 
     @classmethod
     def load(cls, data_root: Path) -> Settings:
@@ -286,6 +293,9 @@ class Settings:
                 del data["stock_headings"]
             else:
                 data["stock_headings"] = [h.as_setting() for h in stock_of(stock)]
+        if "open_tasks_in" in data and data["open_tasks_in"] not in OPEN_TASKS_IN:  # release 5.174
+            log.warning("Ignoring open_tasks_in in %s: it isn't one of %s", file, ", ".join(OPEN_TASKS_IN))
+            del data["open_tasks_in"]
         if "other_links" in data and data["other_links"] not in OTHER_LINKS:
             log.warning("Ignoring other_links in %s: it isn't one of %s", file, ", ".join(OTHER_LINKS))
             del data["other_links"]
@@ -322,7 +332,7 @@ class Settings:
         # Release 5.146 (decision 639): the link lists and Other links, written once they differ from their start, so an
         # existing data root gets Never keep's start too, and a list emptied on purpose stays empty.
         for key, default in (("links_keep", []), ("links_drop", list(DEFAULT_DROP)), ("other_links", "keep"),
-                             ("stock_headings", _stock_defaults())):  # release 5.169 (decision 788): the same
+                             ("stock_headings", _stock_defaults()), ("open_tasks_in", "workspace")):  # 5.169 (decision 788) and 5.174: the same
             if data[key] == default:
                 del data[key]
         return fs.write_text(data_root / SETTINGS_FILE, json.dumps(data, indent=2) + "\n")
