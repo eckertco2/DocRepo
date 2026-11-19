@@ -1283,7 +1283,7 @@ class TaskView(QWidget):
             task_menus.add_row_menus(self.browse, r.id, menu, anchor=self.list, after=lambda: self.refresh(keep=True), tell=self._tell_move)
         if r.kind == "task" and can_change(self.browse.model(), r.id):
             sub = state_menu(menu, self.browse.model(), r.id, lambda to, branch, t=r.id: self.browse.set_state(
-                t, to, branch, after=lambda: self.refresh(keep=True), tell=self._tell_state))
+                t, to, branch, after=lambda: self.refresh(keep=True), tell=self._tell_state), wait=self.browse.wait_on(r.id))
             menu.addSeparator()
             menu.addMenu(sub)
         try:

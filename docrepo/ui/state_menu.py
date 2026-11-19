@@ -25,6 +25,8 @@ MARKS = {"Not started": ("state-ns", "text2"), "In progress": ("state-ip", "acce
 UNDO_MS = 10_000
 #: The menu's line for closing a whole branch (decision 364).
 BRANCH = "Closed, with its {n} open subtask{s}"
+#: The menu's line for a wait (release 5.166, decision 762): Log progress, on that state.
+WAITING = "Waiting on a reply…"
 #: A collection's pick that makes it a task again (release 5.167, decision 781): ``BrowseWindow.set_state`` knows it.
 MAKE_TASK = "make-task"
 
@@ -66,9 +68,12 @@ class StateMenu(QMenu):
         p.end()
 
 
-def state_menu(parent: QWidget | None, model: Model, task_id: str, pick: Callable[[str, bool], None], title: str = "State") -> QMenu:
+def state_menu(parent: QWidget | None, model: Model, task_id: str, pick: Callable[[str, bool], None], title: str = "State",
+               wait: Callable[[], None] | None = None) -> QMenu:
     """The menu of states for a task: picking one calls ``pick(state, branch)``, where ``branch`` closes its open subtasks too.
-    The current state is ticked and is where the keyboard starts. ``title`` names it as a submenu."""
+    The current state is ticked and is where the keyboard starts. ``title`` names it as a submenu. ``wait`` (release 5.166,
+    decision 762) adds **Waiting on a reply…** after In progress, for a task that isn't closed: it opens Log progress on
+    that state, since a wait is a mark on In progress (decision 580), not a state of its own."""
     t = model.task(task_id)
     if t.collection:
         return collection_menu(parent, model, task_id, pick, title)
@@ -87,6 +92,10 @@ def state_menu(parent: QWidget | None, model: Model, task_id: str, pick: Callabl
         a.triggered.connect(lambda _=False, s=s: pick(s, False))
         if s == t.state:
             current = a
+        if s == "In progress" and wait is not None and t.state != "Closed":
+            w = menu.addAction(icon("waiting", tokens.LIGHT["accent"]), WAITING)
+            w.setToolTip("Log progress on this task, waiting on someone's reply: it stays In progress, with the hourglass")
+            w.triggered.connect(lambda _=False: wait())
     below = open_below(model, task_id)
     if below and t.state != "Closed":
         menu.addSeparator()

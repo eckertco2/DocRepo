@@ -100,16 +100,19 @@ def test_a_save_with_no_problems_shows_none(windows, ctx):
 
 # ---- Undo on Today's Done and an agenda's Discussed ----
 def test_undo_after_done_puts_it_back_on_today(windows, ctx):
+    """Since release 5.166 (decision 755) a tick on an open task opens Log progress instead; a note ticks as before."""
+    from datetime import datetime
+
+    from docrepo import edits
+
     _, browse = windows
-    browse.add_to_today("T000012")
-    item = next(a for a in Model(ctx.conn).today_items() if a.subject == "T000012")
+    edits.add_to_today(ctx.conn, ctx.data_root, ctx.fs, None, "Sign the overtime sheets", datetime(2026, 10, 8, 9, 0))
+    item = next(a for a in Model(ctx.conn).today_items() if a.subject is None)
     browse.close_today_item(item.id, "Done")
     assert "Undo" in browse.status.text()
     browse._status_link("undo")
-    m = Model(ctx.conn)
-    again = next(a for a in m.agenda if a.id == item.id)
+    again = next(a for a in Model(ctx.conn).agenda if a.id == item.id)
     assert again.closed is None and again.how is None
-    assert not [e for e in m.status_log_of("T000012") if e.to_value == "Done"]  # its closing line went with it
     assert "Back on Today." in browse.status.text()
 
 
