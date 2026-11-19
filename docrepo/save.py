@@ -576,6 +576,7 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
     task_words = "\n\n".join([items.words(own_words, names)] * bool(own_words) + [e.text() for e in emails])
     summary = draft.summary.strip()
     targets = list(dict.fromkeys(draft.agenda)) if draft.agenda_shown() else []
+    not_on_today: list[str] = []  # collections Today was ticked for, left off it (release 5.167)
     # A note on a task, of text alone, is no capture (release 5.69, the notes workspace plan's decisions 341 and 345): its
     # text goes on the task's page, and its items are made as before. A file, an email, a link or a summary makes it a
     # capture still, a record of what arrived; so do an update, a new task and meeting notes.
@@ -748,7 +749,11 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
                     said_doc = transcripts.record(conn, holder, capture_id, said)
         subject = created if is_new else t if is_upd or draft.split_part else None
         note_text = "" if is_new else plain_text(words)
-        for target in targets:
+        for target in list(targets):
+            if target == TODAY and subject and agenda.is_collection(conn, subject):  # release 5.167: the capture is kept, not the Today item
+                targets.remove(target)
+                not_on_today.append(subject)
+                continue
             # A split note's task on its own agenda is the note alone: a task can't be on its own agenda.
             agenda.add_item(conn, subject=None if subject == target else subject, target=target, note=note_text, added=when, added_by=via)
         item_files: list[tuple[str, str, bool]] = []  # (item capture, its block, whether it's markup)
@@ -840,6 +845,8 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
     except OSError as e:
         result.problems.append(f"The generated pages weren't all updated ({type(e).__name__}).")
     result.message = _message(conn, draft, result, targets, bool(draft.new_task.title.strip()))
+    for subject in dict.fromkeys(not_on_today):  # release 5.167 (decision 780): said, as the Today item wasn't made
+        result.message += " " + agenda.COLLECTION_NOT_ON_TODAY.format(title=tasks.get_task(conn, subject).title)
     moved = tasks.moved_words(result.changes)  # no one to ask here, so it moves them and says so (decision 249)
     if moved:
         result.message += f" {moved}"
@@ -937,7 +944,8 @@ def _save_items(conn: sqlite3.Connection, settings: Settings, reading: items.Rea
                 deadline_desc=it.deadline_desc or None, reminder=it.reminder, recurrence=it.recurrence or None,
                 start=it.start if it.start and (it.start != day or it.plant_event) else None, urgent=it.urgent, leads=[person(x.who()) for x in it.leads],
                 assignees=[person(x.who()) for x in it.assignees], lead_hours=float(it.lead_hours) if it.lead_hours else None,
-                assignee_hours=float(it.assignee_hours) if it.assignee_hours else None, labels=it.labels, plant_event=it.plant_event)
+                assignee_hours=float(it.assignee_hours) if it.assignee_hours else None, labels=it.labels, plant_event=it.plant_event,
+                collection=getattr(it, "collection", False))  # **collection, (release 5.167, decision 784)
             item_task[it.key] = task_id
             if made_tasks is not None:
                 made_tasks[it.key] = task_id

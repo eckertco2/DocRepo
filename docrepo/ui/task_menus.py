@@ -57,6 +57,10 @@ def run(browse: BrowseWindow, task_id: str, entry: Entry, anchor: QWidget | None
         browse.open_capture(task=task_id, mode="update", agenda=[args[0]])
     elif do == "agenda_other":
         browse.open_capture(task=task_id, mode="update", agenda_focus=True)
+    else:  # a kind line (release 5.167): Make it a collection, and back
+        from docrepo.ui import collections_ui
+
+        collections_ui.run(browse, task_id, do)
 
 
 def fill(menu: QMenu, entries: list[Entry], picked: Callable[[Entry], None]) -> QMenu:
@@ -116,6 +120,9 @@ def add_row_menus(browse: BrowseWindow, task_id: str, menu: QMenu, anchor: QWidg
         fill(menu, [put], lambda e: run(browse, task_id, e, anchor, after, tell))
     menu.addMenu(add_to_menu(browse, task_id, menu))
     menu.addMenu(edit_menu(browse, task_id, menu, anchor, after, tell))
+    from docrepo.ui import collections_ui
+
+    collections_ui.add_kind_lines(browse, task_id, menu)  # release 5.167, decision 779
 
 
 def move(browse: BrowseWindow, task_id: str, old_parent: str | None, new_parent: str | None, after: After = None, tell: Tell = None) -> bool:

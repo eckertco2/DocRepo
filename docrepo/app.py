@@ -31,7 +31,8 @@ from docrepo.model import Model
 from docrepo.pages import write_pages
 from docrepo.panel_rules import OPEN_KEY
 from docrepo.safe_fs import SafeFS
-from docrepo.schedule import due_of, is_open
+from docrepo.kinds import is_work
+from docrepo.schedule import due_of
 from docrepo.ui.browse_window import BrowseWindow
 from docrepo.ui.capture_window import CaptureWindow
 from docrepo.ui.context import AppContext
@@ -345,7 +346,7 @@ class CaptureApp(QObject):
         today = now.date()
         model = Model(conn)
         shown = {(r["task"], r["reminder"]) for r in conn.execute("SELECT task, reminder FROM reminders_shown")}
-        due = [t for t in model.tasks.values() if is_open(t) and t.reminder and t.reminder <= today.isoformat() and (t.id, t.reminder) not in shown]
+        due = [t for t in model.tasks.values() if is_work(t) and t.reminder and t.reminder <= today.isoformat() and (t.id, t.reminder) not in shown]
         if not due:
             return 0
         if len(due) <= MAX_SINGLE_REMINDERS:

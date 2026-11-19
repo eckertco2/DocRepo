@@ -248,6 +248,12 @@ The `**` names in a capture, read by `read` and `itemText` in `docs/browse-tool/
 | ** due, 5 Nov. | Stays in the notes. |
 | **this is a long sentence of many words, and more. | Stays in the notes. |
 | **events are fun | Stays in the notes. |
+| **collection, Job aids. | Collection "Job aids" [home] |
+| **task-routine, Check the seals. | Task "Check the seals" recurrence Weekly [home] |
+| **task-routine, Walk the line. **recurrence, daily. | Task "Walk the line" recurrence Weekly [home] / Recurrence: Daily. [item 0] |
+| **task-single, Order gaskets. | Task "Order gaskets" [home] |
+| **task-group, Rebuild the pump. | Task "Rebuild the pump" [home] |
+| **task-parent, Paint the rails. | Task "Paint the rails" [home] |
 
 ### On an existing task
 

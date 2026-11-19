@@ -21,8 +21,9 @@ from datetime import date, timedelta
 from docrepo.config import Settings
 from docrepo.dates import add_months, monday_of, to_date, workday_numbers
 from docrepo.db import transaction
+from docrepo.kinds import is_work
 from docrepo.model import Model, Task, load_tasks
-from docrepo.schedule import is_open, windows
+from docrepo.schedule import windows
 
 
 def horizon(today: date, settings: Settings) -> date:
@@ -39,7 +40,7 @@ def roles_of(task: Task) -> list[tuple[str, float]]:
 def task_rows(task: Task, today: date, settings: Settings) -> dict[tuple[str, date], float]:
     """The task's hours per (person, day)."""
     roles = roles_of(task)
-    if task.state == "Parked" or task.discarded or not any(h for _, h in roles):
+    if task.state == "Parked" or task.discarded or task.collection or not any(h for _, h in roles):  # a collection isn't work (5.167)
         return {}
     workdays = workday_numbers(settings.workdays)
     closed = to_date(task.closed) if task.closed else None
@@ -107,8 +108,8 @@ def unplaced(model: Model, today: date, settings: Settings) -> tuple[list[str], 
         if t.state == "Parked" or not roles:
             continue
         if not ((t.leads and t.lead_hours) or (t.assignees and t.assignee_hours)):  # someone at 0% doesn't make it unestimated
-            if is_open(t):
+            if is_work(t):
                 unestimated.append(t.id)
-        elif not windows(t, horizon(today, settings)) and is_open(t):
+        elif not windows(t, horizon(today, settings)) and is_work(t):
             unscheduled.append(t.id)
     return unestimated, unscheduled

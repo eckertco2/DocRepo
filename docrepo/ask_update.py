@@ -26,7 +26,8 @@ from typing import TYPE_CHECKING
 
 from docrepo.dates import long_date, short, to_date
 from docrepo.model import Model, Person, Task
-from docrepo.schedule import due_of, is_open
+from docrepo.kinds import is_work
+from docrepo.schedule import due_of
 
 if TYPE_CHECKING:
     from docrepo.config import Settings
@@ -159,7 +160,7 @@ def question(m: Model, t: Task, today: date) -> str:
         else:
             parts.append(f"Its deadline was {day}." if past else f"Its deadline is {day}.")
     kids = [m.task(k) for k in m.children_of(t.id) if k in m.tasks]
-    still = [k.title for k in kids if is_open(k) and not k.discarded]
+    still = [k.title for k in kids if is_work(k) and not k.discarded]
     if still:
         parts.append(f"Still open under it: {_ends(listed(still))}")
     return " ".join(parts)

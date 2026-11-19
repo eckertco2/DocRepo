@@ -6,6 +6,9 @@ decision 394) or Edit task puts it under its real task. It's made two ways (deci
 side panel's, and Ctrl+Shift+D, whose command the wheels' slots run; Make it a task turns a note on Today into one. Quick tasks is
 made the first time it's needed. DocRepo knows it by its creator, ``CREATOR``, so renaming it changes nothing; if it's
 discarded, the next quick task makes a new one.
+
+Since release 5.167 (the design workspace's docs/mods/collections-and-kinds-plan.md, decision 778) Quick tasks is a
+collection, made one by schema 30's migration and made as one since, so it's left out of the work as any collection is.
 """
 from __future__ import annotations
 
@@ -37,4 +40,4 @@ def ensure_parent(conn: sqlite3.Connection, settings: Settings, at: datetime) ->
     """Quick tasks' ID, making it first if it isn't there. Joins the caller's transaction."""
     with transaction(conn):
         return parent_id(conn) or tasks.create_task(conn, settings, title=TITLE, at=at, created_by=CREATOR, description=DESCRIPTION,
-                                                    state="In progress")
+                                                    state="In progress", collection=True)

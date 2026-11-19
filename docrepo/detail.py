@@ -31,6 +31,7 @@ from docrepo.links import FOLDER_TEXT, NO_TEXT, is_folder, is_link, reference_li
 from docrepo.model import PRIORITY_NAMES, TODAY, TYPE_NAMES, Capture, Model, Task, is_person
 from docrepo.overview import file_type, sender_of
 from docrepo.pages import num
+from docrepo.kinds import is_work
 from docrepo.schedule import due_of, held_on, is_open, start_of
 from docrepo.stories import Event, RawItem, Stories, clip
 from docrepo.task_links import SHOWN, all_documents, links_of
@@ -227,7 +228,7 @@ SIDE_BY_SIDE = 540
 #: A description longer than this folds, with More (decision 67).
 DESC_CHARS = 180
 PROGRESS_WIDTH = 72
-MARKS = {"Not started": "ns", "In progress": "ip", "Parked": "pk", "Closed": "cl"}
+MARKS = {"Not started": "ns", "In progress": "ip", "Parked": "pk", "Closed": "cl", "Collection": "co"}
 
 
 def section(title: str, extra: str = "") -> str:
@@ -415,7 +416,7 @@ class Pages:
     # ---- the task page (the visual overhaul's O9, release 5.21, decisions 64 to 69) ----
     def has_agenda(self, t: Task) -> bool:
         """True when a task has open agenda items, or is an open meeting."""
-        return bool(self.m.open_items_for(t.id)) or (t.meeting and is_open(t))
+        return bool(self.m.open_items_for(t.id)) or (t.meeting and is_work(t))
 
     def task_page(self, task_id: str, state: PageState, width: int = 600, part: str = "all") -> str:
         """The task's story, top to bottom: where it sits and what it is, its current status, When and Who, a meeting's
@@ -572,9 +573,13 @@ class Pages:
         """The task's facts as one grid under its title (release 5.113, the task panel plan's decision 422): its state
         with its flags, then its dates (When's rows) on the left; its people (Who's rows) and its labels on the right; each
         a grey name beside its value, all at the Body size. From SIDE_BY_SIDE wide the two sit side by side, below it one
-        under the other. It takes the place of the chips, the fact line and the When and who group."""
-        left = [("Status", self.status_value(t)), *self.when_rows(t)]
-        right = list(self.who_rows(t))
+        under the other. It takes the place of the chips, the fact line and the When and who group. A collection's has its
+        kind and labels alone (release 5.167, decision 781)."""
+        if t.collection:
+            left, right = [("Kind", self.status_value(t))], []
+        else:
+            left = [("Status", self.status_value(t)), *self.when_rows(t)]
+            right = list(self.who_rows(t))
         labels = self.labels_value(t)
         if labels:
             right.append(("Labels", labels))
@@ -592,6 +597,12 @@ class Pages:
     def status_value(self, t: Task) -> str:
         """The grid's Status: the state's mark and name, which open the state menu (a discarded task's are only words),
         then its priority, flags and kind as chips, as a chip says something needs a look (the visual review's V6)."""
+        if t.collection:  # release 5.167 (decision 781): a folder, which opens Archive and Make it a task
+            word = "Collection, archived" if t.state == "Closed" else "Collection"
+            if t.discarded:
+                return f"{self.mark(t)} {esc(word)}"
+            return (f'<a href="state:{t.id}" title="A collection. Click to archive it, or make it a task." style="text-decoration: none">'
+                    f'{self.mark(t)} <span class="tl">{esc(word)}</span>{CHEVRON_DOWN}</a>')
         if t.discarded:
             state = f"{self.mark(t)} {esc(t.state)}"
         else:
@@ -656,7 +667,11 @@ class Pages:
 
     def status_parts(self, t: Task) -> tuple[str, str, str, str]:
         """The status card's pieces (release 5.84): its name, the date its text last changed, how long ago that was (the
-        date's tooltip, release 5.83's R7) and its body."""
+        date's tooltip, release 5.83's R7) and its body. A collection's card says what it is (release 5.167, decision 779)."""
+        if t.collection:
+            return "A collection", "", "", ('<span class="sub">A place for notes, files, links, captures and tasks. It is not work, so it '
+                                            "has no state, dates or people, and it isn't on Today, the Priorities board, the Timeline or "
+                                            "the weekly review. Its tasks are, as any others.</span>")
         name = "Final status" if t.state == "Closed" else "Current status"
         since = self.status_since(t)
         when = self.long(since) if t.current_status and since else ""
@@ -836,7 +851,8 @@ class Pages:
 
     def mark(self, t: Task) -> str:
         """A task's state as its small mark, with the state's name as its tooltip."""
-        return f'<img src="mark:{MARKS.get(t.state, "ns")}" width="14" height="14" style="vertical-align: middle" title="{esc(t.state)}">'
+        state = "Collection" if t.collection else t.state  # a collection's folder (release 5.167)
+        return f'<img src="mark:{MARKS.get(state, "ns")}" width="14" height="14" style="vertical-align: middle" title="{esc(state)}">'
 
     def agenda_section(self, t: Task) -> str:
         """A meeting's (or any agenda target's) open agenda items: for a meeting, they're what's next."""
@@ -1957,8 +1973,8 @@ class Pages:
     def person_page(self, person_id: str) -> str:
         """A person's page: their open tasks as lead and assignee, their hours this week and next, and their agenda."""
         m, p = self.m, self.m.people[person_id]
-        leads = [t.id for t in m.tasks.values() if is_open(t) and person_id in t.leads]
-        assigned = [t.id for t in m.tasks.values() if is_open(t) and person_id in t.assignees]
+        leads = [t.id for t in m.tasks.values() if is_work(t) and person_id in t.leads]
+        assigned = [t.id for t in m.tasks.values() if is_work(t) and person_id in t.assignees]
         this_week, next_week = self.scheduled(person_id)
         chips = (" " + chip("me", "st-ip") if person_id == self.me else "") + (" " + chip("retired", "st-cl") if p.status == "retired" else "")
         rows = [("Aliases", esc(", ".join(p.aliases)) or none_text()),

@@ -1395,7 +1395,7 @@ class TimelineView(QWidget):
         self.a_week = False
         self.labels: list[str] = []
         self.people: list[str] = []
-        self.routine = True
+        self.routine = False  # release 5.167 (decision 783): routine work is off the Timeline unless asked for
         self.plan = False
         self.focus: str | None = None
         self.open_ids: set[str] = set()
@@ -1710,7 +1710,7 @@ class TimelineView(QWidget):
         row(2, "Hours on bars", seg)
         row(3, "Focus on", self.focus_box)
         self.routine_box = QCheckBox("Show routine")
-        self.routine_box.setToolTip("Recurring tasks, such as meetings")
+        self.routine_box.setToolTip("Routine tasks, such as regular meetings and their occurrences, and what's only under them")
         self.routine_box.toggled.connect(lambda on: self._set("routine", on))
         grid.addWidget(self.routine_box, 4, 1)
         grid.addWidget(QLabel("Labels", objectName="fieldLabel"), 5, 0)
@@ -2191,7 +2191,7 @@ class TimelineView(QWidget):
         people.chosen.connect(lambda values: self._set("people", values))
         lay.addWidget(people)
         routine = QCheckBox("Show routine")
-        routine.setToolTip("Recurring tasks, such as meetings")
+        routine.setToolTip("Routine tasks, such as regular meetings and their occurrences, and what's only under them")
         routine.setChecked(self.routine)
         routine.toggled.connect(lambda on: self._set("routine", on))
         lay.addWidget(routine)
@@ -2265,6 +2265,7 @@ class TimelineView(QWidget):
     def settings(self) -> dict:
         kept = {k: getattr(self, k) for k in self.REMEMBERED}
         kept["bars_v"] = 2  # bars can be one colour: a "project" saved since then was chosen
+        kept["routine_v"] = 1  # release 5.167: Show routine starts off, so a choice saved before then isn't kept
         if self.typed_days and self.start is not None:  # a typed range: its days, until a Show choice replaces them
             kept["range"] = [self.start.isoformat(), (self.start + timedelta(days=self.typed_days - 1)).isoformat()]
         return kept
@@ -2278,6 +2279,8 @@ class TimelineView(QWidget):
             if value is None or (key in valid and value not in valid[key]):
                 continue
             if key == "bars" and value == "project" and not saved.get("bars_v"):  # saved before bars could be one colour (decision 234)
+                continue
+            if key == "routine" and not saved.get("routine_v"):  # saved before Show routine started off (release 5.167, decision 783)
                 continue
             if key in ("a_week", "routine", "undated_open", "cap_open", "cap_by_group"):
                 value = bool(value)

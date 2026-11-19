@@ -24,7 +24,10 @@ def test_task_page(sample_conn, task_id):
 
 
 def test_contents_page(sample_conn):
-    assert Pages(Model(sample_conn), TODAY, SAMPLE_AS_OF).contents_page() == example_block("Contents.md")
+    from docrepo import stock_headings
+
+    # With Settings' stock headings as they ship, whose line examples.md has since release 5.167 (release 5.169's).
+    assert Pages(Model(sample_conn), TODAY, SAMPLE_AS_OF, stock=stock_headings.DEFAULTS).contents_page() == example_block("Contents.md")
 
 
 @pytest.mark.parametrize("capture_id", ["C000020", "C000017", "C000014", "C000024", "C000003", "C000021"])
@@ -88,5 +91,5 @@ def test_plant_events_and_reference_fields_on_the_page(sample_conn):
                       references={"Work order #": "48213"})
     model = Model(sample_conn)
     page = Pages(model, TODAY, SAMPLE_AS_OF).task_page(model.task("T000012"))
-    assert "| State | In progress |\n| Plant event | Yes |\n| Parents |" in page
+    assert "| State | In progress |\n| Kind | Single task |\n| Plant event | Yes |\n| Parents |" in page
     assert "| Deadline | None |\n| Work order # | 48213 |\n" in page
