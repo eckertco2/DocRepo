@@ -70,7 +70,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo import outlook, progress, waits
+from docrepo import current, outlook, progress, waits
 from docrepo.dates import long_date
 from docrepo.detail import esc
 from docrepo.model import Model
@@ -81,6 +81,9 @@ from docrepo.ui.icons import icon
 from docrepo.ui.progress_form import ProgressForm, guarded, said_after
 from docrepo.ui.style import style_sheet
 from docrepo.ui.task_picker import TaskPicker
+
+#: How the task picker says its task came from the current task (release 5.177, decision 830), as "from conversation" does.
+CURRENT_HOW = "current task"
 
 if TYPE_CHECKING:
     from docrepo.app import CaptureApp
@@ -310,6 +313,10 @@ class LogProgress(QWidget):
             found = task
         elif self.email is not None:
             found, self.task_how = progress.task_for(m, self.email)
+        if found is None:  # no conversation to go by: the task you're working on (release 5.177, decision 830)
+            now = current.get(self.ctx.conn, m)
+            if now is not None:
+                found, self.task_how = now, CURRENT_HOW
         to_people = progress.people_in(m, self.email.to, self.ctx.settings.me) if self.email and self.email.to else []
         self.form.reset(found, to_people, state)
         self.clear_problems()

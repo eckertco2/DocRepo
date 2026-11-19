@@ -17,7 +17,7 @@ from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 from pathlib import Path
 
-from docrepo import (activity, agenda, bulk, captures, notes_page, page_lines, people, priorities, quick, repeats, search, tasks, urgency, views,
+from docrepo import (activity, agenda, bulk, captures, current, notes_page, page_lines, people, priorities, quick, repeats, search, tasks, urgency, views,
                      waits, whatif)
 from docrepo.config import Settings
 from docrepo.dates import long_date, stamp, to_date, workday_numbers
@@ -568,7 +568,7 @@ def move_today_item(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, item_
     day of ``at`` and the owner's ``workdays``, Monday to Friday when not given), and a move keeps to its half as well: the
     top and the bottom are its half's, and a drag lands only beside an item of its own band and half."""
     before = model_now(conn, model)
-    items = views.today_order(before, at.date(), workdays)
+    items = views.today_order(before, at.date(), workdays, current.stored(conn))  # the current task is under Now (5.177)
     a = next((x for x in items if x.id == item_id), None)
     if a is None:
         raise EditError("That item isn't on Today any more.")

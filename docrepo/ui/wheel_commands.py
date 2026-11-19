@@ -101,6 +101,13 @@ def _summary_open(app: CaptureApp, args: Mapping[str, Any]) -> None:
         app.wheels.quick_summary()
 
 
+def _current_open(app: CaptureApp, _args: Mapping[str, Any]) -> None:
+    """Back to the task you're working on (release 5.177, the current task plan's decision 829): its workspace, in front."""
+    from docrepo.ui import current_ui
+
+    current_ui.back_to_it(app.browse)
+
+
 def _progress_log(app: CaptureApp, _args: Mapping[str, Any]) -> None:
     """Log progress (release 5.139, decision 583): its window, on the email being written in Outlook."""
     app.wheels.log_progress()
@@ -140,6 +147,7 @@ _ROWS = (
     Registered(CommandSpec("find_files.current", "Find files for the current task"), _find_files_current),
     Registered(CommandSpec("summary.open", "The quick summary",(Arg("set", "", kind="text"),)), _summary_open),
     Registered(CommandSpec("progress.log", "Log progress, on the email you're writing in Outlook"), _progress_log),
+    Registered(CommandSpec("current.open", "Back to the task you're working on"), _current_open),  # release 5.177, decision 829
 )
 REGISTRY: dict[str, Registered] = {r.spec.id: r for r in _ROWS}
 SPECS: dict[str, CommandSpec] = {r.spec.id: r.spec for r in _ROWS}

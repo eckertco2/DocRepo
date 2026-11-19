@@ -137,3 +137,25 @@ def test_escape_keeps_nothing(window):
     window.hide()
     m = Model(window.ctx.conn)
     assert m.waits == [] and m.task(RIGGING).current_status != "Not this time"
+
+
+# ---- release 5.177 (the current task plan's decision 830): it starts on the task you're working on ----
+def test_with_no_conversation_it_starts_on_the_current_task(window):
+    from docrepo import current
+
+    current.start(window.ctx.conn, "T000016")
+    window.open_for(None)
+    assert window.task == "T000016" and window.task_how == "current task"
+    window.open_for(draft(subject="Unknown thread"))  # an email nothing knows: still the current task
+    assert window.task == "T000016"
+
+
+def test_an_emails_conversation_wins_over_the_current_task(window):
+    from docrepo import current
+
+    conn = window.ctx.conn
+    current.start(conn, "T000016")
+    index = conversations.new_index(NOW, GUID)
+    conversations.record_t_mail(conn, RIGGING, "new", "2026-10-07 09:00:00", index)
+    window.open_for(draft(index=index + "8000000001"))
+    assert window.task == RIGGING and window.task_how == "from conversation"

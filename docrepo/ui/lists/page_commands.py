@@ -86,7 +86,9 @@ class PageCommands:
         # Work on it (release 5.152, the workspace plan's decision 663): the task's workspace, for doing the work.
         from docrepo.ui import workspace as workspace_ui
 
-        self._action(workspace_ui.WORK_ON_IT, lambda: workspace_ui.open_workspace(self, task_id), workspace_ui.WORK_TIP.removesuffix(" (W)"),
+        from docrepo.ui import current_ui  # Work on it makes it the current task too (release 5.177, decision 826)
+
+        self._action(workspace_ui.WORK_ON_IT, lambda: current_ui.work_on(self, task_id), workspace_ui.WORK_TIP.removesuffix(" (W)"),
                      primary=True, icon_name="workspace", key="W")
         # More: New task under this one, the agenda, Copy (release 5.9: its people's email addresses, M0031, and each reference field,
         # M0034), Copy prompt for each summary type, and the folder.

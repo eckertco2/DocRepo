@@ -211,10 +211,18 @@ def fill_menu(browse: BrowseWindow, task_id: str, menu: QMenu, own: Iterable[Own
         if work_first is None:
             work_first = task_open.opens_workspace(browse, task_id)
 
+        from docrepo import current
+        from docrepo.ui import current_ui
+
         k = task_menus.key_column()
-        work = QAction(icon("workspace"), f"{workspace_ui.WORK_ON_IT}{k}{'Enter, W' if work_first else 'W'}", menu)
-        work.setToolTip(workspace_ui.WORK_TIP)
-        work.triggered.connect(lambda: workspace_ui.open_workspace(browse, task_id))
+        if current.is_current(browse.conn, m, task_id):  # the current task's menu starts with its end (release 5.177, decision 827)
+            stop = menu.addAction(icon("close"), current_ui.STOP, lambda: current_ui.stop(browse, task_id))
+            stop.setToolTip("It's no longer the task you're working on: Now on Today goes")
+            menu.addSeparator()
+        # Work on it makes the task the current one too (release 5.177, decision 826); Enter and a double-click only open it.
+        work = QAction(icon("workspace"), f"{workspace_ui.WORK_ON_IT}{k}W", menu)
+        work.setToolTip(workspace_ui.WORK_TIP + "; it becomes the task you're working on, first on Today under Now")
+        work.triggered.connect(lambda: current_ui.work_on(browse, task_id))
         opened = QAction(icon("open"), f"Open the task page{k}" if work_first else f"Open{k}Enter", menu)
         opened.setToolTip("Its page, beside the list" if work_first else "Its page, with the keyboard in it: a double-click does the same")
         opened.triggered.connect(lambda: open_task(browse, task_id))

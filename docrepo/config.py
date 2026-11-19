@@ -140,6 +140,9 @@ class Settings:
     progress_hotkey: str = ""
     #: The glossary lookup (release 5.172, the design workspace's docs/mods/glossaries-plan.md, decision 808): off until set.
     lookup_hotkey: str = ""
+    #: Back to the task you're working on (release 5.177, the design workspace's docs/mods/current-task-plan.md, decision 829):
+    #: off until set.
+    current_hotkey: str = ""
     #: Whether Log progress's Enter sends the draft in its own window (decision 590 A); off, Enter logs and brings the draft
     #: back to the front for the owner to send (590 B).
     progress_sends: bool = True
@@ -317,7 +320,7 @@ class Settings:
     def save(self, fs: SafeFS, data_root: Path) -> Path:
         data = asdict(self)
         for key in ("wheel_hotkeys", "today_panel_hotkey", "copilot_folder", "reference_links", "tagged_patterns", "tagged_never",
-                    "summary_pins", "summary_recent", "summary_names", "progress_hotkey", "lookup_hotkey", "glossary_recent"):  # written once they're set, as they're optional (releases 5.41, 5.56, 5.67, 5.80, 5.131, 5.139, 5.149 and 5.172)
+                    "summary_pins", "summary_recent", "summary_names", "progress_hotkey", "lookup_hotkey", "glossary_recent", "current_hotkey"):  # written once they're set, as they're optional (releases 5.41, 5.56, 5.67, 5.80, 5.131, 5.139, 5.149, 5.172 and 5.177)
             if not data[key]:
                 del data[key]
         if data["progress_sends"]:  # release 5.139: written once it's turned off

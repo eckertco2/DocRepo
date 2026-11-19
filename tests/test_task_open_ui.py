@@ -11,6 +11,7 @@ from datetime import datetime  # noqa: E402
 from types import SimpleNamespace  # noqa: E402
 
 import pytest  # noqa: E402
+from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from docrepo import tasks  # noqa: E402
@@ -183,3 +184,12 @@ def test_the_side_panels_double_click_follows_the_setting(browse, monkeypatch):
     finally:
         panel.close_panel()
         panel.deleteLater()
+
+
+def test_shift_is_read_live_from_windows(monkeypatch):
+    """Release 5.177: Shift is Windows' live state of the keys, through a seam the tests set, so a Shift+double-click on
+    the side panel, which never takes the keyboard, is seen, and a synthetic Shift left over isn't."""
+    monkeypatch.setattr(task_open, "query_modifiers", lambda: Qt.KeyboardModifier.ShiftModifier)
+    assert task_open.shift_held()
+    monkeypatch.setattr(task_open, "query_modifiers", lambda: Qt.KeyboardModifier.NoModifier)
+    assert not task_open.shift_held()

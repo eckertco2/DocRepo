@@ -981,7 +981,8 @@ def test_the_suggested_hotkeys(browse):
         "outlook_hotkey": "Ctrl+Shift+E",  # E for email (release 5.33.1)
         "today_panel_hotkey": "",  # no default (release 5.43, decision 216)
         "progress_hotkey": "",  # Log progress has no suggested key either (release 5.139, decision 583)
-        "lookup_hotkey": ""}  # nor the glossary lookup (release 5.172, decision 808)
+        "lookup_hotkey": "",  # nor the glossary lookup (release 5.172, decision 808)
+        "current_hotkey": ""}  # nor Back to the task you're working on (release 5.177, decision 829)
     assert browse.status.text() == "Filled 6 hotkeys. Save settings to use them."
     assert view.save() == ["browse_hotkey", "note_hotkey", "new_task_hotkey", "update_hotkey", "agenda_hotkey", "today_hotkey", "outlook_hotkey"]
 

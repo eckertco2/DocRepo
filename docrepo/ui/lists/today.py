@@ -30,7 +30,7 @@ from docrepo import db, edits, key_dates, later, priorities, urgency, waits
 from docrepo.dates import long_date
 from docrepo.detail import esc
 from docrepo.model import Model
-from docrepo.ui import today_bins, today_meetings
+from docrepo.ui import current_ui, today_bins, today_meetings
 from docrepo.ui.lists import review as review_list
 from docrepo.ui.tree_view import MOVE_ROLE, RULE_ROLE, Line, group_ground, state_icon, with_actions
 from docrepo.views import (
@@ -94,12 +94,14 @@ class TodayList:
         self._button("Add", self.add_today_item)
         self.tree.set_columns(*_cols(*with_actions(["Item", "State", "Due"], [0, 96, 96 if LOOK.classic else DAYS_COL], 220)))
         grey = group_ground()
+        # Now first: the current task (release 5.177, the current task plan's decision 828), shown once, so its band leaves it out.
+        now = current_ui.add_now_view(self, m, today)
         review_list.today_row(self, grey)  # on the review day, "Weekly review" first (release 5.128, decision 502)
         today_meetings.add_group(self, grey)  # Meetings first, from the Outlook calendar (release 5.127, decision 490)
         # One list in the owner's order (release 5.148), in priority bands (release 5.154, decision 688), each band's urgent
         # tasks first (release 5.176, the urgency plan's decision 820): ``views.today_order``, as everything that walks it.
         workdays = self._workdays()
-        bands = today_bands(m, today, workdays)
+        bands = today_bands(m, today, workdays, now)
         hot = urgency.urgent_ids(m, (a for _, _, g in bands for a in g), today, workdays)
         self._today_band_of: dict[int, tuple[str, bool]] = {}
         head = self.tree.add_row(None, None, ["<b>Today</b>"], grey, selectable=False, span=True) if bands else None

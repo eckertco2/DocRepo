@@ -434,6 +434,8 @@ DEFAULT_TEXT = """\
         "S": { "label": "Quick summary", "icon": "agenda", "command": "summary.open" },
         //   args: "set" opens a saved set by its name, for one used every day: in a place of its own, such as
         //   "SE": { "label": "Morning meeting", "icon": "people", "command": "summary.open", "args": { "set": "Morning meeting" } }
+        // current.open: back to the task you're working on, its workspace in front (release 5.177); on no wheel by default,
+        //   for a place of its own, such as "NW": { "label": "Back to it", "icon": "workspace", "command": "current.open" },
         // find_files.current: Find files for the task selected in the browse tool, or the last one opened.
         "W": { "label": "Find files", "icon": "open", "command": "find_files.current" },
         // progress.log: Log progress, on the email you're writing in Outlook, or a call or a talk.

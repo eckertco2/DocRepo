@@ -51,6 +51,9 @@ MENU_ROLE = Qt.ItemDataRole.UserRole + 8
 #: A hairline over a row, in this colour (release 5.176, the urgency plan's decision 821): between a Today band's urgent tasks
 #: and the rest, drawn in the gap above the row, so it takes no height of its own.
 RULE_ROLE = Qt.ItemDataRole.UserRole + 9
+#: The current task's row under Now on Today (release 5.177, the current task plan's decision 828): the ``now`` ground and
+#: the accent edge.
+NOW_ROLE = Qt.ItemDataRole.UserRole + 10
 #: The chevron after a Classic State cell's word on hover, and the room it takes.
 STATE_CHEVRON = 12
 
@@ -1211,7 +1214,7 @@ class RowTree(QTreeWidget):
             painter.save()
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(tokens.colour("content")))
+            painter.setBrush(QColor(tokens.colour("now" if first.data(NOW_ROLE) and not selected else "content")))
             painter.drawRoundedRect(QRectF(box), TILE_RADIUS, TILE_RADIUS)
             painter.restore()
         super().drawRow(painter, option, index)
@@ -1225,7 +1228,8 @@ class RowTree(QTreeWidget):
             painter.fillPath(ground.subtracted(inner), QColor(tokens.colour("base")))
             painter.restore()
         bucket = "" if selected else self.row_priority(first)
-        mark = tokens.colour("accent") if selected else tokens.colour(PRIORITY_EDGES[bucket]) if bucket in PRIORITY_EDGES else None
+        mark = (tokens.colour("accent") if selected or first.data(NOW_ROLE)  # the current task's row: the accent edge (5.177)
+                else tokens.colour(PRIORITY_EDGES[bucket]) if bucket in PRIORITY_EDGES else None)
         if mark:
             painter.save()
             if not selected and first.data(DIM_ROLE):

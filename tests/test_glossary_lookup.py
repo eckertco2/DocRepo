@@ -149,9 +149,10 @@ def test_places_counts_as_the_tag_s_page_does(sample_root):
 
 
 # ---- its hotkey (decision 808) ----
-def test_its_hotkey_is_last_and_off_until_set():
-    assert hotkey.HOTKEYS[-1][0] == "lookup_hotkey"
-    assert hotkey.HOTKEY_IDS["progress_hotkey"] == 11 and hotkey.HOTKEY_IDS["lookup_hotkey"] == len(hotkey.HOTKEYS)
+def test_its_hotkey_keeps_its_place_and_is_off_until_set():
+    # It was last when it came (release 5.172); a later hotkey goes after it (release 5.177's), so its Windows ID stays 12.
+    assert hotkey.HOTKEYS[11][0] == "lookup_hotkey"
+    assert hotkey.HOTKEY_IDS["progress_hotkey"] == 11 and hotkey.HOTKEY_IDS["lookup_hotkey"] == 12
     assert Settings().lookup_hotkey == ""
 
 
