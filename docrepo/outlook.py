@@ -36,9 +36,10 @@ owner's signature, puts the words before it, and still never sends it.
 
 Log progress (release 5.139, the email progress plan's decisions 584 and 590)
 finds the email being written in Outlook's active window (``front_draft``) and,
-on the owner's Enter in its window, sends that draft (``send_draft``), with its
-deferred delivery a minute on; an inline reply, which Outlook won't let a program
-send, or a send Outlook refuses, is brought back to the front (``show_draft``).
+on the owner's Enter in its window, sends that draft (``send_draft``), setting
+nothing on it first (release 5.164); an inline reply, which Outlook won't let a
+program send, or a send Outlook refuses, is brought back to the front
+(``show_draft``).
 
 Since release 5.127 (the cold-eyes plan's decisions 488 to 495) it reads today's appointments from the default calendar
 for Today's Meetings (``todays_appointments``): only their subject, start, end, location, whether all day, busy status,
@@ -892,24 +893,20 @@ def front_draft(scratch: Path | None) -> FrontDraft | None:
     return FrontDraft(item, inline, _subject(item), index_of(item), entry_id, store_id, copy)
 
 
-def send_draft(draft: FrontDraft, now: datetime) -> None:
-    """Send the owner's own draft, the one the Log progress window named, on their Enter there (decision 590 A): first
-    its deferred delivery is set a minute on, so it waits in the Outbox as the owner's own delay rule makes mail wait.
-    Never an inline reply (Outlook won't let a program send one). Raises OutlookError when Outlook refuses; the caller then
-    brings the draft to the front for the owner to send."""
+def send_draft(draft: FrontDraft) -> None:
+    """Send the owner's own draft, the one the Log progress window named, on their Enter there (decision 590 A). Nothing
+    is set on it first (release 5.164, decision 750): its deferred delivery, a local time pywin32 handed Outlook as UTC,
+    held it in the Outbox for hours, and the owner's own rule holds mail anyway. Never an inline reply (Outlook won't let
+    a program send one). Raises OutlookError when Outlook refuses; the caller then brings the draft to the front for the
+    owner to send."""
     if draft.inline:
         raise OutlookError("Outlook won't let a program send a reply in the reading pane.", "sending the draft", "inline")
-    item = draft.item
     try:
-        item.DeferredDeliveryTime = now + timedelta(minutes=1)  # type: ignore[attr-defined]
-    except Exception as e:  # noqa: BLE001 - the owner's own delay rule may still hold it
-        record_problem("setting the draft's deferred delivery", e)
-    try:
-        item.Send()  # type: ignore[attr-defined]
+        draft.item.Send()  # type: ignore[attr-defined]
     except Exception as e:  # noqa: BLE001
         detail = record_problem("sending the draft (Send)", e)
         raise OutlookError(f"Outlook didn't send it ({detail}).", "sending the draft", detail) from e
-    log.info("Outlook: sent a draft for Log progress, deferred a minute")
+    log.info("Outlook: sent a draft for Log progress")
 
 
 def show_draft(draft: FrontDraft) -> bool:

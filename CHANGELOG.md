@@ -4,6 +4,12 @@ One line per release, newest first: its number, the date it was built, and what 
 
 Since 2026-11-12, releases ship in weekly trains (the design workspace's `docs/mods/cold-eyes-plan.md`, decisions 464 to 468): each train has a heading with the day it was pushed to GitHub, over its releases. Releases keep their own numbers and tags.
 
+## Next train
+
+| Release | Date | What |
+|---|---|---|
+| 5.164 | 2026-11-18 | Log progress: the send and Enter (two errors the owner reported, so it ships at once). An email sent from Log progress no longer sits in the Outbox for hours: DocRepo set its deferred delivery a minute on, a local time that pywin32 handed Outlook as UTC, so the minute became as many hours as the time zone is behind UTC, plus the minute; it now sends and sets nothing first, and the owner's own rule holds mail as before. Just before it sends, a new email's draft is marked as sent by DocRepo, so nothing of DocRepo's opens it again on its way out, and its sent copy is still found on the task. The window goes before Outlook is asked, so an Outlook prompt never sits under it. Enter always answers: in Waiting on with the box empty it logs (it did nothing), and on Cancel it cancels (it saved). What stops a save is said by its row in the caution colour, with the cursor there; any other error is caught and said ("Nothing was kept: the database is busy. Try again."), and the button says "Logging…" while it runs. All or nothing: after the Update, the email, the wait, the follow-up and the Today item are kept together or not at all, and a second Enter keeps no second Update. No schema change. |
+
 ## Second train of 2026-11-18
 
 Releases 5.156 and 5.157, pushed to GitHub on Wednesday 2026-11-18, after the train of 2026-11-18 (5.163) the same day and eight days before the Thursday they were built for, at the owner's word ("push today anything that is ready"), with everything merged by then (the design workspace's `docs/mods/train-2026-11-26-plan.md` and `docs/mods/notes-topics-plan.md`). They add glossary terms (Topic heading, Heading list, Topic, Occasion, By day, By meeting, By topic), so the train after them settles (decision 467). Schema 29, as before; no new package. The version stays 5.163, the highest release in: 5.156 and 5.157 were numbered before it and built after. Their corporate test is the design workspace's `handoff/docrepo/train-2026-11-18-second-test.md`.
