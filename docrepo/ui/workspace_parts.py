@@ -14,7 +14,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from PySide6.QtCore import QPoint, QRect, QSize, Qt, Signal
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea, QSizePolicy, QStyle,
                                QStyleOptionButton, QStylePainter, QToolButton, QVBoxLayout, QWidget)
 
@@ -27,8 +27,15 @@ from docrepo.ui.notes_outline import NotesOutline
 from docrepo.ui.task_header import fit_view
 from docrepo.ui.task_pane import TaskPane
 from docrepo.ui.task_tile import STATE_ICONS, TileWidget
-from docrepo.ui.widgets import DropButton
+from docrepo.ui.widgets import DropButton, ElidedLabel
 
+#: The status card's quick entry, closed and opened into Log progress's form (release 5.175, decision 764).
+HINT = "Enter update · Shift+Enter note"
+MORE_HINT = "Enter logs it all · Shift+Enter note"
+MORE_TIP = "More (Alt+Down): State, Waiting on and Today under the line, as Log progress has them"
+LESS_TIP = "Less (Alt+Down): the line alone, Enter keeping an update"
+#: Below this width the card's hint goes, so the line keeps its room.
+HINT_ROOM = 640
 #: The chain's column's width, and the resources'.
 CHAIN_WIDTH = 270
 RESOURCES_WIDTH = 300
@@ -153,8 +160,13 @@ class EntryBox(QLineEdit):
     """The quick entry's line: Enter keeps an Update, Shift+Enter a note (701); ``entered`` says which."""
 
     entered = Signal(str, bool)
+    #: Esc with nothing typed, before it goes back: True when it did something (the card's form closed, release 5.175).
+    on_escape: Callable[[], bool] | None = None
 
     def keyPressEvent(self, e) -> None:  # noqa: N802 - Qt's name
+        if e.key() == Qt.Key.Key_Escape and not self.text() and self.on_escape is not None and self.on_escape():
+            e.accept()
+            return
         if e.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             e.accept()
             self.entered.emit(self.text(), bool(e.modifiers() & Qt.KeyboardModifier.ShiftModifier))
@@ -234,6 +246,8 @@ class StatusCard(QFrame):
     state_clicked = Signal(QPoint)
     later_clicked = Signal(QPoint)
     add_clicked = Signal()
+    #: More (release 5.175, decision 764): the card opened into Log progress's form, or closed again.
+    more_toggled = Signal(bool)
 
     def __init__(self, css: str) -> None:
         super().__init__(objectName="statusCard")
@@ -281,11 +295,21 @@ class StatusCard(QFrame):
         self.box = EntryBox(objectName="wsEntry")
         self.box.setMinimumWidth(140)
         self.box.setAccessibleName("Quick entry: Enter keeps an update, Shift+Enter a note")
+        self.box.setToolTip("Enter keeps an update, Shift+Enter a note; More (Alt+Down) for State, Waiting on and Today")
         self.box.entered.connect(self.entered)
         if not LOOK.classic:
             self.box.addAction(icon("update"), QLineEdit.ActionPosition.LeadingPosition)
-        self.hint = QLabel("Enter update · Shift+Enter note", objectName="hint")
-        self.hint.setMinimumWidth(1)  # it gives way first when the card is narrow
+        # More (release 5.175, decision 764): the card grows to show Log progress's form under the line. The arrow is in
+        # the line, at its end, so it takes no room from the line.
+        self.more_action = self.box.addAction(icon("chevron-right"), QLineEdit.ActionPosition.TrailingPosition)
+        self.more_action.setToolTip(MORE_TIP)
+        self.more_action.setText("More: State, Waiting on and Today")
+        self.more_action.triggered.connect(lambda: self.set_more(not self.more_open))
+        QShortcut(QKeySequence("Alt+Down"), self.box, lambda: self.set_more(not self.more_open),
+                  context=Qt.ShortcutContext.WidgetShortcut)
+        self.more_open = False
+        self.box.on_escape = lambda: self.more_open and (self.set_more(False) or True)
+        self.hint = ElidedLabel(HINT, objectName="hint")  # it gives way first when the card is narrow, ending in "…" (5.175)
         self.hint.setToolTip("Enter keeps an update: its words become the latest update. Shift+Enter keeps a note under today's day.")
         self.state_button = StateButton(objectName="wsState")
         self.state_button.setToolTip("Change the state")
@@ -303,6 +327,41 @@ class StatusCard(QFrame):
         for w in (self.state_button, self.later_button, self.add_button):
             el.addWidget(w)
         lay.addWidget(self.entry_row)
+        self.form_box = QWidget(objectName="wsForm")  # Log progress's form, placed here by the workspace (place_form)
+        self.form_grid = QGridLayout(self.form_box)
+        self.form_grid.setContentsMargins(0, 8, 4, 0)
+        self.form_grid.setHorizontalSpacing(12)
+        self.form_grid.setVerticalSpacing(8)
+        self.form_grid.setColumnStretch(1, 1)
+        self.form_box.hide()
+        lay.addWidget(self.form_box)
+        self._buttons_shown = (False, False)
+
+    def resizeEvent(self, e) -> None:  # noqa: N802 - Qt's name
+        """A narrow card gives the line the hint's room (release 5.175): the hint goes, its words in the line's tooltip."""
+        super().resizeEvent(e)
+        self.hint.setVisible(self.width() >= HINT_ROOM)
+
+    def place_form(self, form) -> None:
+        """Put Log progress's form (``ui.progress_form.ProgressForm``, its line this card's box) under the entry row."""
+        form.place(self.form_grid, 0)
+
+    def set_more(self, on: bool) -> None:
+        """Open the card into the form, or close it (decision 764). Open, the form has State and Today, so the card's own
+        State button and Later… or Add to Today step aside; Enter then logs it all at once."""
+        if on == self.more_open:
+            return
+        self.more_open = on
+        self.more_action.setIcon(icon("chevron-down" if on else "chevron-right"))
+        self.more_action.setToolTip(LESS_TIP if on else MORE_TIP)
+        self.form_box.setVisible(on)
+        self.hint.setText(MORE_HINT if on else HINT)
+        self.state_button.setVisible(not on)
+        later, add = self._buttons_shown
+        self.later_button.setVisible(later and not on)
+        self.add_button.setVisible(add and not on)
+        self.box.setFocus()
+        self.more_toggled.emit(on)
 
     def set_log_open(self, on: bool) -> None:
         self.log_open = on
@@ -329,13 +388,17 @@ class StatusCard(QFrame):
         self.style().unpolish(self)
         self.style().polish(self)
         self.entry_row.setVisible(f.entry)
+        if not f.entry:
+            self.set_more(False)
         if f.entry:
             self.box.setPlaceholderText(f"Type an update, or a note, for {f.title}")
             name, colour = STATE_ICONS.get(f.state, STATE_ICONS["Not started"])
             self.state_button.setIcon(icon(name, tokens.colour(colour)))
             self.state_button.setText(f.state)
-            self.later_button.setVisible(f.later)
-            self.add_button.setVisible(f.add)
+            self._buttons_shown = (f.later, f.add)
+            self.later_button.setVisible(f.later and not self.more_open)
+            self.add_button.setVisible(f.add and not self.more_open)
+            self.state_button.setVisible(not self.more_open)
 
 
 # ---- Dates (decisions 681, 698 and 699) ----

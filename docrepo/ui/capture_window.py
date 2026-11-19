@@ -121,7 +121,7 @@ from docrepo.ui.look import LOOK, Help, KeyBadge, KeyTips, set_hints, tip
 from docrepo.ui.meeting_tabs import MeetingTabs
 from docrepo.ui.problems import Problems, ProblemsLine
 from docrepo.ui.mods_panel import ModsPanel
-from docrepo.ui.palette import RECENT_CAPTURES, Command, CommandPalette, summary_commands
+from docrepo.ui.palette import GLOSSARY_LOOKUP, RECENT_CAPTURES, Command, CommandPalette, summary_commands
 from docrepo.ui.rich_edit import KEYS as FORMAT_KEYS, FormatBar, RichEdit
 from docrepo.ui.style import style_sheet
 from docrepo.ui.task_forms import BAD_DURATION, HoursRow, days_valid, typed_days
@@ -988,6 +988,7 @@ class CaptureWindow(QWidget):
                 Command("", "Clear the capture", self.clear),
                 Command("", "Drafts", self.show_drafts),
                 Command("", RECENT_CAPTURES, lambda: self.ctx.open_recent()),  # release 5.158, decision 723
+                Command("", GLOSSARY_LOOKUP, lambda: self.ctx.open_lookup()),  # release 5.172, decision 808
                 Command("", "Hide hints" if LOOK.hints else "Show hints", lambda: self._set_hints(not LOOK.hints)),
                 Command("", "Keys", self.show_keys, "F1"),
                 Command("", "Mods log", lambda: self.show_mods(True)),

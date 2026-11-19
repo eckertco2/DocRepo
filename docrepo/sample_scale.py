@@ -463,3 +463,26 @@ def add_scale_extras(conn: sqlite3.Connection, data: dict[str, Any]) -> None:
              for cid, subject, sender, sent, conversation in extra["emails"]])
         conn.executemany("INSERT INTO tagged_labels (label, key, description, status, came, added) VALUES (?, ?, ?, 'glossary', 'import', ?)",
                          [(tag, tag.replace("-", "").upper(), description, added) for tag, description in extra["glossary"]])
+
+
+#: The glossary the lookup's budget is timed on (release 5.172, the glossaries plan's decision 809): its rows and columns.
+GLOSSARY_ROWS = 20_000
+GLOSSARY_COLUMNS = ("Line", "Tag No.", "Description", "Service")
+SERVICES = ("Feed", "Recycle", "Cooling water", "Steam", "Instrument air", "Flare", "Product", "Drain", "")
+
+
+def glossary_rows(count: int = GLOSSARY_ROWS, seed: int = SEED) -> list[list[str]]:
+    """A made-up equipment list of ``count`` rows in ``GLOSSARY_COLUMNS``' four columns: an area, a tag unique in the list,
+    what it is, and its service, from the same made-up words as the tags above."""
+    rnd = random.Random(seed)  # noqa: S311 - made-up sample data, the same each time
+    rows: list[list[str]] = []
+    keys: set[str] = set()
+    while len(rows) < count:
+        area = rnd.choice(AREAS)
+        letters, kind = rnd.choice(TAG_KINDS)
+        tag = f"{letters}-{AREAS.index(area) + 1}{rnd.randrange(10_000):04d}{rnd.choice(('', '', '', 'A', 'B'))}"
+        if tag in keys:
+            continue
+        keys.add(tag)
+        rows.append([area, tag, f"{kind} {rnd.choice(SCOPES).split()[0]}", rnd.choice(SERVICES)])
+    return rows

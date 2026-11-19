@@ -100,7 +100,7 @@ PANEL_KEYS = (
     ("Delete", "Removes it from Today"),
     ("Esc", "Back from the detail; then it contracts and the keyboard goes back to the window you were in"),
 )
-#: The wheels' task search and file search (release 5.42), and Recent captures (release 5.158).
+#: The wheels' task search and file search (release 5.42), Recent captures (release 5.158) and the glossary lookup (release 5.172).
 SEARCH_KEYS = (
     ("Enter (task search)", "Opens the task's page in the browse tool"),
     ("Ctrl+Enter (task search)", "Opens its Find files"),
@@ -109,7 +109,11 @@ SEARCH_KEYS = (
     ("Ctrl+Shift+C (file search)", "Copies its path"),
     ("Tab (file search)", "Goes to its task's page"),
     ("Enter or Tab (recent captures)", "Opens the capture at its block on its notes page, to work on its words there; on no page, its capture page (release 5.158)"),
-    ("Esc", "Clears what's typed; again, closes it (recent captures: closes it)"),
+    ("Enter (glossary lookup)", "On the glossaries, opens one; on its rows, copies the row's tag and closes, for pasting where you were (release 5.172)"),
+    ("Ctrl+C (glossary lookup)", "Copies the whole row, its cells separated by tabs, and closes"),
+    ("Ctrl+Enter (glossary lookup)", "Opens the tag's tagged label page in the browse tool"),
+    ("Backspace (glossary lookup)", "In an empty box, goes back to the list of glossaries"),
+    ("Esc", "Clears what's typed; again, closes it (recent captures and the glossary lookup: closes it)"),
 )
 
 

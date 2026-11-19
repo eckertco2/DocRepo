@@ -268,3 +268,149 @@ def rows_for_tag(conn: sqlite3.Connection, key: str) -> list[TagRow]:
             if g.tag_column < len(cells) and tagged.key_of(cells[g.tag_column]) == key:
                 out.append(TagRow(g, tuple(cells)))
     return out
+
+
+# ---- the lookup (release 5.172, decisions 807 to 809) ----
+#: The most rows the lookup lists (decision 807).
+LOOKUP_SHOWN = 50
+#: What a typed word with a digit in it may leave out to match a tag: "p204a" finds P-204A, "fv 3001" finds FV-3001. SQL's
+#: ``replace`` and ``squeeze`` leave out the same marks.
+_SQUEEZED = ("-", ".", "/", "_", " ")
+_SQUEEZE = re.compile(r"[-./_ ]")
+
+
+def _squeeze_sql(column: str) -> str:
+    for mark in _SQUEEZED:
+        column = f"replace({column}, '{mark}', '')"
+    return column
+
+
+_SQUEEZE_SQL = _squeeze_sql("folded")
+
+
+def squeeze(text: str) -> str:
+    """Folded text without the marks a tag is written with or without (``_SQUEEZED``)."""
+    return _SQUEEZE.sub("", text)
+
+
+@dataclass(frozen=True)
+class Found:
+    """A row the lookup lists: its place in the sheet and its cells."""
+
+    pos: int
+    cells: tuple[str, ...]
+
+
+def _match(glossary_id: int, words: Sequence[str]) -> tuple[str, list[object]]:
+    """The WHERE for rows holding every word in some cell. A word with a digit also matches the row's text with its tag marks
+    left out (``squeeze``), so it's found however the tag was typed."""
+    esc = "ESCAPE '\\'"
+    where, params = "glossary = ?", [glossary_id]
+    for w in words:
+        if _DIGITS.search(w):
+            # As typed, or with the tag's marks left out of both: "p204" finds P-204A, and "p-204" does too.
+            where += f" AND (folded LIKE ? {esc} OR {_SQUEEZE_SQL} LIKE ? {esc})"
+            params += [_like(w), _like(squeeze(w))]
+        else:
+            where += f" AND folded LIKE ? {esc}"
+            params.append(_like(w))
+    return where, params
+
+
+def lookup(conn: sqlite3.Connection, g: Glossary, typed: str, limit: int = LOOKUP_SHOWN) -> tuple[list[Found], int]:
+    """The rows of ``g`` holding every word typed, in any column, case and accents aside (decision 807), at most ``limit``;
+    and how many match in all. Nothing typed lists the first rows in the sheet's order.
+
+    The order: the row whose tag (its first cell, with no tag column) is what's typed; then those whose tag starts with it;
+    then those with a cell starting with the first word; then the rest; each in the sheet's order. Only each match's place
+    and folded text are read to order them, and only the rows listed are read whole (decision 809's budget)."""
+    words = words_of(typed)
+    if not words:
+        rows = conn.execute("SELECT pos, cells FROM glossary_rows WHERE glossary = ? ORDER BY pos LIMIT ?", (g.id, limit))
+        found = [Found(int(r[0]), tuple(json.loads(r[1]))) for r in rows]
+        total = int(conn.execute("SELECT count(*) FROM glossary_rows WHERE glossary = ?", (g.id,)).fetchone()[0])
+        return found, total
+    where, params = _match(g.id, words)
+    hits = conn.execute(f"SELECT pos, folded FROM glossary_rows WHERE {where}", params).fetchall()  # noqa: S608 - fixed text; values are parameters
+    whole = " ".join(words)
+    key = squeeze(whole) if _DIGITS.search(whole) else ""
+    tag = g.tag_column if g.tag_column is not None else 0
+
+    def rank(folded: str) -> int:
+        cells = folded.split(_SEP)
+        first = cells[tag] if tag < len(cells) else ""
+        if first == whole or (key and squeeze(first) == key):
+            return 0
+        if first.startswith(whole) or (key and squeeze(first).startswith(key)):
+            return 1
+        return 2 if any(c.startswith(words[0]) for c in cells) else 3
+
+    places = [int(p) for p, _f in sorted(((int(r[0]), r[1]) for r in hits), key=lambda r: (rank(r[1]), r[0]))[:limit]]
+    if not places:
+        return [], 0
+    marks = ",".join("?" * len(places))
+    cells = {int(r[0]): tuple(json.loads(r[1])) for r in conn.execute(
+        f"SELECT pos, cells FROM glossary_rows WHERE glossary = ? AND pos IN ({marks})", [g.id, *places])}  # noqa: S608 - fixed text; values are parameters
+    return [Found(p, cells[p]) for p in places if p in cells], len(hits)
+
+
+def tag_of(g: Glossary, cells: Sequence[str]) -> str:
+    """What Enter copies (decision 807): the row's tag, or its first cell when the glossary has no tag column."""
+    i = g.tag_column if g.tag_column is not None else 0
+    return cells[i] if i < len(cells) else ""
+
+
+def row_text(cells: Sequence[str]) -> str:
+    """What Ctrl+C copies (decision 807): the row's cells, tab-separated, as a sheet takes them."""
+    return "\t".join(" ".join(c.split()) for c in cells)
+
+
+def shown_cells(g: Glossary, cells: Sequence[str]) -> list[tuple[str, bool]]:
+    """A row's cells as the lookup draws them (decision 807): the tag column's first, marked True to be drawn bold, then
+    the others in the sheet's order; empty cells left out."""
+    cells = [" ".join(c.split()) for c in cells]
+    tag = g.tag_column if g.tag_column is not None and g.tag_column < len(cells) else None
+    out = [(cells[tag], True)] if tag is not None and cells[tag] else []
+    return out + [(c, False) for i, c in enumerate(cells) if i != tag and c]
+
+
+def remember(recent: Sequence[str], glossary_id: int, keep: int = 10) -> list[str]:
+    """The glossaries last used, by ID as words (``Settings.glossary_recent``), ``glossary_id`` first."""
+    key = str(glossary_id)
+    return [key, *(k for k in recent if k != key)][:keep]
+
+
+def by_recent(listed: Sequence[Glossary], recent: Sequence[str]) -> list[Glossary]:
+    """The glossaries for the lookup's first list (decision 807): the last used first, then the rest by name."""
+    place = {k: n for n, k in enumerate(recent)}
+    return sorted(listed, key=lambda g: (place.get(str(g.id), len(place)), g.name.casefold()))
+
+
+# ---- how often a row's tagged label is mentioned (decision 807) ----
+def task_hits(model) -> dict[int, int]:
+    """How many tasks' own fields mention each tagged label, in one pass over the tasks, as ``tagged.uses_of`` counts them.
+    The lookup reads it once while its Model is the same, so typing never runs it again."""
+    from collections import Counter
+
+    f = model.tagged.finder()
+    out: Counter[int] = Counter()
+    for t in model.tasks.values():
+        if not t.discarded:
+            for label in {h.label for h in f.find(tagged.task_text(t, model))}:
+                out[label] += 1
+    return dict(out)
+
+
+def places_of(model, label, hits: dict[int, int]) -> int:
+    """How many places mention ``label`` (a ``tagged.Label``): its page's count (``tagged.uses_of``), for one row shown,
+    with the tasks' part from ``task_hits``."""
+    tg = model.tagged
+    n, seen = 0, set()
+    for m in tg.by_label.get(label.id, []):
+        if tagged.live(model, m.kind, m.id) and tg.choices.get((m.kind, m.id), {}).get(label.key) != "removed":
+            n += 1
+            seen.add((m.kind, m.id))
+    for (kind, item_id), own in tg.choices.items():
+        if own.get(label.key) == "added" and (kind, item_id) not in seen and tagged.live(model, kind, item_id):
+            n += 1
+    return n + hits.get(label.id, 0)
