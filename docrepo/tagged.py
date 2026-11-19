@@ -731,7 +731,7 @@ def add_label(conn: sqlite3.Connection, label: str, at: datetime, description: s
         accept(conn, k, description, aliases, label)
         return int(have["id"])
     if have:
-        raise TaggedError(f"{have['label']} is in the glossary already" + ("." if have["label"] == label else f", and {label} is it written another way."))
+        raise TaggedError(f"{have['label']} is on the tag list already" + ("." if have["label"] == label else f", and {label} is it written another way."))
     aliases = list(aliases)
     problems = check_aliases(read_labels(conn), None, aliases)
     if problems:
@@ -764,7 +764,7 @@ def edit_label(conn: sqlite3.Connection, label_id: int, description: str, aliase
 def _suggested_row(conn: sqlite3.Connection, key: str) -> sqlite3.Row:
     row = conn.execute("SELECT * FROM tagged_labels WHERE key = ? AND status = 'suggested'", (key,)).fetchone()
     if row is None:
-        raise TaggedError("It isn't a suggested tagged label any more: the glossary or the patterns changed.")
+        raise TaggedError("It isn't a suggested tagged label any more: the tag list or the patterns changed.")
     return row
 
 
@@ -792,7 +792,7 @@ def same_as(conn: sqlite3.Connection, key: str, label_id: int) -> Label:
     row = _suggested_row(conn, key)
     target = next((lb for lb in read_labels(conn) if lb.id == label_id and lb.status == "glossary"), None)
     if target is None:
-        raise TaggedError("Pick a tagged label from the glossary.")
+        raise TaggedError("Pick a tagged label from the tag list.")
     problems = check_aliases(read_labels(conn), target.id, [row["label"]])
     if problems:
         raise TaggedError(" ".join(problems))

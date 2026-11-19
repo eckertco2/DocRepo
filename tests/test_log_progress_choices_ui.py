@@ -83,7 +83,7 @@ def test_state_is_a_dropdown_under_what_you_did(window):
     assert box.itemData(3, Qt.ItemDataRole.ToolTipRole) == "Finished: off Today too"
     grid = window.layout().itemAt(1).layout()
     rows = {grid.itemAtPosition(r, 0).widget().text(): r for r in range(grid.rowCount()) if grid.itemAtPosition(r, 0)}
-    assert rows["What you did"] < rows["State"] < rows["Waiting on"] < rows["Follow up"] < rows["Today"]
+    assert rows["What you did"] < rows["State"] < rows["Waiting on"] < rows["Today"] and "Follow up" not in rows  # 5.166: one row
 
 
 def test_it_opens_on_waiting_with_the_emails_people_else_in_progress(window):
@@ -97,15 +97,15 @@ def test_it_opens_on_waiting_with_the_emails_people_else_in_progress(window):
     assert window.state_key == progress.IN_PROGRESS and window.people == []
 
 
-def test_another_state_empties_waiting_on_and_follow_up(window):
+def test_another_state_empties_waiting_on_and_its_back_day(window):
     window.open_for(draft(), task=RIGGING)
-    assert window.choice == "3d"
+    assert window.choice == "3d"  # the last Back with a wait (5.166's row)
     pick(window, progress.PARKED)
     assert window.people == [] and window.choice == "none" and dimmed(window)
-    assert window.follow_note.text() == "No follow-up: nothing comes back by itself."
+    assert window.today_note.text() == "Not on Today: nothing brings it back by itself."
     assert window.state_note.text() == "Parked, with this line as its current status. No wait."
-    assert not any(b.isEnabled() for b in window.follow.buttons() if b.property("key") != "none")
-    pick(window, progress.WAITING)  # back: Mike from the email's To, and the last follow-up
+    assert window.back.isEnabled()  # Back on Today is live for Parked too (decision 757)
+    pick(window, progress.WAITING)  # back: Mike from the email's To, and the last Back
     assert window.people == [MIKE] and window.choice == "3d" and not dimmed(window)
 
 
@@ -160,7 +160,7 @@ def test_closed_closes_the_task_and_its_today_item(window):
     item_id = put_on_today(window, INSTALLATION)
     window.open_for(None, task=INSTALLATION)
     pick(window, progress.CLOSED)
-    assert window.done_box.isChecked() and not window.done_box.isEnabled()
+    assert not window.back.isEnabled()  # with Closed the row is off (decision 757)
     assert window.today_note.text() == "Closed: its Today item closes as done with it."
     window.line.setText("Installation signed off")
     window.submit()
@@ -169,55 +169,89 @@ def test_closed_closes_the_task_and_its_today_item(window):
     assert window.said[-1] == ("Logged on Installation: closed. Done for today.", False)
 
 
-# ================= the Today row (decision 697) =================
-def test_the_today_row_shows_only_when_the_task_is_on_today(window):
-    window.open_for(None, task=RIGGING)
-    assert window.done_box.isHidden() and window.today_name.isHidden()
-    put_on_today(window)
-    window.open_for(None, task=RIGGING)
-    assert not window.done_box.isHidden() and not window.done_box.isChecked() and window.done_box.isEnabled()
-    assert window.today_note.text() == "It's on Today. Tick to take it off as done once this is logged."
+# ================= the Today row: Back on Today (release 5.166, decision 757) =================
+def chip(window, key: str) -> None:
+    window.back.buttons[key].click()
 
 
-def test_done_for_today_is_unticked_each_time_and_closed_ticks_it_only_while_picked(window):
+def test_on_today_it_offers_stays_and_done_and_off_today_none(window):
+    window.open_for(None, task=RIGGING)
+    b = window.back.buttons
+    assert b["none"].isVisibleTo(window) and not b["stays"].isVisibleTo(window) and not b["done"].isVisibleTo(window)
+    assert window.choice == "none" and b["1d"].isVisibleTo(window) and b["other"].isVisibleTo(window)
     put_on_today(window)
-    window.open_for(draft(), task=RIGGING)
-    window.done_box.setChecked(True)
+    window.open_for(None, task=RIGGING)
+    assert b["stays"].isVisibleTo(window) and b["done"].isVisibleTo(window) and not b["none"].isVisibleTo(window)
+    assert window.choice == "stays" and window.today_note.text() == "It stays on Today."
+
+
+def test_done_for_today_starts_unpicked_each_time_and_closed_turns_the_row_off(window):
+    put_on_today(window)
+    window.open_for(None, task=RIGGING)
+    chip(window, "done")
     assert window.done_today
-    window.open_for(draft(), task=RIGGING)
-    assert not window.done_box.isChecked() and not window.done_today
+    window.open_for(None, task=RIGGING)
+    assert window.choice == "stays" and not window.done_today
     pick(window, progress.CLOSED)
-    assert window.done_box.isChecked()
+    assert not window.back.isEnabled()
     pick(window, progress.IN_PROGRESS)
-    assert not window.done_box.isChecked() and window.done_box.isEnabled()
+    assert window.back.isEnabled() and window.choice == "stays"
 
 
-def test_done_for_today_with_a_follow_up_says_when_it_comes_back(window):
+def test_back_with_a_wait_says_when_it_comes_back(window):
     item_id = put_on_today(window)
     window.open_for(draft(), task=RIGGING)
-    window.done_box.setChecked(True)
-    assert window.today_note.text() == "Off Today until Tue 13 Oct, if Mike hasn't replied: the follow-up brings it back."
+    assert window.choice == "3d"  # with a wait, the last Back chosen with one
+    assert window.today_note.text() == "Off Today now; back Tue 13 Oct if Mike hasn't replied: the follow-up."
     window.line.setText("Asked Mike for the crane vendor's quote")
     window.submit()
     m = Model(window.ctx.conn)
     assert next(a for a in m.agenda if a.id == item_id).how == "Done" and waits.current(m, RIGGING) is not None
-    assert window.said[-1] == ("Sent, and logged on Rigging plan: waiting on Mike, follow up Tue 13 Oct. Done for today.", False)
+    assert m.task(RIGGING).reminder == "2026-10-13"
+    assert window.said[-1] == ("Sent, and logged on Rigging plan: waiting on Mike, follow up Tue 13 Oct.", False)
 
 
 def test_an_earlier_reminder_of_the_tasks_own_is_the_day_it_comes_back(window):
     ctx = window.ctx
     tasks.update_task(ctx.conn, ctx.settings, RIGGING, at=NOW - timedelta(days=1), via="test", reminder="2026-10-12")
     put_on_today(window)
-    window.open_for(draft(), task=RIGGING)  # follow up in 3 days: Tue 13 Oct, after the task's own Mon 12 Oct
-    window.done_box.setChecked(True)
-    assert window.today_note.text() == "Off Today until Mon 12 Oct: its reminder brings it back."
+    window.open_for(draft(), task=RIGGING)  # back in 3 days: Tue 13 Oct, after the task's own Mon 12 Oct
+    assert window.today_note.text() == "Off Today now; back Mon 12 Oct, its own reminder, before the follow-up Tue 13 Oct."
 
 
-def test_done_for_today_with_no_follow_up_stays_under_done_today(window):
+def test_back_without_a_wait_takes_it_off_today_until_its_day(window):
     item_id = put_on_today(window)
     window.open_for(None, task=RIGGING)
-    window.done_box.setChecked(True)
-    assert window.today_note.text() == "It stays under Done today, where Back on Today puts it back."
+    chip(window, "1w")
+    assert window.today_note.text() == "Off Today now, back Thu 15 Oct: its Reminder."
+    window.line.setText("Sent the lift plan for review")
+    window.submit()
+    m = Model(window.ctx.conn)
+    assert next(a for a in m.agenda if a.id == item_id).how == "Done" and m.task(RIGGING).reminder == "2026-10-15"
+    assert window.said[-1] == ("Logged on Rigging plan, back on Today Thu 15 Oct.", False)
+
+
+def test_other_reads_a_typed_day_and_says_when_it_isnt_one(window):
+    window.open_for(None, task=RIGGING)
+    chip(window, "other")
+    assert window.back.other.isVisibleTo(window)
+    window.back.other.setText("not a day")
+    window.back.other.textEdited.emit("not a day")
+    window.line.setText("Waiting on the drawings")
+    window.submit()
+    assert window.problems["back"].text().startswith("Type a day after today") and window.said == []
+    window.back.other.setText("4")  # four workdays: Wed 14 Oct
+    window.back.other.textEdited.emit("4")
+    assert window.today_note.text() == "On Today Wed 14 Oct: its Reminder."
+    window.submit()
+    assert Model(window.ctx.conn).task(RIGGING).reminder == "2026-10-14"
+
+
+def test_done_for_today_with_no_day_stays_under_done_today(window):
+    item_id = put_on_today(window)
+    window.open_for(None, task=RIGGING)
+    chip(window, "done")
+    assert window.today_note.text() == "Off Today now, under Done today, where Back on Today puts it back."
     window.line.setText("Called the crane company")
     window.submit()
     assert next(a for a in Model(window.ctx.conn).agenda if a.id == item_id).how == "Done"

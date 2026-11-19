@@ -42,7 +42,9 @@ def test_a_version_1_database_is_brought_up_to_date(data_root, fs):
     old.close()
     conn = db.connect(fs, data_root)
     try:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 30
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 31
+        assert conn.execute("SELECT count(*) FROM glossaries").fetchone()[0] == 0  # version 31 (release 5.171): no glossaries yet
+        assert conn.execute("SELECT count(*) FROM glossary_rows").fetchone()[0] == 0
         assert conn.execute("SELECT count(*) FROM tasks WHERE collection = 1").fetchone()[0] == 0  # version 30 (release 5.167): no collections yet
         assert conn.execute("SELECT pos FROM agenda_items WHERE id = 7").fetchone()[0] is None  # version 29 (release 5.148): no place yet
         assert conn.execute("SELECT count(*) FROM meeting_links").fetchone()[0] == 0  # version 26 (release 5.127)

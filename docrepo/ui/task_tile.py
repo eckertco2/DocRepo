@@ -237,7 +237,7 @@ def fill_menu(browse: BrowseWindow, task_id: str, menu: QMenu, own: Iterable[Own
     if state_pick is not None:
         from docrepo.ui.state_menu import state_menu
 
-        menu.addMenu(state_menu(menu, m, task_id, state_pick))
+        menu.addMenu(state_menu(menu, m, task_id, state_pick, wait=browse.wait_on(task_id)))
     else:
         sub = browse.state_menu_for(task_id, menu)
         if sub is not None:

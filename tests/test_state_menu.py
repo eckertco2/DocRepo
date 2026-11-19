@@ -173,7 +173,7 @@ def test_a_click_opens_the_menu_and_doesnt_pick_the_row(browse):
     in_sight(browse, item)
     current = browse.tree.currentItem()
     QTest.mouseClick(browse.tree.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, icon_at(browse, item))
-    assert browse.menus and browse.menus[0][0][:4] == ["Not started", "In progress", "Parked", "Closed"]
+    assert browse.menus and browse.menus[0][0][:5] == ["Not started", "In progress", "Waiting on a reply…", "Parked", "Closed"]  # 5.166: decision 762
     assert states(browse, RIGGING) == ["Parked"]
     assert browse.tree.currentItem() is current or browse.tree.currentItem().data(0, KEY_ROLE) != ("task", RIGGING)
     assert shown(browse) == "Parked: Rigging plan." and undo_offered(browse)
@@ -219,8 +219,10 @@ def test_every_task_rows_right_click_menu_has_state(browse):
     menu = browse.tree.row_menu(item)
     words = [w.split("	")[0] for w in labels(menu)]
     # A task tile's one menu since release 5.138 (decision 573): Open, then State, then Add to; Edit (5.98's) further down
+    # Since release 5.174 (decision 815) the first line is what a double-click does: the workspace, as Settings start; and
+    # since release 5.166 (decision 762) the State submenu has Waiting on a reply… after In progress.
     assert words[0] == "Work on it" and words[words.index("State"):][:2] == ["State", "Add to"] and "Edit" in words
-    assert labels(next(a.menu() for a in menu.actions() if a.menu() and a.text() == "State"))[:4] == ["Not started", "In progress", "Parked", "Closed"]
+    assert labels(next(a.menu() for a in menu.actions() if a.menu() and a.text() == "State"))[:4] == ["Not started", "In progress", "Waiting on a reply…", "Parked"]
     edits.add_to_today(browse.conn, browse.ctx.data_root, browse.ctx.fs, INSTALLATION, "", NOW)
     browse.refresh(render=False)
     browse.show_browse(view="today")
