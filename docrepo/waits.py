@@ -23,12 +23,12 @@ import logging
 import sqlite3
 import weakref
 from collections.abc import Collection
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 
 from docrepo import conversations
 from docrepo.dates import WEEKDAYS, long_date, short, to_date
 from docrepo.db import get_state, transaction
-from docrepo.later import on_a_workday, workdays_after
+from docrepo.later import CHOICES, later_day, workdays_after
 from docrepo.model import Capture, Model, Wait
 
 log = logging.getLogger(__name__)
@@ -70,20 +70,21 @@ def current(m: Model, task_id: str) -> Wait | None:
 
 
 # ---- the follow-up and the reminder (decision 588) ----
-#: Follow up's choices, the first three in workdays.
-FOLLOW_UPS: tuple[tuple[str, str], ...] = (("1d", "Tomorrow"), ("2d", "2 days"), ("3d", "3 days"), ("1w", "1 week"), ("2w", "2 weeks"),
-                                           ("none", "None"))
+#: The follow-up's choices: since release 5.166 (decision 757) Later's (``later.CHOICES``: Tomorrow, 3 days, 1 week,
+#: 2 weeks, 1 month), Log progress's Back on Today row taking the place of its own Follow up row.
+FOLLOW_UPS: tuple[tuple[str, str], ...] = CHOICES
 DEFAULT_FOLLOW_UP = "3d"
-#: The last choice, remembered between runs.
+#: The last choice made with a wait, remembered between runs.
 LAST_KEY = "progress_follow_up"
 
 
 def follow_up_day(choice: str, today: date, workdays: Collection[int]) -> date | None:
-    """The day a choice brings the task back: 1 to 3 workdays on, or a week or two on (moved to a workday); None for None."""
-    if choice in ("1d", "2d", "3d"):
-        return workdays_after(today, int(choice[0]), workdays)
-    if choice in ("1w", "2w"):
-        return on_a_workday(today + timedelta(days=7 if choice == "1w" else 14), workdays)
+    """The day a choice brings the task back, as Later's (``later.later_day``); "2d", 5.139's 2 days, still read as two
+    workdays on, for a choice remembered before release 5.166. None for anything else ("none")."""
+    if choice in dict(FOLLOW_UPS):
+        return later_day(choice, today, workdays)
+    if choice == "2d":
+        return workdays_after(today, 2, workdays)
     return None
 
 

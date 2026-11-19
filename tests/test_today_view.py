@@ -148,14 +148,15 @@ def test_other_views_take_no_file_drops(app, tmp_path):
     assert not drop.isAccepted() and not app.window.isVisible()
 
 
-def test_done_opens_an_update_and_undo_takes_it_away(app):
+def test_done_opens_log_progress_on_closed(app):
+    """Release 5.166, decision 755: in the Today view too."""
     browse = _today(app, "T000008")
     item = next(a for a in Model(app.ctx.conn).today_items() if a.subject == "T000008")
-    browse.close_today_item(item.id, "Done")
-    w = app.window
-    assert w.isVisible() and w.task == "T000008" and w.types == {"update"} and w.content.value()[0].startswith("Done today")
-    browse._status_link("undo")
-    assert any(a.id == item.id for a in Model(app.ctx.conn).today_items()) and not w.isVisible()
+    browse.close_today_item(item.id, "Done", log=True)  # the Today view's Done
+    lp = app.wheels._log_progress
+    assert lp.isVisible() and lp.task == "T000008" and lp.state_key == "Closed" and not app.window.isVisible()
+    assert any(a.id == item.id for a in Model(app.ctx.conn).today_items())
+    lp.hide()
 
 
 def test_put_back_on_done_today(app):

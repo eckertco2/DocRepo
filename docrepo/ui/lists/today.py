@@ -328,13 +328,26 @@ class TodayList:
         self.say_undo(out.message, undo)
 
     # ---- Done, Remove and Back on Today (release 5.115, decisions 420 and 421) ----
-    def close_today_item(self, item_id: int, how: str, tell: Callable[[str, Callable[[], None] | None], None] | None = None) -> None:
-        """Done or Remove on Today. Done on a task opens the capture window as an Update on it, its text starting "Done
-        today: ", with no question (decision 421). Undo, for ten seconds, puts the item back as it was and takes away that
+    def close_today_item(self, item_id: int, how: str, tell: Callable[[str, Callable[[], None] | None], None] | None = None,
+                         log: bool = False) -> None:
+        """Done or Remove on Today. Since release 5.166 (decision 755) a tick, ``log`` (the side panel's and the Today view's
+        Done), on an open task opens Log progress for it, on Closed, and changes nothing until its Enter; the workspace's
+        Done for today, which means just that, still closes the item. Done on a note, or on a task already closed, closes the item; on the
+        closed task the capture window then opens as an Update on it, its text starting "Done today: " (decision 421). Undo, for ten seconds, puts the item back as it was and takes away that
         Update if nothing was typed in it, as Discussed's Undo does (release 5.91). ``tell``: where to say it, with Undo, such
         as the Today side panel's line (decision 420); the status line by default."""
         item = next((a for a in self.model().agenda if a.id == item_id), None)
         if item is None:
+            return
+        ticked = self.model().tasks.get(item.subject) if item.subject and how == "Done" and log else None
+        if ticked is not None and not ticked.discarded and ticked.state != "Closed":
+            # Release 5.166 (decision 755): a tick on a task opens Log progress for it, on Closed; nothing changes until
+            # Enter, and Esc leaves it as it was, unticked. A note on Today ticks as before.
+            self.ctx.log_progress(ticked.id, state="Closed")
+            words = f"{ticked.title}: Log progress is open. Enter logs it and takes it off Today; Esc leaves it as it was."
+            if tell is not None:
+                tell(words, None)
+            self.say(words)
             return
         out = self._do(lambda: edits.close_today_item(self.conn, self.ctx.data_root, self.ctx.fs, item_id, how, self._now(), self.model()))
         if not out:
@@ -397,6 +410,6 @@ class TodayList:
                 links = (("Reply all", lambda: t_mails.reply_all(self, c.id, e.pos, task_id), "Reply all to the newest email on the task, "
                           "to follow up; then Log progress on it"), *links)
             links = (("Got it", lambda: self.got_it(task_id), "The answer came: stop waiting, and take away the follow-up"), *links)
-        return [*links, ("Done", lambda: self.close_today_item(item_id, "Done"),
-                         "Take it off Today as done, and open an Update on the task" if task_id else "Take it off Today as done"),
+        return [*links, ("Done", lambda: self.close_today_item(item_id, "Done", log=True),
+                         "Log progress on it, on Closed: Enter takes it off Today" if task_id else "Take it off Today as done"),
                 ("Remove", lambda: self.close_today_item(item_id, "Removed"), "Take it off Today")]

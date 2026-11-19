@@ -261,10 +261,11 @@ class Wheels(QObject):
             self._quick_summary = QuickSummary(self.app)
         self._quick_summary.open_it(self._screen_for(self.snapshot.hwnd if self.snapshot else 0), key, set_name)
 
-    def log_progress(self, task: str | None = None, with_email: bool = True) -> None:
+    def log_progress(self, task: str | None = None, with_email: bool = True, state: str | None = None) -> None:
         """Log progress (release 5.139, decision 583): its window, on the email being written in Outlook's active window
         (decision 584), or on ``task`` with no email (the status card's Log progress…). Outlook is asked only when it's
-        open, and a failure leaves the window for a call or a talk, saying why."""
+        open, and a failure leaves the window for a call or a talk, saying why. ``state`` is the state it opens on (release
+        5.166)."""
         from docrepo import outlook
         from docrepo.ui.log_progress import LogProgress
 
@@ -278,7 +279,7 @@ class Wheels(QObject):
                 problem = str(e)
             except Exception as e:  # noqa: BLE001 - COM or pywin32: the window still opens, for a call or a talk
                 problem = outlook.record_problem("finding the email for Log progress", e)
-        self._log_progress.open_for(draft, task, self._screen_for(self.snapshot.hwnd if self.snapshot else 0))
+        self._log_progress.open_for(draft, task, self._screen_for(self.snapshot.hwnd if self.snapshot else 0), state=state)
         if problem:
             self._log_progress.message.setText(f"Outlook didn't give DocRepo the email ({problem}).")
 

@@ -24,21 +24,32 @@ Today item) is then one transaction: a failure there keeps none of it and raises
 the Update kept, and the window's next Enter passes it back as ``kept``, so it keeps no second Update. ``sending`` and
 ``not_sent`` mark a kept draft as sent by DocRepo around Log progress's send, so nothing of DocRepo's reads it on its
 way out (``docrepo.sent_watch``).
+
+Since release 5.166 (the same plan, decisions 757, 759 and 761):
+- **Back on Today** (757): ``back``, the day the task comes back, whatever the state but Closed. It takes the task off
+  Today now (its item closed as Done, under Done today) and sets its Reminder to that day, which puts it back (decision
+  415); with a wait, that day is the wait's follow-up too, and the task's own earlier reminder still comes first (588).
+  Its choices are Later's (``later.CHOICES``, or a day typed in Other…); the last one made with a wait is remembered.
+- **An attached email** (759): ``attached``, the email selected in Outlook, read as Add selected Outlook email reads it,
+  kept on the Update capture, so the task's page and its conversation show it with the line.
+- **The next step** (761): ``log_next`` makes the task that comes next, under the logged task's parents, with no Update
+  (nothing has been done on it), on Today or back on its day, with its wait.
 """
 from __future__ import annotations
 
 import logging
 import sqlite3
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from docrepo import conversations, edits, sent_watch, tasks, waits
+from docrepo import agenda, conversations, edits, later, sent_watch, tasks, waits
 from docrepo.db import set_state, transaction
-from docrepo.model import Model
-from docrepo.save import CaptureDraft, EmailItem, SaveError, save_capture
+from docrepo.layer0 import LinkRules
+from docrepo.model import TODAY, Model
+from docrepo.save import CaptureDraft, EmailItem, SaveError, email_rows, save_capture
 
 if TYPE_CHECKING:
     from docrepo.config import Settings
@@ -65,6 +76,17 @@ STATES: tuple[tuple[str, str, str], ...] = (
 )
 #: The task's state after each choice: Waiting on a reply is In progress with a wait (decision 580).
 TASK_STATE = {IN_PROGRESS: "In progress", WAITING: "In progress", PARKED: "Parked", CLOSED: "Closed"}
+#: Back on Today's choices (decision 757): Later's, then Other…, a day typed.
+BACK = later.CHOICES
+OTHER = "other"
+#: The next step's states (decision 761): something not yet done, or begun.
+NOT_STARTED = "Not started"
+NEXT_STATES: tuple[tuple[str, str, str], ...] = (
+    (NOT_STARTED, "Not started", "Nothing done on it yet"),
+    (IN_PROGRESS, "In progress", "Started"),
+    (WAITING, "Waiting on a reply", "In progress, with a wait on someone"),
+)
+NEXT_STATE = {NOT_STARTED: "Not started", IN_PROGRESS: "In progress", WAITING: "In progress"}
 #: What Enter says to Waiting on a reply with nobody in Waiting on.
 NOBODY = "Who are you waiting on? Type a name from People, or pick another state."
 
@@ -136,11 +158,14 @@ class Logged:
     reminder: str | None
     follow_up: str | None
     done_today: bool = False
+    #: The day it comes back on Today (release 5.166, decision 757), or None.
+    back: str | None = None
 
 
 def log_progress(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, *, task_id: str, line: str,
                  on: Sequence[str], follow_up: date | None, at: datetime, email: Email | None = None, choice: str = "",
-                 state: str | None = None, done_today: bool = False, kept: str | None = None) -> Logged:
+                 state: str | None = None, done_today: bool = False, kept: str | None = None, back: date | None = None,
+                 attached: EmailItem | None = None) -> Logged:
     """Keep one Log progress (decisions 586 to 592). Raises SaveError, keeping nothing, when the task is gone or closed,
     the line is empty, or it's to wait with nobody named.
 
@@ -152,7 +177,12 @@ def log_progress(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
 
     ``kept`` (release 5.164, decision 754) is the Update capture an earlier try kept before the rest failed
     (``NotAllKept``): this try keeps the rest only, with no second Update. Any other error (a busy database) is raised as
-    it is, with nothing kept when it comes from the Update."""
+    it is, with nothing kept when it comes from the Update.
+
+    ``back`` (release 5.166, decision 757) is the day the task comes back on Today, whatever the state but Closed: its
+    Reminder is set to it, and its Today item closes as Done now; with a wait it's the follow-up, in place of
+    ``follow_up``, which is 5.139's (a wait's follow-up, leaving Today as it is). ``attached`` (decision 759) is an email
+    kept on the Update capture."""
     line = " ".join(line.split())
     m = Model(conn)
     t = m.tasks.get(task_id)
@@ -173,18 +203,21 @@ def log_progress(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
         people = []
     elif not people:
         raise SaveError(NOBODY, "who")
-    day = follow_up if people else None
+    leaves = back is not None and state != CLOSED  # Back on Today (decision 757)
+    day = back if leaves else follow_up if people else None
     update: dict[str, object] = {"current_status": line}
     if t.state != TASK_STATE[state]:  # Not started or Parked made In progress (decision 589); or Parked, or Closed
         update["state"] = TASK_STATE[state]
-    if people:
-        reminder = waits.reminder_for(m, task_id, day)
+    if day is not None:  # a wait's follow-up keeps an earlier reminder of the task's own (588); Back alone sets it (757)
+        reminder = waits.reminder_for(m, task_id, day) if people else day.isoformat()
         if reminder != t.reminder:
             update["reminder"] = reminder
     if kept:
         capture = kept
     else:
-        result = save_capture(conn, data_root, fs, settings, CaptureDraft(content=line, task=task_id, types={"update"}, update=update), at)
+        files = email_rows(attached, LinkRules.of(settings)) if attached is not None else []
+        result = save_capture(conn, data_root, fs, settings,
+                              CaptureDraft(content=line, task=task_id, types={"update"}, update=update, files=files), at)
         capture = result.capture_id or ""
     stamp = waits.stamp_of(at)
     t_mail = wait = None
@@ -198,9 +231,9 @@ def log_progress(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
             if people:
                 wait = waits.start(conn, m, task_id, at=stamp, line=line, on=people, follow_up=day, via=capture or LABEL, t_mail=t_mail,
                                    capture=capture or None)
-            if choice in dict(FOLLOW_UPS) and choice != "none" and people:
+            if choice in dict(FOLLOW_UPS) and people:
                 set_state(conn, LAST_KEY, choice)
-            if done_today or state == CLOSED:  # under Done today, where Back on Today puts it back (decision 697)
+            if done_today or state == CLOSED or leaves:  # under Done today, where Back on Today puts it back (697, 757)
                 now = Model(conn)
                 item = next((a for a in now.today_items() if a.subject == task_id), None)
                 if item is not None:
@@ -208,12 +241,68 @@ def log_progress(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
                     closed_today = True
     except Exception as e:  # noqa: BLE001 - whatever it was, the Update is kept and the rest isn't: said, and tried again
         log.warning("Log progress on %s: capture %s kept, the rest rolled back (%s)", task_id, capture, type(e).__name__)
-        raise NotAllKept(f"The update was kept. {_missing(people, email, done_today or state == CLOSED)}: press Enter to try again.",
+        raise NotAllKept(f"The update was kept. {_missing(people, email, done_today or state == CLOSED or leaves)}: press Enter to try again.",
                          capture) from e
     after = Model(conn).task(task_id)
     log.info("Log progress on %s: %s, capture %s, T-mail %s, wait %s, Today item closed %s", task_id, state, capture, t_mail, wait,
              closed_today)
-    return Logged(task_id, capture, t_mail, wait, after.state, after.reminder, day.isoformat() if day else None, closed_today)
+    return Logged(task_id, capture, t_mail, wait, after.state, after.reminder, day.isoformat() if day and people else None, closed_today,
+                  day.isoformat() if leaves and day else None)
+
+
+def back_day(choice: str, today: date, workdays: Collection[int]) -> date | None:
+    """The day a Back on Today choice brings the task back (decision 757), as Later's (``later.later_day``); None for
+    any other key."""
+    return later.later_day(choice, today, workdays) if choice in dict(BACK) else None
+
+
+@dataclass(frozen=True)
+class Next:
+    """What Log, then next… kept (decision 761): the new task, its wait, whether it's on Today, and its Reminder."""
+
+    task: str
+    wait: int | None
+    on_today: bool
+    reminder: str | None
+
+
+def log_next(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, *, parent: str | None, title: str,
+             state: str, on: Sequence[str], at: datetime, today: bool = True, back: date | None = None, choice: str = "") -> Next:
+    """The next step (release 5.166, decision 761): a new task under ``parent`` (None: a top-level task), named ``title``,
+    in ``state`` (``NEXT_STATES``: Waiting starts a wait on ``on``), with no Update, since nothing has been done on it.
+    ``today`` puts it on Today; ``back`` instead sets its Reminder to that day, which puts it on Today then (decision 415),
+    and is a wait's follow-up too. Raises SaveError, making nothing, when the title is empty, the parent is gone or
+    closed, or it's to wait with nobody named."""
+    title = " ".join(title.split())
+    m = Model(conn)
+    if not title:
+        raise SaveError("Name the next step in a line.", "content")
+    if parent is not None:
+        p = m.tasks.get(parent)
+        if p is None or p.discarded or p.state == "Closed":
+            raise SaveError("The task to put it under is gone or closed: pick another.", "task")
+    if state not in NEXT_STATE:
+        raise ValueError(f"Not a next step's state: {state!r}.")
+    people = [x for x in dict.fromkeys(on) if x in m.people] if state == WAITING else []
+    if state == WAITING and not people:
+        raise SaveError(NOBODY, "who")
+    reminder = back.isoformat() if back is not None else None
+    put = today and back is None
+    stamp = waits.stamp_of(at)
+    with transaction(conn):
+        task = tasks.create_task(conn, settings, title=title, at=at, created_by=LABEL, parents=[parent] if parent else [],
+                                 state=NEXT_STATE[state], reminder=reminder)
+        if put:
+            agenda.add_item(conn, subject=task, target=TODAY, note="", added=stamp, added_by=LABEL)
+        wait = None
+        if people:
+            wait = waits.start(conn, Model(conn), task, at=stamp, line=title, on=people, follow_up=back, via=LABEL)
+            if choice in dict(BACK):
+                set_state(conn, LAST_KEY, choice)
+    problems: list[str] = []
+    edits.write_touched_pages(conn, data_root, fs, at, problems, [task, *([parent] if parent else [])], m)
+    log.info("Log progress, next step: %s under %s, %s, on Today %s, wait %s", task, parent or "(top level)", state, put, wait)
+    return Next(task, wait, put, reminder)
 
 
 def _missing(people: list[str], email: Email | None, today: bool) -> str:
