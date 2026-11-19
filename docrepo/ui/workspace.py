@@ -172,6 +172,11 @@ class Workspace(QWidget):
         self.on_label.setFont(tokens.ui_font(tokens.CAPTION))
         self.on_label.hide()
         self.bar.addWidget(self.on_label)
+        # Work on this, or Working on this pressed (release 5.177, the current task plan's decision 826): ``current_ui``'s.
+        from docrepo.ui import current_ui
+
+        self.current_button = current_ui.bar_toggle(self)
+        self.bar.addWidget(self.current_button)
         self.buttons: dict[str, QPushButton] = {}
         b = self.browse
         for key, label, name, tip, do in (
@@ -326,6 +331,9 @@ class Workspace(QWidget):
         if self.meeting and self.meeting not in m.tasks:
             self.meeting = ""
         b.sel = ("task", self.acting)
+        from docrepo.ui import current_ui
+
+        current_ui.sync_toggle(self)  # Work on this, or Working on this, for the task acted on (release 5.177)
         pages = b.pages()
         today = b.today()
         self._draw_head(m)
@@ -1028,11 +1036,13 @@ def render(browse: BrowseWindow) -> None:
 
 
 def work_key(browse: BrowseWindow) -> None:
-    """W: the selected task's workspace."""
+    """W: the selected task's workspace, and it's the task you're working on (release 5.177, decision 826)."""
     if browse._typing():
         return
     if browse.sel and browse.sel[0] == "task":
-        open_workspace(browse, browse.sel[1])
+        from docrepo.ui import current_ui
+
+        current_ui.work_on(browse, browse.sel[1])
 
 
 def open_row(browse: BrowseWindow, task_id: str) -> None:

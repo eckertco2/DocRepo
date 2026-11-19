@@ -45,7 +45,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from docrepo import agenda, conversations, edits, later, sent_watch, tasks, waits
+from docrepo import agenda, conversations, current, edits, later, sent_watch, tasks, waits
 from docrepo.db import set_state, transaction
 from docrepo.layer0 import LinkRules
 from docrepo.model import TODAY, Model
@@ -233,6 +233,8 @@ def log_progress(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
                                    capture=capture or None)
             if choice in dict(FOLLOW_UPS) and people:
                 set_state(conn, LAST_KEY, choice)
+            if (done_today or state == CLOSED) and current.stored(conn) == task_id:  # release 5.177, decision 827: it ends here
+                current.stop(conn)
             if done_today or state == CLOSED or leaves:  # under Done today, where Back on Today puts it back (697, 757)
                 now = Model(conn)
                 item = next((a for a in now.today_items() if a.subject == task_id), None)

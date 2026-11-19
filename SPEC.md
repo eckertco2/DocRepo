@@ -1025,6 +1025,19 @@ A window of its own for one task, built so any of its documents can be found and
 - **Its look:** a white header band, the outline on the base layer, a 1 px stroke between panes; rows of 48 px (32 compact) with the type's mark in its colour (`type_*` tokens, each 3:1 on white; the type is also in the name), matches in the caution tint, the selected row's tint and pill, and a 2 px accent ring when the list has the keyboard.
 
 ### 8.11 The workspace (release 5.152)
+- **The current task** (release 5.177, the design workspace's `docs/mods/current-task-plan.md`, decisions 825 to 832;
+  `docrepo/current.py` without Qt, `docrepo/ui/current_ui.py`): one task at a time, kept in `app_state` (`current_task`),
+  never in the status log. **Work on it** (the tile menu's line, the W key, the page's action) and the workspace bar's
+  **Work on this** make a task current, in the place of the one before; a plain open (a double-click, Enter, Task search,
+  a link) changes nothing. **Stop working on it** (the current task's menu, first; the bar's **Working on this** pressed
+  again) ends it, and so does Log progress on it with Done for today or Closed, in the same transaction as the rest; a task
+  closed, discarded or made a collection by any route stops being current (`current.get` clears it). On Today, the view
+  and the side panel, it's first under **Now** (the accent colour), its row with the accent edge and the `now` ground,
+  shown once (`views.today_order`'s `current` leaves its item out of its band), on Today or not, with **Log progress** and
+  **Workspace** under its title, at rest and widened; it isn't dragged, and isn't among the panel's keyboard rows. The
+  command `current.open` (Back to the task you're working on) and the hotkey `current_hotkey` (off until set, last in
+  `hotkey.HOTKEYS`) open its workspace in front, or say "No current task. Use Work on it on a task." Log progress, opened
+  with no email's conversation to go by, starts on it, marked "current task".
 The task page laid out for doing the work (the design workspace's `docs/mods/workspace-view-plan.md`, decisions 663 to 670,
 678 to 687 and 698 to 702; `docrepo/workspace.py` without Qt, `docrepo/ui/workspace.py` and `workspace_parts.py`).
 - **Open a task in** (release 5.174, decision 815, which supersedes 667 and 572 and takes in 756): Settings' Look card, `Settings.open_tasks_in`, its **workspace** to start or its **page**. A double-click or Enter on a task in a list or on a tile (the browse tool's lists, the side panel, the Priorities board), Task search's pick, the quick summary's task link, File search's Task and the side panel's Open all call `docrepo/ui/task_open.py`'s `open_task`, which follows it; Shift with the double-click or Enter (or the pick) does the other, and so does the second line of every tile's right-click menu, whose first line is what a double-click does. A link inside a page still goes to the task's page (`go_task`), and a collection, having no workspace of work, opens at its page either way. Where 667's and 756's lines below say Today, read the setting.

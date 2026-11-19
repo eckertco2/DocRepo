@@ -66,7 +66,7 @@ from docrepo.ui.context import AppContext
 from docrepo.ui.drop_target import DropOverlay, DropRead
 from docrepo.ui.icons import icon, icon_size
 from docrepo.ui.page_view import PageView
-from docrepo.ui import today_bins, today_meetings
+from docrepo.ui import current_ui, today_bins, today_meetings
 from docrepo.ui.tree_view import PRIORITY_EDGES
 from docrepo.ui import task_tile as tile_ui
 from docrepo.ui.state_menu import UNDO_MS, UndoButton
@@ -123,6 +123,10 @@ QPushButton#tpLink {{ border: 0; background: transparent; color: {accent}; paddi
 QPushButton#tpLink:hover {{ text-decoration: underline; }}
 QPushButton#tpState {{ border: 0; border-radius: 4px; background: transparent; color: {text2}; padding: 0 3px; min-height: 0; font-size: {caption}pt; }}
 QPushButton#tpState:hover {{ background: {pressed}; }}
+QWidget#tpNow {{ background: {now}; border-left: 3px solid {accent}; border-radius: 4px; }}
+QLabel#tpNowHead {{ color: {accent}; font-size: {caption}pt; font-weight: 600; padding: 2px 4px 0 6px; }}
+QFrame#tpRow[now="true"] {{ background: {now}; }}
+QFrame#tpRow[now="true"]:hover {{ background: {hover}; }}
 """
 
 
@@ -742,12 +746,15 @@ class TodayPanel(QWidget):
         self.rows = []
         self.extras = []
         self._add_meeting_line(m)  # first, the next meeting (release 5.127, decision 490)
+        # Now: the current task (release 5.177, the current task plan's decision 828), shown once, so its band leaves it out.
+        self.now_row = None
+        now = current_ui.add_now_panel(self, m, today)
         # In priority bands (release 5.154, decision 688), each named while widened, each band's urgent tasks first (release
         # 5.176, the urgency plan's decision 820): ``views.today_order``, as the Today view, the moves and the keyboard have it.
         workdays = self.browse._workdays()
-        bands = today_bands(m, today, workdays)
+        bands = today_bands(m, today, workdays, now)
         hot = urgency.urgent_ids(m, (a for _, _, g in bands for a in g), today, workdays)
-        total = sum(len(items) for _, _, items in bands)
+        total = sum(len(items) for _, _, items in bands) + sum(1 for a in m.today_items() if now and a.subject == now)
         self.count.setText(f"Today · {total}")
         if bands:
             self._add(QLabel("Today", objectName="tpGroup"))
@@ -1318,6 +1325,8 @@ class TodayPanel(QWidget):
         wide = self.hover.wide
         for row in self.rows:
             row.set_wide(wide)
+        if getattr(self, "now_row", None) is not None:  # the current task's row, under Now (release 5.177)
+            self.now_row.set_wide(wide)
         for w in getattr(self, "extras", []):
             w.setVisible(wide)
         self.box_row.setVisible(wide and self._detail is None)
