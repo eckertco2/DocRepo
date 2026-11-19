@@ -12,14 +12,14 @@ cells of ``model.js`` (``dueCell``, ``remText``).
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Collection, Iterable
 from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 
-from docrepo import capacity, priorities
+from docrepo import capacity, priorities, urgency
 from docrepo.dates import day_diff, days_text, long_date, monday_of, short, to_date
 from docrepo.lists import LISTS, TaskList, key_dates_due, list_tasks
-from docrepo.model import TODAY_BAND_NAMES, TODAY_BANDS, AgendaItem, Model, Task
+from docrepo.model import TODAY_BAND_NAMES, TODAY_BANDS, AgendaItem, Model, Task, place_key
 from docrepo.kinds import is_work
 from docrepo.schedule import DueDate, due_of
 
@@ -566,10 +566,28 @@ def today_groups(m: Model, today: date) -> list[tuple[str, list[AgendaItem]]]:
     return [("Today", items)] if items else []
 
 
-def today_bands(m: Model) -> list[tuple[str, str, list[AgendaItem]]]:
-    """Today's bands that have items (release 5.154, decision 688), top to bottom: each band's key ("" for Not ranked), its
-    name, and its items in the owner's order."""
+def today_half(m: Model, a: AgendaItem, urgent: Collection[int]) -> tuple[str, bool]:
+    """Where a Today item sits (release 5.176, decision 820): its band, and whether it's in the band's urgent half.
+    ``urgent`` is ``urgency.urgent_ids`` of Today's items."""
+    return m.today_band(a), a.id in urgent
+
+
+def today_order(m: Model, today: date, workdays: Collection[int] | None = None) -> list[AgendaItem]:
+    """Today's order, the one everything that shows or walks it reads (release 5.176, the urgency plan's decision 820): by
+    band (priority, as ``Model.today_items``), then the band's urgent tasks first (``urgency``: the tick, overdue, or due
+    within two workdays), and in each half the owner's own order (``place_key``). The Model has no clock, so its own
+    ``today_items`` keeps the band and the owner's order alone; the Today view, the side panel, the moves, the keyboard and
+    the next item after a tick go through this."""
     items = m.today_items()
+    hot = urgency.urgent_ids(m, items, today, workdays)
+    return sorted(items, key=lambda a: (TODAY_BANDS.index(m.today_band(a)), a.id not in hot, place_key(a)))
+
+
+def today_bands(m: Model, today: date | None = None, workdays: Collection[int] | None = None) -> list[tuple[str, str, list[AgendaItem]]]:
+    """Today's bands that have items (release 5.154, decision 688), top to bottom: each band's key ("" for Not ranked), its
+    name, and its items in the owner's order. Given a day (release 5.176, decision 820), each band's urgent tasks come
+    first, in ``today_order``; without one, the owner's order alone, as ``Model.today_items`` has it."""
+    items = today_order(m, today, workdays) if today is not None else m.today_items()
     return [(key, TODAY_BAND_NAMES[key], its) for key in TODAY_BANDS if (its := [a for a in items if m.today_band(a) == key])]
 
 

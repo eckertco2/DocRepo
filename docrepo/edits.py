@@ -13,11 +13,12 @@ from __future__ import annotations
 import logging
 import sqlite3
 from collections.abc import Callable, Collection, Iterable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 from pathlib import Path
 
-from docrepo import activity, agenda, bulk, captures, notes_page, page_lines, people, priorities, quick, repeats, search, tasks, waits, whatif
+from docrepo import (activity, agenda, bulk, captures, notes_page, page_lines, people, priorities, quick, repeats, search, tasks, urgency, views,
+                     waits, whatif)
 from docrepo.config import Settings
 from docrepo.dates import long_date, stamp, to_date, workday_numbers
 from docrepo.db import transaction
@@ -50,6 +51,8 @@ class Outcome:
     #: as the shared one (``AppContext.keep``) rather than read docs.db again. None when the change didn't read one, or
     #: read it inside a transaction (release 5.163), as what's read there could still be rolled back.
     model: Model | None = None
+    #: What Undo needs to put the change back, where it has one (release 5.176: a bin's drop, ``BinUndo``).
+    undo: object | None = None
 
 
 def read_now(conn: sqlite3.Connection) -> tuple[int, int, int]:
@@ -551,7 +554,7 @@ MOVES = {"top": "moved to the top", "bottom": "moved to the bottom", "up": "move
 
 
 def move_today_item(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, item_id: int, at: datetime, *, to: str | None = None,
-                    beside: tuple[int, str] | None = None, model: Model | None = None) -> Outcome:
+                    beside: tuple[int, str] | None = None, model: Model | None = None, workdays: Collection[int] | None = None) -> Outcome:
     """Today in the owner's order (release 5.148, decisions 643 and 646): ``to`` is "top", "bottom", "up" or "down" (Move to
     top and Move to bottom, Alt+Up and Alt+Down); ``beside`` is a drag's drop, another item and "before" or "after". Every
     open item gets its place, as at the first drag. A move changes no task, so it goes in no status log and has no Undo;
@@ -559,17 +562,26 @@ def move_today_item(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, item_
 
     Since release 5.154 (decision 689) a move keeps to the item's band: the top and the bottom are its band's, up and down
     stop at its ends, and a drag lands only beside an item of its own band. The places are first set in the order shown,
-    bands and all, so the order kept is the order shown."""
+    bands and all, so the order kept is the order shown.
+
+    Since release 5.176 (the urgency plan's decision 820) a band's urgent tasks come first (``views.today_order``, on the
+    day of ``at`` and the owner's ``workdays``, Monday to Friday when not given), and a move keeps to its half as well: the
+    top and the bottom are its half's, and a drag lands only beside an item of its own band and half."""
     before = model_now(conn, model)
-    items = before.today_items()
+    items = views.today_order(before, at.date(), workdays)
     a = next((x for x in items if x.id == item_id), None)
     if a is None:
         raise EditError("That item isn't on Today any more.")
     order = [x.id for x in items]
+    hot = urgency.urgent_ids(before, items, at.date(), workdays)
     band = before.today_band(a)
-    same = [x.id for x in items if before.today_band(x) == band]
-    where = f" of {TODAY_BAND_NAMES[band]}" if len(same) < len(order) else ""  # only when Today has more than one band
+    half = views.today_half(before, a, hot)
+    in_band = [x.id for x in items if before.today_band(x) == band]
+    same = [x.id for x in items if views.today_half(before, x, hot) == half]
+    where = f" of {TODAY_BAND_NAMES[band]}" if len(in_band) < len(order) else ""  # only when Today has more than one band
     if beside is not None:
+        if beside[0] in in_band and beside[0] not in same:
+            raise EditError("Urgent tasks stay first in their band. Drop it on a bin to change that.")
         if beside[0] not in same:
             raise EditError(f"A Today item moves within its band, {TODAY_BAND_NAMES[band]}. Drop it on a bin to change its priority.")
         place = beside
@@ -597,8 +609,22 @@ def move_today_item(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, item_
 TODAY_BINS = "Today"
 
 
+@dataclass(frozen=True)
+class BinUndo:
+    """How a bin's drop is put back (release 5.176, decision 822): the task's priority and its place on the Priorities
+    board (the task after it there, None for the last), its Urgent tick, and Today's order, as they were."""
+
+    item_id: int
+    task: str
+    bucket: str
+    after: str | None
+    urgent: bool
+    order: tuple[int, ...]
+
+
 def today_bin(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, item_id: int, bucket: str, at: datetime,
-              model: Model | None = None) -> Outcome:
+              model: Model | None = None, *, urgent: bool | None = None, settings: Settings | None = None,
+              workdays: Collection[int] | None = None) -> Outcome:
     """A Today task dropped on a bin (release 5.154, decisions 690 and 691): its priority is set as a move to another column
     of the Priorities board sets it (``priorities.place``: to the end of that bucket there, and in its status log), and on
     Today it goes to the end of its new band. ``bucket`` "" is Not ranked. A note has no priority (decision 692), and a
@@ -607,9 +633,16 @@ def today_bin(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, item_id: in
     Since release 5.159 (the design workspace's ``docs/mods/bin-drop-speed-plan.md``, decisions 729 and 730) a drop writes
     only the pages a priority can reach, and reads docs.db once, after the change: ``model`` is the Model as docs.db is
     now, the browse tool's own, read here when it isn't given, and the new order is worked out from it. The Model read
-    after is the outcome's ``model``."""
+    after is the outcome's ``model``.
+
+    Since release 5.176 (the urgency plan's decision 822) each bin has two parts while a task is dragged: ``urgent`` True
+    (its upper part) ticks Urgent, False (its lower part) unticks it, by the same write Edit task's tick makes, its line in
+    the status log included, in the one transaction with the priority; None (any caller that doesn't say) keeps the tick.
+    The item goes to the end of its half of the new band (``views.today_order``, on ``at``'s day and ``workdays``). The
+    outcome's ``undo`` puts the priority, the tick and Today's order back (``undo_today_bin``)."""
     before = model_now(conn, model)
-    items = before.today_items()
+    day = at.date()
+    items = views.today_order(before, day, workdays)
     a = next((x for x in items if x.id == item_id), None)
     if a is None:
         raise EditError("That item isn't on Today any more.")
@@ -617,24 +650,66 @@ def today_bin(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, item_id: in
         raise EditError("A note has no priority. Make it a task first, from its menu.")
     if bucket not in TODAY_BANDS:
         raise EditError(f"Today's bins are {', '.join(TODAY_BAND_NAMES[b] for b in TODAY_BANDS)}, not {bucket!r}.")
-    if before.today_band(a) == bucket:
+    t = before.task(a.subject)
+    tick = t.urgent if urgent is None else urgent
+    if before.today_band(a) == bucket and bool(tick) == bool(t.urgent):
         return Outcome("")
-    title = before.task(a.subject).title
-    priorities.place(conn, a.subject, bucket, None, at=at, via=TODAY_BINS)
+    was = priorities.bucket_ids(before, t.priority or "")
+    undo = BinUndo(item_id, t.id, t.priority or "", next((x for x in was[was.index(t.id) + 1:]), None) if t.id in was else None,
+                   bool(t.urgent), tuple(x.id for x in items))
+    with transaction(conn):
+        if before.today_band(a) != bucket:
+            priorities.place(conn, a.subject, bucket, None, at=at, via=TODAY_BINS)
+        if bool(tick) != bool(t.urgent):
+            tasks.update_task(conn, settings or Settings(), t.id, at=at, via=TODAY_BINS, urgent=bool(tick))
+        # Today's order after the change: by band, the urgent half first, the owner's order kept in each; the item at the
+        # end of its half.
+        now = replace(t, priority=bucket or None, urgent=bool(tick))
+        hot = urgency.urgent_ids(before, (x for x in items if x.id != item_id), day, workdays)
+        mine = urgency.is_urgent(before, now, day, workdays)
 
-    def band(x) -> str:  # the bands after the change: the task's is the bin's, and every other item's is as it was
-        return bucket if x.subject == a.subject else before.today_band(x)
+        def key(x) -> tuple:
+            return (TODAY_BANDS.index(before.today_band(x)), x.id not in hot)
 
-    rank = TODAY_BANDS.index(bucket)
-    # Today's order after the change, as ``Model.today_items`` sorts it: by band, the owner's order kept within each.
-    rest = sorted((x for x in items if x.id != item_id), key=lambda x: (TODAY_BANDS.index(band(x)), place_key(x)))
-    at_end = max((i + 1 for i, x in enumerate(rest) if TODAY_BANDS.index(band(x)) <= rank), default=0)
-    ids = [x.id for x in rest]
-    ids.insert(at_end, item_id)
-    agenda.place_items(conn, ids)
-    out = Outcome(f"{title}: {TODAY_BAND_NAMES[bucket]}. Its status log says so.")
+        mine_key = (TODAY_BANDS.index(bucket), not mine)
+        rest = sorted((x for x in items if x.id != item_id), key=lambda x: (*key(x), place_key(x)))
+        at_end = max((i + 1 for i, x in enumerate(rest) if key(x) <= mine_key), default=0)
+        ids = [x.id for x in rest]
+        ids.insert(at_end, item_id)
+        agenda.place_items(conn, ids)
+    name = TODAY_BAND_NAMES[bucket]
+    if urgent is None:
+        words = f"{name}. Its status log says so."
+    elif urgent:
+        words = f"{name}, urgent."
+    elif mine:  # unticked, but its date still puts it first
+        words = f"{name}. Still first: it's {urgency.why(before, now, day, workdays)}."
+    else:
+        words = f"{name}, not urgent."
+    out = Outcome(f"{t.title}: {words}", undo=undo)
     hand_back(out, write_touched_pages(conn, data_root, fs, at, out.problems, [a.subject], before))
-    log.info("Today item %d: task %s priority %s, from a bin", item_id, a.subject, bucket or "not ranked")
+    log.info("Today item %d: task %s priority %s, urgent %s, from a bin", item_id, a.subject, bucket or "not ranked", tick)
+    return out
+
+
+def undo_today_bin(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, undo: BinUndo, at: datetime,
+                   settings: Settings | None = None, model: Model | None = None) -> Outcome:
+    """Undo a bin's drop (release 5.176, decision 822): the priority back in its place on the board, the Urgent tick back,
+    and Today's order as it was. Each change back is in the status log too, as Undo's."""
+    before = model_now(conn, model)
+    if undo.task not in before.tasks:
+        raise EditError("That task isn't there any more.")
+    t = before.task(undo.task)
+    with transaction(conn):
+        if (t.priority or "") != undo.bucket:
+            priorities.place(conn, undo.task, undo.bucket, undo.after, at=at, via="Undo")
+        if bool(t.urgent) != undo.urgent:
+            tasks.update_task(conn, settings or Settings(), undo.task, at=at, via="Undo", urgent=undo.urgent)
+        open_ids = {a.id for a in before.today_items()}
+        agenda.place_items(conn, [x for x in undo.order if x in open_ids])
+    out = Outcome("Set back. The status log keeps both changes.")
+    hand_back(out, write_touched_pages(conn, data_root, fs, at, out.problems, [undo.task], before))
+    log.info("Today item %d: bin drop undone", undo.item_id)
     return out
 
 
