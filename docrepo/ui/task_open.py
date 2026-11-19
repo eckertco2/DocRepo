@@ -24,9 +24,15 @@ if TYPE_CHECKING:
 WORKSPACE, PAGE = "workspace", "page"
 
 
+#: Where Shift is read: Windows' live state of the keys (release 5.177), not the state Qt remembers from the last event it
+#: was given, which a window that never takes the keyboard (the Today side panel) may not have had, and a test's synthetic
+#: Shift leaves held. Tests set it. On Qt's offscreen platform it answers what Qt remembers.
+query_modifiers = QGuiApplication.queryKeyboardModifiers
+
+
 def shift_held() -> bool:
     """Whether Shift is held now: with a double-click or Enter, it opens the task the other way."""
-    return bool(QGuiApplication.keyboardModifiers() & Qt.KeyboardModifier.ShiftModifier)
+    return bool(query_modifiers() & Qt.KeyboardModifier.ShiftModifier)
 
 
 def opens_workspace(browse: BrowseWindow, task_id: str, other: bool = False) -> bool:
