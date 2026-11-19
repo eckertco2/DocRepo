@@ -29,7 +29,7 @@ from PySide6.QtCore import QPoint, QRect, QSize, Qt, QTimer, QUrl
 from PySide6.QtGui import QCursor, QKeySequence, QShortcut
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QMenu, QPushButton, QToolButton, QVBoxLayout, QWidget
 
-from docrepo import all_notes, edits, meeting_rows, notes_page, task_tile, topics, waits
+from docrepo import all_notes, edits, meeting_rows, notes_page, progress, task_tile, topics, waits
 from docrepo import workspace as ws
 from docrepo.dates import days_words, long_date, short, to_date
 from docrepo.detail import PageState, esc, link
@@ -43,6 +43,7 @@ from docrepo.ui.icons import icon
 from docrepo.ui.lists.notes_pages import grouped_outline
 from docrepo.ui.look import LOOK
 from docrepo.ui.page_view import PageView
+from docrepo.ui.progress_form import ProgressForm, guarded, said_after
 from docrepo.ui.style import page_css
 from docrepo.ui.workspace_parts import (RESOURCES_WIDTH, CardFacts, ChainCard, ChainColumn, DatesView, StatusCard,
                                         WorkPane, search_box, status_line)
@@ -249,6 +250,12 @@ class Workspace(QWidget):
         self.card.state_clicked.connect(lambda at: b.popup_state_menu(self.acting, at))
         self.card.later_clicked.connect(self._later)
         self.card.add_clicked.connect(lambda: b.add_to_today(self.acting))
+        # Release 5.175 (decision 764): More opens the card into Log progress's form, its line the card's box.
+        self.card_form = ProgressForm(b.ctx, self.card, line=self.card.box)
+        self.card.place_form(self.card_form)
+        self.card_form.submit.connect(lambda: self.quick_entry(self.card.box.text(), False))
+        self.card_form.changed.connect(lambda: self.card_form.render(self.browse.model()))
+        self.card.more_toggled.connect(self._card_more)
         self.pane.card_slot.layout().addWidget(self.card)
         self.dates = DatesView()
         self.dates.day_clicked.connect(self._edit_day)
@@ -428,6 +435,7 @@ class Workspace(QWidget):
                                            body=f'<p class="stext">{esc(said) or "Its notes, read here."}</p>'))
         else:
             self.card.show_facts(self._card_facts(m, pages, self.picked, today))
+            self._card_follows(m)
         # The heading's words, the switch and the banner.
         has_more = self.picked == self.here and not self.meeting and all_notes.has_more(m, self.here)
         mode = self.mode if has_more else "page"
@@ -634,11 +642,55 @@ class Workspace(QWidget):
 
     # ---- the quick entry bar (678, 701 and 702) ----
     def quick_entry(self, text: str, note: bool) -> None:
+        if self.card.more_open and not note:  # opened into Log progress's form: Enter logs it all (decision 764)
+            self._log_card()
+            return
         line = " ".join(text.split())
         if not line:
             return
         (self._keep_note if note else self._keep_update)(self.acting, line)
         self.card.box.clear()
+
+    # ---- the card opened into Log progress's form (release 5.175, decisions 763 and 764) ----
+    def _card_more(self, on: bool) -> None:
+        """More, or Less: opened, the form starts as Log progress opens on the task, keeping the words typed."""
+        if on:
+            self.card_form.reset(self.acting, [], keep_line=True)
+            self.card_form.render(self.browse.model())
+
+    def _card_follows(self, m) -> None:
+        """Another task acted on while the card is open: the form follows it, as it would open on that task."""
+        if self.card.more_open and self.card_form.task != self.acting:
+            self.card_form.reset(self.acting, [], keep_line=True)
+        if self.card.more_open:
+            self.card_form.render(m)
+
+    def _log_card(self) -> None:
+        """Enter in the opened card: the same log Log progress keeps (``progress.log_progress``, with the form's values), for
+        the workspace's task, with no email. Said in the status line; the card closes, as the window does."""
+        b, form, task = self.browse, self.card_form, self.acting
+        stopped = form.check()
+        if stopped is not None:
+            form.say(*stopped)
+            form.focus(stopped[0])
+            return
+
+        def stop(key: str, words: str) -> None:
+            key = key if key in form.problems else "content"
+            form.say(key, words)
+            form.focus(key)
+
+        values = form.values()
+        done = guarded(lambda: progress.log_progress(b.conn, b.ctx.data_root, b.ctx.fs, b.ctx.settings, task_id=task, at=b._now(),
+                                                     **values), task, stop)
+        if done is None:
+            return
+        self.card.box.clear()
+        self.card.set_more(False)
+        b.ctx.today_changed()
+        b.refresh()
+        said = said_after(b.model(), done, values["state"], b.today())
+        b.say(f"{said} Done for today." if done.done_today and not done.back else said)
 
     def _keep_update(self, task_id: str, line: str) -> None:
         """Enter: an Update capture on the task, its words the current status, with Undo (678)."""
