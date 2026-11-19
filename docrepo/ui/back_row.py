@@ -21,6 +21,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QButtonGroup, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget
 
 from docrepo import later
+from docrepo.ui.widgets import FlowLayout
 
 #: The chips that aren't a day.
 STAYS, DONE, NONE, PUT = "stays", "done", "none", "today"
@@ -45,7 +46,7 @@ class BackRow(QWidget):
     def __init__(self, today: Callable[[], date], workdays: Callable[[], Collection[int]], parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.today, self.workdays = today, workdays
-        # Seven chips on a line in Log progress's width: a little less padding than a chip's own, and no minimum width.
+        # Seven chips on a line in Log progress's width: a little less padding than a chip's own.
         self.setStyleSheet("QPushButton#today { padding: 3px 7px; min-width: 0px; }")
         self.mode = ON_TODAY
         self.key = STAYS
@@ -61,15 +62,15 @@ class BackRow(QWidget):
             first.addWidget(self._chip(key, label))
         first.addStretch()
         lay.addLayout(first)
-        second = QHBoxLayout()
-        second.setSpacing(4)
+        # Back's chips wrap where the row is narrow (release 5.175: the workspace's status card, decision 764).
+        holder = QWidget()
+        second = FlowLayout(holder, spacing=4)
         back = QLabel("Back", objectName="hint")
         back.setToolTip("Off Today now, and back on it that day: its Reminder")
         second.addWidget(back)
         for key, label in (*later.CHOICES, (OTHER, "Other…")):
             second.addWidget(self._chip(key, label))
-        second.addStretch()
-        lay.addLayout(second)
+        lay.addWidget(holder)
         self.other = QLineEdit(objectName="progressOther")
         self.other.setPlaceholderText(OTHER_HINT)
         self.other.textEdited.connect(lambda _t: self.changed.emit())
