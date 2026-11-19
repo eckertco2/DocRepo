@@ -280,3 +280,59 @@ def test_the_schema_has_page_made_captures(data_root, fs):
     assert conn.execute("PRAGMA user_version").fetchone()[0] >= 11  # 11 brought page_made; later versions keep it
     assert [r[1] for r in conn.execute("PRAGMA table_info(captures)") if r[1] == "page_made"] == ["page_made"]
     conn.close()
+
+
+# ---- a click on a picture stays where it is (release 5.165, decision 770) ----
+def test_a_click_on_a_picture_puts_the_cursor_there_and_ctrl_click_opens_it(qapp, tmp_path):
+    path = tmp_path / "p.png"
+    picture().save(str(path))
+    n = NotesEdit()
+    n.picture_path = lambda d: path if d == "D000031" else None
+    n.resize(700, 600)
+    n.show()
+    n.set_page(PAGE)
+    refs, links = [], []
+    n.open_ref.connect(refs.append)
+    n.open_link.connect(links.append)
+    pic = next(b for b in n.blocks() if n.kind(b) == "picture")
+    at = n.cursorRect(QTextCursor(pic)).center()
+    at.setX(at.x() + 40)  # inside the picture, right of its left edge
+    assert n.picture_at(at) == "D000031"
+    QTest.mouseClick(n.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, at)
+    assert refs == [] and links == [] and n.textCursor().block() == pic  # the cursor's there, nothing opened
+    QTest.mouseClick(n.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.ControlModifier, at)
+    assert links == ["openpic:D000031"] and refs == []
+    QTest.mouseDClick(n.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, at)
+    assert links[-1] == "openpic:D000031"
+    # A "File:" line's link still opens its document on a click.
+    file_line = next(b for b in n.blocks() if n.kind(b) == "attachment")
+    fat = n.cursorRect(QTextCursor(file_line)).center()
+    fat.setX(fat.x() + 30)
+    assert n.picture_at(fat) is None
+    QTest.mouseClick(n.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, fat)
+    assert refs == ["D000032"]
+
+
+def test_open_picture_starts_its_file_and_the_menu_has_its_two_choices(browse, monkeypatch):
+    from PySide6.QtCore import QUrl
+
+    from docrepo.ui.lists import page_commands
+
+    browse.go_task("T000012")
+    notes = browse.task_pane.notes
+    browse._picture_pasted(picture())
+    m = Model(browse.conn)
+    doc = next(c for c in m.captures.values() if c.page_made).document_ids[0]
+    started: list[str] = []
+    monkeypatch.setattr(page_commands, "PICTURE_STARTER", started.append)
+    browse.on_link(QUrl(f"openpic:{doc}"))
+    assert len(started) == 1 and started[0].endswith(".png") and Path(started[0]).is_file()
+    pic = next(b for b in notes.blocks() if notes.kind(b) == "picture")
+    at = notes.cursorRect(QTextCursor(pic)).center()
+    at.setX(at.x() + 40)
+    from PySide6.QtGui import QContextMenuEvent
+
+    notes.contextMenuEvent(QContextMenuEvent(QContextMenuEvent.Reason.Mouse, at, notes.viewport().mapToGlobal(at)))
+    names = [a.text() for a in notes._menu.actions()]
+    assert names[:2] == ["Open picture", "Go to its document"]
+    notes._menu.close()

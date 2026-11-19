@@ -36,7 +36,7 @@ from datetime import date
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QByteArray, QEasingCurve, QMimeData, QPoint, QRect, Qt, QTimer, QVariantAnimation
-from PySide6.QtGui import QColor, QCursor, QDrag, QFontMetrics, QGuiApplication, QPainter, QPen
+from PySide6.QtGui import QColor, QCursor, QDrag, QFont, QFontMetrics, QGuiApplication, QPainter, QPen
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -115,7 +115,8 @@ QLabel#tpTitle {{ color: {text}; }}
 QLabel#tpSub {{ color: {text2}; font-size: {caption}pt; }}
 QLabel#tpDue {{ color: {text2}; font-size: {caption}pt; }}
 QLabel#tpGroup {{ color: {text2}; font-size: {caption}pt; font-weight: 600; }}
-QLabel#tpBand {{ font-size: {caption}pt; font-weight: 600; padding: 4px 2px 0 2px; }}
+QWidget#tpHoverBar {{ background: {hover}; border-radius: 4px; }}
+QFrame#tpRow[current="true"] QWidget#tpHoverBar {{ background: {selected}; }}
 QLabel#tpDone {{ color: {disabled}; text-decoration: line-through; }}
 QToolButton#tpFold {{ border: 0; color: {text2}; font-size: {caption}pt; font-weight: 600; text-align: left; padding: 2px; }}
 QPushButton#tpLink {{ border: 0; background: transparent; color: {accent}; padding: 0 3px; min-height: 0; font-size: {caption}pt; }}
@@ -192,12 +193,44 @@ def fill_due(label: QLabel, cell: DueCell | task_tile.Days) -> None:
     label.setToolTip(cell.tip)
 
 
+class _BandRule(QWidget):
+    """A priority band's heading on Today (release 5.154, decision 688), as a thin rule in its priority's colour with its
+    name and count small at the left (release 5.165, decision 772): about half the height a heading of words took."""
+
+    def __init__(self, name: str, count: int, colour: QColor) -> None:
+        super().__init__(objectName="tpBand")
+        self._text, self.colour = f"{name.upper()}  {count}", colour
+        # About half the height of the caption line and padding it was, with its own font fitted to it in pixels (the
+        # panel's style sheet sets every widget's): capitals and digits, so nothing goes under the line.
+        caption = QFont(tokens.ui_font(tokens.CAPTION))
+        height = max(9, round((QFontMetrics(caption).height() + 4) * 0.55))
+        self._font = QFont(tokens.ui_font(tokens.CAPTION, semibold=True))
+        self._font.setPixelSize(max(7, height - 2))
+        self.setFixedHeight(height)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+
+    def text(self) -> str:
+        return self._text
+
+    def paintEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        p = QPainter(self)
+        p.setFont(self._font)
+        p.setPen(self.colour)
+        fm = QFontMetrics(self._font)
+        p.drawText(QRect(2, 0, self.width() - 4, self.height()), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, self._text)
+        x = 2 + fm.horizontalAdvance(self._text) + 6
+        p.fillRect(x, self.height() // 2, max(0, self.width() - x - 2), 1, self.colour)
+        p.end()
+
+
 class _Row(_EdgeFrame):
     """One Today item. A task's is a task tile (release 5.138, the task tile plan's decision 576): at rest its state's
-    circle, its title and the days to its nearer date; widened, Today's Done box before it, its depth ticks and marks, and a
-    second line under it with its project, "reminder" and how long it's been carried, where Later, Done and Remove show
-    while the pointer is on it. A note keeps its tick box, its title and that line. A click opens the panel's detail; a
-    task's double-click opens its page in the browse window (decision 572), and its right-click is the tile's menu (573)."""
+    circle, its title and the days to its nearer date; widened, Today's Done box before it and its depth ticks and marks.
+    A note keeps its tick box, its title and its date. A row is one line, at rest, widened and under the pointer (release
+    5.165, decision 772, in place of decision 440's second line): its project, "reminder" and how long it's been carried
+    are in its tooltip, and Later, Done and Remove are drawn over its right-hand end while the pointer is on it, or it's
+    the current row, outside the layout, so nothing moves. A click opens the panel's detail; a task's double-click opens
+    its workspace (release 5.165, decision 756), and its right-click is the tile's menu (573)."""
 
     def __init__(self, panel: TodayPanel, item_id: int, task_id: str | None, title: str, sub: str, due: DueCell | None,
                  state: str = "", edge: str = "", tile: task_tile.Tile | None = None) -> None:
@@ -213,44 +246,55 @@ class _Row(_EdgeFrame):
         self.tick.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.tick.setToolTip("Done: take it off Today")
         self.tick.clicked.connect(lambda: panel.done(self.item_id))
-        lay.addWidget(self.tick, 0, Qt.AlignmentFlag.AlignTop)
-        text = QVBoxLayout()
-        text.setSpacing(0)
+        lay.addWidget(self.tick, 0, Qt.AlignmentFlag.AlignVCenter)
         self.title_label = _Elided(title)
+        #: What the second line said until release 5.165 (its project, "reminder", "since…"): the row's tooltip now.
+        self.subtitle = _Elided(sub, "tpSub")
+        self.subtitle.setParent(self)
+        self.subtitle.hide()
         self.tile: tile_ui.TileWidget | None = None
         if task_id and tile is not None:
             self.tile = tile_ui.TileWidget(tile)
+            self.tile.set_more_tip(sub)
             self.tile.state_clicked.connect(lambda _task, at: panel.state_clicked(self, at))
             self.tile.opened.connect(panel.open_in_browse)
-            text.addWidget(self.tile)
+            lay.addWidget(self.tile, 1)
             self.title_label.hide()
         else:
-            text.addWidget(self.title_label)
-        self.second = QWidget()
-        second = QHBoxLayout(self.second)
-        second.setContentsMargins(0, 0, 0, 0)
-        second.setSpacing(4)
-        self.subtitle = _Elided(sub, "tpSub")
-        second.addWidget(self.subtitle, 1)
-        # A task's state and days are on its tile's own line (decision 576); a note has neither.
+            self.title_label.setToolTip(NEWLINE.join(x for x in (title, sub) if x))
+            lay.addWidget(self.title_label, 1)
+        self.setToolTip(sub)
+        # A task's state and days are on its tile's own line (decision 576); a note's date is on its line.
         self.state_button: QPushButton | None = None
         self.due = due_label(None if self.tile is not None else due)
-        second.addWidget(self.due)
-        self.buttons = QWidget()
+        lay.addWidget(self.due)
+        self.buttons = QWidget(self, objectName="tpHoverBar")
+        self.buttons.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         bl = QHBoxLayout(self.buttons)
-        bl.setContentsMargins(0, 0, 0, 0)
+        bl.setContentsMargins(4, 0, 2, 0)
         bl.setSpacing(0)
         for label, how in ((("Later", self.later_clicked),) if task_id else ()) + (("Done", self.done_clicked), ("Remove", self.remove_clicked)):
             b = QPushButton(label, objectName="tpLink")
             b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             b.clicked.connect(how)
             bl.addWidget(b)
-        second.addWidget(self.buttons)
         self.buttons.hide()
-        text.addWidget(self.second)
-        lay.addLayout(text, 1)
         self.setMouseTracking(True)
         self._press: QPoint | None = None  # where the left button went down, for a drag (release 5.148)
+
+    def show_buttons(self, on: bool) -> None:
+        """Later, Done and Remove over the row's right-hand end, outside the layout (decision 772)."""
+        if on:
+            self.buttons.adjustSize()
+            size = self.buttons.sizeHint()
+            self.buttons.setGeometry(self.width() - size.width() - 4, (self.height() - size.height()) // 2, size.width(), size.height())
+            self.buttons.raise_()
+        self.buttons.setVisible(on)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        super().resizeEvent(event)
+        if self.buttons.isVisible():
+            self.show_buttons(True)
 
     def done_clicked(self) -> None:
         self.panel.done(self.item_id)
@@ -263,25 +307,23 @@ class _Row(_EdgeFrame):
         self.panel.remove(self.item_id)
 
     def set_wide(self, wide: bool) -> None:
-        """At rest a task is its tile alone, without its ticks and marks; widened, the Done box, the marks and the second line
-        come (decision 576). A note keeps its box."""
+        """At rest a task is its tile alone, without its ticks and marks; widened, the Done box and the marks come
+        (decision 576), on the same line (decision 772). A note keeps its box. The links show under the pointer, or on
+        the current row, while it's widened."""
         self.due.setVisible(bool(self.due.text()))
         self.tick.setVisible(wide or self.tile is None)
         if self.tile is not None:
             self.tile.set_compact(not wide)
-        self.second.setVisible(wide and bool(self.subtitle.full or self.due.text()))
+        self.show_buttons(wide and not self.panel.detail_id() and (self.underMouse() or bool(self.property("current"))))
 
     def enterEvent(self, event) -> None:  # noqa: N802
         super().enterEvent(event)
         if self.panel.hover.wide and not self.panel.detail_id():
-            self.second.show()
-            self.buttons.show()
-            self.due.hide()
+            self.show_buttons(True)
 
     def leaveEvent(self, event) -> None:  # noqa: N802
         super().leaveEvent(event)
-        self.buttons.hide()
-        self.set_wide(self.panel.hover.wide)
+        self.show_buttons(self.panel.hover.wide and bool(self.property("current")) and not self.panel.detail_id())
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
         self._press = event.globalPosition().toPoint() if event.button() == Qt.MouseButton.LeftButton else None
@@ -691,8 +733,7 @@ class TodayPanel(QWidget):
         if bands:
             self._add(QLabel("Today", objectName="tpGroup"))
         for band, name, items in bands:
-            label = QLabel(f"{name.upper()}  {len(items)}", objectName="tpBand")
-            label.setStyleSheet(f"color: {today_bins.colour_of(band).name()};")
+            label = _BandRule(name, len(items), today_bins.colour_of(band))
             label.setToolTip(f"{name}: drag a task onto a bin to change its priority")
             self.extras.append(label)
             self._add(label)
@@ -918,8 +959,12 @@ class TodayPanel(QWidget):
         menu.exec(at)
 
     def open_in_browse(self, task_id: str) -> None:
-        """A tile's double-click (decision 572): the browse window comes forward at the task's page."""
-        tile_ui.open_task(self.browse, task_id)
+        """A tile's double-click: the task's workspace, as the Today view's double-click (release 5.165, decision 756; its
+        page until then, decision 572), the browse window coming forward maximised (decision 771). The panel's own
+        detail stays on its buttons."""
+        from docrepo.ui import workspace as workspace_ui  # the browse window's, imported when it's used
+
+        workspace_ui.open_workspace(self.browse, task_id, True)
 
     def tell_state(self, text: str, undo: Callable[[], None] | None) -> None:
         """What a pick did, under the list, with Undo for ten seconds (decision 363)."""
@@ -1599,6 +1644,7 @@ class TodayPanel(QWidget):
             r.setProperty("current", i == self.cursor)
             r.style().unpolish(r)
             r.style().polish(r)
+            r.set_wide(self.hover.wide)  # the current row's links show while it's widened (decision 772)
 
     def keyPressEvent(self, event) -> None:  # noqa: N802 - Up and Down move, Enter the detail, Space Done, Delete Remove, Esc back
         key = event.key()

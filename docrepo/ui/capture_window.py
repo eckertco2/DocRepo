@@ -97,7 +97,7 @@ from docrepo.save import (
     meeting_name,
     held_text,
     msg_name,
-    part_of,
+    goes_with,
     save_capture,
     split_parts,
 )
@@ -1669,10 +1669,12 @@ class CaptureWindow(QWidget):
         (decision 30). Read afresh, as if no task were picked, so a # that's also the picked task counts."""
         box = self.pin_window.text if self.pinned and self.pin_window is not None else self.content
         reading = items.read(self.content.plain(), self.names(), self.ctx.now().date())
-        return items.section_at(reading, box.textCursor().blockNumber())
+        # Every task the section's heading or note names, the section's own first (release 5.165, decision 767).
+        return " ".join(items.section_tasks_at(reading, box.textCursor().blockNumber())) or None
 
     def _show_goes(self, parts: list[CaptureDraft] | None) -> None:
-        """Each file's row says which capture of a split note it goes with, and its menu changes it (decision 30)."""
+        """Each file's row says which captures of a split note it goes with, and its menu changes it (decision 30, and
+        release 5.165's decision 767: a file outside any section goes with every task named)."""
         m = self.ctx.model()
         ids = [p.task for p in parts or [] if p.task]
         rows = [e.row for e in self.files]
@@ -1681,23 +1683,32 @@ class CaptureWindow(QWidget):
                 continue
             e.goes.setVisible(bool(parts))
             if parts:
-                task = part_of(e.row, rows, ids)
-                e.goes.setText(f"→ {m.tasks[task].title if task in m.tasks else 'Unfiled'}")
-                e.goes.setToolTip("Several #tasks split this note into a capture per task. This goes with the one shown; click to change it.")
+                where = goes_with(e.row, rows, ids)
+                names = [m.tasks[t].title if t in m.tasks else "Unfiled" for t in where]
+                e.goes.setText(f"→ {names[0] if len(names) == 1 else ' and '.join([', '.join(names[:-1]), names[-1]])}")
+                e.goes.setToolTip("Several #tasks split this note into a capture per task. This goes with the ones shown, as one "
+                                  "file on each task's page; click to change it.")
 
     def _goes_menu(self, entry: FileEntry) -> None:
-        """The captures of a split note a file can go with: each #task's, or the unfiled one."""
+        """The captures of a split note a file can go with: each #task's alone, every #task's, or the unfiled one."""
         menu = entry.goes.menu()
         menu.clear()
         m = self.ctx.model()
-        for task in [p.task for p in self.split() or [] if p.task] + [None]:
-            action = menu.addAction(m.tasks[task].title if task in m.tasks else "Unfiled: the lines under no #task")
+        ids = [p.task for p in self.split() or [] if p.task]
+        now = goes_with(entry.row, [e.row for e in self.files], ids)
+        choices: list[tuple[str, str | None, bool]] = [(m.tasks[t].title if t in m.tasks else t, t, now == [t]) for t in ids]
+        if len(ids) > 1:
+            choices.append(("Every #task", None, now == ids))
+        choices.append(("Unfiled: the lines under no #task", items.UNFILED, now == [None]))
+        for label, section, checked in choices:
+            action = menu.addAction(label)
             action.setCheckable(True)
-            action.setChecked(part_of(entry.row, [e.row for e in self.files], [task] if task else []) == task)
-            action.triggered.connect(lambda _=False, task=task: self._set_goes(entry, task))
+            action.setChecked(checked)
+            action.triggered.connect(lambda _=False, section=section: self._set_goes(entry, section))
 
-    def _set_goes(self, entry: FileEntry, task: str | None) -> None:
-        entry.row.section = task
+    def _set_goes(self, entry: FileEntry, section: str | None) -> None:
+        """A file's captures picked by hand: one task's ID, None for every #task, or ``items.UNFILED``."""
+        entry.row.section = section
         self.refresh()
 
     def _stripe(self, it: items.Item) -> str:

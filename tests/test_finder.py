@@ -249,3 +249,27 @@ def test_the_records_of_the_large_project_are_quick_to_build(large):
     m = Model(conn)
     overview.build(m, root, pid, overview.capture_texts(conn, [c.id for c in m.live_captures()]))
     assert time.perf_counter() - start < 0.5
+
+
+def test_file_search_finds_unfiled_files_and_links(data_root, fs, tmp_path):
+    """Release 5.165, decision 768: the files and links of a capture with no task are searched too, marked Unfiled, and
+    their task is the capture (Tab goes to it)."""
+    from datetime import datetime
+
+    from docrepo.config import Settings
+    from docrepo.save import CaptureDraft, FileRow, save_capture
+
+    conn = db.connect(fs, data_root)
+    load_sample(conn)
+    f = tmp_path / "pump curve.txt"
+    f.write_text("made-up curve", encoding="utf-8")
+    link = "https://example.com/pump-curves"
+    r = save_capture(conn, data_root, fs, Settings(me="P001"), CaptureDraft(content="Curves from the vendor.", files=[
+        FileRow(f.name, str(f)), FileRow("Pump curves", link)]), datetime(2026, 10, 8, 9, 0))
+    m = Model(conn)
+    assert m.capture_tasks(m.captures[r.capture_id]) == []
+    recs = [x for x in file_search.records(conn, m, data_root) if x.capture == r.capture_id]
+    assert sorted((x.title, x.type) for x in recs) == [("Pump curves", "link"), ("pump curve.txt", "doc")]
+    assert all(x.task == "" and file_search.task_title(m, x) == "Unfiled" for x in recs)
+    assert {x.path for x in recs} == {str(f), link}
+    conn.close()

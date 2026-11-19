@@ -284,7 +284,7 @@ def test_widened_it_shows_more(app, panel):
     panel._update_state()
     assert panel.target_width() == 320
     assert panel.box_row.isVisibleTo(panel)
-    assert panel.rows and panel.rows[0].subtitle.isVisibleTo(panel.rows[0])
+    assert panel.rows and panel.rows[0].tick.isVisibleTo(panel.rows[0])  # its project's in its tooltip (release 5.165, decision 772)
 
 
 def test_widths_come_from_the_config(app, panel, data_root, fs):
@@ -604,24 +604,51 @@ def _wide(panel) -> None:
     QApplication.processEvents()
 
 
-def test_a_task_is_its_tile_with_its_project_under_it(app, panel):
-    """Release 5.138 (the task tile plan's decision 576, in place of 5.119's 440): a task's first line is its tile (its circle,
-    title, marks and days); widened, Today's Done box before it and its project under it, where the hover's links go; at rest,
-    the tile alone, without its ticks and marks."""
+def test_a_task_is_its_tile_with_its_project_in_its_tooltip(app, panel):
+    """Release 5.138 (the task tile plan's decision 576): a task's line is its tile (its circle, title, marks and days);
+    widened, Today's Done box before it; at rest, the tile alone, without its ticks and marks. Since release 5.165
+    (decision 772, amending 440) there's no second line: its project is in the tooltip, and the links are over the row."""
     task = _with_a_due(app)
     _wide(panel)
     row = next(r for r in panel.rows if r.task_id == task)
     assert row.tile is not None and row.tile.tile.task_id == task and not row.tile.compact
-    assert all(w.parent() is row.second for w in (row.subtitle, row.buttons))
-    assert row.tick.isVisibleTo(row) and row.second.isVisibleTo(row) == bool(row.subtitle.full)  # a project, or nothing to say
+    assert not hasattr(row, "second") and row.buttons.parent() is row and not row.subtitle.isVisibleTo(row)
+    assert row.tick.isVisibleTo(row) and (not row.subtitle.full or row.subtitle.full in row.tile.toolTip())
     panel.hover.contract()
     panel._update_state()
-    assert not row.second.isVisibleTo(row) and not row.tick.isVisibleTo(row) and row.tile.compact
+    assert not row.tick.isVisibleTo(row) and row.tile.compact
+
+
+def test_a_row_keeps_one_height_at_rest_widened_and_under_the_pointer(app, panel):
+    """Decision 772: one line in all three, the links drawn over its right-hand end, outside the layout."""
+    task = _with_a_due(app)
+    row = next(r for r in panel.rows if r.task_id == task)
+    QApplication.processEvents()
+    rest = row.sizeHint().height()
+    _wide(panel)
+    QApplication.processEvents()
+    wide = row.sizeHint().height()
+    QApplication.sendEvent(row, QEnterEvent(QPointF(2, 2), QPointF(2, 2), QPointF(2, 2)))
+    QApplication.processEvents()
+    hovered = row.sizeHint().height()
+    assert rest == wide == hovered and row.buttons.isVisibleTo(row)
+    assert row.buttons.geometry().right() <= row.width() and row.buttons.geometry().height() <= row.height()
+
+
+def test_a_band_heading_is_a_thin_rule(app, panel):
+    """Decision 772: about half the height its words took (a caption line and its padding)."""
+    put_on_today(app)
+    panel.refresh()
+    _wide(panel)
+    band = next(w for w in panel.extras if w.objectName() == "tpBand")
+    before = QLabel("HIGH  1")  # the heading as it was: a caption's words and their padding
+    before.setStyleSheet(f"font-size: {today_panel.tokens.CAPTION}pt; font-weight: 600; padding: 4px 2px 0 2px;")
+    assert band.height() <= before.sizeHint().height() * 0.65 and band.text().split("  ")[0] in ("HIGH", "MEDIUM", "LOW", "NOT RANKED")
 
 
 def test_the_state_is_the_tiles_circle_and_the_date_its_number(app, panel):
     """Decision 441 kept, 442 changed by 5.138's 568: the state is the tile's circle, the date its number of days, its whole
-    dates in its tooltip; the hover's links come on the second line."""
+    dates in its tooltip; the hover's links come over the row's right-hand end (release 5.165, decision 772)."""
     from docrepo import task_tile
 
     task = _with_a_due(app)
@@ -636,13 +663,13 @@ def test_the_state_is_the_tiles_circle_and_the_date_its_number(app, panel):
     assert not row.buttons.isVisibleTo(row)
 
 
-def test_a_note_s_second_line_is_there_only_for_its_links(app, panel):
+def test_a_note_s_links_show_under_the_pointer(app, panel):
     note_on_today(app)
     _wide(panel)
     row = next(r for r in panel.rows if r.task_id is None)
-    assert row.tile is None and not row.second.isVisibleTo(row)
+    assert row.tile is None and not row.buttons.isVisibleTo(row)
     QApplication.sendEvent(row, QEnterEvent(QPointF(2, 2), QPointF(2, 2), QPointF(2, 2)))
-    assert row.second.isVisibleTo(row) and row.buttons.isVisibleTo(row)
+    assert row.buttons.isVisibleTo(row) and row.buttons.parent() is row  # over the row, on its one line (decision 772)
 
 
 def test_due_in_the_next_7_days_has_the_short_date(app, panel):
@@ -896,3 +923,61 @@ def test_the_cover_takes_nothing_off_a_task(app, panel, monkeypatch):
     assert not panel.cover_allows()
     panel.cover_dropped(DropRead(items=[Dropped("Lift plan.txt", b"x")]))
     assert not app.window.isVisible()
+
+
+# ---- a double-click opens the workspace (release 5.165, decision 756), maximised and in front (decision 771) ----
+def _double_click(row) -> None:
+    from PySide6.QtTest import QTest
+
+    QTest.mouseDClick(row.tile, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, row.tile.rect().center())
+
+
+def _ws_open(app, task) -> bool:
+    from docrepo.ui import workspace as workspace_ui
+
+    return workspace_ui.is_open(app.browse) and app.browse.workspace.here == task
+
+
+def test_a_double_click_opens_the_workspace_with_the_browse_window_hidden(app, panel):
+    put_on_today(app)
+    panel.refresh()
+    app.browse.hide()
+    row = next(r for r in panel.rows if r.task_id == "T000008")
+    _double_click(row)
+    assert app.browse.isVisible() and _ws_open(app, "T000008")
+    assert app.browse.isMaximized() and app.browse.workspace.from_today
+
+
+def test_a_double_click_with_the_browse_window_minimised_or_on_another_view(app, panel):
+    put_on_today(app)
+    put_on_today(app, "T000012")
+    panel.refresh()
+    app.browse.show_browse("tasks")
+    app.browse.setWindowState(Qt.WindowState.WindowMinimized)
+    _double_click(next(r for r in panel.rows if r.task_id == "T000008"))
+    assert not app.browse.isMinimized() and app.browse.isMaximized() and _ws_open(app, "T000008")
+    # A workspace already open: the other task's takes its place.
+    _double_click(next(r for r in panel.rows if r.task_id == "T000012"))
+    assert _ws_open(app, "T000012") and app.browse.isMaximized()
+
+
+def test_leaving_the_workspace_puts_the_browse_window_back(app, panel):
+    from docrepo.ui import workspace as workspace_ui
+
+    put_on_today(app)
+    panel.refresh()
+    app.browse.show_browse("tasks")
+    app.browse.setWindowState(Qt.WindowState.WindowNoState)
+    app.browse.setGeometry(100, 100, 900, 600)
+    before = app.browse.geometry()
+    _double_click(next(r for r in panel.rows if r.task_id == "T000008"))
+    assert app.browse.isMaximized()
+    workspace_ui.leave(app.browse)
+    assert not app.browse.isMaximized() and app.browse.geometry().size() == before.size()
+
+
+def test_a_note_s_row_has_no_workspace(app, panel):
+    note_on_today(app)
+    panel.refresh()
+    row = next(r for r in panel.rows if r.task_id is None)
+    assert row.tile is None  # nothing to double-click into: a note's row does what it did
