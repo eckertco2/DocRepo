@@ -91,6 +91,7 @@ from docrepo.views import (
     TASK_VIEWS,
     VIEW_IDS,
     VIEWS,
+    today_order,
     current_target,
     discarded_rows,
     view_counts,
@@ -1261,7 +1262,8 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         m, v = self.model(), self.view
         new = None
         if v == "today":
-            first = next((a.subject for a in m.today_items() if a.subject), None)
+            # The first task as Today shows it (release 5.176, decision 820: urgent first in each band).
+            first = next((a.subject for a in today_order(m, self._now().date(), self._workdays()) if a.subject), None)
             new = ("task", first) if first else None
         elif v == "unfiled":
             caps = m.unfiled_captures()

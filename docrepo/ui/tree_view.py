@@ -48,6 +48,9 @@ STATE_ROLE = Qt.ItemDataRole.UserRole + 6
 MOVE_ROLE = Qt.ItemDataRole.UserRole + 7
 #: A row's lines for its right-click menu only, a ``RowActions`` (release 5.148): ``set_menu_lines``.
 MENU_ROLE = Qt.ItemDataRole.UserRole + 8
+#: A hairline over a row, in this colour (release 5.176, the urgency plan's decision 821): between a Today band's urgent tasks
+#: and the rest, drawn in the gap above the row, so it takes no height of its own.
+RULE_ROLE = Qt.ItemDataRole.UserRole + 9
 #: The chevron after a Classic State cell's word on hover, and the room it takes.
 STATE_CHEVRON = 12
 
@@ -624,10 +627,11 @@ class RowTree(QTreeWidget):
         self._file_drops = (takes, dropped)
         self.setAcceptDrops(True)
 
-    def set_bins(self, opens: Callable[[object], tuple[str, dict[str, int]] | None], dropped: Callable[[object, str], None]) -> None:
+    def set_bins(self, opens: Callable[[object], tuple | None], dropped: Callable[[object, tuple[str, bool]], None]) -> None:
         """Today's bins (release 5.154, decisions 690 and 691), with row moves on: when a row's drag starts, ``opens`` gets its
-        move key and says the band it's in and each band's count, or None for no bins (a note's drag). While the drag lasts
-        the bins are drawn down the list's left side; a drop on one calls ``dropped`` with the key and the bin's band."""
+        move key and says the band it's in, each band's count and whether it's in the band's urgent half, or None for no bins
+        (a note's drag). While the drag lasts the bins are drawn down the list's left side; a drop on one calls ``dropped``
+        with the key and the target, the bin's band and whether its urgent part (release 5.176, decision 822)."""
         from docrepo.ui.today_bins import VIEW_WIDTH, Bins  # here: today_bins needs nothing of this module, but keeps it light
 
         self._bin_hooks = (opens, dropped)
@@ -640,7 +644,7 @@ class RowTree(QTreeWidget):
         if self._bin_hooks and self._bins is not None:
             found = self._bin_hooks[0](self.move_key(self.currentItem()))
             if found is not None:
-                self._bins.open_for(found[0], found[1], self.viewport().rect())
+                self._bins.open_for(found[0], found[1], self.viewport().rect(), *found[2:])
                 opened = True
         try:
             super().startDrag(actions)
@@ -648,9 +652,9 @@ class RowTree(QTreeWidget):
             if opened:
                 self._bins.close_bins()
 
-    def _over_bins(self, event) -> str | None | bool:
-        """Where a row's drag is over the bins: the bin's band, None on the bins but not on one a drop would go to, or False
-        away from them (the list's own rules then)."""
+    def _over_bins(self, event) -> tuple[str, bool] | None | bool:
+        """Where a row's drag is over the bins: the target (the bin's band, and whether its urgent part), None on the bins but
+        not on one a drop would go to, or False away from them (the list's own rules then)."""
         bins = self._bins
         if not self._bin_hooks or bins is None or not bins.isVisible():
             return False
@@ -1233,6 +1237,9 @@ class RowTree(QTreeWidget):
             else:
                 painter.fillRect(0, option.rect.top() + 2, 3, option.rect.height() - 4, QColor(mark))
             painter.restore()
+        rule = first.data(RULE_ROLE)
+        if rule:  # the hairline over the first of a band's rest (decision 821)
+            painter.fillRect(TILE_INSET + 6, option.rect.top(), self.viewport().width() - 2 * TILE_INSET - 12, 1, QColor(rule))
 
     def _item_changed(self, item: QTreeWidgetItem, column: int) -> None:
         if self._building or column != 0 or item.data(0, Qt.ItemDataRole.CheckStateRole) is None:
