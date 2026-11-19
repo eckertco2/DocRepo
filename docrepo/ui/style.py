@@ -92,6 +92,7 @@ QLabel#hotkey { color: #87919c; font-family: Consolas; font-size: 8pt;
                 border: 1px solid #d6dce3; border-radius: 3px; padding: 1px 4px; }
 QLabel#fieldLabel { color: #5a6571; font-size: 9pt; }
 QLabel#hint { color: #5a6571; font-size: 8.5pt; }
+QLabel#progressProblem { color: #9d5d00; font-size: 9pt; }  /* what stops Log progress, by its row (release 5.164) */
 QLabel#does { background: #dbe8f5; border-left: 3px solid #1d5e98; padding: 6px 10px; }
 QLabel#error { background: #fbe3e1; color: #b0261e; padding: 6px 10px; border-radius: 4px; }
 QLabel#tip { background: #dbe8f5; border: 1px solid #9dc0e3; border-radius: 5px; padding: 6px 9px; font-size: 9pt; }
