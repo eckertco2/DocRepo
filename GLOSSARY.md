@@ -80,7 +80,8 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Plant event**: a task with Plant event ticked, such as an outage or a turnaround, which the timeline shades from its Start to its Due so other work can be seen against it.
 - **Reference field**: a field every task has for a number from another system, such as a change record's. Its name is set in Settings.
 - **Tagged label**: a plant's tag, such as V-110 or FIC-2210, found in the text of every capture, email, document, notes page and task (release 5.79). It isn't a label: a label is a category the owner gives a task, and a tagged label is found in the words. It's found however its parts are joined (V-110, V110, V 110), and by its aliases. Captures, documents and tasks show theirs in a **Tagged labels** row.
-- **Glossary** (of tagged labels): the list of tagged labels, each with its description and aliases, imported from Excel or CSV in the Tagged labels view, or added by hand. Each is known by its **key**, its letters and digits in capitals.
+- **Tag list**: the tagged labels DocRepo knows by name, each with its description and aliases, imported from Excel or CSV in the Tagged labels view, or added by hand (called the glossary until release 5.171; the code's names, such as `status = 'glossary'`, stay). Each is known by its **key**, its letters and digits in capitals.
+- **Glossary**: a named table the owner imported whole from a sheet (release 5.171): an equipment list, an instrument list, a list of acronyms, anything in rows, with every column kept as the sheet has it, in docs.db. It may have a **tag column**, whose cells are tags: a glossary row and a tagged label are the same thing when the row's tag has the label's key, and Import can add those tags to the tag list too. The browse tool's **Glossaries** view lists them, and each has a page for agents, `Views\Glossaries\<name>.md`. The Model never reads one.
 - **Tagged labels page**: `Views\Tagged labels.md` in the data root (release 5.153), the glossary as a generated page: every tagged label with its name and the other ways it's written, and the suggested ones after them, so an agent reading the data root can look a tag up. `Contents.md` points to it. DocRepo rewrites it when the glossary changes; like every generated page, it's never read back.
 - **Alias** (of a tagged label): another name it's found by: one with a digit and no space (D-10) is matched like a label, and any other (feed drum) as whole words.
 - **Tag pattern**: a name and a **mask** such as `XX[X]-####` for a plant's tagging convention, kept in Settings, which finds tags that aren't in the glossary yet (release 5.80). In a mask `X` is a capital letter, `#` a digit, `*` either, `[ ]` optional and `' '` itself; DocRepo makes it a regular expression of its own.
@@ -228,6 +229,7 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Project notes**: say Note.
 - **Tag**: on its own, only a plant's tag (a tagged label, release 5.79), as in tag pattern. Never a capture's type, which is its capture type, or a task's category, which is a label.
 - **option**: the field in `capture.md` becomes `capture_types`, a list, since one capture can be several types.
+- **Glossary** (of tagged labels): say tag list (release 5.171). A glossary is now a table the owner imported whole.
 - **Inbox**: for the browse tool's view and the `Contents.md` section, say Unfiled.
 - **Inbox capture**: say unfiled capture.
 - **Raw notes**: say raw text log.

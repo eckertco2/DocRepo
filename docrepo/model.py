@@ -468,6 +468,9 @@ class Model:
 
     def __init__(self, conn: sqlite3.Connection) -> None:
         q = conn.execute
+        #: The connection it was read from (release 5.171), kept only so the generated pages can ask docs.db for what the
+        #: Model never reads itself: the glossaries' names for Contents.md (``glossaries.summaries``).
+        self.conn = conn
         #: docs.db's state as it was read (release 5.159): the connection, its changes and others', as ``AppContext.model``
         #: keys its shared Model, so a Model read after a change can be kept as the shared one (``AppContext.keep``). None
         #: inside a transaction, as what's read there could still be rolled back.

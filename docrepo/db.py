@@ -26,7 +26,7 @@ from docrepo.safe_fs import SafeFS
 log = logging.getLogger(__name__)
 
 DB_FILE = Path("System") / "docs.db"
-SCHEMA_VERSION = 30
+SCHEMA_VERSION = 31
 #: How long, in seconds, a statement waits for docs.db while another connection holds it (SQLite's busy timeout, release
 #: 5.102) before it gives up with "database is locked". A backup's copy holds it for as long as the copy takes. Python's
 #: own default is 5 seconds.
@@ -715,6 +715,28 @@ ALTER TABLE agenda_items ADD COLUMN pos INTEGER;
 -- Quick tasks, known by its creator, becomes a collection, being one already in all but name.
 ALTER TABLE tasks ADD COLUMN collection INTEGER NOT NULL DEFAULT 0 CHECK (collection IN (0, 1));
 UPDATE tasks SET collection = 1 WHERE created_by = 'DocRepo';
+""",
+    31: """
+-- Glossaries (release 5.171, the design workspace's docs/mods/glossaries-plan.md, decisions 802 and 803): tables the owner
+-- imports whole from a sheet, each with a name and its own columns, kept apart from the tag list (tagged_labels). A
+-- glossary's columns are a JSON list of their names, in the sheet's order. Its tag_column is the one whose cells are tags
+-- (an index into them), or none. Its source is the file it came from, as words, and imported is when. A row's cells are a
+-- JSON list in the columns' order, and folded is its text folded for matching (case and marks aside). Model never reads them.
+CREATE TABLE glossaries (
+    id         INTEGER PRIMARY KEY,
+    name       TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    columns    TEXT NOT NULL,
+    tag_column INTEGER,
+    source     TEXT NOT NULL DEFAULT '',
+    imported   TEXT NOT NULL
+);
+CREATE TABLE glossary_rows (
+    glossary INTEGER NOT NULL REFERENCES glossaries(id) ON DELETE CASCADE,
+    pos      INTEGER NOT NULL,
+    cells    TEXT NOT NULL,
+    folded   TEXT NOT NULL,
+    PRIMARY KEY (glossary, pos)
+);
 """,
 }
 

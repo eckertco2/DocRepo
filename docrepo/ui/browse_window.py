@@ -57,6 +57,7 @@ from docrepo.tasks import TaskError
 from docrepo.ui.context import AppContext
 from docrepo.ui.dialogs import LabelDialog, PersonDialog
 from docrepo.ui.lists import review as review_list
+from docrepo.ui.lists import glossaries as glossary_list
 from docrepo.ui.lists import tagged as tagged_list
 from docrepo.ui.rich_edit import RichEdit
 from docrepo.ui.explorer import show_in_explorer
@@ -205,6 +206,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         self.cap_offset = 0
         self.cap_cell: tuple[str, int] | None = None
         self.retired = {"people": False, "labels": False}
+        self.glossary_find = ""  # the Glossaries view's Find in rows (release 5.171, decision 804)
         self.tagged_mentioned: bool | None = None  # the Tagged labels view's Mentioned only (release 5.79); None: not set yet
         self.query = ""
         self.before_search = "tasks"
@@ -698,6 +700,8 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
             return any(lb.name == item for lb in m.labels)
         if kind == "tagged":  # release 5.79: a tagged label, by its key
             return item in m.tagged.by_key
+        if kind == glossary_list.KIND:  # release 5.171: a glossary, by its ID, asked of docs.db (the Model never reads one)
+            return glossary_list.exists(self, item)
         if kind == conversation_page.KIND:  # release 5.122: an email conversation, from a task's page
             return conversation_page.exists(self, item)
         if kind == "tplrow":
@@ -985,7 +989,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         self.filters.setVisible(True)
         builder = {"today": self._today_view, "review": lambda: review_list.view(self), "tasks": self._tasks_view, "unfiled": self._unfiled_view, "agenda": self._agenda_view,
                    "people": self._people_view, "templates": self.templates.render_list,
-                   "labels": self._labels_view, "tagged": lambda: tagged_list.view(self), "docs": self._docs_view, "search": self._search_view,
+                   "labels": self._labels_view, "tagged": lambda: tagged_list.view(self), "glossaries": lambda: glossary_list.view(self), "docs": self._docs_view, "search": self._search_view,
                    "discarded": self._discarded_view, "activity": self._activity_view}.get(self.view)
         self.tree.stop_row_moves()  # the Templates view turns it back on
         self.tree.begin()
@@ -1056,6 +1060,9 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         elif kind == "tagged":  # release 5.79
             tagged_list.actions(self, item)
             html = pages.tagged_page(item)
+        elif kind == glossary_list.KIND:  # release 5.171: a glossary and its rows (the glossaries plan's decision 804)
+            glossary_list.actions(self, item)
+            html = glossary_list.page(self, item)
         elif kind == conversation_page.KIND:  # release 5.122: an email conversation (the email section plan's decision 459)
             conversation_page.actions(self, item)
             html = conversation_page.page(self, item)
@@ -1275,6 +1282,8 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
             new = ("label", m.labels[0].name) if m.labels else None
         elif v == "tagged":  # release 5.79: the first label it lists
             new = tagged_list.first(self)
+        elif v == "glossaries":  # release 5.171: the first glossary, by name
+            new = glossary_list.first(self)
         elif v == "review":  # release 5.128: the step's first row
             new = review_list.first(self)
         elif v == "templates":

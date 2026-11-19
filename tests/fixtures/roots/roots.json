@@ -147,5 +147,14 @@
    "task_pages": 17,
    "task_dates": 2
   }
+ },
+ "v30": {
+  "commit": "470c0fe",
+  "counts": {
+   "tasks": 18,
+   "captures": 24,
+   "task_pages": 17,
+   "task_dates": 2
+  }
  }
 }
