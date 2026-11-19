@@ -1088,13 +1088,11 @@ def work_key(browse: BrowseWindow) -> None:
 
 
 def open_row(browse: BrowseWindow, task_id: str) -> None:
-    """A task row's double-click or Enter: on Today, its workspace (667); everywhere else, its page (572)."""
-    from docrepo.ui import task_tile as tile_ui
+    """A task row's double-click or Enter: as Settings' Open a task in says, its workspace or its page, and the other with
+    Shift (release 5.174, decision 815, in place of 667's Today only and 572's page)."""
+    from docrepo.ui import task_open
 
-    if browse.view == TODAY:
-        open_workspace(browse, task_id, True)
-    else:
-        tile_ui.open_task(browse, task_id)
+    task_open.open_task(browse, task_id, other=task_open.shift_held())
 
 
 def come_back(browse: BrowseWindow) -> bool:

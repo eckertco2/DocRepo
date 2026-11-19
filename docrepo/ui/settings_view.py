@@ -37,7 +37,7 @@ from PySide6.QtWidgets import (
 
 from docrepo import __version__, backup, capacity, db, diagnose, hotkey, layer0, outlook, prompts, search, startup, stock_headings, tagged, wheels_config
 from docrepo import tagged_masks as masks
-from docrepo.config import REVIEW_DAYS, Settings, data_root_problem, init_data_root, make_safe_fs, resolve_data_root, save_location
+from docrepo.config import OPEN_TASKS_IN, REVIEW_DAYS, Settings, data_root_problem, init_data_root, make_safe_fs, resolve_data_root, save_location
 from docrepo.dates import WEEKDAYS, long_date, stamp
 from docrepo.links import check_link_template
 from docrepo.markup import esc
@@ -141,6 +141,8 @@ def check_values(ctx: AppContext, values: dict[str, Any]) -> dict[str, Any]:
         raise SettingsProblem("Projects come up every 1, 2 or 4 weeks.")
     if "quiet_days" in out and not (isinstance(out["quiet_days"], int) and 1 <= out["quiet_days"] <= 365):
         raise SettingsProblem("Gone quiet is after 1 to 365 days.")
+    if out.get("open_tasks_in", "workspace") not in OPEN_TASKS_IN:  # release 5.174
+        raise SettingsProblem("A task opens in its workspace or its page.")
     if out.get("look", "new") not in ("new", "classic"):
         raise SettingsProblem("The look is the new one or the Classic one.")
     if out.get("me") and out["me"] not in Model(ctx.conn).people:
@@ -515,8 +517,16 @@ class SettingsView(QWidget):
         self.hints = QCheckBox("Show hints")
         self.hints.setToolTip("Help text, the ⓘ buttons and key badges, in every window, at once")
         self.hints.toggled.connect(self._hints_toggled)
+        # Open a task in (release 5.174, the design workspace's docs/mods/today-workspace-carry-plan.md, decision 815).
+        self.open_tasks_in = QComboBox()
+        for key, words in OPEN_TASKS_IN.items():
+            self.open_tasks_in.addItem(words, key)
+        self.open_tasks_in.setFixedWidth(240)
         self._card(lay, "Look", [
             ("Look", "The new look, or release 5.9's while you get used to it. It changes when DocRepo next starts.", self.look),
+            ("Open a task in", "What a double-click or Enter on a task does, in a list, on a tile, in Task search, the quick summary and "
+                               "File search. Shift does the other, and so does the second line of a task's right-click menu. A link "
+                               "inside a page always goes to the task's page, and a collection opens at its page.", self.open_tasks_in),
             ("Hints", "Help text under fields, the ⓘ buttons and the keys beside controls. Hold Alt to see the letter keys, or Ctrl "
                       "for the Ctrl shortcuts, at any time.", self.hints),
             ("Version", "The release of DocRepo running now. CHANGELOG.md, beside the code, says what each brought.",
@@ -911,6 +921,7 @@ class SettingsView(QWidget):
         self.backup_days.setValue(s.backup_every_days)
         self.backup_keep.setValue(s.backup_keep)
         self.look.setCurrentIndex(max(0, self.look.findData(s.look)))
+        self.open_tasks_in.setCurrentIndex(max(0, self.open_tasks_in.findData(s.open_tasks_in)))  # release 5.174
         self.hints.blockSignals(True)
         self.hints.setChecked(s.show_hints)
         self.hints.blockSignals(False)
@@ -941,6 +952,7 @@ class SettingsView(QWidget):
             "extracted_text_cap_chars": self.cap.value(), "prompt_warn_chars": self.warn.value(), "doc_check_minutes": self.check.value(),
             "backup_every_days": self.backup_days.value(), "backup_keep": self.backup_keep.value(),
             "look": self.look.currentData(), "show_hints": self.hints.isChecked(), "outlook_categories": self.categories.isChecked(),
+            "open_tasks_in": self.open_tasks_in.currentData(),
             "outlook_category_colour": self.colour.currentData(), "today_meetings": self.meetings_on.isChecked(),
             "progress_sends": self.progress_sends.isChecked(),
             "links_keep": self.links_keep.lines(), "links_drop": self.links_drop.lines(), "other_links": self.other_links.currentData(),
