@@ -470,10 +470,10 @@ def report(data_root: Path, timings: list[Timing], now: datetime, data_counts: l
     return "\n".join(lines)
 
 
-def save_report(fs: SafeFS, data_root: Path, text: str, now: datetime) -> Path:
+def save_report(fs: SafeFS, data_root: Path, text: str, now: datetime, prefix: str = "timings") -> Path:
     """Keep the output as System\\diagnostics\\timings YYYY-MM-DD HHMM.md, never over an earlier one."""
     folder = data_root / REPORT_DIR
-    name = f"timings {now:%Y-%m-%d %H%M}"
+    name = f"{prefix} {now:%Y-%m-%d %H%M}"  # ``prefix``: another command's report, as appbar-try's (release 5.178)
     path, n = folder / f"{name}.md", 2
     while path.exists():
         path, n = folder / f"{name} ({n}).md", n + 1

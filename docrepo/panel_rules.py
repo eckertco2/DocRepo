@@ -206,3 +206,10 @@ def find_monitor(saved: Monitor, monitors: Sequence[Monitor]) -> int | None:
 def covers(front: Rect, monitor: Rect) -> bool:
     """Decision 223: whether a window fills the monitor. A maximized window stops short of the taskbar, so it doesn't."""
     return front.x <= monitor.x and front.y <= monitor.y and front.right >= monitor.right and front.bottom >= monitor.bottom
+
+
+def dock_rect(monitor: Rect, side: str, width: int) -> Rect:
+    """The strip a docked Today panel asks Windows for (release 5.178, the today docked plan's decision 834): ``width``
+    wide at ``side`` of ``monitor``, its full height. Windows takes the taskbar and other app bars out of it
+    (``appbar.AppBar.dock``)."""
+    return Rect(edge_x(side, monitor, width), monitor.y, width, monitor.h)

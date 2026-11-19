@@ -136,6 +136,7 @@ class CaptureApp(QObject):
         super().__init__()
         self.qt = qt
         self.ctx = ctx
+        qt.aboutToQuit.connect(self.give_back_strip)  # a docked Today panel's strip, however DocRepo quits (release 5.178)
         self.paused = False
         self.reminder_task: str | None = None
         self.reminder_many = False
@@ -465,8 +466,15 @@ class CaptureApp(QObject):
         except Exception:  # noqa: BLE001
             log.exception("T-mail watch failed")
 
+    def give_back_strip(self) -> None:
+        """A docked Today panel's strip given back to Windows (release 5.178, the today docked plan's decision 835); nothing
+        when it isn't docked, and nothing the second time."""
+        if self.panel is not None:
+            self.panel.dock.undock()
+
     def quit(self) -> None:
         self.window.keep_draft(closing=True)  # an open capture waits in Drafts for the next start (release 5.77)
+        self.give_back_strip()
         self.unregister_hotkeys()
         self.tray.hide()
         self.qt.quit()
