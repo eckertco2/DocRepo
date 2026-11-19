@@ -21,12 +21,23 @@ and the last one taken away picks In progress; Waiting on a reply picked with no
 or puts the cursor in Waiting on.
 
 Enter keeps it all (``docrepo.progress.log_progress``) and then, for a draft in its own window under decision 590 A,
-sends it, a minute deferred; an inline reply, or a send Outlook refuses, comes back to the front for the owner to send.
-Esc closes it, keeping nothing. ``ui.wheels`` keeps one window, as it keeps the quick summary.
+sends it; an inline reply, or a send Outlook refuses, comes back to the front for the owner to send. Esc closes it,
+keeping nothing. ``ui.wheels`` keeps one window, as it keeps the quick summary.
+
+Since release 5.164 (the design workspace's ``docs/mods/log-progress-whole-plan.md``, decisions 750 to 754):
+- the draft is sent with nothing set on it first (750), and once sent, or shown, the window holds nothing of Outlook's;
+  the kept draft is marked as sent by DocRepo just before, so nothing reads it on its way out (751);
+- Enter checks, keeps, hides the window, and only then asks Outlook, so a prompt of Outlook's never sits under it (752);
+- Enter always answers (753): in Waiting on it adds the person typed, or with the box empty logs; on Cancel it cancels;
+  what stops a save is said by its row in the caution colour, with the cursor put there; any other error is caught and
+  said ("Nothing was kept: the database is busy. Try again."); while it runs the button says "Logging…" and takes no
+  second press;
+- all or nothing (754): when the Update is kept and the rest isn't, it says so, and the next Enter keeps only the rest.
 """
 from __future__ import annotations
 
 import logging
+import sqlite3
 from datetime import date
 from typing import TYPE_CHECKING
 
@@ -71,6 +82,12 @@ WIDTH = 600
 DIM = 0.45
 #: The Waiting on row's line while another state is picked (decision 695).
 PICK_WAITING = "Pick Waiting on a reply to wait on someone."
+#: What Enter's button says while it runs (decision 753).
+LOGGING = "Logging…"
+#: What a busy database says (decision 753): nothing was kept.
+BUSY = "Nothing was kept: the database is busy. Try again."
+#: The keys of the problem lines (decision 753): SaveError's focus, and "" for the foot's, which has no row.
+PROBLEM_ROWS = ("task", "content", "who", "")
 
 
 def email_of(draft: outlook.FrontDraft | None) -> progress.Email | None:
@@ -111,6 +128,9 @@ class LogProgress(QWidget):
         self.state_key = progress.IN_PROGRESS
         self.done_today = False
         self._dimmed: list[QGraphicsOpacityEffect] = []
+        self.problems: dict[str, QLabel] = {}  # what stops a save, by its row (decision 753)
+        self.kept: str | None = None  # the Update an Enter kept when the rest wasn't (decision 754)
+        self.busy = False  # while Enter runs (decision 753)
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(16, 14, 16, 12)
@@ -144,10 +164,12 @@ class LogProgress(QWidget):
         self.task_button.setToolTip("The task (Ctrl+T, or #): the # list")
         self.task_button.clicked.connect(self.pick_task)
         self._row(grid, 0, "Task", self.task_button)
+        self._problem_line(grid, 1, "task")
         self.line = QLineEdit(objectName="progressLine")
         self.line.setPlaceholderText("What you sent or asked, in a line")
         self.line.textEdited.connect(self._line_typed)
-        self._row(grid, 1, "What you did", self.line, "Becomes the task's current status, a line in its status log.")
+        self._row(grid, 2, "What you did", self.line, "Becomes the task's current status, a line in its status log.")
+        self._problem_line(grid, 3, "content")
 
     def _build_state(self, grid: QGridLayout) -> None:
         """State (decision 695): a dropdown under What you did, each choice with its mark and, in its tooltip, what it does."""
@@ -164,10 +186,10 @@ class LogProgress(QWidget):
         self.state_box.activated.connect(lambda n: self.pick_state(self.state_box.itemData(n)))
         bl.addWidget(self.state_box)
         bl.addStretch()
-        self._row(grid, 2, "State", box)
+        self._row(grid, 4, "State", box)
         self.state_note = QLabel(objectName="hint")
         self.state_note.setWordWrap(True)
-        grid.addWidget(self.state_note, 3, 1)
+        grid.addWidget(self.state_note, 5, 1)
 
     def _build_waiting(self, grid: QGridLayout) -> None:
         who = QWidget()
@@ -178,13 +200,14 @@ class LogProgress(QWidget):
         self.chips.setSpacing(4)
         wl.addLayout(self.chips)
         self.who = QLineEdit(objectName="progressWho")
-        self.who.returnPressed.connect(self.add_person)
-        self.who.installEventFilter(self)
+        self.who.returnPressed.connect(self.add_person)  # with the completer's list open, Enter comes this way
+        self.who.installEventFilter(self)  # otherwise, Enter is the filter's (decision 753)
         wl.addWidget(self.who, 1)
-        self.who_name = self._row(grid, 4, "Waiting on", who, "")
+        self.who_name = self._row(grid, 6, "Waiting on", who, "")
+        self._problem_line(grid, 7, "who")
         self.who_note = QLabel(objectName="hint")
         self.who_note.setWordWrap(True)
-        grid.addWidget(self.who_note, 5, 1)
+        grid.addWidget(self.who_note, 8, 1)
         self._dim(self.who_name, who)
 
     def _build_follow_up(self, grid: QGridLayout) -> None:
@@ -202,10 +225,10 @@ class LogProgress(QWidget):
             fl.addWidget(b)
         fl.addStretch()
         self.follow.idClicked.connect(self._followed)
-        self.follow_name = self._row(grid, 6, "Follow up", follow)
+        self.follow_name = self._row(grid, 9, "Follow up", follow)
         self.follow_note = QLabel(objectName="hint")
         self.follow_note.setWordWrap(True)
-        grid.addWidget(self.follow_note, 7, 1)
+        grid.addWidget(self.follow_note, 10, 1)
         self._dim(self.follow_name, follow)
 
     def _build_today(self, grid: QGridLayout) -> None:
@@ -218,18 +241,19 @@ class LogProgress(QWidget):
         self.done_box.setToolTip("Take it off Today as done once this is logged: it's under Done today, where Back on Today "
                                  "puts it back")
         self.done_box.toggled.connect(self._done_ticked)
-        self.today_name = self._row(grid, 8, "Today", self.done_box)
+        self.today_name = self._row(grid, 11, "Today", self.done_box)
         self.today_note = QLabel(objectName="hint")
         self.today_note.setWordWrap(True)
-        grid.addWidget(self.today_note, 9, 1)
+        grid.addWidget(self.today_note, 12, 1)
 
     def _build_foot(self, lay: QVBoxLayout) -> None:
         foot = QHBoxLayout()
-        self.message = QLabel(objectName="hint")
-        self.message.setWordWrap(True)
+        self.message = self._problem_label("")  # what has no row: an error that isn't a field's (decision 753)
         self.cancel = QPushButton("Cancel")
         self.cancel.setToolTip("Esc: close it, keeping nothing")
+        self.cancel.setAutoDefault(False)
         self.cancel.clicked.connect(self.hide)
+        self.cancel.installEventFilter(self)  # Enter on Cancel cancels (decision 753)
         self.enter = QPushButton(objectName="primary")
         self.enter.setDefault(True)
         self.enter.clicked.connect(self.submit)
@@ -251,6 +275,27 @@ class LogProgress(QWidget):
         if tip:
             widget.setToolTip(tip)
         return name
+
+    def _problem_label(self, key: str) -> QLabel:
+        """A problem line (decision 753): in the caution colour. A row's is hidden until there's something to say; the
+        foot's ("") stays, empty, so Cancel and Enter keep to the right."""
+        label = QLabel(objectName="progressProblem")
+        label.setWordWrap(True)
+        label.setVisible(not key)
+        self.problems[key] = label
+        return label
+
+    def _problem_line(self, grid: QGridLayout, row: int, key: str) -> None:
+        grid.addWidget(self._problem_label(key), row, 1)
+
+    def say(self, key: str, words: str) -> None:
+        """Say what stops the save by its row (``key``: task, content, who, or "" for the foot), the others cleared."""
+        for k, label in self.problems.items():
+            label.setText(words if k == key else "")
+            label.setVisible(not k or (k == key and bool(words)))
+
+    def clear_problems(self) -> None:
+        self.say("", "")
 
     def _dim(self, *widgets: QWidget) -> None:
         """Widgets dimmed while another state than Waiting on a reply is picked (decision 695)."""
@@ -284,7 +329,9 @@ class LogProgress(QWidget):
         self.done_today = False  # unticked each time (decision 697)
         self.line.clear()
         self.who.clear()
-        self.message.clear()
+        self.clear_problems()
+        self.kept, self.busy = None, False
+        self.enter.setEnabled(True)
         names = [p.name for p in m.people.values() if p.status == "active" and p.id != self.ctx.settings.me]
         completer = QCompleter(sorted(names), self.who)
         completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
@@ -355,7 +402,7 @@ class LogProgress(QWidget):
         if self.email is None:
             self.after.setText("Nothing is sent: the line, the wait and the follow-up are kept.")
         elif sends:
-            self.after.setText("DocRepo sends this email for you, held a minute in the Outbox.")
+            self.after.setText("DocRepo sends this email for you once it's logged.")
         elif self.email.inline:
             self.after.setText("Outlook won't let a program send a reply in the reading pane: Enter logs, then press Send there.")
         else:
@@ -422,6 +469,8 @@ class LogProgress(QWidget):
         if task_id:
             if task_id != self.task:
                 self.done_today = False  # another task: its Today row starts unticked
+                self.kept = None  # an Update kept on the other task stays there; this one gets its own
+                self.clear_problems()
             self.task, self.task_how = task_id, ""
             self.render()
             self.line.setFocus()
@@ -443,19 +492,22 @@ class LogProgress(QWidget):
             self.people = list(self.to_people)
         if self.people and self.choice == "none":
             self.choice = progress.last_follow_up(self.ctx.conn)
-        self.message.clear()
+        self.say("who", "")
         self.render()
         if not self.people:
             self.who.setFocus()
 
     def add_person(self) -> None:
+        """Enter in Waiting on (decision 753): with words in the box, the person they name is added; with the box empty,
+        it logs."""
         words = self.who.text().strip().casefold()
         if not words:
+            self.submit()
             return
         m = self.model()
         found = [p.id for p in m.people.values() if p.status == "active" and (p.name.casefold() == words or words in p.name.casefold())]
         if len(found) != 1:
-            self.message.setText("Type a name from People, as the list shows it." if not found else "Several match: type more of the name.")
+            self.say("who", "Type a name from People, as the list shows it." if not found else "Several match: type more of the name.")
             return
         if found[0] not in self.people:
             self.people.append(found[0])
@@ -463,7 +515,7 @@ class LogProgress(QWidget):
                 self.choice = progress.last_follow_up(self.ctx.conn)
         self.state_key = progress.WAITING  # a person added picks Waiting on a reply (decision 695)
         self.who.clear()
-        self.message.clear()
+        self.clear_problems()
         self.render()
         self.who.setFocus()
 
@@ -480,7 +532,16 @@ class LogProgress(QWidget):
     def eventFilter(self, watched, event) -> bool:  # noqa: N802 - Qt's name
         from PySide6.QtCore import QEvent
 
-        if watched is self.who and event.type() == QEvent.Type.KeyPress and event.key() == Qt.Key.Key_Backspace and not self.who.text() and self.people:
+        if event.type() != QEvent.Type.KeyPress:
+            return super().eventFilter(watched, event)
+        enter = event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and not event.modifiers() & ~Qt.KeyboardModifier.KeypadModifier
+        if watched is self.who and enter:  # decision 753: adds the person typed, or with the box empty logs
+            self.add_person()
+            return True
+        if watched is self.cancel and enter:  # decision 753: Enter on Cancel cancels
+            self.hide()
+            return True
+        if watched is self.who and event.key() == Qt.Key.Key_Backspace and not self.who.text() and self.people:
             self.people.pop()
             self._nobody_left()
             self.render()
@@ -496,52 +557,108 @@ class LogProgress(QWidget):
         self.render()
 
     def keyPressEvent(self, event) -> None:  # noqa: N802 - Qt's name
-        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and self.focusWidget() is not self.who:
+        """Enter anywhere else logs: Waiting on's and Cancel's are the event filter's (decision 753)."""
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and self.focusWidget() not in (self.who, self.cancel):
             self.submit()
             return
         super().keyPressEvent(event)
 
     # ---- Enter ----
     def submit(self) -> None:
-        """Keep it all, then send (decision 590 A) or bring the draft back for the owner to send."""
+        """Check, keep, hide, then send (decision 590 A) or bring the draft back for the owner to send, then tell the app
+        (decision 752). What stops it is said by its row (753); while it runs, a second press does nothing."""
+        if self.busy:
+            return
         if not self.task:
             self.pick_task()
             return
         if self.state_key == progress.WAITING and not self.people:
-            self.message.setText(progress.NOBODY)
-            self.who.setFocus()
+            self.stop("who", progress.NOBODY)
             return
-        now = self.ctx.now()
+        self.busy = True
+        label = self.enter.text()
+        self.enter.setText(LOGGING)
+        self.enter.setEnabled(False)
+        self.enter.repaint()
         try:
-            done = progress.log_progress(self.ctx.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, task_id=self.task,
+            done = self._keep()
+        finally:
+            self.busy = False
+            self.enter.setText(label)
+            self.enter.setEnabled(True)
+        if done is not None:
+            self._after(done)
+
+    def stop(self, key: str, words: str) -> None:
+        """Say what stops the save by its row, and put the cursor there."""
+        self.say(key, words)
+        {"task": self.task_button, "who": self.who, "content": self.line}.get(key, self.line).setFocus()
+
+    def _keep(self) -> progress.Logged | None:
+        """Keep it (``progress.log_progress``), or say why not and return None. Every error is caught (decision 753)."""
+        try:
+            done = progress.log_progress(self.ctx.conn, self.ctx.data_root, self.ctx.fs, self.ctx.settings, task_id=self.task or "",
                                          line=self.line.text(), on=self.people, follow_up=self.follow_day() if self.people else None,
-                                         at=now, email=self.email, choice=self.choice, state=self.state_key, done_today=self.done_today)
+                                         at=self.ctx.now(), email=self.email, choice=self.choice, state=self.state_key,
+                                         done_today=self.done_today, kept=self.kept)
+        except progress.NotAllKept as e:  # decision 754: the next Enter keeps the rest, with no second Update
+            self.kept = e.capture
+            self.stop(e.focus, str(e))
+            return None
         except SaveError as e:
-            self.message.setText(str(e))
-            {"task": self.task_button, "who": self.who}.get(e.focus, self.line).setFocus()
-            return
+            self.stop(e.focus if e.focus in self.problems else "content", str(e))
+            return None
+        except sqlite3.OperationalError as e:  # locked or busy: nothing kept, since the Update is first
+            log.warning("Log progress on %s: nothing kept (%s)", self.task, type(e).__name__)
+            self.stop("", BUSY if "lock" in str(e) or "busy" in str(e) else f"Nothing was kept ({type(e).__name__}). Try again.")
+            return None
+        except Exception as e:  # noqa: BLE001 - said in the window, logged without the capture's words
+            log.warning("Log progress on %s: nothing kept (%s)", self.task, type(e).__name__)
+            self.stop("", f"Nothing was kept ({type(e).__name__}). Try again.")
+            return None
+        self.kept = None
+        self.clear_problems()
+        return done
+
+    def _after(self, done: progress.Logged) -> None:
+        """Kept: the window goes first, then Outlook is asked (decision 752), then the app is told. The window holds
+        nothing of Outlook's after (decision 751)."""
+        sends = self.sends()
+        draft, subject = self.draft, self.email.subject if self.email else ""
+        self.draft = self.email = None  # the window holds nothing of Outlook's (decision 751)
+        self.hide()  # before Outlook is asked, so no prompt of Outlook's sits under it (decision 752)
         m = self.model()
         title = m.tasks[done.task].title
         wait = f": waiting on {waits.who(m, waits.current(m, done.task))}" if done.wait and waits.current(m, done.task) else ""
         follow = f", follow up {long_date(date.fromisoformat(done.follow_up), self.today())}" if done.follow_up else ""
         state = {progress.PARKED: ": parked", progress.CLOSED: ": closed"}.get(self.state_key, "")
         said, trouble = f"Logged on {title}{state}{wait}{follow}.", False
-        if self.draft is not None:
+        if draft is not None:
             sent = False
-            if self.sends():
+            if sends:
+                self._mark(progress.sending, done, subject, self.ctx.now())  # nothing of DocRepo's reads it on its way out (751)
                 try:
-                    outlook.send_draft(self.draft, now)
+                    outlook.send_draft(draft)
                     sent = True
                 except outlook.OutlookError as e:
+                    self._mark(progress.not_sent, done)  # the owner sends it: watched as before
                     said, trouble = f"{said} Outlook didn't send it ({e}): press Send in Outlook.", True
             if sent:
                 said = f"Sent, and l{said[1:]}"
             else:
-                outlook.show_draft(self.draft)
+                outlook.show_draft(draft)
                 if not trouble:
                     said = f"{said} Press Send in Outlook."
+            del draft
             self.ctx.t_mail_opened()  # its sent copy is watched for (release 5.123)
         if done.done_today:  # decision 697: what Enter did says so, last
             said = f"{said} Done for today."
-        self.hide()
         self.app.progress_logged(done, said, trouble)
+
+    def _mark(self, how, done: progress.Logged, *args) -> None:
+        """Mark the kept draft around the send (decision 751). The log is kept already, so a database too busy for the
+        mark is only logged: the draft is then looked at as before."""
+        try:
+            how(self.ctx.conn, done, *args)
+        except sqlite3.Error as e:
+            log.warning("Log progress: the draft's mark wasn't kept (%s)", type(e).__name__)

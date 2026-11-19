@@ -399,6 +399,7 @@ QSplitter#timelineSplit::handle:vertical:hover { background: $hover; }
 QToolButton#linkMark { border: none; background: transparent; padding: 0 3px; color: $text2; font-size: ${caption}pt; }
 QToolButton#linkMark:hover { background: $hover; color: $accent; }
 QLabel#linkLeaving { color: $caution; font-size: ${caption}pt; }
+QLabel#progressProblem { color: $caution; font-size: ${caption}pt; }
 QLineEdit[worked="true"] { color: $text2; font-style: italic; }
 QWidget#checkRow QCheckBox { spacing: 0; padding-top: 3px; }
 QWidget#checkRow QCheckBox::indicator { width: 13px; height: 13px; }

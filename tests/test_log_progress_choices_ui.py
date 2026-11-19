@@ -43,7 +43,7 @@ def window(qapp, sample_root, monkeypatch):
     app = types.SimpleNamespace(ctx=ctx, progress_logged=lambda done, text, trouble: said.append((text, trouble)))
     w = LogProgress(app)
     w.said = said
-    monkeypatch.setattr(outlook, "send_draft", lambda draft, now: None, raising=False)
+    monkeypatch.setattr(outlook, "send_draft", lambda draft: None, raising=False)
     monkeypatch.setattr(outlook, "show_draft", lambda draft: True, raising=False)
     yield w
     QApplication.processEvents()
@@ -118,7 +118,7 @@ def test_waiting_with_nobody_puts_the_cursor_in_waiting_on(window, qapp):
     assert window.state_key == progress.WAITING and window.people == [] and window.focusWidget() is window.who
     window.line.setText("Asked Mike about the crane")
     window.submit()
-    assert window.message.text() == progress.NOBODY and window.said == [] and window.isVisible()
+    assert window.problems["who"].text() == progress.NOBODY and window.said == [] and window.isVisible()
 
 
 def test_a_person_added_picks_waiting_and_the_last_taken_picks_in_progress(window):

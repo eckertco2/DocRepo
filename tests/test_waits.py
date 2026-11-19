@@ -323,14 +323,27 @@ def test_no_email_being_written_is_none(monkeypatch):
     assert outlook.front_draft(None) is None
 
 
-def test_send_holds_it_a_minute_and_an_inline_reply_is_never_sent(monkeypatch):
-    d = _Draft(entry="D1")
+class _Recording(_Draft):
+    """A draft that records each of its fields set once it's been found (release 5.164)."""
+
+    def __setattr__(self, name: str, value) -> None:
+        if self.__dict__.get("found"):
+            self.__dict__.setdefault("fields_set", []).append(name)
+        super().__setattr__(name, value)
+
+
+def test_send_sets_nothing_first_and_an_inline_reply_is_never_sent(monkeypatch):
+    """Release 5.164, decision 750 (no deferred delivery): a local time pywin32 hands Outlook as UTC, which Outlook reads
+    back as local time, held the email in the Outbox for hours. ``send_draft`` now only sends."""
+    d = _Recording(entry="D1")
     outlook = _outlook_with(monkeypatch, 35, current=d)
     found = outlook.front_draft(None)
-    outlook.send_draft(found, AT)
-    assert d.events == ["send"] and d.DeferredDeliveryTime == AT + timedelta(minutes=1)
+    d.found = True
+    outlook.send_draft(found)
+    assert d.events == ["send"] and d.__dict__.get("fields_set", []) == []
+    assert "DeferredDeliveryTime" not in d.__dict__
     inline = outlook.FrontDraft(_Draft(entry="D2"), True, "RE: x", "", "D2", "S1", None)
     with pytest.raises(outlook.OutlookError):
-        outlook.send_draft(inline, AT)
+        outlook.send_draft(inline)
     assert inline.item.events == []
     assert outlook.show_draft(found) and d.events[-1] == "activate"
