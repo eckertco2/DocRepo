@@ -28,7 +28,7 @@ The notes page (``notes_edit``) has its own folding, with captions and tables.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 from PySide6.QtCore import QEvent, QPoint, QRectF, QSizeF, Qt, QTimer, Signal
 from PySide6.QtGui import (QBrush, QColor, QFont, QFontInfo, QFontMetrics, QKeySequence, QPainter, QPainterPath, QPen, QTextBlockFormat,
@@ -219,6 +219,9 @@ class RichEdit(QTextEdit):
     #: Whether another list of the box's window is open at the caret (the capture window's @ and # list), which the
     #: heading list gives way to.
     other_list_open: Callable[[], bool] | None = None
+    #: The stock headings (release 5.169, the stock headings plan's decision 790), from Settings: under one with nothing
+    #: written yet, what belongs there is painted muted on the empty line below (``stock_hint``). None: not in this box.
+    stock_headings: Callable[[], Sequence] | None = None
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -226,6 +229,8 @@ class RichEdit(QTextEdit):
         self.setTabChangesFocus(False)
         self.document().setIndentWidth(INDENT)
         self.currentCharFormatChanged.connect(lambda _: self.formatting.emit())
+        # A stock heading's muted line goes once anything is written under it, which may be lines below it (decision 790).
+        self.textChanged.connect(lambda: self.stock_headings is not None and self.viewport().update())
         self.cursorPositionChanged.connect(self.formatting.emit)
         # Handled as keys, not shortcuts, so they win over a window's own (the browse tool's Ctrl+B hides its views).
         bullets, numbers = (lambda: self.toggle_list(False)), (lambda: self.toggle_list(True))
@@ -365,7 +370,7 @@ class RichEdit(QTextEdit):
         from datetime import date
 
         from docrepo import topics
-        from docrepo.ui.heading_list import HeadingList, rows_of
+        from docrepo.ui.heading_list import HeadingList, abouts, rows_of
         from docrepo.ui.task_list import can_pick
 
         cursor = self.textCursor()
@@ -380,6 +385,7 @@ class RichEdit(QTextEdit):
         own = [h for h in topics.sections(self.headings_markup()) if h.n != n]
         listing = self.heading_options(level, typed, self.heading_under(block, level), own)
         rows = rows_of(listing, date.today()) if isinstance(listing, topics.Listing) else []
+        about = abouts(listing) if isinstance(listing, topics.Listing) else {}
         if not any(can_pick(r) for r in rows):
             self.hide_heading_list()
             return
@@ -391,7 +397,7 @@ class RichEdit(QTextEdit):
         rect = self.cursorRect(cursor)
         at = self.viewport().mapTo(host, rect.bottomLeft()) + QPoint(0, 3)
         above = self.viewport().mapTo(host, rect.topLeft()).y() - 3
-        self._heading_list.show_at(rows, at, above)
+        self._heading_list.show_at(rows, at, above, about)
 
     def _heading_list_key(self, event) -> bool:
         """A key for the open list (decision 706): True when it used the key. Ctrl+Space shows it on a topic heading."""
@@ -912,6 +918,58 @@ class RichEdit(QTextEdit):
                     yield b
             b = b.next()
 
+    # ---- what belongs under a stock heading (release 5.169, the stock headings plan's decision 790) ----
+    def stock_hint(self, block) -> str:
+        """What to paint on ``block``, muted: what belongs under the stock heading just above it, when ``block`` is the
+        empty line below it and nothing is written under that heading yet (every line up to the next heading empty). ""
+        otherwise. It's never in the text: not saved, searched or matched for tagged labels."""
+        if self.stock_headings is None or not block.isValid() or block.text() or block.blockFormat().headingLevel():
+            return ""
+        if block.textList() is not None:
+            return ""
+        head = block.previous()
+        if not head.isValid() or not (level := self.topic_level(head)):
+            return ""
+        from docrepo import stock_headings, topics
+
+        words = stock_headings.about(self.stock_headings()).get((level, topics.same(topics.heading_words(head.text()))), "")
+        if not words:
+            return ""
+        b = block.next()
+        while b.isValid() and not b.blockFormat().headingLevel():
+            if b.text().strip() or b.textList() is not None:
+                return ""
+            b = b.next()
+        return words
+
+    def _paint_stock_hints(self, area) -> None:
+        """Decision 790: each empty line under a stock heading with nothing written yet shows what belongs there, in the
+        placeholder's colour, in italics, as a page's own placeholder is drawn."""
+        p = None
+        b = self.cursorForPosition(QPoint(4, area.top())).block()
+        if b.previous().isValid():
+            b = b.previous()
+        while b.isValid():
+            if b.isVisible():
+                r = self.cursorRect(QTextCursor(b))
+                if r.top() > area.bottom():
+                    break
+                words = self.stock_hint(b)
+                if words:
+                    if p is None:
+                        p = QPainter(self.viewport())
+                        font = QFont(self.document().defaultFont())
+                        font.setItalic(True)
+                        p.setFont(font)
+                        p.setPen(self.palette().color(self.palette().ColorRole.PlaceholderText))
+                    room = self.viewport().width() - r.left() - 8
+                    shown = QFontMetrics(p.font()).elidedText(words, Qt.TextElideMode.ElideRight, max(room, 0))
+                    p.drawText(QRectF(r.left() + 1, r.top(), max(room, 0), r.height()),
+                               Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, shown)
+            b = b.next()
+        if p is not None:
+            p.end()
+
     def _paint_pills(self, area) -> None:
         """After a folded heading's words, how many lines it holds."""
         p = None
@@ -992,6 +1050,8 @@ class RichEdit(QTextEdit):
         """The new look's tick box over Qt's (a box with an X): an outline, or the accent with a white tick; and in a box
         that folds, a folded heading's count of lines, with its arrow in the strip beside the text."""
         super().paintEvent(event)
+        if self.stock_headings is not None:
+            self._paint_stock_hints(event.rect())
         if self.folds_here:
             self._paint_pills(event.rect())
             if self._gutter.isVisible():

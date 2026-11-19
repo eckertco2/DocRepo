@@ -81,8 +81,11 @@ class NotesPages:
         pane.all_notes_link.connect(lambda href: self.on_link(QUrl(href)))
         # The heading list (release 5.156, the notes topics plan's decisions 704 to 708): the page's task's topic headings
         # and its project's, this page's read from the editor as it's typed.
+        # Since release 5.169 (the stock headings plan's decisions 789 and 790) the owner's stock headings come last, and
+        # an empty line under one with nothing written yet shows what belongs there.
         notes.heading_options = lambda level, typed, under, own: topics.options(
-            self.model(), notes.page_task, level, typed, under, own, own_page=notes.page_task)
+            self.model(), notes.page_task, level, typed, under, own, own_page=notes.page_task, stock=self.ctx.settings.stock())
+        notes.stock_headings = lambda: self.ctx.settings.stock()
         if back:
             QShortcut(QKeySequence("Alt+Left"), pane, context=Qt.ShortcutContext.WidgetWithChildrenShortcut, activated=self._back_to_all_notes)
         self._all_notes_from: tuple[str, int] | None = None

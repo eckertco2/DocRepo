@@ -766,6 +766,22 @@ The task page reads top to bottom as the task's story (release 5.21, the visual 
     (decision 708). The page's own headings are read from the editor as typed, the line being typed left out. The
     capture window has the same list (7.2's Formatting): for the picked task, and in Meeting notes for the meeting's home
     task.
+  - **Stock headings** (release 5.169; the design workspace's `docs/mods/stock-headings-plan.md`, decisions 788 to 793;
+    `docrepo/stock_headings.py`): topic headings the owner defines once for every task, each a name, a level (1 to 3)
+    and what belongs under it, kept in settings.json as `stock_headings` and changed in Settings' Stock headings card
+    (rows of name, level and what belongs under it, with Add, Remove and Restore defaults). Four ship, at level 1:
+    Background, Path forward, Decisions and Open questions; the list is written to settings.json once it differs from
+    them. The heading list ends with a "Stock headings" row and those at the level being typed that aren't already a
+    row (by their words, case and spacing aside), each with what belongs under it as its grey part and whole in its
+    tooltip; what's typed narrows them and those it starts come first, else they're in Settings' order. They're there
+    on a task with no notes, and in the capture window before a task is picked (not for a saved capture being made a
+    task). A stock heading the page already has is listed with the task's own, its tooltip adding what belongs under
+    it. Under a stock heading with nothing written yet (every line up to the next heading empty), what belongs there
+    is painted on the empty line below, in the placeholder's grey and in italics, on the notes page and in the capture
+    window; it's never in the text, so it isn't saved, searched or matched for tagged labels, and it goes when the
+    section has a character. `Views\Stock headings.md` lists each, its level and what belongs under it, with a line
+    saying the words are data; it has no date, so it's written once per change of the setting (and once on a data
+    root without it, with the other pages), and Contents.md names them and points to it.
   - **Captions and file lines:** a click opens the capture or document. Typing on a caption goes to the line below;
     Backspace or Delete on one removes it with its line break (Ctrl+Z puts it back), and its capture is then no longer on
     the page. Enter on a heading, caption or file line starts a line of text under it; Backspace and Delete never join a

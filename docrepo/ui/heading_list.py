@@ -1,7 +1,8 @@
 """The heading list (release 5.156; the design workspace's ``docs/mods/notes-topics-plan.md``, decisions 704 to 707).
 
 Typing in a topic heading (``docrepo.topics``) lists the topic headings already used at its level, under the caret: the
-task's own and what's under it, then, after a grey "Elsewhere in …" row, the rest of its project's. Its rows and look
+task's own and what's under it, then, after a grey "Elsewhere in …" row, the rest of its project's, then, after a grey
+"Stock headings" row, the owner's stock headings the page doesn't have yet (release 5.169). Its rows and look
 are the `#` list's (``task_list.TaskList``, release 5.103); its keys are a free-text line's (decision 706):
 
 - what's typed narrows it; nothing is highlighted until Down or Up;
@@ -23,14 +24,28 @@ from docrepo import items, topics
 from docrepo.ui.task_list import OPTION_ROLE, TaskList, Words, can_pick
 
 
+#: The divider over the stock headings the page doesn't have yet (release 5.169, decision 789).
+STOCK = "Stock headings"
+
+
 def rows_of(listing: topics.Listing, today: date) -> list[items.Option | Words]:
-    """The list's rows: the task's, then "Elsewhere in …" and the rest. Each row's value is its words; its grey part says
-    what it's under, how often and when last (``topics.sub_text``)."""
+    """The list's rows: the task's, then "Elsewhere in …" and the rest, then "Stock headings" and the stock headings the
+    page doesn't have (release 5.169). Each row's value is its words; its grey part says what it's under, how often and
+    when last (``topics.sub_text``), or for a stock heading what belongs under it."""
     out: list[items.Option | Words] = [items.Option(r.words, r.words, topics.sub_text(r, today)) for r in listing.here]
     if listing.others:
         out.append(Words(f"Elsewhere in {listing.elsewhere}"))
         out += [items.Option(r.words, r.words, topics.sub_text(r, today)) for r in listing.others]
+    if listing.stock:
+        out.append(Words(STOCK))
+        out += [items.Option(r.words, r.words, topics.sub_text(r, today)) for r in listing.stock]
     return out
+
+
+def abouts(listing: topics.Listing) -> dict[str, str]:
+    """What belongs under each of the task's own rows that's a stock heading, by its words, for its tooltip (decision 789:
+    a stock heading the page already uses is listed with the task's own, its tooltip still saying what belongs under it)."""
+    return {r.words: r.about for r in listing.here + listing.others if r.about}
 
 
 class HeadingList(TaskList):
@@ -44,11 +59,18 @@ class HeadingList(TaskList):
         self.min_width = 280
         self.hide()
 
-    def show_at(self, rows: list[items.Option | Words], at: QPoint, above: int | None = None) -> None:
+    def show_at(self, rows: list[items.Option | Words], at: QPoint, above: int | None = None,
+                about: dict[str, str] | None = None) -> None:
         """Show ``rows`` with nothing highlighted (decision 706), under ``at`` in the parent, or with its foot at
-        ``above`` when it wouldn't fit under it."""
+        ``above`` when it wouldn't fit under it. ``about``: what belongs under a row that's a stock heading, by its words,
+        added to its tooltip (release 5.169)."""
         self._at, self._above = QPoint(at), above
         self.show_rows(rows)
+        for i in range(self.count()):
+            item = self.item(i)
+            o = item.data(OPTION_ROLE)
+            if can_pick(o) and about and about.get(o.value):
+                item.setToolTip(f"{item.toolTip()}\nStock heading: {about[o.value]}")
         self.setCurrentRow(-1)
         self.show()
         self.raise_()
