@@ -35,9 +35,13 @@ STATE = 16          # the state circle
 MARK = 14           # a mark's icon
 MARK_GAP = 3        # between marks
 FLAG = 13           # Urgent's flag and the two-parents mark
+KIND = 12           # a parent's or a routine task's mark, between the circle and the title (release 5.168, decision 786)
+KIND_GAP = 5        # after the kind's mark
 TICK_SLOT = 12      # the depth ticks' slot, in a flat list
 DAYS_W = 34         # the days number's column
 PRIORITY_EDGES = {"critical": "pri_critical", "high": "pri_high", "medium": "pri_medium", "parking": "pri_parking"}
+#: The state circle's icon and colour token for each state, and a collection's folder: defined here only, for every tile
+#: (release 5.168, decision 786: one recipe for the three renderers).
 STATE_ICONS = {"Not started": ("state-ns", "text2"), "In progress": ("state-ip", "accent"), "Parked": ("state-pk", "parked"),
                "Closed": ("state-cl", "text2"), "Collection": ("folder", "text2")}  # a collection's folder (release 5.167)
 
@@ -67,6 +71,19 @@ def paint_ticks(painter: QPainter, x: int, mid: int, n: int) -> None:
     for i in range(k):
         painter.drawRoundedRect(right - i * 3 - 1, mid - 6, 1.5, 12, 0.75, 0.75)
     painter.restore()
+
+
+def paint_kind(painter: QPainter, x: int, mid: int, tile: task_tile.Tile, scale: float, hits: list[tuple[QRect, str]]) -> int:
+    """A tile's kind mark at ``x`` (release 5.168, decision 786): branches for a parent task, a loop for a routine task, in
+    the secondary colour; nothing for a single task or a collection. Adds its rectangle and words to ``hits``; returns where
+    the title starts."""
+    mark = task_tile.kind_mark(tile)
+    if mark is None:
+        return x
+    box = QRect(x, mid - KIND // 2, KIND, KIND)
+    painter.drawPixmap(box.topLeft(), tinted(mark[0], tokens.colour("text2"), KIND, scale))
+    hits.append((box, mark[1]))
+    return x + KIND + KIND_GAP
 
 
 def paint_marks(painter: QPainter, right: int, mid: int, marks: tuple, scale: float) -> list[tuple[QRect, str]]:
@@ -394,6 +411,7 @@ class TileWidget(QWidget):
                 p.drawRoundedRect(self._circle_rect, 4, 4)
             p.drawPixmap(QPoint(x, mid - STATE // 2), tinted(name, tokens.colour(colour), STATE, scale))
             x += STATE + 8
+        x = paint_kind(p, x, mid, t, scale, self._hits)
         right = r.right() - 4
         fm = QFontMetrics(self._font)
         small = tokens.ui_font(tokens.CAPTION, semibold=True)

@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QPushButton,
 )
 
-from docrepo import activity, edits
+from docrepo import activity, edits, kinds, task_tile
 from docrepo.dates import long_date, short, to_date
 from docrepo.detail import chip, esc
 from docrepo.model import TODAY
@@ -159,8 +159,10 @@ class ActivityList:
                 chain = m.chains_of(t.id)[0]
                 above = " › ".join(m.task(x).title for x in chain[(1 if g.task else 0):-1])
                 icon, colour = state_icon(t.state)
+                kind = kinds.kind_of(m, t)  # the kind's mark in the "↻ Weekly" chip's place (release 5.168, decision 786)
                 cells = [Line(t.title, icon=icon, icon_colour=colour, icon_tip=t.state, lead=f"{above} ›" if above else "", strong=True,
-                              chips=tuple(markers(m, t))) if not LOOK.classic else
+                              chips=tuple(markers(m, t, routine=False)), kind=task_tile.KIND_ICONS.get(kind, ""),
+                              kind_tip=task_tile.kind_tip(m, t, kind)) if not LOOK.classic else
                          (f'<span class="sub">{esc(above)} ›</span> ' if above else "") + f"<b>{esc(t.title)}</b> {_row_state(t.state)}"
                          + "".join(" " + chip(text, cls) for text, cls in markers(m, t)), ""]
                 parent = self.tree.add_row(top, ("task", t.id), cells)
