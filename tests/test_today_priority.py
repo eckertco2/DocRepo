@@ -92,7 +92,9 @@ def test_a_bin_into_an_empty_band_and_back_to_not_ranked(today, data_root, fs):
     assert ids(conn)[0] == i["medium"] and Model(conn).task("T000019").priority == "critical"
     edits.today_bin(conn, data_root, fs, i["medium"], "", AT)  # Not ranked takes the priority off
     assert Model(conn).task("T000019").priority is None
-    assert ids(conn) == [i["high"], i["note"], i["plain"], i["medium"], i["parking"]]  # the end of Not ranked
+    # The end of Not ranked's urgent half (release 5.176, decision 822): the alignment contractor is ticked Urgent and due
+    # tomorrow, so it's first there; before 5.176, the end of Not ranked.
+    assert ids(conn) == [i["high"], i["medium"], i["note"], i["plain"], i["parking"]]
 
 
 def test_a_bin_of_its_own_band_and_a_note_change_nothing(today, data_root, fs):
