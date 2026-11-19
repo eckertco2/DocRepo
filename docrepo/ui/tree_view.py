@@ -26,7 +26,7 @@ from docrepo.ui import tokens
 from docrepo.ui.icons import icon, icon_size, tinted
 from docrepo.ui.look import LOOK, paint_focus_ring
 from docrepo.ui.style import CLASSIC_TREE, page_css
-from docrepo.ui.task_tile import FLAG, TICK_SLOT, marks_width, paint_marks, paint_ticks
+from docrepo.ui.task_tile import FLAG, KIND, STATE_ICONS, TICK_SLOT, marks_width, paint_marks, paint_ticks
 
 KEY_ROLE = Qt.ItemDataRole.UserRole
 HTML_ROLE = Qt.ItemDataRole.UserRole + 1
@@ -69,9 +69,8 @@ ROW_ICON, ROW_ICON_GAP = 16, 8
 #: The widest a column after the title grows to fit what it says.
 MAX_CELL = 220
 
-#: A task's state as the icon before its title (decision L7): the icon, and its colour's token.
-STATE_ICONS = {"Not started": ("state-ns", "text2"), "In progress": ("state-ip", "accent"), "Parked": ("state-pk", "parked"),
-               "Closed": ("state-cl", "text2"), "Collection": ("folder", "text2")}  # a collection's folder (release 5.167)
+#: A task's state as the icon before its title (decision L7) is ``task_tile.STATE_ICONS``, imported: one recipe for every
+#: tile since release 5.168 (decision 786).
 #: A row action's icon, by its words (decision L5). An action not here keeps its words.
 ACTION_ICONS = {"Edit": "edit", "Note": "note", "Done": "state-cl", "Remove": "close", "Clear": "close", "Discussed": "state-cl",
                 "Add to Today": "sun", "Make it a task": "task"}
@@ -133,6 +132,10 @@ class Line:
     depth_tip: str = ""
     #: The marks' slots at the line's right end (566): each a ``task_tile.Mark``, or None for an empty slot.
     marks: tuple = ()
+    #: The kind's mark between the state and the title (release 5.168, decision 786): its icon ("kind-parent" or
+    #: "kind-routine", ``task_tile.kind_mark``) and its words; "" for a single task.
+    kind: str = ""
+    kind_tip: str = ""
 
     @property
     def icon_offset(self) -> int:
@@ -353,6 +356,8 @@ class HtmlDelegate(QStyledItemDelegate):
         is cut but never dropped: a tile's at its first sentence or clause (decision 565), any other with "…"."""
         gap = 8
         parts: list[list] = []  # [part, text, width, priority, can be cut]
+        if line.kind:  # the kind's mark, never dropped; drawn into the gap after it, so it sits close to the title (decision 786)
+            parts.append(["kind", line.kind_tip, KIND - 3, 10, False])
         if line.lead:
             parts.append(["lead", line.lead, fm.horizontalAdvance(line.lead), 3, True])
         parts.append(["title", line.title, fm.horizontalAdvance(line.title), 9, True])
@@ -436,7 +441,9 @@ class HtmlDelegate(QStyledItemDelegate):
         quiet, normal = QColor(tokens.colour("text2")), QColor(tokens.colour("text2" if line.closed or line.dim else "text"))
         for part, text, box in parts:
             x, w = box.left(), box.width() - 2
-            if part in ("flag", "parents"):  # Urgent's flag (decision 569) and the two-parents mark (570)
+            if part == "kind":
+                painter.drawPixmap(QPoint(x, mid - KIND // 2), tinted(line.kind, tokens.colour("text2"), KIND, scale))
+            elif part in ("flag", "parents"):  # Urgent's flag (decision 569) and the two-parents mark (570)
                 name, colour = ("urgent", "critical") if part == "flag" else ("parents", "text2")
                 painter.drawPixmap(QPoint(x, mid - FLAG // 2), tinted(name, tokens.colour(colour), FLAG, scale))
             elif part.startswith("chip:") and part[5:] not in MARKS:
@@ -473,7 +480,7 @@ class HtmlDelegate(QStyledItemDelegate):
         if ticks is not None and line.depth > 0 and ticks <= pos.x() < ticks + TICK_SLOT:
             return line.depth_tip or None
         for part, text, box in parts:
-            if part in ("flag", "parents") and box.contains(pos):
+            if part in ("flag", "parents", "kind") and box.adjusted(0, 0, 3, 0).contains(pos):
                 return text
         if marks_right is not None:
             x = marks_right - marks_width(line.marks)

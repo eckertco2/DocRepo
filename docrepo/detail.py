@@ -388,9 +388,19 @@ class Pages:
         return ", ".join(link(f"person:{p}", self.m.person_name(p)) + (f' <span class="sub">{num(hours)} h</span>' if hours else "")
                          for p in person_ids) + per
 
-    def markers_html(self, t: Task, critical: bool = True) -> str:
+    def markers_html(self, t: Task, critical: bool = True, routine: bool = True) -> str:
         """A task's markers (Critical, Urgent, routine, more than one parent) as chips, after a space each."""
-        return "".join(" " + chip(text, cls) for text, cls in markers(self.m, t, critical))
+        return "".join(" " + chip(text, cls) for text, cls in markers(self.m, t, critical, routine))
+
+    def kind_html(self, t: Task) -> str:
+        """A task's kind mark as a page draws it (release 5.168, decision 786): branches for a parent task, a loop for a
+        routine task, its words in its tooltip; "" for a single task or a collection."""
+        from docrepo import kinds, task_tile
+
+        kind = kinds.kind_of(self.m, t)
+        icon = task_tile.KIND_ICONS.get(kind)
+        tip = task_tile.kind_tip(self.m, t, kind)
+        return f' <img src="tm:{icon}" width="12" height="12" style="vertical-align: middle" title="{esc(tip)}">' if icon else ""
 
     def priority_chip(self, t: Task) -> str:
         """The task page shows every bucket (release 5.23, decision 77); rows show only Critical."""
@@ -576,9 +586,10 @@ class Pages:
         else:
             state = (f'<a href="state:{t.id}" title="{esc(t.state)}. Click to change the state." style="text-decoration: none">'
                      f'{self.mark(t)} <span class="tl">{esc(t.state)}</span>{CHEVRON_DOWN}</a>')
+        state += self.kind_html(t)  # the kind's mark in the "↻ Weekly" chip's place (release 5.168, decision 786)
         # A meeting's dates already say it's one ("Next meeting", "Meeting"), so its chip would say it twice.
         said = t.meeting and any("eeting" in k for k, _ in self.when_rows(t))
-        flags = (self.priority_chip(t) + self.markers_html(t, critical=False) + (" " + chip("Meeting", "routine") if t.meeting and not said else "")
+        flags = (self.priority_chip(t) + self.markers_html(t, critical=False, routine=False) + (" " + chip("Meeting", "routine") if t.meeting and not said else "")
                  + (" " + chip("Plant event", "new") if t.plant_event else ""))
         return state + (f" &nbsp;{flags.strip()}" if flags.strip() else "")
 
