@@ -71,6 +71,10 @@ def put(app) -> dict[str, int]:
     """Four made-up items: Rigging plan ranked High, the alignment contractor not ranked and carried from Monday, a note, and
     the guard drawings Medium. Their numbers by name."""
     c = app.ctx
+    # None of them urgent (release 5.176, the urgency plan's decision 820): the sample ticks the alignment contractor Urgent
+    # and dates it tomorrow, which would put it first in Not ranked. These tests are about the bands; test_urgency_ui.py
+    # has the halves.
+    c.conn.execute("UPDATE tasks SET urgent = 0, due = NULL, deadline = NULL WHERE id = 'T000019'")
     priorities.place(c.conn, "T000012", "high", None, at=NOW, via=priorities.VIA)
     priorities.place(c.conn, "T000018", "medium", None, at=NOW, via=priorities.VIA)
     plain = edits.add_to_today(c.conn, c.data_root, c.fs, "T000019", "", MONDAY)
@@ -124,8 +128,8 @@ def test_a_tasks_drag_opens_the_bins_and_a_drop_sets_its_priority(app):
     browse = show_today(app)
     tree = browse.tree
     assert browse._today_bins_for(("today", i["note"])) is None  # a note's drag opens none (decision 692)
-    own, counts = browse._today_bins_for(("today", i["plain"]))
-    assert own == "" and counts == {"critical": 0, "high": 1, "medium": 1, "": 2, "parking": 0}
+    own, counts, own_urgent = browse._today_bins_for(("today", i["plain"]))
+    assert own == "" and not own_urgent and counts == {"critical": 0, "high": 1, "medium": 1, "": 2, "parking": 0}
     tree.setCurrentItem(today_row(tree, i["plain"]))
     tree._bins.open_for(own, counts, tree.viewport().rect())
     assert tree._bins.isVisible() and tree._bins.width() == today_bins.VIEW_WIDTH
@@ -136,7 +140,7 @@ def test_a_tasks_drag_opens_the_bins_and_a_drop_sets_its_priority(app):
     at = bin_point(tree._bins, "critical")
     move = OwnMove(tree, at, Qt.DropAction.MoveAction, QMimeData(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
     tree.dragMoveEvent(move)
-    assert move.isAccepted() and tree._bins.hot == "critical"
+    assert move.isAccepted() and tree._bins.hot == ("critical", False)
     drop = OwnDrop(tree, QPointF(at), Qt.DropAction.MoveAction, QMimeData(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
     tree.dropEvent(drop)
     assert drop.dropAction() == Qt.DropAction.IgnoreAction  # Qt moves no row: the records change
@@ -144,7 +148,7 @@ def test_a_tasks_drag_opens_the_bins_and_a_drop_sets_its_priority(app):
     QApplication.processEvents()
     m = Model(app.ctx.conn)
     assert m.task("T000019").priority == "critical" and order(app, i)[0] == "plain"  # decision 691
-    assert "Book the alignment contractor: Critical." in browse.status.text()
+    assert "Book the alignment contractor: Critical, not urgent." in browse.status.text()  # its lower part (822)
     assert tree.currentItem() is today_row(browse.tree, i["plain"])
 
 
@@ -211,10 +215,10 @@ def test_a_tasks_drag_in_the_panel_opens_the_bins_and_a_drop_sets_its_priority(a
     panel.start_row_drag(panel_row(panel, i["plain"]))
     (shown, own, counts), (accepted, hot, line) = seen
     assert shown and own == "" and counts["high"] == 1 and counts[""] == 2  # decision 690
-    assert accepted and hot == "high" and not line
+    assert accepted and hot == ("high", False) and not line
     assert not panel.bins.isVisible()  # closed once the drag is over
     assert Model(app.ctx.conn).task("T000019").priority == "high" and order(app, i) == ["high", "plain", "medium", "note"]
-    assert panel.note_label.text() == "Book the alignment contractor: High. Its status log says so."
+    assert panel.note_label.text() == "Book the alignment contractor: High, not urgent."  # the bin's lower part (release 5.176, decision 822)
     assert panel.rows[panel.cursor].item_id == i["plain"]
 
 
@@ -270,10 +274,10 @@ def test_a_drop_draws_the_panel_once_and_reads_docs_db_once(app, panel, monkeypa
     panel.start_row_drag(panel_row(panel, i["plain"]))
     assert calls == ["refresh"] and len(loads) == 1 and app.browse.dirty
     assert order(app, i) == ["high", "plain", "medium", "note"]  # the end of High, as before (decision 691)
-    assert panel.note_label.text() == "Book the alignment contractor: High. Its status log says so."
+    assert panel.note_label.text() == "Book the alignment contractor: High, not urgent."  # the bin's lower part (release 5.176, decision 822)
     assert panel.rows[panel.cursor].item_id == i["plain"]  # the keyboard still on it
     assert [r.item_id for r in panel.rows] == [i["high"], i["plain"], i["medium"], i["note"]]
-    assert "Book the alignment contractor: High." in app.browse.status.text()
+    assert "Book the alignment contractor: High, not urgent." in app.browse.status.text()
     browse = show_today(app)  # drawn once it's shown, with the drop in it
     assert rows_in_order(browse.tree)[-4:] == [i["high"], i["plain"], i["medium"], i["note"]] and not browse.dirty
 

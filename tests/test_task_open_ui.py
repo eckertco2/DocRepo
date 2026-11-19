@@ -123,3 +123,63 @@ def test_shift_enter_in_the_tree_opens_the_page(browse):
     assert opened(browse) == f"page:{HOLIDAY}"
     QTest.keyClick(browse.tree, Qt.Key.Key_Return)
     assert opened(browse) == f"workspace:{HOLIDAY}"
+
+
+# ---- Today, the view and the side panel (after release 5.176's order and bins, merged in) ----
+def _today_row(browse, task_id: str):
+    from docrepo.ui.tree_view import KEY_ROLE
+
+    return next(i for i in browse.tree.items() if i.data(0, KEY_ROLE) == ("task", task_id))
+
+
+def test_a_today_rows_double_click_and_shift_enter(browse, monkeypatch):
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    from docrepo import edits
+
+    edits.add_to_today(browse.conn, browse.ctx.data_root, browse.ctx.fs, HOLIDAY, "", NOW)
+    browse.refresh()
+    browse.set_view("today")
+    browse.render_list()
+    browse.double_click(_today_row(browse, HOLIDAY))
+    assert opened(browse) == f"workspace:{HOLIDAY}"
+    back(browse)
+    browse.set_view("today")
+    browse.render_list()
+    browse.tree.setCurrentItem(_today_row(browse, HOLIDAY))
+    QTest.keyClick(browse.tree, Qt.Key.Key_Return, Qt.KeyboardModifier.ShiftModifier)
+    assert opened(browse) == f"page:{HOLIDAY}"
+    monkeypatch.setattr(task_open, "shift_held", lambda: False)  # Qt keeps the synthetic Shift as held until a real event
+    browse.ctx.settings.open_tasks_in = "page"
+    browse.set_view("today")
+    browse.render_list()
+    browse.double_click(_today_row(browse, HOLIDAY))
+    assert opened(browse) == f"page:{HOLIDAY}" and not workspace_ui.is_open(browse)
+
+
+def test_the_side_panels_double_click_follows_the_setting(browse, monkeypatch):
+    from docrepo import edits
+    from docrepo import wheels_config as wc
+
+    edits.add_to_today(browse.conn, browse.ctx.data_root, browse.ctx.fs, HOLIDAY, "", NOW)
+    browse.refresh()
+    monkeypatch.setattr(today_panel, "_full_screen_candidates", lambda own: [])
+    monkeypatch.setattr(task_open, "shift_held", lambda: False)
+    panel = today_panel.TodayPanel(browse.ctx, browse, SimpleNamespace(config=wc.WheelsConfig(wheels=())))
+    try:
+        panel.open_panel()
+        row = next(r for r in panel.rows if r.task_id == HOLIDAY)
+        row.tile.opened.emit(HOLIDAY)
+        assert opened(browse) == f"workspace:{HOLIDAY}" and browse.workspace.from_today
+        back(browse)
+        monkeypatch.setattr(task_open, "shift_held", lambda: True)
+        row.tile.opened.emit(HOLIDAY)
+        assert opened(browse) == f"page:{HOLIDAY}"
+        monkeypatch.setattr(task_open, "shift_held", lambda: False)
+        browse.ctx.settings.open_tasks_in = "page"
+        row.tile.opened.emit(HOLIDAY)
+        assert opened(browse) == f"page:{HOLIDAY}" and not workspace_ui.is_open(browse)
+    finally:
+        panel.close_panel()
+        panel.deleteLater()
