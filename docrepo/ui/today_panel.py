@@ -54,7 +54,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo import db, edits, key_dates, markup, meetings, notes_page, panel_rules, selection, task_tile, waits
+from docrepo import db, edits, key_dates, markup, meetings, notes_page, panel_rules, selection, task_tile, urgency, waits
 from docrepo.detail import Pages, PageState, esc
 from docrepo.model import Model, Task, is_person
 from docrepo.panel_rules import OPEN_KEY, REST_WIDTH_KEY, WIDE_WIDTH_KEY, Hover, Monitor, Place, Rect
@@ -126,6 +126,14 @@ QPushButton#tpState:hover {{ background: {pressed}; }}
 """
 
 
+#: The hairline's tooltip (release 5.176, the urgency plan's decision 821).
+RULE_TIP = "Above: urgent (ticked, overdue, or due within two workdays)"
+
+
+def _half(row) -> tuple[str, bool]:
+    """A Today row's band and whether it's in the band's urgent half (release 5.176, decision 820)."""
+    return getattr(row, "band", ""), bool(getattr(row, "urgent", False))
+
 class _Elided(QLabel):
     """A line cut off to fit, with all of it in the tooltip."""
 
@@ -150,12 +158,19 @@ class _EdgeFrame(QFrame):
     """A row with its task's priority down its left edge, as the browse window's lists have it."""
 
     edge = ""
+    #: The hairline's colour over the first of a band's rest (release 5.176, the urgency plan's decision 821), or "": drawn in
+    #: the row's own top pixel, at rest and widened alike, so it takes no height.
+    rule = ""
     #: The task a drop on this row goes to (decision 407), and its title; None for a note on Today.
     task_id: str | None = None
     title = ""
 
     def paintEvent(self, event) -> None:  # noqa: N802 - Qt's name
         super().paintEvent(event)
+        if self.rule:
+            p = QPainter(self)
+            p.fillRect(4, 0, self.width() - 8, 1, QColor(self.rule))
+            p.end()
         if self.edge:
             p = QPainter(self)
             p.fillRect(0, 2, 3, self.height() - 4, QColor(self.edge))
@@ -486,7 +501,7 @@ class TodayPanel(QWidget):
         self._width_now = settings.rest_width
         self._rest = db.get_state(self.ctx.conn, REST_WIDTH_KEY)  # the width at rest, dragged and kept (decision 406)
         self._wide = db.get_state(self.ctx.conn, WIDE_WIDTH_KEY) or None  # the width widened, dragged and kept (decision 694)
-        self._binned: tuple[int, str] | None = None  # a row's drag dropped on a bin: the item and the bin's band (decision 691)
+        self._binned: tuple[int, tuple[str, bool]] | None = None  # a row's drag dropped on a bin: the item and its target (691, 822)
         self._own_drop = False  # a drop of the panel's own is being made: it draws once, after (release 5.159, decision 730)
         self.bins: today_bins.Bins | None = None
         self._dragging = False  # a drag of files, links or an email is over the panel (decision 407)
@@ -727,7 +742,11 @@ class TodayPanel(QWidget):
         self.rows = []
         self.extras = []
         self._add_meeting_line(m)  # first, the next meeting (release 5.127, decision 490)
-        bands = today_bands(m)  # in priority bands (release 5.154, decision 688), each named while widened
+        # In priority bands (release 5.154, decision 688), each named while widened, each band's urgent tasks first (release
+        # 5.176, the urgency plan's decision 820): ``views.today_order``, as the Today view, the moves and the keyboard have it.
+        workdays = self.browse._workdays()
+        bands = today_bands(m, today, workdays)
+        hot = urgency.urgent_ids(m, (a for _, _, g in bands for a in g), today, workdays)
         total = sum(len(items) for _, _, items in bands)
         self.count.setText(f"Today · {total}")
         if bands:
@@ -737,6 +756,7 @@ class TodayPanel(QWidget):
             label.setToolTip(f"{name}: drag a task onto a bin to change its priority")
             self.extras.append(label)
             self._add(label)
+            first_rest = next((a.id for a in items if a.id not in hot), None) if any(a.id in hot for a in items) else None
             for a in items:
                 t = m.tasks.get(a.subject) if a.subject else None
                 since = f"since {since_text(a.added, today)} · " if a.added[:10] < today.isoformat() else ""
@@ -753,9 +773,16 @@ class TodayPanel(QWidget):
                     reminder = f"Follow up: {waits.words(m, wait, today)}"
                 tile = (task_tile.tile(m, t.id, today, task_tile.marks(m, today), hide=("today",), flat=True)
                         if t is not None and not t.discarded else None)
-                row = _Row(self, a.id, t.id if t else None, t.title if t else a.note, " · ".join(x for x in (where, reminder, since.rstrip(" ·")) if x),
+                # A task first in its band by its date says why (decision 821).
+                why = f"Urgent: {urgency.why(m, t, today, workdays)}" if t is not None and a.id in hot and not t.urgent else ""
+                row = _Row(self, a.id, t.id if t else None, t.title if t else a.note,
+                           " · ".join(x for x in (where, reminder, since.rstrip(" ·")) if x) + (f"\n{why}" if why else ""),
                            cell, state, edge_of(t), tile)
                 row.band = band
+                row.urgent = a.id in hot  # its half (decision 820)
+                if a.id == first_rest:  # the hairline between the halves (decision 821)
+                    row.rule = today_bins.colour_of(band).name()
+                    row.setToolTip("\n".join(x for x in (row.toolTip(), RULE_TIP) if x))
                 self.rows.append(row)
                 self._add(row)
         if not total:
@@ -1025,11 +1052,14 @@ class TodayPanel(QWidget):
 
     def _move_lines(self, row: _Row) -> list[tuple[str, Callable[[], None], str]]:
         """Move to top and Move to bottom for a row's menu (decision 646), each only where it would move it: within its band
-        since release 5.154 (decision 689)."""
+        since release 5.154 (decision 689), and since release 5.176 within its half (the urgency plan's decision 820)."""
         band = getattr(row, "band", "")
-        same = [r for r in self.rows if getattr(r, "band", "") == band]
+        in_band = [r for r in self.rows if getattr(r, "band", "") == band]
+        same = [r for r in in_band if _half(r) == _half(row)]
         at = same.index(row) if row in same else -1
-        where = f"in {today_bins.TODAY_BAND_NAMES[band]}" if len(same) < len(self.rows) else "on Today"
+        where = f"in {today_bins.TODAY_BAND_NAMES[band]}" if len(in_band) < len(self.rows) else "on Today"
+        if len(same) < len(in_band):
+            where = f"among {'the urgent tasks' if getattr(row, 'urgent', False) else 'the tasks after the urgent ones'} {where}"
         item_id = row.item_id
         lines: list[tuple[str, Callable[[], None], str]] = []
         if at > 0:
@@ -1081,11 +1111,12 @@ class TodayPanel(QWidget):
         if self.bins is None:
             self.bins = today_bins.Bins(self, today_bins.PANEL_WIDTH)
         viewport = self.scroll.viewport()
-        self.bins.open_for(m.today_band(a), today_bins.counts_of(m, items), QRect(viewport.mapTo(self, QPoint(0, 0)), viewport.size()))
+        self.bins.open_for(m.today_band(a), today_bins.counts_of(m, items), QRect(viewport.mapTo(self, QPoint(0, 0)), viewport.size()),
+                           bool(getattr(row, "urgent", False)))  # its own part isn't a target (release 5.176, decision 822)
 
-    def _bin_under(self, event) -> str | None | bool:
-        """Where a row's drag is over the bins: the bin's band, None on the bins but not on one a drop would go to, or False
-        away from them."""
+    def _bin_under(self, event) -> tuple[str, bool] | None | bool:
+        """Where a row's drag is over the bins: the target (the bin's band and whether its urgent part, release 5.176), None
+        on the bins but not on one a drop would go to, or False away from them."""
         if self.bins is None or not self.bins.isVisible():
             return False
         at = self.mapToGlobal(event.position().toPoint())
@@ -1096,12 +1127,14 @@ class TodayPanel(QWidget):
         self.bins.set_hot(found)
         return found
 
-    def bin_item(self, item_id: int, band: str) -> None:
+    def bin_item(self, item_id: int, target: tuple[str, bool] | str) -> None:
         """A task dropped on a bin: its priority set by the browse tool's own (``bin_today``), said on the panel's line, and the
         list drawn again, with the keyboard still on the item. Drawn once (release 5.159, decision 730): the browse tool's
-        word that Today changed doesn't draw it as well, and the browse tool's Today view keeps its own selection."""
+        word that Today changed doesn't draw it as well, and the browse tool's Today view keeps its own selection. ``target``
+        is the bin's band and whether its urgent part (release 5.176, decision 822), or a band alone, which keeps the tick."""
+        band, urgent = target if isinstance(target, tuple) else (target, None)
         with self._drawn_once():
-            self.browse.bin_today(item_id, band, tell=self.tell_state, follow=False)
+            self.browse.bin_today(item_id, band, tell=self.tell_state, follow=False, urgent=urgent)
         self.refresh()
         at = next((i for i, r in enumerate(self.rows) if r.item_id == item_id), -1)
         if at >= 0:
@@ -1155,9 +1188,9 @@ class TodayPanel(QWidget):
         """A row's drag moved or dropped here: where it would land, with its line shown, or None (away, or where it is now)."""
         target = self.row_target(self.mapToGlobal(event.position().toPoint()))
         ids = [r.item_id for r in self.rows]
-        band = next((getattr(r, "band", "") for r in self.rows if r.item_id == moving), "")
-        if target is not None and getattr(target[0], "band", "") != band:
-            target = None  # only within its band (release 5.154, decision 689): a bin changes the band
+        half = next((_half(r) for r in self.rows if r.item_id == moving), ("", False))
+        if target is not None and _half(target[0]) != half:
+            target = None  # only within its band (release 5.154, decision 689) and half (5.176, 820): a bin changes either
         if target is not None and moving in ids:
             now, at = ids.index(moving), ids.index(target[0].item_id)
             if at == now or (target[1] == "after" and at == now - 1) or (target[1] == "before" and at == now + 1):
