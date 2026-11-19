@@ -1178,7 +1178,8 @@ class TaskEditDialog(FormDialog):
         bl.setContentsMargins(0, 0, 0, 0)
         bl.addWidget(self.parents_box)
         bl.addWidget(self.parents_hint)
-        ml.addWidget(field("Parents", box, sub="none makes it a top-level task"))
+        parents_field = field("Parents", box, sub="none makes it a top-level task")
+        ml.addWidget(parents_field)
         self._draw_parents()
         self.labels = ChipPicker(labels, "Search or add", "Create label “{}”")
         self.labels.set_chips([Chip(name, name) for name in t.labels])
@@ -1262,9 +1263,47 @@ class TaskEditDialog(FormDialog):
                             {"urgent": (flags, self.urgent), "meeting": (flags, self.meeting), "plant_event": (plant, self.plant_event),
                              "inherit_labels": (inherit_row, self.inherit), "calendar_days": (calendar_row, self.calendar)})
         self._sync()
+        self.collection = t.collection
+        if t.collection:  # release 5.167 (decision 779): a collection's Title, Parents, Labels and Description only
+            self._as_collection(g, ml, {title_field, description_field, self.more}, {parents_field, labels_field, self.inherit})
         self.mark_clean()
         self.title.setFocus()
         fit_dialog(self, body, 640 if link else 608)  # a mark on each tick needs the room
+
+    #: The line at the top of a collection's Edit task (release 5.167, decision 779).
+    COLLECTION_LINE = ("A collection: a place for notes, files, links, captures and tasks. It isn't work, so it has no state, dates, "
+                       "people or priority. Make it a task, on its right-click menu, brings back what it had.")
+
+    def _as_collection(self, g: QVBoxLayout, ml: QVBoxLayout, keep: set[QWidget], keep_more: set[QWidget]) -> None:
+        """Edit task for a collection: everything hidden but ``keep`` in the form and ``keep_more`` under More options,
+        which is open with its button gone; a line says what a collection is. The hidden fields stay as they were, unsaved."""
+        self.setWindowTitle(f"Edit collection {self.task_id}")
+        line = QLabel(self.COLLECTION_LINE, objectName="hint")
+        line.setWordWrap(True)
+        g.insertWidget(0, line)
+        keep = {*keep, line}
+
+        def hide_all(layout) -> None:
+            for i in range(layout.count()):
+                item = layout.itemAt(i)
+                if item.widget() is not None:
+                    item.widget().hide()
+                elif item.layout() is not None:
+                    hide_all(item.layout())
+
+        def only(layout, kept: set[QWidget]) -> None:
+            for i in range(layout.count()):
+                item = layout.itemAt(i)
+                w, sub = item.widget(), item.layout()
+                if w is not None and w not in kept:
+                    w.hide()
+                elif sub is not None and not any(sub.indexOf(k) >= 0 for k in kept):
+                    hide_all(sub)
+
+        only(g, keep)
+        only(ml, keep_more)
+        self.more.setVisible(True)
+        self.more_button.hide()
 
     # ---- a task made from a template: the line naming its row, and each field's mark (release 5.45, decision 184) ----
     def _origin_line(self, link: templates.TaskLink) -> QHBoxLayout:
@@ -1593,7 +1632,11 @@ class TaskEditDialog(FormDialog):
         self.accept()
 
     def values(self) -> dict[str, Any]:
-        """The form's values, as edits.edit_task takes them."""
+        """The form's values, as edits.edit_task takes them. A collection's are its title, description, labels and parents
+        alone (release 5.167): what it keeps unseen stays as it is."""
+        if getattr(self, "collection", False):
+            return {"title": self.title.text(), "description": self.description.toPlainText(), "labels": self.labels.values(),
+                    "inherit_labels": self.inherit.isChecked(), "parents": list(self.parents)}
         recurrence = self.recurrence.currentText() if self.recurrence.currentIndex() else None
         return {
             "title": self.title.text(), "description": self.description.toPlainText(), "state": self.state.currentText(),

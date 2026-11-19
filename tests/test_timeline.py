@@ -221,7 +221,8 @@ def test_the_view_folds_selects_and_opens(browse):
     w = browse
     view, chart = w.timeline, w.timeline.chart
     assert w.middle.currentWidget() is view and not w.detail.isVisible()
-    assert [r.task for r in chart.rows] == ["T000001", "T000002", "T000006", "T000010"]
+    # Show routine starts off (release 5.167, decision 783): the monthly report and the weekly meeting aren't drawn.
+    assert [r.task for r in chart.rows] == ["T000001", "T000002"]
     # The arrow opens a project, and the choice is kept in docs.db.
     QTest.mouseClick(chart, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, _row_point(chart, "T000001", 15))
     assert "T000008" in [r.task for r in chart.rows] and "T000001" in view.open_ids
@@ -463,8 +464,8 @@ def test_ordered_by_a_field_the_lane_column_names_it(browse):
     view._set("weeks", 13)
     view._set("bars", "hours")
     kept = json.loads(browse.ctx.conn.execute("SELECT value FROM app_state WHERE key = 'timeline_view'").fetchone()[0])
-    assert kept == {"weeks": 13, "order": "person", "bars": "hours", "a_week": False, "routine": True, "undated_open": False,
-                    "cap_open": True, "cap_unit": "pct", "cap_by_group": False, "cap_h": None, "bars_v": 2}
+    assert kept == {"weeks": 13, "order": "person", "bars": "hours", "a_week": False, "routine": False, "undated_open": False,
+                    "cap_open": True, "cap_unit": "pct", "cap_by_group": False, "cap_h": None, "bars_v": 2, "routine_v": 1}
     fresh = TimelineView()
     fresh.restore(kept | {"weeks": 7, "bars": "nonsense"})  # a value it no longer offers is left at its default
     assert (fresh.weeks, fresh.order, fresh.bars) == (9, "person", "one")

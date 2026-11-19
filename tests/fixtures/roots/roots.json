@@ -138,5 +138,14 @@
    "task_pages": 17,
    "task_dates": 2
   }
+ },
+ "v29": {
+  "commit": "b3d56ca",
+  "counts": {
+   "tasks": 18,
+   "captures": 24,
+   "task_pages": 17,
+   "task_dates": 2
+  }
  }
 }

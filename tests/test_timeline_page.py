@@ -224,6 +224,7 @@ def test_capacity_doesnt_take_more_than_its_share_to_start_with(browse):
 def test_people_narrows_the_bars_and_the_load_together(browse):
     """Decision 232."""
     view = browse.timeline
+    view._set("routine", True)  # every row, routine ones too (Show routine starts off since release 5.167)
     all_rows = len(view.chart.rows)
     view._set("people", ["P004"])
     assert [p.id for p in view.cap_rows.data.people] == ["P004"] and len(view.chart.rows) < all_rows
@@ -413,7 +414,7 @@ def test_display_holds_how_its_drawn(browse):
     # Picking in it doesn't lose it: the same boxes are kept across the redraw.
     assert view.order_box.currentData() == "person"
     view.routine_box.click()
-    assert view.routine is False
+    assert view.routine is True  # Show routine starts off (release 5.167, decision 783)
     view.hours_buttons[True].click()
     assert view.a_week is True
 

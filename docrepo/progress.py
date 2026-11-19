@@ -188,6 +188,8 @@ def log_progress(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
     t = m.tasks.get(task_id)
     if t is None or t.discarded:
         raise SaveError("Pick a task first: type # or a few words.", "task")
+    if t.collection:  # release 5.167, decision 780: a collection isn't work, so there's no progress to log on it
+        raise SaveError(f"{t.title} is a collection, not a task: pick one of its tasks.", "task")
     if t.state == "Closed" and not kept:  # on a second try, Closed may be the Update's own doing
         raise SaveError(f"{t.title} is closed. Reopen it, or pick another task.", "task")
     if not line:

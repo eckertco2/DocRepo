@@ -32,6 +32,16 @@ class AgendaError(ValueError):
     """An agenda item can't be added or closed as asked."""
 
 
+#: Why a collection isn't put on Today (release 5.167, decision 780): it isn't work. Every way onto Today comes here.
+COLLECTION_NOT_ON_TODAY = "{title} is a collection, not a task, so it isn't put on Today."
+
+
+def is_collection(conn: sqlite3.Connection, task_id: str) -> bool:
+    """Whether a task tree entry is a collection (release 5.167)."""
+    row = conn.execute("SELECT collection FROM tasks WHERE id = ?", (task_id,)).fetchone()
+    return bool(row and row[0])
+
+
 #: The tables an agenda item's subject or target can be in.
 _TARGET_TABLES = ("tasks", "people")
 
@@ -54,6 +64,8 @@ def add_item(conn: sqlite3.Connection, *, subject: str | None, target: str, note
         raise AgendaError(f"There's no agenda target {target}.")
     if subject == target:
         raise AgendaError("A task can't be on its own agenda.")
+    if target == TODAY and subject and is_collection(conn, subject):
+        raise AgendaError(COLLECTION_NOT_ON_TODAY.format(title=conn.execute("SELECT title FROM tasks WHERE id = ?", (subject,)).fetchone()[0]))
     with transaction(conn):
         if target == TODAY and subject:
             row = conn.execute("SELECT id FROM agenda_items WHERE target = ? AND subject = ? AND closed IS NULL", (TODAY, subject)).fetchone()

@@ -16,7 +16,8 @@ from datetime import date
 
 from docrepo.dates import long_date
 from docrepo.links import is_folder, is_link
-from docrepo.schedule import due_of, held_on, is_open, start_of
+from docrepo.kinds import is_work
+from docrepo.schedule import due_of, held_on, start_of
 from docrepo.tagged import load as tagged_load
 
 TYPE_NAMES = {"note": "Note", "new_task": "New task", "update": "Update"}
@@ -71,6 +72,9 @@ class Task:
     #: Release 5.49 (decision 260): each role's hours a week, instead of a day. A role has one rate at most.
     lead_per_week: float | None = None
     assignee_per_week: float | None = None
+    #: Release 5.167 (decisions 774 and 775): a collection, a container in the task tree that isn't work. Its other fields
+    #: stay as they were, unseen, so Make it a task brings them back. A task's kind is worked out (``docrepo.kinds``).
+    collection: bool = False
     leads: list[str] = field(default_factory=list)
     assignees: list[str] = field(default_factory=list)
     labels: list[str] = field(default_factory=list)
@@ -407,6 +411,7 @@ TASK_COLUMNS = (
     "reminder", "lead_hours", "assignee_hours", "inherit_labels", "description", "current_status", "created", "created_by", "discarded",
     "discard_reason", "plant_event", "priority", "priority_rank", "day_headings", "duration", "calendar_days", "lead_per_day",
     "assignee_per_day", "lead_per_week", "assignee_per_week", "reminder_repeat", "reminder_until", "reviewed", "review_every",
+    "collection",
 )
 _TASK_COLUMNS = ", ".join(TASK_COLUMNS)
 
@@ -439,7 +444,7 @@ def load_tasks(conn: sqlite3.Connection, task_ids: Iterable[str] | None = None) 
         tasks[r["id"]] = Task(**{k: r[k] for k in r.keys()})
         t = tasks[r["id"]]
         t.urgent, t.meeting, t.inherit_labels, t.plant_event = bool(t.urgent), bool(t.meeting), bool(t.inherit_labels), bool(t.plant_event)
-        t.calendar_days = bool(t.calendar_days)
+        t.calendar_days, t.collection = bool(t.calendar_days), bool(t.collection)
         t.day_headings = None if t.day_headings is None else bool(t.day_headings)
     for r in conn.execute("SELECT * FROM task_ties"):
         if r["task"] in tasks:
@@ -879,7 +884,7 @@ class Model:
 
     def open_meetings(self) -> list[Task]:
         """The open tasks with Meeting ticked."""
-        return [t for t in self.tasks.values() if t.meeting and is_open(t)]
+        return [t for t in self.tasks.values() if t.meeting and is_work(t)]
 
     def agenda_targets(self) -> list[str]:
         """Open meetings first, then any other task or person with open items. Today has a view of its own."""
@@ -893,8 +898,10 @@ class Model:
     def today_items(self) -> list[AgendaItem]:
         """Today's open items, in priority order and the owner's order within each band (release 5.154, decision 688):
         Critical, High, Medium, Not ranked (and notes), Parking lot; within a band by their places once they have them
-        (release 5.148, decisions 643 to 645), and until then the oldest first. They carry over until they're closed."""
-        return sorted(self.open_items_for(TODAY), key=lambda a: (TODAY_BANDS.index(self.today_band(a)), place_key(a)))
+        (release 5.148, decisions 643 to 645), and until then the oldest first. They carry over until they're closed. An item
+        whose task is a collection isn't one (release 5.167, decision 780): one made before is left out, not closed."""
+        items = [a for a in self.open_items_for(TODAY) if not (a.subject in self.tasks and self.tasks[a.subject].collection)]
+        return sorted(items, key=lambda a: (TODAY_BANDS.index(self.today_band(a)), place_key(a)))
 
     def today_band(self, a: AgendaItem) -> str:
         """The band a Today item is in (decision 688): its task's priority, or "" for Not ranked and for a note."""

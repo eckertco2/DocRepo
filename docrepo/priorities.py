@@ -16,10 +16,10 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime
 
-from docrepo import quick, tasks
+from docrepo import kinds, tasks
 from docrepo.db import transaction
 from docrepo.model import PRIORITY_NAMES, Model, Task
-from docrepo.schedule import due_of, is_open
+from docrepo.schedule import due_of
 
 #: The buckets, in order: (key, name, the key 1 to 4 that moves a card there).
 BUCKETS: tuple[tuple[str, str, str], ...] = tuple((key, label, str(i + 1)) for i, (key, label) in enumerate(PRIORITY_NAMES.items()))
@@ -54,10 +54,11 @@ def sort_key(t: Task) -> tuple[int, int]:
     return (ORDER.get(t.priority or "", len(BUCKETS)), t.priority_rank or 0)
 
 
-def on_board(t: Task, routine: bool = False) -> bool:
-    """Every open task, top-level tasks and parents too, but not routine ones (unless shown) or Quick tasks itself
-    (decision 74). Parked and closed tasks aren't open."""
-    return is_open(t) and not quick.is_parent(t) and (routine or not t.recurrence)
+def on_board(m: Model, t: Task, routine: bool = False) -> bool:
+    """Every open task, top-level tasks and parents too, but not routine ones (unless shown) (decision 74). Parked and
+    closed tasks aren't open. Since release 5.167 a collection has no card (decision 780), Quick tasks being one, and
+    a regular meeting's occurrences are routine, so they're left out with routine tasks (decision 783)."""
+    return kinds.is_work(t) and (routine or not kinds.is_routine(m, t))
 
 
 @dataclass(frozen=True)
@@ -78,7 +79,8 @@ class BoardFilter:
 
 
 def open_subtasks(m: Model, task_id: str) -> list[str]:
-    return [c for c in m.children_of(task_id) if is_open(m.task(c))]
+    """A task's open subtasks that are work: a collection under it doesn't make it a parent (release 5.167, decision 782)."""
+    return [c for c in m.children_of(task_id) if kinds.is_work(m.task(c))]
 
 
 def fold_parents(m: Model, t: Task, routine: bool = False) -> list[str]:
@@ -88,7 +90,7 @@ def fold_parents(m: Model, t: Task, routine: bool = False) -> list[str]:
     missing card, and was lost from the board)."""
     if open_subtasks(m, t.id):
         return []
-    return [p for p in m.parents_of(t.id) if on_board(m.task(p), routine)]
+    return [p for p in m.parents_of(t.id) if on_board(m, m.task(p), routine)]
 
 
 def folded(m: Model, t: Task, routine: bool = False) -> bool:
@@ -98,7 +100,7 @@ def folded(m: Model, t: Task, routine: bool = False) -> bool:
 
 def folded_into(m: Model, task_id: str, routine: bool = False) -> list[str]:
     """The open subtasks Parents folds into a task's card."""
-    return [c for c in open_subtasks(m, task_id) if on_board(m.task(c), routine) and task_id in fold_parents(m, m.task(c), routine)]
+    return [c for c in open_subtasks(m, task_id) if on_board(m, m.task(c), routine) and task_id in fold_parents(m, m.task(c), routine)]
 
 
 def folded_under(m: Model, task_id: str, routine: bool = False) -> int:
@@ -109,7 +111,7 @@ def folded_under(m: Model, task_id: str, routine: bool = False) -> int:
 def shown(m: Model, t: Task, f: BoardFilter, today: date) -> bool:
     """Whether a task has a card of its own that passes the filters. In Parents, a parent's card also shows for the
     subtasks folded into it, as context (``columns``)."""
-    return (on_board(t, f.routine) and not (f.fold and folded(m, t, f.routine)) and not (f.show == "work" and open_subtasks(m, t.id))
+    return (on_board(m, t, f.routine) and not (f.fold and folded(m, t, f.routine)) and not (f.show == "work" and open_subtasks(m, t.id))
             and passes(m, t, f, today))
 
 
@@ -164,7 +166,7 @@ def not_ranked(m: Model, today: date, routine: bool = False) -> list[str]:
         d = due_of(t, today)
         return (not t.urgent, d.date if d else date.max, order.get(t.id, len(order)))
 
-    return [t.id for t in sorted((t for t in m.tasks.values() if on_board(t, routine) and not t.priority), key=key)]
+    return [t.id for t in sorted((t for t in m.tasks.values() if on_board(m, t, routine) and not t.priority), key=key)]
 
 
 @dataclass
@@ -198,7 +200,7 @@ def columns(m: Model, today: date, f: BoardFilter, match: Callable[[str], bool] 
         col = Column(key, label, digit, [])
         for x in not_ranked(m, today, f.routine) if not key else bucket_ids(m, key):
             t = m.task(x)
-            if not on_board(t, f.routine) or (f.fold and folded(m, t, f.routine)):
+            if not on_board(m, t, f.routine) or (f.fold and folded(m, t, f.routine)):
                 continue
             if f.show == "work" and open_subtasks(m, x):
                 continue
@@ -210,7 +212,7 @@ def columns(m: Model, today: date, f: BoardFilter, match: Callable[[str], bool] 
                     if kept:
                         col.pips[x] = kept
                 elif f.show == "all" and open_subtasks(m, x):
-                    col.pips[x] = by_bucket(m, [c for c in open_subtasks(m, x) if on_board(m.task(c), f.routine) and ok(c)])
+                    col.pips[x] = by_bucket(m, [c for c in open_subtasks(m, x) if on_board(m, m.task(c), f.routine) and ok(c)])
                 if not ok(x):
                     col.context.add(x)
         out.append(col)

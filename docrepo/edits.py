@@ -25,7 +25,8 @@ from docrepo.lists import reminders_due
 from docrepo.model import TODAY, TODAY_BAND_NAMES, TODAY_BANDS, Model, is_person, place_key
 from docrepo.pages import write_pages, write_task_page
 from docrepo.safe_fs import SafeFS
-from docrepo.schedule import is_open, start_of
+from docrepo.kinds import is_work
+from docrepo.schedule import start_of
 from docrepo.stories import Stories
 
 log = logging.getLogger(__name__)
@@ -674,6 +675,8 @@ def add_to_today(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, subject:
                  model: Model | None = None) -> Outcome:
     """Put a task, or a note, on Today (mods log round 1, M0016). A task already there stays as it is."""
     m = model_now(conn, model)
+    if subject and subject in m.tasks and m.task(subject).collection:  # release 5.167, decision 780: a collection isn't work
+        raise EditError(f"{m.task(subject).title} is a collection, not a task: put one of its tasks on Today.")
     if subject and any(a.subject == subject for a in m.today_items()):
         return Outcome(f"{m.task(subject).title} is on Today already.")
     agenda.add_item(conn, subject=subject, target=TODAY, note=" ".join(note.split()), added=stamp(at), added_by=BROWSE)
@@ -745,7 +748,7 @@ def reminders_to_today(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, se
         # an open wait's follow-up still to come takes the reminder's place (release 5.139, decision 588)
         tasks.update_task(conn, settings, t.id, at=at, via=PUT_ON_TODAY, reminder=waits.after_reminder(before, t.id, today, next_reminder(t.id, before, settings, today)))
     # A repeat with no reminder (Clear took this time's) moves on to its next time after today (decision 416).
-    waiting = [t for t in before.tasks.values() if t.reminder_repeat and not t.reminder and is_open(t) and t not in due]
+    waiting = [t for t in before.tasks.values() if t.reminder_repeat and not t.reminder and is_work(t) and t not in due]
     for t in waiting:
         nxt = repeats.following(t.reminder_repeat, t.reminder_until, today, today, _workdays(settings))
         if nxt:
@@ -1073,10 +1076,14 @@ def add_activity_to_agenda(conn: sqlite3.Connection, data_root: Path, fs: SafeFS
     m = Model(conn)
     added: list[str] = []
     skipped: list[str] = []
+    refused: list[str] = []  # collections, which aren't put on Today (release 5.167)
     with transaction(conn):
         for subject, note in entries:
             if subject and any(a.subject == subject for a in m.open_items_for(target)):
                 skipped.append(m.task(subject).title)
+                continue
+            if subject and target == TODAY and m.task(subject).collection:  # release 5.167, decision 780
+                refused.append(m.task(subject).title)
                 continue
             agenda.add_item(conn, subject=subject, target=target, note=" ".join(note.split()), added=stamp(at), added_by=activity.VIA)
             added.append(m.task(subject).title if subject else clip_note(note))
@@ -1084,6 +1091,8 @@ def add_activity_to_agenda(conn: sqlite3.Connection, data_root: Path, fs: SafeFS
     message = f"Added {len(added)} to {where}: {', '.join(added)}." if added else "Nothing added."
     if skipped:
         message += f" Already on it: {', '.join(skipped)}."
+    if refused:
+        message += f" Not on Today, as a collection isn't work: {', '.join(refused)}."
     out = Outcome(message)
     if added:
         write_all_pages(conn, data_root, fs, at, out.problems)

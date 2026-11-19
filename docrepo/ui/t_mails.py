@@ -139,9 +139,10 @@ def ask_tip(browse: BrowseWindow, task_id: str) -> str:
 
 def add_ask(browse: BrowseWindow, task_id: str, menu: QMenu) -> None:
     """Ask for an update as a menu's line, with who it would go to in its tooltip: on New T-mail's arrow, and on a task
-    row's right-click menu in Waiting on others (decision 481). Not for a closed or discarded task."""
+    row's right-click menu in Waiting on others (decision 481). Not for a closed or discarded task, nor a collection, which
+    isn't work (release 5.167, decision 780)."""
     t = browse.model().tasks.get(task_id)
-    if t is None or t.discarded or t.state == "Closed":
+    if t is None or t.discarded or t.state == "Closed" or t.collection:
         return
     menu.setToolTipsVisible(True)
     a = menu.addAction(icon("mail"), ask_update.LABEL, lambda: ask_for_update(browse, task_id))
@@ -158,6 +159,9 @@ def ask_for_update(browse: BrowseWindow, task_id: str, say: Say | None = None) -
     if task_id not in m.tasks:
         return None
     title = m.tasks[task_id].title
+    if m.tasks[task_id].collection:  # release 5.167, decision 780
+        out(f"{ask_update.LABEL}: {title} is a collection, not a task.", True)
+        return None
     ask = ask_update.compose(m, task_id, browse.ctx.settings.me, browse.today())
     try:
         asked = outlook.ask_t_mail(browse.ctx.now(), ask.to, ask.subject, ask.words)
