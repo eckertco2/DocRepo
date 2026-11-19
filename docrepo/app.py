@@ -150,7 +150,8 @@ class CaptureApp(QObject):
         self.wheels = Wheels(self)  # the navigation wheels (release 5.41)
         ctx.wheel_palette = self.wheels.palette_commands
         ctx.open_summary = self.wheels.quick_summary  # the quick summary, from a page or Ctrl+K (release 5.131)
-        ctx.log_progress = lambda task=None: self.wheels.log_progress(task, with_email=False)  # the status card's (release 5.139)
+        # the status card's (release 5.139); a Today tick's and the state menu's, with the state it opens on (release 5.166)
+        ctx.log_progress = lambda task=None, state=None: self.wheels.log_progress(task, with_email=False, state=state)
         ctx.open_recent = self.wheels.recent_captures_from_palette  # Recent captures, from Ctrl+K (release 5.158)
         self.panel: TodayPanel | None = None  # the Today side panel, made the first time it opens (release 5.43)
         menu = QMenu()
@@ -304,6 +305,11 @@ class CaptureApp(QObject):
             self.window.show_capture()
 
     # ---- notifications and reminders ----
+    def edit_task_dates(self, task_id: str) -> None:
+        """Log progress's Dates and reminder… (release 5.166, decision 758): Edit task for the task, at More options, as
+        Quick edit's More options… opens it. It returns once Edit task is closed."""
+        self.browse.edit_task(task_id, more=True)
+
     def progress_logged(self, done, said: str, trouble: bool) -> None:
         """Log progress kept it (release 5.139): say so from the tray, and bring the lists up to date."""
         self.notify("Log progress" if not trouble else "Log progress: press Send in Outlook", said)

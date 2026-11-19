@@ -528,11 +528,15 @@ def test_the_today_list(browse, monkeypatch):
     assert [(a.subject, a.note) for a in m.today_items()] == [("T000012", ""), (None, "Sign the overtime sheets")]
     item = m.today_items()[0]
     opened = []
-    monkeypatch.setattr(browse, "open_capture", lambda **options: opened.append(options))
-    browse.close_today_item(item.id, "Done")
-    # Release 5.115 (decision 421): no question; the Update opens at once.
-    assert opened == [{"task": "T000012", "mode": "update", "content": "Done today: "}]
-    assert "done for today" in browse.status.text() and "Undo" in browse.status.text()
+    monkeypatch.setattr(browse.ctx, "log_progress", lambda task=None, state=None: opened.append((task, state)))
+    browse.close_today_item(item.id, "Done", log=True)
+    # Release 5.166 (decision 755): a tick on a task opens Log progress on Closed, and changes nothing until its Enter.
+    assert opened == [("T000012", "Closed")] and any(a.id == item.id for a in Model(browse.conn).today_items())
+    assert "Log progress is open" in browse.status.text()
+    from docrepo import edits
+
+    edits.close_today_item(browse.conn, browse.ctx.data_root, browse.ctx.fs, item.id, "Done", browse._now())  # as its Enter does
+    browse.refresh()
     # Done today holds the item marked done (release 5.24: each heading holds its items, so it folds).
     done = next(browse.tree.topLevelItem(i) for i in range(browse.tree.topLevelItemCount())
                 if "Done today" in browse.tree.topLevelItem(i).data(0, Qt.ItemDataRole.UserRole + 1))

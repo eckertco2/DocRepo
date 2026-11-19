@@ -64,7 +64,7 @@ def test_a_reply_in_a_known_conversation_fills_the_task_and_mike(window):
     window.open_for(draft(index=index + "8000000001"))
     assert window.task == RIGGING and window.task_how == "from conversation"
     assert window.people == [MIKE] and window.choice == "3d" and window.enter.text() == "Send and log"
-    assert "Rigging plan comes back on Today" in window.follow_note.text() and "Tue 13 Oct" in window.follow_note.text()
+    assert window.today_note.text() == "On Today Tue 13 Oct if Mike hasn't replied: the follow-up."  # Back on Today (5.166)
     assert window.isVisible() and not window.picker.isVisible()
 
 
@@ -111,7 +111,7 @@ def test_with_progress_sends_off_enter_only_logs(window):
 def test_a_call_with_nobody_waited_on(window):
     window.open_for(None, task=RIGGING)
     assert "No email in front" in window.email_line.text() and window.people == [] and window.choice == "none"
-    assert window.follow_note.text() == "No follow-up: nothing comes back by itself." and window.enter.text() == "Log"
+    assert window.today_note.text() == "Not on Today: nothing brings it back by itself." and window.enter.text() == "Log"
     window.who.setText("Mike")
     window.add_person()
     assert window.people == [MIKE] and window.choice == "3d"

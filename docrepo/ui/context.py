@@ -44,7 +44,9 @@ class AppContext:
     #: Opens the quick summary (release 5.131): on a subject's key ("person:P004"), or with its box for None.
     open_summary: Callable[[str | None], None] = lambda key=None: None
     #: Opens Log progress (release 5.139, decision 583) on a task, with no email: the status card's Log progress….
-    log_progress: Callable[[str | None], None] = lambda task=None: None
+    #: Log progress on a task (release 5.139); since 5.166 with the state it opens on (a Today tick's Closed, decision 755;
+    #: the state menu's Waiting on a reply, decision 762).
+    log_progress: Callable[..., None] = lambda task=None, state=None: None
     #: Opens Recent captures (release 5.158, decision 723) from a window's command palette.
     open_recent: Callable[[], None] = lambda: None
     #: This session's saves that had problems (release 5.91), for the Problems lines of the capture and browse windows.

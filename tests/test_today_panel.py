@@ -299,36 +299,50 @@ def test_a_change_elsewhere_reaches_it(app, panel):
     assert len(panel.rows) == before + 1
 
 
-def test_done_here_is_done_there_and_opens_an_update(app, panel):
-    """Release 5.115, decision 421: no question, the capture window opens as an Update on the task."""
-    put_on_today(app)
-    item = next(r for r in panel.rows if r.task_id == "T000008")
-    panel.done(item.item_id)
-    assert not any(a.id == item.item_id for a in Model(app.ctx.conn).today_items())
-    assert not any(r.item_id == item.item_id for r in panel.rows)
-    w = app.window
-    assert w.isVisible() and w.task == "T000008" and w.types == {"update"} and w.content.value()[0].startswith("Done today")
-    assert panel.note_row.isVisibleTo(panel) and "done for today" in panel.note_label.text()  # said here, with Undo (decision 420)
-
-
-def test_undo_in_the_panel_puts_it_back_and_takes_away_the_untouched_update(app, panel):
+def test_a_tick_opens_log_progress_on_closed_and_esc_leaves_it(app, panel):
+    """Release 5.166, decision 755: a tick on a task opens Log progress for it on Closed, the line empty; nothing changes
+    until Enter, and Esc leaves the task as it was, on Today."""
     put_on_today(app)
     item = next(r for r in panel.rows if r.task_id == "T000008").item_id
     panel.done(item)
-    assert app.window.isVisible()
+    lp = app.wheels._log_progress
+    assert lp.isVisible() and lp.task == "T000008" and lp.state_key == "Closed" and lp.line.text() == ""
+    assert any(a.id == item for a in Model(app.ctx.conn).today_items()) and not app.window.isVisible()
+    assert "Log progress is open" in panel.note_label.text()
+    lp.hide()  # Esc
+    m = Model(app.ctx.conn)
+    assert any(a.id == item for a in m.today_items()) and m.task("T000008").state != "Closed"
+    panel.done(item)
+    lp.line.setText("Signed off")
+    lp.submit()
+    m = Model(app.ctx.conn)
+    assert m.task("T000008").state == "Closed" and next(a for a in m.agenda if a.id == item).how == "Done"
+
+
+def test_a_tick_can_log_it_as_done_for_today_and_still_open(app, panel):
+    put_on_today(app)
+    item = next(r for r in panel.rows if r.task_id == "T000008").item_id
+    panel.done(item)
+    lp = app.wheels._log_progress
+    lp.pick_state("In progress")
+    lp.back.buttons["done"].click()
+    lp.line.setText("Enough for today")
+    lp.submit()
+    m = Model(app.ctx.conn)
+    assert m.task("T000008").state == "In progress" and next(a for a in m.agenda if a.id == item).how == "Done"
+
+
+def test_a_closed_task_ticked_closes_as_before_with_undo(app, panel):
+    from docrepo import tasks
+
+    put_on_today(app)
+    item = next(r for r in panel.rows if r.task_id == "T000008").item_id
+    tasks.update_task(app.ctx.conn, app.ctx.settings, "T000008", at=NOW, via="test", state="Closed")
+    panel.done(item)
+    assert not any(a.id == item for a in Model(app.ctx.conn).today_items()) and app.window.isVisible()
     panel.note_undo.click()
     assert any(a.id == item for a in Model(app.ctx.conn).today_items())
     assert not app.window.isVisible() and "Back on Today." in panel.note_label.text()
-
-
-def test_undo_keeps_an_update_with_something_typed_in_it(app, panel):
-    put_on_today(app)
-    item = next(r for r in panel.rows if r.task_id == "T000008").item_id
-    panel.done(item)
-    app.window.content.setPlainText("Done today: the vendor called back.")
-    panel.note_undo.click()
-    assert any(a.id == item for a in Model(app.ctx.conn).today_items())
-    assert app.window.isVisible() and "stays open" in panel.note_label.text()
 
 
 def test_remove_in_the_panel_has_undo(app, panel):
@@ -350,7 +364,7 @@ def test_a_note_ticked_is_just_done(app, panel):
 def test_put_back_from_done_today(app, panel):
     put_on_today(app)
     item = next(r for r in panel.rows if r.task_id == "T000008").item_id
-    panel.done(item)
+    edits.close_today_item(app.ctx.conn, app.ctx.data_root, app.ctx.fs, item, "Done", NOW)  # as Log progress's Enter does
     db.set_state(app.ctx.conn, today_panel.DONE_OPEN_KEY, "1")
     panel.hover.open_wide()
     panel.refresh()
@@ -440,9 +454,10 @@ def test_the_keyboard(app, panel, monkeypatch):
     first = panel.rows[0].item_id
     panel.cursor = 0
     key(panel, Qt.Key.Key_Space)
-    assert not any(a.id == first for a in Model(app.ctx.conn).today_items())
-    assert app.window.isVisible() and app.window.task == panel_task(app, first)  # Space ticks it: the Update opens (decision 421)
-    app.window.hide()
+    lp = app.wheels._log_progress  # Space ticks it: Log progress opens on Closed (release 5.166, decision 755)
+    assert lp.isVisible() and lp.task == panel_task(app, first) and lp.state_key == "Closed"
+    assert any(a.id == first for a in Model(app.ctx.conn).today_items())
+    lp.hide()
     panel.hover.open_wide()
     key(panel, Qt.Key.Key_Escape)
     assert not panel.hover.wide

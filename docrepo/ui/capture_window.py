@@ -108,6 +108,7 @@ from docrepo.ui.tokens import C
 from docrepo.ui.context import AppContext
 from docrepo.ui import drafts as draft_ui
 from docrepo.ui import link_filter
+from docrepo.ui import capture_waiting
 from docrepo.ui.drop_target import DropOverlay, DropRead
 from docrepo.ui.icons import icon, icon_size, set_fold
 from docrepo.ui.items_panel import AgendaPanel, ItemCards, OperatorHighlighter, RefPopup, _drop, task_colour, where_text
@@ -659,12 +660,14 @@ class CaptureWindow(QWidget):
         row2.addWidget(InfoButton("task", task_note))
         self.u_state = QComboBox()
         self.u_state.addItems(list(STATES))
+        capture_waiting.add_waiting(self.u_state)  # release 5.166, decision 762
+        self.u_state.currentTextChanged.connect(lambda _t: self._sync_waiting())
         self.state_row = QWidget()
         sr = QHBoxLayout(self.state_row)
         sr.setContentsMargins(0, 0, 0, 0)
         sr.setSpacing(8)
         sr.addWidget(QLabel("State", objectName="fieldLabel"))
-        self.u_state.setFixedWidth(150)
+        self.u_state.setFixedWidth(170)  # room for Waiting on a reply (release 5.166)
         sr.addWidget(self.u_state)
         self.state_row.hide()
         row2.addWidget(self.state_row)
@@ -681,6 +684,9 @@ class CaptureWindow(QWidget):
         self.meeting_row.hide()
         row2.addWidget(self.meeting_row, 1)
         b.addLayout(row2)
+        self.u_waiting = capture_waiting.WaitingRow(self.ctx.model, lambda: self.ctx.settings.me)  # decision 762
+        self.u_waiting.hide()
+        b.addWidget(self.u_waiting)
         b.addWidget(task_note)
         self.meet_what = Help()
         b.addWidget(self.meet_what)
@@ -1053,6 +1059,8 @@ class CaptureWindow(QWidget):
         more.setContentsMargins(0, 0, 0, 0)
         self.n_state = QComboBox()
         self.n_state.addItems(list(STATES))
+        capture_waiting.add_waiting(self.n_state)  # release 5.166, decision 762
+        self.n_state.currentTextChanged.connect(lambda _t: self._sync_waiting())
         self.n_start, self.n_reminder, self.n_repeat = DateField(), DateField(), DateField()
         self.n_recurrence = QComboBox()
         self.n_recurrence.addItems(["No recurrence", *RECURRENCES])
@@ -1080,6 +1088,9 @@ class CaptureWindow(QWidget):
             more.addWidget(note, 8 + i, 0, 1, 2)
         more.addWidget(self.n_inherit_row, 11, 0, 1, 2)
         more.addWidget(self.n_keydates, 12, 0, 1, 2)
+        self.n_waiting = capture_waiting.WaitingRow(self.ctx.model, lambda: self.ctx.settings.me)  # decision 762
+        self.n_waiting.hide()
+        more.addWidget(self.n_waiting, 13, 0, 1, 2)
         self.n_more.hide()
         g.addWidget(self.n_more)
         self.new_heading = QLabel(objectName="heading")
@@ -2365,6 +2376,8 @@ class CaptureWindow(QWidget):
         self._u_keydates_were = []
         self.n_inherit.setChecked(True)
         self.n_state.setCurrentText("Not started")
+        self.n_waiting.reset()
+        self.u_waiting.reset()
         self.n_recurrence.setCurrentIndex(0)
         self.same_all.setChecked(False)
         for w in self.__dict__.get("_fields", {}).values():
@@ -2593,6 +2606,7 @@ class CaptureWindow(QWidget):
         self.meeting_title.setVisible(self.meeting_on)
         self.meeting_row.setVisible(self.meeting_on)
         self.state_row.setVisible(upd and bool(t) and not self.meeting_on)
+        self._sync_waiting()
         for w in (self.today_button, self.agenda, self.agenda_divider):
             w.setVisible(not self.meeting_on)
         self.content.setPlaceholderText(MEETING_PLACEHOLDER if self.meeting_on else CONTENT_PLACEHOLDER)
@@ -3404,7 +3418,7 @@ class CaptureWindow(QWidget):
         """The Update fields' values, in the form tasks.update_task takes them."""
         recurrence = self.u_recurrence.currentText() if self.u_recurrence.currentIndex() else None
         return {
-            "state": self.u_state.currentText(), "current_status": self.u_status.toPlainText().strip(), "due": self.u_due.value(),
+            "state": capture_waiting.state_of(self.u_state), "current_status": self.u_status.toPlainText().strip(), "due": self.u_due.value(),
             "deadline": self.u_deadline.value(), "deadline_desc": self.u_deadline_desc.text().strip() or None,
             "leads": self._chips_people(self.u_leads), "assignees": self._chips_people(self.u_assignees),
             **self._hours_values(self.u_lead_row, self.u_asg_row), "duration": typed_days(self.u_duration), "calendar_days": self.u_calendar.isChecked(),
@@ -3473,7 +3487,7 @@ class CaptureWindow(QWidget):
             title=self.title.text(), labels=self.n_labels.values(), inherit_labels=self.n_inherit.isChecked(),
             leads=self._chips_people(self.n_leads), assignees=self._chips_people(self.n_assignees), due=self.n_due.value(),
             deadline=self.n_deadline.value(), deadline_desc=self.n_deadline_desc.text().strip() or None, urgent=self.n_urgent.isChecked(),
-            meeting=self.n_meeting.isChecked(), state=self.n_state.currentText(), start=start, reminder=self.n_reminder.value(),
+            meeting=self.n_meeting.isChecked(), state=capture_waiting.state_of(self.n_state), start=start, reminder=self.n_reminder.value(),
             recurrence=recurrence, repeat_until=self.n_repeat.value() if recurrence else None,
             plant_event=self.n_plant.isChecked(), references={name: box.text().strip() for name, box in self.n_refs.items() if box.text().strip()},
             key_dates=self.n_keydates.rows(), duration=typed_days(self.n_duration), calendar_days=self.n_calendar.isChecked(),
@@ -3489,8 +3503,25 @@ class CaptureWindow(QWidget):
             update_key_dates=self.update_key_dates() if "update" in self.types and t else None,
             from_capture=self.from_capture, quick=self._quick(),
             meeting=self.meeting_on, meeting_name=self.meet_name.text() if self.meeting_on else "", agenda_ticks=dict(self.agenda_ticks),
-            item_overrides={k: dict(v) for k, v in self.item_ov.items()}, refs=dict(self.ref_ids),
+            item_overrides={k: dict(v) for k, v in self.item_ov.items()}, refs=dict(self.ref_ids), waiting_on=self.waiting_on(),
         )
+
+    # ---- Waiting on a reply (release 5.166, decision 762; docrepo.ui.capture_waiting) ----
+    def _sync_waiting(self) -> None:
+        """Each Waiting on row shows while its State list has Waiting on a reply and its fields are shown."""
+        if "n_waiting" not in self.__dict__ or "u_waiting" not in self.__dict__:
+            return  # still being built
+        upd = "update" in self.types and not self.state_row.isHidden()
+        self.u_waiting.setVisible(upd and capture_waiting.is_waiting(self.u_state))
+        self.n_waiting.setVisible("new_task" in self.types and capture_waiting.is_waiting(self.n_state))
+
+    def waiting_on(self) -> list[str] | None:
+        """Who the saved task waits on: a new task's, else the update's; None when neither list has Waiting on a reply."""
+        if "new_task" in self.types and capture_waiting.is_waiting(self.n_state):
+            return list(self.n_waiting.people)
+        if "update" in self.types and self.task and capture_waiting.is_waiting(self.u_state):
+            return list(self.u_waiting.people)
+        return None
 
     def save(self) -> None:
         if self.pages.currentIndex() == 1:
