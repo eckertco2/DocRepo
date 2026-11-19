@@ -54,7 +54,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo import db, edits, key_dates, markup, meetings, notes_page, panel_rules, selection, task_tile, urgency, waits
+from docrepo import appbar, db, edits, key_dates, markup, meetings, notes_page, panel_rules, selection, task_tile, urgency, waits
 from docrepo.detail import Pages, PageState, esc
 from docrepo.model import Model, Task, is_person
 from docrepo.panel_rules import OPEN_KEY, REST_WIDTH_KEY, WIDE_WIDTH_KEY, Hover, Monitor, Place, Rect
@@ -69,6 +69,7 @@ from docrepo.ui.page_view import PageView
 from docrepo.ui import today_bins, today_meetings
 from docrepo.ui.tree_view import PRIORITY_EDGES
 from docrepo.ui import task_tile as tile_ui
+from docrepo.ui import today_dock
 from docrepo.ui.state_menu import UNDO_MS, UndoButton
 from docrepo.ui.style import page_css, style_sheet
 from docrepo.ui.tokens import C
@@ -488,6 +489,7 @@ class TodayPanel(QWidget):
         settings = self.settings
         self.hover = Hover(settings.hover_ms if settings.hover_ms is not None else windows_hover_ms(), settings.contract_ms, settings.hover)
         self.place_ = self._read_place()
+        self.dock = today_dock.Dock(self)  # docked at its edge when the owner ticks it (release 5.178)
         self.rows: list[_Row] = []
         self.cursor = -1  # the row the keyboard is on
         self._detail: tuple[str, int | None, str | None] | None = None  # ("task" or "note", the Today item, the task)
@@ -664,6 +666,7 @@ class TodayPanel(QWidget):
         self.hover.contract_ms = self.settings.contract_ms
         self.hover.hover_ms = self.settings.hover_ms if self.settings.hover_ms is not None else windows_hover_ms()
         self.refresh()
+        self.dock.dock()  # docked at its edge when the owner ticked it (release 5.178, decision 834)
         self.place_window()
         self._apply_capture_rule()
         self.show()
@@ -682,6 +685,7 @@ class TodayPanel(QWidget):
         self.hover.contract()
         self.close_detail()
         self.hide()
+        self.dock.undock()  # the strip given back (release 5.178, decision 835); the tick stays for next time
         self._give_back()
 
     def _set_no_activate(self, on: bool) -> None:
@@ -1373,6 +1377,9 @@ class TodayPanel(QWidget):
 
     def keep_rest(self) -> None:
         self.ctx.keep_state(REST_WIDTH_KEY, self._rest or "")
+        if self.dock.strip is not None:  # the strip follows the width at rest when the drag ends (release 5.178)
+            self.dock.moved()
+            self.place_window(animate=False)
 
     def keep_wide(self) -> None:
         self.ctx.keep_state(WIDE_WIDTH_KEY, self._wide or "")
@@ -1584,13 +1591,18 @@ class TodayPanel(QWidget):
         return max(120, min(most, wanted))
 
     def place_window(self, animate: bool = True) -> None:
-        """On its side of its monitor, at its height, growing away from the edge."""
+        """On its side of its monitor, at its height, growing away from the edge. Docked (release 5.178, decision 834), it
+        fills its strip's height, from the strip's outer edge, widening over the other windows."""
         screen = self._screen()
         area = screen.availableGeometry()
         width = self.target_width()
-        height = self._wanted_height(area)
-        top = min(self.place_.top, max(0, area.height() - height))
-        self._to = QRect(panel_rules.edge_x(self.place_.side, _rect(area), width), area.y() + top, width, height)
+        strip = self.dock.rect()
+        if strip is not None:
+            self._to = QRect(panel_rules.edge_x(self.place_.side, _rect(strip), width), strip.y(), width, strip.height())
+        else:
+            height = self._wanted_height(area)
+            top = min(self.place_.top, max(0, area.height() - height))
+            self._to = QRect(panel_rules.edge_x(self.place_.side, _rect(area), width), area.y() + top, width, height)
         if not animate or not self.isVisible() or self.width() == width or self.wheels.config.timing.animation_ms <= 0 or not animations_on():
             self._grow.stop()
             self.setGeometry(self._to)
@@ -1641,22 +1653,37 @@ class TodayPanel(QWidget):
         top = max(0, self.frameGeometry().y() - area.y())
         self.place_ = Place(side, top, Monitor(screen.name(), screen.serialNumber(), screen.size().width(), screen.size().height()))
         self._save_place()
+        self.dock.moved()  # docked, the strip moves with it (release 5.178)
         self.place_window()
 
     def _top_menu(self, at: QPoint) -> None:
+        menu = self.top_menu()
+        self._menu_open = True
+        menu.exec(self.top.mapToGlobal(at))
+        self._menu_open = False
+        self._hover_timer.start()
+
+    def top_menu(self) -> QMenu:
+        """The top line's menu (release 5.178: built here, shown by ``_top_menu``)."""
         menu = QMenu(self)
         menu.addAction("Move to next screen", self.move_to_next_screen)
         reset = menu.addAction("Reset the width at rest", self.reset_rest)
         reset.setEnabled(bool(self._rest))
         reset_wide = menu.addAction("Reset the width widened", self.reset_wide)  # release 5.154, decision 694
         reset_wide.setEnabled(bool(self._wide))
+        # Dock at this edge (release 5.178, decision 833): ticked, the panel keeps its strip of the screen; greyed where
+        # Windows can't be asked (not Windows, or offscreen).
+        dock = menu.addAction(today_dock.LINE)
+        dock.setCheckable(True)
+        dock.setChecked(self.dock.wanted())
+        dock.setEnabled(self.dock.can())
+        dock.toggled.connect(self.dock.set_wanted)
+        dock.setToolTip("Maximised windows stop at the panel, as at the taskbar. It still widens over them under the pointer.")
+        self._dock_action = dock
         menu.addAction("Hide", lambda: self.action("close"))
         menu.addSeparator()
         menu.addAction("Open wheels config", self.wheels.open_config)
-        self._menu_open = True
-        menu.exec(self.top.mapToGlobal(at))
-        self._menu_open = False
-        self._hover_timer.start()
+        return menu
 
     def move_to_next_screen(self) -> None:
         screens = QGuiApplication.screens()
@@ -1664,6 +1691,7 @@ class TodayPanel(QWidget):
         screen = screens[panel_rules.next_monitor(now, len(screens))]
         self.place_ = Place(self.place_.side, self.place_.top, Monitor(screen.name(), screen.serialNumber(), screen.size().width(), screen.size().height()))
         self._save_place()
+        self.dock.moved()  # docked, the strip moves to that screen (release 5.178)
         self.place_window()
 
     # ================= the keyboard =================
@@ -1724,6 +1752,10 @@ class TodayPanel(QWidget):
                 msg = wintypes.MSG.from_address(int(message))
             except (TypeError, ValueError):
                 return False, 0
+            if msg.message == appbar.CALLBACK_MESSAGE and msg.wParam == appbar.ABN_POSCHANGED and self.dock.strip is not None:
+                self.dock.moved()  # Windows' word that things moved: its place asked for again (release 5.178, decision 834)
+                self.place_window(animate=False)
+                return True, 0
             if msg.message == WM_MOUSEACTIVATE:
                 if not isinstance(self.childAt(self.mapFromGlobal(QCursor.pos())), QLineEdit):
                     return True, MA_NOACTIVATE

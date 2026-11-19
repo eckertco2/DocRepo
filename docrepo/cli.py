@@ -102,6 +102,15 @@ def build_parser() -> argparse.ArgumentParser:
     timings.add_argument("--words", default=None, metavar="WORDS", help="the three words Search everything is timed with "
                                                                          "(default: \"pump seal drawing\"). They aren't printed")
     timings.add_argument("--as-of", type=as_of, metavar="WHEN", help=as_of_help)
+    # Release 5.178 (the today docked plan's decision 836): for the corporate computer, never this one.
+    try_bar = commands.add_parser("appbar-try", help="try docking at a screen edge (release 5.178): a plain strip, registered with Windows as "
+                                                     "an app bar for a while and given back, with the screen's working area before, during "
+                                                     "and after; kept in System\\diagnostics. It opens a window")
+    try_bar.add_argument("--side", choices=("left", "right"), default="right", help="which edge of the main screen (default: right)")
+    try_bar.add_argument("--width", type=int, default=240, help="the strip's width in pixels (default: 240)")
+    try_bar.add_argument("--seconds", type=float, default=30, help="how long it's kept (default: 30)")
+    try_bar.add_argument("--leave", action="store_true", help="end without giving it back, to see what Windows does with it")
+    try_bar.add_argument("--check", action="store_true", help="only report the working area now: run it after --leave")
     commands.add_parser("make-shortcut", help="make DocRepo.lnk, to move into your Startup folder so DocRepo starts when you sign in")
     set_hotkey = commands.add_parser("set-hotkey", help="choose the capture window's hotkey, such as \"Ctrl+Alt+Space\"")
     set_hotkey.add_argument("keys")
@@ -571,6 +580,51 @@ def cmd_timings(args: argparse.Namespace) -> int:
     return 0 if all(x.within for x in found) else 2
 
 
+def cmd_appbar_try(args: argparse.Namespace) -> int:
+    """Try docking (release 5.178, the today docked plan's decision 836): a plain strip of its own, registered with Windows
+    as an app bar, kept ``--seconds`` and given back (or, with ``--leave``, not); ``--check`` only reports the working area.
+    Prints its report and keeps it in System\\diagnostics, measurements only. Windows only, and never on the personal computer:
+    it opens a window."""
+    from docrepo import appbar, timings
+
+    api = appbar.system_api()
+    if api is None:
+        print("appbar-try needs Windows' own desktop: it opens a window and registers it with Windows.", file=sys.stderr)
+        return 1
+    root = _data_root(args)
+    fs = make_safe_fs(root, Settings.load(root)) if root is not None and (root / SETTINGS_FILE).exists() else None
+    _utf8_stdout()
+    if args.check:
+        text = appbar.check(api)
+    else:
+        from PySide6.QtCore import QEventLoop, QTimer, Qt
+        from PySide6.QtWidgets import QApplication, QLabel
+
+        qt = QApplication.instance() or QApplication([])
+
+        def open_strip(box: appbar.Box) -> appbar.Strip:
+            w = QLabel("DocRepo appbar-try")
+            w.setWindowFlags(Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
+            w.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            w.setGeometry(box.left, box.top, box.width, box.height)
+            w.show()
+            qt.processEvents()
+            return appbar.Strip(int(w.winId()), w.close)
+
+        def wait(seconds: float) -> None:
+            loop = QEventLoop()
+            QTimer.singleShot(int(seconds * 1000), loop.quit)
+            loop.exec()
+
+        print(f"A {args.width} px strip at the {args.side} edge, for {args.seconds:g} s. Maximise a window now to see it stop short.", flush=True)
+        text = appbar.try_out(api, open_strip, wait, side=args.side, width=args.width, seconds=args.seconds, leave=args.leave)
+    print(text)
+    if fs is not None:
+        path = timings.save_report(fs, root, text, datetime.now(), prefix="appbar-try")
+        print(f"Kept as {path.relative_to(root)} in the data root. Bring it, or the text above, to the personal computer.")
+    return 0
+
+
 def cmd_backup(args: argparse.Namespace) -> int:
     """Make a backup now, and say what it did."""
     opened = _open(args)
@@ -653,6 +707,7 @@ COMMANDS: dict[str, Callable[[argparse.Namespace], int]] = {
     "dump": cmd_dump,
     "usage": cmd_usage,
     "timings": cmd_timings,
+    "appbar-try": cmd_appbar_try,
     "make-shortcut": cmd_make_shortcut,
     "set-hotkey": cmd_set_hotkey,
     "where": cmd_where,
