@@ -155,6 +155,7 @@ class CaptureApp(QObject):
         # the status card's (release 5.139); a Today tick's and the state menu's, with the state it opens on (release 5.166)
         ctx.log_progress = lambda task=None, state=None: self.wheels.log_progress(task, with_email=False, state=state)
         ctx.open_recent = self.wheels.recent_captures_from_palette  # Recent captures, from Ctrl+K (release 5.158)
+        ctx.open_lookup = self.wheels.glossary_lookup_from_palette  # the glossary lookup, from Ctrl+K (release 5.172)
         self.panel: TodayPanel | None = None  # the Today side panel, made the first time it opens (release 5.43)
         menu = QMenu()
         menu.addAction("New capture", lambda: self.window.show_capture())
@@ -192,6 +193,7 @@ class CaptureApp(QObject):
             hotkey.HOTKEY_IDS["outlook_hotkey"]: self.window.add_selected_email,
             hotkey.HOTKEY_IDS["today_panel_hotkey"]: lambda: self.today_panel_action("hotkey"),
             hotkey.HOTKEY_IDS["progress_hotkey"]: lambda: self.wheels.log_progress(),  # release 5.139, decision 583
+            hotkey.HOTKEY_IDS["lookup_hotkey"]: lambda: self.wheels.glossary_lookup(),  # release 5.172, decision 808
         }
         self.register_hotkey()
         if db.get_state(ctx.conn, OPEN_KEY) == "1":  # open or closed is remembered across restarts (release 5.43)

@@ -50,17 +50,18 @@ def test_the_default_file_is_the_decided_wheels():
     # Release 5.158 (the recent captures plan's decision 723): Recent captures on the Capture wheel's NE.
     assert {d: s.command for d, s in config.wheel("capture").slots.items()} == {
         "N": "capture.new", "E": "capture.selection", "S": "today.new_item", "W": "capture.meeting", "NE": "capture.recent"}
+    # Release 5.172 (the glossaries plan's decision 808): the glossary lookup on the Browse wheel's NE.
     assert {d: s.command for d, s in config.wheel("browse").slots.items()} == {
-        "N": "browse.view", "E": "search.tasks", "S": "search.files", "W": "search.everything"}
+        "N": "browse.view", "E": "search.tasks", "S": "search.files", "W": "search.everything", "NE": "glossary.lookup"}
     execution = config.wheel("execution").slots
     assert execution["N"].args == {"view": "today"} and execution["E"].command == "today.panel"
     # Release 5.131 (the quick summary plan's decision 517): S is the quick summary, no longer held for the agent window.
     assert execution["S"].command == "summary.open" and not execution["S"].held and execution["W"].command == "find_files.current"
     # Release 5.139 (the email progress plan's decision 583): Log progress on NE makes the Execution wheel eight-way
     # (decision 170: a diagonal item makes it 8-way, and nothing moves); since release 5.158 the Capture wheel's NE does the
-    # same for it, and only the Browse wheel stays a cross.
+    # same for it, and since release 5.172 the Browse wheel's NE too: no default wheel is a cross now.
     assert execution["NE"].command == "progress.log"
-    assert [w.id for w in config.wheels if w.eight_way] == ["capture", "execution"]
+    assert [w.id for w in config.wheels if w.eight_way] == ["capture", "browse", "execution"]
     capture = config.wheel("capture").slots["NE"]
     assert (capture.label, capture.icon) == ("Recent captures", "activity")
     assert '// "NW": { "label": "Pinned", "icon": "pin", "command": "capture.pin" }' in wc.DEFAULT_TEXT  # the pin's suggestion moved

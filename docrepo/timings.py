@@ -52,6 +52,9 @@ BUDGETS = (
     Budget("model", "Loading the model", 0.3),
     Budget("counts", "The view counts", 0.3),
     Budget("search", "Search everything, three words", 0.3),
+    # Release 5.172 (the glossaries plan's decision 809): the slowest key typed in the glossary lookup, on a made-up
+    # glossary of 20,000 rows in four columns (``sample_scale.glossary_rows``), in a database of its own in memory.
+    Budget("lookup", "The glossary lookup, a key typed, on 20,000 rows", 0.05),
     Budget("page", "A task page with 300 notes", 0.3),
     # Release 5.140 (the notes consolidation plan's decision 609): the task page's budget, for its All notes and Meetings.
     Budget("allnotes", "All notes and Meetings on the busiest project", 0.3),
@@ -217,6 +220,8 @@ def measure(data_root: Path, settings: Settings, now: datetime, words: str = DEF
         if "search" in wanted:
             t, results = _clock(lambda: search.search(conn, m, words, today), runs)
             out.append(Timing("search", t, runs, f"{len(results):,} results"))
+        if "lookup" in wanted:
+            out.append(_lookup(runs))
         busiest, notes = busiest_task(m)
         if "page" in wanted and busiest:
             def page() -> int:
@@ -293,6 +298,32 @@ def measure(data_root: Path, settings: Settings, now: datetime, words: str = DEF
     out.sort(key=lambda x: order.index(x.key))
     log.info("timings: %s", ", ".join(f"{x.key} {x.seconds * 1000:.0f} ms" for x in out))
     return out
+
+
+#: What the lookup's budget types, key by key (decision 809): a tag as it's written, then without its hyphen, then words.
+LOOKUP_TYPED = ("p", "p-", "p-2", "p-26", "p-267", "p267", "pump", "pump feed", "line 2 pump")
+
+
+def _lookup(runs: int) -> Timing:
+    """The glossary lookup (release 5.172, decision 809): each of ``LOOKUP_TYPED`` looked up ``runs`` times on a made-up
+    glossary of 20,000 rows and four columns, in a database of its own in memory; the slowest key's median counts. The
+    data root's own glossaries aren't read: the budget is the lookup's, on a list of that size."""
+    from docrepo import glossaries, sample_scale
+
+    mem = db.connect_memory()
+    try:
+        rows = sample_scale.glossary_rows()
+        gid = glossaries.create(mem, "Equipment", sample_scale.GLOSSARY_COLUMNS, 1, rows, "made up", datetime(2026, 11, 19))
+        g = glossaries.get(mem, gid)
+        assert g is not None
+        slowest, which = 0.0, ""
+        for typed in LOOKUP_TYPED:
+            t, _ = _clock(lambda typed=typed: glossaries.lookup(mem, g, typed), runs)
+            if t >= slowest:
+                slowest, which = t, typed
+        return Timing("lookup", slowest, runs, f"{len(rows):,} rows, {len(LOOKUP_TYPED)} keys, the slowest {len(which)} characters")
+    finally:
+        mem.close()
 
 
 def _grouped(m, conn: sqlite3.Connection, data_root: Path, settings: Settings, today, project: str, runs: int) -> Timing:

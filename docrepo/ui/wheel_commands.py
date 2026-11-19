@@ -106,6 +106,12 @@ def _progress_log(app: CaptureApp, _args: Mapping[str, Any]) -> None:
     app.wheels.log_progress()
 
 
+def _glossary_lookup(app: CaptureApp, _args: Mapping[str, Any]) -> None:
+    """The glossary lookup (release 5.172, the glossaries plan's decisions 807 and 808): a glossary's rows narrowed as
+    they're typed; Enter copies a row's tag."""
+    app.wheels.glossary_lookup()
+
+
 def _find_files_current(app: CaptureApp, _args: Mapping[str, Any]) -> None:
     """Find files for the task selected in the browse tool, or else the last one opened; with neither, task search, and
     picking a task opens its Find files. Its old name, task_view.current, still works (``wheels_config.RENAMED``)."""
@@ -130,6 +136,7 @@ _ROWS = (
                _search_tasks),
     Registered(CommandSpec("search.files", "File search"), _search_files),
     Registered(CommandSpec("search.everything", "Search everything"), _search_everything),
+    Registered(CommandSpec("glossary.lookup", "Glossary lookup: Enter copies a row's tag"), _glossary_lookup),
     Registered(CommandSpec("find_files.current", "Find files for the current task"), _find_files_current),
     Registered(CommandSpec("summary.open", "The quick summary",(Arg("set", "", kind="text"),)), _summary_open),
     Registered(CommandSpec("progress.log", "Log progress, on the email you're writing in Outlook"), _progress_log),

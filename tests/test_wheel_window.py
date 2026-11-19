@@ -132,9 +132,12 @@ def test_each_wheel_is_painted_once_unseen_so_the_first_opening_is_quick(wheel_w
 
 
 def test_a_chord_on_a_cross_selects_nothing_and_stays_open(wheel_window):
-    """Decision 170. The Browse wheel is the default's cross (since release 5.158 the Capture wheel has NE, Recent captures)."""
+    """Decision 170. A wheel of N, E, S and W only, as the Browse wheel was until release 5.172 gave it NE (the glossary
+    lookup); no default wheel is a cross now, so this one is made here."""
     w = wheel_window
-    open_tapped(w, "browse")
+    cross = wc.check({"wheels": [{"id": "x", "name": "X", "slots": {d: {"label": d, "command": "capture.pin"} for d in ("N", "E", "S", "W")}}]},
+                     SPECS, icon_names()).wheels[0]
+    w.open_wheel(cross, CONFIG.timing, QPointF(500, 400), None)
     assert not w.wheel.eight_way
     press(w, UP)
     press(w, RIGHT)

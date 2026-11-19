@@ -27,6 +27,8 @@ SHOWN = 12
 #: Recent captures' row in the browse tool's and the capture window's palettes (release 5.158, decision 723), there
 #: whether or not a wheel has its slot.
 RECENT_CAPTURES = "Recent captures: open one on its notes page"
+#: The glossary lookup's row in the same two palettes (release 5.172, decision 808), there whether or not a wheel has it.
+GLOSSARY_LOOKUP = "Glossary lookup: find a row, copy its tag"
 
 
 @dataclass(frozen=True)
