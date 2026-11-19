@@ -1125,8 +1125,10 @@ class QuickSummary(QWidget):
         if kind == "state":  # a task tile's circle (release 5.138, decision 564): the state menu, drawn again after
             browse.popup_state_menu(rest, QCursor.pos(), after=self.render)
             return
-        if kind == "task":
-            self.app.show_browse(None, rest)
+        if kind == "task":  # as Settings' Open a task in says, Shift the other way (release 5.174, decision 815)
+            from docrepo.ui import task_open
+
+            task_open.open_task(browse, rest, other=task_open.shift_held())
         elif kind == "capture":
             browse.go_capture(rest)
             self.app.show_browse()

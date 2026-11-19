@@ -375,6 +375,6 @@ def test_move_to_top_and_bottom_on_the_panels_menus(app, panel, monkeypatch):
     panel.row_menu(first, QPoint(0, 0))
     assert "Move to top" not in shown[-1] and "Move to bottom" in shown[-1]
     panel.row_menu(panel_row(panel, task), QPoint(0, 0))
-    assert "Move to top" in shown[-1] and "Move to bottom" not in shown[-1] and "Open" in shown[-1]  # the tile's menu
+    assert "Move to top" in shown[-1] and "Move to bottom" not in shown[-1] and "Work on it" in shown[-1]  # the tile's menu
     shown[-1]["Move to top"].trigger()
     assert panel.rows[0].item_id == task and Model(app.ctx.conn).today_items()[0].id == task

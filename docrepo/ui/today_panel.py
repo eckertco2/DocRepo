@@ -959,12 +959,12 @@ class TodayPanel(QWidget):
         menu.exec(at)
 
     def open_in_browse(self, task_id: str) -> None:
-        """A tile's double-click: the task's workspace, as the Today view's double-click (release 5.165, decision 756; its
-        page until then, decision 572), the browse window coming forward maximised (decision 771). The panel's own
-        detail stays on its buttons."""
-        from docrepo.ui import workspace as workspace_ui  # the browse window's, imported when it's used
+        """A tile's double-click: the task as Settings' Open a task in says, its workspace (to start) or its page, and the
+        other with Shift (release 5.174, decision 815; the workspace since release 5.165's decision 756), the browse
+        window coming forward (decision 771). The panel's own detail stays on its buttons."""
+        from docrepo.ui import task_open  # the browse window's, imported when it's used
 
-        workspace_ui.open_workspace(self.browse, task_id, True)
+        task_open.open_task(self.browse, task_id, other=task_open.shift_held(), from_today=True)
 
     def tell_state(self, text: str, undo: Callable[[], None] | None) -> None:
         """What a pick did, under the list, with Undo for ten seconds (decision 363)."""
@@ -1236,8 +1236,11 @@ class TodayPanel(QWidget):
             self.refresh()
 
     def _open_detail_in_browse(self) -> None:
+        """The detail's Open: the task as Settings' Open a task in says (release 5.174, decision 815)."""
         if self._detail and self._detail[2]:
-            self.browse.show_browse(None, self._detail[2])
+            from docrepo.ui import task_open
+
+            task_open.open_task(self.browse, self._detail[2], other=task_open.shift_held(), from_today=True)
 
     # ================= hovering =================
     def _holding(self) -> bool:

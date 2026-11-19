@@ -179,11 +179,13 @@ def _copy_menu(browse: BrowseWindow, task_id: str, parent: QMenu) -> QMenu:
 def fill_menu(browse: BrowseWindow, task_id: str, menu: QMenu, own: Iterable[Own] = (), *, anchor: QWidget | None = None,
               after: Callable[[], None] | None = None, tell: Callable[[str, Callable[[], None] | None], None] | None = None,
               ask_first: bool = False, open_it: bool = True, state_pick: Callable[[str, bool], None] | None = None,
-              work_first: bool = False) -> None:
+              work_first: bool | None = None) -> None:
     """A tile's right-click menu, the same on every tile (decision 573), after anything already in ``menu``:
 
     1. Open, the default (Enter), then Work on it (W), the task's workspace (release 5.152, the workspace plan's decision
-       663); with ``work_first`` (on Today, decision 667) Work on it is first and the default, and Open says it's the page;
+       663); with ``work_first`` Work on it is first and the default, and Open says it's the page. Since release 5.174
+       (decision 815) ``work_first`` follows Settings' Open a task in (``task_open.opens_workspace``) unless it's given, so
+       the first line is what a double-click does and the second the other;
     2. the view's ``own`` lines (Today's Done, Later and Remove; an agenda's Discussed; Reminders' Clear), with Ask for an
        update first in Waiting on others (``ask_first``);
     3. State, Add to, Ask for an update (on a task someone else is on);
@@ -203,7 +205,11 @@ def fill_menu(browse: BrowseWindow, task_id: str, menu: QMenu, own: Iterable[Own
     if not menu.isEmpty():
         menu.addSeparator()
     if open_it:
+        from docrepo.ui import task_open
         from docrepo.ui import workspace as workspace_ui
+
+        if work_first is None:
+            work_first = task_open.opens_workspace(browse, task_id)
 
         k = task_menus.key_column()
         work = QAction(icon("workspace"), f"{workspace_ui.WORK_ON_IT}{k}{'Enter, W' if work_first else 'W'}", menu)

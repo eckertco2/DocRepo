@@ -778,8 +778,9 @@ class RowTree(QTreeWidget):
             QTimer.singleShot(0, lambda: drop(key, *at))  # after the drag has finished with these rows
 
     def keyPressEvent(self, event) -> None:  # noqa: N802 - Qt's name
-        if (event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and not event.modifiers() and self.task_opened is not None
-                and self.currentItem() is not None):  # a task tile's Enter opens its page, as its double-click does (decision 572)
+        shift_only = event.modifiers() in (Qt.KeyboardModifier.NoModifier, Qt.KeyboardModifier.ShiftModifier)
+        if (event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and shift_only and self.task_opened is not None
+                and self.currentItem() is not None):  # a task tile's Enter opens it as its double-click does; Shift the other way (5.174)
             task = self.row_task(self.currentItem())
             if task:
                 self.task_opened(task)

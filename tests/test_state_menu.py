@@ -219,7 +219,7 @@ def test_every_task_rows_right_click_menu_has_state(browse):
     menu = browse.tree.row_menu(item)
     words = [w.split("	")[0] for w in labels(menu)]
     # A task tile's one menu since release 5.138 (decision 573): Open, then State, then Add to; Edit (5.98's) further down
-    assert words[0] == "Open" and words[words.index("State"):][:2] == ["State", "Add to"] and "Edit" in words
+    assert words[0] == "Work on it" and words[words.index("State"):][:2] == ["State", "Add to"] and "Edit" in words
     assert labels(next(a.menu() for a in menu.actions() if a.menu() and a.text() == "State"))[:4] == ["Not started", "In progress", "Parked", "Closed"]
     edits.add_to_today(browse.conn, browse.ctx.data_root, browse.ctx.fs, INSTALLATION, "", NOW)
     browse.refresh(render=False)
@@ -257,7 +257,7 @@ def test_the_cards_right_click_menus_have_state(browse):
     picking(browse, None)
     browse.priorities.card_menu.emit(INSTALLATION, QPoint(0, 0))
     words = [w.split("	")[0] for w in browse.menus[-1][0]]
-    assert words[0] == "Open" and "State" in words and "Edit" in words  # the tile's menu since release 5.138 (decision 573)
+    assert words[0] == "Work on it" and "State" in words and "Edit" in words  # the tile's menu since release 5.138 (decision 573)
     browse.timeline.render(browse.model(), NOW.date())
     browse.timeline.sel = INSTALLATION
     browse.timeline._card_menu(QPoint(0, 0))

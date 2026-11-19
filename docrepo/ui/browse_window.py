@@ -81,7 +81,7 @@ from docrepo.ui.timeline_view import TimelineView
 from docrepo.ui.state_menu import MAKE_TASK as STATE_MAKE_TASK
 from docrepo.ui.state_menu import UNDO_MS, can_change, open_below, picked_line, state_menu
 from docrepo.ui.tree_view import HTML_ROLE, KEY_ROLE, RowTree
-from docrepo.ui import conversation_page, people_import, task_menus, tidy_follow_ups, tidy_notes, today_meetings
+from docrepo.ui import conversation_page, people_import, task_menus, task_open, tidy_follow_ups, tidy_notes, today_meetings
 from docrepo.ui import workspace as workspace_ui
 from docrepo.ui import task_tile as tile_ui
 from docrepo.ui.widgets import SAVE_KEYS, DropButton, FlowLayout, Option, ViewStack, ask, label_options, people_options
@@ -375,11 +375,10 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         # The task tile's one menu (release 5.138, the task tile plan's decision 573): Open, the row's own lines, State, Add to,
         # Ask for an update, Log progress, Note, Update, New task under, Edit, Priority and Copy, in every view of tasks; Ask
         # for an update first among a waiting list's own (Waiting on others, the review's Waiting step).
-        # Work on it on every tile's menu, first on Today's, where Enter and a double-click open the workspace (release 5.152,
-        # the workspace plan's decisions 663 and 667).
-        self.tree.tile_menu = lambda task_id, menu, own: tile_ui.fill_menu(self, task_id, menu, own, anchor=self.tree, ask_first=self._asks(),
-                                                                         work_first=self.view == TODAY)
-        self.tree.task_opened = lambda task_id: workspace_ui.open_row(self, task_id)  # Enter, as a double-click (decision 572)
+        # Work on it on every tile's menu, first where Enter and a double-click open the workspace: as Settings' Open a task in
+        # says since release 5.174 (decision 815; on Today only until then, the workspace plan's decisions 663 and 667).
+        self.tree.tile_menu = lambda task_id, menu, own: tile_ui.fill_menu(self, task_id, menu, own, anchor=self.tree, ask_first=self._asks())
+        self.tree.task_opened = lambda task_id: workspace_ui.open_row(self, task_id)  # Enter, as a double-click; Shift the other way
         lp.addWidget(self.tree, 1)
         self.middle.addWidget(list_page)
         if LOOK.classic:  # the new look has it on the Timeline's page (decision 229)
@@ -420,7 +419,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         self.middle.addWidget(self.timeline)
         self.priorities = PrioritiesView()  # mods log round 2, M0029, M0030 (release 5.23)
         self.priorities.picked.connect(lambda task_id: setattr(self, "sel", ("task", task_id)))
-        self.priorities.open_task.connect(lambda task_id: tile_ui.open_task(self, task_id))  # its page (release 5.138, decision 572)
+        self.priorities.open_task.connect(lambda task_id: task_open.open_task(self, task_id, other=task_open.shift_held()))  # release 5.174, decision 815
         self.priorities.state_clicked.connect(lambda task_id, at: self.popup_state_menu(task_id, at))  # decision 564
         self.priorities.edit_task.connect(self.edit_task)
         self.priorities.moved.connect(self.move_priority)
@@ -1095,9 +1094,9 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
             return
         kind, ident = key
         m = self.model()
-        if kind == "task":  # a task tile opens its page (release 5.138, the task tile plan's decision 572): Edit task is E
+        if kind == "task":  # a task tile opens as Settings' Open a task in says (release 5.174, decision 815): Edit task is E
             t = m.tasks.get(ident)
-            if t is not None and not t.discarded:  # on Today, its workspace (release 5.152, the workspace plan's decision 667)
+            if t is not None and not t.discarded:
                 workspace_ui.open_row(self, ident)
         elif kind == "capture":
             note = next((a for a in m.today_items() if a.subject is None and a.added_by == ident), None) if self.view == TODAY else None

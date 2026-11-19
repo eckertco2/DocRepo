@@ -162,7 +162,7 @@ def test_the_task_page_draws_tiles_and_their_menus(setup, monkeypatch):
     monkeypatch.setattr(w, "run_menu", lambda menu, at: shown.append([a.text().split("\t")[0] for a in menu.actions() if a.text()]))
     notes.tile_menu.emit(crane, QPoint(0, 0))
     notes.tile_state.emit(crane, QPoint(0, 0))
-    assert shown[0][0] == "Open" and "In progress" in shown[1]
+    assert shown[0][0] == "Work on it" and "In progress" in shown[1]
     assert [notes.kind(x) for x in blocks(notes) if notes.kind(x) == "change"] == ["change", "change"]
 
 
