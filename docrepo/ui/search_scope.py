@@ -27,6 +27,14 @@ _TYPING = re.compile(rf"^\s*(?:{_FILTER})*#([^#]*)$", re.I)
 SHOWN = 8
 
 
+def open_search(box: QLineEdit) -> None:
+    """Search everything opened from the wheel, Ctrl+Shift+F or the palette (release 5.165, decision 769): it starts
+    clean, its box (with any filters typed in it) cleared, and the cursor in it. Words carried in on purpose (File
+    search's or Task search's when nothing matched, the Task view's) are set by their callers instead, and stay."""
+    box.clear()
+    box.setFocus()
+
+
 class ScopeList(QObject):
     """Holds the popup for one search box. ``model`` gives the Model as it is now."""
 

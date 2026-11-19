@@ -5,7 +5,8 @@ Every subject has one shape (decision 521): a headline of counts, with only what
 facts, then its sections in order, each left out when it has nothing:
 
 - **a person:** Agenda; Waiting on <first name>; <first name>'s waiting on you; <first name>'s other work, folded (decision
-  525); Email conversations; What's changed since you last talked;
+  525); Email conversations; What's changed since you last talked; Routine, folded (release 5.165, decision 773: their
+  routine tasks and regular meetings, out of the chips, unless on their agenda or waiting on them);
 - **an agenda** (a meeting, or any task with open items on its agenda): Agenda; Discussed lately, folded; Email
   conversations; What's changed since it was last discussed;
 - **a label** (a parent label takes its sublabels in): Where they stand (decision 532); Needs attention; Other open tasks,
@@ -38,6 +39,7 @@ from urllib.parse import quote, unquote
 from docrepo import capacity, email_conversations, tagged, task_tile
 from docrepo.activity import Activity, Line
 from docrepo.dates import long_date, monday_of, short, to_date
+from docrepo.meetings import occurrence
 from docrepo.detail import chip, esc, initials, link
 from docrepo.model import PRIORITY_NAMES, TODAY, AgendaItem, Model, Person, Task, is_person
 from docrepo.schedule import DueDate, due_of, is_open
@@ -285,9 +287,13 @@ def is_agenda(m: Model, task_id: str) -> bool:
 
 def subjects(m: Model, me: str | None) -> list[Subject]:
     """Everything the box finds: the active people but the owner, the agendas (open meetings first, then any task with open
-    items), and the active labels, each in its own order. Today has a view of its own (decision 520)."""
+    items, regular meetings last and their occurrences left out), and the active labels, each in its own order. Today has a
+    view of its own (decision 520)."""
     people = [Subject(PERSON, p.id, p.name) for p in m.active_people() if p.id != me]
-    agendas = [Subject(AGENDA, x, m.task(x).title) for x in m.agenda_targets() if not is_person(x) and x != TODAY and is_agenda(m, x)]
+    # A regular meeting's occurrences aren't listed, and regular meetings come after the other agendas (release 5.165,
+    # decision 773): the box is for what needs bringing up.
+    found = [x for x in m.agenda_targets() if not is_person(x) and x != TODAY and is_agenda(m, x) and not occurrence(m, m.task(x))]
+    agendas = [Subject(AGENDA, x, m.task(x).title) for x in sorted(found, key=lambda x: bool(m.task(x).meeting and m.task(x).recurrence))]
     labels = [Subject(LABEL, lb.name, lb.name) for lb in m.active_labels()]
     return people + agendas + labels
 
@@ -454,6 +460,13 @@ def touched(m: Model) -> dict[str, date]:
         if task_id in out and d > out[task_id]:
             out[task_id] = d
     return out
+
+
+def is_routine(m: Model, t: Task) -> bool:
+    """Routine work, as the code already knows it (release 5.165, decision 773): a routine task (``recurrence``), a regular
+    meeting (a meeting with one), or a regular meeting's occurrence (``meetings.occurrence``). Release 5.167 gives this one
+    name in ``kinds.py``: whichever is built second uses the other's."""
+    return bool(t.recurrence) or occurrence(m, t)
 
 
 def worklike(t: Task) -> bool:
@@ -779,8 +792,13 @@ class Builder:
         on_agenda = {a.task for a in agenda.agenda or () if a.task}
         waiting_on, waiting_you, other = self.person_lists(p.id)
         waiting_on = [x for x in waiting_on if x not in on_agenda]
-        waiting_you = [x for x in waiting_you if x not in on_agenda]
-        other = [x for x in other if x not in on_agenda]
+        # Routine work goes last, folded, and out of the chips (release 5.165, decision 773): routine tasks and the regular
+        # meetings they're on. One on their agenda, or waiting on them, stays where it would be.
+        routine = [x for x in (*waiting_you, *other) if x not in on_agenda and is_routine(m, m.task(x))]
+        routine += [t.id for t in m.tasks.values() if t.meeting and t.recurrence and is_open(t) and p.id in (*t.leads, *t.assignees)
+                    and t.id not in on_agenda and t.id not in routine]
+        waiting_you = [x for x in waiting_you if x not in on_agenda and x not in routine]
+        other = [x for x in other if x not in on_agenda and x not in routine]
         shared = [m.task(x) for x in (*on_agenda, *waiting_on, *waiting_you) if worklike(m.task(x))]
         last = self.last_discussed(p.id)
         last_day = to_date(last.closed[:10]) if last and last.closed else None
@@ -816,6 +834,9 @@ class Builder:
         changed = self.changed_section(involved, since, why, activity_href(s, since), {p.id})
         if changed:
             sections.append(changed)
+        if routine:
+            sections.append(Section("routine", "Routine", str(len(routine)), "routine tasks and regular meetings",
+                                    body=self.task_list("routine", routine, more, with_status=False), folded=True))
         kind = " · ".join(x for x in (KIND_WORDS[PERSON], p.role or "", p.group or "") if x)
         return Summary(s, kind, initials(p.name), facts, chips, sections)
 

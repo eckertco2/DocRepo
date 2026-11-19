@@ -220,6 +220,9 @@ class CaptureDraft:
     #: One of the captures a note split by # task makes (the knowledge base's decision 29, release 5.32): it isn't split
     #: again, and Add to agenda puts its task, with its text, on the agenda.
     split_part: bool = False
+    #: A split note's files that go with more than one of its captures (release 5.165, decision 767), by ``id`` of their
+    #: row: None until the first capture saves it, then its document, which the others link to. The parts share this.
+    shared: dict[int, str | None] = field(default_factory=dict)
 
     def words(self) -> str:
         """The content text's words, without its marks: what titles, descriptions and Parse and populate read."""
@@ -407,12 +410,19 @@ def _check(draft: CaptureDraft, task_exists: bool) -> None:
 
 
 # ---- a note split by # task (the knowledge base's phase 0, decisions 29 and 30; release 5.32) ----
-def part_of(row: FileRow, files: list[FileRow], task_ids: list[str]) -> str | None:
-    """Which capture of a split note a file goes with (decision 30): the task whose section the cursor was in when it was
-    added, while that task has a section; else the one for the lines under no # task (None). An email's parts go with
-    the email."""
+def goes_with(row: FileRow, files: list[FileRow], task_ids: list[str]) -> list[str | None]:
+    """Which captures of a split note a file goes with (decision 30, as release 5.165's decision 767 amends it), by their
+    tasks, None for the one for the lines under no # task. ``task_ids`` are the tasks the note names, in the order of
+    their parts. A file added in a # section goes with that section's tasks (``section`` holds their IDs, the first the
+    section's own; a pick by hand holds one); a file added outside any section goes with every task named; one moved to
+    Unfiled by hand (``items.UNFILED``), or with no task named, with the unfiled one. An email's parts go with the email."""
     top = row if row.of is None else next((r for r in files if r.email is not None and r.email is row.of), row)
-    return top.section if top.section in task_ids else None
+    if top.section == items.UNFILED:
+        return [None]
+    mine = [t for t in (top.section or "").split() if t in task_ids]
+    if mine:
+        return mine
+    return list(task_ids) or [None]
 
 
 def held_text(files: list[FileRow]) -> str:
@@ -434,7 +444,12 @@ def split_parts(draft: CaptureDraft, reading: items.Reading, read_part: Callable
         return None
     secs, rest = items.sections(reading)
     source = (draft.content.strip() if draft.formatted else draft.words()).split("\n")
-    task_ids = [sec.task for sec in secs]
+    # Every task a section's heading or note names has a part, in the order its section comes: one named beside the
+    # section's own (#Installation #Rigging plan) holds only the files that go with it (decision 767).
+    task_ids = list(dict.fromkeys(t for sec in secs for t in sec.tasks or [sec.task]))
+    lines_of = {sec.task: sec.lines for sec in secs}
+    goes = {id(r): goes_with(r, draft.files, task_ids) for r in draft.files}
+    shared: dict[int, str | None] = {key: None for key, where in goes.items() if len(where) > 1}
 
     def part(task: str | None, numbers: list[int]) -> CaptureDraft:
         lines: list[str] = []
@@ -446,7 +461,7 @@ def split_parts(draft: CaptureDraft, reading: items.Reading, read_part: Callable
             lines.append(source[n] if n < len(source) else "")
         lead = next((i for i, line in enumerate(lines) if line.strip()), 0)  # the empty lines the part's text loses at its start
         out = replace(draft, content="\n".join(lines[lead:]).rstrip(), task=task, agenda=list(draft.agenda), item_overrides={},
-                      split_part=True, files=[r for r in draft.files if part_of(r, draft.files, task_ids) == task])
+                      split_part=True, files=[r for r in draft.files if task in goes[id(r)]], shared=shared)
         if draft.item_overrides:
             mine = {it.line: it.key for it in read_part(out).items}
             for key, change in draft.item_overrides.items():
@@ -460,7 +475,7 @@ def split_parts(draft: CaptureDraft, reading: items.Reading, read_part: Callable
     def empty(p: CaptureDraft) -> bool:  # only # headings, and no files: nothing to keep
         return not p.files and all(not L.raw.strip() or L.heading for L in read_part(p).lines)
 
-    parts = [p for p in (part(sec.task, sec.lines) for sec in secs) if not empty(p)]
+    parts = [p for p in (part(task, lines_of.get(task, [])) for task in task_ids) if not empty(p)]
     leftover = part(None, rest)
     if leftover.words().strip() or leftover.files:
         parts.append(leftover)
@@ -670,6 +685,13 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
             for row in draft.files:
                 if not row.described:
                     continue  # an email's own row is its text and its .msg file; an unticked part is left out
+                if draft.shared.get(id(row)):
+                    # A file of a split note that goes with several # tasks (release 5.165, decision 767): one document,
+                    # saved once, with the first task named, and linked to this capture too, so it's on each task's page.
+                    doc = str(draft.shared[id(row)])
+                    if not conn.execute("SELECT 1 FROM capture_documents WHERE capture = ? AND document = ?", (capture_id, doc)).fetchone():
+                        captures.link_document(conn, capture_id, doc, save_a_copy=row.save_a_copy, extract=row.extract)
+                    continue
                 desc = row.description.strip() or default_description(row, holder_title)
                 row.description = desc
                 if row.part and row.part.attachment:
@@ -683,6 +705,8 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
                     captures.add_attachment(conn, capture_id, name)
                     captures.link_document(conn, capture_id, doc, save_a_copy=row.save_a_copy, extract=row.extract)
                     documents.append((doc, row, a))
+                    if id(row) in draft.shared:
+                        draft.shared[id(row)] = doc
                     continue
                 link = is_link(row.path)  # a link is matched exactly; a path in any case, as Windows does
                 same = "original = ?" if link else "lower(original) = lower(?)"
@@ -694,6 +718,8 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
                     doc = captures.add_document(conn, name=row.name, description=desc, original=row.path)
                     if link or is_folder(row.path):  # a folder has no text either (release 5.66)
                         conn.execute("UPDATE documents SET text_status = 'none', text_note = ? WHERE id = ?", (NO_TEXT if link else FOLDER_TEXT, doc))
+                if id(row) in draft.shared:
+                    draft.shared[id(row)] = doc
                 if conn.execute("SELECT 1 FROM capture_documents WHERE capture = ? AND document = ?", (capture_id, doc)).fetchone():
                     continue
                 captures.link_document(conn, capture_id, doc, save_a_copy=row.save_a_copy, extract=row.extract)

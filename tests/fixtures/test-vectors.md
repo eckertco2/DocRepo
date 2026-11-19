@@ -213,7 +213,7 @@ The `**` names in a capture, read by `read` and `itemText` in `docs/browse-tool/
 | **permit, A-12.5. | Permit no.: A-12.5. [home] |
 | **decision, we go with option B. It's cheaper over five years. | Decision "We go with option B. It's cheaper over five years." [home] |
 | - **decision, we go with option B.\n  - It's cheaper\n  - It's quicker | Decision "We go with option B.\n- It's cheaper\n- It's quicker" [home] |
-| **decision, we go with option B.\n- It's cheaper | Decision "We go with option B." [home] |
+| **decision, we go with option B.\n- It's cheaper | Decision "We go with option B.\n- It's cheaper" [home] |
 | **closed, #Rigging plan sling drawing approved. Will recheck Friday. | Update Closed "Sling drawing approved. Will recheck Friday." [T000012] |
 | **done, #Rigging plan. | Update Closed "" [T000012] |
 | **closed #Rigging plan | Update Closed "" [T000012] |
@@ -228,7 +228,7 @@ The `**` names in a capture, read by `read` and `itemText` in `docs/browse-tool/
 | **event, Spring outage, 3 to 14 Nov. | Plant event "Spring outage" start 2026-11-03 due 2026-11-14 [home] |
 | @Tom check the pump. **due, 5 Nov. | Task "Check the pump" for Tom Becker [home] / Due: 2026-11-05. [item 0] |
 | - @Tom check the pump\n  - **due, 5 Nov. | Task "Check the pump" for Tom Becker [home] / Due: 2026-11-05. [item 0] |
-| @Tom check the pump\n- **due, 5 Nov. | Task "Check the pump" for Tom Becker [home] / Due: 2026-11-05. [home] |
+| @Tom check the pump\n- **due, 5 Nov. | Task "Check the pump" for Tom Becker [home] / Due: 2026-11-05. [item 0] |
 | #Rigging plan **due, 5 Nov. | Due: 2026-11-05. Due is already 2026-10-14: change it with Update or Edit task. [T000012] |
 | **key date, by Nov 25 prep done, deadline, #Rigging plan. | Key date: End 2026-11-25. Description "Prep done". Deadline. [T000012] |
 | #Rigging plan\n**due, 5 Nov.\nNotes on it. | Due: 2026-11-05. Due is already 2026-10-14: change it with Update or Edit task. [T000012] / Note "Notes on it." [T000012] |

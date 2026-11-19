@@ -112,3 +112,32 @@ def test_a_capture_hotkey_restores_the_capture_window(app):
     app.window.setWindowState(MIN)
     app.hotkey_actions[hotkey.HOTKEY_IDS["note_hotkey"]]()
     assert app.window.isVisible() and not app.window.isMinimized()
+
+
+# ---- when Windows refuses the foreground (release 5.165, decision 771) ----
+def test_the_fallback_runs_for_every_caller_and_a_refusal_is_logged_not_raised(qapp, monkeypatch, caplog):
+    from docrepo.ui import front
+
+    handles: list[int] = []
+    monkeypatch.setattr(front, "FOREGROUND", lambda hwnd: handles.append(hwnd) or True)
+    w = QWidget()
+    w.show()
+    w.setWindowState(MIN)
+    bring_to_front(w)
+    assert handles == [int(w.winId())] and not w.isMinimized()
+
+    def refuses(_hwnd):
+        raise OSError("refused")
+
+    monkeypatch.setattr(front, "FOREGROUND", refuses)
+    with caplog.at_level("WARNING"):
+        bring_to_front(w)  # no error reaches the caller
+    assert w.isVisible() and "couldn't bring a window to the front: OSError" in caplog.text
+    w.close()
+
+
+def test_offscreen_there_is_no_fallback(qapp):
+    from docrepo.ui import front
+
+    assert front.FOREGROUND is None and not front._on_windows()  # the tests never touch the desktop's foreground
+    assert front.take_foreground(QWidget()) is True

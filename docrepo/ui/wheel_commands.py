@@ -85,9 +85,10 @@ def _search_files(app: CaptureApp, _args: Mapping[str, Any]) -> None:
 
 
 def _search_everything(app: CaptureApp, _args: Mapping[str, Any]) -> None:
+    from docrepo.ui.search_scope import open_search  # Qt's, so imported when it's run
+
     app.show_browse()
-    app.browse.search_box.setFocus()
-    app.browse.search_box.selectAll()
+    open_search(app.browse.search_box)  # clean each time (release 5.165, decision 769)
 
 
 def _summary_open(app: CaptureApp, args: Mapping[str, Any]) -> None:

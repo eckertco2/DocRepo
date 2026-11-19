@@ -38,6 +38,7 @@ from docrepo.safe_fs import WriteRefused
 from docrepo.save import CaptureDraft, SaveError, save_capture
 from docrepo.tasks import TaskError
 from docrepo.ui import tokens
+from docrepo.ui.front import bring_to_front
 from docrepo.ui.icons import icon
 from docrepo.ui.lists.notes_pages import grouped_outline
 from docrepo.ui.look import LOOK
@@ -106,6 +107,9 @@ class Workspace(QWidget):
         self.came_from: tuple[str, str, str, bool] | None = None
         self._found: tuple[tuple, dict] | None = None
         self._sizes: list[int] | None = None
+        #: The browse window as it was before the workspace maximised it (release 5.165, decision 771): whether it was
+        #: maximised, and its size and place, restored when the workspace goes.
+        self._window: tuple[bool, QRect] | None = None
         self._rows: dict[str, ws.DateRow] = {}
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -971,8 +975,19 @@ def open_workspace(browse: BrowseWindow, task_id: str, from_today: bool | None =
     _show(browse, w)
     w.render()
     w.pane.verticalScrollBar().setValue(0)
+    _to_front(browse, w)
     w.setFocus(Qt.FocusReason.OtherFocusReason)
     browse.say(f"{ws.gathered_words(m, task_id)} Esc goes back to {w.origin_name()}.")
+
+
+def _to_front(browse: BrowseWindow, w: Workspace) -> None:
+    """The workspace's window maximised, restored if it was minimised, and in front with the keyboard (release 5.165,
+    decision 771): Qt calls a minimised window, or one behind another program, visible, so showing it isn't enough.
+    What it was before is kept, for ``leave`` to restore."""
+    if w._window is None:
+        w._window = (bool(browse.windowState() & Qt.WindowState.WindowMaximized), QRect(browse.normalGeometry()))
+    browse.setWindowState((browse.windowState() & ~Qt.WindowState.WindowMinimized) | Qt.WindowState.WindowMaximized)
+    bring_to_front(browse)
 
 
 def _show(browse: BrowseWindow, w: Workspace) -> None:
@@ -999,6 +1014,13 @@ def leave(browse: BrowseWindow) -> None:
     browse.detail.show()
     if w._sizes:
         browse.split.setSizes(w._sizes)
+    if w._window is not None:  # the size and place the browse window had before (decision 771)
+        was_maximised, geometry = w._window
+        w._window = None
+        if not was_maximised:
+            browse.setWindowState(browse.windowState() & ~Qt.WindowState.WindowMaximized)
+            if geometry.isValid():
+                browse.setGeometry(geometry)
 
 
 def render(browse: BrowseWindow) -> None:
@@ -1039,6 +1061,7 @@ def come_back(browse: BrowseWindow) -> bool:
     w.meeting = w.editing = ""
     _show(browse, w)
     w.render()
+    _to_front(browse, w)
     w.setFocus(Qt.FocusReason.OtherFocusReason)
     browse.say(f"Back in the workspace of {browse.model().task(here).title}.")
     return True

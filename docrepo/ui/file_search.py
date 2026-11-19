@@ -22,6 +22,7 @@ from docrepo import task_view_pages as pages
 from docrepo.captures import capture_folder
 from docrepo.overview import Record
 from docrepo.search import extracted_text
+from docrepo.ui.filter_chips import FilterChips
 from docrepo.ui.front import bring_to_front
 from docrepo.ui.result_list import ResultList, Row
 from docrepo.ui.style import page_css, style_sheet
@@ -80,6 +81,9 @@ class FileSearch(QWidget):
         self.box.installEventFilter(self)
         tl.addWidget(self.box)
         lay.addWidget(top)
+        # Each filter in force, as a chip with a cross (release 5.165, decision 769): a typed filter leaves the box.
+        self.chips = FilterChips(self.refresh)
+        lay.addWidget(self.chips)
         split = QSplitter(Qt.Orientation.Horizontal)
         self.list = ResultList(self.ctx.now().date())
         self.list.chosen.connect(lambda _row: self.show_preview())
@@ -121,14 +125,24 @@ class FileSearch(QWidget):
         QShortcut(QKeySequence("Ctrl+W"), self, self.hide)
 
     # ---- opening ----
-    def open_it(self, screen) -> None:
-        """Read what's there now, and show the window at the centre of the monitor, with the cursor in the box."""
+    def open_it(self, screen, words: str = "") -> None:
+        """Read what's there now, and show the window at the centre of the monitor, with the cursor in the box. It starts
+        clean each time (release 5.165, decision 769): no filter, and only the ``words`` carried in on purpose (a
+        selection searched, a task's name) in the box."""
+        self.filters.clear()
+        self.box.blockSignals(True)
+        self.box.setText("")
+        self.box.blockSignals(False)
+        self.query = ""
         self.load()
-        area = screen.availableGeometry()
-        self.move(area.x() + (area.width() - self.width()) // 2, area.y() + (area.height() - self.height()) // 3)
+        if words:
+            self.box.setText(words)
+        if screen is not None:
+            area = screen.availableGeometry()
+            self.move(area.x() + (area.width() - self.width()) // 2, area.y() + (area.height() - self.height()) // 3)
         bring_to_front(self)  # restored if it was minimized (release 5.106, decision 405)
         self.box.setFocus()
-        self.box.selectAll()
+        self.box.end(False)
 
     def load(self) -> None:
         self.records = file_search.records(self.ctx.conn, self.ctx.model(), self.ctx.data_root)
@@ -199,6 +213,7 @@ class FileSearch(QWidget):
 
     def refresh(self, keep: bool = False) -> None:
         m = self.ctx.model()
+        self.chips.show_filters(self.filters, m)
         words, neg = finder.terms(self.query)
         current = self.list.current()
         was = self.list.rows[current].record.id if keep and 0 <= current < len(self.list.rows) and self.list.rows[current].record else None
@@ -268,7 +283,11 @@ class FileSearch(QWidget):
             return
         if name == "task":
             self.hide()
-            self.app.show_browse(None, r.task)
+            if not r.task and r.capture:  # an unfiled capture's file (release 5.165, decision 768): its capture
+                self.app.show_browse()
+                self.browse.go_capture(r.capture)
+            else:
+                self.app.show_browse(None, r.task)
         elif name == "copy":
             QGuiApplication.clipboard().setText(opener.copy_text([r.path]) if r.path else "")
             self.foot.setText(f"Copied the path of {r.title}.")

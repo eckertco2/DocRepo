@@ -44,7 +44,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from PySide6.QtCore import QByteArray, QPoint, QRect, QRectF, Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import (QBrush, QColor, QFont, QFontMetrics, QImage, QPainter, QPainterPath, QTextBlockFormat, QTextCharFormat,
+from PySide6.QtGui import (QAction, QBrush, QColor, QFont, QFontMetrics, QImage, QPainter, QPainterPath, QTextBlockFormat, QTextCharFormat,
                            QTextCursor, QTextDocument, QTextFormat, QTextImageFormat, QTextLength, QTextListFormat, QTextTable,
                            QTextTableFormat)
 from PySide6.QtWidgets import QSizePolicy, QTextEdit, QWidget
@@ -753,6 +753,16 @@ class NotesEdit(RichEdit):
             menu.addSeparator()
             menu.addAction("Remove row", lambda: table.removeRows(r, 1) if table.rows() > 1 else None)
             menu.addAction("Remove column", lambda: table.removeColumns(col, 1) if table.columns() > 1 else None)
+        pic = self.picture_at(event.pos())
+        if pic:  # a picture (release 5.165, decision 770): its file, or its document's page
+            first = menu.actions()[0] if menu.actions() else None
+            go = QAction("Go to its document", menu)
+            go.triggered.connect(lambda _=False, pic=pic: self.open_ref.emit(pic))
+            opens = QAction("Open picture", menu)
+            opens.triggered.connect(lambda _=False, pic=pic: self.open_link.emit(f"openpic:{pic}"))
+            menu.insertActions(first, [opens, go])
+            if first is not None:
+                menu.insertSeparator(first)
         # Move to task (release 5.143, decision 613), and on a pointer line Bring the lines back.
         menu.addSeparator()
         menu.addAction("Move to task…\tAlt+Shift+M", self.move_requested.emit)
@@ -1708,8 +1718,40 @@ class NotesEdit(RichEdit):
                 return b
         return None
 
+    def picture_at(self, pos: QPoint) -> str | None:
+        """The document ID of the pasted picture under ``pos`` (its image's name is ``docimg:<id>``), or None: a "File:"
+        line's link is a document too, but no picture."""
+        if not self.anchorAt(pos).startswith("document:"):
+            return None
+        at = self.cursorForPosition(pos).position()
+        for p in (at, at - 1):
+            if p < 0:
+                continue
+            c = QTextCursor(self.document())
+            c.setPosition(p)
+            c.setPosition(p + 1, QTextCursor.MoveMode.KeepAnchor)
+            f = c.charFormat()
+            if f.isImageFormat() and (name := f.toImageFormat().name()).startswith("docimg:"):
+                return name.partition(":")[2]
+        return None
+
+    def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        """A double-click on a picture opens its file, as a saved file opens (release 5.165, decision 770)."""
+        if event.button() == Qt.MouseButton.LeftButton and (pic := self.picture_at(event.position().toPoint())):
+            self.open_link.emit(f"openpic:{pic}")
+            return
+        super().mouseDoubleClickEvent(event)
+
     def mousePressEvent(self, event) -> None:  # noqa: N802 - Qt's name
         pos = event.position().toPoint()
+        if event.button() == Qt.MouseButton.LeftButton and (pic := self.picture_at(pos)):
+            # A click on a picture stays where it is (release 5.165, decision 770): a plain click puts the cursor there,
+            # nothing more; Ctrl+click opens its file. Its document is Go to its document, on the right-click menu.
+            if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                self.open_link.emit(f"openpic:{pic}")
+                return
+            super().mousePressEvent(event)
+            return
         if event.button() == Qt.MouseButton.LeftButton:
             h = self.heading_row_at(pos) if pos.x() < LEFT else None
             if h is not None:
@@ -1794,7 +1836,10 @@ class NotesEdit(RichEdit):
         address = self.address_at(pos) if not scheme else None
         mark = self.mark_at(pos)
         tile = self.tile_hit(pos)
-        hand = ((row is not None and pos.x() < LEFT) or mark is not None or scheme in ("capture", "document", "task", "moved", "from")
+        picture = self.picture_at(pos) is not None  # a picture's click puts the cursor there; Ctrl+click opens it (decision 770)
+        ctrl = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
+        hand = ((row is not None and pos.x() < LEFT) or mark is not None
+                or (scheme in ("capture", "document", "task", "moved", "from") and (not picture or ctrl))
                 or (scheme in ("change", "set") and target != self.page_task) or (tile is not None and tile[0] == "circle")
                 or self.checkbox_at(pos) is not None or (address is not None and event.modifiers() & Qt.KeyboardModifier.ControlModifier))
         self.viewport().setToolTip(f"{mark.text()}. Click to open the capture." if mark is not None

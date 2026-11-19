@@ -538,7 +538,7 @@ def test_enter_opens_through_the_allow_list(app, files, qapp):
 
 
 def test_tab_goes_to_its_task(app, files):
-    files.list.choose(files.list.choosable()[0])
+    files.list.choose(next(i for i in files.list.choosable() if files.list.rows[i].record.task))  # an Unfiled row's is its capture
     r = files.current_record()
     files.act("task")
     assert app.browse.isVisible() and app.browse.sel == ("task", r.task) and not files.isVisible()
@@ -562,3 +562,42 @@ def test_esc_clears_then_closes(app, files):
     assert files.box.text() == "" and files.isVisible()
     files.eventFilter(files.box, event)
     assert not files.isVisible()
+
+
+# ---- a search starts clean (release 5.165, decision 769) ----
+def test_file_search_opens_clean_and_shows_its_filters_as_chips(app, files):
+    files.box.setText("type:pdf pump")
+    assert files.filters.types == {"pdf"} and files.box.text() == "pump"
+    assert [b.text() for b in files.chips.buttons()] == ["Type: PDF  ×"] and not files.chips.isHidden()
+    files.chips.buttons()[0].click()  # the chip's cross takes the filter off
+    assert not files.filters.types and files.chips.isHidden()
+    files.box.setText("type:pdf ")
+    files.hide()
+    app.wheels.file_search()  # opened again: no filter and an empty box
+    assert not files.filters.count() and files.box.text() == "" and files.chips.isHidden()
+    files.open_it(None, "seal kit")  # words carried in on purpose stay
+    assert files.box.text() == "seal kit"
+
+
+def test_search_everything_opens_with_its_box_cleared(app):
+    from docrepo.ui import wheel_commands
+
+    app.show_browse()
+    app.browse.search_box.setText("type:pdf pump")
+    wheel_commands._search_everything(app, {})
+    assert app.browse.search_box.text() == ""
+    app.browse.search_box.setText("from:Tom")
+    next(c for c in app.browse.palette_commands() if c.name == "Search everything").run()
+    assert app.browse.search_box.text() == ""
+
+
+def test_tab_on_an_unfiled_file_goes_to_its_capture(app, files, tmp_path):
+    from docrepo.overview import Record
+
+    m = app.ctx.model()
+    c = next(c for c in m.live_captures() if not m.capture_tasks(c))
+    files.records = [Record("file", "D999999", "", c.saved, "loose.txt", "", "", "text", "Linked file", "a Note", "", c.id, str(tmp_path / "loose.txt"), "")]
+    files.refresh()
+    files.list.choose(files.list.choosable()[0])
+    files.act("task")
+    assert app.browse.sel == ("capture", c.id) and not files.isVisible()
