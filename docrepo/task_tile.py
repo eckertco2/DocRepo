@@ -3,7 +3,8 @@ are listed, worked out here without Qt, so the fast run tests it, as ``file_rows
 
 A tile, left to right:
 - depth ticks, in a flat list only (decision 570);
-- the state circle, which opens the state menu (564);
+- the state circle, which opens the state menu (564), or a collection's folder (release 5.167);
+- a small mark for a parent task's branches or a routine task's loop (release 5.168, decision 786): a single task has none;
 - the title, cut to fit (565);
 - Urgent's flag and the two-parents mark (569, 570);
 - the view's own quiet context;
@@ -22,6 +23,7 @@ from dataclasses import dataclass
 from datetime import date
 from html import escape
 
+from docrepo import kinds
 from docrepo import waits as wait_records
 from docrepo.dates import day_diff, days_words, long_date, to_date
 from docrepo.model import TODAY, Model, Task
@@ -35,6 +37,34 @@ COLLECTION_STATE = "Collection"
 def shown_state(t: Task) -> str:
     """A tile's state: the task's own, or ``COLLECTION_STATE`` for a collection, which has no state to show."""
     return COLLECTION_STATE if getattr(t, "collection", False) else t.state
+
+
+# ---- the kind's mark (release 5.168, the design workspace's docs/mods/collections-and-kinds-plan.md, decision 786) ----
+#: The mark between the circle and the title, by kind: branches for a parent task, a loop for a routine task. A single task
+#: has none, so most rows stay as quiet as they were; a collection has its folder in the circle's place.
+KIND_ICONS = {kinds.PARENT: "kind-parent", kinds.ROUTINE: "kind-routine"}
+
+
+def kind_tip(m: Model, t: Task, kind: str) -> str:
+    """What a kind's mark says: "Parent task: 3 subtasks, 2 open", or "Routine task: Weekly" (the rhythm the "↻ Weekly"
+    chip said), or "Routine task: an occurrence of Business team meeting"."""
+    if kind == kinds.PARENT:
+        subs = [m.tasks[c] for c in m.children_of(t.id) if c in m.tasks and not m.tasks[c].discarded and not m.tasks[c].collection]
+        n, still = len(subs), sum(kinds.is_work(x) for x in subs)
+        return f"Parent task: {n} subtask{'s' if n != 1 else ''}, {still} open"
+    if kind == kinds.ROUTINE:
+        if t.recurrence:
+            return f"Routine task: {t.recurrence}" + (f" until {t.repeat_until}" if t.repeat_until else "")
+        regular = next((m.tasks[p].title for p in m.parents_of(t.id) if p in m.tasks and m.tasks[p].recurrence), "")
+        return f"Routine task: an occurrence of {regular}" if regular else "Routine task"
+    return ""
+
+
+def kind_mark(tile: Tile) -> tuple[str, str] | None:
+    """A tile's kind mark as (icon, tooltip), or None for a single task or a collection: the one recipe the three renderers
+    draw from (the painted tile, the lists' rows and a page's tile)."""
+    icon = KIND_ICONS.get(tile.kind)
+    return (icon, tile.kind_tip) if icon else None
 
 
 # ---- the title (decision 565) ----
@@ -320,6 +350,9 @@ class Tile:
     marks: tuple[Mark | None, ...]
     days: Days | None
     closed: bool
+    #: Its kind (``docrepo.kinds``): "single", "parent", "routine" or "collection" (release 5.168), and the mark's words.
+    kind: str = kinds.SINGLE
+    kind_tip: str = ""
 
 
 def tile(m: Model, task_id: str, today: date, marks_: Marks | None = None, *, hide: Iterable[str] = (), flat: bool = False,
@@ -329,17 +362,18 @@ def tile(m: Model, task_id: str, today: date, marks_: Marks | None = None, *, hi
     t = m.task(task_id)
     marks_ = marks_ if marks_ is not None else marks(m, today)
     d = depth(m, task_id) if flat else -1
+    kind = kinds.kind_of(m, t)
     if t.collection:  # a folder for the circle, and none of the work's priority, flag or days (release 5.167, decision 781)
         return Tile(task_id, t.title, COLLECTION_STATE, "", False, parents_tip(m, task_id, under), d, depth_tip(m, task_id) if d > 0 else "",
-                    slots(task_id, marks_, hide), None, t.state == "Closed")
+                    slots(task_id, marks_, hide), None, t.state == "Closed", kind)
     return Tile(task_id, t.title, t.state, t.priority if t.priority and t.state != "Closed" else "", bool(t.urgent),
                 parents_tip(m, task_id, under), d, depth_tip(m, task_id) if d > 0 else "", slots(task_id, marks_, hide),
-                days(t, today), t.state == "Closed")
+                days(t, today), t.state == "Closed", kind, kind_tip(m, t, kind))
 
 
 def tooltip(t: Tile, priority_names: dict[str, str] | None = None) -> str:
     """A tile's tooltip: its whole title, then what its marks and colours say in words."""
-    lines = [t.title, t.state]
+    lines = [t.title, t.state, *([t.kind_tip] if t.kind_tip else [])]
     if t.priority and priority_names:
         lines.append(f"Priority: {priority_names.get(t.priority, t.priority)}")
     if t.urgent:
@@ -379,12 +413,15 @@ def circle_html(t: Tile) -> str:
 
 
 def title_html(t: Tile, link: Callable[[str, str], str]) -> str:
-    """A page tile's title: a link to its page, cut by ``page_title`` with the whole in its tooltip, struck when closed."""
+    """A page tile's title: its kind's mark first (release 5.168), then a link to its page, cut by ``page_title`` with the
+    whole in its tooltip, struck when closed."""
     title = page_title(t.title)
     words = link(f"task:{t.task_id}", title)
     if title != t.title:
         words = f'<span title="{escape(t.title)}">{words}</span>'
-    return f"<s>{words}</s>" if t.closed else words
+    mark = kind_mark(t)
+    lead = (_img(f"tm:{mark[0]}", 12, mark[1]) + " ") if mark else ""
+    return lead + (f"<s>{words}</s>" if t.closed else words)
 
 
 def extras_html(t: Tile) -> str:

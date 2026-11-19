@@ -7,6 +7,7 @@ its bytes; a pasted picture as its PNG; a path or a link as text.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 from dataclasses import asdict
 from datetime import date
@@ -44,7 +45,8 @@ ID_FIELDS = ("conversation_index", "conversation_id", "conversation_topic", "con
 def holds_draft(c: CaptureWindow) -> bool:
     """Whether the window holds something worth keeping: words, a title, files, meeting notes or Make it a task. A task
     picked and nothing else isn't (decision 333)."""
-    return bool(c.content.value()[0].strip() or c.title.text().strip() or c.files or c.meeting_on or c.from_capture)
+    return bool(c.content.value()[0].strip() or c.title.text().strip() or c.files or c.meeting_on or c.from_capture
+                or c.tabs.transcript.toPlainText().strip())
 
 
 # ---- the form ----
@@ -147,7 +149,28 @@ def snapshot(c: CaptureWindow) -> tuple[dict[str, Any], list[tuple[str, Callable
             writes.append((record["stored"], lambda target, s=email.save_msg: s(fs.checked_path(target))))
         data["emails"].append(record)
     data["files"] = rows
+    # The transcript (release 5.170, decision 800): a file beside draft.json, not inside it, named by its text, as a file
+    # already in the folder isn't written again.
+    said = c.tabs.transcript.toPlainText()
+    data["transcript"] = None
+    if said.strip():
+        stored = f"transcript-{hashlib.sha256(said.encode('utf-8')).hexdigest()[:12]}.md"
+        data["transcript"] = stored
+        writes.append((stored, lambda target, t=said: fs.write_text(target, t)))
     return data, writes
+
+
+def restore_transcript(c: CaptureWindow, draft_id: str, data: dict[str, Any]) -> None:
+    """A draft's transcript back into its tab (decision 800)."""
+    stored = data.get("transcript")
+    path = drafts.file_path(c.ctx.data_root, draft_id, stored) if isinstance(stored, str) and stored else None
+    text = ""
+    if path is not None and path.is_file():
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            log.warning("draft %s: its transcript couldn't be read", draft_id)
+    c.tabs.transcript.setPlainText(text)
 
 
 def _safe(name: str) -> str:
@@ -276,7 +299,7 @@ class DraftsList(QFrame):
             line.setSpacing(4)
             n = d.file_count()
             files = f"{n} file{'s' if n != 1 else ''}" if n else "no files"
-            task = task_name(d.data.get("task")) or ("Meeting notes" if d.data.get("meeting") else "No task")
+            task = task_name(d.data.get("task")) or ("Discussion or meeting notes" if d.data.get("meeting") else "No task")
             when = d.when(today)
             # A two-line row (the playbook's 48 px, Body over Caption): its words, then its task, files and when it changed.
             open_ = QPushButton(objectName="subtle")

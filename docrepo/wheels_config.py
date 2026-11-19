@@ -399,8 +399,8 @@ DEFAULT_TEXT = """\
         "E": { "label": "Email or file", "icon": "mail", "command": "capture.selection" },
         // today.new_item: a quick task on Today, as Ctrl+Shift+D makes one.
         "S": { "label": "Today item", "icon": "sun", "command": "today.new_item" },
-        // capture.meeting: meeting notes.
-        "W": { "label": "Meeting", "icon": "people", "command": "capture.meeting" },
+        // capture.meeting: notes of a discussion or meeting, with its summary and transcript.
+        "W": { "label": "Discussion or meeting", "icon": "people", "command": "capture.meeting" },
         // capture.recent: the last captures saved; Enter opens one at its block on its notes page, to work on its words there.
         "NE": { "label": "Recent captures", "icon": "activity", "command": "capture.recent" }
         // capture.pin: the plain pinned window, on no wheel by default. To use it, add a comma after the line above, and:
@@ -535,6 +535,23 @@ def recent_slot(text: str) -> str:
     return text.replace(old, _RECENT_END.replace("{nl}", nl))
 
 
+#: The Capture wheel's W as releases 5.41 to 5.169 wrote it, its comment above it (release 5.170 renames the mode,
+#: decision 794), and what it says now. The slot's own words, without the comma after it or the line's end.
+_OLD_MEETING_COMMENT = "// capture.meeting: meeting notes."
+_MEETING_COMMENT = "// capture.meeting: notes of a discussion or meeting, with its summary and transcript."
+_OLD_MEETING_SLOT = '"W": { "label": "Meeting", "icon": "people", "command": "capture.meeting" }'
+_MEETING_SLOT = '"W": { "label": "Discussion or meeting", "icon": "people", "command": "capture.meeting" }'
+
+
+def discussion_slot(text: str) -> str:
+    """Release 5.170 (the discussions plan's decision 794): the Capture wheel's W, still labelled Meeting as the default
+    wrote it, reads Discussion or meeting, once. A slot you've relabelled, moved or given another command stays yours, and
+    so does every other line."""
+    if text.count(_OLD_MEETING_SLOT) != 1:
+        return text
+    return text.replace(_OLD_MEETING_COMMENT, _MEETING_COMMENT).replace(_OLD_MEETING_SLOT, _MEETING_SLOT)
+
+
 def write_defaults(fs: SafeFS, data_root: Path, registry: Mapping[str, CommandSpec], icons: Iterable[str]) -> None:
     """The config file, if there isn't one, and always the schema beside it, which is DocRepo's own."""
     path = data_root / CONFIG_FILE
@@ -545,7 +562,7 @@ def write_defaults(fs: SafeFS, data_root: Path, registry: Mapping[str, CommandSp
             text = path.read_bytes().decode("utf-8-sig")  # as bytes, so its line endings stay
         except (OSError, UnicodeDecodeError):
             text = ""  # loading it says what's wrong
-        upgraded = recent_slot(progress_slot(summary_slot(draw_at_once(text))))
+        upgraded = discussion_slot(recent_slot(progress_slot(summary_slot(draw_at_once(text)))))
         if upgraded != text:
             fs.write_text(path, upgraded)
     fs.write_text(data_root / SCHEMA_FILE, json.dumps(schema(registry, icons), indent=1) + "\n")

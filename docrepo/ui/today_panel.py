@@ -830,7 +830,7 @@ class TodayPanel(QWidget):
         target = x.target
         if target:
             links = [("Agenda", "Its agenda, in the browse tool", lambda: self._agenda_in_browse(target)),
-                     ("Notes", "Meeting notes, for today's meeting", lambda: today_meetings.open_notes(self.browse, x))]
+                     ("Notes", "Notes of a discussion or meeting, for today's meeting", lambda: today_meetings.open_notes(self.browse, x))]
         elif x.appointment.key and not x.appointment.private:
             links = [("Link…", "Link it to a meeting task or a person, on Today in the browse tool", lambda: self._link_in_browse(x))]
         else:

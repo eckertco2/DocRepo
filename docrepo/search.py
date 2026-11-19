@@ -31,6 +31,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from pathlib import Path
 
+from docrepo import transcripts
 from docrepo.captures import plain, read_content
 from docrepo.dates import short
 from docrepo.db import transaction
@@ -637,7 +638,10 @@ def search(conn: sqlite3.Connection, model: Model, query: str, today: date | Non
             and (keep is None or keep.document(i))] if lists("Document") else []
     for did, body in docs[:limit]:
         d = m.documents[did]
-        out.append(Result("Document", "doc", d.id, d.name, f"{d.id} · {d.description or d.status}", snippet(_after_title(body), words)))
+        # A meeting's transcript says so first, with its meeting (release 5.170, decision 799).
+        on = next((f.task for f in m.saved_of(did) if f.task in m.tasks), None) if transcripts.is_transcript(m, did) else None
+        sub = f"Transcript · {m.task(on).title} · {d.id}" if on else f"{d.id} · {d.description or d.status}"
+        out.append(Result("Document", "doc", d.id, d.name, sub, snippet(_after_title(body), words)))
     copies = [f for f in m.copies if not m.task(f.task).discarded and _has_all(words, f.name) and typed(f.name) and here(f.task)
               and (keep is None or keep.copy(f))] if lists("Saved file") else []
     for f in copies[:limit]:

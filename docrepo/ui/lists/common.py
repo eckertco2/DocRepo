@@ -124,8 +124,9 @@ def tile_cells(m: Model, task_id: str, today, *, context: str = "", flat: bool =
     if dim:
         return Line(t.title, icon=icon, icon_tip=shown, dim=True, tile=True), ""
     tl = task_tile.tile(m, task_id, today, task_tile.marks(m, today), hide=hide, flat=flat, under=under)
+    mark = task_tile.kind_mark(tl)  # release 5.168 (decision 786): branches for a parent, a loop for a routine task
     line = Line(t.title, icon=icon, icon_colour=colour, icon_tip=shown, context=context, closed=tl.closed, tile=True, flag=tl.urgent,
-                parents=tl.parents, depth=tl.depth, depth_tip=tl.depth_tip, marks=tl.marks)
+                parents=tl.parents, depth=tl.depth, depth_tip=tl.depth_tip, marks=tl.marks, kind=mark[0] if mark else "", kind_tip=mark[1] if mark else "")
     return line, task_tile.days_html(tl.days)
 
 

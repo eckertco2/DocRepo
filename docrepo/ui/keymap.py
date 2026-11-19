@@ -20,7 +20,7 @@ KEY_MAP = (
     ("F", "Find", "", "Ctrl+F finds in this view; Ctrl+Shift+F searches everything", ""),
     ("B", "Browse tool", "Ctrl+Shift+B shows it", "", ""),
     ("P", "Parse, Plan", "", "On the timeline: Plan mode, to drag dates (Ctrl+Z undoes a drop)", "Alt+P runs Parse and populate"),
-    ("M", "Meeting notes", "", "Meeting notes for the selected task: its meeting, or a new one under it", "Alt+M turns meeting notes on or off"),
+    ("M", "Discussion or meeting", "", "Notes of a discussion or meeting for the selected task: its meeting, or a new one under it", "Alt+M turns it on or off; Alt+1, 2 and 3 its Notes, Summary and Transcript"),
     ("O", "Open (Find files)", "", "Find files for the selected task: a window of its own for finding and opening its files", ""),
     ("W", "Work on it", "", "The selected task's workspace: the chain of tasks above it, its notes and theirs, its dates and resources. "
                             "On Today, Enter and a double-click open it too; Esc goes back", ""),

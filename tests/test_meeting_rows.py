@@ -81,7 +81,7 @@ def test_the_section_on_the_page(sample_root, ex):
     m = Model(conn)
     pages = Pages(m, TODAY, lambda cid: read_content(root, m.captures[cid]))
     parts = pages.task_parts(ex.project, PageState())
-    assert plain(parts["meetings_summary"]) == "2 · last 10 Nov Meeting notes" and parts["meetings_short"] == "2 · last 10 Nov"
+    assert plain(parts["meetings_summary"]) == "2 · last 10 Nov Discussion or meeting" and parts["meetings_short"] == "2 · last 10 Nov"
     assert f'href="meetingnotes:{ex.project}"' in parts["meetings_summary"]
     body = plain(parts["meetings"])
     assert body.startswith("Cooling tower weekly 10 Nov made Fan blade inspection") and "Attendees" not in body
