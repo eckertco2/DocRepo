@@ -103,7 +103,7 @@ def test_another_state_empties_waiting_on_and_its_back_day(window):
     pick(window, progress.PARKED)
     assert window.people == [] and window.choice == "none" and dimmed(window)
     assert window.today_note.text() == "Not on Today: nothing brings it back by itself."
-    assert window.state_note.text() == "Parked, with this line as its current status. No wait."
+    assert window.state_note.text() == "Parked, with this line as its latest update. No wait."
     assert window.back.isEnabled()  # Back on Today is live for Parked too (decision 757)
     pick(window, progress.WAITING)  # back: Mike from the email's To, and the last Back
     assert window.people == [MIKE] and window.choice == "3d" and not dimmed(window)
@@ -142,7 +142,7 @@ def test_the_state_line_says_what_enter_does(window):
     assert window.state_note.text() == "Was Parked: it goes In progress, with nothing to wait for."
     window.open_for(None, task=INSTALLATION)
     pick(window, progress.CLOSED)
-    assert window.state_note.text() == "Closed, with this line as its last status. No wait. Its 3 open subtasks stay open."
+    assert window.state_note.text() == "Closed, with this line as its last update. No wait. Its 3 open subtasks stay open."
 
 
 # ================= Enter =================

@@ -301,7 +301,7 @@ class ProgressForm(QObject):
         elif self.own_line:
             self.line_name.setText("What you did")
             self.line.setPlaceholderText("What you sent or asked, in a line")
-            self.line.setToolTip("Becomes the task's current status, a line in its status log.")
+            self.line.setToolTip("Becomes the task's latest update, a line in its history.")
         if not self.next_step:
             self.back.set_mode(back_row.ON_TODAY if self.on_today(m) else back_row.OFF_TODAY)
         self.back.setEnabled(self.state_key != progress.CLOSED)
@@ -320,10 +320,10 @@ class ProgressForm(QObject):
                 return f"In progress{how}"
             return f"It stays In progress{how}" if t.state == "In progress" else f"Was {t.state}: it goes In progress{how}"
         if key == progress.PARKED:
-            return "Parked, with this line as its current status. No wait."
+            return "Parked, with this line as its latest update. No wait."
         below = len(open_below(m, t.id)) if t is not None else 0
         more = f" Its {below} open subtask{'s stay' if below != 1 else ' stays'} open." if below else ""
-        return f"Closed, with this line as its last status. No wait.{more}"
+        return f"Closed, with this line as its last update. No wait.{more}"
 
     def on_today(self, m: Model) -> bool:
         return bool(self.task) and any(a.subject == self.task for a in m.today_items())

@@ -154,7 +154,7 @@ def picked_line(model: Model, task_id: str, state: str, others: int) -> str:
 class UndoButton(QPushButton):
     """Undo beside a status line, for ten seconds after a change it can take back (decision 363). A new message hides it."""
 
-    TIP = "Set the state back. The status log keeps both changes."
+    TIP = "Set the state back. The history keeps both changes."
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__("Undo", parent, objectName="link")

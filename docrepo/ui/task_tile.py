@@ -261,7 +261,7 @@ def fill_menu(browse: BrowseWindow, task_id: str, menu: QMenu, own: Iterable[Own
     k = task_menus.key_column()
     menu.addAction(icon("note"), f"Note…{k}N", lambda: browse.open_capture(task=task_id, mode="note")).setToolTip("A note on its notes page")
     menu.addAction(icon("update"), f"Update…{k}U", lambda: browse.open_capture(task=task_id, mode="update")).setToolTip(
-        "Its state, status, dates and more")
+        "Its state, latest update, dates and more")
     menu.addAction(icon("add"), f"New task under this one…{k}T", lambda: browse.open_capture(task=task_id, mode="new_task"))
     menu.addSeparator()
     edit = task_menus.edit_menu(browse, task_id, menu, anchor, after, tell)

@@ -383,7 +383,7 @@ class Stories:
         for u in self.updates(task_id):
             before, state = state, u.state
             c = self.capture_of(u.via)
-            main = (u.status or "Status cleared.") if u.status_changed else self.gist(c) if c and c.created_task != task_id else ""
+            main = (u.status or "Update cleared.") if u.status_changed else self.gist(c) if c and c.created_task != task_id else ""
             events.append(Event(u.at, "update", state=u.state, state_words=state_words(before, u.state) if u.state_changed else "",
                                 main=main, facts=[s for s in (self.field_sentence(e) for e in u.others) if s], via=u.via))
         for k in m.children_of(task_id):
@@ -483,7 +483,7 @@ class Stories:
         changes, added = self.made_by(c.id, task_id)
         for e in changes:
             said.append(state_words(e.from_value or "", e.to_value or "") + "." if e.field == "State"
-                        else "New current status." if e.field == "Current status" else self.field_sentence(e))
+                        else "New update." if e.field == "Current status" else self.field_sentence(e))
         for a in added:
             said.append(self.field_sentence(StatusEntry(task_id, a.added, "Agenda", None, self.m.target_name(a.target), c.id, a.target)))
         update = " ".join(s for s in said if s)

@@ -62,7 +62,7 @@ class PageCommands:
         if self.view == "review":  # the weekly review's step 4 (release 5.128): Mark reviewed first
             review_list.page_actions(self, task_id)
         self._action("Note", lambda: self.open_capture(task=task_id, mode="note"), "Add a note to this task's notes page", icon_name="note", key="N")
-        self._action("Update", lambda: self.open_capture(task=task_id, mode="update"), "Update this task: its state, status, dates and more",
+        self._action("Update", lambda: self.open_capture(task=task_id, mode="update"), "Update this task: its state, latest update, dates and more",
                      icon_name="update", key="U")
         if t.meeting and is_open(t):  # release 5.8
             self._action("Discussion or meeting", lambda: self.open_capture(task=task_id, meeting=True),

@@ -234,7 +234,7 @@ A subtask with a saved file, an old version, a document version, a summary, stat
 
 Install and align the new impeller during the turnaround. Maintenance planning's procedure is attached.
 
-## Current status
+## Latest update
 
 Procedure rev 2 approved. Waiting on the rigging plan.
 
@@ -262,11 +262,11 @@ Bring up the 20 Oct crane booking at the next business team meeting.
 | T000015 | [Q4 overtime budget](../T000015/Task.md) | Not started | None |  |
 | T000019 | [Book the alignment contractor](../T000019/Task.md) | Not started | Tyler Nguyen | 2026-10-09 |
 
-## Status log
+## History
 
 - 2026-10-06 09:55 · Agenda: Business team meeting → Discussed · Agenda view
 - 2026-10-05 09:25 · Agenda: None → Business team meeting · [C000013](../../Captures/2026/10/C000013/capture.md)
-- 2026-10-05 09:12 · Current status: Procedure in review. → Procedure rev 2 approved. Waiting on the rigging plan. · Browse tool
+- 2026-10-05 09:12 · Latest update: Procedure in review. → Procedure rev 2 approved. Waiting on the rigging plan. · Browse tool
 - 2026-09-30 15:10 · State: Not started → In progress · Browse tool
 
 ## Summary log
@@ -315,9 +315,9 @@ A routine meeting with its agenda: open agenda items, one of them a note with no
 
 Business team meeting, weekly on Tuesdays at 9:00, starting 6 Oct. Priya leads; Tom, Mike and I attend.
 
-## Current status
+## Latest update
 
-_No status yet._
+_No update yet._
 
 ## Notes
 
@@ -334,7 +334,7 @@ Business team meeting, weekly on Tuesdays at 9:00, starting 6 Oct. Priya leads; 
 - [Holiday coverage schedule](../T000016/Task.md) · added 2026-10-06
 - Ask whether the December shutdown dates are confirmed. · added 2026-10-08
 
-## Status log
+## History
 
 _No changes yet._
 
@@ -378,9 +378,9 @@ A task with two parents. It's also on a meeting's agenda.
 
 Raise the Q4 overtime forecast for the turnaround.
 
-## Current status
+## Latest update
 
-_No status yet._
+_No update yet._
 
 ## Notes
 
@@ -388,7 +388,7 @@ _No status yet._
 
 _[Tue 6 Oct 2026 · 10:18 am · New task](../../Captures/2026/10/C000015/capture.md)_
 
-## Status log
+## History
 
 - 2026-10-06 10:19 · Parents: Q4 cost reduction → Q4 cost reduction; Installation · Browse tool
 - 2026-10-06 10:18 · Agenda: None → Business team meeting · [C000015](../../Captures/2026/10/C000015/capture.md)

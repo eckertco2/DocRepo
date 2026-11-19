@@ -30,14 +30,14 @@ def test_the_header_has_the_title_state_dates_people_subtasks_and_latest(records
     assert "Fri 27 Nov" in page and "in 50 days" in page
     assert 'title="Tom Becker"' in page
     assert "6 of 7 open" in page and 'src="progress:1:7"' in page
-    assert "Current status" in page and "Impeller arrived on site" in page
+    assert "Latest update" in page and "Impeller arrived on site" in page
     assert 'href="pick:note:C000025"' in page  # the latest note or update, which picks it in the list
 
 
 def test_a_task_with_no_status_says_so(records):
     m, _recs = records
     page = tvp.header(m, replace(m.task("T000003"), current_status=""), [], TODAY, "P001")
-    assert "No status yet." in page and "Latest" not in page
+    assert "No update yet." in page and 'class="sk">Latest<' not in page  # no latest note beside it
     assert 'href="do:update"' not in page  # no Add one since release 5.98 (decision 390): an update is the task page's
     assert "No due date" in page
 

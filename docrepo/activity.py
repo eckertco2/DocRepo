@@ -29,7 +29,7 @@ GROUPS = (("top", "Top-level task"), ("person", "Person"), ("group", "Group"), (
 KINDS = (("task", "New tasks"), ("update", "Updates"), ("note", "Notes"), ("email", "Emails"), ("change", "Changes"), ("doc", "Documents"),
          ("agenda", "Agendas"))
 #: A changed field's chip: what kind of change it was.
-CHANGE_CHIPS = {"State": "State", "Current status": "Status", "Due": "Date", "Deadline": "Date", "Start": "Date", "Reminder": "Date",
+CHANGE_CHIPS = {"State": "State", "Current status": "Update", "Due": "Date", "Deadline": "Date", "Start": "Date", "Reminder": "Date",
                 "Priority": "Priority", "Key date": "Key date", "Key date done": "Key date"}
 #: Where a change was made, when it wasn't in a capture or on a task's page.
 WHERE = {"Agenda view": "In the Agendas view", "Reminders list": "In the reminders list", "Today": "On Today", "Capture window": "In the capture window",
@@ -171,7 +171,7 @@ class Activity:
         for i, e in enumerate(m.status):
             if not in_window(e.at) or e.task not in m.tasks or m.task(e.task).discarded or e.via in m.captures:
                 continue
-            text = ("Status cleared." if is_none(e.to_value) else e.to_value or "") if e.field == "Current status" \
+            text = ("Update cleared." if is_none(e.to_value) else e.to_value or "") if e.field == "Current status" \
                 else self.change_text(e.field, e.from_value, e.to_value)
             facts = [WHERE.get(e.via, e.via if e.via.startswith("Follows ") else f"By {e.via}")] if e.via and e.via != "Browse tool" and not re.match(r"C\d", e.via) else []
             out.append(Line(f"e:{i}", e.at[:16], e.task, e.task, ["change"], CHANGE_CHIPS.get(e.field, "Changed"), text, facts, ("task", e.task)))

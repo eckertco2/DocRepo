@@ -408,7 +408,7 @@ def test_task_edits(browse, monkeypatch):
     assert opened == ["Edit task T000012"]
     assert (t.title, t.description, t.labels, t.inherit_labels, t.leads, t.lead_hours, t.due) == (
         "Rigging plan for the lift", "Mike writes the rigging plan.", ["Safety", "Lifting"], False, ["P003"], 4.0, "2026-10-16")
-    assert any(lb.name == "Lifting" for lb in m.labels) and browse.status.text() == "7 changes in the status log."
+    assert any(lb.name == "Lifting" for lb in m.labels) and browse.status.text() == "7 changes in the history."
     browse.move_task("T000012", "T000008", "T000001")
     assert Model(browse.conn).parents_of("T000012") == ["T000001"]
     browse.move_task("T000001", None, "T000012")
@@ -445,10 +445,10 @@ def test_select_and_edit_selected(browse):
 
     browse.run_dialog = run
     browse.edit_selected_button.click()
-    assert previews[0].startswith("2 tasks change, 4 changes in their status logs.") and "State: Not started → Parked" in previews[0]
+    assert previews[0].startswith("2 tasks change, 4 changes in their histories.") and "State: Not started → Parked" in previews[0]
     m = Model(browse.conn)
     assert [(m.task(x).state, m.task(x).reminder) for x in ("T000016", "T000017")] == [("Parked", "2026-10-12")] * 2
-    assert browse.status.text() == "Changed 2 tasks: 4 changes in their status logs."
+    assert browse.status.text() == "Changed 2 tasks: 4 changes in their histories."
     browse.tick_shown(False)
     browse.tick_shown(True)  # the task tree opens collapsed: only the rows you can see
     assert "T000001" in browse.ticked and "T000012" not in browse.ticked
@@ -475,7 +475,7 @@ def test_a_new_labels_matching_tasks(browse):
     browse.set_view("labels")
     browse.save_label(None, "Lifting", ["crane", "rigging"])
     assert ("task", "T000012") in shown[0]
-    assert "Lifting" in Model(browse.conn).task("T000012").labels and browse.status.text() == "Changed 1 task: 1 change in its status log."
+    assert "Lifting" in Model(browse.conn).task("T000012").labels and browse.status.text() == "Changed 1 task: 1 change in its history."
     browse.save_label("Lifting", "Lifting", ["crane", "rigging"])  # the same keywords: nothing to list again
     assert len(shown) == 1
     browse.find_label_tasks("Line 2")
@@ -517,7 +517,7 @@ def test_the_today_list(browse, monkeypatch):
     browse.go_task("T000012")
     browse.task_pane.top.setFocus()
     browse._key("today")
-    assert browse.status.text() == "Rigging plan is on Today. Its status log says so."
+    assert browse.status.text() == "Rigging plan is on Today. Its history says so."
     add_to = next(b for b in browse.actions.findChildren(QPushButton) if b.text() == "Add to").menu()
     assert add_to.actions()[0].text().startswith("On Today ✓")  # in Add to's menu (release 5.21)
     browse.set_view("today")
@@ -854,7 +854,7 @@ def test_one_letter_per_topic(browse, monkeypatch):
         keys[k].activated.emit()
     assert [(o["mode"], o.get("agenda_focus", False)) for o in opened] == [("note", False), ("new_task", False), ("update", False), ("update", True)]
     keys["D"].activated.emit()
-    assert browse.status.text() == "Rigging plan is on Today. Its status log says so."
+    assert browse.status.text() == "Rigging plan is on Today. Its history says so."
     shown = []
     browse.run_dialog = lambda d: shown.append(d.windowTitle()) or False
     keys["F1"].activated.emit()
@@ -966,7 +966,7 @@ def test_quick_tasks_on_today(browse):
     dialog.put_button.click()
     assert dialog.parents == ["T000008"] and dialog.changed()
     browse.save_task_edit(t.id, dialog.values())
-    assert Model(browse.conn).parents_of(t.id) == ["T000008"] and browse.status.text() == "1 change in the status log."
+    assert Model(browse.conn).parents_of(t.id) == ["T000008"] and browse.status.text() == "1 change in the history."
 
 
 def test_the_suggested_hotkeys(browse):
@@ -1123,7 +1123,7 @@ def test_the_header_s_groups_open_fold_and_are_remembered(browse):
     # Each file once (release 5.145): a document saved on a task isn't counted again as its original or attachment.
     assert "Installation" in header.text() and "Folder" not in header.text() and g["files"].label.text() == "3"
     grid = " ".join(header.head.toPlainText().replace("￼", "").split())  # without the faces' pictures
-    assert "Lead Me 20 h" in grid and "Status In progress" in grid  # the grid
+    assert "Lead Me 20 h" in grid and "State In progress" in grid  # the grid
     g["details"].toggle()
     assert g["details"].is_open and g["details"].head.parentWidget() is g["details"] and "Folder" in header.text()
     assert not header.log_open and "Imported from the Excel tracker" not in header.text()

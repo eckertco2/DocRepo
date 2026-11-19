@@ -36,7 +36,7 @@ if TYPE_CHECKING:
 KIND = "ask"
 #: The command's name, on New T-mail's arrow and a task row's right-click menu in Waiting on others (decision 481).
 LABEL = "Ask for an update"
-TIP = ("A new email in Outlook to the people on this task, asking where it stands, with the last status, the due date and "
+TIP = ("A new email in Outlook to the people on this task, asking where it stands, with the latest update, the due date and "
        "the open subtasks filled in for you to change. You send it; DocRepo never sends email. The reply comes back to this "
        "task when you capture it.")
 #: How many open subtasks the words name before "and n more".
@@ -150,7 +150,7 @@ def question(m: Model, t: Task, today: date) -> str:
         when = f" ({short(to_date(day), today)})" if day else ""
         parts.append(f"The last I have{when}: {_ends(in_sentence(status))}")
     else:
-        parts.append("I have no status for it yet.")
+        parts.append("I have no update on it yet.")
     due = due_of(t, today)
     if due is not None and due.label in ("Due", "Deadline"):
         day = long_date(due.date, today)

@@ -101,7 +101,7 @@ def test_no_status_a_past_due_a_deadline_and_many_subtasks(conn):
     task(conn, "Part 8", parents=[t], state="Closed")
     m = Model(conn)
     words = ask_update.question(m, m.task(t), TODAY)
-    assert words == ("Where does the spare parts list stand? I have no status for it yet. It was due Mon 5 Oct. "
+    assert words == ("Where does the spare parts list stand? I have no update on it yet. It was due Mon 5 Oct. "
                      "Still open under it: Part 1, Part 2, Part 3, Part 4, Part 5 and 2 more.")
     d = task(conn, "Permit pack", deadline="2026-10-20", current_status="Drafted. Waiting on the permit office!")
     words = ask_update.question(Model(conn), Model(conn).task(d), TODAY)

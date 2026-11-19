@@ -1256,7 +1256,7 @@ def _message(conn: sqlite3.Connection, draft: CaptureDraft, r: SaveResult, targe
         bits.append(f"Created {new.id}, {new.title}{f', under {under}' if under else ''}." + ("" if typed_title else " The title came from the content text."))
     if r.updated_task and t:
         n = len(r.changes)
-        bits.append(f"{n} change{'s' if n != 1 else ''} in the status log of {t.title}." if n else f"Added to the status log of {t.title}." if r.capture_id else "")
+        bits.append(f"{n} change{'s' if n != 1 else ''} in the history of {t.title}." if n else f"Added to the history of {t.title}." if r.capture_id else "")
     if r.noted_on:  # a note that's no capture (release 5.69)
         page = model.task(r.noted_on).title
         bits.append(f"Added to the notes of {page}, under {_and_list(r.noted_under)}." if r.noted_under else f"Added to the notes of {page}.")

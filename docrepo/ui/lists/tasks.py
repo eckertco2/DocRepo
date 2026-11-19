@@ -379,7 +379,7 @@ class TaskLists:
             for item in self.tree.items():
                 key = item.data(0, KEY_ROLE)
                 if key and key[0] == "task" and m.task(key[1]).reminder and key[1] in {t.id for t in self._matching(task_list)}:
-                    self.tree.set_actions(item, [("Clear", lambda tid=key[1]: self.clear_reminder(tid), "Clear this reminder. Its status log records it.")])
+                    self.tree.set_actions(item, [("Clear", lambda tid=key[1]: self.clear_reminder(tid), "Clear this reminder. Its history records it.")])
         keyed = self._key_date_rows(None) if with_keys else 0
         if not nodes and not keyed:
             self.tree.add_row(None, None, ['<span class="sub">Nothing here right now.</span>'], selectable=False, span=True)
@@ -398,7 +398,7 @@ class TaskLists:
         return _shape([line, _row_word("Key date"), task_tile.days_html(task_tile.days_to(d.day, today, "Starts" if d.starts else "Due"))])
 
     def _key_date_actions(self, key_id: int) -> list[tuple[str, Callable[[], None], str]]:
-        return [("Done", lambda: self.key_date_done(key_id, True), "Mark this key date done: off Today and this list, and in its task's status log (decision 148)")]
+        return [("Done", lambda: self.key_date_done(key_id, True), "Mark this key date done: off Today and this list, and in its task's history (decision 148)")]
 
     def _key_date_rows(self, parent) -> int:
         """The Overdue and next 7 days list's key dates (release 5.31, decision 150): under a Key dates heading, a row each,

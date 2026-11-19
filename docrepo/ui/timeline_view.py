@@ -2643,7 +2643,7 @@ class TimelineView(QWidget):
             else:
                 entries.append(PreviewEntry(key, line.title, line.says, off_lines=["Left as it is: this change isn't applied."]))
         dialog = PreviewDialog(self, f"Apply {w.name} to your tasks?",
-                               "Each change goes into its task's status log, as Plan mode's do. The what-if goes once it's applied.",
+                               "Each change goes into its task's history, as Plan mode's do. The what-if goes once it's applied.",
                                entries, "", lambda ticked: f"Apply {len(ticked)} change{'' if len(ticked) == 1 else 's'}", back="Keep it as a what-if")
         self.review_dialog = dialog  # kept, so tests can reach it
         if not self.run_dialog(dialog):

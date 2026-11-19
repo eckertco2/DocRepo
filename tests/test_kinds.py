@@ -152,7 +152,7 @@ def test_a_collection_is_in_where_things_are_filed(filed):
     assert c in ids
     assert c in str(search.search(conn, m, "Rigging job aids", TODAY_))
     page = (root / "Tasks" / c / "Task.md").read_text(encoding="utf-8")
-    assert "| Kind | Collection |" in page and "\n| State |" not in page and "\n| Due |" not in page and "## Current status" not in page
+    assert "| Kind | Collection |" in page and "\n| State |" not in page and "\n| Due |" not in page and "## Latest update" not in page
     assert f"{c} · collection" in (root / "Contents.md").read_text(encoding="utf-8")
     sub = (root / "Tasks" / under / "Task.md").read_text(encoding="utf-8")
     assert "| Kind | Single task |" in sub

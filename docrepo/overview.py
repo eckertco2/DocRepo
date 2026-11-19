@@ -22,6 +22,7 @@ from docrepo import markup, notes_page
 from docrepo.captures import capture_folder, held_files
 from docrepo.links import is_folder, is_link
 from docrepo.model import Capture, Model
+from docrepo.tasks import shown_name
 
 #: A file's type, by its extension. Anything else is "other"; a link is "link".
 TYPES = {
@@ -186,11 +187,13 @@ def page_texts(page: str) -> tuple[dict[str, str], list[tuple[str, str]]]:
 
 
 def _changes(model: Model) -> dict[str, list[str]]:
-    """Each capture's field changes, in words, for searching an update by what it changed."""
+    """Each capture's field changes, in words, for searching an update by what it changed: under the name stored and the
+    name shown, so "status" and "latest update" both find one (release 5.173, decision 813)."""
     out: dict[str, list[str]] = {}
     for e in model.status:
         if e.via and e.via.startswith("C"):
-            out.setdefault(e.via, []).append(f"{e.field} {e.to_value or ''}".strip())
+            shown = shown_name(e.field)
+            out.setdefault(e.via, []).append(f"{e.field}{'' if shown == e.field else ' ' + shown} {e.to_value or ''}".strip())
     return out
 
 

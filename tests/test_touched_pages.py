@@ -137,7 +137,7 @@ def test_a_drop_on_a_bin_writes_every_page_it_changes(root, task_id, bucket):
 def test_a_board_move_writes_every_page_it_changes(root, task_id, bucket):
     conn, data_root, fs = root
     out = edits.set_priority(conn, data_root, fs, task_id, bucket, None, AT)
-    assert out.message.endswith("Its status log says so.") and not out.problems
+    assert out.message.endswith("Its history says so.") and not out.problems
     assert f"| Priority | {PRIORITY_NAMES[bucket]} |" in (data_root / "Tasks" / task_id / "Task.md").read_text(encoding="utf-8")
     assert left_to_write(conn, data_root, fs) == 0
     edits.set_priority(conn, data_root, fs, task_id, "", None, AT)

@@ -81,7 +81,7 @@ def test_a_state_change_reads_docs_db_once_and_its_undo_once(browse, monkeypatch
     browse._status_link("undo")
     assert len(loads) == 1 and kept(browse) and len(loads) == 1
     assert browse.model().task(INSTALLATION).state == "In progress" == Model(browse.conn).task(INSTALLATION).state
-    assert browse.status.text() == "Set back. The status log keeps both changes."
+    assert browse.status.text() == "Set back. The history keeps both changes."
     log = [(e.field, e.from_value, e.to_value) for e in Model(browse.conn).status_log_of(INSTALLATION) if e.field == "State"]
     assert log[-2:] == [("State", "In progress", "Parked"), ("State", "Parked", "In progress")]
 
@@ -109,7 +109,7 @@ def test_edit_tasks_save_reads_docs_db_once(browse, monkeypatch):
     browse.edit_task(INSTALLATION)
     assert len(loads) == 1 and kept(browse)
     assert browse.model().task(INSTALLATION).due == "2026-11-06" == Model(browse.conn).task(INSTALLATION).due
-    assert browse.status.text().startswith("1 change in the status log.")
+    assert browse.status.text().startswith("1 change in the history.")
 
 
 def test_quick_edits_save_reads_docs_db_once(browse, monkeypatch):

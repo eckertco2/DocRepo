@@ -35,7 +35,7 @@ from docrepo.kinds import is_work
 from docrepo.schedule import due_of, held_on, is_open, start_of
 from docrepo.stories import Event, RawItem, Stories, clip
 from docrepo.task_links import SHOWN, all_documents, links_of
-from docrepo.tasks import review_every_words
+from docrepo.tasks import review_every_words, shown_name
 from docrepo.views import CapacityRow, label_tasks, markers
 
 CSS = """
@@ -119,7 +119,7 @@ h2 { font-size: 15pt; font-weight: 600; margin-top: 2px; margin-bottom: 4px; }
 STATE_CLASS = {"Not started": "st-ns", "In progress": "st-ip", "Parked": "st-pk", "Closed": "st-cl"}
 #: The task page's history (release 5.21): its tabs, and the names of its scopes. Subtasks is a section of its own now.
 #: The history's tabs. The raw text log is Captures since the notes page (release 5.25, decision 104).
-TABS = (("notes", "Captures"), ("log", "Status log"), ("summaries", "Summaries"), ("files", "Files"))
+TABS = (("notes", "Captures"), ("log", "History"), ("summaries", "Summaries"), ("files", "Files"))
 #: The History group's tabs since release 5.84 (the task pane review's R6): the status log is behind the status, the files are
 #: a group of their own.
 HISTORY_TABS = (("notes", "Captures"), ("summaries", "Summaries"))
@@ -588,7 +588,7 @@ class Pages:
         if t.collection:
             left, right = [("Kind", self.status_value(t))], []
         else:
-            left = [("Status", self.status_value(t)), *self.when_rows(t)]
+            left = [("State", self.status_value(t)), *self.when_rows(t)]
             right = list(self.who_rows(t))
         labels = self.labels_value(t)
         if labels:
@@ -683,12 +683,12 @@ class Pages:
             return "A collection", "", "", ('<span class="sub">A place for notes, files, links, captures and tasks. It is not work, so it '
                                             "has no state, dates or people, and it isn't on Today, the Priorities board, the Timeline or "
                                             "the weekly review. Its tasks are, as any others.</span>")
-        name = "Final status" if t.state == "Closed" else "Current status"
+        name = "Last update" if t.state == "Closed" else "Latest update"
         since = self.status_since(t)
         when = self.long(since) if t.current_status and since else ""
         age = ago(to_date(since), self.today) if when else ""
         body = (multiline(t.current_status) if t.current_status
-                else f'<span class="sub">No status yet.</span> {link(f"update:{t.id}", "Add one", "Update this task")}')
+                else f'<span class="sub">No update yet.</span> {link(f"update:{t.id}", "Add one", "Update this task")}')
         if t.state != "Closed" and not t.discarded:  # Log progress, and Got it while it waits (release 5.139, decisions 581 and 583)
             acts = [link(f"progress:{t.id}", "Log progress…", "A line of what you did, who you're waiting on and when to follow up")]
             if waits.current(self.m, t.id) is not None:
@@ -710,7 +710,7 @@ class Pages:
         task waits (release 5.139; "asked Mon" in 5.125)."""
         name, date, age, body = self.status_parts(t)
         wait, wait_tip, late = self.wait_parts(t)
-        when = f'<td align="right" class="rel" title="The current status last changed {age}">{esc(date)}</td>' if date else ""
+        when = f'<td align="right" class="rel" title="The latest update was written {age}">{esc(date)}</td>' if date else ""
         if wait:
             shown = f'<span class="over">{esc(wait)}</span>' if late else esc(wait)
             when += f'<td align="right" class="rel" width="1" title="{esc(wait_tip)}">&nbsp;·&nbsp;{shown}</td>'
@@ -1656,7 +1656,7 @@ class Pages:
             if e.text:
                 out += f"<br>{multiline(e.text)}"
             if e.status:
-                out += f'<br><span class="sub">Status:</span> {multiline(e.status)}'
+                out += f'<br><span class="sub">Update:</span> {multiline(e.status)}'
             if e.facts:
                 out += f'<br><span class="facts">{" · ".join(esc(x) for x in e.facts)}</span>'
             return out + "</p>"
@@ -1715,7 +1715,7 @@ class Pages:
         notes = self.m.raw_log_of(task_id)
         empty = kind == "notes" and not notes
         dates = sorted(e.at for e in (self.stories.story(task_id) if kind == "log" else notes))
-        summary = (k.current_status or "No status yet") if kind == "log" else "No entries" if empty else f"{len(notes)} entr{'ies' if len(notes) > 1 else 'y'}"
+        summary = (k.current_status or "No update yet") if kind == "log" else "No entries" if empty else f"{len(notes)} entr{'ies' if len(notes) > 1 else 'y'}"
         caret = "" if empty else f'<a href="chap:{esc(task_id)}">{CHEVRON_DOWN if is_open_ else CHEVRON_RIGHT}</a>'
         head = (f'<tr><td class="ch" width="{18 + 16 * depth}" align="right">{caret}</td><td class="ch"><span class="ttl">{esc(k.title)}</span> {state_chip(k.state)} '
                 f'<span class="sub">{esc(clip(summary, 90))}{" · " + self.day(dates[-1]) if dates else ""}</span>'
@@ -1766,7 +1766,7 @@ class Pages:
             rows.append(("Filed", esc(f"{self.long(c.filed)} {c.filed[11:16]}")))
         changes = [e for e in self.m.status if e.via == c.id]
         if changes:
-            rows.append(("Changes", "<br>".join(esc(f"{e.field}: {e.from_value or 'None'} → {e.to_value or 'None'}") for e in changes)))
+            rows.append(("Changes", "<br>".join(esc(f"{shown_name(e.field)}: {e.from_value or 'None'} → {e.to_value or 'None'}") for e in changes)))
         if c.emails:  # each email, its .msg file and what it's about (round 7's item 93, release 5.74)
             # Reply all beside each email DocRepo can find (release 5.105, the knowledge base's stage K8, release B).
             tip = "Reply all in Outlook, as a T-mail: its replies come back to its task"

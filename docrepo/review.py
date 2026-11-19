@@ -59,7 +59,7 @@ STEPS = (
     Step("unfiled", "Unfiled", "File each capture to its task, or make it a task."),
     Step("due", "Overdue and due in the next 7 days", "Move each date, or close or park the task."),
     Step("waiting", "Waiting on others", "The longest waits first. Ask for an update where one is due."),
-    Step("projects", "Projects due for review", "Read each one's status, what's happened since its last review and what's next, "
+    Step("projects", "Projects due for review", "Read each one's latest update, what's happened since its last review and what's next, "
                                                   "then Mark reviewed (R)."),
     Step("quiet", "Gone quiet", "Nothing has touched these for {days} days. Update, park or close each one."),
     Step("nonext", "No next step", "No open subtask, no Due, no reminder and nothing on Today. Give each its next step."),

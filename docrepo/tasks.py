@@ -32,6 +32,17 @@ FIELDS = (
     ("description", "Description"), ("labels", "Labels"), ("inherit_labels", "Inherit parent labels"), ("review_every", "Review every"),
 )
 FIELD_NAMES = dict(FIELDS)
+#: The words shown for a change's stored name (release 5.173, decision 812). What's stored keeps its name: the
+#: ``status_log`` table, the ``current_status`` column and "Current status" as a change's name in every data root's
+#: history; only what the owner reads says Latest update.
+SHOWN_NAMES = {"Current status": "Latest update"}
+
+
+def shown_name(stored: str) -> str:
+    """A change's stored name as the owner reads it: "Current status" is Latest update; any other is as stored."""
+    return SHOWN_NAMES.get(stored, stored)
+
+
 DATE_FIELDS = ("due", "deadline", "start", "reminder", "repeat_until", "reminder_until")
 TEXT_FIELDS = ("title", "current_status", "deadline_desc", "description")
 FLAG_FIELDS = ("urgent", "meeting", "inherit_labels", "plant_event", "calendar_days", "collection")

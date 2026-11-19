@@ -109,13 +109,13 @@ def test_an_update_logs_its_changes_under_the_capture(env):
     log = [e for e in Model(conn).status_log_of("T000009") if e.via == r.capture_id]
     assert [(e.field, e.from_value, e.to_value) for e in log] == [("Current status", "Drawings came in late; review moved to 23 Oct.", "Drawings late."),
                                                                   ("Due", "2026-10-23", "2026-10-30")]
-    assert r.message == "Saved C000026. 2 changes in the status log of Vendor drawing package."
+    assert r.message == "Saved C000026. 2 changes in the history of Vendor drawing package."
     assert '"changes": ' not in capture_md(env[1], r.capture_id) and 'changes: [{"field":"Current status"' in capture_md(env[1], r.capture_id)
 
 
 def test_a_change_with_no_text_keeps_no_capture(env):
     r = save(env, CaptureDraft(task="T000012", types={"update"}, update={"state": "Closed"}))
-    assert r.capture_id is None and r.message == "1 change in the status log of Rigging plan."
+    assert r.capture_id is None and r.message == "1 change in the history of Rigging plan."
     entry = Model(env[0]).status_log_of("T000012")[-1]
     assert (entry.field, entry.to_value, entry.via) == ("State", "Closed", "Capture window")
 

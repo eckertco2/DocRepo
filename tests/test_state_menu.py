@@ -124,7 +124,7 @@ def test_set_states_logs_as_the_browse_tool_with_no_capture(sample_root):
     before = Model(conn)
     out = edits.set_states(conn, root, fs, Settings(me="P001"), {RIGGING: "Closed", INSTALLATION: "Parked"}, NOW)
     m = Model(conn)
-    assert out.message == "2 changes in the status log." and len(m.captures) == len(before.captures)
+    assert out.message == "2 changes in the history." and len(m.captures) == len(before.captures)
     new = [e for e in m.status if e not in before.status]
     assert {(e.task, e.field, e.to_value, e.via) for e in new} >= {(RIGGING, "State", "Closed", "Browse tool"), (INSTALLATION, "State", "Parked", "Browse tool")}
     assert m.task(RIGGING).closed  # the day it closed, as Edit task records it
@@ -189,7 +189,7 @@ def test_closed_leaves_the_open_list_and_undo_brings_it_back(browse):
     assert undo_offered(browse) and browse._status_timer.interval() == UNDO_MS
     browse.status.linkActivated.emit("undo")
     assert states(browse, RIGGING) == [was] and ("task", RIGGING) in browse.tree.keys()
-    assert browse.status.text() == "Set back. The status log keeps both changes." and not undo_offered(browse)
+    assert browse.status.text() == "Set back. The history keeps both changes." and not undo_offered(browse)
     changes = [(e.from_value, e.to_value) for e in browse.model().status if e.task == RIGGING and e.field == "State" and e.at.startswith("2026-10-08 14:10")]
     assert changes == [(was, "Closed"), ("Closed", was)]
 

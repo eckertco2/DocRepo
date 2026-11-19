@@ -962,7 +962,7 @@ class SaveAsDialog(_Form):
         self.link = QCheckBox("Link this tree to the new template")
         self.link.setChecked(True)
         self.form.addRow("Name", self.name)
-        self.form.addRow(_hint(f"Takes {count} task{'s' if count != 1 else ''}. Dates, state, status, notes and captures aren't carried over."))
+        self.form.addRow(_hint(f"Takes {count} task{'s' if count != 1 else ''}. Dates, state, latest update, notes and captures aren't carried over."))
         self.form.addRow(self.link)
         moved = f" It already came from {already}, and linking moves it to this one." if already else ""
         self.form.addRow(_hint(f"Linked, these tasks follow the template, as any tree made from it does.{moved}"))
@@ -1257,7 +1257,7 @@ class TemplatesPane:
         return PreviewDialog(self.w, f"This change reaches {plural(len(reached), 'task')}",
                              f"<b>{esc(plan.title)}</b>: {esc(', '.join(plan.lines))}",
                              [*(PreviewEntry(i.task, i.tree, i.lines, i.state) for i in plan.items), *(PreviewEntry(i.task, i.tree, i.lines, i.state, off_lines=keeps) for i in plan.moved)],
-                             f"Unticked tasks keep their value and stop following. Each change goes in the task's status log, as Template: {plan.name}.",
+                             f"Unticked tasks keep their value and stop following. Each change goes in the task's history, as Template: {plan.name}.",
                              lambda ticked: f"Apply to {plural(len(ticked), 'task')}" if ticked else "Save, changing no tasks", folded=self._folded(plan.not_changing), total=total)
 
     def _timing_preview(self, plan: templates.TimingPlan) -> PreviewDialog:
@@ -1272,7 +1272,7 @@ class TemplatesPane:
         return PreviewDialog(self.w, f"This change reaches {plural(len(plan.items), 'task')}", f"<b>{esc(plan.name)}</b>: {esc(plan.what)}",
                              [PreviewEntry(i.task, i.tree, i.lines, i.state, off_lines=keeps) for i in plan.items],
                              f"An unticked task keeps its date, stays tied, and takes a new gap, so it stops following the template's number. Each change goes in the task's "
-                             f"status log, as Template: {plan.name}.",
+                             f"history, as Template: {plan.name}.",
                              lambda ticked: f"Apply to {plural(len(ticked), 'task')}" if ticked else "Save, changing no tasks", folded=self._folded(plan.not_changing), total=total)
 
     def timing(self, template_id: int) -> None:

@@ -38,7 +38,7 @@ def test_capture_prompt(sample_conn):
 def test_ancestor_context_covers_every_task_above(sample_conn):
     blocks = prompts.task_blocks(prompts.DEFAULTS[3], Model(sample_conn), "T000012")
     labels = [label for label, _ in blocks]
-    assert "Event, Installation" in labels and any(label.startswith("Status change, Installation") for label in labels)
+    assert "Event, Installation" in labels and any(label.startswith("History, Installation") for label in labels)
     assert any(label.startswith("Summary, Installation") for label in labels) and "Files, Reactor impeller upgrade" in labels
 
 

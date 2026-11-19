@@ -126,7 +126,7 @@ class PlanningHooks:
         dialog = PreviewDialog(parent or self, f"This move reaches {far} task{'' if far == 1 else 's'} in other trees",
                                f"{m.task(task_id).title} moved. {n} task{' is' if n == 1 else 's are'} tied to it, near or far.", [entry(f) for f in followed],
                                "An unticked task keeps its date, stays tied, and takes a new gap, and what's tied to it stays too. Each change goes in the "
-                               "task's status log. Back puts this move back.",
+                               "task's history. Back puts this move back.",
                                lambda ticked: f"Move {len(ticked)} task{'' if len(ticked) == 1 else 's'}" if ticked else "Move only this one")
         self._move_dialog = dialog  # kept, so tests can reach it
         if not self.run_dialog(dialog):

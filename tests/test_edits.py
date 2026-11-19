@@ -113,7 +113,7 @@ def test_make_it_a_task_files_the_capture_to_the_new_task(sample_root):
 def test_clearing_a_reminder_goes_into_the_status_log(sample_root):
     conn, root, fs = sample_root
     out = edits.clear_reminder(conn, root, fs, SETTINGS, "T000018", AT)
-    assert out.message == "Update area 3 guard drawings: reminder cleared. The change is in its status log."
+    assert out.message == "Update area 3 guard drawings: reminder cleared. The change is in its history."
     m = Model(conn)
     assert m.task("T000018").reminder is None
     assert [(e.field, e.to_value, e.via) for e in m.status_log_of("T000018")][-1] == ("Reminder", None, "Reminders list")
@@ -123,7 +123,7 @@ def test_closing_an_agenda_item(sample_root):
     conn, root, fs = sample_root
     item = next(a for a in Model(conn).open_items_for("T000010") if a.subject == "T000015")
     out = edits.close_agenda_item(conn, root, fs, item.id, "Removed", AT)
-    assert out.message == "Q4 overtime budget: removed. It's off the Business team meeting agenda, and its status log says so."
+    assert out.message == "Q4 overtime budget: removed. It's off the Business team meeting agenda, and its history says so."
     m = Model(conn)
     assert item.id not in [a.id for a in m.open_items_for("T000010")]
     assert m.status_log_of("T000015")[-1].to_value == "Removed" and m.task("T000015").state == "Not started"
@@ -132,7 +132,7 @@ def test_closing_an_agenda_item(sample_root):
 def test_renaming_a_task_and_its_description(sample_root):
     conn, root, fs = sample_root
     out = edits.change_task(conn, root, fs, SETTINGS, "T000012", AT, title="Rigging plan for the impeller lift", description="Line one.\nLine two.")
-    assert out.message == "2 changes in the status log."
+    assert out.message == "2 changes in the history."
     m = Model(conn)
     assert (m.task("T000012").title, m.task("T000012").description) == ("Rigging plan for the impeller lift", "Line one.\nLine two.")
     page = (root / "Tasks" / "T000012" / "Task.md").read_text(encoding="utf-8")
@@ -170,7 +170,7 @@ def test_the_edit_task_form_changes_only_what_differs(sample_root):
     assert edits.edit_task(conn, root, fs, SETTINGS, "T000016", AT, **form_values(t)).message == "Nothing changed."
     values = form_values(t) | {"state": "In progress", "leads": [Who(name="Dana Kim")], "labels": ["Safety", "Holidays"]}
     out = edits.edit_task(conn, root, fs, SETTINGS, "T000016", AT, **values)
-    assert out.message == "3 changes in the status log. Added Dana Kim to the people list." and not out.problems
+    assert out.message == "3 changes in the history. Added Dana Kim to the people list." and not out.problems
     m = Model(conn)
     after, dana = m.task("T000016"), next(p for p in m.people.values() if p.name == "Dana Kim")
     assert (after.state, after.leads, after.labels, after.start) == ("In progress", [dana.id], ["Safety", "Holidays"], None)

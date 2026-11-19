@@ -1085,14 +1085,14 @@ def parse_capture(
         note("state", "State", quick.state, quick.prefix)
         if quick.rest:
             r.status = quick.rest
-            note("status", "Current status", quick.rest, "the rest of the content text")
+            note("status", "Latest update", quick.rest, "the rest of the content text")
     text = prep_text(content).strip()
     sents = sentences(text)
     # An update's first sentence is its Current status (mods log round 1), as a new task's first sentence is its
     # description. A quick update's status, the rest of its text, comes first.
     if capture_type == "update" and not quick and sents:
         r.status = sents[0].text
-        note("status", "Current status", r.status, "the first sentence")
+        note("status", "Latest update", r.status, "the first sentence")
 
     def sentence_at(pos: int) -> Sentence | None:
         return next((s for s in sents if s.start <= pos < s.end), sents[-1] if sents else None)

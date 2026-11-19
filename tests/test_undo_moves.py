@@ -33,7 +33,7 @@ def test_undo_puts_a_moved_task_back_in_its_old_place(sample_root):
     assert Model(conn).children_of("T000001") == [s for s in siblings if s != "T000008"]
 
     back = edits.undo_move(conn, root, fs, "T000008", had, left, LATER)
-    assert back.message == "Set back: Installation is under Reactor impeller upgrade again. The status log keeps both changes."
+    assert back.message == "Set back: Installation is under Reactor impeller upgrade again. The history keeps both changes."
     m = Model(conn)
     assert m.parents_of("T000008") == ["T000001"] and m.children_of("T000001") == siblings
     assert "T000008" not in m.children_of("T000002")

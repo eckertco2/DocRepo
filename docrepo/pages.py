@@ -225,7 +225,7 @@ class Pages:
             out.append("")
         out += ["## Description", "", t.description or "_None._", ""]
         if not t.collection:  # a collection isn't work, so it has no status (release 5.167)
-            out += ["## Current status", "", t.current_status or "_No status yet._", ""]
+            out += ["## Latest update", "", t.current_status or "_No update yet._", ""]
         # The notes page (release 5.25): its headings two levels down, each caption a link to its capture.
         from docrepo import notes_page
 
@@ -275,7 +275,7 @@ class Pages:
             lines = [f"- {self._agenda_text(here, a.subject, a.note)} · added {a.added[:10]}" for a in items]
             out += ["## Agenda", "", *(lines or ["_No open agenda items._"]), ""]
         log = sorted(self.m.status_log_of(t.id), key=lambda e: e.at, reverse=True)
-        out += ["## Status log", "", *([self._status_line(here, e) for e in log] or ["_No changes yet._"]), ""]
+        out += ["## History", "", *([self._status_line(here, e) for e in log] or ["_No changes yet._"]), ""]
         summaries = list(reversed(self.m.summaries_of(t.id)))
         out += ["## Summary log", ""]
         out += [line for s in summaries for line in (f"### {minutes(s.at)} · {s.type} · {self._ref_link(here, s.via)}", "", s.text, "")] or ["_No summaries yet._", ""]
@@ -337,7 +337,8 @@ class Pages:
 
     def _status_line(self, here: list[str], e: StatusEntry) -> str:
         # A value with line breaks, such as an edited description, stays on the entry's one line.
-        return (f"- {minutes(e.at)} · {e.field}: {' '.join(_value(e.from_value).split())} → {' '.join(_value(e.to_value).split())}"
+        from docrepo.tasks import shown_name  # here, not at the top: tasks imports pages
+        return (f"- {minutes(e.at)} · {shown_name(e.field)}: {' '.join(_value(e.from_value).split())} → {' '.join(_value(e.to_value).split())}"
                 f" · {self._ref_link(here, e.via)}")
 
     def _file_line(self, here: list[str], f: FileEntry) -> str:

@@ -182,7 +182,7 @@ class Workspace(QWidget):
         b = self.browse
         for key, label, name, tip, do in (
                 ("note", "Note", "note", "A note on its notes page (N)", lambda: b.open_capture(task=self.acting, mode="note")),
-                ("update", "Update", "update", "Its state, status, dates and more (U)", lambda: b.open_capture(task=self.acting, mode="update")),
+                ("update", "Update", "update", "Its state, latest update, dates and more (U)", lambda: b.open_capture(task=self.acting, mode="update")),
                 ("progress", "Log progress…", "waiting", "A line of what you did, who you're waiting on and when to follow up",
                  lambda: b.ctx.log_progress(self.acting)),
                 ("tmail", "New T-mail", "mail", "A new email in Outlook, tagged so its replies come back to the task. You write and send it.",
@@ -424,7 +424,7 @@ class Workspace(QWidget):
         editable = task_id == self.acting and not t.discarded
         on_today = ws.today_item(m, task_id) is not None
         done = ws.done_today(m, task_id, today)
-        return CardFacts(whose=whose, name=name, when=when, when_tip=f"The current status last changed {age}" if age else "",
+        return CardFacts(whose=whose, name=name, when=when, when_tip=f"The latest update was written {age}" if age else "",
                          wait=wait, wait_tip=wait_tip, late=bool(late),
                          body=body if editable else body.split('<br><span class="sub">')[0],
                          log=log_html, changes=f"{len(log)} change{'s' if len(log) != 1 else ''}" if log else "",
@@ -720,9 +720,9 @@ class Workspace(QWidget):
                     edits.discard_capture(b.conn, b.ctx.data_root, b.ctx.fs, capture, "undone", b._now())
                 return edits.change_task(b.conn, b.ctx.data_root, b.ctx.fs, b.ctx.settings, task_id, b._now(), current_status=old)
             if b._do(both):
-                b.say("The update is undone: the status is as it was, and its capture is in the Discarded view.")
+                b.say("The update is undone: the latest update is as it was, and its capture is in the Discarded view.")
 
-        b.say_undo(f"Kept as an update on {b.model().task(task_id).title}: its current status now.", undo)
+        b.say_undo(f"Kept as an update on {b.model().task(task_id).title}: its latest update now.", undo)
 
     def _keep_note(self, task_id: str, line: str) -> None:
         """Shift+Enter: the line on the task's notes under today's day, the status as it was, with Undo (701)."""

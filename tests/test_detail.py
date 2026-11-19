@@ -38,14 +38,14 @@ def test_a_task_page(pages):
     words = text(html)
     assert words.startswith("Reactor impeller upgrade › Installation In progress Line 1 Strategic Plan Install and align")
     # Release 5.83 (the task pane review's R7): the status says its date, its age in the tooltip; a subtask row its date alone.
-    order = ["Current status Mon 5 Oct Procedure rev 2 approved. Waiting on the rigging plan.",
+    order = ["Latest update Mon 5 Oct Procedure rev 2 approved. Waiting on the rigging plan.",
              "When Due Fri 30 Oct in 22 days Deadline too · Turnaround ends Starts Mon 19 Oct in 11 days",
              "Who Lead Me 8 h Assignees Tom Becker 60 h Mike Ortiz 60 h", "Subtasks 3 of 3 open New task under this one Rigging plan",
-             "Details T000008 · Created Tue 22 Sep from C000005", "Captures 6 Status log 14 Summaries 1 Files 2 With subtasks ⇅ Oldest first",
+             "Details T000008 · Created Tue 22 Sep from C000005", "Captures 6 History 14 Summaries 1 Files 2 With subtasks ⇅ Oldest first",
              "This task September 2026", "Subtasks · 3"]
     at = [words.find(part) for part in order]
     assert -1 not in at and at == sorted(at), dict(zip(order, at))
-    assert 'title="The current status last changed 3 days ago"' in html and 'title="Due Wed 14 Oct, in 6 days"' in html
+    assert 'title="The latest update was written 3 days ago"' in html and 'title="Due Wed 14 Oct, in 6 days"' in html
     assert "3 days ago" not in words and "6 d" not in words and "<b>" not in html  # one rule for time, two weights (R7, R10)
     for gone in ("Reminder", "—", "Subtasks Summaries", "SUBTASKS", "Scope:", "Order:", "Top-level task"):  # empty fields, the old tab and lines
         assert gone not in words, gone
@@ -61,11 +61,11 @@ def test_the_page_shows_only_what_says_something(pages):
     is "ago"; a routine meeting counts to its next one, with hours per occurrence and its agenda before Details."""
     words = text(pages.task_page("T000002", PageState()))
     assert "When Deadline Sat 31 Oct in 23 days Verification walkthrough Who" in words and "No due date" not in words
-    assert "Current status Tue 1 Sep " in words and "5 weeks ago" not in words  # the Excel import's status: as old as the task
-    assert "last changed 5 weeks ago" in pages.task_page("T000002", PageState())
+    assert "Latest update Tue 1 Sep " in words and "5 weeks ago" not in words  # the Excel import's status: as old as the task
+    assert "was written 5 weeks ago" in pages.task_page("T000002", PageState())
     words = text(pages.task_page("T000016", PageState()))
     assert "When Due No due date Reminder Wed 7 Oct yesterday Agenda Business team meeting Tue 13 Oct" in words
-    assert "No status yet. Add one" in words and "update:T000016" in pages.task_page("T000016", PageState())
+    assert "No update yet. Add one" in words and "update:T000016" in pages.task_page("T000016", PageState())
     words = text(pages.task_page("T000010", PageState()))
     assert "When Next meeting Tue 13 Oct in 5 days Who Lead Priya Shah 1.5 h per occurrence" in words
     assert words.index("Agenda 4 open Open agenda") < words.index("Details")
@@ -91,10 +91,10 @@ def test_subtasks_closed_ones_and_the_description(pages, sample_root):
 def test_the_wide_page_has_its_facts_on_the_right(pages):
     """Decision 69: from 760 px, When, Who and Details move into a rail, with Details open; narrow, When and Who stack."""
     main, rail = pages.task_page("T000008", PageState(), 900).split('class="rule"', 1)
-    assert "Current status" in main and "Subtasks" in main and "Captures" in main and "When" not in text(main)
+    assert "Latest update" in main and "Subtasks" in main and "Captures" in main and "When" not in text(main)
     # The browse tool draws it in two parts, the notes page's editor between them (release 5.25).
     top, bottom = pages.task_page("T000008", PageState(), 900, "top"), pages.task_page("T000008", PageState(), 900, "bottom")
-    assert "Captures" not in text(top) and "Folder" in text(top) and text(bottom).startswith("Captures 6 Status log")
+    assert "Captures" not in text(top) and "Folder" in text(top) and text(bottom).startswith("Captures 6 History")
     assert all(x in text(rail) for x in ("When Due Fri 30 Oct", "Who Lead", "Details ID T000008", "Folder"))
     assert '<td width="50%"' in pages.task_page("T000008", PageState(), 600)
     assert '<td width="50%"' not in pages.task_page("T000008", PageState(), 500)
@@ -105,7 +105,7 @@ def test_tabs_scopes_and_chapters(pages):
     assert "Work started" in log and "↳ New task under this one: Rigging plan · Mike Ortiz, due 14 Oct" in log
     closed = text(pages.task_page("T000008", PageState(tab="log", scope="self")))
     assert "Subtasks ·" not in closed and "This task" in closed  # the scope's name is its menu's
-    assert log.count("Status log") == closed.count("Status log") and log.split("Status log ")[1][:2] != closed.split("Status log ")[1][:2]
+    assert log.count("History") == closed.count("History") and log.split("History ")[1][:2] != closed.split("History ")[1][:2]
     opened = text(pages.task_page("T000008", PageState(tab="log", chapters={"T000012"})))
     assert "Rigging plan In progress Lift study done" in opened and "Mike to write the rigging plan" in opened
     files = pages.task_page("T000001", PageState(tab="files"))
@@ -233,11 +233,11 @@ def test_the_page_in_parts(pages):
     head = text(parts["head"])
     # The path, the title and the description, then the grid: Status and When's rows on the left, Who's and Labels on the right.
     assert head.startswith("Reactor impeller upgrade › Installation Install and align the new impeller")
-    assert "Status In progress Due Fri 30 Oct in 22 days Deadline too" in head and "Starts Mon 19 Oct in 11 days" in head
+    assert "State In progress Due Fri 30 Oct in 22 days Deadline too" in head and "Starts Mon 19 Oct in 11 days" in head
     assert "Lead Me 8 h Assignees Tom Becker 60 h Mike Ortiz 60 h Labels Line 1 , Strategic Plan" in head
     grid = parts["head"].split("<table", 1)[1]
     assert 'href="state:T000008"' in parts["head"] and 'class="rel"' not in grid and 'class="sub"' not in grid  # one size in the grid
-    assert (parts["status_name"], parts["status_when"], parts["status_age"]) == ("Current status", "Mon 5 Oct", "3 days ago")
+    assert (parts["status_name"], parts["status_when"], parts["status_age"]) == ("Latest update", "Mon 5 Oct", "3 days ago")
     assert "Procedure rev 2 approved" in parts["status_body"]
     assert parts["status_log_summary"] == f"{len(pages.stories.story('T000008'))} changes" and "Work started" in text(parts["status_log"])
     assert text(parts["subtasks_summary"]) == "3 of 3 open New task under this one" and "Rigging plan" in text(parts["subtasks"]) and "Subtasks" not in text(parts["subtasks"])
@@ -245,7 +245,7 @@ def test_the_page_in_parts(pages):
     assert "when_who" not in parts and "rail" not in parts  # When and who is the grid now
     assert parts["details_short"] == "" and "ID T000008" in text(parts["details"]) and "Folder" in text(parts["details"])
     history = text(parts["history"])
-    assert history.startswith("Captures 6 Summaries 1 With subtasks") and "Status log" not in history and "Files 2" not in history  # the tabs
+    assert history.startswith("Captures 6 Summaries 1 With subtasks") and "History" not in history and "Files 2" not in history  # the tabs
     # Each file once (release 5.145): the saved procedure and its old version, not its original as well.
     assert parts["history_short"] == "6 captures" and parts["files_short"] == "2" and text(parts["files_summary"]) == "2 Find files"  # release 5.98
     assert "to search, preview and open" not in text(parts["files"])  # Find files is the section's command, not a line in it

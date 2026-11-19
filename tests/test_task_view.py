@@ -105,7 +105,7 @@ def test_it_opens_on_overview_with_the_status_and_the_key_documents(view):
     assert "Recent" in rows and "Latest updates" in rows and rows[-1] == "Show all 504 files"
     assert chosen(view) == "Scope of work v3.docx"  # the first row is chosen
     head = view.head.toPlainText()
-    assert "Current status" in head and "Vendor shortlist agreed" in head and "Latest" in head and "Re: pump curve rev C" in head
+    assert "Latest update" in head and "Vendor shortlist agreed" in head and "Latest" in head and "Re: pump curve rev C" in head
     assert "Due" in head and "Subtasks" in head and "13 of 16 open" in head
     assert "Scope of work v3.docx" in view.preview_page.toPlainText()
     assert view.box.hasFocus() or QGuiApplication.focusObject() is view.box or True  # offscreen windows may not take focus
