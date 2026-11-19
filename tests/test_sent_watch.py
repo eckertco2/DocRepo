@@ -521,3 +521,58 @@ def test_a_new_t_mail_known_by_its_draft_counts_for_the_ticks_quick_look(env):
     w, _, _ = watcher(env, out)
     w.tick()
     assert out.handler is not None and out.send_handler is not None and out.looked == ["D1"]
+
+
+# ---- a draft DocRepo sent itself (release 5.164, decision 751) ----
+def test_a_draft_docrepo_sent_is_never_looked_at_again_and_its_copy_is_still_found(env):
+    """Log progress sent the draft: DocRepo lets go of it. Its draft isn't fetched again (Classic Outlook stops sending an
+    Outbox item something has opened), and its sent copy is still known by its subject and the time it was sent."""
+    conn = env[0]
+    out = FakeOutlook()
+    tid = open_untagged(env)
+    out.drafts["D1"] = DraftState(False, "Seal drawings")
+    sent_watch.sent_by_docrepo(conn, tid, "Seal drawings", AT)
+    d = sent_watch.drafts(conn)[tid]
+    assert (d.gone, d.how, d.subject) == ("2026-10-08 09:00:00", sent_watch.BY_DOCREPO, "Seal drawings")
+    w, clock, told = watcher(env, out)
+    assert w.ensure()
+    for minutes in (1, 2, 3):
+        clock["now"] = AT + timedelta(minutes=minutes)
+        w.tick()
+    assert out.looked == []  # never fetched by its place
+    out.send_handler(SendSeen("D1", "Seal drawings", ""))  # Outlook's own send event names it, and nothing is read
+    assert out.looked == []
+    # The owner's rule holds it in the Outbox for a few minutes; then Outlook files it.
+    out.send(NEW, "Seal drawings", "E9", AT + timedelta(minutes=4))
+    assert len(told) == 1 and told[0].task == RIGGING and out.copied == ["E9"] and sent_watch.drafts(conn) == {}
+
+
+def test_a_draft_docrepo_couldnt_send_is_watched_again(env):
+    """When Outlook refuses the send, the owner sends it by hand: its draft is kept as before, and watched."""
+    conn = env[0]
+    tid = open_untagged(env)
+    sent_watch.sent_by_docrepo(conn, tid, "Seal drawings", AT)
+    sent_watch.not_sent(conn, tid)
+    d = sent_watch.drafts(conn)[tid]
+    assert (d.entry_id, d.gone, d.how) == ("D1", "", "")
+    out = FakeOutlook()
+    out.drafts["D1"] = DraftState(False, "Seal drawings")
+    w, _, _ = watcher(env, out)
+    w.ensure()
+    assert out.looked == ["D1"]
+
+
+def test_marking_a_t_mail_with_no_draft_kept_does_nothing(env):
+    conn = env[0]
+    t = open_t_mail(env)
+    sent_watch.sent_by_docrepo(conn, t, "RE: Crane quote", AT)
+    sent_watch.not_sent(conn, t)
+    assert sent_watch.drafts(conn) == {}
+
+
+def test_the_report_says_docrepo_sent_it(env):
+    conn = env[0]
+    tid = open_untagged(env)
+    sent_watch.sent_by_docrepo(conn, tid, "Seal drawings", AT)
+    w, _, _ = watcher(env, FakeOutlook())
+    assert w.report()[0].endswith("known by its draft, sent at 09:00 (sent by Log progress)")

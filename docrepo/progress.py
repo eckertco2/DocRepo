@@ -16,6 +16,14 @@ picks the **state** the line leaves the task in (``STATES``): In progress, Waiti
 decision 580 has it, and the only choice that starts one), Parked or Closed (the task alone: its open subtasks stay open,
 as Edit task's State leaves them). **Done for today** closes the task's Today item as Done, as the Today side panel's does
 (decision 420), with no Update opened, since the line is the update; Closed always closes it.
+
+Since release 5.164 (the design workspace's ``docs/mods/log-progress-whole-plan.md``, decisions 751 and 754) it's all or
+nothing as far as it can be. ``save_capture`` keeps the Update first; it writes capture.md and the pages too, so it can't
+join a transaction of its caller's. Everything after it (the T-mail, its draft, the wait, the last follow-up and the
+Today item) is then one transaction: a failure there keeps none of it and raises ``NotAllKept``, which says so and names
+the Update kept, and the window's next Enter passes it back as ``kept``, so it keeps no second Update. ``sending`` and
+``not_sent`` mark a kept draft as sent by DocRepo around Log progress's send, so nothing of DocRepo's reads it on its
+way out (``docrepo.sent_watch``).
 """
 from __future__ import annotations
 
@@ -28,7 +36,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from docrepo import conversations, edits, sent_watch, tasks, waits
-from docrepo.db import set_state
+from docrepo.db import set_state, transaction
 from docrepo.model import Model
 from docrepo.save import CaptureDraft, EmailItem, SaveError, save_capture
 
@@ -106,6 +114,15 @@ def people_in(m: Model, to: str, me: str | None) -> list[str]:
     return [p for _, p in sorted(found)]
 
 
+class NotAllKept(SaveError):
+    """The Update was kept and what comes after it wasn't (decision 754): ``capture`` is the Update, for ``kept`` on the
+    next try."""
+
+    def __init__(self, message: str, capture: str) -> None:
+        super().__init__(message, "content")
+        self.capture = capture
+
+
 @dataclass(frozen=True)
 class Logged:
     """What Enter kept: the Update capture, the T-mail, the wait, the task's state and Reminder after, and whether its Today
@@ -123,7 +140,7 @@ class Logged:
 
 def log_progress(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, *, task_id: str, line: str,
                  on: Sequence[str], follow_up: date | None, at: datetime, email: Email | None = None, choice: str = "",
-                 state: str | None = None, done_today: bool = False) -> Logged:
+                 state: str | None = None, done_today: bool = False, kept: str | None = None) -> Logged:
     """Keep one Log progress (decisions 586 to 592). Raises SaveError, keeping nothing, when the task is gone or closed,
     the line is empty, or it's to wait with nobody named.
 
@@ -131,13 +148,17 @@ def log_progress(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
     none and leave ``on`` and ``follow_up`` aside; Parked and Closed set the task's state, Closed the task alone (696). None
     is 5.139's rule: Waiting when ``on`` names someone in People, else In progress; Not started or Parked is made In
     progress either way. ``done_today`` (decision 697) closes the task's Today item as Done, as the side panel's Done for
-    today does, with no Update opened; Closed closes it too. A task not on Today has nothing to close."""
+    today does, with no Update opened; Closed closes it too. A task not on Today has nothing to close.
+
+    ``kept`` (release 5.164, decision 754) is the Update capture an earlier try kept before the rest failed
+    (``NotAllKept``): this try keeps the rest only, with no second Update. Any other error (a busy database) is raised as
+    it is, with nothing kept when it comes from the Update."""
     line = " ".join(line.split())
     m = Model(conn)
     t = m.tasks.get(task_id)
     if t is None or t.discarded:
         raise SaveError("Pick a task first: type # or a few words.", "task")
-    if t.state == "Closed":
+    if t.state == "Closed" and not kept:  # on a second try, Closed may be the Update's own doing
         raise SaveError(f"{t.title} is closed. Reopen it, or pick another task.", "task")
     if not line:
         raise SaveError("Say in a line what you sent or asked.", "content")
@@ -158,31 +179,61 @@ def log_progress(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
         reminder = waits.reminder_for(m, task_id, day)
         if reminder != t.reminder:
             update["reminder"] = reminder
-    result = save_capture(conn, data_root, fs, settings, CaptureDraft(content=line, task=task_id, types={"update"}, update=update), at)
-    capture = result.capture_id or ""
+    if kept:
+        capture = kept
+    else:
+        result = save_capture(conn, data_root, fs, settings, CaptureDraft(content=line, task=task_id, types={"update"}, update=update), at)
+        capture = result.capture_id or ""
     stamp = waits.stamp_of(at)
-    t_mail = None
-    if email is not None:
-        t_mail = conversations.record_t_mail(conn, task_id, KIND, stamp, email.index, untagged=True)
-        if t_mail is not None and not conversations.key(email.index) and email.entry_id:
-            sent_watch.keep_draft(conn, t_mail, email.entry_id, email.store_id)  # a new email: known by its draft (5.141)
-    wait = None
-    if people:
-        wait = waits.start(conn, m, task_id, at=stamp, line=line, on=people, follow_up=day, via=capture or LABEL, t_mail=t_mail,
-                           capture=capture or None)
-    if choice in dict(FOLLOW_UPS) and choice != "none" and people:
-        set_state(conn, LAST_KEY, choice)
+    t_mail = wait = None
     closed_today = False
-    if done_today or state == CLOSED:  # under Done today, where Back on Today puts it back (decision 697)
-        now = Model(conn)
-        item = next((a for a in now.today_items() if a.subject == task_id), None)
-        if item is not None:
-            edits.close_today_item(conn, data_root, fs, item.id, "Done", at, now)
-            closed_today = True
+    try:
+        with transaction(conn):  # the rest, all or nothing (decision 754)
+            if email is not None:
+                t_mail = conversations.record_t_mail(conn, task_id, KIND, stamp, email.index, untagged=True)
+                if t_mail is not None and not conversations.key(email.index) and email.entry_id:
+                    sent_watch.keep_draft(conn, t_mail, email.entry_id, email.store_id)  # a new email: known by its draft (5.141)
+            if people:
+                wait = waits.start(conn, m, task_id, at=stamp, line=line, on=people, follow_up=day, via=capture or LABEL, t_mail=t_mail,
+                                   capture=capture or None)
+            if choice in dict(FOLLOW_UPS) and choice != "none" and people:
+                set_state(conn, LAST_KEY, choice)
+            if done_today or state == CLOSED:  # under Done today, where Back on Today puts it back (decision 697)
+                now = Model(conn)
+                item = next((a for a in now.today_items() if a.subject == task_id), None)
+                if item is not None:
+                    edits.close_today_item(conn, data_root, fs, item.id, "Done", at, now)
+                    closed_today = True
+    except Exception as e:  # noqa: BLE001 - whatever it was, the Update is kept and the rest isn't: said, and tried again
+        log.warning("Log progress on %s: capture %s kept, the rest rolled back (%s)", task_id, capture, type(e).__name__)
+        raise NotAllKept(f"The update was kept. {_missing(people, email, done_today or state == CLOSED)}: press Enter to try again.",
+                         capture) from e
     after = Model(conn).task(task_id)
     log.info("Log progress on %s: %s, capture %s, T-mail %s, wait %s, Today item closed %s", task_id, state, capture, t_mail, wait,
              closed_today)
     return Logged(task_id, capture, t_mail, wait, after.state, after.reminder, day.isoformat() if day else None, closed_today)
+
+
+def _missing(people: list[str], email: Email | None, today: bool) -> str:
+    """What ``NotAllKept`` says wasn't kept: the first of what there was to keep after the Update."""
+    if people:
+        return "The wait wasn't started"
+    if email is not None:
+        return "The email wasn't kept with it"
+    return "Its Today item wasn't closed" if today else "The rest wasn't kept"
+
+
+def sending(conn: sqlite3.Connection, done: Logged, subject: str, at: datetime) -> None:
+    """Just before Log progress sends the draft (decision 751): a kept draft is marked as sent by DocRepo, so nothing of
+    DocRepo's fetches it again on its way out."""
+    if done.t_mail is not None:
+        sent_watch.sent_by_docrepo(conn, done.t_mail, subject, at)
+
+
+def not_sent(conn: sqlite3.Connection, done: Logged) -> None:
+    """Outlook refused the send: the draft is watched as before, for the owner to send."""
+    if done.t_mail is not None:
+        sent_watch.not_sent(conn, done.t_mail)
 
 
 def got_it(conn: sqlite3.Connection, settings: Settings, task_id: str, at: datetime) -> bool:

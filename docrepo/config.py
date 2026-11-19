@@ -196,6 +196,10 @@ class Settings:
     links_keep: list[str] = field(default_factory=list)
     links_drop: list[str] = field(default_factory=lambda: list(DEFAULT_DROP))
     other_links: str = "keep"
+    #: Stock headings (release 5.169, the design workspace's docs/mods/stock-headings-plan.md, decisions 788 to 791): topic
+    #: headings for every task's notes, each {"name": ..., "level": 1 to 3, "description": what belongs under it}. Four
+    #: ship (``stock_headings.DEFAULTS``); the list is written once it differs from them, so an emptied list stays empty.
+    stock_headings: list[dict] = field(default_factory=lambda: _stock_defaults())
 
     @classmethod
     def load(cls, data_root: Path) -> Settings:
@@ -269,10 +273,25 @@ class Settings:
             if bad:
                 log.warning("Leaving %d entries out of %s in %s: they aren't sites", len(bad), key, file)
             data[key] = tidy_list(x for x in value if not entry_problem(x))
+        stock = data.get("stock_headings")  # release 5.169: a list of stock headings; one that can't be used is left out
+        if stock is not None:
+            from docrepo.stock_headings import stock_of
+
+            if not isinstance(stock, list):
+                log.warning("Ignoring stock_headings in %s: it isn't a list", file)
+                del data["stock_headings"]
+            else:
+                data["stock_headings"] = [h.as_setting() for h in stock_of(stock)]
         if "other_links" in data and data["other_links"] not in OTHER_LINKS:
             log.warning("Ignoring other_links in %s: it isn't one of %s", file, ", ".join(OTHER_LINKS))
             del data["other_links"]
         return cls(**{k: v for k, v in data.items() if k in known})
+
+    def stock(self) -> list:
+        """The stock headings (release 5.169) as ``stock_headings.StockHeading``."""
+        from docrepo.stock_headings import stock_of
+
+        return stock_of(self.stock_headings)
 
     def reference_link(self, name: str, value: str | None) -> str:
         """A reference field's value as a link to its page, from the field's link address (release 5.67), or "" for a field
@@ -298,10 +317,18 @@ class Settings:
                 del data[key]
         # Release 5.146 (decision 639): the link lists and Other links, written once they differ from their start, so an
         # existing data root gets Never keep's start too, and a list emptied on purpose stays empty.
-        for key, default in (("links_keep", []), ("links_drop", list(DEFAULT_DROP)), ("other_links", "keep")):
+        for key, default in (("links_keep", []), ("links_drop", list(DEFAULT_DROP)), ("other_links", "keep"),
+                             ("stock_headings", _stock_defaults())):  # release 5.169 (decision 788): the same
             if data[key] == default:
                 del data[key]
         return fs.write_text(data_root / SETTINGS_FILE, json.dumps(data, indent=2) + "\n")
+
+
+def _stock_defaults() -> list[dict]:
+    """The stock headings that ship (release 5.169), as settings.json holds them."""
+    from docrepo.stock_headings import defaults
+
+    return defaults()
 
 
 def make_safe_fs(data_root: Path, settings: Settings) -> SafeFS:

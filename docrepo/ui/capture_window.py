@@ -723,6 +723,7 @@ class CaptureWindow(QWidget):
         # The heading list (release 5.156, the notes topics plan's decisions 704 to 708): the picked task's topic headings,
         # or in Meeting notes the meeting's home task's; it gives way to the @ and # list.
         self.content.heading_options = self._heading_options
+        self.content.stock_headings = lambda: [] if getattr(self, "from_capture", None) else self.ctx.settings.stock()  # release 5.169 (790)
         self.content.other_list_open = lambda: self.ref_popup.isVisible()
         self.content.link_pasted = self._paste_link
         self.highlighter = OperatorHighlighter(self.content.document())
@@ -1729,7 +1730,10 @@ class CaptureWindow(QWidget):
         return follow_up_home(self.ctx.model(), self.task) if self.meeting_on else self.task
 
     def _heading_options(self, level: int, typed: str, under: str, own: list) -> topics.Listing:
-        return topics.options(self.ctx.model(), self.heading_task(), level, typed, under, own)
+        """The heading list's rows (release 5.156); since release 5.169 (decision 789) with the stock headings last, also
+        before a task is picked. A saved capture being looked at gets none."""
+        stock = [] if self.from_capture else self.ctx.settings.stock()
+        return topics.options(self.ctx.model(), self.heading_task(), level, typed, under, own, stock=stock)
 
     def _follow_up_home_name(self) -> str | None:
         """In Meeting notes, where the follow-ups go, in words (release 5.142, decision 610): the meeting's home task, or the
