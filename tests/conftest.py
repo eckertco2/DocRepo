@@ -107,12 +107,6 @@ def example_block(name: str) -> str:
     return m.group(1) + "\n"
 
 
-def without_stock_line(contents: str) -> str:
-    """Contents.md without its Stock headings line (release 5.169, decision 792), which the mockup's examples.md doesn't
-    have yet: the rest is compared with it as it is."""
-    return re.sub(r"^Stock headings: [^\n]*\n\n", "", contents, count=1, flags=re.M)
-
-
 def vector_lines(first_heading: str, end_heading: str) -> list[str]:
     """The headings, table rows and bullet lines of test-vectors.md from one heading up to another."""
     text = (FIXTURES / "test-vectors.md").read_text(encoding="utf-8")

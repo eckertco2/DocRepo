@@ -25,7 +25,7 @@ from docrepo.config import Settings
 from docrepo.dates import monday_of, short, to_date
 from docrepo.load import Cells
 from docrepo.model import KeyDate, Model, Task, load_tasks
-from docrepo.schedule import is_open
+from docrepo.kinds import is_work
 from docrepo.stories import and_list
 
 #: Where the what-ifs are kept, in ``app_state``.
@@ -127,7 +127,7 @@ def _key_was(kd: KeyDate) -> list:
 
 def take_off(m: Model, task_id: str) -> Action:
     """A task and everything open under it taken off: Parked when it's applied, so their hours stop counting (decision 227)."""
-    ids = [task_id, *(x for x in m.descendants_of(task_id) if is_open(m.task(x)))]
+    ids = [task_id, *(x for x in m.descendants_of(task_id) if is_work(m.task(x)))]
     return Action("off", task_id, off=ids, base={x: _as_was(m.task(x)) for x in ids})
 
 
@@ -149,7 +149,7 @@ def move_parent(m: Model, task_id: str, weeks: int, real: Model | None = None) -
     a = Action("parent", task_id, weeks=weeks)
     for x in [task_id, *m.descendants_of(task_id)]:
         t = m.task(x)
-        if not is_open(t) or t.recurrence:
+        if not is_work(t) or t.recurrence:
             continue
         dates = {f: moved(v) for f, v in (("start", t.start), ("due", t.due)) if v}
         if dates and x in real.tasks:
@@ -252,7 +252,7 @@ def _make(conn: sqlite3.Connection, settings: Settings, a: Action, at: datetime,
     if a.kind == "off":
         now = load_tasks(conn, a.off)
         for x in a.off:
-            if x in now and is_open(now[x]):
+            if x in now and is_work(now[x]):
                 note(tasks.update_task(conn, settings, x, at=at, via=said, state="Parked"), x)
         return done
     # Key dates first: nothing moves a key date, and a task tied to one has then moved before it's set, so no gap counts twice.

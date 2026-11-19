@@ -20,6 +20,7 @@ from docrepo.detail import esc
 from docrepo.links import is_link
 from docrepo.overview import file_type
 from docrepo.model import Model
+from docrepo.kinds import is_work
 from docrepo.schedule import DueDate, is_open
 from docrepo.ui.look import LOOK
 from docrepo.ui.task_forms import BulkEditDialog
@@ -80,6 +81,8 @@ class TaskLists:
         if context:
             return _shape([line, "", ""])
         line.strong = depth == 0
+        if m.task(task_id).collection:  # no state and no dates to show (release 5.167, decision 781)
+            return _shape([line, "", ""])
         if when is not None or not use_due:
             days = _due_html(due_cell(m.task(task_id), today, when, use_due))
         return _shape([line, _row_state(m.task(task_id).state), days])
@@ -89,9 +92,10 @@ class TaskLists:
         """The Classic look's task row: a ``Line`` (its state's icon, its title, Urgent or Critical as chips, its other marks and
         ``muted`` as quiet words, and ``people``), then its State, and its date. Its top-level tasks are bold."""
         m, t = self.model(), self.model().task(task_id)
-        icon, colour = state_icon(t.state)
+        shown = "Collection" if t.collection else t.state  # a collection's folder (release 5.167)
+        icon, colour = state_icon(shown)
         if context:
-            return _shape([Line(t.title, icon=icon, icon_tip=t.state, dim=True, strong=depth == 0), "", ""])
+            return _shape([Line(t.title, icon=icon, icon_tip=shown, dim=True, strong=depth == 0), "", ""])
         chips, quiet = [], []
         for text, cls in markers(m, t):  # a chip only for an exception; the rest are quiet words (the review's recipe)
             (chips if LOOK.classic or cls in ("urgent", "pri-critical") else quiet).append((text, cls))
@@ -100,9 +104,11 @@ class TaskLists:
         asked = waits.row_text(m, task_id, self.today())
         if asked and people:
             people, asked = f"{asked} · {people}", ""
-        line = Line(t.title, icon=icon, icon_colour=colour, icon_tip=t.state, chips=tuple(chips),
+        line = Line(t.title, icon=icon, icon_colour=colour, icon_tip=shown, chips=tuple(chips),
                     muted=(*(x for x, _ in quiet), *muted, *((asked,) if asked else ())),
                     context=people, strong=depth == 0, closed=t.state == "Closed")
+        if t.collection:
+            return _shape([line, "", ""])
         return _shape([line, _row_state(t.state), _due_html(due_cell(t, self.today(), when, use_due))])
 
     def _label_words(self, task_id: str, skip: str = "") -> tuple[str, ...]:
@@ -153,7 +159,7 @@ class TaskLists:
         filtered = bool(f["labels"] or f["people"] or f["priorities"] or f.get("urgent"))
         m = self.model()
         self._set_head("Task tree", "Dimmed rows don't match the filter. They're parents of tasks that do, shown for context." if filtered else "",
-                       f"{sum(1 for t in m.tasks.values() if is_open(t))} open")
+                       f"{sum(1 for t in m.tasks.values() if is_work(t))} open")
         # Urgent only (release 5.97, the consolidation plan's decision 386): what the Urgent view listed, in the tree, first
         # among the filters (the mock's place, the owner's choice of 2026-11-07).
         self._check("Urgent only", bool(f.get("urgent")), lambda on: self._set_filter("urgent", on),
@@ -248,7 +254,7 @@ class TaskLists:
         """Urgent only, ticked: the branches open down to each urgent task, so the tree shows them (release 5.97)."""
         m = self.model()
         for t in m.tasks.values():
-            if t.urgent and is_open(t):
+            if t.urgent and is_work(t):
                 self.open.update(m.ancestors_of(t.id))
 
     def _sort_box(self, view_id: str) -> None:

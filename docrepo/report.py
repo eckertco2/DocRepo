@@ -15,7 +15,8 @@ from docrepo.config import Settings
 from docrepo.dates import day_diff, short
 from docrepo.lists import LISTS, list_tasks
 from docrepo.model import TODAY, AgendaItem, Model, is_person
-from docrepo.schedule import due_of, is_open
+from docrepo.kinds import is_work
+from docrepo.schedule import due_of
 
 
 def fixed2(value: float) -> str:
@@ -50,7 +51,7 @@ def build_report(conn: sqlite3.Connection, model: Model, today: date, settings: 
 
     out += ["## Days until due", "", "| Task | Date used | Days |", "|---|---|---:|"]
     for t in m.tasks.values():
-        if is_open(t):
+        if is_work(t):
             due = due_of(t, today)
             out.append(f"| {tl(t.id)} | {f'{due.label} {due.date.isoformat()}' if due else 'None'} | {day_diff(today, due.date) if due else ''} |")
     out.append("")

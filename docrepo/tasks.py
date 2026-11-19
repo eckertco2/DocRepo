@@ -34,7 +34,11 @@ FIELDS = (
 FIELD_NAMES = dict(FIELDS)
 DATE_FIELDS = ("due", "deadline", "start", "reminder", "repeat_until", "reminder_until")
 TEXT_FIELDS = ("title", "current_status", "deadline_desc", "description")
-FLAG_FIELDS = ("urgent", "meeting", "inherit_labels", "plant_event", "calendar_days")
+FLAG_FIELDS = ("urgent", "meeting", "inherit_labels", "plant_event", "calendar_days", "collection")
+#: A collection's archiving and restoring in the status log (release 5.167, decision 781): stored as Closed, it has no
+#: state to show, so the log says "Archived", from the state it had to the day, and from the day to None when it's
+#: restored. The state it had is what Restore brings back (``collection_edits.restored_state``).
+ARCHIVED = "Archived"
 #: Reference fields (mods log round 2, M0034, release 5.9): named in Settings, each logged under its own name.
 REFERENCES = "references"
 #: Each person's Involvement (release 5.47, decision 196): {(role, person): percent}. Logged under the person's name.
@@ -542,10 +546,12 @@ def create_task(
     inherit_labels: bool = True, plant_event: bool = False, references: dict[str, str] | None = None, duration: int | None = None,
     calendar_days: bool = False, lead_per_day: float | None = None, assignee_per_day: float | None = None,
     lead_per_week: float | None = None, assignee_per_week: float | None = None, involvement: dict[tuple[str, str], int] | None = None,
+    collection: bool = False,
 ) -> str:
     """Create a task, under ``parents`` if any are given (a top-level task if not). Returns its ID.
 
-    ``created_by`` is the capture that created it, or "Excel import" and so on.
+    ``created_by`` is the capture that created it, or "Excel import" and so on. ``collection`` makes a collection
+    (release 5.167, decision 774), as ``**collection,`` does.
     """
     values = {
         "title": title, "state": state, "current_status": current_status, "start": start, "due": due,
@@ -553,7 +559,7 @@ def create_task(
         "repeat_until": repeat_until, "urgent": urgent, "meeting": meeting, "lead_hours": lead_hours,
         "assignee_hours": assignee_hours, "inherit_labels": inherit_labels, "plant_event": plant_event, "duration": duration,
         "calendar_days": calendar_days, "lead_per_day": lead_per_day, "assignee_per_day": assignee_per_day,
-        "lead_per_week": lead_per_week, "assignee_per_week": assignee_per_week,
+        "lead_per_week": lead_per_week, "assignee_per_week": assignee_per_week, "collection": collection,
     }
     with transaction(conn):
         values = {k: _normalize(conn, k, v) for k, v in values.items()}
@@ -647,7 +653,12 @@ def update_task(conn: sqlite3.Connection, settings: Settings, task_id: str, *, a
             if key not in new or getattr(task, key) == new[key]:
                 continue
             changed.append(key)
-            logged.append(Change(name, _shown(conn, key, getattr(task, key)), _shown(conn, key, new[key])))
+            if key == "state" and task.collection and "Closed" in (task.state, new[key]):  # release 5.167, decision 781
+                # Archived keeps the state it had, so Restore brings it back (the review of 2026-11-18): "In progress → 2026-11-18".
+                logged.append(Change(ARCHIVED, task.state if new[key] == "Closed" else (task.closed or "Yes"),
+                                     at.date().isoformat() if new[key] == "Closed" else None))
+            else:
+                logged.append(Change(name, _shown(conn, key, getattr(task, key)), _shown(conn, key, new[key])))
             if key in ROLES or key == "labels":
                 _apply_lists(conn, task_id, key, new[key])
             else:
@@ -707,6 +718,25 @@ def set_discarded(conn: sqlite3.Connection, settings: Settings, task_id: str, re
         if t.discarded:  # back: it takes a new gap if it fell behind, and what's tied to it catches up with it (decision 258)
             update_task(conn, settings, task_id, at=at, via=via)
             follow(conn, settings, ties.every_follower(conn, task_id), at, via)
+    return change
+
+
+def set_collection(conn: sqlite3.Connection, settings: Settings, task_id: str, on: bool, *, at: datetime, via: str) -> Change | None:
+    """Make a task a collection, or a collection a task again (release 5.167, decision 779): the flag alone, its other
+    fields kept as they were, unseen, and the status log's "Kind: Collection" or "Kind: Task". None when it's that already.
+    What else making one does (off Today, its wait ended) is ``collection_edits``'."""
+    from docrepo import kinds
+
+    with transaction(conn):
+        t = get_task(conn, task_id)
+        if t.discarded:
+            raise TaskError(f"{t.title} is discarded.")
+        if t.collection == on:
+            return None
+        conn.execute("UPDATE tasks SET collection = ? WHERE id = ?", (int(on), task_id))
+        change = Change(kinds.LOG_FIELD, kinds.LOG_TASK if on else kinds.LOG_COLLECTION, kinds.LOG_COLLECTION if on else kinds.LOG_TASK)
+        _log(conn, task_id, at, via, [change])
+        capacity.rebuild_task(conn, task_id, at.date(), settings)
     return change
 
 

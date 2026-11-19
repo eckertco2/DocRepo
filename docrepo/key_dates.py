@@ -18,7 +18,7 @@ from datetime import date
 
 from docrepo.dates import long_date, to_date
 from docrepo.model import KeyDate, Model, Task
-from docrepo.schedule import is_open
+from docrepo.kinds import is_work
 
 #: How far ahead a key date shows on Today and the list, as the task's Due does.
 SOON_DAYS = 7
@@ -99,7 +99,7 @@ def due(m: Model, today: date, days: int = SOON_DAYS, task_ids: set[str] | None 
     out: list[Due] = []
     for task_id, kds in m.key_dates.items():
         t = m.tasks.get(task_id)
-        if t is None or not is_open(t) or (task_ids is not None and task_id not in task_ids):
+        if t is None or not is_work(t) or (task_ids is not None and task_id not in task_ids):
             continue
         for kd in kds:
             if kd.done:

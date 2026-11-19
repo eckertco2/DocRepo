@@ -139,6 +139,8 @@ The table of contents at the top of the data root, with the open agendas.
 
 > Generated from docs.db on 2026-10-08 07:58. Don't edit: DocRepo rewrites this page. In VS Code, press Ctrl+Shift+V to preview it and follow the links.
 
+Stock headings: Background, Path forward, Decisions and Open questions. What belongs under each is in [Views\Stock headings.md](Views/Stock%20headings.md).
+
 ## Open tasks
 
 - [Reactor impeller upgrade](Tasks/T000001/Task.md) · T000001 · In progress · due 2026-11-27
@@ -219,6 +221,7 @@ A subtask with a saved file, an old version, a document version, a summary, stat
 |---|---|
 | ID | T000008 |
 | State | In progress |
+| Kind | Parent task |
 | Parents | [Reactor impeller upgrade](../T000001/Task.md) |
 | Labels | Line 1 (inherited), Strategic Plan (inherited) |
 | Lead | Me (8 h) |
@@ -297,6 +300,7 @@ A routine meeting with its agenda: open agenda items, one of them a note with no
 |---|---|
 | ID | T000010 |
 | State | In progress |
+| Kind | Routine task |
 | Meeting | Yes |
 | Recurrence | Weekly, no end date |
 | Parents | None (top-level task) |
@@ -360,6 +364,7 @@ A task with two parents. It's also on a meeting's agenda.
 |---|---|
 | ID | T000015 |
 | State | Not started |
+| Kind | Single task |
 | Parents | [Q4 cost reduction](../T000003/Task.md), [Installation](../T000008/Task.md) |
 | Labels | Profitability (inherited), Line 1 (inherited), Strategic Plan (inherited) |
 | Lead | None |
