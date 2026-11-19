@@ -1,7 +1,7 @@
 """The command line."""
 from __future__ import annotations
 
-from conftest import example_block, table_lines, vector_lines, without_stock_line
+from conftest import example_block, table_lines, vector_lines
 
 from docrepo import config
 from docrepo.cli import main
@@ -56,7 +56,7 @@ def test_load_sample_then_rebuild_and_report(tmp_path, capsys):
     assert main(["--data-root", str(root), "load-sample"]) == 0
     contents = (root / "Contents.md").read_text(encoding="utf-8")
     assert "Stock headings: Background, Path forward, Decisions and Open questions." in contents  # release 5.169
-    assert without_stock_line(contents) == example_block("Contents.md")
+    assert contents == example_block("Contents.md")  # the mockup's examples.md has the line too since release 5.167
     assert (root / "Tasks" / "T000010" / "Task.md").read_text(encoding="utf-8") == example_block("Tasks/T000010/Task.md")
     assert (root / "Captures" / "2026" / "10" / "C000024" / "capture.md").exists()
     assert (root / "Documents" / "D000002" / "extracted.txt").exists()

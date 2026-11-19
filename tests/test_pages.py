@@ -24,7 +24,10 @@ def test_task_page(sample_conn, task_id):
 
 
 def test_contents_page(sample_conn):
-    assert Pages(Model(sample_conn), TODAY, SAMPLE_AS_OF).contents_page() == example_block("Contents.md")
+    from docrepo import stock_headings
+
+    # With Settings' stock headings as they ship, whose line examples.md has since release 5.167 (release 5.169's).
+    assert Pages(Model(sample_conn), TODAY, SAMPLE_AS_OF, stock=stock_headings.DEFAULTS).contents_page() == example_block("Contents.md")
 
 
 @pytest.mark.parametrize("capture_id", ["C000020", "C000017", "C000014", "C000024", "C000003", "C000021"])

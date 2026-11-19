@@ -91,7 +91,7 @@ _MARKER = re.compile(r"^\s*(?:[-*•]|\d+[.)])\s+", re.M)
 # The @, @L. or # word being typed: up to 8 words, with a space after the last one (round 7's decision 324, release 5.74).
 # A sigil with only a space after it isn't one: "# " starts a heading.
 #: A ** being typed at a line's start or after a space, with the start of a name (release 5.92).
-_STAR_TYPING = re.compile(r"(?:^|[\s(])(\*\*)([A-Za-z]+(?: [A-Za-z]+){0,2})?\Z")
+_STAR_TYPING = re.compile(r"(?:^|[\s(])(\*\*)([A-Za-z]+(?:[ -][A-Za-z]+|-){0,2})?\Z")  # a hyphen keeps it open (release 5.167)
 _TYPING = re.compile(r"(?:^|[\s(])(@L\.|@|#)((?:[^\s@#*]+(?: [^\s@#*]+){0,7} ?)?)\Z", re.I)
 TYPING_LIMIT = 60  # characters after the sigil
 
@@ -160,6 +160,8 @@ class Token:
     lead: bool = False  # @L.
     none: bool = False  # @__
     event: bool = False  # **event,: a task that's a plant event
+    collection: bool = False  # **collection,: a collection (release 5.167, decision 784)
+    routine: bool = False  # **task-routine,: a task with Recurrence, Weekly unless **recurrence, says
     size: int = 0
     # A parameter: its entry in the table (none for a name it can't take), what its card says, its sentence and where that
     # ends, and what stops it. ``inside``: an @ or # inside a parameter's sentence, which is the sentence's own.
@@ -219,7 +221,7 @@ def _value_token(rest: str, head: int, *, op: Operator | None = None, label: str
 
 
 def _kind_token(op: Operator, size: int) -> Token:
-    return Token("type", item_type=op.item, state=op.state, event=op.event, size=size)
+    return Token("type", item_type=op.item, state=op.state, event=op.event, collection=op.collection, routine=op.routine, size=size)
 
 
 def _nothing_after(after: str, names: Names) -> bool:
@@ -796,14 +798,23 @@ class Operator:
     # A parameter with no sentence (release 5.147, decision 641): its name says it all, with or without its comma, and the
     # words after it stay the line's.
     alone: bool = False
+    # Release 5.167 (decision 784): a kind that makes a collection, or a routine task; and names read as this one's that the
+    # ** list and the Syntax tab don't offer.
+    collection: bool = False
+    routine: bool = False
+    quiet: tuple[str, ...] = ()
 
 
 OPERATORS: tuple[Operator, ...] = (
-    Operator(("t", "task"), item="task"),
+    # **task-single, **task-group, and **task-parent, are read as **task, (decision 784): a task becomes a parent when one's
+    # made under it, so neither is declared, but nothing typed so fails.
+    Operator(("t", "task", "task-single", "task-group", "task-parent"), item="task", quiet=("task-single", "task-group", "task-parent")),
     Operator(("n", "note"), item="note"),
     Operator(("u", "update"), item="update"),
     Operator(("decision",), item="decision"),
     Operator(("event",), item="task", event=True),
+    Operator(("collection",), item="task", collection=True, what="A collection: a place for notes, files and tasks that isn't work"),
+    Operator(("task-routine",), item="task", routine=True, what="A routine task: Recurrence Weekly, unless **recurrence, says another"),
     Operator(("closed", "done", "complete", "completed", "finished"), item="update", state="Closed"),
     Operator(("in progress", "started", "under way", "underway", "reopened", "re-opened"), item="update", state="In progress"),
     Operator(("parked", "on hold"), item="update", state="Parked"),
@@ -994,6 +1005,7 @@ class Item:
     reminder: str | None = None
     start: str | None = None
     plant_event: bool = False  # made by **event, (release 5.9)
+    collection: bool = False  # made by **collection, (release 5.167, decision 784)
     key_date: KeyDateText | None = None  # made by **key date, (release 5.31)
     # A parameter (release 5.38): what its card is called, its entry in the table, and what its sentence says.
     label: str = ""
@@ -1193,13 +1205,16 @@ def read(content: str, names: Names, today: date, *, labels: Sequence[ParseLabel
                       list(b.lines), b.owner is None, state=typ.state if typ else "", assignees=[x for x in people if not x.lead and not x.none],
                       leads=[x for x in people if x.lead and not x.none], none=any(x.none for x in people), tasks=ctx_tasks(b),
                       parent_item=parent_item.key if parent_item and parent_item.kind == "task" else None,
-                      parent_self=b.parent is not None and blocks[b.parent].is_self, plant_event=bool(typ and typ.event))
+                      parent_self=b.parent is not None and blocks[b.parent].is_self, plant_event=bool(typ and typ.event),
+                      collection=bool(typ and typ.collection))
             if kind == "task":
                 r = parse_capture(it.text, "new_task", today, names.people, labels, events)
                 it.title = r.title or first_sentence(it.text) or "Untitled task"
                 it.due, it.deadline, it.deadline_desc, it.urgent = _iso(r.due), _iso(r.deadline), r.deadline_desc, r.urgent
                 it.labels, it.lead_hours, it.assignee_hours = list(r.labels), r.lead_hours, r.assignee_hours
                 it.recurrence, it.reminder, it.start = r.recurrence, _iso(r.reminder), _iso(r.start)
+                if typ and typ.routine and not it.recurrence:  # **task-routine, (release 5.167, decision 784)
+                    it.recurrence = "Weekly"
                 it.plant_event = it.plant_event or r.plant_event  # "plant event" in its block, as for the new task (M0059)
                 # A plant event runs from its Start to its Due: the end date its own name made a Deadline ("Spring outage,
                 # 3 to 14 Nov") is its Due.
@@ -1703,6 +1718,8 @@ STAR_EXAMPLES = {
     "update": "**update, Crane booked for Tuesday",
     "decision": "**decision, We hire the bigger crane",
     "event": "**event, Turnaround from 3 to 21 Nov",
+    "collection": "**collection, Job aids",
+    "task-routine": "**task-routine, Check the seals",
     "closed": "**closed, The seals are fitted",
     "in progress": "**in progress, Drawings started",
     "parked": "**parked, Waiting for the vendor",
@@ -1768,8 +1785,8 @@ def syntax_rows(names: Names | None = None) -> list[tuple[str, str, str, str]]:
         if op.gone:
             continue
         name = star_name(op)
-        others = ", ".join(f"**{n}," for n in op.names if n != name)
-        what = (f"{KIND_NAMES.get(op.item, 'Item')}" + (f", {op.state}" if op.state else "") + (", a plant event" if op.event else "")
+        others = ", ".join(f"**{n}," for n in op.names if n != name and n not in op.quiet)
+        what = (op.what or f"{KIND_NAMES.get(op.item, 'Item')}" + (f", {op.state}" if op.state else "") + (", a plant event" if op.event else "")
                 if op.item else op.what or op.label + (" (adds to the list)" if op.adds else ""))
         rows.append((f"**{name}{'' if op.alone else ','}", others, what, STAR_EXAMPLES.get(name, "")))
     for op in (names.field_ops.values() if names else ()):
@@ -1889,9 +1906,10 @@ def item_text(it: Item, names: Names) -> str:
         said = key_date_text(kd) if kd else f"{it.value.shown}." if it.value and it.value.shown else ""
         more = f"{it.problem}." if it.problem and not (kd and kd.problem == it.problem) else ""
         return f"{it.label}: {' '.join(x for x in (said, more) if x)}{on}"
-    name = "Plant event" if it.plant_event else KIND_NAMES[it.kind] + (f" {it.state}" if it.state else "")
+    name = "Plant event" if it.plant_event else "Collection" if it.collection else KIND_NAMES[it.kind] + (f" {it.state}" if it.state else "")
     who = lambda xs: ", ".join(names.person_name(x.id) if x.id else x.name for x in xs)  # noqa: E731
     facts = [] if it.kind != "task" else [it.start and f"start {it.start}", it.due and f"due {it.due}", it.deadline and f"deadline {it.deadline}",
+                                          it.recurrence and f"recurrence {it.recurrence}",
                                           it.assignees and f"for {who(it.assignees)}", it.leads and f"lead {who(it.leads)}"]
     tail = "".join(f" {f}" for f in facts if f)
     return f'{name} "{it.title if it.kind == "task" else it.text}"{tail}{f" {it.problem}." if it.problem else ""}{on}'

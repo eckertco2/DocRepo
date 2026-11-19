@@ -89,6 +89,8 @@ The comma after the name is what makes it one: `**due, 5 Nov`, not `**due. 5 Nov
 | `**update,` | `**u,` | Update | `**update, Crane booked for Tuesday` |
 | `**decision,` |  | Decision | `**decision, We hire the bigger crane` |
 | `**event,` |  | Task, a plant event | `**event, Turnaround from 3 to 21 Nov` |
+| `**collection,` |  | A collection: a place for notes, files and tasks that isn't work | `**collection, Job aids` |
+| `**task-routine,` |  | A routine task: Recurrence Weekly, unless **recurrence, says another | `**task-routine, Check the seals` |
 | `**closed,` | `**done,` `**complete,` `**completed,` `**finished,` | Update, Closed | `**closed, The seals are fitted` |
 | `**in progress,` | `**started,` `**under way,` `**underway,` `**reopened,` `**re-opened,` | Update, In progress | `**in progress, Drawings started` |
 | `**parked,` | `**on hold,` | Update, Parked | `**parked, Waiting for the vendor` |

@@ -139,6 +139,8 @@ The table of contents at the top of the data root, with the open agendas.
 
 > Generated from docs.db on 2026-10-08 07:58. Don't edit: DocRepo rewrites this page. In VS Code, press Ctrl+Shift+V to preview it and follow the links.
 
+Stock headings: Background, Path forward, Decisions and Open questions. What belongs under each is in [Views\Stock headings.md](Views/Stock%20headings.md).
+
 ## Open tasks
 
 - [Reactor impeller upgrade](Tasks/T000001/Task.md) · T000001 · In progress · due 2026-11-27
