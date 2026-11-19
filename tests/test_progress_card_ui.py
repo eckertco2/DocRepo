@@ -12,8 +12,8 @@ import types  # noqa: E402
 
 import pytest  # noqa: E402
 from PySide6.QtCore import QEvent, Qt  # noqa: E402
-from PySide6.QtGui import QKeyEvent  # noqa: E402
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtGui import QGuiApplication, QKeyEvent  # noqa: E402
+from PySide6.QtWidgets import QApplication, QLineEdit  # noqa: E402
 
 from docrepo import edits, progress, waits  # noqa: E402
 from docrepo.config import Settings  # noqa: E402
@@ -63,6 +63,16 @@ def settle() -> None:
 
 def key(widget, k, mods=Qt.KeyboardModifier.NoModifier) -> None:
     QApplication.sendEvent(widget, QKeyEvent(QEvent.Type.KeyPress, k, mods))
+
+
+@pytest.fixture(autouse=True)
+def modifiers_let_go(qapp):
+    """Qt keeps the modifiers of the last key press it was handed (a release doesn't clear them), and opening a task reads
+    them (release 5.174's ``task_open.shift_held``): a test's Shift+Enter or Alt+Down, never let go, would make the next
+    file's opens go the other way. A keyboard lets go of Shift itself; here a plain key press does."""
+    yield
+    QApplication.sendEvent(QLineEdit(), QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_unknown, Qt.KeyboardModifier.NoModifier))
+    assert QGuiApplication.keyboardModifiers() == Qt.KeyboardModifier.NoModifier
 
 
 def updates(conn, task: str) -> int:
