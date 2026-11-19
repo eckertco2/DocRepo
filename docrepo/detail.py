@@ -23,7 +23,7 @@ from datetime import date, timedelta
 from urllib.parse import quote
 
 from docrepo import (all_notes, capacity, decisions, email_conversations, items, markup, meeting_rows, notes_page, repeats, tagged, task_tile,
-                     ties, topics, waits)
+                     ties, topics, transcripts, waits)
 from docrepo.dates import ago, days_words, long_date, monday_of, short, to_date
 from docrepo.file_rows import dated_name, type_name
 from docrepo.markup import esc
@@ -134,7 +134,7 @@ CONVERSATION_TIP = "Open the conversation: every email of it DocRepo holds, olde
 COPY_DECISIONS_TIP = ("Copy the decision register: a table of each decision's date, its words, its task and the meeting it came "
                       "from, for an email or a document")
 #: The Meetings section's command (release 5.140, decision 607): Meeting notes on this task, as M on its page.
-MEETING_NOTES_TIP = ("Meeting notes on this task: the capture window takes a meeting's notes, a new meeting under this task "
+MEETING_NOTES_TIP = ("Notes of a discussion or meeting on this task (Meeting notes until release 5.170): the capture window takes a meeting's notes, a new meeting under this task "
                      "(this time's, for a regular meeting), with its agenda beside them (M)")
 #: All notes' link back to a block's own page (decision 605).
 EDIT_THERE_TIP = "Open its page at these lines, to read or write them there (or double-click a line)"
@@ -480,6 +480,11 @@ class Pages:
             out["agenda_short"] = f"{n_open} open"
             out["agenda_summary"] = section_head(out["agenda_short"], link(f"agenda:{t.id}", "Open agenda"))
             out["agenda"] = split_section(agenda)[1]
+        # A meeting's Summary (release 5.170, the discussions plan's decisions 796 and 798): its notes' summaries and its
+        # transcripts, above the notes, with Add summary… and Add transcript… at the right.
+        said = self.summary_section(t)
+        if said:
+            out["summary_short"], out["summary_summary"], out["summary"] = said
         # Subtasks, the work only, or on a meeting's page its Follow-ups (release 5.142, decision 611).
         subtasks = self.subtask_section(t, state)
         if subtasks:
@@ -499,7 +504,7 @@ class Pages:
         met = meeting_rows.rows(self.m, t.id)
         if met:
             out["meetings_short"] = f"{len(met)} · last {self.day(met[0].day)}"
-            out["meetings_summary"] = section_head(out["meetings_short"], link(f"meetingnotes:{t.id}", "Meeting notes", MEETING_NOTES_TIP))
+            out["meetings_summary"] = section_head(out["meetings_short"], link(f"meetingnotes:{t.id}", "Discussion or meeting", MEETING_NOTES_TIP))
             out["meetings"] = self.meeting_rows_html(t, met, state)
         ids = self.m.scope_ids(t.id, state.scope)
         # Decisions (release 5.124, decisions 477 to 479): the task's and its subtasks' decisions, newest first, after
@@ -535,6 +540,33 @@ class Pages:
         out["history_short"] = f"{n} capture{'s' if n != 1 else ''}"
         out["history_summary"] = section_head(out["history_short"])
         return out
+
+    def summary_section(self, t: Task) -> tuple[str, str, str] | None:
+        """A meeting's Summary section (release 5.170, decisions 796 to 798): each summary of its notes, newest first, with
+        the day and the capture it's on, then its transcripts, each opening in its own program; at the right Add summary…
+        (Edit summary… once there's one) and Add transcript…. On a meeting's page always, so the two are there to use;
+        elsewhere only when a capture on the task holds a summary or a transcript. Its few words, its head and its body."""
+        sums = transcripts.summaries(self.m, t.id)
+        said = transcripts.meeting_transcripts(self.m, t.id)
+        if not (t.meeting or sums or said):
+            return None
+        rows = []
+        for cid, text in sums:
+            c = self.m.captures[cid]
+            body = "<br>".join(esc(line) for line in text.strip().split("\n"))
+            rows.append(f'<p style="margin: 0 0 2px 0">{body}</p><p class="sub" style="margin: 0 0 8px 0">{esc(self.day(c.saved))} · '
+                        f'{link(f"capture:{cid}", cid, "Its capture", "tq")}</p>')
+        if said:
+            names = " &nbsp;".join(link(f"opensaved:{d.id}", d.name, "Open the transcript in its own program", "tl") for d in said)
+            rows.append(f'<p class="sub" style="margin: 0">Transcript{"s" if len(said) > 1 else ""}: {names}</p>')
+        if not rows:
+            rows.append('<p class="note">No summary or transcript yet. A summary from the call, or the recording\'s '
+                        "transcript, can be pasted in here.</p>")
+        short_words = " · ".join([f"{len(sums)} summar{'ies' if len(sums) != 1 else 'y'}"] * bool(sums)
+                                 + [f"{len(said)} transcript{'s' if len(said) != 1 else ''}"] * bool(said)) or "none yet"
+        actions = (link(f"addsummary:{t.id}", "Edit summary…" if sums else "Add summary…", "Paste the summary: a Zoom AI summary, or one made later")
+                   + " &nbsp;" + link(f"addtranscript:{t.id}", "Add transcript…", "Paste the transcript: kept whole as a file of the meeting's"))
+        return short_words, section_head(short_words, actions, raw=True), "".join(rows)
 
     def facts_grid(self, t: Task, width: int = 600) -> str:
         """The task's facts as one grid under its title (release 5.113, the task panel plan's decision 422): its state

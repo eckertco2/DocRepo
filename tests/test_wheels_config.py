@@ -246,14 +246,22 @@ OLD_CAPTURE = wc._OLD_CAPTURE_END.replace("{nl}", "\n")
 NEW_CAPTURE = wc._RECENT_END.replace("{nl}", "\n")
 
 
+def as_before_5_170(text: str) -> str:
+    """The default text with the Capture wheel's W as releases 5.41 to 5.169 wrote it (release 5.170 renames the mode)."""
+    return text.replace(wc._MEETING_SLOT, wc._OLD_MEETING_SLOT).replace(wc._MEETING_COMMENT, wc._OLD_MEETING_COMMENT)
+
+
+BEFORE = as_before_5_170(wc.DEFAULT_TEXT)
+
+
 def test_a_file_from_before_gets_recent_captures_on_the_capture_wheel_s_ne(data_root, fs):
     """Release 5.158 (the recent captures plan's decision 723), as 5.139 added Log progress: a file whose Capture wheel ends
     as the default wrote it gets NE, and the pinned window's suggestion moves to NW; every other line stays."""
     wc.write_defaults(fs, data_root, SPECS, ICONS)
     path = data_root / wc.CONFIG_FILE
-    assert NEW_CAPTURE in wc.DEFAULT_TEXT
-    old = wc.DEFAULT_TEXT.replace(NEW_CAPTURE, OLD_CAPTURE)
-    assert "capture.recent" not in old and wc.recent_slot(old) == wc.DEFAULT_TEXT
+    assert NEW_CAPTURE in BEFORE
+    old = BEFORE.replace(NEW_CAPTURE, OLD_CAPTURE)
+    assert "capture.recent" not in old and wc.recent_slot(old) == BEFORE
     path.write_bytes(("// mine\n" + old).encode("utf-8"))
     wc.write_defaults(fs, data_root, SPECS, ICONS)
     assert path.read_bytes().decode("utf-8") == "// mine\n" + wc.DEFAULT_TEXT
@@ -269,8 +277,8 @@ def test_a_file_from_before_gets_recent_captures_on_the_capture_wheel_s_ne(data_
 
 def test_a_capture_wheel_you_changed_or_whose_ne_is_taken_stays(data_root, fs):
     """Decision 723: only when NE is free and the command isn't named; otherwise the file is left alone, and Recent captures
-    is still on Ctrl+K."""
-    old = wc.DEFAULT_TEXT.replace(NEW_CAPTURE, OLD_CAPTURE)
+    is still on Ctrl+K. (Release 5.170 still renames a W that reads Meeting, decision 794.)"""
+    old = BEFORE.replace(NEW_CAPTURE, OLD_CAPTURE)
     # The pin's suggestion taken up on NE, as its comment says.
     pinned = old.replace('"command": "capture.meeting" }\n        // capture.pin', '"command": "capture.meeting" },\n        // capture.pin').replace(
         '        // "NE": { "label": "Pinned"', '        "NE": { "label": "Pinned"')
@@ -284,6 +292,26 @@ def test_a_capture_wheel_you_changed_or_whose_ne_is_taken_stays(data_root, fs):
     path = data_root / wc.CONFIG_FILE
     for mine in (pinned, elsewhere, named, renamed, "{ not json"):
         assert wc.recent_slot(mine) == mine
+        path.write_bytes(mine.encode("utf-8"))
+        wc.write_defaults(fs, data_root, SPECS, ICONS)
+        assert path.read_bytes().decode("utf-8") == wc.discussion_slot(mine)
+
+
+def test_the_meeting_slot_is_renamed_once_and_a_slot_you_changed_stays(data_root, fs):
+    """Release 5.170 (the discussions plan's decision 794): the Capture wheel's W, still Meeting as the default wrote it,
+    reads Discussion or meeting, with its comment; once. A slot you relabelled or gave another command stays yours."""
+    assert '"label": "Discussion or meeting"' in wc.DEFAULT_TEXT and wc.discussion_slot(BEFORE) == wc.DEFAULT_TEXT
+    assert wc.discussion_slot(wc.DEFAULT_TEXT) == wc.DEFAULT_TEXT
+    path = data_root / wc.CONFIG_FILE
+    wc.write_defaults(fs, data_root, SPECS, ICONS)
+    path.write_bytes(BEFORE.replace("\n", "\r\n").encode("utf-8"))
+    wc.write_defaults(fs, data_root, SPECS, ICONS)
+    assert path.read_bytes().decode("utf-8") == wc.DEFAULT_TEXT.replace("\n", "\r\n")
+    assert wc.load(data_root, SPECS, ICONS).wheel("capture").slots["W"].label == "Discussion or meeting"
+    for mine in (BEFORE.replace('"label": "Meeting"', '"label": "Standup"'),
+                 BEFORE.replace('"label": "Meeting", "icon": "people", "command": "capture.meeting"',
+                                '"label": "Meeting", "icon": "people", "command": "capture.new"')):
+        assert wc.discussion_slot(mine) == mine
         path.write_bytes(mine.encode("utf-8"))
         wc.write_defaults(fs, data_root, SPECS, ICONS)
         assert path.read_bytes().decode("utf-8") == mine

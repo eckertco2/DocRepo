@@ -120,7 +120,7 @@ _ROWS = (
     Registered(CommandSpec("capture.new", "The capture window, blank", (Arg("mode", None, ("note", "new_task", "update")), Arg("blank", True, kind="bool"))), _capture_new),
     Registered(CommandSpec("capture.pin", "The pinned window"), _capture_pin),
     Registered(CommandSpec("capture.selection", "The pinned window with the current email or file"), _capture_selection),
-    Registered(CommandSpec("capture.meeting", "Meeting notes"), _capture_meeting),
+    Registered(CommandSpec("capture.meeting", "Discussion or meeting"), _capture_meeting),
     Registered(CommandSpec("capture.recent", "Recent captures: Enter opens one on its notes page"), _capture_recent),
     Registered(CommandSpec("today.new_item", "A quick task on Today (Ctrl+Shift+D's command)"), _today_new_item),
     Registered(CommandSpec("today.panel", "The Today side panel", (Arg("do", "toggle", ("toggle", "open", "close")),)), _today_panel, gives_back=True),
