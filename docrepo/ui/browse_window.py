@@ -862,7 +862,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
                     Command("Task", "Add to an agenda", lambda: self.open_capture(task=tid, mode="update", agenda_focus=True), "A"),
                     Command("Task", "Edit task", lambda: self.edit_task(tid), "E")]
             if task.meeting:
-                out.append(Command("Task", "Meeting notes", lambda: self.open_capture(task=tid, meeting=True), "M"))
+                out.append(Command("Task", "Discussion or meeting", lambda: self.open_capture(task=tid, meeting=True), "M"))
             out += [Command("Task", "Find files", lambda: self.open_task_view(tid), "O"),
                     Command("Task", "Copy prompt", lambda: self.copy_prompt(tid)),
                     Command("Task", "Save as template", lambda: self.templates.save_as(tid)),

@@ -61,7 +61,7 @@ class AgendaList:
         self._button("Quick summary", lambda: self.ctx.open_summary(f"{'person' if is_person(target) else 'agenda'}:{target}"))
         meeting = m.tasks.get(target)
         if meeting and meeting.meeting and is_open(meeting):  # release 5.8
-            self._button("Meeting notes", lambda: self.open_capture(task=target, meeting=True))
+            self._button("Discussion or meeting", lambda: self.open_capture(task=target, meeting=True))  # release 5.170 (decision 794)
         self.tree.set_columns(*_cols(*with_actions(["Item", "State", "Added"], [0, 96, 70], 130)))
         grey = group_ground()
         for name, group in agenda_groups(m, target):  # each topic's items under its heading, which folds (release 5.24)

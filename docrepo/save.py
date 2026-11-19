@@ -21,7 +21,8 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
-from docrepo import agenda, captures, conversations, edits, items, layer0, markup, page_lines, people, priorities, quick, search, tasks, waits
+from docrepo import (agenda, captures, conversations, edits, items, layer0, markup, page_lines, people, priorities, quick, search, tasks,
+                     transcripts, waits)
 from docrepo.captures import copy_name
 from docrepo.config import Settings
 from docrepo.dates import long_date, short, stamp, workday_numbers
@@ -191,6 +192,9 @@ class CaptureDraft:
     agenda: list[str] = field(default_factory=list)  # agenda targets: task or person IDs
     summary: str = ""
     summary_type: str | None = None
+    #: A discussion's or meeting's transcript, pasted into its tab (release 5.170, decision 797): kept as ``transcript.md``
+    #: in the meeting's Files, never in docs.db's rows or on the notes page, and never read for operators.
+    transcript: str = ""
     new_task: NewTaskFields = field(default_factory=NewTaskFields)
     #: The Update fields, prefilled with the task's values; only those that differ are changed.
     update: dict[str, Any] = field(default_factory=dict)
@@ -393,7 +397,7 @@ def _and_list(items: list[str]) -> str:
 def _check(draft: CaptureDraft, task_exists: bool) -> None:
     is_new, is_upd = "new_task" in draft.types, "update" in draft.types
     content = draft.words()
-    has_body = bool(content or draft.files)
+    has_body = bool(content or draft.files or draft.summary.strip() or draft.transcript.strip())
     targets = draft.agenda if draft.agenda_shown() else []
     if draft.task and not task_exists:
         raise SaveError(f"There's no task {draft.task}.", "task")
@@ -578,7 +582,8 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
     # capture still, a record of what arrived; so do an update, a new task and meeting notes.
     page_note = (is_note and not is_new and not is_upd and not draft.meeting and bool(t) and bool(content) and not draft.files
                  and not summary and not draft.page_made and not draft.from_capture)
-    keep = bool(content or draft.files or summary) and not draft.from_capture and not page_note
+    transcript = draft.transcript.strip("\n") + "\n" if draft.transcript.strip() else ""  # one line end at its close
+    keep = bool(content or draft.files or summary or transcript) and not draft.from_capture and not page_note
     when, day = stamp(at), at.date().isoformat()
     source_capture = Model(conn).captures.get(draft.from_capture) if draft.from_capture else None
     if draft.from_capture and source_capture is None:
@@ -593,6 +598,7 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
     created = None
     quick_task = is_new and not t and not draft.from_capture and draft.quick  # decision 393: Today alone doesn't make one
     holder_title = task_row["title"] if task_row else None  # the task the files belong to, for descriptions left empty
+    said, said_doc = "", None  # the transcript's file name and document (release 5.170)
     with transaction(conn):
         capture_id = next_id(conn, "C") if keep else None
         via = capture_id or draft.from_capture or "Capture window"
@@ -737,6 +743,10 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
                         taken.add(name)
                         captures.add_saved_copy(conn, task=holder, name=name, document=doc, from_capture=capture_id)
                         copies.append((doc, name))
+                if transcript:  # the transcript, a file of the meeting's own, once (release 5.170, decision 797)
+                    said = transcripts.next_name(taken)
+                    taken.add(said)
+                    said_doc = transcripts.record(conn, holder, capture_id, said)
         subject = created if is_new else t if is_upd or draft.split_part else None
         note_text = "" if is_new else plain_text(words)
         for target in list(targets):
@@ -802,9 +812,12 @@ def save_capture(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
         model = Model(conn)
         if capture_id:
             _write_files(conn, data_root, fs, settings, capture_id, emails, documents, copies, created or t, result)
+            if said_doc:
+                write_transcript(conn, data_root, fs, settings, created or t, said_doc, said, transcript, result.problems)
             filed = model.capture_tasks(model.captures[capture_id])  # the task the capture's page is on, a new task first
             result.filed_emails = [(e, filed[0]) for e in emails] if filed else []
-        search.index_items(conn, data_root, captures=[*([capture_id] if capture_id else []), *result.items], documents=[d for d, _, _ in documents])
+        search.index_items(conn, data_root, captures=[*([capture_id] if capture_id else []), *result.items],
+                           documents=[d for d, _, _ in documents] + [said_doc] * bool(said_doc))
         # The notes page (release 5.25): the capture's block on its tasks' pages, and each item's on its own task's. A
         # note that's no capture is on its page already (release 5.69).
         typed = items.store(content, names, formatted) if content else ""
@@ -1162,8 +1175,23 @@ def _write_files(
         _record_text(conn, data_root, fs, settings, doc, source, result, picture=doc in pictures, shown=model.documents[doc].name)
 
 
+def write_transcript(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, task_id: str, doc: str, name: str,
+                     text: str, problems: list[str]) -> None:
+    """Write a transcript's file in the meeting's Files folder and read its text for search, whole up to its own cap
+    (release 5.170, decisions 797 and 799). A failure is a problem said, never its words in the log."""
+    try:
+        path = transcripts.write(fs, data_root, task_id, name, text)
+    except OSError as e:
+        problems.append(f"The transcript couldn't be saved as {name} ({type(e).__name__}).")
+        log.warning("transcript %s not written: %s", doc, type(e).__name__)
+        return
+    holder = SaveResult(None, None, None, [], [], "")
+    _record_text(conn, data_root, fs, settings, doc, path, holder, cap=transcripts.TEXT_CAP)
+    problems.extend(holder.problems)
+
+
 def _record_text(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings: Settings, doc: str, source: Path, result: SaveResult,
-                 picture: bool = False, shown: str = "") -> None:
+                 picture: bool = False, shown: str = "", cap: int | None = None) -> None:
     """Pull a document's plain text into Documents/<id>/extracted.txt, and note its size, time and checksum. A picture has
     no text to read, so that isn't a problem (release 5.33). ``shown`` is the name a problem says: the document's, not its
     saved file's dated one."""
@@ -1174,7 +1202,7 @@ def _record_text(conn: sqlite3.Connection, data_root: Path, fs: SafeFS, settings
         result.problems.append(f"{name} couldn't be opened ({type(e).__name__}), so its text wasn't saved.")
         conn.execute("UPDATE documents SET text_status = 'error', text_note = ? WHERE id = ?", (f"couldn't open it ({type(e).__name__})", doc))
         return
-    found = extract_text(source, settings.extracted_text_cap_chars)
+    found = extract_text(source, cap or settings.extracted_text_cap_chars)
     if found.text:
         try:
             fs.write_text(data_root / "Documents" / doc / "extracted.txt", found.text)

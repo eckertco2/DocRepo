@@ -168,15 +168,16 @@ def list_date(task_list: TaskList, t: Task, today: date) -> DueDate | None:
     return due_of(t, today)
 
 
-def markers(m: Model, t: Task, critical: bool = True) -> list[tuple[str, str]]:
+def markers(m: Model, t: Task, critical: bool = True, routine: bool = True) -> list[tuple[str, str]]:
     """The chips after a task's title: (text, kind), kind being pri-critical, urgent, routine or multi. Of the priorities,
-    rows show only Critical, as they show Urgent (decision 77); the task page shows every bucket, so it leaves this one out."""
+    rows show only Critical, as they show Urgent (decision 77); the task page shows every bucket, so it leaves this one out.
+    ``routine`` False leaves out the "↻ Weekly" chip where a tile's kind mark says it instead (release 5.168, decision 786)."""
     out = []
     if critical and t.priority == "critical":
         out.append((priorities.name("critical"), "pri-critical"))
     if t.urgent:
         out.append(("Urgent", "urgent"))
-    if t.recurrence:
+    if routine and t.recurrence:
         out.append((f"↻ {t.recurrence}", "routine"))
     n = len(m.parents_of(t.id))
     if n > 1:

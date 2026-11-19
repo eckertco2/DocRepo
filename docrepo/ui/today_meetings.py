@@ -150,7 +150,7 @@ def actions(browse: BrowseWindow, x: Meeting) -> list[tuple[str, Callable[[], No
     if x.target:
         whose = f"{meetings.target_name(m, x.target)}'s agenda" if is_person(x.target) else "its page, at its Agenda section"
         return [("Agenda", lambda: open_agenda(browse, x.target), f"Open {whose}"),
-                ("Meeting notes", lambda: open_notes(browse, x), "The capture window's meeting notes, for today's meeting")]
+                ("Discussion or meeting", lambda: open_notes(browse, x), "The capture window's notes of a discussion or meeting, for today's meeting")]
     pick = ("Link…", lambda: pick_link(browse, x), "Link it to a meeting task, or to a person for a one-to-one: it stays linked each time it's on your calendar")
     if x.suggestion:
         name = meetings.target_name(m, x.suggestion)

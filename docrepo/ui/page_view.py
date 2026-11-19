@@ -111,7 +111,7 @@ def file_mark(kind: str, scale: float) -> QImage:
 #: A tile's marks on a page (release 5.138, the task tile plan's decisions 566 to 570): the icon each draws, its colour and size.
 TILE_MARKS = {"sun": ("sun", "text2", 14), "agenda": ("agenda", "text2", 14), "waiting": ("waiting", "text2", 14),
               "waiting-late": ("waiting", "caution", 14), "urgent": ("urgent", "critical", 13), "parents": ("parents", "text2", 13),
-              "blank": ("", "", 14)}
+              "blank": ("", "", 14), "kind-parent": ("kind-parent", "text2", 12), "kind-routine": ("kind-routine", "text2", 12)}  # 5.168
 
 
 def tile_mark(key: str, scale: float) -> QImage:

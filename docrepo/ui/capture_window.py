@@ -117,6 +117,7 @@ from docrepo.ui.save_link import SAVE, SaveLinkSwitch, SaveLinkZones, zone_at
 from docrepo.ui.explorer import show_in_explorer
 from docrepo.ui.front import bring_to_front
 from docrepo.ui.look import LOOK, Help, KeyBadge, KeyTips, set_hints, tip
+from docrepo.ui.meeting_tabs import MeetingTabs
 from docrepo.ui.problems import Problems, ProblemsLine
 from docrepo.ui.mods_panel import ModsPanel
 from docrepo.ui.palette import RECENT_CAPTURES, Command, CommandPalette, summary_commands
@@ -168,7 +169,7 @@ DRAFT_NOTE = "The draft saves itself every 30 seconds."
 ITEMS_WAIT_MS = 500
 #: The content text's placeholder: what to type, while the box is empty (decision 7).
 CONTENT_PLACEHOLDER = "Type a note. @name makes a task, #task files it on a task, ** says what a line is or fills a field: type ** for the list."
-MEETING_PLACEHOLDER = "Meeting notes. @name makes a task, #task files a line on a task, ** says what a line is: type ** for the list."
+MEETING_PLACEHOLDER = "Discussion or meeting notes. @name makes a task, #task files a line on a task, ** says what a line is: type ** for the list."
 #: The items' and the agenda's column, beside the content text.
 SIDE_WIDTH = 300
 #: The new look's shortest window: it grows with the content, up to most of the screen.
@@ -604,7 +605,7 @@ class CaptureWindow(QWidget):
         row1.addWidget(types_box)
         types_note = QLabel()
         row1.addWidget(InfoButton("types", types_note))
-        self.meeting_title = QLabel("Meeting notes", objectName="heading")  # meeting notes take the capture types' place
+        self.meeting_title = QLabel("Discussion or meeting notes", objectName="heading")  # release 5.170 (decision 794)  # meeting notes take the capture types' place
         self.meeting_title.hide()
         row1.addWidget(self.meeting_title)
         row1.addStretch(1)
@@ -625,7 +626,7 @@ class CaptureWindow(QWidget):
         line.setFrameShape(QFrame.Shape.VLine)
         line.setObjectName("divider")
         row1.addWidget(line)
-        self.meeting_button = self._icon_button("people", "Meeting notes: the meeting's name, its agenda and room to write", "Alt+M", "M")
+        self.meeting_button = self._icon_button("people", "Discussion or meeting: its name, its agenda, and notes, a summary and a transcript", "Alt+M", "M")
         self.meeting_button.setCheckable(True)
         self.meeting_button.clicked.connect(lambda _=False: self.toggle_meeting())
         row1.addWidget(self.meeting_button)
@@ -739,7 +740,9 @@ class CaptureWindow(QWidget):
         el.addWidget(self.content, 1)
         if not LOOK.classic:
             self.format_bar.show_on_use(editor)
-        self.content_field = field("Content text", editor, "content")
+        # In Discussions and meetings, Notes, Summary and Transcript tabs over it (release 5.170, decision 795).
+        self.tabs = MeetingTabs(editor)
+        self.content_field = field("Content text", self.tabs, "content")
         self.content_field.property("label").setVisible(LOOK.show_help)  # the editor speaks for itself; its placeholder says what to type
         lc.addWidget(self.content_field, 1)
         self.content_hint = Help()
@@ -965,7 +968,7 @@ class CaptureWindow(QWidget):
                Command("Capture", "Put it on an agenda", self._alt_agenda, "Alt+A"),
                Command("Capture", "Pick its task", self._open_picker),
                Command("Capture", "Parse and populate", self.parse, "Alt+P"),
-               Command("Capture", "Meeting notes", self.toggle_meeting, "Alt+M"),
+               Command("Capture", "Discussion or meeting", self.toggle_meeting, "Alt+M"),
                Command("Capture", "Expand", self.toggle_expand, "F11"),
                Command("Capture", "Pin it at the bottom right", self.pin, "F12"),
                Command("Attach", "Save files in DocRepo", lambda: self._pick_files(saved=True)),
@@ -1961,6 +1964,7 @@ class CaptureWindow(QWidget):
         """A kept draft back in the window: its words, the rest of its form and its files. Returns what couldn't come back."""
         self._restore_state(data)
         lost = draft_ui.restore_files(self, draft_id, data)
+        draft_ui.restore_transcript(self, draft_id, data)  # release 5.170 (decision 800)
         if not data.get("files") and data.get("file_names"):  # a draft set aside before release 5.77 kept no files
             lost += [str(n) for n in data["file_names"]]
         self.refresh()
@@ -2348,7 +2352,7 @@ class CaptureWindow(QWidget):
             row.set_per_day(False)
         for box in (self.n_calendar, self.u_calendar):
             box.setChecked(False)
-        for w in (self.content, self.summary, self.u_status):
+        for w in (self.content, self.summary, self.u_status, self.tabs.transcript):
             w.clear()
         for d in (self.n_due, self.n_deadline, self.n_reminder, self.n_repeat, self.u_due, self.u_deadline, self.u_start, self.u_reminder, self.u_repeat):
             d.set_value(None)
@@ -2596,10 +2600,11 @@ class CaptureWindow(QWidget):
         for w in (self.today_button, self.agenda, self.agenda_divider):
             w.setVisible(not self.meeting_on)
         self.content.setPlaceholderText(MEETING_PLACEHOLDER if self.meeting_on else CONTENT_PLACEHOLDER)
+        self.tabs.set_on(self.meeting_on and not self.from_capture, self.summary_field, self.summary, self.lower_layout)
         self.meet_what.setVisible(self.meeting_on)
         self.meeting_button.setChecked(self.meeting_on)
         self.meeting_button.setEnabled(not self.from_capture)
-        self.content_field.property("label").setText("Meeting notes" if self.meeting_on else self.content_field.property("label").text())
+        self.content_field.property("label").setText("Discussion or meeting notes" if self.meeting_on else self.content_field.property("label").text())
         self.content_hint.setText(
             f"The content text of {self.from_capture}. It stays in that capture." if self.from_capture else
             "Each line with an operator becomes an item when you save: @Tom a task for Tom, #Rigging plan a note on it, **closed, an update, "
@@ -3489,6 +3494,7 @@ class CaptureWindow(QWidget):
             update_key_dates=self.update_key_dates() if "update" in self.types and t else None,
             from_capture=self.from_capture, quick=self._quick(),
             meeting=self.meeting_on, meeting_name=self.meet_name.text() if self.meeting_on else "", agenda_ticks=dict(self.agenda_ticks),
+            transcript=self.tabs.transcript_text(),
             item_overrides={k: dict(v) for k, v in self.item_ov.items()}, refs=dict(self.ref_ids),
         )
 

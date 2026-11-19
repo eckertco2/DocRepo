@@ -170,14 +170,14 @@ def test_the_browse_tool_opens_meeting_notes(ctx, monkeypatch):
         opened = []
         monkeypatch.setattr(browse, "open_capture", lambda **options: opened.append(options))
         browse.go_task("T000010")
-        button = next(b for b in browse.actions.findChildren(QPushButton) if b.text() == "Meeting notes")  # its key, M, is in its tooltip
+        button = next(b for b in browse.actions.findChildren(QPushButton) if b.text() == "Discussion or meeting")  # its key, M, is in its tooltip
         button.click()
         browse.go_task("T000012")
         assert "Meeting notes   M" not in [b.text() for b in browse.actions.findChildren(QPushButton)]
         assert any(s.key().toString() == "M" for s in browse.findChildren(QShortcut))
         browse.capture_for_selected("meeting")  # what M does on the selected task
         browse.show_agenda("T000010")
-        next(b for b in browse.filters.findChildren(QPushButton) if b.text() == "Meeting notes").click()
+        next(b for b in browse.filters.findChildren(QPushButton) if b.text() == "Discussion or meeting").click()
         assert opened == [{"task": "T000010", "meeting": True}, {"task": "T000012", "meeting": True}, {"task": "T000010", "meeting": True}]
     finally:
         browse.deleteLater()
