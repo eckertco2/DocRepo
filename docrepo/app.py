@@ -33,6 +33,7 @@ from docrepo.panel_rules import OPEN_KEY
 from docrepo.safe_fs import SafeFS
 from docrepo.kinds import is_work
 from docrepo.schedule import due_of
+from docrepo.ui import current_ui
 from docrepo.ui.browse_window import BrowseWindow
 from docrepo.ui.capture_window import CaptureWindow
 from docrepo.ui.context import AppContext
@@ -194,6 +195,7 @@ class CaptureApp(QObject):
             hotkey.HOTKEY_IDS["today_panel_hotkey"]: lambda: self.today_panel_action("hotkey"),
             hotkey.HOTKEY_IDS["progress_hotkey"]: lambda: self.wheels.log_progress(),  # release 5.139, decision 583
             hotkey.HOTKEY_IDS["lookup_hotkey"]: lambda: self.wheels.glossary_lookup(),  # release 5.172, decision 808
+            hotkey.HOTKEY_IDS["current_hotkey"]: lambda: current_ui.back_to_it(self.browse),  # release 5.177, decision 829
         }
         self.register_hotkey()
         if db.get_state(ctx.conn, OPEN_KEY) == "1":  # open or closed is remembered across restarts (release 5.43)

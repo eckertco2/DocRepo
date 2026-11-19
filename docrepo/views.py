@@ -572,22 +572,26 @@ def today_half(m: Model, a: AgendaItem, urgent: Collection[int]) -> tuple[str, b
     return m.today_band(a), a.id in urgent
 
 
-def today_order(m: Model, today: date, workdays: Collection[int] | None = None) -> list[AgendaItem]:
+def today_order(m: Model, today: date, workdays: Collection[int] | None = None, current: str | None = None) -> list[AgendaItem]:
     """Today's order, the one everything that shows or walks it reads (release 5.176, the urgency plan's decision 820): by
     band (priority, as ``Model.today_items``), then the band's urgent tasks first (``urgency``: the tick, overdue, or due
     within two workdays), and in each half the owner's own order (``place_key``). The Model has no clock, so its own
     ``today_items`` keeps the band and the owner's order alone; the Today view, the side panel, the moves, the keyboard and
-    the next item after a tick go through this."""
-    items = m.today_items()
+    the next item after a tick go through this. current is the current task (release 5.177, decision 828): its item is
+    left out, as it's shown once, under Now, above the bands."""
+    items = [a for a in m.today_items() if not (current and a.subject == current)]
     hot = urgency.urgent_ids(m, items, today, workdays)
     return sorted(items, key=lambda a: (TODAY_BANDS.index(m.today_band(a)), a.id not in hot, place_key(a)))
 
 
-def today_bands(m: Model, today: date | None = None, workdays: Collection[int] | None = None) -> list[tuple[str, str, list[AgendaItem]]]:
+def today_bands(m: Model, today: date | None = None, workdays: Collection[int] | None = None,
+                current: str | None = None) -> list[tuple[str, str, list[AgendaItem]]]:
     """Today's bands that have items (release 5.154, decision 688), top to bottom: each band's key ("" for Not ranked), its
     name, and its items in the owner's order. Given a day (release 5.176, decision 820), each band's urgent tasks come
-    first, in ``today_order``; without one, the owner's order alone, as ``Model.today_items`` has it."""
-    items = today_order(m, today, workdays) if today is not None else m.today_items()
+    first, in ``today_order``; without one, the owner's order alone, as ``Model.today_items`` has it. The current task's
+    item (``current``, release 5.177) is left out of its band: it's under Now."""
+    items = (today_order(m, today, workdays, current) if today is not None
+             else [a for a in m.today_items() if not (current and a.subject == current)])
     return [(key, TODAY_BAND_NAMES[key], its) for key in TODAY_BANDS if (its := [a for a in items if m.today_band(a) == key])]
 
 

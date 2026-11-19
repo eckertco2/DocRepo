@@ -17,6 +17,7 @@ LIGHT = {
     "hover": "#eef1f4",
     "pressed": "#e3e7ec",
     "selected": "#dbe8f5",    # a selected row, with the accent bar beside it
+    "now": "#eef4fb",         # the current task's row under Now on Today (release 5.177, decision 828): lighter than selected
     "text": "#1a1f25",        # 16.6:1 on white
     "text2": "#5a6571",       # secondary text, 5.9:1 on white
     "disabled": "#87919c",    # disabled controls only
@@ -57,7 +58,7 @@ LIGHT = {
 }
 #: The dark theme's values, reserved for later (decision 14): the same names, not yet used.
 DARK = {
-    "base": "#202020", "content": "#2b2b2b", "hover": "#333333", "pressed": "#3a3a3a", "selected": "#1f3447",
+    "base": "#202020", "content": "#2b2b2b", "hover": "#333333", "pressed": "#3a3a3a", "selected": "#1f3447", "now": "#1b2a37",
     "text": "#ffffff", "text2": "#c5c5c5", "disabled": "#7a7a7a", "stroke": "#3a3a3a", "stroke_strong": "#454545",
     "control": "#9a9a9a", "accent": "#7cb0e2", "accent_hover": "#93bfe8", "accent_pressed": "#6aa2d8", "on_accent": "#0c1622",
     "info_bg": "#1b2a38", "info_line": "#3d5a75", "parked": "#b9b6d6", "parked_bg": "#2d2b3d",
