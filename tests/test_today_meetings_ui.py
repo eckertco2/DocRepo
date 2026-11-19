@@ -129,7 +129,7 @@ def test_each_rows_commands(browse):
     meetings.set_link(browse.conn, "Tom / Me: weekly 1:1", TOM, NOW)
     browse.render_list()
     tom = row_of(browse, "Tom / Me: weekly 1:1")
-    assert list(actions(tom)) == ["Agenda", "Meeting notes"] and tom.data(0, KEY_ROLE) == ("person", TOM)
+    assert list(actions(tom)) == ["Agenda", "Discussion or meeting"] and tom.data(0, KEY_ROLE) == ("person", TOM)
     assert tom.data(0, LINE_ROLE).context == "Tom's office · 1 on Tom Becker's agenda"
 
 
@@ -137,7 +137,7 @@ def test_link_confirms_the_suggestion_with_undo(browse):
     actions(row_of(browse, "Business team meeting"))["Link"]()
     assert meetings.links(browse.conn)["business team meeting"].task == BUSINESS
     row = row_of(browse, "Business team meeting")
-    assert row.data(0, KEY_ROLE) == ("task", BUSINESS) and list(actions(row)) == ["Agenda", "Meeting notes"]
+    assert row.data(0, KEY_ROLE) == ("task", BUSINESS) and list(actions(row)) == ["Agenda", "Discussion or meeting"]
     assert row.data(0, LINE_ROLE).context == "Conf room B · 4 on its agenda"
     assert "“Business team meeting” is linked to its meeting task" in browse.status.text() and "Undo" in browse.status.text()
     browse._status_link("undo")
@@ -168,10 +168,10 @@ def test_make_a_meeting_task_and_meeting_notes(browse):
     meetings.set_link(browse.conn, "Business team meeting", BUSINESS, NOW)
     meetings.set_link(browse.conn, "Tom / Me: weekly 1:1", TOM, NOW)
     browse.render_list()
-    actions(row_of(browse, "Business team meeting"))["Meeting notes"]()
+    actions(row_of(browse, "Business team meeting"))["Discussion or meeting"]()
     assert cap.meeting_on and cap.task == BUSINESS and cap.meet_name.text() == "Business team meeting 8 Oct"  # today's occurrence
     cap.file_draft()
-    actions(row_of(browse, "Tom / Me: weekly 1:1"))["Meeting notes"]()
+    actions(row_of(browse, "Tom / Me: weekly 1:1"))["Discussion or meeting"]()
     assert cap.meeting_on and cap.meet_name.text() == "Tom / Me: weekly 1:1"
 
 

@@ -31,11 +31,12 @@ PICTURE_STARTER: Callable[[str], None] | None = None
 
 def open_picture(w, document_id: str) -> None:
     """Open a notes page's picture in its own program, as a saved file opens (release 5.165, decision 770): through
-    ``opener.start``, whose allow-list has pictures. Its file is in the data root, so it's found at once."""
+    ``opener.start``, whose allow-list has pictures. Its file is in the data root, so it's found at once. A meeting's
+    transcript opens the same way (release 5.170, decision 797): ``.md`` is on the allow-list too."""
     d = w.model().documents.get(document_id)
     path = edits.source_of(w.ctx.data_root, w.model(), document_id) if d is not None else None
     if path is None:
-        w.say("That picture's file isn't there any more.", error=True)
+        w.say("That file isn't there any more.", error=True)
         return
     problem = opener.start(str(path), PICTURE_STARTER)
     w.say(problem or f"Opened {d.name}.", error=bool(problem))
@@ -64,8 +65,8 @@ class PageCommands:
         self._action("Update", lambda: self.open_capture(task=task_id, mode="update"), "Update this task: its state, status, dates and more",
                      icon_name="update", key="U")
         if t.meeting and is_open(t):  # release 5.8
-            self._action("Meeting notes", lambda: self.open_capture(task=task_id, meeting=True),
-                         "Take this meeting's notes, with its agenda beside them", icon_name="people", key="M")
+            self._action("Discussion or meeting", lambda: self.open_capture(task=task_id, meeting=True),
+                         "Take this meeting's notes, with its agenda beside them, and its summary and transcript", icon_name="people", key="M")
         # New T-mail (the knowledge base's stage K8, release B, as release 5.105, decision 36): one click opens a new email
         # in Outlook tagged for this task; its arrow has Reply all to the task's latest email, and since release 5.125 Ask
         # for an update (the cold-eyes plan's decision 481).
@@ -257,8 +258,12 @@ class PageCommands:
         # (a reference field's link, or one in a note's words), its Copy, Find files' links, and Settings.
         elif kind == "opendoc":
             self.open_document_link(rest)
-        elif kind == "openpic":  # Ctrl+click, a double-click or Open picture on a notes page's picture (release 5.165)
+        elif kind in ("openpic", "opensaved"):  # a notes page's picture (release 5.165), a meeting's transcript (5.170)
             open_picture(self, rest)
+        elif kind in ("addsummary", "addtranscript"):  # a meeting's Summary section (release 5.170, decision 798)
+            from docrepo.ui import meeting_add
+
+            (meeting_add.add_summary if kind == "addsummary" else meeting_add.add_transcript)(self, rest)
         elif kind == "openurl":
             self.open_address(unquote(rest))
         elif kind == "copyaddr":

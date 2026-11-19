@@ -181,7 +181,7 @@ class Workspace(QWidget):
                  lambda: b.ctx.log_progress(self.acting)),
                 ("tmail", "New T-mail", "mail", "A new email in Outlook, tagged so its replies come back to the task. You write and send it.",
                  self._new_t_mail),
-                ("meeting", "Meeting notes", "people", "Take meeting notes on it, with its agenda beside them (M)",
+                ("meeting", "Discussion or meeting", "people", "Notes of a discussion or meeting on it, with its agenda beside them (M)",
                  lambda: b.open_capture(task=self.acting, meeting=True)),
                 ("find", "Find files", "search", "Search, preview and open its files (O)", lambda: b.open_task_view(self.acting))):
             btn = QPushButton(label, objectName="subtle")

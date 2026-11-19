@@ -60,7 +60,7 @@ class Draft:
         files = [f.get("name") for f in self.data.get("files") or [] if isinstance(f, dict) and f.get("kind") != "part"]
         words = (line or str(self.data.get("title") or "").strip() or next((str(n) for n in files if n), "")
                  or next((str(n) for n in self.data.get("file_names") or [] if n), "")
-                 or ("Meeting notes" if self.data.get("meeting") else "Empty"))
+                 or ("Discussion or meeting notes" if self.data.get("meeting") else "Empty"))
         return words if len(words) <= width else words[:width - 1] + "…"
 
     def file_count(self) -> int:

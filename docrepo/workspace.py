@@ -30,7 +30,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote
 
-from docrepo import decisions, edits, email_conversations, later, markup, meeting_rows, notes_page, tasks, waits
+from docrepo import decisions, edits, email_conversations, later, markup, meeting_rows, notes_page, tasks, transcripts, waits
 from docrepo.config import Settings
 from docrepo.dates import days_words, long_date, short, stamp, to_date
 from docrepo.db import transaction
@@ -40,6 +40,7 @@ from docrepo.model import Model
 from docrepo.overview import file_type
 from docrepo.parse import find_dates
 from docrepo.safe_fs import SafeFS
+from docrepo.text import first_sentence
 from docrepo.schedule import due_of, held_on
 from docrepo.task_links import links_of
 
@@ -434,7 +435,9 @@ def done_today(m: Model, task_id: str, today: date) -> bool:
 
 # ---- the resources (decisions 664, 679, 680 and 685) ----
 #: The sections, in the column's order (685 puts Meetings between Email conversations and Decisions).
-SECTIONS = (("links", "Links"), ("files", "Files"), ("emails", "Email conversations"), ("meetings", "Meetings"), ("decisions", "Decisions"))
+#: A meeting's Summary first (release 5.170, decision 796): its summaries and transcripts.
+SECTIONS = (("summary", "Summary"), ("links", "Links"), ("files", "Files"), ("emails", "Email conversations"), ("meetings", "Meetings"),
+            ("decisions", "Decisions"))
 
 
 @dataclass
@@ -522,6 +525,21 @@ def _meetings(pages: Pages, picked: str, order: list[str]) -> list[Row]:
     return out
 
 
+def _summary(pages: Pages, picked: str) -> list[Row]:
+    """The picked task's summaries and transcripts (release 5.170, decision 796): a meeting's, as its page's Summary
+    section has them, each summary a row opening its capture, each transcript one opening in its own program."""
+    m = pages.m
+    rows = []
+    for cid, text in transcripts.summaries(m, picked):
+        words = " ".join(text.split())
+        name = first_sentence(words) or words[:80]
+        rows.append(Row("summary", picked, name, words[:160] if len(words.rstrip(". ")) > len(name) + 1 else "",
+                        short(to_date(m.captures[cid].saved), pages.today), f"capture:{cid}", "lk:note", text.strip()))
+    for d in transcripts.meeting_transcripts(m, picked):
+        rows.append(Row("summary", picked, d.name, "Transcript", "", f"opensaved:{d.id}", "ft:text", "Open the transcript in its own program"))
+    return rows
+
+
 def _decisions(pages: Pages, order: list[str]) -> list[Row]:
     m = pages.m
     rows = []
@@ -536,7 +554,7 @@ def resources(pages: Pages, picked: str) -> dict[str, list[Row]]:
     """Every resource of what's gathered (680), by section, each row's ``whose`` its task's title."""
     m = pages.m
     order = [x for x in resource_order(m, picked) if x in m.tasks]
-    out = {"links": _links(pages, order), "files": _files(pages, order), "emails": _emails(pages, picked, order),
+    out = {"summary": _summary(pages, picked), "links": _links(pages, order), "files": _files(pages, order), "emails": _emails(pages, picked, order),
            "meetings": _meetings(pages, picked, order), "decisions": _decisions(pages, order)}
     for rows in out.values():
         for r in rows:
@@ -586,11 +604,14 @@ def whose_chip(m: Model, task_id: str, picked: str, words: list[str]) -> str:
 
 
 def section_actions(picked: str) -> dict[str, str]:
-    """Each section's command at its head's right: Find files, New T-mail, Meeting notes and Copy."""
+    """Each section's command at its head's right: Find files, New T-mail, Discussion or meeting (release 5.170) and Copy;
+    a meeting's Summary has Add summary… and Add transcript…."""
     return {"files": link(f"taskview:{picked}", "Find files", "Search, preview and open the task's files (O)"),
             "emails": link(f"tmail:{picked}", "New T-mail", "A new email in Outlook, tagged for the task"),
-            "meetings": link(f"meetingnotes:{picked}", "Meeting notes", "Take meeting notes for the task"),
-            "decisions": link(f"copydecisions:{picked}", "Copy", "Copy the decision register")}
+            "meetings": link(f"meetingnotes:{picked}", "Discussion or meeting", "Notes of a discussion or meeting for the task"),
+            "decisions": link(f"copydecisions:{picked}", "Copy", "Copy the decision register"),
+            "summary": link(f"addsummary:{picked}", "Add summary…", "Paste the summary: a Zoom AI summary, or one made later") + " &nbsp;"
+            + link(f"addtranscript:{picked}", "Add transcript…", "Paste the transcript: kept whole as a file of the meeting's")}
 
 
 def resources_html(m: Model, found: dict[str, list[Row]], picked: str, query: str, folded: Collection[str]) -> str:
@@ -602,7 +623,9 @@ def resources_html(m: Model, found: dict[str, list[Row]], picked: str, query: st
     out = []
     for key, title in SECTIONS:
         rows, total = shown[key], len(found[key])
-        if not rows and (words or key != "files"):
+        # Files show with none yet, as does a meeting's Summary, so its Add summary… and Add transcript… are there (5.170).
+        keeps = key == "files" or (key == "summary" and picked in m.tasks and m.tasks[picked].meeting)
+        if not rows and (words or not keeps):
             continue
         count = f"{len(rows)} of {total}" if words else str(total)
         is_open = key not in folded
