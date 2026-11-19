@@ -4,6 +4,14 @@ One line per release, newest first: its number, the date it was built, and what 
 
 Since 2026-11-12, releases ship in weekly trains (the design workspace's `docs/mods/cold-eyes-plan.md`, decisions 464 to 468): each train has a heading with the day it was pushed to GitHub, over its releases. Releases keep their own numbers and tags.
 
+## Next train
+
+Built for the train of Thursday 2026-11-26 (the design workspace's `docs/mods/memos-2026-11-18-plan.md`); not pushed yet.
+
+| Release | Date | What |
+|---|---|---|
+| 5.169 | 2026-11-18 | Stock headings (the owner's voice memo of 2026-11-18). Topic headings you define once, in Settings' new **Stock headings** card, for every task's notes, each a name, a level and what belongs under it; four ship, at level 1: Background, Path forward, Decisions and Open questions. The heading list ends with a **Stock headings** group of those at the level being typed that the page doesn't have yet, each with what belongs under it, on every task (one with no notes too, so Ctrl+Space on an empty heading always has something) and in the capture window before a task is picked. Under one with nothing written yet, the empty line shows what belongs there in grey italics, painted only: never saved, searched or matched for tagged labels. `Views\Stock headings.md` lists them for agents, and Contents.md points to it. A glossary term, Stock heading; no schema change. |
+
 ## Second train of 2026-11-18
 
 Releases 5.156 and 5.157, pushed to GitHub on Wednesday 2026-11-18, after the train of 2026-11-18 (5.163) the same day and eight days before the Thursday they were built for, at the owner's word ("push today anything that is ready"), with everything merged by then (the design workspace's `docs/mods/train-2026-11-26-plan.md` and `docs/mods/notes-topics-plan.md`). They add glossary terms (Topic heading, Heading list, Topic, Occasion, By day, By meeting, By topic), so the train after them settles (decision 467). Schema 29, as before; no new package. The version stays 5.163, the highest release in: 5.156 and 5.157 were numbered before it and built after. Their corporate test is the design workspace's `handoff/docrepo/train-2026-11-18-second-test.md`.
