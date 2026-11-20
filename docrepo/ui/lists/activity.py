@@ -16,7 +16,7 @@ from docrepo.dates import long_date, short, to_date
 from docrepo.detail import esc
 from docrepo.model import TODAY
 from docrepo.ui.tree_view import Line, state_icon
-from docrepo.ui.widgets import CheckMenuButton, DateField, label_filter, people_filter
+from docrepo.ui.widgets import DateField, label_filter, people_filter
 from docrepo.views import (
     VIEW_IDS,
     markers,
@@ -73,39 +73,36 @@ class ActivityList:
             show.addItem(f"Show: {label[0].lower()}{label[1:]}", key)
         show.setCurrentIndex(max(0, show.findData(a["win"])))
         show.currentIndexChanged.connect(lambda _: self._set_act_window(show.currentData()))
-        self._filter_widget(show)
+        self._filter_widget(show, "filter")  # its chip is its own words, off This week (release 5.184)
+        if a["win"] != activity.WINDOWS[0][0]:
+            self.head.add_chip(show.currentText(), lambda: self._set_act_window(activity.WINDOWS[0][0]))
         if a["win"] == "range":
             for key, label, value in (("from", "From", span[0]), ("to", "To", span[1])):
                 box = DateField()
                 box.setAccessibleName(label)
                 box.set_value(value.isoformat())
                 box.edited.connect(lambda k=key, b=box: self._set_act(k, b.value()) if b.is_valid() and b.value() else None)
-                self._filter_widget(QLabel(label))
-                self._filter_widget(box)
+                self._filter_widget(box, "tool", label=label)
         group = QComboBox()
         group.setAccessibleName("Group by")
         for key, label in activity.GROUPS:
             group.addItem(f"Group by {label.lower() if key != 'top' else 'top-level task'}", key)
         group.setCurrentIndex(max(0, group.findData(a["group"])))
         group.currentIndexChanged.connect(lambda _: self._set_act("group", group.currentData()))
-        self._filter_widget(group)
+        self._filter_widget(group, "display")
         choices, sets = people_filter(m)
-        who = CheckMenuButton("People", "anyone", choices, a["people"], sets)
-        who.chosen.connect(lambda values: self._set_act("people", values))
-        self._filter_widget(who)
+        self._check_menu("People", "anyone", choices, a["people"], sets, lambda values: self._set_act("people", values))
         choices, sets = label_filter(m)
-        labels = CheckMenuButton("Labels", "any", choices, a["labels"], sets)
-        labels.chosen.connect(lambda values: self._set_act("labels", values))
-        self._filter_widget(labels)
-        what = CheckMenuButton("What", "anything", [(label, key) for key, label in activity.KINDS], a["kinds"])
-        what.chosen.connect(lambda values: self._set_act("kinds", values))
-        self._filter_widget(what)
+        self._check_menu("Labels", "any", choices, a["labels"], sets, lambda values: self._set_act("labels", values))
+        self._check_menu("What", "anything", [(label, key) for key, label in activity.KINDS], a["kinds"], [],
+                         lambda values: self._set_act("kinds", values))
         select = QPushButton("Done selecting" if a["select"] else "Select")
         select.setCheckable(True)
+        select.setAccessibleName("Select")  # its words change; its name doesn't
         select.setChecked(a["select"])
         select.setToolTip("Tick tasks and lines to put on an agenda, for meeting prep")
         select.clicked.connect(lambda: self._set_act_select(not a["select"]))
-        self._filter_widget(select)
+        self._filter_widget(select, "tool" if a["select"] else "display")
         self._button("Copy as Markdown", self.copy_activity, tip="Copy what's shown, as Markdown")
         if not a["select"]:
             return
@@ -130,7 +127,7 @@ class ActivityList:
         self._act_add.setToolTip("Each ticked task as an agenda item; a ticked line goes on as its task, with the line as the item's note")
         self._act_add.clicked.connect(self.add_activity_to_agenda)
         self._filter_widget(self._act_add)
-        self._act_clear = self._button("Clear ticks", lambda: self._set_act("picked", set()))
+        self._act_clear = self._button("Clear ticks", lambda: self._set_act("picked", set()), where="tool")
         self._sync_activity_bar()
 
     def _activity_group(self, m, today, g) -> None:

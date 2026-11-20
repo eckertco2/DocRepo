@@ -21,7 +21,7 @@ class PeopleAndLabelLists:
         m = self.model()
         self._set_head("People", "Stored in docs.db. Tasks store a person's ID, so renaming someone changes nothing else.",
                        f"{len(m.active_people())} active")
-        self._check("Show retired", self.retired["people"], lambda on: self._set_retired("people", on))
+        self._check("Show retired", self.retired["people"], lambda on: self._set_retired("people", on), chip="Retired shown")
         self._button("Add person", self.add_person)
         # Import people… (release 5.151, decision 658): a list from a .csv or an .xlsx, with a preview first.
         self._button(people_import.NAME, lambda: people_import.run(self),
@@ -41,7 +41,7 @@ class PeopleAndLabelLists:
     def _labels_view(self) -> None:
         m = self.model()
         self._set_head("Labels", "Stored in docs.db. Keywords let Parse and populate suggest the label.", f"{len(m.active_labels())} active")
-        self._check("Show retired", self.retired["labels"], lambda on: self._set_retired("labels", on))
+        self._check("Show retired", self.retired["labels"], lambda on: self._set_retired("labels", on), chip="Retired shown")
         self._button("Add label", self.add_label)
         self.tree.set_columns(["Label", "Keywords", "Open tasks"], [0, 200, 76])
 

@@ -81,7 +81,12 @@ def view(w: BrowseWindow) -> None:
     w._set_head("Tagged labels", "Plant tags found in every capture, email, document and notes page, however their parts are joined. "
                 "The tag list is in docs.db.", total if tg else "")
     if tg:
-        w._check("Mentioned only", bool(w.tagged_mentioned), lambda on: set_mentioned(w, on), "Only the labels something mentions")
+        # Its default is what it was when the view first opened (release 5.184): a chip says when it's off that.
+        default = getattr(w, "tagged_mentioned_default", None)
+        if default is None:
+            default = w.tagged_mentioned_default = bool(w.tagged_mentioned)
+        w._check("Mentioned only", bool(w.tagged_mentioned), lambda on: set_mentioned(w, on), "Only the labels something mentions",
+                 default=default, chip="Unmentioned shown" if default else "Mentioned only")
     w._button("Import…", lambda: import_glossary(w))
     w._button("Export…", lambda: export(w), enabled=bool(tg.glossary()), tip="Write the tag list as a CSV to Exports in the data root")
     w._button("Add…", lambda: add(w), tip="Add a tagged label by hand")
@@ -162,6 +167,7 @@ def import_glossary(w: BrowseWindow) -> None:
     w.refresh(render=False)
     w.view = "tagged"
     w.tagged_mentioned = None  # the glossary's size may have changed
+    w.tagged_mentioned_default = None  # and with it Mentioned only's default (release 5.184)
     w.sel = first(w)
     w.render_all()
     w.say(out.message + (" Problems: " + " ".join(out.problems) if out.problems else ""), bool(out.problems))
