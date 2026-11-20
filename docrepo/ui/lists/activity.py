@@ -13,9 +13,8 @@ from PySide6.QtWidgets import (
 
 from docrepo import activity, edits, kinds, task_tile
 from docrepo.dates import long_date, short, to_date
-from docrepo.detail import chip, esc
+from docrepo.detail import esc
 from docrepo.model import TODAY
-from docrepo.ui.look import LOOK
 from docrepo.ui.tree_view import Line, state_icon
 from docrepo.ui.widgets import CheckMenuButton, DateField, label_filter, people_filter
 from docrepo.views import (
@@ -24,7 +23,6 @@ from docrepo.views import (
 )
 from docrepo.ui.lists.common import (
     _row_state,
-    ACT_CHIPS,
     ACT_ICONS,
 )
 
@@ -128,7 +126,7 @@ class ActivityList:
         target.setCurrentIndex(max(0, target.findData(a["target"])))
         target.currentIndexChanged.connect(lambda _: a.__setitem__("target", target.currentData()))
         self._filter_widget(target)
-        self._act_add = QPushButton("Add to agenda", objectName="primary" if LOOK.classic else "")
+        self._act_add = QPushButton("Add to agenda")
         self._act_add.setToolTip("Each ticked task as an agenda item; a ticked line goes on as its task, with the line as the item's note")
         self._act_add.clicked.connect(self.add_activity_to_agenda)
         self._filter_widget(self._act_add)
@@ -162,20 +160,15 @@ class ActivityList:
                 kind = kinds.kind_of(m, t)  # the kind's mark in the "↻ Weekly" chip's place (release 5.168, decision 786)
                 cells = [Line(t.title, icon=icon, icon_colour=colour, icon_tip=t.state, lead=f"{above} ›" if above else "", strong=True,
                               chips=tuple(markers(m, t, routine=False)), kind=task_tile.KIND_ICONS.get(kind, ""),
-                              kind_tip=task_tile.kind_tip(m, t, kind)) if not LOOK.classic else
-                         (f'<span class="sub">{esc(above)} ›</span> ' if above else "") + f"<b>{esc(t.title)}</b> {_row_state(t.state)}"
-                         + "".join(" " + chip(text, cls) for text, cls in markers(m, t)), ""]
+                              kind_tip=task_tile.kind_tip(m, t, kind)), ""]
                 parent = self.tree.add_row(top, ("task", t.id), cells)
                 if select:
                     self.tree.add_tick(parent, f"t:{t.id}" in self.act["picked"])
             for line in h.lines:
-                facts = "".join(f'<br><span class="sub">{esc(x)}</span>' for x in line.facts)
                 # Two lines (decision L1): its kind's icon and its words, then what kind it is and its facts.
                 what = Line(line.text, icon=ACT_ICONS.get(line.kinds[0], "note"), icon_tip=line.chip, second=" · ".join((line.chip, *line.facts)))
-                when = (f'<p align="right">{esc(short(line.day, today))}<br><span class="sub">{esc(long_date(line.day, today)[:3])} {esc(line.at[11:16])}</span></p>'
-                        if LOOK.classic else f'<p align="right">{esc(short(line.day, today))} <span class="sub">{esc(line.at[11:16])}</span></p>')  # one line
-                row = self.tree.add_row(parent, ("actline", line.key), [f"{chip(line.chip, ACT_CHIPS.get(line.kinds[0], 'lbl'))} {esc(line.text)}{facts}"
-                                                                        if LOOK.classic else what, when],
+                when = f'<p align="right">{esc(short(line.day, today))} <span class="sub">{esc(line.at[11:16])}</span></p>'  # one line
+                row = self.tree.add_row(parent, ("actline", line.key), [what, when],
                                         tip=f"{long_date(line.day, today)}, {line.at[11:16]}")
                 if select:
                     self.tree.add_tick(row, f"l:{line.key}" in self.act["picked"])

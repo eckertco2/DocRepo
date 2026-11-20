@@ -19,7 +19,6 @@ from docrepo.model import TODAY
 from docrepo.task_commands import Entry
 from docrepo.ui import t_mails
 from docrepo.ui.icons import icon
-from docrepo.ui.look import LOOK
 
 if TYPE_CHECKING:
     from docrepo.ui.browse_window import BrowseWindow
@@ -31,8 +30,8 @@ Tell = Callable[[str, Callable[[], None] | None], None] | None
 
 
 def key_column() -> str:
-    """A menu's key column: a tab in the new look; the Classic look puts the key after the label."""
-    return "   " if LOOK.classic else "\t"
+    """A menu's key column: a tab."""
+    return "\t"
 
 
 def run(browse: BrowseWindow, task_id: str, entry: Entry, anchor: QWidget | None = None, after: After = None, tell: Tell = None) -> None:

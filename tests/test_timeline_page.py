@@ -20,7 +20,6 @@ from docrepo.ui import tokens  # noqa: E402
 from docrepo.ui.browse_window import BrowseWindow  # noqa: E402
 from docrepo.ui.capture_window import CaptureWindow  # noqa: E402
 from docrepo.ui.context import AppContext  # noqa: E402
-from docrepo.ui.look import configure  # noqa: E402
 from docrepo.ui.timeline_view import TimelineView  # noqa: E402
 
 NOW = datetime(2026, 10, 8, 14, 10)
@@ -478,29 +477,3 @@ def test_tasks_with_no_dates_join_the_chart_only_while_their_fold_is_open(browse
     view.set_plan(False)
     view.undated_fold.click()
     assert "Plan mode" in view.undated_names.text() and view.undated_names.text().count("task:") == n
-
-
-# ---- the Classic look keeps its own ----
-def test_the_classic_look_keeps_the_chart_alone_and_capacitys_page(qapp, sample_root):
-    conn, root, fs = sample_root
-    configure("classic", False)
-    try:
-        ctx = AppContext(conn, root, fs, SETTINGS, now=lambda: NOW)
-        capture = CaptureWindow(ctx)
-        w = BrowseWindow(ctx, capture)
-        w.show_browse()
-        w.set_view("capacity")
-        assert w.view == "capacity" and w.middle.currentWidget() is w.cap_page and w.cap_table.rowCount() == 6
-        w.set_view("timeline")
-        view = w.timeline
-        assert view.bars == "project" and not hasattr(view, "cap_box") and view.legend.isVisibleTo(view)
-        assert w.middle.currentWidget() is view
-        view._set("bars", "hours")
-        view.chart.grab()
-        view.head.grab()
-        w.set_view("settings")
-        assert w.middle.currentWidget() is w.settings_view
-        capture.deleteLater()
-        w.deleteLater()
-    finally:
-        configure("new", False)

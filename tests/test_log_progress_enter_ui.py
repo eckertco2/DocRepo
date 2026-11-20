@@ -131,9 +131,8 @@ def test_each_stop_is_said_by_its_row_in_the_caution_colour(window, what):
 
 def test_the_caution_style_is_on_the_problem_line():
     from docrepo.ui import tokens
-    from docrepo.ui.style import CLASSIC_STYLE
 
-    assert "QLabel#progressProblem" in CLASSIC_STYLE and "QLabel#progressProblem { color: $caution" in tokens._QSS.template
+    assert "QLabel#progressProblem { color: $caution" in tokens._QSS.template
 
 
 def test_a_busy_database_says_so_and_keeps_nothing(window, monkeypatch, caplog):

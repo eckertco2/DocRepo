@@ -425,34 +425,6 @@ def test_focus_on_is_the_picker_of_tasks_with_subtasks(env):
     assert view.focus is None and view.focus_box.text() == "All projects"
 
 
-def test_the_classic_looks_focus_on_too(qapp, sample_root):
-    from docrepo.ui.look import configure
-    from docrepo.ui.widgets import DropButton
-
-    conn, root, fs = sample_root
-    configure("classic", False)
-    try:
-        ctx = AppContext(conn, root, fs, SETTINGS, now=lambda: NOW)
-        capture = CaptureWindow(ctx)
-        browse = BrowseWindow(ctx, capture)
-        browse.show_browse()
-        browse.set_view("timeline")
-        QApplication.processEvents()
-        view = browse.timeline
-
-        def button() -> DropButton:
-            return next(b for b in view.findChildren(DropButton) if b.accessibleName() == "Focus on" and b.isVisibleTo(view))
-
-        assert button().text() == "Focus on all projects"
-        button().click()
-        _focus_on(view)
-        assert button().text() == "Focus on Installation"
-        capture.deleteLater()
-        browse.deleteLater()
-    finally:
-        configure("new", False)
-
-
 # ---- the agenda picker ----
 def test_the_agenda_picker_finds_tasks_as_the_hash_list_does(env):
     _, capture, _ = env

@@ -509,7 +509,7 @@ def run(data_root: Path, settings: Settings, fs: SafeFS, browse: bool = False) -
     qt = QApplication.instance() or QApplication(sys.argv)
     qt.setQuitOnLastWindowClosed(False)
     qt.setApplicationName("DocRepo")
-    apply_look(qt, settings.look, settings.show_hints)  # the new look or the Classic one; light, whatever Windows is set to
+    apply_look(qt, "new", settings.show_hints)  # light, whatever Windows is set to
     set_identity(qt)
     lock = QLockFile(str(fs.checked_path(data_root / LOCK_FILE)))
     lock.setStaleLockTime(0)

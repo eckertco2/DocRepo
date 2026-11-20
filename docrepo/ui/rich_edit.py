@@ -38,7 +38,6 @@ from PySide6.QtWidgets import QHBoxLayout, QMenu, QTextEdit, QToolButton, QWidge
 from docrepo import markup
 from docrepo.ui.icons import icon
 from docrepo.ui import tokens
-from docrepo.ui.look import LOOK
 
 #: The new look's icons on the format bar (decision 4): the highlight, the lists and the checklist.
 ICONS = {"mark": "highlight", "ul": "bullets", "ol": "numbers", "check": "checklist"}
@@ -998,7 +997,7 @@ class RichEdit(QTextEdit):
             path.lineTo(cx, cy + s * 0.75)
         path.closeSubpath()
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QColor("#666666") if LOOK.classic else QColor(tokens.colour("text2" if folded or hover else "scroll")))
+        p.setBrush(QColor(tokens.colour("text2" if folded or hover else "scroll")))
         p.drawPath(path)
 
     def _paint_pill(self, p: QPainter, b) -> None:
@@ -1056,8 +1055,6 @@ class RichEdit(QTextEdit):
             self._paint_pills(event.rect())
             if self._gutter.isVisible():
                 self._gutter.update()
-        if LOOK.classic:
-            return
         area = event.rect()
         layout = self.document().documentLayout()
         p = None
@@ -1353,7 +1350,7 @@ class FormatBar(QWidget):
                 ("check", "☐ Checklist", "Checklist (Ctrl+1), or type “[] ” at a line's start; a click on a box ticks it",
                  edit.toggle_checklist, True)):
             b = QToolButton(text=text)
-            if not LOOK.classic and key in ICONS:  # the new look: icons for the highlight and the lists, their names in the tooltip
+            if key in ICONS:  # icons for the highlight and the lists, their names in the tooltip
                 b.setText("")
                 b.setIcon(icon(ICONS[key]))
                 b.setAccessibleName(tip.split(" (")[0])

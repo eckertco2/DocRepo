@@ -120,6 +120,19 @@ def test_unknown_settings_are_ignored_with_a_warning(tmp_path, caplog):
     assert "colour" in caplog.text
 
 
+def test_a_saved_classic_look_loads_as_the_one_look(tmp_path, caplog):
+    """Release 5.179 (the redesign's decision 840): a settings file that still says "look": "classic" loads without an error
+    or a warning, as the look there is, and is written back as it."""
+    root = tmp_path / "DocRepoData"
+    (root / "Config").mkdir(parents=True)
+    (root / "Config" / "settings.json").write_text('{"me": "P001", "look": "classic", "show_hints": true}', encoding="utf-8")
+    with caplog.at_level(logging.WARNING):
+        settings = Settings.load(root)
+    assert settings.look == "new" and settings.me == "P001" and settings.show_hints and not caplog.text
+    settings.save(make_safe_fs(root, settings), root)
+    assert json.loads((root / "Config" / "settings.json").read_text(encoding="utf-8"))["look"] == "new"
+
+
 def test_backup_folder_is_an_allowed_root(tmp_path):
     root, backups = tmp_path / "DocRepoData", tmp_path / "Backups"
     fs = make_safe_fs(root, Settings(backup_dir=str(backups)))

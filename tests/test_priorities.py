@@ -238,28 +238,6 @@ def test_edit_task_has_priority(browse):
     d.deleteLater()
 
 
-def test_the_classic_look_has_both(qapp, sample_root):
-    from docrepo.ui.browse_window import BrowseWindow
-    from docrepo.ui.context import AppContext
-    from docrepo.ui.look import configure
-
-    conn, root, fs = sample_root
-    configure("classic", False)
-    try:
-        w = BrowseWindow(AppContext(conn, root, fs, Settings(me="P001"), now=lambda: AT), None)
-        w.show_browse("priorities")
-        assert w.middle.currentWidget() is w.priorities and len(w.priorities.columns) == 5
-        w.priorities.pick("T000012")
-        w.priorities.key(Qt.Key.Key_2, Qt.KeyboardModifier.NoModifier)
-        assert w.priorities.columns[2].ids == ["T000012"]
-        w.set_view("activity")
-        assert any(k and k[0] == "actline" for k in w.tree.keys())
-        w.hide()
-        w.deleteLater()
-    finally:
-        configure("new", False)
-
-
 def test_fold_subtasks(conn):
     """Release 5.24: only parent and top-level tasks; a subtask with no open subtasks of its own folds into its parent."""
     m = Model(conn)

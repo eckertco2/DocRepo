@@ -56,7 +56,6 @@ from docrepo.task_tile import page_title
 from docrepo.ui import task_tile as tile_ui
 from docrepo.ui import tokens
 from docrepo.ui.icons import icon, tinted
-from docrepo.ui.look import LOOK
 from docrepo.ui.rich_edit import FOLDED, HEADING_SIZES, MARKER, NUMBERED, RichEdit, block_markup
 
 LEFT = 28   # the gutter beside the page, where the fold arrows and the captures' marks go
@@ -1192,7 +1191,7 @@ class NotesEdit(RichEdit):
     def _paint_mark(self, p: QPainter, b, caption) -> None:
         r = self._row(b)
         hover = b.blockNumber() == self._hover
-        colour = tokens.colour("text2" if hover else "scroll") if not LOOK.classic else ("#444444" if hover else "#888888")
+        colour = tokens.colour("text2" if hover else "scroll")
         size = MARK
         icon(self.mark_name(caption.text()), colour, size=size).paint(p, QRect(round((LEFT - size) / 2), round(r.center().y() - size / 2), size, size))
 
@@ -1896,7 +1895,7 @@ class NotesEdit(RichEdit):
             bottom = layout.blockBoundingRect(below).top() if below.isValid() else self.document().size().height()
             if bottom > top:
                 p.fillRect(QRectF(0, top - dy, self.viewport().width(), bottom - top),
-                           QColor(tokens.colour("content")) if not LOOK.classic else QColor("#ffffff"))
+                           QColor(tokens.colour("content")))
 
     def _paint_heading(self, p: QPainter, b, small: QFont) -> None:
         r = self._row(b)
@@ -1913,7 +1912,7 @@ class NotesEdit(RichEdit):
             path.lineTo(cx, cy + s * 0.75)
         path.closeSubpath()
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QColor(tokens.colour("text2" if folded or hover else "scroll")) if not LOOK.classic else QColor("#666666"))
+        p.setBrush(QColor(tokens.colour("text2" if folded or hover else "scroll")))
         p.drawPath(path)
         if folded:
             line = b.layout().lineAt(0)

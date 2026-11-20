@@ -304,23 +304,6 @@ def test_a_change_out_of_date_is_said_and_left_out(browse):
     assert view.whatifs  # kept as a what-if
 
 
-def test_the_classic_look_has_no_what_ifs(qapp, sample_root):
-    from docrepo.ui.look import configure
-
-    conn, root, fs = sample_root
-    configure("classic", False)
-    try:
-        ctx = AppContext(conn, root, fs, SETTINGS, now=lambda: NOW)
-        capture = CaptureWindow(ctx)
-        w = BrowseWindow(ctx, capture)
-        w.set_view("timeline")
-        assert not hasattr(w.timeline, "whatif_button") and w.timeline.cur is None
-        capture.deleteLater()
-        w.deleteLater()
-    finally:
-        configure("new", False)
-
-
 def test_a_picture_is_worked_out_once_for_each_change(browse, monkeypatch):
     t = make(browse, "Big job", start="2026-10-12", due="2026-10-16")
     shown(browse)

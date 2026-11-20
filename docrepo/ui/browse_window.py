@@ -21,7 +21,6 @@ from pathlib import Path
 from PySide6.QtCore import QPoint, Qt, QTimer
 from PySide6.QtGui import QGuiApplication, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QAbstractItemView,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -34,8 +33,6 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSpinBox,
     QSplitter,
-    QTableWidget,
-    QTextBrowser,
     QTextEdit,
     QToolButton,
     QTreeWidgetItem,
@@ -67,7 +64,7 @@ from docrepo.ui.settings_view import SettingsView
 from docrepo.ui.search_scope import ScopeList, open_search
 from docrepo.ui import tokens
 from docrepo.ui.icons import icon
-from docrepo.ui.look import LOOK, Help, KeyTips, set_hints, tip, with_key
+from docrepo.ui.look import LOOK, Help, KeyTips, set_hints, tip
 from docrepo.ui.nav_pane import WIDTH as NAV_WIDTH, NavPane
 from docrepo.ui.page_view import PageView
 from docrepo.ui.task_pane import TaskPane
@@ -75,7 +72,7 @@ from docrepo.ui.templates_view import TemplatesPane
 from docrepo.ui.tree_import import TreeFilesPane
 from docrepo.ui.priorities_view import PrioritiesView
 from docrepo.ui.palette import GLOSSARY_LOOKUP, RECENT_CAPTURES, Command, CommandPalette, summary_commands
-from docrepo.ui.style import CLASSIC_BROWSE, page_css, style_sheet
+from docrepo.ui.style import page_css, style_sheet
 from docrepo.ui.task_forms import LabelMatchDialog, TaskEditDialog
 from docrepo.ui.task_picker import TaskPicker
 from docrepo.ui.timeline_view import TimelineView
@@ -85,7 +82,7 @@ from docrepo.ui.tree_view import HTML_ROLE, KEY_ROLE, RowTree
 from docrepo.ui import conversation_page, people_import, task_menus, task_open, tidy_follow_ups, tidy_notes, today_meetings
 from docrepo.ui import workspace as workspace_ui
 from docrepo.ui import task_tile as tile_ui
-from docrepo.ui.widgets import SAVE_KEYS, DropButton, FlowLayout, Option, ViewStack, ask, label_options, people_options
+from docrepo.ui.widgets import SAVE_KEYS, FlowLayout, Option, ViewStack, ask, label_options, people_options
 from docrepo.views import (
     LIST_IDS,
     RETIRED_VIEWS,
@@ -117,9 +114,7 @@ from docrepo.ui.lists.common import (  # noqa: F401 - the helpers, here as befor
     _row_state,
     _row_word,
     _shape,
-    ACT_CHIPS,
     ACT_ICONS,
-    CLASSIC_DEADLINE,
     DETAIL_MIN,
     log,
     NAV_FOLDED_KEY,
@@ -166,7 +161,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         ctx.open_capture_page = lambda cid: (self.show_browse(), self.go_capture(cid))  # an email captured before (release 5.93)
         self.setObjectName("browse")
         self.setWindowTitle(WINDOW_TITLE)
-        self.setStyleSheet(CLASSIC_BROWSE if LOOK.classic else style_sheet())
+        self.setStyleSheet(style_sheet())
         #: Shows a file in File Explorer. Tests replace it.
         self.reveal: Callable[[Path], bool] = show_in_explorer
         #: What hands a checked link to the browser (release 5.67): Windows' "open", or a stand-in in the tests.
@@ -204,8 +199,6 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         self.doc_task: str | None = None
         self.doc_subs = True
         self.target: str | None = None
-        self.cap_offset = 0
-        self.cap_cell: tuple[str, int] | None = None
         self.retired = {"people": False, "labels": False}
         self.glossary_find = ""  # the Glossaries view's Find in rows (release 5.171, decision 804)
         self.tagged_mentioned: bool | None = None  # the Tagged labels view's Mentioned only (release 5.79); None: not set yet
@@ -254,23 +247,20 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         bl.setContentsMargins(10, 8, 12, 8)
         bl.setSpacing(8)
         self.keytips = KeyTips(self)
-        if LOOK.classic:
-            self.views_button = QPushButton("≡ Views")
-        else:  # the visual overhaul's O5: an icon button folds the sidebar
-            self.views_button = QToolButton(objectName="iconButton")
-            self.views_button.setIcon(icon("sidebar"))
-            self.views_button.setFixedSize(tokens.ICON_BUTTON, tokens.ICON_BUTTON)
-            self.views_button.setAccessibleName("Views")
+        # The visual overhaul's O5: an icon button folds the sidebar
+        self.views_button = QToolButton(objectName="iconButton")
+        self.views_button.setIcon(icon("sidebar"))
+        self.views_button.setFixedSize(tokens.ICON_BUTTON, tokens.ICON_BUTTON)
+        self.views_button.setAccessibleName("Views")
         self.views_button.setCheckable(True)
         tip(self.views_button, "Hide or show the list of views on the left", "Ctrl+B")
         self.keytips.add(self.views_button, "Ctrl+B", ctrl=True)
         bl.addWidget(self.views_button)
         self.search_box = QLineEdit()
-        self.search_box.setPlaceholderText("Search everything: tasks, captures, documents and people" + ("   (Ctrl+Shift+F)" if LOOK.classic else ""))
+        self.search_box.setPlaceholderText("Search everything: tasks, captures, documents and people")
         tip(self.search_box, "Search everything. Narrow it as File search does: type:pdf, type:notes, type:decision, from:name, after:1 sep, is:pinned, tag:V-110, or a #task first", "Ctrl+Shift+F")
-        if not LOOK.classic:
-            self.search_box.addAction(icon("search"), QLineEdit.ActionPosition.LeadingPosition)
-            self.search_box.setMaximumWidth(560)
+        self.search_box.addAction(icon("search"), QLineEdit.ActionPosition.LeadingPosition)
+        self.search_box.setMaximumWidth(560)
         self.keytips.add(self.search_box, "Ctrl+Shift+F", ctrl=True)
         self.search_box.setClearButtonEnabled(True)
         self._search_timer = QTimer(self)
@@ -281,53 +271,42 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         self.search_box.installEventFilter(self)
         self.search_scope = ScopeList(self.search_box, self.model, self)  # "#" lists tasks to search in (release 5.108)
         bl.addWidget(self.search_box, 1)
-        if not LOOK.classic:
-            bl.addStretch(0)
+        bl.addStretch(0)
         new = QPushButton("New capture", objectName="primary")
-        if not LOOK.classic:
-            new.setIcon(icon("add", tokens.colour("on_accent")))
+        new.setIcon(icon("add", tokens.colour("on_accent")))
         tip(new, "A new note, task or update in the capture window", self.ctx.settings.hotkey)
         new.clicked.connect(lambda: self.open_capture())
-        self.tb_new = QPushButton(with_key("New task", "T"))
+        self.tb_new = QPushButton("New task")
         self.tb_new.clicked.connect(lambda: self.capture_for_selected("new_task"))
-        self.tb_update = QPushButton(with_key("Update", "U"))
+        self.tb_update = QPushButton("Update")
         self.tb_update.clicked.connect(lambda: self.capture_for_selected("update"))
-        keys = QPushButton(with_key("Keys", "F1"))
+        keys = QPushButton("Keys")
         keys.setToolTip("Every key, in one list")
         keys.clicked.connect(self.show_keys)
         for w in (new, self.tb_new, self.tb_update, keys):
             bl.addWidget(w)
-        if not LOOK.classic:  # New task and Update act on the selected task: they're on its command bar; the keys are in More
-            for w in (self.tb_new, self.tb_update, keys):
-                w.hide()
-            more = QToolButton(objectName="iconButton")
-            more.setIcon(icon("more"))
-            more.setFixedSize(tokens.ICON_BUTTON, tokens.ICON_BUTTON)
-            more.setAccessibleName("More")
-            more.setToolTip("Keys, the command palette and Show hints")
-            more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-            self.top_menu = QMenu(more)
-            self.top_menu.aboutToShow.connect(self._fill_top_menu)
-            more.setMenu(self.top_menu)
-            bl.addWidget(more)
+        # New task and Update act on the selected task: they're on its command bar; the keys are in More
+        for w in (self.tb_new, self.tb_update, keys):
+            w.hide()
+        more = QToolButton(objectName="iconButton")
+        more.setIcon(icon("more"))
+        more.setFixedSize(tokens.ICON_BUTTON, tokens.ICON_BUTTON)
+        more.setAccessibleName("More")
+        more.setToolTip("Keys, the command palette and Show hints")
+        more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.top_menu = QMenu(more)
+        self.top_menu.aboutToShow.connect(self._fill_top_menu)
+        more.setMenu(self.top_menu)
+        bl.addWidget(more)
         outer.addWidget(bar)
 
         self.split = QSplitter(Qt.Orientation.Horizontal)
-        if LOOK.classic:
-            self.nav = RowTree()
-            self.nav.setObjectName("nav")
-            self.nav.set_columns(["View", ""], [0, 34])
-            self.nav.setHeaderHidden(True)
-            self.nav.setRootIsDecorated(False)
-            self.nav.setIndentation(0)
-            self.nav.picked.connect(lambda key: self.set_view(key[1]) if key[0] == "view" else None)
-        else:  # the visual overhaul's O10 (release 5.22): a sidebar of its own, not the tree
-            # Capacity is under the Timeline now, on one page (decision 229), and its key and other routes lead there.
-            self.nav = NavPane([v for v in VIEWS if v.id != "capacity"])
-            self.nav.picked.connect(self.set_view)
-            self.nav.folded.connect(self._nav_folded)
-        if not LOOK.classic:
-            self.nav.setMinimumWidth(NAV_WIDTH)  # the sidebar keeps its width, so its names aren't cut; the room comes from the list
+        # The visual overhaul's O10 (release 5.22): a sidebar of its own, not the tree.
+        # Capacity is under the Timeline now, on one page (decision 229), and its key and other routes lead there.
+        self.nav = NavPane([v for v in VIEWS if v.id != "capacity"])
+        self.nav.picked.connect(self.set_view)
+        self.nav.folded.connect(self._nav_folded)
+        self.nav.setMinimumWidth(NAV_WIDTH)  # the sidebar keeps its width, so its names aren't cut; the room comes from the list
         self.split.addWidget(self.nav)
 
         self.middle = ViewStack()
@@ -337,8 +316,8 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         lp.setSpacing(0)
         head = QWidget(objectName="paneHead")
         hl = QVBoxLayout(head)
-        hl.setContentsMargins(12, 8, 12, 6) if LOOK.classic else hl.setContentsMargins(16, 12, 16, 10)
-        hl.setSpacing(4 if LOOK.classic else 8)
+        hl.setContentsMargins(16, 12, 16, 10)
+        hl.setSpacing(8)
         self.pane_title = QLabel(objectName="paneTitle")
         self.pane_note = Help()  # what the view is: with Show hints (decision 7)
         self.pane_note.setObjectName("paneNote")
@@ -349,7 +328,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         fb = QHBoxLayout(self.find_bar)
         fb.setContentsMargins(0, 0, 0, 0)
         self.find_box = QLineEdit()
-        self.find_box.setPlaceholderText("Find in this view   Esc clears" if LOOK.classic else "Find in this view")
+        self.find_box.setPlaceholderText("Find in this view")
         tip(self.find_box, "Find in this view. Esc clears it.", "Ctrl+F")
         self.find_box.setAccessibleName("Find in this view")
         self.find_box.textChanged.connect(lambda _: self.render_list())
@@ -384,9 +363,6 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         self.tree.task_opened = lambda task_id: workspace_ui.open_row(self, task_id)  # Enter, as a double-click; Shift the other way
         lp.addWidget(self.tree, 1)
         self.middle.addWidget(list_page)
-        if LOOK.classic:  # the new look has it on the Timeline's page (decision 229)
-            self.cap_page = self._build_capacity()
-            self.middle.addWidget(self.cap_page)
         self.settings_view = SettingsView(self.ctx, self.say, lambda title, text: self.confirm(title, text),
                                           lambda path: self.reveal(path), lambda: self.open_import())
         self.middle.addWidget(self.settings_view)
@@ -436,26 +412,25 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         dl.setContentsMargins(0, 0, 0, 0)
         dl.setSpacing(0)
         self.actions = QWidget(objectName="actions")
-        self.actions_layout = FlowLayout(self.actions, spacing=6 if LOOK.classic else 4)
-        self.actions_layout.setContentsMargins(14, 8, 14, 4) if LOOK.classic else self.actions_layout.setContentsMargins(16, 10, 16, 2)
+        self.actions_layout = FlowLayout(self.actions, spacing=4)
+        self.actions_layout.setContentsMargins(16, 10, 16, 2)
         dl.addWidget(self.actions)
-        if not LOOK.classic:
-            detail.setMinimumWidth(DETAIL_MIN)
+        detail.setMinimumWidth(DETAIL_MIN)
         self.detail_stack = ViewStack()
         self.page = PageView()
         self.page.setOpenLinks(False)
         self.page.setOpenExternalLinks(False)
         self.page.document().setDefaultStyleSheet(page_css())
-        self.page.document().setDocumentMargin(14 if LOOK.classic else 16)
+        self.page.document().setDocumentMargin(16)
         self.page.anchorClicked.connect(self.on_link)
         self.page.link_menu = self.page_link_menu  # a task's link: the tile's menu (release 5.138)
         self.page.layout_changed.connect(self._page_width_changed)
         self.detail_stack.addWidget(self.page)
         self.detail_stack.addWidget(self._build_edit_form())
         # A task's page with its notes page (release 5.25): its facts, the notes and its history in one scroll.
-        # The page's left edge is 24 px in from the pane in the new look (release 5.113, decision 423), so a section's
+        # The page's left edge is 24 px in from the pane (release 5.113, decision 423), so a section's
         # chevron can hang in the margin and every title, grid and frame starts on that one edge.
-        self.task_pane = TaskPane(page_css(), 14 if LOOK.classic else 24)
+        self.task_pane = TaskPane(page_css(), 24)
         for view in self.task_pane.views():
             view.anchorClicked.connect(self.on_link)
             view.link_menu = self.page_link_menu  # a subtask's link or circle: the tile's menu (release 5.138, decision 577)
@@ -468,7 +443,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         dl.addWidget(self.detail_stack, 1)
         self.detail = detail
         self.split.addWidget(detail)
-        self.split.setSizes([190 if LOOK.classic else NAV_WIDTH, 430, 560])
+        self.split.setSizes([NAV_WIDTH, 430, 560])
         self.split.setStretchFactor(1, 1)
         self.split.setStretchFactor(2, 1)
         outer.addWidget(self.split, 1)
@@ -496,64 +471,6 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         self.problems_line = ProblemsLine(self.ctx.problem_log, lambda path: self.reveal(path))
         status_row.addWidget(self.problems_line)
         outer.addLayout(status_row)
-
-    def _build_capacity(self) -> QWidget:
-        page = QWidget()
-        lay = QVBoxLayout(page)
-        lay.setContentsMargins(12, 8, 12, 8) if LOOK.classic else lay.setContentsMargins(16, 12, 16, 10)
-        title = QLabel("Capacity", objectName="paneTitle")
-        note = Help("Scheduled hours per person and week, spread over each task's workdays. Parked tasks don't count. Click a cell "
-                    "to see which tasks fill it.")
-        self.cap_nav = QWidget()
-        nav = QHBoxLayout(self.cap_nav)
-        nav.setContentsMargins(0, 0, 0, 0)
-        for text, step in (("Earlier", -1), ("This week", 0), ("Later", 1)):
-            b = DropButton(text, arrow="chevron-right") if step > 0 else QPushButton(text)
-            if step < 0:
-                b.setIcon(icon("chevron-left"))
-            b.clicked.connect(lambda _=False, s=step: self._move_capacity(s))
-            nav.addWidget(b)
-        nav.addStretch()
-        # Release 5.9: people under their groups' headings (M0033). A week with a plant event says so at its top (M0028).
-        self.cap_by_group = QCheckBox("Group by group")
-        self.cap_by_group.setToolTip("Put people under their groups' headings")
-        self.cap_by_group.toggled.connect(lambda _: self.render_capacity())
-        nav.addWidget(self.cap_by_group)
-        self.cap_table = QTableWidget()
-        self.cap_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.cap_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.cap_table.cellClicked.connect(self._capacity_clicked)
-        self.cap_table.verticalHeader().setVisible(False)
-        if not LOOK.classic:  # the weeks share the width: it scrolls across only when a cell's number wouldn't fit
-            self.cap_table.setCornerButtonEnabled(False)
-            self.cap_table.horizontalHeader().setMinimumSectionSize(76)
-        self.cap_detail = QTextBrowser()
-        self.cap_detail.setOpenLinks(False)
-        self.cap_detail.document().setDefaultStyleSheet(page_css())
-        self.cap_detail.anchorClicked.connect(self.on_link)
-        legend = QLabel(" ".join(f'<span style="background-color:{c}">&nbsp;{t}&nbsp;</span>' for t, c in (
-            (("Under 80%", "#e2f2e6"), ("80 to 100%", "#fcefcf"), ("Over 100%", "#fbe3e1")) if LOOK.classic else
-            (("Under 80%", tokens.colour("content")), ("80 to 100%", tokens.colour("caution_bg")), ("Over 100%", tokens.colour("critical_bg"))))))
-        for w in (title, note):
-            lay.addWidget(w)
-        lay.addWidget(self.cap_nav)
-        lay.addWidget(self.cap_table, 0 if LOOK.classic else 8)
-        lay.addWidget(legend)
-        lay.addWidget(self.cap_detail, 1)
-        self.cap_legend = legend
-        self.cap_empty = QWidget()
-        el = QHBoxLayout(self.cap_empty)
-        el.setContentsMargins(0, 4, 0, 4)
-        el.setSpacing(12)
-        el.addWidget(QLabel("Add people to see their load."))
-        add = QPushButton("Add person")
-        add.clicked.connect(lambda _=False: self.add_person())
-        el.addWidget(add)
-        el.addStretch()
-        self.cap_empty.hide()
-        lay.addWidget(self.cap_empty)
-        lay.addStretch(0)
-        return page
 
     def _build_edit_form(self) -> QWidget:
         form = QWidget()
@@ -584,7 +501,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         note = Help("Its capture.md stays as it arrived: the title and summary are kept in docs.db. Ctrl+Enter saves; Esc cancels.")
         lay.addWidget(note)
         row = QHBoxLayout()
-        save = QPushButton("Save", objectName="primary" if LOOK.classic else "")
+        save = QPushButton("Save")
         save.clicked.connect(self.save_capture_edit)
         cancel = QPushButton("Cancel")
         cancel.clicked.connect(self.cancel_capture_edit)
@@ -604,13 +521,13 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
             screen = QGuiApplication.primaryScreen().availableGeometry()
             self.resize(int(screen.width() * 0.82), int(screen.height() * 0.85))
             self.move(screen.x() + (screen.width() - self.width()) // 2, screen.y() + (screen.height() - self.height()) // 3)
-            if not LOOK.classic:  # the sidebar starts at its own width, not a share of the window's (O10)
-                rest = self.width() - NAV_WIDTH - 2 * self.split.handleWidth()
-                self.split.setSizes([NAV_WIDTH, rest * 43 // 99, rest - rest * 43 // 99])
+            # the sidebar starts at its own width, not a share of the window's (O10)
+            rest = self.width() - NAV_WIDTH - 2 * self.split.handleWidth()
+            self.split.setSizes([NAV_WIDTH, rest * 43 // 99, rest - rest * 43 // 99])
             self._placed = True
         if self.dirty:
             self.refresh(render=False)
-        if view == "capacity" and not LOOK.classic:  # one page for both (decision 229): a wheel's slice can still name it
+        if view == "capacity":  # one page for both (decision 229): a wheel's slice can still name it
             self.timeline.show_capacity()
             view = "timeline"
         view = self._route_retired(view)
@@ -720,7 +637,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         self.status.setProperty("error", error)
         self.status.style().unpolish(self.status)
         self.status.style().polish(self.status)
-        if error and not LOOK.classic:
+        if error:
             self._status_timer.stop()
         else:
             self._status_timer.start(9000)
@@ -823,24 +740,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
 
     # ================= the views pane =================
     def render_nav(self) -> None:
-        if not LOOK.classic:
-            self._render_nav_new()
-            return
-        counts = view_counts(self.model(), self.today(), self.ctx.settings.me)
-        self.nav.begin()
-        section = ""
-        for v in VIEWS:
-            if v.section != section:
-                section = v.section
-                self.nav.add_row(None, None, [f'<span style="color:#87919c; font-size:8pt; font-weight:600">{esc(section.upper())}</span>', ""],  # Classic's
-                                 selectable=False)
-            count = counts.get(v.id)
-            label = f"<b>{esc(v.label)}</b>" if v.id == self.view else esc(v.label)
-            self.nav.add_row(None, ("view", v.id), [label, f'<p align="right" class="sub">{count}</p>' if count is not None else ""])
-        self.nav.end(("view", self.view) if self.view != "search" else None)
-
-    def _render_nav_new(self) -> None:
-        """The new look's sidebar (O10): an icon per view, counts only where they ask for something, and the groups
+        """The sidebar (O10): an icon per view, counts only where they ask for something, and the groups
         folded as the owner left them (in docs.db)."""
         counts = view_counts(self.model(), self.today(), self.ctx.settings.me)
         folded = set(filter(None, (db.get_state(self.ctx.conn, NAV_FOLDED_KEY) or "").split(",")))
@@ -933,9 +833,9 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
 
     # ================= the list pane =================
     def _set_head(self, title: str, note: str = "", total: str = "") -> None:
-        """The view's title and what it is. ``total`` (such as "18 open") follows the title in the new look, whose sidebar
+        """The view's title and what it is. ``total`` (such as "18 open") follows the title, as the sidebar
         counts only what asks for something (O10)."""
-        if total and not LOOK.classic:
+        if total:
             self.pane_title.setTextFormat(Qt.TextFormat.RichText)
             self.pane_title.setText(f'{esc(title)}&nbsp;&nbsp;<span style="color:{tokens.colour("text2")}; font-size:{tokens.CAPTION}pt; '
                                     f'font-weight:400">{esc(total)}</span>')
@@ -977,10 +877,6 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
             self.middle.setCurrentWidget(self.priorities)
             self.priorities.render(self.model(), self.today(), self.sel[1] if self.sel and self.sel[0] == "task" else None, self.ctx.settings.me)
             return
-        if self.view == "capacity":
-            self.middle.setCurrentWidget(self.cap_page)
-            self.render_capacity()
-            return
         if self.view == "timeline":
             self.middle.setCurrentWidget(self.timeline)
             self.timeline.render(self.model(), self.today())
@@ -1012,8 +908,8 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
             self._mark_states()
         finally:
             self.tree.end(self._row_to_select())
-        if not LOOK.classic:  # no column headings over nothing, or where they say nothing the cells don't (decision L6)
-            self.tree.setHeaderHidden(self.view in NO_HEADINGS or not any(k is not None for k in self.tree.keys()))
+        # no column headings over nothing, or where they say nothing the cells don't (decision L6)
+        self.tree.setHeaderHidden(self.view in NO_HEADINGS or not any(k is not None for k in self.tree.keys()))
         if self.view in NESTING_VIEWS:
             self._sync_level_buttons()
         self.filters.setVisible(any(_in_bar(self.filters_layout.itemAt(i)) for i in range(self.filters_layout.count())))
@@ -1038,10 +934,10 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         if not s or not self._exists(s):
             self.actions.hide()
             self.page.setHtml('<p class="note">Pick a task, capture or document to see it here.</p>')
-            if not LOOK.classic and self.view not in NO_PAGE_VIEWS:
+            if self.view not in NO_PAGE_VIEWS:
                 self.detail.hide()  # the list takes the room until something is picked
             return
-        if not LOOK.classic and self.view not in NO_PAGE_VIEWS:
+        if self.view not in NO_PAGE_VIEWS:
             self.detail.show()
         self.actions.show()
         pages = self.pages()
@@ -1251,7 +1147,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         if view not in VIEW_IDS:
             return
         workspace_ui.leave(self)  # a place picked in the sidebar leaves the workspace for it (release 5.152, decision 682)
-        if view == "capacity" and not LOOK.classic:  # one page for both (decision 229)
+        if view == "capacity":  # one page for both (decision 229)
             self.timeline.show_capacity()
             view = "timeline"
         if self.query:
@@ -1259,7 +1155,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
             self.search_box.blockSignals(True)
             self.search_box.clear()
             self.search_box.blockSignals(False)
-        self.view, self.cap_cell = view, None
+        self.view = view
         self.ticked.clear()
         self.close_find()
         self.priorities.close_find(render=False)

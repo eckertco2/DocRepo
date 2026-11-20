@@ -27,7 +27,6 @@ from docrepo.detail import esc
 from docrepo.model import Model
 from docrepo.safe_fs import WriteRefused
 from docrepo.ui.dialogs import TaggedLabelDialog
-from docrepo.ui.look import LOOK
 from docrepo.ui.tree_view import Line, group_ground
 
 if TYPE_CHECKING:
@@ -99,8 +98,7 @@ def view(w: BrowseWindow) -> None:
         for s in sug[:ROWS]:
             lb = s.label
             context = " · ".join(x for x in (f"From {lb.pattern}", _places(w, s)) if x)
-            cell = (esc(lb.label) + ' <span class="new">&nbsp;new&nbsp;</span> ' + f'<span class="sub">{esc(context)}</span>' if LOOK.classic
-                    else Line(lb.label, icon="tagged", icon_tip="Tagged label, suggested", chips=(("new", "new"),), context=context))
+            cell = Line(lb.label, icon="tagged", icon_tip="Tagged label, suggested", chips=(("new", "new"),), context=context)
             w.tree.add_row(None, ("tagged", lb.key), [cell, "", f'<p align="right">{s.items}</p>'],
                            tip=f"{lb.label}: new, found by the {lb.pattern} pattern")
         if len(sug) > ROWS:
@@ -108,8 +106,7 @@ def view(w: BrowseWindow) -> None:
         w.tree.add_row(None, None, [f'<b>Tag list</b> <span class="sub">{len(tg.glossary()):,}</span>'], group_ground(), selectable=False, span=True)
     for lb in labels:
         # The row recipe (the list rows review): the label, its description quiet after it, as People's aliases are.
-        cell = (esc(lb.label) + (f' <span class="sub">{esc(lb.description)}</span>' if lb.description else "") if LOOK.classic
-                else Line(lb.label, icon="tagged", icon_tip="Tagged label", context=lb.description))
+        cell = Line(lb.label, icon="tagged", icon_tip="Tagged label", context=lb.description)
         w.tree.add_row(None, ("tagged", lb.key), [cell, esc("; ".join(lb.aliases)), f'<p align="right">{counts.get(lb.id, 0)}</p>'],
                        tip=f"{lb.label}: {lb.description}" if lb.description else lb.label)
     if more:

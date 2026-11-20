@@ -69,12 +69,10 @@ def bar_toggle(w) -> QPushButton:
     """The workspace bar's toggle: **Work on this** while the task acted on isn't the current one, **Working on this**
     (pressed) while it is. A press makes it current, or, pressed again, stops it."""
     from docrepo.ui.icons import icon
-    from docrepo.ui.look import LOOK
 
     b = QPushButton(WORK_ON_THIS, objectName="subtle")
     b.setCheckable(True)
-    if not LOOK.classic:
-        b.setIcon(icon("workspace"))
+    b.setIcon(icon("workspace"))
     b.clicked.connect(lambda on: _toggled(w, on))
     return b
 

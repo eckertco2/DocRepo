@@ -32,7 +32,6 @@ from docrepo.detail import esc
 from docrepo.tasks import REVIEW_WEEKS, review_every_words
 from docrepo.ui import tokens
 from docrepo.ui.icons import icon
-from docrepo.ui.look import LOOK
 from docrepo.ui.lists.common import _cols
 from docrepo.ui.state_menu import open_below
 from docrepo.ui.tree_view import Line, group_ground, tint
@@ -153,18 +152,16 @@ def _bar(w: BrowseWindow, index: int, counts: dict[str, int]) -> None:
     back_to, _ = review.step_after(index, counts, back=True)
     on_to, _ = review.step_after(index, counts)
     back = QPushButton("Back")
-    if not LOOK.classic:
-        back.setIcon(icon("chevron-left"))
+    back.setIcon(icon("chevron-left"))
     back.setEnabled(index > 0)
     back.setToolTip(f"Back to {review.STEPS[back_to].name} (Alt+Left)" if index > 0 else "This is the first step")
     back.clicked.connect(lambda _=False: go(w, back=True))
     w._filter_widget(back)
     last = index == len(review.STEPS) - 1
     # Neutral, as a page's main command is: New capture stays the window's one accent button (the visual review's decision V2).
-    nxt = QPushButton("Finish" if on_to == len(review.STEPS) - 1 else f"Next: {review.STEPS[on_to].name}", objectName="primary" if LOOK.classic else "")
-    if not LOOK.classic:
-        nxt.setIcon(icon("chevron-right"))
-        nxt.setLayoutDirection(Qt.LayoutDirection.RightToLeft)  # the arrow after the words
+    nxt = QPushButton("Finish" if on_to == len(review.STEPS) - 1 else f"Next: {review.STEPS[on_to].name}")
+    nxt.setIcon(icon("chevron-right"))
+    nxt.setLayoutDirection(Qt.LayoutDirection.RightToLeft)  # the arrow after the words
     nxt.setToolTip("Finish the review: what it did, and Plan next week (Alt+Right)" if on_to == len(review.STEPS) - 1
                    else f"On to {review.STEPS[on_to].name} (Alt+Right). Empty steps are passed over.")
     nxt.clicked.connect(lambda _=False: go(w))
@@ -346,7 +343,7 @@ def _done(w: BrowseWindow, s: review.Session) -> None:
                                   selectable=False)
             w.tree.set_actions(item, [("Go back", lambda i=i: goto(w, i), f"Back to step {i + 1}, {x.name}")])
         head.setExpanded(True)
-    plan = QPushButton("Plan next week", objectName="primary" if LOOK.classic else "")
+    plan = QPushButton("Plan next week")
     plan.setToolTip("Open Priorities, to rank next week's work")
     plan.clicked.connect(lambda _=False: w.set_view("priorities"))
     w.filters_layout.insert_widget(1, plan)  # after Back, before the step's line
@@ -388,7 +385,7 @@ def today_row(w: BrowseWindow, grey) -> None:
             if counts["projects"] else "", f"{counts['quiet']} gone quiet" if counts["quiet"] else ""]
     context = (f"carry on at step {s.step + 1}, {review.STEPS[s.step].name}" if carry else "") or " · ".join(x for x in asks if x)
     line = Line("Weekly review", icon="review", icon_colour="accent", icon_tip="Review", context=context, strong=True)
-    item = w.tree.add_row(None, None, [line, *([""] if LOOK.classic else []), ""], grey, selectable=False,
+    item = w.tree.add_row(None, None, [line, ""], grey, selectable=False,
                           tip=f"It's {st.review_day}, your review day: a step at a time through what needs a look.")
     w.tree.set_actions(item, [("Carry on" if carry else "Start", lambda: w.set_view(VIEW),
                                "Open Review where you left it" if carry else "Open Review at its first step")])

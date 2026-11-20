@@ -269,11 +269,11 @@ def test_the_task_views_footer_keeps_its_keys_for_show_hints(browse, hints_off):
 
 
 def test_no_typed_arrows_in_the_new_look():
-    """One arrow family: the icons' chevrons. A line naming the Classic look may keep its own."""
+    """One arrow family: the icons' chevrons (with no exception for the Classic look's lines since release 5.179)."""
     found = []
     for path in sorted(UI.glob("*.py")):
         for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-            if re.search("[▾▸◀▶▼►]", line) and "classic" not in line.lower():
+            if re.search("[▾▸◀▶▼►]", line):
                 found.append(f"{path.name}:{n}")
     assert found == []
     assert not re.search("[▾▸◀▶▼]", (UI.parent / "detail.py").read_text(encoding="utf-8"))
@@ -288,13 +288,13 @@ def test_a_drop_buttons_text_is_only_its_words(qapp):
 
 # ---- V4: colour by one rule ----
 def test_no_raw_colours_outside_the_tokens():
-    """Each colour has a name and one job. Classic's own colours are in style.py, or on a line naming it."""
+    """Each colour has a name and one job (with no exception for the Classic look's own since release 5.179)."""
     found = []
     for path in sorted(UI.glob("*.py")):
-        if path.name in ("tokens.py", "style.py"):
+        if path.name == "tokens.py":
             continue
         for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-            if re.search(r"#[0-9a-fA-F]{6}\b", line) and "classic" not in line.lower():
+            if re.search(r"#[0-9a-fA-F]{6}\b", line):
                 found.append(f"{path.name}:{n}")
     assert found == []
 

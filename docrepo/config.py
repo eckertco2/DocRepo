@@ -162,8 +162,9 @@ class Settings:
     #: Each reference field's link address, by its name (release 5.67, round 6's decision 320): the field's value goes
     #: where ``{}`` is, or at the end, and becomes a link to its page. Typed on the owner's computer, never in the code.
     reference_links: dict[str, str] = field(default_factory=dict)
-    #: The visual overhaul (releases 5.10 to 5.16): "new", or "classic" for release 5.9's look (decision 15); and Show
-    #: hints, which brings back the help text, ⓘ buttons and key badges (decision 7). Both take effect when DocRepo starts.
+    #: The look: "new" (the visual overhaul, releases 5.10 to 5.16), the one there is since release 5.179 retired release
+    #: 5.9's (the redesign's decision 840). Kept in settings.json as it was; a saved "classic" is read as "new". And Show
+    #: hints, which brings back the help text, ⓘ buttons and key badges (decision 7). It takes effect when DocRepo starts.
     look: str = "new"
     show_hints: bool = False
     #: Mark filed emails in Outlook (release 5.33, the knowledge base's decisions 24 to 26): each email a capture files on
@@ -228,6 +229,8 @@ class Settings:
         if not isinstance(data, dict):
             raise SettingsError(f"{file} doesn't hold a JSON object.")
         known = {f.name for f in fields(cls)}
+        if "look" in data:  # release 5.179: one look, whatever was saved, written back as it when the settings are saved next
+            data["look"] = "new"
         for key in sorted(set(data) - known):
             log.warning("Ignoring unknown setting %r in %s", key, file)
         links = data.get("reference_links")

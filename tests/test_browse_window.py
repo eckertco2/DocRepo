@@ -596,14 +596,15 @@ def test_the_window_only_hides_when_closed(browse):
 
 
 def test_the_windows_stay_light_in_dark_mode(qapp):
+    """The look's palette sets every role from the light tokens, so nothing falls back to a dark Windows theme's colours.
+    (Release 5.179 retired the Classic look's ``use_light_theme``; ``apply_look`` itself is checked in test_real_look.py.)"""
     from PySide6.QtCore import Qt
     from PySide6.QtGui import QPalette
 
-    from docrepo.ui.style import use_light_theme
+    from docrepo.ui import tokens
 
-    use_light_theme(qapp)
-    palette = qapp.palette()
-    assert palette.color(QPalette.ColorRole.Base).name() == "#ffffff" and palette.color(QPalette.ColorRole.Text).name() == "#1a1f25"
+    palette = tokens.palette()
+    assert palette.color(QPalette.ColorRole.Base).name() == tokens.colour("content") and palette.color(QPalette.ColorRole.Text).name() == tokens.colour("text")
     # The offscreen platform has no colour schemes (Unknown); on Windows this is Light, never Dark.
     assert qapp.styleHints().colorScheme() != Qt.ColorScheme.Dark
 

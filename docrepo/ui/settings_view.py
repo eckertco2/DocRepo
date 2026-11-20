@@ -47,7 +47,7 @@ from docrepo.safe_fs import WriteRefused
 from docrepo.ui.tokens import C
 from docrepo.ui.context import AppContext
 from docrepo.ui.icons import icon, set_fold
-from docrepo.ui.look import LOOK, Help, set_hints
+from docrepo.ui.look import Help, set_hints
 from docrepo.ui.wheel_commands import SPECS, icon_names
 
 log = logging.getLogger(__name__)
@@ -143,8 +143,6 @@ def check_values(ctx: AppContext, values: dict[str, Any]) -> dict[str, Any]:
         raise SettingsProblem("Gone quiet is after 1 to 365 days.")
     if out.get("open_tasks_in", "workspace") not in OPEN_TASKS_IN:  # release 5.174
         raise SettingsProblem("A task opens in its workspace or its page.")
-    if out.get("look", "new") not in ("new", "classic"):
-        raise SettingsProblem("The look is the new one or the Classic one.")
     if out.get("me") and out["me"] not in Model(ctx.conn).people:
         raise SettingsProblem(f"There's no person {out['me']}.")
     if "tagged_patterns" in out or "tagged_never" in out:  # release 5.80
@@ -459,7 +457,7 @@ class SettingsView(QWidget):
 
         # ---- the data root and start-up ----
         self._build_data_root(lay, open_import)
-        # ---- the look (decisions 7 and 15) ----
+        # ---- the look (decision 7): Open a task in, Show hints and the version ----
         self._build_look(lay)
         # ---- hotkeys ----
         self._build_hotkeys(lay)
@@ -509,11 +507,7 @@ class SettingsView(QWidget):
         ])
 
     def _build_look(self, lay) -> None:
-        """The look (decisions 7 and 15) (part of ``__init__``, release 5.95)."""
-        self.look = QComboBox()
-        self.look.addItem("New look", "new")
-        self.look.addItem("Classic look (release 5.9)", "classic")
-        self.look.setFixedWidth(240)
+        """The look (decision 7) (part of ``__init__``, release 5.95). Its Look row went with the Classic look (release 5.179)."""
         self.hints = QCheckBox("Show hints")
         self.hints.setToolTip("Help text, the ⓘ buttons and key badges, in every window, at once")
         self.hints.toggled.connect(self._hints_toggled)
@@ -523,7 +517,6 @@ class SettingsView(QWidget):
             self.open_tasks_in.addItem(words, key)
         self.open_tasks_in.setFixedWidth(240)
         self._card(lay, "Look", [
-            ("Look", "The new look, or release 5.9's while you get used to it. It changes when DocRepo next starts.", self.look),
             ("Open a task in", "What a double-click or Enter on a task does, in a list, on a tile, in Task search, the quick summary and "
                                "File search. Shift does the other, and so does the second line of a task's right-click menu. A link "
                                "inside a page always goes to the task's page, and a collection opens at its page.", self.open_tasks_in),
@@ -810,7 +803,7 @@ class SettingsView(QWidget):
         lay.addWidget(self.error)
         buttons = QHBoxLayout()
         buttons.setSpacing(8)
-        save = QPushButton("Save settings", objectName="primary" if LOOK.classic else "")
+        save = QPushButton("Save settings")
         save.clicked.connect(self.save)
         undo = QPushButton("Undo changes")
         undo.clicked.connect(self.load)
@@ -920,7 +913,6 @@ class SettingsView(QWidget):
         self.check.setValue(s.doc_check_minutes)
         self.backup_days.setValue(s.backup_every_days)
         self.backup_keep.setValue(s.backup_keep)
-        self.look.setCurrentIndex(max(0, self.look.findData(s.look)))
         self.open_tasks_in.setCurrentIndex(max(0, self.open_tasks_in.findData(s.open_tasks_in)))  # release 5.174
         self.hints.blockSignals(True)
         self.hints.setChecked(s.show_hints)
@@ -951,7 +943,7 @@ class SettingsView(QWidget):
             "stock_headings": self.stock.headings(),
             "extracted_text_cap_chars": self.cap.value(), "prompt_warn_chars": self.warn.value(), "doc_check_minutes": self.check.value(),
             "backup_every_days": self.backup_days.value(), "backup_keep": self.backup_keep.value(),
-            "look": self.look.currentData(), "show_hints": self.hints.isChecked(), "outlook_categories": self.categories.isChecked(),
+            "show_hints": self.hints.isChecked(), "outlook_categories": self.categories.isChecked(),
             "open_tasks_in": self.open_tasks_in.currentData(),
             "outlook_category_colour": self.colour.currentData(), "today_meetings": self.meetings_on.isChecked(),
             "progress_sends": self.progress_sends.isChecked(),
@@ -978,7 +970,6 @@ class SettingsView(QWidget):
         else:
             n = sum(1 for k in changed if k in hotkey.HOTKEY_IDS or k == "wheel_hotkeys")
             later = f" The hotkey{'s work' if n > 1 else ' works'} from now on." if n else ""
-            later += " The look changes the next time DocRepo starts." if "look" in changed else ""
             if "tagged_patterns" in changed or "tagged_never" in changed:  # release 5.80
                 fresh = sum(1 for lb in tagged.read_labels(self.ctx.conn) if lb.status == "suggested")
                 later += (f" Everything is matched again: {fresh:,} new tagged label{'s are' if fresh != 1 else ' is'} on what mentions "

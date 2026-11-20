@@ -28,6 +28,27 @@ def run_look(script: str, platform: str) -> dict:
     return json.loads(done.stdout.strip().splitlines()[-1])
 
 
+def test_a_saved_classic_look_starts_the_one_look():
+    """Release 5.179 (the redesign's decision 840): ``apply_look`` given the retired "classic" sets up the one look there is,
+    the same as "new": the style, the tokens' palette and font, and the style sheet on the application."""
+    out = run_look("""
+from PySide6.QtGui import QPalette
+from docrepo.ui import tokens
+from docrepo.ui.look import LOOK
+
+def state():
+    return {"style": app.style().metaObject().className(), "base": app.palette().color(QPalette.ColorRole.Base).name(),
+            "font": app.font().pointSizeF(), "sheet": app.styleSheet()}
+
+new = state()
+apply_look(app, 'classic', True)
+print(json.dumps({"new": new, "classic": state(), "help": LOOK.show_help, "has_classic": hasattr(LOOK, "classic"),
+                  "content": tokens.colour("content"), "body": tokens.ui_font().pointSizeF()}))
+""", "offscreen")
+    assert out["classic"] == out["new"] and out["new"]["sheet"] and out["help"] and not out["has_classic"]
+    assert out["new"]["base"] == out["content"] and out["new"]["font"] == out["body"]
+
+
 @windows_only
 def test_every_class_of_widget_gets_the_body_font():
     """Decisions 1 and 2: rows, tables and menus in the same font and size as the buttons, on the real platform."""

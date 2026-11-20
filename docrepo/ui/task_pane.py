@@ -16,7 +16,6 @@ from PySide6.QtWidgets import (QApplication, QButtonGroup, QFrame, QHBoxLayout, 
 from docrepo import topics
 from docrepo.ui import tokens
 from docrepo.ui.icons import icon
-from docrepo.ui.look import LOOK
 from docrepo.ui.checklist_summary import ChecklistSummary
 from docrepo.ui.notes_edit import NotesEdit
 from docrepo.ui.notes_outline import OUTLINE_MIN_TEXT, OUTLINE_WIDTH, NotesOutline, OutlineSlot
@@ -65,8 +64,8 @@ class LandmarkBar(QScrollBar):
         if not self.marks or self.total <= 0:
             return
         p = QPainter(self)
-        heading = QColor(tokens.colour("accent") if not LOOK.classic else "#1d5e98")
-        divider = QColor(tokens.colour("scroll_hover") if not LOOK.classic else "#888888")
+        heading = QColor(tokens.colour("accent"))
+        divider = QColor(tokens.colour("scroll_hover"))
         for top, _level, day, _text in self.marks:
             p.fillRect(QRect(2, self.bar_y(top), self.width() - 4, 2), divider if day else heading)
         p.end()
@@ -155,7 +154,6 @@ class TaskPane(QScrollArea):
         self.task_id: str | None = None
         #: Where its messages go: the window it's in says them (``BrowseWindow.wire_notes``).
         self.say = lambda text, error=False: None
-        self.smooth = not LOOK.classic
         self.setVerticalScrollBar(LandmarkBar(self))  # with landmarks for the page's headings (release 5.86)
         self._anim = QPropertyAnimation(self.verticalScrollBar(), b"value", self)
         self._anim.setDuration(180)
@@ -767,9 +765,6 @@ class TaskPane(QScrollArea):
             bar.setValue(bar.value() - event.pixelDelta().y())
             return
         step = event.angleDelta().y() / 120 * QApplication.wheelScrollLines() * bar.singleStep()
-        if not self.smooth:
-            bar.setValue(int(bar.value() - step))
-            return
         start = self._anim.endValue() if self._anim.state() == QPropertyAnimation.State.Running else bar.value()
         target = max(bar.minimum(), min(bar.maximum(), int(start - step)))
         self._anim.stop()

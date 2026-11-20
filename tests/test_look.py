@@ -245,13 +245,15 @@ def test_no_text_is_styled_below_the_floor():
     assert sizes and min(float(s) for s in sizes) >= tokens.CAPTION
 
 
-def test_settings_keep_the_look_and_show_hints(ctx):
+def test_settings_keep_show_hints_and_have_no_look_row(ctx):
+    """Release 5.179 (the redesign's decision 840): the Look row went with the Classic look; Show hints stays."""
     from docrepo.ui.settings_view import SettingsView, update_settings
 
     view = SettingsView(ctx, lambda text: None, lambda title, text: True)
     view.load()
-    view.look.setCurrentIndex(view.look.findData("classic"))
+    assert not hasattr(view, "look") and "look" not in view.values()
     view.hints.setChecked(True)
     assert LOOK.hints  # Show hints applies at once
-    assert set(update_settings(ctx, view.values())) == {"look", "show_hints"}
-    assert Settings.load(ctx.data_root).look == "classic" and Settings.load(ctx.data_root).show_hints
+    assert set(update_settings(ctx, view.values())) == {"show_hints"}
+    assert Settings.load(ctx.data_root).show_hints and Settings.load(ctx.data_root).look == "new"
+    assert not hasattr(LOOK, "classic")

@@ -6,11 +6,10 @@ from __future__ import annotations
 import logging
 
 
-from docrepo.detail import chip, esc, row_state, state_chip
+from docrepo.detail import esc, row_state
 from docrepo.model import Model
 from docrepo.kinds import is_work
 from docrepo.ui import tokens
-from docrepo.ui.look import LOOK
 from docrepo.views import (
     LIST_IDS,
 )
@@ -30,9 +29,7 @@ DETAIL_MIN = 352
 SELECT_VIEWS = ("tasks", *LIST_IDS)
 #: The views but the task tree whose rows nest, so they have Collapse a level and Expand a level (release 5.24).
 NESTING_VIEWS = ("today", *LIST_IDS, "agenda", "activity", "docs", "labels", "templates")
-#: Activity's line chips, by what happened (release 5.23): the pages' chip classes.
-ACT_CHIPS = {"task": "multi", "update": "st-ip", "note": "lbl", "email": "lbl", "change": "routine", "doc": "st-pk", "agenda": "new"}
-#: Each view's rows in the new look (the list rows review, decision L1): its row height, and whether rows with a second line
+#: Each view's rows (the list rows review, decision L1): its row height, and whether rows with a second line
 #: take two. Views whose rows nest are 28 px; Agendas, Documents, Activity and Search show a second line. Others are 32 px.
 ROW_DENSITY = {"tasks": (tokens.TREE_ROW, False), **{v: (tokens.TREE_ROW, False) for v in LIST_IDS}, "labels": (tokens.TREE_ROW, False),
                "templates": (tokens.TREE_ROW, False), "docs": (tokens.TREE_ROW, True), "agenda": (tokens.LIST_ROW, True),
@@ -63,13 +60,13 @@ def _due_css(cls: str) -> str:
 
 def _row_state(state: str) -> str:
     """A task's state in a list's row: words for the usual ones, and a chip only for what's out of the ordinary (the review's decision V6)."""
-    return state_chip(state) if LOOK.classic else row_state(state)
+    return row_state(state)
 
 
 def _row_word(word: str) -> str:
-    """What stands in a row's State column in place of a task's state, such as Note. The new look has no State column: the
-    word is the row's icon's tooltip (decision L7)."""
-    return chip(word, "st-ns") if LOOK.classic else f'<span class="faint">{esc(word)}</span>'
+    """What stands in a row's State cell in place of a task's state, such as Note. There's no State column: the word is
+    the row's icon's tooltip (decision L7)."""
+    return f'<span class="faint">{esc(word)}</span>'
 
 
 def priorities_of(m: Model) -> dict[str, str]:
@@ -78,32 +75,27 @@ def priorities_of(m: Model) -> dict[str, str]:
 
 
 def _shape(cells: list) -> list:
-    """A row's cells, written as the Classic look's (title, State, then the rest), without the State cell in the new look,
-    where the state is an icon before the title (decision L7)."""
-    return cells if LOOK.classic else [cells[0], *cells[2:]]
+    """A row's cells, written as title, State, then the rest, without the State cell: the state is an icon before the
+    title (decision L7)."""
+    return [cells[0], *cells[2:]]
 
 
 def _cols(labels: list[str], widths: list[int] | None = None) -> tuple[list[str], list[int] | None]:
-    """A list's columns, without State in the new look (decision L7)."""
-    if LOOK.classic or "State" not in labels:
+    """A list's columns, without State (decision L7)."""
+    if "State" not in labels:
         return labels, widths
     i = labels.index("State")
     return labels[:i] + labels[i + 1:], (widths[:i] + widths[i + 1:] if widths else None)
 
 
-#: The Classic look's deadline: a small grey word under the date (release 5.9's colours).
-CLASSIC_DEADLINE = '<br><span style="color:#87919c; font-weight:400; font-size:8pt">deadline</span>'
-
-
-def _due_html(cell, deadline_line: bool = True) -> str:
-    """A row's date, at its right: red when it's late, caution's colour when it's soon. A deadline is a red ◆ before it in the
-    new look, rather than a line under it, so the row keeps one line."""
+def _due_html(cell) -> str:
+    """A row's date, at its right: red when it's late, caution's colour when it's soon. A deadline is a red ◆ before it,
+    rather than a line under it, so the row keeps one line."""
     if cell is None:
         return ""
-    if cell.deadline and not LOOK.classic:
+    if cell.deadline:
         return f'<p align="right" style="{_due_css(cell.cls)}"><span class="critical">◆</span> {esc(cell.text)}</p>'
-    mark = CLASSIC_DEADLINE if cell.deadline and deadline_line else ""
-    return f'<p align="right" style="{_due_css(cell.cls)}">{esc(cell.text)}{mark}</p>'
+    return f'<p align="right" style="{_due_css(cell.cls)}">{esc(cell.text)}</p>'
 
 
 #: The days number's column (release 5.138, the task tile plan's decision 568): an integer, so narrow.

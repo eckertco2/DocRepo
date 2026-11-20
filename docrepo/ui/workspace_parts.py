@@ -22,7 +22,6 @@ from docrepo import task_tile
 from docrepo import workspace as ws
 from docrepo.ui import tokens
 from docrepo.ui.icons import icon
-from docrepo.ui.look import LOOK
 from docrepo.ui.notes_outline import NotesOutline
 from docrepo.ui.task_header import fit_view
 from docrepo.ui.task_pane import TaskPane
@@ -297,8 +296,7 @@ class StatusCard(QFrame):
         self.box.setAccessibleName("Quick entry: Enter keeps an update, Shift+Enter a note")
         self.box.setToolTip("Enter keeps an update, Shift+Enter a note; More (Alt+Down) for State, Waiting on and Today")
         self.box.entered.connect(self.entered)
-        if not LOOK.classic:
-            self.box.addAction(icon("update"), QLineEdit.ActionPosition.LeadingPosition)
+        self.box.addAction(icon("update"), QLineEdit.ActionPosition.LeadingPosition)
         # More (release 5.175, decision 764): the card grows to show Log progress's form under the line. The arrow is in
         # the line, at its end, so it takes no room from the line.
         self.more_action = self.box.addAction(icon("chevron-right"), QLineEdit.ActionPosition.TrailingPosition)
@@ -713,7 +711,6 @@ def search_box() -> QLineEdit:
     box.setPlaceholderText("Search links, files, emails, meetings")
     box.setClearButtonEnabled(True)
     box.setAccessibleName("Search the resources")
-    if not LOOK.classic:
-        box.addAction(icon("search"), QLineEdit.ActionPosition.LeadingPosition)
+    box.addAction(icon("search"), QLineEdit.ActionPosition.LeadingPosition)
     box.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
     return box

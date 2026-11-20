@@ -22,7 +22,6 @@ from docrepo.ui import conversation_page, decision_register, t_mails, task_menus
 from docrepo.ui import task_tile as tile_ui
 from docrepo.ui.lists import review as review_list
 from docrepo.ui.icons import icon
-from docrepo.ui.look import LOOK
 from docrepo.views import full_path
 
 #: Starts a picture's file in its own program (``opener.start``'s ``starter``). Tests replace it.
@@ -58,7 +57,7 @@ class PageCommands:
                          primary=True)
             self._action("Open folder", lambda: self.reveal(self.ctx.data_root / "Tasks" / task_id), f"Open Tasks\\{task_id} in File Explorer")
             return
-        menu_key = "   " if LOOK.classic else "\t"  # a menu's key column; the Classic look puts the key after the label
+        menu_key = "\t"  # a menu's key column
         if self.view == "review":  # the weekly review's step 4 (release 5.128): Mark reviewed first
             review_list.page_actions(self, task_id)
         self._action("Note", lambda: self.open_capture(task=task_id, mode="note"), "Add a note to this task's notes page", icon_name="note", key="N")
@@ -123,15 +122,14 @@ class PageCommands:
         if tidy_notes.has_typed_operators(m.pages.get(task_id, "")):  # lines older pages keep as typed (release 5.150)
             more.addAction(tidy_notes.NAME, lambda: tidy_notes.run(self, task_id))
         more.addAction(icon("folder"), "Open folder", lambda: self.reveal(self.ctx.data_root / "Tasks" / task_id))
-        b = self._action("More" if LOOK.classic else "", tip="More: New task under this one, Open agenda, Copy, Copy prompt, Save as template, Export tree and Open folder", menu=more,
+        b = self._action("", tip="More: New task under this one, Open agenda, Copy, Copy prompt, Save as template, Export tree and Open folder", menu=more,
                          icon_name="more")
         b.setAccessibleName("More")
         b.setProperty("flowEnd", True)  # at the row's end
-        if not LOOK.classic:
-            b.setObjectName("iconOnly")
-            b.setProperty("menu", False)
-            b.style().unpolish(b)
-            b.style().polish(b)
+        b.setObjectName("iconOnly")
+        b.setProperty("menu", False)
+        b.style().unpolish(b)
+        b.style().polish(b)
 
     def _capture_actions(self, capture_id: str) -> None:
         m = self.model()
