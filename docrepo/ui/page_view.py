@@ -33,7 +33,9 @@ AVATAR = 20
 MARK = 14
 PROGRESS_HEIGHT = 4
 #: The state marks' colours: secondary text, the accent, Parked's, and secondary text again.
-MARK_COLOURS = {"ns": "text2", "ip": "accent", "pk": "parked", "cl": "text2", "co": "text2"}  # co: a collection's folder (release 5.167)
+#: A state's mark in its colour as well as its shape (release 5.185, the redesign's decision 858): not started in the third grey,
+#: in progress the accent, parked violet, closed green. co: a collection's folder (release 5.167).
+MARK_COLOURS = {"ns": "text3", "ip": "accent", "pk": "parked", "cl": "success", "co": "text3"}
 
 
 def layout_of(width: int) -> int:

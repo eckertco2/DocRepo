@@ -3,8 +3,9 @@ the design workspace's ``docs/mods/task-panel-plan.md``).
 
 The facts above the notes: the path, the title and the description, then the **facts grid** (its state and flags, its
 dates, its people and its labels, each a grey name beside its value, release 5.113's decision 422), as one HTML part;
-the status as a card with a bar down its left side, its log behind the button at its right (the owner's stage two: a
-status panel that opens to its updates); then one **section** per group (Key dates, Agenda, Subtasks, Decisions since
+the status as a soft panel (no bar since release 5.185, the redesign's decision 859), its log behind the button at its
+right (the owner's stage two: a status panel that opens to its updates) and its commands as small buttons under its words;
+then one **section** per group (Key dates, Agenda, Subtasks, Decisions since
 release 5.124, Email conversations since release 5.122, Links, Files, Details), stacked in that order, open or closed. Every section's head
 is the same row: a chevron hanging in the margin, the title, a count or a few words, and its one command at the right;
 so the title, the grid, the sections, the notes and the history all start on one left edge (decision 423). Which groups
@@ -15,8 +16,8 @@ from __future__ import annotations
 
 import re
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QLayout, QSizePolicy, QToolButton, QVBoxLayout, QWidget
+from PySide6.QtCore import Qt, QUrl, Signal
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QLayout, QPushButton, QSizePolicy, QToolButton, QVBoxLayout, QWidget
 
 from docrepo.ui import tokens
 from docrepo.ui.icons import icon
@@ -71,11 +72,12 @@ class Expander(QWidget):
         self.head = QWidget(objectName="groupHeadRow")
         hl = QHBoxLayout(self.head)
         # The chevron hangs in the margin: the title's words start where the page's do.
-        hl.setContentsMargins(max(0, margin - HANG), 3, margin, 3)
+        # Air above each section and no rule (release 5.185, the redesign's decision 859), its title at the section size.
+        hl.setContentsMargins(max(0, margin - HANG), 14, margin, 2)
         hl.setSpacing(8)
         self.button = QToolButton(objectName="groupHead")
         self.button.setText(title)
-        self.button.setFont(tokens.ui_font(tokens.BODY, semibold=True))
+        self.button.setFont(tokens.ui_font(tokens.SECTION, semibold=True))
         self.button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.button.setIcon(icon("chevron-right"))
         self.button.setAutoRaise(True)
@@ -133,6 +135,54 @@ class Expander(QWidget):
         return " ".join(x for x in parts if x)
 
 
+def parse_actions(text: str) -> list[tuple[str, str, str]]:
+    """The status card's commands from ``task_parts``' "status_actions": a line each, address, words and tooltip by tabs."""
+    return [tuple(line.split("\t", 2)) for line in text.split("\n") if line.count("\t") == 2]  # type: ignore[misc]
+
+
+class CardActions(QWidget):
+    """The status card's commands as small buttons at its bottom right (release 5.185, the redesign's decision 859): Got it
+    while the task waits, then Log progress…. A click sends the command's address, as its link did; Tab reaches them after
+    the card's words, and a click doesn't take the keyboard from where it is."""
+
+    link = Signal(str)
+
+    def __init__(self) -> None:
+        super().__init__(objectName="cardActions")
+        self.lay = QHBoxLayout(self)
+        self.lay.setContentsMargins(0, 8, 0, 0)
+        self.lay.setSpacing(6)
+        self.lay.addStretch(1)
+        self.buttons: list[QPushButton] = []
+
+    def set_actions(self, actions: list[tuple[str, str, str]]) -> None:
+        for b in self.buttons:
+            b.hide()
+            b.deleteLater()
+        self.buttons = []
+        for href, words, tip in actions:
+            b = QPushButton(words, objectName="cardAction")
+            b.setFont(tokens.ui_font(tokens.CAPTION))
+            b.setToolTip(tip)
+            b.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.clicked.connect(lambda _=False, h=href: self.link.emit(h))
+            self.lay.addWidget(b)
+            self.buttons.append(b)
+        self.setVisible(bool(actions))
+
+    def text(self) -> str:
+        """The buttons' words, for the tests."""
+        return " ".join(b.text() for b in self.buttons)
+
+
+def set_late(label: QLabel, late: bool) -> None:
+    """The waiting mark in the caution colour from the follow-up day, by its ``late`` property (release 5.185)."""
+    label.setProperty("late", late)
+    label.style().unpolish(label)
+    label.style().polish(label)
+
+
 class TaskHeader(QWidget):
     """The header: the head part (with the facts grid), the status card and the sections. ``fold_changed`` carries a
     group's key (or "status_log") and whether it's open now, for the browse window to keep per task."""
@@ -152,7 +202,7 @@ class TaskHeader(QWidget):
         # button at its right (release 5.113: the bar and the button's words, so the card reads as one and says what opens).
         self.card = QFrame(objectName="statusCard")
         cl = QVBoxLayout(self.card)
-        cl.setContentsMargins(14, 8, 8, 10)
+        cl.setContentsMargins(14, 10, 10, 12)  # the plan's 16 and 12 at the sides held the narrowest pane open by 3 px
         cl.setSpacing(0)
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
@@ -182,9 +232,15 @@ class TaskHeader(QWidget):
         self.status_log = fit_view(css, (0, 8, 0, 0))
         self.status_log.hide()
         self.log_open = False
+        # Got it and Log progress… as buttons under the words (release 5.185): their addresses go through the card's view,
+        # which the window already follows, so nothing else is wired.
+        self.actions = CardActions()
+        self.actions.link.connect(lambda href: self.status_body.anchorClicked.emit(QUrl(href)))
+        self.actions.hide()
         cl.addLayout(row)
         cl.addWidget(self.status_body)
         cl.addWidget(self.status_log)
+        cl.addWidget(self.actions, 0, Qt.AlignmentFlag.AlignRight)
         self.card_wrap = QWidget()
         wl = QVBoxLayout(self.card_wrap)
         wl.setContentsMargins(margin, 14, margin, 10)
@@ -213,10 +269,10 @@ class TaskHeader(QWidget):
         wait = parts.get("status_wait", "")
         self.status_wait.setText(f"· {wait}")
         self.status_wait.setToolTip(parts.get("status_wait_tip", ""))
-        late = bool(parts.get("status_wait_late"))  # from the follow-up day, in the caution colour
-        self.status_wait.setStyleSheet(f"color: {tokens.colour('caution')}; font-weight: 600" if late else "")
+        set_late(self.status_wait, bool(parts.get("status_wait_late")))  # from the follow-up day, in the caution colour
         self.status_wait.setVisible(bool(wait))
         self.status_body.setHtml(parts["status_body"])
+        self.actions.set_actions(parse_actions(parts.get("status_actions", "")))
         self.status_log.setHtml(parts["status_log"])
         self.status_fold.setText(parts["status_log_summary"])
         self.status_fold.setToolTip(f"History: {parts['status_log_summary']}")
@@ -246,7 +302,7 @@ class TaskHeader(QWidget):
         return out
 
     def text(self) -> str:
-        parts = [self.head.toPlainText(), self.status_name.text(), self.status_when.text(), self.status_body.toPlainText()]
+        parts = [self.head.toPlainText(), self.status_name.text(), self.status_when.text(), self.status_body.toPlainText(), self.actions.text()]
         if self.log_open:
             parts.append(self.status_log.toPlainText())
         parts += [g.text() for g in self.groups.values() if g.present]

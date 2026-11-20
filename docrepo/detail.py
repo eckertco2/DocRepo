@@ -181,10 +181,17 @@ GRID_MAX = 760
 
 def grid_column(rows: list[tuple[str, str]]) -> str:
     """Rows of the facts grid (release 5.113): a grey name beside its value, both at the Body size, the names' column a
-    fixed width, so values line up down the grid; the first column's words on the page's left edge."""
-    cells = "".join(f'<tr><td class="gk" valign="top" style="padding: 3px 14px 3px 0px; white-space: nowrap">{esc(k)}</td>'
-                    f'<td valign="top" style="padding: 3px 12px 3px 0px">{v}</td></tr>' for k, v in rows)
+    fixed width, so values line up down the grid; the first column's words on the page's left edge. Since release 5.185 (the
+    redesign's decision 859) the names are small and in the third grey, and a row is 26 px, as the mock draws it."""
+    cells = "".join(f'<tr><td class="gk" valign="top" style="padding: 4px 14px 4px 0px; white-space: nowrap">{esc(k)}</td>'
+                    f'<td valign="top" style="padding: 4px 12px 4px 0px">{v}</td></tr>' for k, v in rows)
     return f'<table cellspacing="0" cellpadding="0">{cells}</table>'
+
+
+#: The page's rows of tasks (a subtask's, an agenda item's), flat between hairlines (release 5.185, the redesign's decision
+#: 859): the opener ``task_tile.TABLE`` was; the rows' height comes from ``.tile``'s padding above and below (33 px, measured), so the
+#: cells keep 4 px at their sides and a days cell keeps its room. ``task_tile.TABLE`` stays for the others.
+ROWS = '<table width="100%" cellspacing="0" cellpadding="4" style="border-collapse: collapse">'
 
 
 def section_head(count: str, action: str = "", raw: bool = False) -> str:
@@ -285,11 +292,11 @@ class Pages:
         """A link that opens a capture, with ``text`` or its ID as its words."""
         return link(f"capture:{capture_id}", text or capture_id, f"Open capture {capture_id}", quiet)
 
-    def target_link(self, target: str) -> str:
-        """A link to an agenda target: Today, a person or a task."""
+    def target_link(self, target: str, quiet: str = "") -> str:
+        """A link to an agenda target: Today, a person or a task; ``quiet`` colours it as text (``link``'s)."""
         if target == TODAY:
-            return link(f"agenda:{TODAY}", "Today")
-        return link(f"person:{target}", self.m.person_name(target)) if is_person(target) else self.task_link(target)
+            return link(f"agenda:{TODAY}", "Today", quiet=quiet)
+        return link(f"person:{target}", self.m.person_name(target), quiet=quiet) if is_person(target) else self.task_link(target, quiet)
 
     def ref_link(self, via: str | None) -> str:
         """A link to where a change came from: a capture, or plain text such as "Browse tool"."""
@@ -398,7 +405,9 @@ class Pages:
         out["head"] = (self.discarded_box(t.discarded, t.discard_reason, "the task tree, the lists, the pickers, search and the capacity calendar")
                        if t.discarded else "") + self.page_head(t, state, grid=self.facts_grid(t, width))
         out["title"] = t.title  # the sticky title line's words (release 5.86)
-        out["status_name"], out["status_when"], out["status_age"], out["status_body"] = self.status_parts(t)
+        out["status_name"], out["status_when"], out["status_age"], out["status_body"] = self.status_parts(t, acts=False)
+        # The card's commands as buttons under its words (release 5.185, decision 859): address, words and tooltip, a line each.
+        out["status_actions"] = "\n".join("\t".join(a) for a in self.status_actions(t))
         out["status_wait"], out["status_wait_tip"], out["status_wait_late"] = self.wait_parts(t)
         log = self.stories.story(task_id)
         out["status_log"] = self.story_list(log, lambda e: self.log_item(e), state) if log else '<p class="note">No changes yet.</p>'
@@ -413,7 +422,7 @@ class Pages:
         if agenda:
             n_open = len(self.m.open_items_for(t.id))
             out["agenda_short"] = f"{n_open} open"
-            out["agenda_summary"] = section_head(out["agenda_short"], link(f"agenda:{t.id}", "Open agenda"))
+            out["agenda_summary"] = section_head(out["agenda_short"], link(f"agenda:{t.id}", "Open agenda", quiet="cmd"))
             out["agenda"] = split_section(agenda)[1]
         # A meeting's Summary (release 5.170, the discussions plan's decisions 796 and 798): its notes' summaries and its
         # transcripts, above the notes, with Add summary… and Add transcript… at the right.
@@ -431,7 +440,7 @@ class Pages:
                                    else f"{n_open} of {len(kids)} open")
             bar = f'<img src="progress:{closed}:{len(kids)}" width="{PROGRESS_WIDTH}" height="4" title="{closed} of {len(kids)} closed">'
             out[key + "_summary"] = section_head(f'{esc(out[key + "_short"])} &nbsp;{bar}',
-                                                 link(f"new:{t.id}", "New task under this one", "A new task under this one (T)"), raw=True)
+                                                 link(f"new:{t.id}", "New task under this one", "A new task under this one (T)", "cmd"), raw=True)
             out[key] = split_section(subtasks)[1]
         # Meetings (release 5.140, the notes consolidation plan's decision 607): every meeting under the task, or whose
         # notes made, named or decided something on it or a task under it, newest first, after Subtasks and before
@@ -439,7 +448,7 @@ class Pages:
         met = meeting_rows.rows(self.m, t.id)
         if met:
             out["meetings_short"] = f"{len(met)} · last {self.day(met[0].day)}"
-            out["meetings_summary"] = section_head(out["meetings_short"], link(f"meetingnotes:{t.id}", "Discussion or meeting", MEETING_NOTES_TIP))
+            out["meetings_summary"] = section_head(out["meetings_short"], link(f"meetingnotes:{t.id}", "Discussion or meeting", MEETING_NOTES_TIP, "cmd"))
             out["meetings"] = self.meeting_rows_html(t, met, state)
         ids = self.m.scope_ids(t.id, state.scope)
         # Decisions (release 5.124, decisions 477 to 479): the task's and its subtasks' decisions, newest first, after
@@ -447,7 +456,7 @@ class Pages:
         found = decisions.of_tasks(self.m, ids)  # their words are read for the rows shown (decision_rows)
         if found:
             out["decisions_short"] = str(len(found))
-            out["decisions_summary"] = section_head(out["decisions_short"], link(f"copydecisions:{t.id}", "Copy", COPY_DECISIONS_TIP))
+            out["decisions_summary"] = section_head(out["decisions_short"], link(f"copydecisions:{t.id}", "Copy", COPY_DECISIONS_TIP, "cmd"))
             out["decisions"] = self.decision_rows(t, found, state)
         # Email conversations (release 5.122, decisions 455 and 456): the task's and its subtasks' emails, a row per
         # conversation; the section isn't there when they have none.
@@ -455,7 +464,7 @@ class Pages:
         if convs:
             n = sum(len(cv.emails) for cv in convs)
             out["emails_short"] = f"{len(convs)} · {n} email{'s' if n != 1 else ''}"
-            out["emails_summary"] = section_head(out["emails_short"], link(f"tmail:{t.id}", "New T-mail", NEW_T_MAIL_TIP))
+            out["emails_summary"] = section_head(out["emails_short"], link(f"tmail:{t.id}", "New T-mail", NEW_T_MAIL_TIP, "cmd"))
             out["emails"] = self.conversation_rows(t, convs, ids, state)
         links = self.links_group(t)
         if links:
@@ -466,7 +475,7 @@ class Pages:
         # with no files too, as the mock has it, and Find files always has a way in by the mouse.
         out["files"] = self.files_body(t, files, FILES_SHOWN, intro=False)
         out["files_short"] = str(len(files)) if files else "none yet"
-        out["files_summary"] = section_head(out["files_short"], link(f"taskview:{t.id}", "Find files", FIND_FILES_TIP))
+        out["files_summary"] = section_head(out["files_short"], link(f"taskview:{t.id}", "Find files", FIND_FILES_TIP, "cmd"))
         out["details"] = grid_column(self.details_rows(t))
         out["details_short"] = " · ".join(f"{k} {v}" for k, v in t.references.items())
         out["details_summary"] = section_head(out["details_short"])
@@ -499,8 +508,8 @@ class Pages:
                         "transcript, can be pasted in here.</p>")
         short_words = " · ".join([f"{len(sums)} summar{'ies' if len(sums) != 1 else 'y'}"] * bool(sums)
                                  + [f"{len(said)} transcript{'s' if len(said) != 1 else ''}"] * bool(said)) or "none yet"
-        actions = (link(f"addsummary:{t.id}", "Edit summary…" if sums else "Add summary…", "Paste the summary: a Zoom AI summary, or one made later")
-                   + " &nbsp;" + link(f"addtranscript:{t.id}", "Add transcript…", "Paste the transcript: kept whole as a file of the meeting's"))
+        actions = (link(f"addsummary:{t.id}", "Edit summary…" if sums else "Add summary…", "Paste the summary: a Zoom AI summary, or one made later", "cmd")
+                   + " &nbsp;" + link(f"addtranscript:{t.id}", "Add transcript…", "Paste the transcript: kept whole as a file of the meeting's", "cmd"))
         return short_words, section_head(short_words, actions, raw=True), "".join(rows)
 
     def facts_grid(self, t: Task, width: int = 600) -> str:
@@ -536,12 +545,13 @@ class Pages:
             if t.discarded:
                 return f"{self.mark(t)} {esc(word)}"
             return (f'<a href="state:{t.id}" title="A collection. Click to archive it, or make it a task." style="text-decoration: none">'
-                    f'{self.mark(t)} <span class="tl">{esc(word)}</span>{CHEVRON_DOWN}</a>')
+                    f'<span class="pill">&nbsp;{self.mark(t)} <span class="tl">{esc(word)}</span>{CHEVRON_DOWN}&nbsp;</span></a>')
         if t.discarded:
             state = f"{self.mark(t)} {esc(t.state)}"
         else:
+            # On a soft fill (release 5.185, decision 859): square-cornered, as rich text rounds nothing.
             state = (f'<a href="state:{t.id}" title="{esc(t.state)}. Click to change the state." style="text-decoration: none">'
-                     f'{self.mark(t)} <span class="tl">{esc(t.state)}</span>{CHEVRON_DOWN}</a>')
+                     f'<span class="pill">&nbsp;{self.mark(t)} <span class="tl">{esc(t.state)}</span>{CHEVRON_DOWN}&nbsp;</span></a>')
         state += self.kind_html(t)  # the kind's mark in the "↻ Weekly" chip's place (release 5.168, decision 786)
         # A meeting's dates already say it's one ("Next meeting", "Meeting"), so its chip would say it twice.
         said = t.meeting and any("eeting" in k for k, _ in self.when_rows(t))
@@ -581,7 +591,7 @@ class Pages:
         made = ""
         if origin:  # release 5.44: the template it came from
             gone = " (discarded)" if origin.discarded else ""
-            made = f'<p class="rel">From template: {link(f"tplrow:{origin.row}", " › ".join(origin.path), "Open it in Templates")}{gone}</p>'
+            made = f'<p class="rel">From template: {link(f"tplrow:{origin.row}", " › ".join(origin.path), "Open it in Templates", "tq")}{gone}</p>'
         if grid is not None:
             return f'{crumbs}{page_title(esc(t.title), t.id)}{desc}{made}{grid}'
         return f'{crumbs}{page_title(esc(t.title), t.id)}<p class="tags">{tags}</p>{fact}{desc}{made}'
@@ -600,9 +610,22 @@ class Pages:
         changes = [e.at for e in self.m.status if e.task == t.id and e.field == "Current status"]
         return max(changes)[:10] if changes else t.created[:10] if t.current_status else None
 
-    def status_parts(self, t: Task) -> tuple[str, str, str, str]:
+    def status_actions(self, t: Task) -> list[tuple[str, str, str]]:
+        """The status card's commands (release 5.139, decisions 581 and 583), as (address, words, tooltip): Got it while the
+        task waits, then Log progress…; none for a closed task, a discarded one or a collection. Buttons on the task page's
+        card since release 5.185 (the redesign's decision 859); links at the end of the card's words where it's drawn as HTML."""
+        if t.collection or t.state == "Closed" or t.discarded:
+            return []
+        acts = [(f"progress:{t.id}", "Log progress…", "A line of what you did, who you're waiting on and when to follow up")]
+        if waits.current(self.m, t.id) is not None:
+            acts.insert(0, (f"gotit:{t.id}", "Got it", "The answer came: stop waiting, and take away the follow-up"))
+        return acts
+
+    def status_parts(self, t: Task, acts: bool = True) -> tuple[str, str, str, str]:
         """The status card's pieces (release 5.84): its name, the date its text last changed, how long ago that was (the
-        date's tooltip, release 5.83's R7) and its body. A collection's card says what it is (release 5.167, decision 779)."""
+        date's tooltip, release 5.83's R7) and its body. A collection's card says what it is (release 5.167, decision 779).
+        With ``acts`` the body ends with the card's commands as links (``status_actions``); without, the task page's and the
+        workspace's cards show them as buttons (release 5.185)."""
         if t.collection:
             return "A collection", "", "", ('<span class="sub">A place for notes, files, links, captures and tasks. It is not work, so it '
                                             "has no state, dates or people, and it isn't on Today, the Priorities board, the Timeline or "
@@ -613,11 +636,9 @@ class Pages:
         age = ago(to_date(since), self.today) if when else ""
         body = (multiline(t.current_status) if t.current_status
                 else f'<span class="sub">No update yet.</span> {link(f"update:{t.id}", "Add one", "Update this task")}')
-        if t.state != "Closed" and not t.discarded:  # Log progress, and Got it while it waits (release 5.139, decisions 581 and 583)
-            acts = [link(f"progress:{t.id}", "Log progress…", "A line of what you did, who you're waiting on and when to follow up")]
-            if waits.current(self.m, t.id) is not None:
-                acts.insert(0, link(f"gotit:{t.id}", "Got it", "The answer came: stop waiting, and take away the follow-up"))
-            body += f'<br><span class="sub">{" · ".join(acts)}</span>'
+        commands = self.status_actions(t) if acts else []
+        if commands:  # Log progress, and Got it while it waits (release 5.139, decisions 581 and 583)
+            body += f'<br><span class="sub">{" · ".join(link(href, words, tip) for href, words, tip in commands)}</span>'
         return name, when, age, body
 
     def wait_parts(self, t: Task) -> tuple[str, str, str]:
@@ -724,7 +745,7 @@ class Pages:
             def named(x: Task) -> str:
                 top = next(iter(ties.tops(self.m.parents_of, x.id)))
                 other = "" if ties.tops(self.m.parents_of, x.id) & mine or top == x.id else f' <span class="rel">{esc(self.m.task(top).title)}</span>'
-                return link(f"task:{x.id}", x.title) + other
+                return link(f"task:{x.id}", x.title, quiet="tl") + other
             rows.append(("Tied to this", ", ".join(named(x) for x in tied[:5]) + (f' <span class="rel">and {len(tied) - 5} more</span>' if len(tied) > 5 else "")))
         if open_ and t.reminder:
             r = to_date(t.reminder)
@@ -745,7 +766,7 @@ class Pages:
             def when_met(target: str) -> str:
                 meeting = target in self.m.tasks and self.m.task(target).meeting
                 return f' <span class="rel">{esc(self.m.meeting_when(target, today))}</span>' if meeting else ""
-            rows.append(("Agenda", "<br>".join(self.target_link(a.target) + when_met(a.target) for a in on)))
+            rows.append(("Agenda", "<br>".join(self.target_link(a.target, "tl") + when_met(a.target) for a in on)))
         return rows
 
     def avatar(self, person_id: str) -> str:
@@ -774,7 +795,7 @@ class Pages:
                     return f"{rate}, needs a length"
                 return tail
 
-            return "<br>".join(f'{self.avatar(p)} {link(f"person:{p}", self.m.person_name(p))}' + (f' <span class="rel">{esc(text(p))}</span>' if text(p) else "")
+            return "<br>".join(f'{self.avatar(p)} {link(f"person:{p}", self.m.person_name(p), quiet="tl")}' + (f' <span class="rel">{esc(text(p))}</span>' if text(p) else "")
                                for p in ids)
 
         rows = []
@@ -806,7 +827,7 @@ class Pages:
                 rows.append(f'<tr><td class="tile" width="20"></td><td class="tile">{esc(a.note)} {added}</td><td class="tile"></td>'
                             f'<td class="tile"></td></tr>')
         return (section("Agenda", f' <span class="rel">{len(items)} open</span> &nbsp;{link(f"agenda:{t.id}", "Open agenda")}')
-                + f'{task_tile.TABLE}{"".join(rows)}</table>')
+                + f'{ROWS}{"".join(rows)}</table>')
 
     def work_ids(self, task_id: str) -> list[str]:
         """A task's subtasks that are the work (release 5.142, the notes consolidation plan's decision 611): those that
@@ -854,7 +875,7 @@ class Pages:
         bar = f' <img src="progress:{len(closed)}:{len(kids)}" width="{PROGRESS_WIDTH}" height="4" title="{len(closed)} of {len(kids)} closed">'
         toggle = (f'<p class="more">{link("fold:closed", "Hide closed" if state.closed else f"Show {len(closed)} closed")}</p>' if closed else "")
         return (section(title, f' <span class="rel">{count}</span>{bar} &nbsp;{link(f"new:{t.id}", "New task under this one", "A new task under this one (T)")}')
-                + f'{task_tile.TABLE}{"".join(rows)}</table>{toggle}')
+                + f'{ROWS}{"".join(rows)}</table>{toggle}')
 
     def reference_value(self, name: str, value: str) -> str:
         """A reference field's value in Details: a link to its page when Settings gives the field a link address (release
@@ -936,9 +957,9 @@ class Pages:
         cells = "".join(f'<td class="tabon">{esc(label)} <span class="rel">{counts[key]}</span></td>' if key == tab
                         else f'<td><a href="tab:{key}"><span class="tab">{esc(label)}</span></a> <span class="rel">{counts[key]}</span></td>'
                         for key, label in tabs)
-        controls = f'<a href="menu:scope" title="Which tasks\' entries to show">{esc(SCOPE_NAMES[state.scope])} {CHEVRON_DOWN}</a>'
+        controls = f'<a href="menu:scope" title="Which tasks\' entries to show"><span class="cmd">{esc(SCOPE_NAMES[state.scope])}</span> {CHEVRON_DOWN}</a>'
         if tab in ("notes", "log"):
-            controls += " &nbsp; " + link("menu:order", f"⇅ {'Newest' if state.order == 'new' else 'Oldest'} first", "Oldest or newest first")
+            controls += " &nbsp; " + link("menu:order", f"⇅ {'Newest' if state.order == 'new' else 'Oldest'} first", "Oldest or newest first", "cmd")
         # The tabs have a table of their own: the selected one's underline would make a full-width table a pixel too wide.
         strip = (f'<table width="100%" cellspacing="0" cellpadding="0" style="margin-top: 16px; margin-bottom: 4px"><tr>'
                  f'<td><table cellspacing="0" cellpadding="5"><tr>{cells}</tr></table></td>'

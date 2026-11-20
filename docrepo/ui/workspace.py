@@ -55,29 +55,12 @@ WORK_ON_IT = "Work on it"
 WORK_TIP = "Its workspace: the chain of tasks above it, its notes and theirs, its dates and resources, to do the work (W)"
 
 
-def _style() -> str:
-    t = tokens.colour
-    return (f"QWidget#workspace {{ background: {t('content')}; }}"
-            f"QWidget#wsHead, QWidget#wsBar {{ background: {t('content')}; }}"
-            f"QWidget#wsBar {{ border-bottom: 1px solid {t('stroke')}; }}"
-            f"QScrollArea#wsChain, QWidget#wsChainInner, QWidget#wsResources {{ background: {t('base')}; }}"
-            f"QScrollArea#wsChain {{ border-right: 1px solid {t('stroke')}; }}"
-            f"QWidget#wsResources {{ border-left: 1px solid {t('stroke')}; }}"
-            f"QLabel#wsCaption {{ color: {t('text2')}; padding-top: 6px; }}"
-            f"QLabel#wsKicker {{ color: {t('accent')}; }}"
-            f"QFrame#wsChainCard {{ background: {t('content')}; border: 1px solid {t('stroke')}; border-radius: {tokens.RADIUS_L}px; }}"
-            f"QFrame#wsChainCard:hover {{ border-color: {t('stroke_strong')}; }}"
-            f"QFrame#wsChainCard[picked=\"true\"] {{ background: {t('selected')}; border-color: {t('accent')}; }}"
-            f"QLabel#wsStatus {{ color: {t('text2')}; }}"
-            f"QLabel#wsThis {{ color: {t('accent')}; }}"
-            f"QLabel#wsNote {{ color: {t('accent')}; }}"
-            f"QLabel#wsBanner {{ background: {t('info_bg')}; border-radius: {tokens.RADIUS}px; padding: 7px 10px; margin-bottom: 6px; }}"
-            f"QLabel#wsOn {{ color: {t('accent')}; background: {t('info_bg')}; border-radius: {tokens.RADIUS_S}px; padding: 2px 9px; }}"
-            f"QFrame#wsAgents {{ border: 1px dashed {t('stroke_strong')}; border-radius: {tokens.RADIUS}px; }}"
-            f"QPushButton#wsLink {{ color: {t('accent')}; border: none; background: transparent; padding: 0; text-align: left; }}"
-            f"QPushButton#wsLink:hover {{ text-decoration: underline; }}"
-            f"QPushButton#wsDay {{ color: {t('text')}; border: none; background: transparent; padding: 2px 0; text-align: left; }}"
-            f"QPushButton#wsDay:hover {{ color: {t('accent')}; text-decoration: underline; }}")
+def command(href: str, words: str, tip: str = "") -> str:
+    """A command in a label's rich text (the chain's New task, Show closed), in the second grey with no underline, as the
+    pages' commands are since release 5.185 (the redesign's decision 844): a label's link is otherwise the accent."""
+    title = f' title="{esc(tip)}"' if tip else ""
+    return (f'<a href="{esc(href)}"{title} style="text-decoration: none">'
+            f'<span style="color: {tokens.colour("text2")}">{esc(words)}</span></a>')
 
 
 class Workspace(QWidget):
@@ -88,8 +71,7 @@ class Workspace(QWidget):
         super().__init__(objectName="workspace")
         self.browse = browse
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.setStyleSheet(_style())
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)  # its look is the token file's (release 5.185): no style sheet of its own
         self.here = ""
         self.picked = ""
         self.meeting = ""
@@ -124,7 +106,11 @@ class Workspace(QWidget):
         self.chain.menu.connect(self._tile_menu)
         self.chain.state_clicked.connect(lambda task_id, at: browse.popup_state_menu(task_id, at))
         self.chain.link.connect(self.on_link)
-        body.addWidget(self.chain)
+        # The chain as a soft panel set in from the workspace's left, top and bottom (release 5.185, decision 859).
+        chain_box = QVBoxLayout()
+        chain_box.setContentsMargins(8, 8, 0, 8)
+        chain_box.addWidget(self.chain)
+        body.addLayout(chain_box)
         body.addWidget(self._build_middle(), 1)
         body.addWidget(self._build_resources())
         lay.addLayout(body, 1)
@@ -142,7 +128,7 @@ class Workspace(QWidget):
         self.back_button.clicked.connect(self.close_to_origin)
         names = QVBoxLayout()
         names.setSpacing(0)
-        kicker = QLabel("WORKSPACE", objectName="wsKicker")
+        kicker = QLabel("Workspace", objectName="wsKicker")
         kicker.setFont(tokens.ui_font(tokens.LABEL, semibold=True))
         self.title = QLabel(objectName="pageTitle")
         self.title.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -276,7 +262,7 @@ class Workspace(QWidget):
         bl = QVBoxLayout(box)
         bl.setContentsMargins(12, 12, 6, 0)
         bl.setSpacing(6)
-        cap = QLabel("RESOURCES", objectName="wsCaption")
+        cap = QLabel("Resources", objectName="wsCaption")
         cap.setFont(tokens.ui_font(tokens.LABEL, semibold=True))
         self.search = search_box()
         self.search.textChanged.connect(lambda _: self.draw_resources())
@@ -353,7 +339,8 @@ class Workspace(QWidget):
         self.back_button.setText(self.origin_name())
         self.back_button.setToolTip(f"Back to {self.origin_name()}, with the task picked there (Esc)")
         today = self.browse.today()
-        parts = [f'<a href="state:{t.id}" style="text-decoration: none">{esc(t.state)}</a>']
+        # The state opens its menu; in the text's colour, as a label's link would be the accent (release 5.185).
+        parts = [f'<a href="state:{t.id}" style="text-decoration: none"><span style="color: {tokens.colour("text")}">{esc(t.state)}</span></a>']
         if t.due:
             parts.append(f"Due {esc(long_date(to_date(t.due), today))}, {esc(days_words(to_date(t.due), today))}")
         people = [m.person_name(p) for p in dict.fromkeys([*t.leads, *t.assignees])]
@@ -378,7 +365,7 @@ class Workspace(QWidget):
         col.clear()
         c = ws.chain(m, self.here)
         marks = task_tile.marks(m, today)
-        col.add_caption("UP THE CHAIN")
+        col.add_caption("Up the chain")
         for n, path in enumerate(c.paths):
             if c.caption(n):
                 col.add_caption(c.caption(n))
@@ -398,31 +385,31 @@ class Workspace(QWidget):
         kids = ws.subtasks(m, self.here)
         open_n = sum(1 for k in kids if m.task(k).state != "Closed")
         if kids or m.task(self.here).state != "Closed":
-            col.add_caption(f"SUBTASKS   {open_n} of {len(kids)} open" if kids else "SUBTASKS",
-                            link(f"new:{self.here}", "New task", "A new task under this one (T)"))
+            col.add_caption("Subtasks", command(f"new:{self.here}", "New task", "A new task under this one (T)"),
+                            count=f"{open_n} of {len(kids)} open" if kids else "")
         closed = [k for k in kids if m.task(k).state == "Closed"]
         for k in kids:
             if m.task(k).state == "Closed" and not self.show_closed:
                 continue
             col.add_card(ChainCard(task_tile.tile(m, k, today, marks), picked=k == self.picked and not self.meeting, compact=True))
         if closed:
-            col.add_link(link("wsclosed:", "Hide closed" if self.show_closed else f"Show {len(closed)} closed"))
+            col.add_link(command("wsclosed:", "Hide closed" if self.show_closed else f"Show {len(closed)} closed"))
         col.finish()
 
     def _card_facts(self, m, pages, task_id: str, today) -> CardFacts:
         t = m.task(task_id)
-        name, when, age, body = pages.status_parts(t)
+        name, when, age, body = pages.status_parts(t, acts=False)  # its commands are the card's buttons (release 5.185)
         wait, wait_tip, late = pages.wait_parts(t)
         log = pages.stories.story(task_id)
         log_html = pages.story_list(log, lambda e: pages.log_item(e), self.state) if log else ""
         whose = "" if task_id == self.here else (
-            f'<a href="wspick:{esc(task_id)}" style="text-decoration: none">{esc(t.title)}</a> ·')
+            f'<a href="wspick:{esc(task_id)}" style="text-decoration: none"><span style="color: {tokens.colour("text")}">{esc(t.title)}</span></a> ·')
         editable = task_id == self.acting and not t.discarded
         on_today = ws.today_item(m, task_id) is not None
         done = ws.done_today(m, task_id, today)
         return CardFacts(whose=whose, name=name, when=when, when_tip=f"The latest update was written {age}" if age else "",
                          wait=wait, wait_tip=wait_tip, late=bool(late),
-                         body=body if editable else body.split('<br><span class="sub">')[0],
+                         body=body, actions=pages.status_actions(t) if editable else [],
                          log=log_html, changes=f"{len(log)} change{'s' if len(log) != 1 else ''}" if log else "",
                          entry=editable, title=t.title, state=t.state, later=on_today and not done, add=not on_today and not done)
 
@@ -979,7 +966,7 @@ class Workspace(QWidget):
 
     def text(self) -> str:
         """What it shows, as words, for the tests."""
-        parts = [self.title.text(), self.facts.text(), self.chain.text(), self.card.name.text(), self.card.body.toPlainText(),
+        parts = [self.title.text(), self.facts.text(), self.chain.text(), self.card.name.text(), self.card.body.toPlainText(), self.card.actions.text(),
                  self.pane.of_label.text(), self.pane.banner.text(), self.pane.text(), self.resources.toPlainText()]
         parts += [f"{r.day} {r.kind} {r.words}" for r, _ in self.dates.shown.values()]
         return "\n".join(x for x in parts if x)
