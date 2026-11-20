@@ -425,7 +425,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         dl.setSpacing(0)
         self.actions = QWidget(objectName="actions")
         self.actions_layout = FlowLayout(self.actions, spacing=4)
-        self.actions_layout.setContentsMargins(16, 10, 16, 2)
+        self.actions_layout.setContentsMargins(12, 10, 12, 2)  # the card's 4 px of padding makes the 16 it was
         dl.addWidget(self.actions)
         detail.setMinimumWidth(DETAIL_MIN)
         self.detail_stack = ViewStack()

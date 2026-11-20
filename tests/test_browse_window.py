@@ -878,7 +878,7 @@ def test_the_task_page_bar_and_its_links(browse, monkeypatch):
     more = buttons[-1]
     assert more.accessibleName() == "More" and more.property("flowEnd") and more.menu().actions()[0].text() == "New task under this one\tT"
     centres = {b.mapTo(browse.actions, b.rect().center()).y() for b in buttons}  # Edit's two sit in a box of their own
-    assert len(centres) == 1 and more.geometry().right() == 899 - 16  # one row, centred, More at its end
+    assert len(centres) == 1 and more.geometry().right() == 899 - 12  # one row, centred, More at its end (12 from release 5.182: the card holds the other 4)
     add_to = next(b for b in buttons if b.text() == "Add to").menu().actions()
     assert add_to[0].text().startswith("Today") and add_to[-1].text() == "An agenda…	A"  # its key since 5.98
     opened = []
