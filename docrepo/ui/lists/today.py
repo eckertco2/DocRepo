@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
 
 from docrepo import db, edits, key_dates, later, priorities, urgency, waits
 from docrepo.dates import long_date
-from docrepo.model import Model
+from docrepo.model import TODAY_BAND_NAMES, TODAY_BANDS, Model
 from docrepo.ui import current_ui, today_bins, today_meetings
 from docrepo.ui.lists import review as review_list
 from docrepo.ui.tree_view import MOVE_ROLE, RULE_ROLE, Line, group_ground, state_icon, with_actions
@@ -87,9 +87,10 @@ class TodayList:
         self.today_note.setPlaceholderText("A quick task, such as Call the vendor about seals by Fri" if self.today_kind == "task"
                                            else "A note for today, such as Sign the overtime sheets")
         self.today_note.setMinimumWidth(320)
+        self.today_note.setAccessibleName("Quick task or note")
         self.today_note.returnPressed.connect(self.add_today_item)
         self._filter_widget(self.today_note)
-        self._button("Add", self.add_today_item)
+        self._button("Add", self.add_today_item, where="tool")
         self.tree.set_columns(*_cols(*with_actions(["Item", "State", "Due"], [0, 96, DAYS_COL], 220)))
         grey = group_ground()
         # Now first: the current task (release 5.177, the current task plan's decision 828), shown once, so its band leaves it out.
@@ -102,11 +103,23 @@ class TodayList:
         bands = today_bands(m, today, workdays, now)
         hot = urgency.urgent_ids(m, (a for _, _, g in bands for a in g), today, workdays)
         self._today_band_of: dict[int, tuple[str, bool]] = {}
+        #: Each band's head row and its rows by half, for the drop targets (release 5.189, decision 864).
+        self._today_groups: dict[str, tuple] = {}
         head = self.tree.add_row(None, None, ["<b>Today</b>"], grey, selectable=False, span=True) if bands else None
-        for band, name, group in bands:
+        by_band = {band: (name, group) for band, name, group in bands}
+        for band in TODAY_BANDS if bands else ():
             colour = today_bins.colour_of(band).name()
+            if band not in by_band:  # an empty band's head: hidden, shown as a slim target while a task is dragged
+                empty = self.tree.add_head(head, TODAY_BAND_NAMES[band], count="0", dot=colour, tag=band,
+                                           tip=f"{TODAY_BAND_NAMES[band]}: drop a task here to change its priority")
+                empty.setHidden(True)
+                self._today_groups[band] = (empty, [], [])
+                continue
+            name, group = by_band[band]
             # the band's head: its colour as a dot, its name grey like every head (release 5.183, decision 856)
-            self.tree.add_head(head, name, count=str(len(group)), dot=colour, tag=band, tip=f"{name}: drag a task onto a bin to change its priority")
+            band_head = self.tree.add_head(head, name, count=str(len(group)), dot=colour, tag=band,
+                                           tip=f"{name}: drag a task onto a group to change its priority")
+            self._today_groups[band] = (band_head, [], [])
             halves = {True: [a.id for a in group if a.id in hot], False: [a.id for a in group if a.id not in hot]}
             for a in group:
                 self._today_band_of[a.id] = (band, a.id in hot)
@@ -134,6 +147,7 @@ class TodayList:
                                          tip=f"{tip}Added {long_date(date.fromisoformat(a.added[:10]), today)}"
                                              + (f"\nUrgent: {why}" if why else ""))
                 self.tree.set_actions(item, self._today_actions(a.id, t.id if t else None))
+                self._today_groups[band][1 if a.id in hot else 2].append(item)
                 half = halves[a.id in hot]
                 if a.id not in hot and halves[True] and a.id == half[0]:  # the hairline between the halves (decision 821)
                     item.setData(0, RULE_ROLE, today_bins.colour_of(band).name())
@@ -159,8 +173,8 @@ class TodayList:
         # no other row is dragged. And a file, link or email dropped on a task's row (release 5.115, decision 419), as on the
         # Today side panel: told apart by what's dragged (decision 648).
         self.tree.allow_row_moves(self._today_dropped, self._today_can_drop, self._today_step)
-        self.tree.set_bins(self._today_bins_for,  # release 5.154, decision 690; a bin's two parts since release 5.176 (822)
-                           lambda key, target: self.bin_today(key[1], target[0], urgent=target[1]))
+        self.tree.set_bins(self._today_bins_for,  # release 5.154, decision 690; two halves since 5.176 (822); groups since 5.189 (864)
+                           lambda key, target: self.bin_today(key[1], target[0], urgent=target[1]), lambda: self._today_groups)
         for row in self.tree.items():
             if row.data(0, MOVE_ROLE) is None:
                 row.setFlags(row.flags() & ~Qt.ItemFlag.ItemIsDragEnabled)
@@ -282,7 +296,9 @@ class TodayList:
         box.setToolTip("Only tasks you lead or are assigned to, in Due in the next 7 days")
         box.setChecked(mine)
         box.toggled.connect(self.set_today_mine)
-        self._filter_widget(box)
+        self._filter_widget(box, "filter")  # in the Filter panel, with a chip while it's on (release 5.184)
+        if mine:
+            self.head.add_chip("Mine only", lambda: self.set_today_mine(False))
         head = self.tree.add_row(None, None, ["<b>Due in the next 7 days</b>" + (" <span class=\"sub\">· yours</span>" if mine else "")],
                                  grey, selectable=False, span=True)
         entries = today_due_entries(m, today, self.ctx.settings.me, mine)  # shared with the Today side panel (release 5.43)

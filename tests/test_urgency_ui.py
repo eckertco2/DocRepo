@@ -41,7 +41,7 @@ def put(app) -> dict[str, int]:
     return {"plain": by["T000012"], "ticked": by["T000018"], "soon": by["T000019"]}
 
 
-def part_point(bins: today_bins.Bins, target: tuple[str, bool]) -> QPoint:
+def part_point(bins: today_bins.DropGroups, target: tuple[str, bool]) -> QPoint:
     rect = dict(bins.parts())[target]
     return bins.mapTo(bins.parentWidget(), rect.center())
 
@@ -77,14 +77,15 @@ def test_the_bins_ten_targets_and_a_drop_on_the_urgent_part_with_undo(app):
     tree = browse.tree
     own, counts, own_urgent = browse._today_bins_for(("today", i["plain"]))
     assert (own, own_urgent) == ("high", False)
-    tree._bins.open_for(own, counts, tree.viewport().rect(), own_urgent)
+    tree.setCurrentItem(today_row(tree, i["plain"]))
+    assert tree.open_bins(("today", i["plain"]))  # each band a target (release 5.189)
     bins = tree._bins
     targets = {t for t, _r in bins.parts()}
     assert len(targets) == 10 and targets == {(b, u) for b in TODAY_BANDS for u in (True, False)}
     found = {t: bins.bin_at(tree.viewport().mapToGlobal(bins.mapTo(tree.viewport(), dict(bins.parts())[t].center()))) for t in targets}
     assert found[("high", False)] is None and found[("high", True)] == ("high", True)  # its own part no target, the other one
     assert all(found[t] == t for t in targets if t != ("high", False))
-    tree._bins.close_bins()
+    tree.close_drop_groups()
     assert browse.bin_today(i["plain"], "high", urgent=True)  # its band's urgent part: ticked, the priority kept
     m = Model(app.ctx.conn)
     assert m.task("T000012").urgent and m.task("T000012").priority == "high"

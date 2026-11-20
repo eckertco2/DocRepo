@@ -105,7 +105,7 @@ def test_show_all_and_a_click_opens_its_capture(browse, ctx):
 def test_type_decision_in_search_everything(browse):
     browse.search_box.setText("type:decision")
     browse._run_search()
-    assert browse.view == "search" and browse.pane_title.text().startswith("Search Decisions&nbsp;")
+    assert browse.view == "search" and browse.pane_title.text() == "Search Decisions" and browse.pane_count.text()  # the count apart since 5.184
     t = browse.tree
     rows = [t.topLevelItem(i) for i in range(t.topLevelItemCount())]
     found = [r for r in rows if r.data(0, KEY_ROLE)]

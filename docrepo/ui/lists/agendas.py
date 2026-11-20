@@ -8,7 +8,6 @@ from datetime import date
 
 from PySide6.QtWidgets import (
     QComboBox,
-    QLabel,
 )
 
 from docrepo.dates import long_date, short
@@ -49,12 +48,12 @@ class AgendaList:
         self._set_head("Agendas", "Open agenda items, grouped by the work they're about. Each stays open, carrying over, until you mark it "
                                   f"Discussed or Remove it.{when_text}")
         pick = QComboBox()
+        pick.setAccessibleName("Agenda for")
         for x in [TODAY, *m.agenda_targets()]:  # Today first; picking it opens the Today view
             pick.addItem(m.target_name(x) + (" (person)" if is_person(x) else ""), x)
         pick.setCurrentIndex(max(0, pick.findData(target)))
         pick.currentIndexChanged.connect(lambda _: self.show_agenda(pick.currentData()))
-        self._filter_widget(QLabel("Agenda for"))
-        self._filter_widget(pick)
+        self._filter_widget(pick, "tool", label="Agenda for")
         self._button("Copy as Markdown", lambda: self.copy_agenda(target))
         # Release 5.131: the agenda's quick summary, its items with their tasks' dates and what's changed.
         self._button("Quick summary", lambda: self.ctx.open_summary(f"{'person' if is_person(target) else 'agenda'}:{target}"))

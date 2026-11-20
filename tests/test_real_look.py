@@ -352,3 +352,28 @@ print(json.dumps([QWidget().windowIcon().isNull(), sizes]))
 """, "offscreen")
     assert got[0] is False and got[1][0] == 16 and 32 in got[1] and got[1][-1] == 64
 
+
+
+@windows_only
+def test_every_wheel_label_fits_two_lines_whole():
+    """Release 5.190 (the wheel redrawn, the redesign's decision 865): each default wheel's label fits two lines at the font
+    ``_label_font`` gives it, never cut, lit or not, on an eight-way wheel and on a cross ("Discussion or meeting" and
+    "Search everything" among them). On Windows' own platform, whose fonts are real; the metrics are in logical pixels, so
+    one check holds at 100% and at 150%."""
+    out = run_look("""
+from docrepo import wheels_config as wc
+from docrepo.ui import wheel_window as ww
+from docrepo.ui.wheel_commands import SPECS, icon_names
+config = wc.parse(wc.DEFAULT_TEXT, SPECS, icon_names())
+labels = sorted({s.label for w in config.wheels for s in w.slots.values()})
+bad = []
+for label in labels:
+    for eight in (True, False):
+        for lit in (False, True):
+            font = ww._label_font(label, ww.LABEL_WIDTH[eight], lit)
+            if ww._lines(font, ww.LABEL_WIDTH[eight], label) > 2 or ww._two_lines(label, font, ww.LABEL_WIDTH[eight]) != label:
+                bad.append([label, eight, lit])
+print(json.dumps({"labels": labels, "bad": bad}))
+""", "windows")
+    assert "Discussion or meeting" in out["labels"] and "Search everything" in out["labels"]
+    assert out["bad"] == []

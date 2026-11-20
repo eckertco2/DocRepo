@@ -74,6 +74,10 @@ SIZE = {
     "control_s": 24,              # a small square button on a row or a card
     "icon_button": ICON_BUTTON,   # a toolbar's icon button, holding a 16 px icon
     "control": CONTROL,           # inputs and buttons
+    # lane D, release 5.189: the Today panel's row, a band's head, and an empty band's slim target
+    "row_today": 30,
+    "today_head": 26,
+    "today_head_empty": 30,
 }
 
 
@@ -494,6 +498,18 @@ QTreeView#rowTree QHeaderView::section { background: $content; color: $text3; bo
   padding: 6px 8px; font-size: ${label}pt; font-weight: 600; }
 /* the # list and its like: TaskRowDelegate paints its rows' rounded ground itself and draws no item from the style, so
    no rule here; the recent captures' and glossary lookup's lists keep the style's ground, under their own delegates */
+
+/* ---- release 5.184 (Filter and Display) ---- */
+/* the list pane's head: one 48 px row, no hairline under it (lane A's framed window keeps it transparent) */
+QWidget#paneHead { background: $content; border: none; }
+QLabel#paneCount { color: $text3; font-size: ${caption}pt; }
+/* a filter that's on, as a chip under the row, and File search's and the Task view's chips */
+QPushButton#filterChip { background: $selected; color: $accent; border: none; border-radius: ${radius_s}px; padding: 3px 8px;
+  min-height: 18px; max-height: 22px; font-size: ${caption}pt; }
+QPushButton#filterChip:hover { background: $pressed; }
+/* the Filter and Display panels' controls at the panel's width (only theirs: the Timeline's popover is lane E's) */
+QFrame#popover[options="true"] QCheckBox, QFrame#popover[options="true"] QComboBox, QFrame#popover[options="true"] QPushButton { min-width: 216px; }
+QFrame#popover[options="true"] QPushButton { text-align: left; }  /* a menu's words where the tick boxes' are */
 
 /* ---- end lane B ---- */
 

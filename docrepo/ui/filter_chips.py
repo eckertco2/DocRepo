@@ -10,7 +10,6 @@ from PySide6.QtWidgets import QHBoxLayout, QPushButton, QSizePolicy, QWidget
 from docrepo import finder
 from docrepo.model import Model
 from docrepo.overview import SOURCE_NAMES, TYPE_NAMES
-from docrepo.ui import tokens
 
 
 def chips_of(f: finder.Filters, model: Model) -> list[tuple[str, Callable[[], None]]]:
@@ -41,19 +40,20 @@ class FilterChips(QWidget):
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.row = QHBoxLayout(self)
         self.row.setContentsMargins(12, 0, 12, 6)
-        self.row.setSpacing(4)
-        self.setStyleSheet(f"QPushButton#filterChip {{ background: {tokens.colour('info_bg')}; border: none; border-radius: {tokens.RADIUS}px;"
-                           f" padding: 2px 10px; min-height: 18px; }}"
-                           f" QPushButton#filterChip:hover {{ background: {tokens.colour('pressed')}; }}")
+        self.row.setSpacing(4)  # the chips' look is the style sheet's (QPushButton#filterChip, release 5.184)
         self.hide()
 
     def show_filters(self, f: finder.Filters, model: Model) -> None:
         """Draw ``f``'s filters again."""
+        self.show_chips(chips_of(f, model))
+
+    def show_chips(self, chips: list[tuple[str, Callable[[], None]]]) -> None:
+        """Draw any chips: each its words and what takes it off (release 5.184: a list view's header draws its own)."""
         while self.row.count():
             w = self.row.takeAt(0).widget()
             if w:
+                w.hide()
                 w.deleteLater()
-        chips = chips_of(f, model)
         for label, undo in chips:
             b = QPushButton(f"{label}  ×", objectName="filterChip")
             b.setToolTip(f"Remove {label}")

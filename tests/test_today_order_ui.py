@@ -133,7 +133,8 @@ def test_today_is_one_list_and_a_carried_row_keeps_its_since(app):
     words = [str(h.data(0, HTML_ROLE)) for h in heads]
     assert "<b>Today</b>" in words and not any("Carried over" in w or "Added today" in w for w in words)  # decision 644
     today = heads[words.index("<b>Today</b>")]
-    assert [today.child(i).data(0, MOVE_ROLE) for i in range(today.childCount())][-3:] == [("today", carried), ("today", note), ("today", task)]
+    moved = [today.child(i).data(0, MOVE_ROLE) for i in range(today.childCount())]
+    assert [m for m in moved if m is not None][-3:] == [("today", carried), ("today", note), ("today", task)]  # heads aside (5.189)
     assert "since Mon" in today_row(browse.tree, carried).data(0, LINE_ROLE).html()
 
 

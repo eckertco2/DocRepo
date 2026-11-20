@@ -158,7 +158,7 @@ def test_the_view(browse):
     keys = browse.tree.keys()
     lines = [k for k in keys if k and k[0] == "actline"]
     assert lines and ("task", "T000001") in keys and browse.view == "activity"
-    assert "happened" in browse.pane_title.text()
+    assert "happened" in browse.pane_count.text()  # the count after the title (release 5.184)
     item = next(i for i in browse.tree.items() if i.data(0, 0x100) == lines[0])
     browse.tree.setCurrentItem(item)  # a click: the line opens its capture, and stays the selected row
     line = browse._act_lines[lines[0][1]]
