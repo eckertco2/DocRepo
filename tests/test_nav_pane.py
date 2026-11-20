@@ -70,11 +70,11 @@ def test_counts_only_where_they_ask_for_something(browse):
     assert unfiled.count == counts["unfiled"] > 0 and unfiled.accessibleName() == f"Unfiled, {counts['unfiled']}"
     # ...and those views say their totals in their own headers
     browse.set_view("tasks")
-    assert f"{counts['tasks']} open</span>" in browse.pane_title.text()
+    assert browse.pane_count.text() == f"{counts['tasks']} open"  # the count after the title (release 5.184)
     browse.set_view("people")
-    assert f"{len(m.active_people())} active" in browse.pane_title.text()
+    assert f"{len(m.active_people())} active" in browse.pane_count.text()
     browse.set_view("today")
-    assert browse.pane_title.text() == "Today"
+    assert browse.pane_title.text() == "Today" and not browse.pane_count.isVisibleTo(browse)
 
 
 def test_a_click_opens_the_view_and_marks_it(browse):

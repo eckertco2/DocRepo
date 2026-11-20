@@ -87,13 +87,13 @@ def actions(item) -> dict:
 def test_review_walks_the_steps_and_passes_over_empty_ones(browse):
     browse.set_view("review")
     assert step(browse) == "unfiled"
-    assert "Step 1 of 7 · Unfiled · 3" in browse.pane_title.text()
+    assert "Step 1 of 7 · Unfiled · 3" in browse.pane_count.text()
     assert bar(browse) == ["Back", "Next: Overdue and due in the next 7 days"]
     assert all(k[0] == "capture" for k in keys(browse) if k) and len([k for k in keys(browse) if k]) == 3
     assert browse.sel == ("capture", keys(browse)[0][1])  # its first capture is open, with File to task on its page
     assert "File to task" in page_bar(browse)
     review_list.go(browse)
-    assert step(browse) == "due" and "Step 2 of 7 · Overdue and due in the next 7 days · 3" in browse.pane_title.text()
+    assert step(browse) == "due" and "Step 2 of 7 · Overdue and due in the next 7 days · 3" in browse.pane_count.text()
     review_list.go(browse)
     assert step(browse) == "waiting" and browse._asks()
     review_list.go(browse)
@@ -152,7 +152,7 @@ def test_step_4_marks_a_project_reviewed_with_undo(browse):
     review_list.mark_reviewed(browse)  # R
     assert Model(browse.conn).task(REACTOR).reviewed == "2026-10-09 09:00:00"
     assert ("task", REACTOR) not in keys(browse) and browse.sel == ("task", WALKTHROUGH)
-    assert "Step 4 of 7 · Projects due for review · 2" in browse.pane_title.text()
+    assert "Step 4 of 7 · Projects due for review · 2" in browse.pane_count.text()
     assert browse.status.text().startswith("Reactor impeller upgrade: reviewed. It comes up again in the week of Mon 12 Oct.")
     browse._status_link("undo")
     assert Model(browse.conn).task(REACTOR).reviewed is None and ("task", REACTOR) in keys(browse)

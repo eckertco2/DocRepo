@@ -10,7 +10,7 @@ from datetime import datetime  # noqa: E402
 
 import pytest  # noqa: E402
 from PySide6.QtCore import Qt  # noqa: E402
-from PySide6.QtWidgets import QApplication, QPushButton  # noqa: E402
+from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from docrepo.config import Settings  # noqa: E402
 from docrepo.model import Model  # noqa: E402
@@ -151,14 +151,18 @@ def test_a_bar_made_only_of_new_widgets_shows(browse, qapp, view):
     the People view had no Add person, nor Import people…, to click."""
     browse.set_view(view)
     qapp.processEvents()
-    assert browse.filters.isVisible()
+    # Since release 5.184 a view's buttons are commands on the header's row, each showing or listed under More.
+    head = browse.head
+    assert head.commands() or head.display_button.isVisibleTo(browse)  # Assigned to me has no command: Sort and Select
+    assert all(b.isVisibleTo(browse) or b in head.folded() for b in head.commands())
+    assert not head.folded() or head.more_button.isVisibleTo(browse)
 
 
 def test_import_people_from_the_people_view(browse, tmp_path, qapp):
     browse.set_view("people")
     qapp.processEvents()
-    button = next(b for b in browse.filters.findChildren(QPushButton) if b.text() == ui.NAME)
-    assert button.isVisible() and "Add person" in [b.text() for b in browse.filters.findChildren(QPushButton) if b.isVisible()]
+    button = next(b for b in browse.head.commands() if b.text() == ui.NAME)
+    assert {"Add person", ui.NAME} <= {b.text() for b in browse.head.commands()}  # on the row, or under More (release 5.184)
     path = csv_file(tmp_path)
 
     def run(d):

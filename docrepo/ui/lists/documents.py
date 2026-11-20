@@ -6,9 +6,6 @@ from __future__ import annotations
 import re
 from datetime import date
 
-from PySide6.QtWidgets import (
-    QLabel,
-)
 
 from docrepo import decisions, search
 from docrepo.dates import short
@@ -31,13 +28,16 @@ class DocumentLists:
         m = self.model()
         self._set_head("Documents", "Files DocRepo tracks, under the tasks they belong to. Originals stay where they are; their text is kept in Documents.",
                        str(sum(1 for d in m.documents if not m.only_in_discarded(d))))
-        self._filter_widget(QLabel("Task"))
+        # In the Filter panel since release 5.184 (decision 855): the task, with a chip of its title while one is picked.
         picker = DropButton(full_path(m, self.doc_task) if self.doc_task in m.tasks else "Any task")
+        picker.setAccessibleName("Task")
         picker.clicked.connect(lambda: self._pick_task(picker, self._set_doc_task, ("Any task", "Show every document")))
-        self._filter_widget(picker)
+        self._filter_widget(picker, "filter", label="Task")
+        if self.doc_task in m.tasks:
+            self.head.add_chip(f"Task: {m.task(self.doc_task).title}", lambda: self._set_doc_task(None))
         if self.doc_task:
-            self._check("Include subtasks", self.doc_subs, self._set_doc_subs)
-            self._button("Show all", lambda: self._set_doc_task(None))
+            self._check("Include subtasks", self.doc_subs, self._set_doc_subs, default=True, chip="Without subtasks")
+            self._button("Show all", lambda: self._set_doc_task(None), where="filter")
         self.tree.set_columns(["Document", "Added"], [0, 76])  # no Status column: a chip says when one isn't current (release 5.114)
         nodes = documents_tree(m, self.doc_task if self.doc_task in m.tasks else None, self.doc_subs)
         # A task's row holds its documents: only its title, so nothing stands under Status and Checked but a document's.

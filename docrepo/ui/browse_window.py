@@ -21,7 +21,6 @@ from pathlib import Path
 from PySide6.QtCore import QPoint, Qt, QTimer
 from PySide6.QtGui import QGuiApplication, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QCheckBox,
     QComboBox,
     QDialog,
     QHBoxLayout,
@@ -43,7 +42,7 @@ from docrepo import activity, bulk, capacity, captures, db, edits, items, notes_
 from docrepo.agenda import AgendaError
 from docrepo.captures import capture_folder, capture_md_path
 from docrepo.dates import workday_numbers
-from docrepo.detail import PageState, Pages, esc
+from docrepo.detail import PageState, Pages
 from docrepo.links import is_folder, is_link
 from docrepo.model import TODAY, Model, is_person
 from docrepo.people import PeopleError
@@ -60,6 +59,7 @@ from docrepo.ui.explorer import show_in_explorer
 from docrepo.ui.front import bring_to_front
 from docrepo.ui.problems import ProblemsLine
 from docrepo.ui.content_card import CARD_GAP, CARD_PAD, ContentCard
+from docrepo.ui.view_options import ViewHeader
 from docrepo.ui.toast import Toast
 from docrepo.ui.settings_view import SettingsView
 from docrepo.ui.search_scope import ScopeList, open_search
@@ -138,17 +138,6 @@ __all__ = ["BrowseWindow", "DETAIL_MIN", "HTML_ROLE", "NAV_FOLDED_KEY", "TODAY_M
 
 #: The views with no page beside them (release 5.159): their own page fills the window, so a selection's page isn't drawn.
 NO_PAGE_VIEWS = ("capacity", "settings", "timeline", "priorities")
-
-
-def _in_bar(item) -> bool:
-    """Whether a filter bar's item shows: a widget unless it was hidden on purpose (release 5.151). A widget a view has just
-    added reads as hidden until Qt shows it a moment later, so the bar of a view made only of new widgets (People, Labels,
-    Tagged labels, Templates, Activity, Assigned to me) was hidden whole since release 5.61, which meant to hide only a bar
-    with nothing showing in it."""
-    w = item.widget() if item is not None else None
-    if w is None:
-        return item is not None and not item.isEmpty()
-    return not (w.isHidden() and w.testAttribute(Qt.WidgetAttribute.WA_WState_ExplicitShowHide))
 
 
 class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelLists, DocumentLists, CaptureLists, ActivityList, PlanningHooks, PageCommands, NotesPages, QWidget):
@@ -325,15 +314,12 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         lp = QVBoxLayout(list_page)
         lp.setContentsMargins(0, 0, 0, 0)
         lp.setSpacing(0)
-        head = QWidget(objectName="paneHead")
-        hl = QVBoxLayout(head)
-        hl.setContentsMargins(16, 12, 16, 10)
-        hl.setSpacing(8)
-        self.pane_title = QLabel(objectName="paneTitle")
-        self.pane_note = Help()  # what the view is: with Show hints (decision 7)
-        self.pane_note.setObjectName("paneNote")
-        self.filters = QWidget()
-        self.filters_layout = FlowLayout(self.filters, spacing=8)
+        # The list pane's head (release 5.184, decision 855): one 48 px row with the title, the count, the commands, Filter,
+        # Display and the folds, then the note, the chips, the tool row and the Find box (``ui/view_options.py``).
+        self.head = ViewHeader(self)
+        self.filters = self.head  # the views' controls are all its children, the panels' too
+        self.filters_layout = self.head.tools_layout
+        self.pane_title, self.pane_note, self.pane_count = self.head.title, self.head.note, self.head.count
         # Find in this view (mods log round 2, M0026): Ctrl+F; it narrows the list as you type, and Esc clears it.
         self.find_bar = QWidget()
         fb = QHBoxLayout(self.find_bar)
@@ -348,9 +334,8 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         self.find_count = QLabel(objectName="paneNote")
         fb.addWidget(self.find_count)
         self.find_bar.hide()
-        for w in (self.pane_title, self.pane_note, self.filters, self.find_bar):
-            hl.addWidget(w)
-        lp.addWidget(head)
+        self.head.under.addWidget(self.find_bar)
+        lp.addWidget(self.head)
         self.tree = RowTree()
         self.tree.picked.connect(self._row_picked)
         self.tree.ticked.connect(self._tick)
@@ -839,42 +824,6 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
             self.ctx.keep_state(VIEWS_HIDDEN_KEY, "0" if on else "1")
 
     # ================= the list pane =================
-    def _set_head(self, title: str, note: str = "", total: str = "") -> None:
-        """The view's title and what it is. ``total`` (such as "18 open") follows the title, as the sidebar
-        counts only what asks for something (O10)."""
-        if total:
-            self.pane_title.setTextFormat(Qt.TextFormat.RichText)
-            self.pane_title.setText(f'{esc(title)}&nbsp;&nbsp;<span style="color:{tokens.colour("text2")}; font-size:{tokens.CAPTION}pt; '
-                                    f'font-weight:400">{esc(total)}</span>')
-        else:
-            self.pane_title.setTextFormat(Qt.TextFormat.PlainText)
-            self.pane_title.setText(title)
-        self.pane_note.setText(note)
-        self.pane_note.setVisible(bool(note))
-
-    def _clear_filters(self) -> None:
-        _empty(self.filters_layout)
-
-    def _filter_widget(self, widget: QWidget) -> QWidget:
-        self.filters_layout.addWidget(widget)
-        return widget
-
-    def _check(self, label: str, on: bool, changed: Callable[[bool], None], tip: str = "") -> QCheckBox:
-        box = QCheckBox(label)
-        box.setChecked(on)
-        if tip:
-            box.setToolTip(tip)
-        box.toggled.connect(changed)
-        return self._filter_widget(box)
-
-    def _button(self, label: str, clicked: Callable[[], None], enabled: bool = True, tip: str = "") -> QPushButton:
-        b = QPushButton(label)
-        b.setEnabled(enabled)
-        if tip:
-            b.setToolTip(tip)
-        b.clicked.connect(lambda _=False: clicked())
-        return self._filter_widget(b)
-
     def render_list(self) -> None:
         if workspace_ui.is_open(self):  # the workspace takes the list's and the page's room (release 5.152, decision 682)
             workspace_ui.render(self)
@@ -893,8 +842,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
             self.settings_view.load()
             return
         self.middle.setCurrentIndex(0)
-        self._clear_filters()
-        self.filters.setVisible(True)
+        self.head.clear(self.view)
         builder = {"today": self._today_view, "review": lambda: review_list.view(self), "tasks": self._tasks_view, "unfiled": self._unfiled_view, "agenda": self._agenda_view,
                    "people": self._people_view, "templates": self.templates.render_list,
                    "labels": self._labels_view, "tagged": lambda: tagged_list.view(self), "glossaries": lambda: glossary_list.view(self), "docs": self._docs_view, "search": self._search_view,
@@ -918,7 +866,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         self.tree.setHeaderHidden(self.view not in HEADINGS or not any(k is not None for k in self.tree.keys()))
         if self.view in NESTING_VIEWS:
             self._sync_level_buttons()
-        self.filters.setVisible(any(_in_bar(self.filters_layout.itemAt(i)) for i in range(self.filters_layout.count())))
+        self.head.done()
         self._apply_find()
 
     def render_detail(self, keep_scroll: bool = False) -> None:

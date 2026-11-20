@@ -77,7 +77,7 @@ def test_search_results_are_file_rows_with_a_day_at_the_end(browse):
     browse.search_box.setText("datasheet")
     browse._run_search()
     tree = browse.tree
-    assert headers(tree) == ["Result", "When"] and "result" in browse.pane_title.text()
+    assert headers(tree) == ["Result", "When"] and "result" in browse.pane_count.text()
     heads = [x.data(0, HTML_ROLE) for x in rows(tree) if x.data(0, KEY_ROLE) is None]
     assert any("<b>Documents</b>" in h and ">&nbsp;" in h for h in heads)
     doc = next(x for x in rows(tree) if x.data(0, KEY_ROLE) == ("doc", "D000001"))

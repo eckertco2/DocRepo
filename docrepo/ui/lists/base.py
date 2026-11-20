@@ -8,6 +8,7 @@ import re
 from collections.abc import Callable
 
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QHBoxLayout,
     QMenu,
@@ -19,7 +20,7 @@ from docrepo.detail import esc
 from docrepo.ui.icons import icon
 from docrepo.ui.keymap import KeyMapDialog
 from docrepo.ui.tree_view import DIM_ROLE, HTML_ROLE, KEY_ROLE, LINE_ROLE, group_ground, state_icon
-from docrepo.ui.widgets import DropButton
+from docrepo.ui.widgets import CheckMenuButton, DropButton
 from docrepo.views import (
     Node,
     collapse_level,
@@ -34,6 +35,50 @@ from docrepo.ui.lists.common import (
 
 class ListBasics:
     """What every list view shares: the state marks, the row to select, Find in this view, the level buttons and folds, grouping, and the command bar's buttons."""
+
+    # ---- the list pane's head (release 5.184, decision 855): each control a view adds goes where it says, in the header ----
+    def _set_head(self, title: str, note: str = "", total: str = "") -> None:
+        """The view's title, what it is, and ``total`` (such as "18 open"), the count after the title, as the sidebar counts
+        only what asks for something (O10)."""
+        self.head.set_head(title, note, total)
+
+    def _filter_widget(self, widget: QWidget, where: str = "tool", label: str = "") -> QWidget:
+        """A view's control, put where it goes (``view_options.PLACES``). A control nobody has placed stays in sight, in the
+        tool row."""
+        return self.head.add(widget, where, label)
+
+    def _check(self, label: str, on: bool, changed: Callable[[bool], None], tip: str = "", *, where: str = "filter",
+               default: bool = False, chip: str = "") -> QCheckBox:
+        """A tick box. In the Filter panel, while it's off its default, a chip (``chip``, or its words) whose cross puts the
+        default back."""
+        box = QCheckBox(label)
+        box.setChecked(on)
+        if tip:
+            box.setToolTip(tip)
+        box.toggled.connect(changed)
+        if where == "filter" and on != default:
+            self.head.add_chip(chip or label, lambda: changed(default))
+        return self._filter_widget(box, where)
+
+    def _button(self, label: str, clicked: Callable[[], None], enabled: bool = True, tip: str = "", *, where: str = "command") -> QPushButton:
+        """A button. A command by default: on the header's row, folded under More when the row is narrow."""
+        b = QPushButton(label)
+        b.setEnabled(enabled)
+        if tip:
+            b.setToolTip(tip)
+        b.clicked.connect(lambda _=False: clicked())
+        return self._filter_widget(b, where)
+
+    def _check_menu(self, noun: str, empty: str, choices: list, picked: list[str], sets: list, chosen: Callable[[list], None],
+                    tip: str = "") -> CheckMenuButton:
+        """A ``CheckMenuButton`` in the Filter panel, its ``chosen`` to ``chosen``; with something picked, a chip of its words."""
+        button = CheckMenuButton(noun, empty, choices, picked, sets)
+        button.chosen.connect(chosen)
+        if tip:
+            button.setToolTip(button.toolTip() or tip)
+        if picked:
+            self.head.add_chip(button.text(), lambda: chosen([]))
+        return self._filter_widget(button, "filter")
 
 
     def _mark_states(self) -> None:
@@ -148,8 +193,12 @@ class ListBasics:
     def _level_button(self, expand: bool, clicked: Callable[[], None], enabled: bool = True) -> QPushButton:
         """Collapse a level or Expand a level. Two icon buttons, as their words often were the reason a bar wrapped (release 5.59)."""
         name, tip_text = ("Expand a level", "Open every branch one more level") if expand else ("Collapse a level", "Fold every branch up one level")
-        b = self._button("", clicked, enabled, f"{name}: {tip_text.lower()}")
+        b = QPushButton()
+        b.setEnabled(enabled)
+        b.setToolTip(f"{name}: {tip_text.lower()}")
+        b.clicked.connect(lambda _=False: clicked())
         b.setObjectName("iconOnly")
+        self._filter_widget(b, "fold")
         b.setIcon(icon("level-open" if expand else "level-fold"))
         b.setAccessibleName(name)
         return b
@@ -212,7 +261,7 @@ class ListBasics:
         box.setCurrentIndex(max(0, box.findData(picked)))
         box.setToolTip("Put each task under its sublabel's heading")
         box.currentIndexChanged.connect(lambda _: self._set_list_group(view_id, box.currentData()))
-        self._filter_widget(box)
+        self._filter_widget(box, "display")
         return picked if picked in parents else None
 
     def _set_list_group(self, view_id: str, parent: str) -> None:
