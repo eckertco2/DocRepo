@@ -257,9 +257,9 @@ def close(w: BrowseWindow, task_id: str) -> None:
     m = w.model()
     below = open_below(m, task_id)
     if below:
-        words = f"Close all {len(below) + 1}"
+        words = f"Close all {len(below) + 1}?"
         if not w.confirm(words, f"{m.task(task_id).title} has {len(below)} open subtask{'s' if len(below) != 1 else ''}. "
-                                f"Close {'them' if len(below) != 1 else 'it'} too?"):
+                                f"{'They are' if len(below) != 1 else 'It is'} closed with it."):
             return
     w.set_state(task_id, "Closed", branch=bool(below))
 

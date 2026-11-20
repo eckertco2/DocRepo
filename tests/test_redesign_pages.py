@@ -153,3 +153,129 @@ def test_the_workspaces_card_has_the_task_pages_commands(setup):
     ws.pick(work.project)  # a parent picked in the chain is read only: no commands
     settle()
     assert ws.card.actions.buttons == [] and not ws.card.actions.isVisibleTo(ws.card)
+
+
+# ---- release 5.186 (the notes without a frame, decision 860) ----
+def test_the_notes_have_no_frame(setup):
+    w, _ = setup
+    pane = task_page(w, "T000008")
+    q = tokens.qss()
+    assert "border: none" in rule(q, "QFrame#notesCard") and "accent" not in rule(q, 'QFrame#notesCard[typing="true"]')
+    assert rule(q, 'QFrame#notesCard[typing="true"]') == rule(q, "QFrame#notesCard")  # the last rule for both: no edge either way
+    assert pane.card.objectName() == "notesCard"
+    pane.notes.focus_changed.emit(True)
+    assert pane.card.property("typing") is True
+    pane.notes.focus_changed.emit(False)
+
+
+def notes_y(pane) -> int:
+    return pane.notes.mapTo(pane.widget(), QPoint(0, 0)).y()
+
+
+@pytest.mark.parametrize("narrow", [False, True])
+def test_the_format_bar_keeps_its_room(setup, narrow):
+    from PySide6.QtTest import QTest
+
+    from docrepo.ui.task_pane import BAR_LINGER_MS
+
+    w, _ = setup
+    pane = task_page(w, "T000008")
+    if narrow:
+        w.resize(960, 700)
+        w.split.setSizes([248, 2000, 0])  # the detail pane as narrow as it goes (test_real_look's)
+    settle()
+    assert pane.format_bar.sizePolicy().retainSizeWhenHidden() and pane.table_button.sizePolicy().retainSizeWhenHidden()
+    assert pane.format_bar.isHidden()
+    at_rest = notes_y(pane)
+    pane.notes.focus_changed.emit(True)
+    settle()
+    assert not pane.format_bar.isHidden() and notes_y(pane) == at_rest
+    pane.notes.focus_changed.emit(False)
+    QTest.qWait(BAR_LINGER_MS + 100)
+    settle()
+    assert pane.format_bar.isHidden() and notes_y(pane) == at_rest
+
+
+def test_clicking_the_bar_keeps_the_caret_in_the_notes(setup):
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QToolButton
+
+    w, _ = setup
+    pane = task_page(w, "T000008")
+    pane.notes.focus_changed.emit(True)
+    settle()
+    for b in pane.format_bar.findChildren(QToolButton):
+        assert b.focusPolicy() == Qt.FocusPolicy.NoFocus, b.toolTip()
+    assert pane.format_bar.focusProxy() is pane.notes and pane.table_button.focusProxy() is pane.notes
+    w.activateWindow()
+    pane.notes.setFocus()
+    settle()
+    if pane.notes.hasFocus():  # the offscreen platform gives a window the keyboard only sometimes
+        bold = next(b for b in pane.format_bar.findChildren(QToolButton) if b.toolTip().startswith("Bold"))
+        QTest.mouseClick(bold, Qt.MouseButton.LeftButton)
+        assert pane.notes.hasFocus(), QApplication.focusWidget()
+
+
+def test_the_notes_words_start_on_the_pages_left_edge(setup):
+    w, _ = setup
+    pane = task_page(w, "T000008")
+    w.split.setSizes([248, 900, 0])
+    pane.set_outline_on(False)
+    settle()
+    inner = pane.widget()
+    words = pane.notes.mapTo(inner, QPoint(pane.gutter(pane.notes), 0)).x()
+    assert abs(words - pane.title.mapTo(inner, QPoint(0, 0)).x()) <= 1, words
+    w.split.setSizes([248, 2000, 0])
+    pane.set_outline_on(True)
+    settle()
+    if pane.outline_shown():
+        assert abs(pane.outline_slot.mapTo(inner, QPoint(0, 0)).x() - PAGE_EDGE) <= 1
+
+
+def test_a_day_is_a_small_grey_label(setup):
+    from PySide6.QtGui import QFont
+
+    from docrepo import notes_page
+
+    w, _ = setup
+    notes = task_page(w, "T000008").notes
+    b, day, own = notes.document().begin(), None, None
+    while b.isValid():
+        if notes.kind(b) == "heading":
+            if notes_page.day_of(b.text()) is not None:
+                day = day or b
+            else:
+                own = own or b
+        b = b.next()
+    assert day is not None
+    f = day.begin().fragment().charFormat()
+    assert f.fontPointSize() == tokens.LABEL and f.fontWeight() == QFont.Weight.DemiBold
+    assert f.foreground().color().name() == tokens.colour("text3")
+    if own is not None:
+        assert own.begin().fragment().charFormat().fontPointSize() != tokens.LABEL
+
+
+def test_the_outline_is_a_gutter(setup):
+    from PySide6.QtGui import QColor
+
+    w, _ = setup
+    pane = task_page(w, "T000008")
+    assert "border-right" not in rule(tokens.qss(), "QFrame#outlineSlot")
+    outline = pane.outline
+    outline.rebuild()
+    assert outline.count() > 0
+    outline.set_current(outline.item(0).data(Qt_NUMBER()))
+    outline.resize(200, 26 * outline.count())
+    image = outline.grab().toImage()
+    accent = QColor(tokens.colour("accent"))
+    near = [(x, y) for y in range(0, image.height(), 2) for x in range(0, image.width(), 2)
+            if abs(QColor(image.pixel(x, y)).red() - accent.red()) + abs(QColor(image.pixel(x, y)).green() - accent.green())
+            + abs(QColor(image.pixel(x, y)).blue() - accent.blue()) < 30]
+    assert near == []
+
+
+def Qt_NUMBER():  # noqa: N802 - the outline's role for an entry's number
+    from docrepo.ui.notes_outline import NUMBER
+
+    return NUMBER

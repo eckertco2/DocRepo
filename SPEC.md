@@ -837,10 +837,10 @@ state on a soft square-cornered fill). From 540 px wide the two sit side by side
     `old_days`) folds every day heading more than 14 days before today as the page opens; the fold arrow, Jump to or
     the caret unfolds one, and turning it off unfolds them.
   - **The outline** (release 5.113, the notes workspace plan's decision 349, the owner's ask of 2026-11-10;
-    `docrepo/ui/notes_outline.py`): a column at the left of the notes, inside their frame, lists the page's headings
-    and day dividers in the page's order (the owner's headings indented by level, a day in Caption size and secondary
-    text, without its year when every day on the page is in one year), and marks where you are with the accent and a
-    bar: the heading over the caret while you type, or else the last heading that has reached the top of the view (at
+    `docrepo/ui/notes_outline.py`): a column at the left of the notes lists the page's headings
+    and day dividers in the page's order (the owner's headings indented by level in the second grey, a day as a small
+    label in the third, without its year when every day on the page is in one year), and marks where you are, dark and
+    semibold (the accent and a bar until release 5.186, which made the column a quiet gutter with no line beside it): the heading over the caret while you type, or else the last heading that has reached the top of the view (at
     the page's end, the last one in view); a heading picked in it stays marked until the page is scrolled by hand. A
     click goes there as Jump to does. The pane has one scroll bar, so the column keeps its place beside the notes and
     moves its list down as the page scrolls, under the sticky line, so it stays in view while the notes do; a list
@@ -899,9 +899,10 @@ state on a soft square-cornered fill). From 540 px wide the two sit side by side
     run of file, attachment and picture lines, with the description lines under them, is one line: a paperclip and the
     files' names, each opening its file with its description as its tooltip, "+3 more" after four (their names in its
     tooltip). This page, the editor, doesn't change (717).
-  - **The Notes heading** (release 5.113, decision 423) is a section's head over the frame (Notes, Saved, the format
-    bar while typing, the outline's button, Jump to and the menu), not a band inside it; the frame round the notes
-    (decision 130) is a single line with rounded corners, its bottom edge the accent while you type.
+  - **The Notes heading** (release 5.113, decision 423) is a section's head over the notes (Notes, Saved, the format
+    bar while typing, the outline's button, Jump to and the menu), not a band inside it. Since release 5.186 (the redesign's
+    decision 860) it sits under the page's one hairline, and the format bar keeps its room while hidden, so the notes don't
+    move when it shows: where it doesn't fit beside the heading it has a line of its own under it, empty at rest, and in the narrowest pane the switch and All notes' Group strip a line each too.
   - **Copy and paste** inside the page keep whole lines as they are (headings, captions, lists); a line's words go in at
     the caret. Text from elsewhere comes in as `RichEdit` takes it. **Alt+Shift+Up and Down** move a line with the list
     items under it, or a folded heading with its section, keeping what each line is; one Ctrl+Z puts it back.
@@ -930,10 +931,10 @@ state on a soft square-cornered fill). From 540 px wide the two sit side by side
     notes, staying a moment for a click on one of its menus; the ⋯ menu is always there.
   - **The notes' lines stop at about 90 characters** (release 5.83, R11, `task_pane.NOTES_LINE`), however wide the
     frame; the frame's header and summary keep its width.
-  - **The frame** (release 5.27, decision 130, by the UI playbook's grouping ladder): Notes, its format bar, the
-    Checklist summary and the page sit in one frame, the capture window's editor frame, so the one part of the task page
-    that's typed in stands apart from the facts above it and the history below. Its header band is tinted, with a
-    hairline under it, and its bottom edge turns to the accent while the page has the caret.
+  - **The notes are the page's body** (release 5.186, the redesign's decision 860, which retired decision 130's frame of
+    release 5.27): no box round the Checklist summary and the page; the notes' gutter for fold arrows and marks hangs in
+    the page's margin, so their words start under the title's; each day is a small grey label. Where you type shows by
+    the caret and the format bar, and a click on the bar keeps the caret in the notes.
   - **Pictures** (release 5.27, decisions 124, 125 and 127): Ctrl+V of a picture (a screenshot, or one copied from a
     document) keeps it as a capture of the page's (6.11) and shows it at the caret, at its own size up to the page's
     width, with an empty list item under it, the caret there, for what it shows. Typing on a picture goes to the end of
@@ -1208,14 +1209,14 @@ The visual overhaul made DocRepo's windows calmer and easier to read without mov
 - **One accent button in the browse window** (release 5.59): New capture. A page's main command is a neutral button. Other windows have their own one.
 - **One arrow family** (release 5.59): the icons' chevrons, on buttons (`DropButton`, `icons.set_fold`), on pages (`chev:` pictures in `PageView`) and on the Timeline's folds.
 - **Colour** (release 5.60): every colour in `docrepo/ui` is a token, by name (`tokens.colour`, or `{C.name}` in an f-string), and has one job. `selected` is for what's selected; `info_bg` is the accent's family where nothing is. A state in a list's row is an icon before its title since release 5.78 (decision L7), its word in the tooltip, and a click on it opens the state menu (release 5.76, 8.7). On the Timeline, project names are plain text beside a colour edge, a lane is one neutral band with a small dot in its key's colour and dark words, and the plant events lane is there only with an event in view.
-- **Windows' chrome** (release 5.59): as a window shows, a popup asks Windows 11 for its full round corners (release 5.181; small ones before), and any other window for a title bar in the base colour (`look.dress_window`, through DWM). Windows 10 refuses, and nothing changes.
-- **Questions** (release 5.61): `widgets.ask`, buttons that say what they do, no icon, and the safe answer on Enter and Esc.
+- **Windows' chrome** (release 5.59): as a window shows, a popup, a menu or a window marked `look.floating` (release 5.187, decision 862: the pinned window, Quick edit, the Today panel, a confirmation) asks Windows 11 for its full round corners (release 5.181; small ones before) and an edge in `stroke_strong`, its style rule keeping a square 1 px edge that Windows clips; the Today panel docked is square (`look.square`); any other window asks for a title bar in the base colour (`look.dress_window`, through DWM). Windows 10 refuses, and nothing changes.
+- **Questions** (release 5.61; DocRepo's own dialog since release 5.187, the redesign's decision 863): `confirm.Confirm`, a small floating dialog with a title, a sentence, an optional one-line box and two buttons that say what they do ("Discard task" and "Keep it"), the doing one red (`danger`) for what can't be undone from the same place; in a question, the safe answer on Enter and Esc; with a box, Enter does it and Esc cancels. `confirm.verbs` holds the buttons' words for each question by its title. `widgets.ask` and `BrowseWindow.confirm`, `ask_text` and `ask_reason` go through it. Qt's stock message box is left only in `app.py`, for a start that fails before any window.
 - **Empty states** (release 5.61): a new data root's Task tree says "No tasks yet" with New task, and Capacity with nobody says "Add people to see their load" with Add person (`RowTree.show_empty`). A list with no rows to pick has no column headings.
 - **The Timeline's tasks with no dates** (release 5.57; a count on the line under the chart since release 5.40): under the chart, by name when they fit on one line, or else as a count with a fold that opens a list of at most four lines, scrolling inside itself, so they never take the chart's room. Whether it's open is kept with the view's other choices.
 - **Icons** (`docrepo/ui/icons/`, `docrepo/ui/icons.py`): SVG files drawn for DocRepo in the style of Fluent UI System Icons, painted in the colour for each state.
 - **One look** (release 5.179, the design workspace's redesign plan, decision 840): the Classic look, release 5.9's colours, fonts, hints and key badges on the new layouts, chosen in Settings from release 5.16, is retired with its Look row. A settings file that still says `classic` starts the new look.
 - **Show hints** (`show_hints`, from More in either window or Settings): the help text, the **i** buttons and the key badges, at once, in every window (`docrepo/ui/look.py`: `Help`, `KeyBadge`). They're off by default.
-- **Keys:** each control's tooltip names its key. Holding Alt shows each control's letter key over the window; holding Ctrl for half a second shows the Ctrl shortcuts (`KeyTips`). **Ctrl+K**, in either window, opens the **command palette** (`docrepo/ui/palette.py`): every action and view, with its key, narrowed as you type by fuzzy matching (RapidFuzz, else the standard library's difflib); Enter runs one, Esc closes it.
+- **Keys:** each control's tooltip names its key. Holding Alt shows each control's letter key over the window; holding Ctrl for half a second shows the Ctrl shortcuts (`KeyTips`). **Ctrl+K**, in either window, opens the **command palette** (`docrepo/ui/palette.py`): every action and view, with its key, narrowed as you type by fuzzy matching (RapidFuzz, else the standard library's difflib); Enter runs one, Esc closes it. With nothing typed, each group's name heads its commands once (release 5.187); typed, each row names its group after the command.
 - **Dates** in fields read "Fri 9 Oct 2026" while you're not in them, and YYYY-MM-DD while you type; the calendar button is inside the field (`DateField`).
 - **Forms** (release 5.13): one column of fields, labels above them, each field as wide as what goes in it. Edit task (release 5.61) has its title, state, priority, Urgent, Meeting, status, description, Lead, Assignees, Start, Due and Deadline in front (Duration too until release 5.100), with a checklist once it has lines, and the rest under More options, which is open when a reminder, recurrence, key date, Plant event, reference, Runs through weekends, Duration or tie is set, or for a task made from a template, so it fits without scrolling otherwise. The commit button is the accent and comes first, then Cancel, at the right. A form fits its content, up to most of the screen.
 - **Capacity** (decision 18, changed by releases 5.60 and 5.40): a cell is grey in two steps under 80%, caution's tint from 80% to 100% (the accent's was selection's, so a selected cell couldn't be seen), red and bold over 100%, and a strong red from 125%, with one number at a time.

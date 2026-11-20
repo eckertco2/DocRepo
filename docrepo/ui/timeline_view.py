@@ -2369,7 +2369,7 @@ class TimelineView(QWidget):
         if w is None:
             return
         n = len(w.actions)
-        if n and not self.confirm(f"Delete {w.name}", f"Its {n} change{'' if n == 1 else 's'} go with it. Your tasks never changed."):
+        if n and not self.confirm("Delete this what-if?", f"{w.name} and its {n} change{'' if n == 1 else 's'} go. Your tasks never changed."):
             return
         self.whatifs.remove(w)
         self.wi_undo.pop(wid, None)

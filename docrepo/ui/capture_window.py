@@ -52,7 +52,6 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
-    QInputDialog,
     QLabel,
     QLineEdit,
     QMenu,
@@ -103,7 +102,7 @@ from docrepo.save import (
 )
 from docrepo.schedule import is_open, length_of, start_of, week_of
 from docrepo.tasks import KeyDateRow, hours_values, stated
-from docrepo.ui import tokens
+from docrepo.ui import confirm, tokens
 from docrepo.ui.tokens import C
 from docrepo.ui.context import AppContext
 from docrepo.ui import drafts as draft_ui
@@ -2836,9 +2835,9 @@ class CaptureWindow(QWidget):
     def add_link(self) -> None:
         """Add link…: asks for the address, starting with the clipboard's when it holds one."""
         clip = QGuiApplication.clipboard().text().strip()
-        url, ok = QInputDialog.getText(self, "Add link", "A web or SharePoint link. DocRepo keeps the address and never fetches it; it opens in your browser when you click it.",
-                                       text=read_address(clip).value if read_address(clip).kind == "link" else "")
-        if ok and url.strip():
+        url = confirm.ask_text(self, "Add link", "A web or SharePoint link. DocRepo keeps the address and never fetches it; it opens in your browser when you click it.",
+                               read_address(clip).value if read_address(clip).kind == "link" else "", yes="Add link")
+        if url is not None and url.strip():
             self.add_link_url(url)
 
     def add_link_url(self, url: str, name: str = "") -> None:

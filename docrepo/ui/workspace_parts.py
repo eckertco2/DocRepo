@@ -112,7 +112,12 @@ class WorkPane(TaskPane):
         self.banner.setTextFormat(Qt.TextFormat.RichText)
         self.banner.linkActivated.connect(self.banner_link)
         self.banner.hide()
-        self.wrap.layout().insertWidget(1, self.banner)
+        # On the page's edge (release 5.186): the notes' wrap starts at the pane's, for their gutter to hang in the margin.
+        banner_box = QWidget(objectName="wsBannerBox")
+        bb = QVBoxLayout(banner_box)
+        bb.setContentsMargins(self._margin, 0, 0, 0)
+        bb.addWidget(self.banner)
+        self.wrap.layout().insertWidget(1, banner_box)
         self.dates_slot = QWidget(objectName="wsDatesSlot")
         dl = QVBoxLayout(self.dates_slot)
         dl.setContentsMargins(self._margin, 4, self._margin, 18)

@@ -175,7 +175,7 @@ def test_document_person_and_label_pages(pages):
     doc = text(pages.document_page("D000002"))
     assert "Installation procedure.docx" in doc and "Tasks Installation" in doc and "1 change in the raw text log of its tasks" in doc
     person = text(pages.person_page("P003"))
-    assert "Tom Becker" in person and "Aliases Tom, Thomas" in person and "h this week" in person and "Agenda: 1 open item" in person
+    assert "Tom Becker" in person and "Aliases Tom, Thomas" in person and "h this week" in person and "Agenda 1 open Open agenda" in person  # a section head since release 5.186
     me = text(pages.person_page("P001"))
     assert me.startswith("Person P001 Quick summary Me me")  # release 5.131: the quick summary's link beside the crumbs
     label = text(pages.label_page("Safety"))
@@ -318,3 +318,37 @@ def test_the_grids_names_read_as_text(pages):
         assert m and not grid[m.end():].startswith("<span")
     on = next(t for t in pages.m.tasks.values() if pages.m.agendas_on(t.id))
     assert re.search(r'<a href="(person|task|agenda):[^"]*"[^>]*><span class="tl">', pages.facts_grid(on).split("Agenda")[-1])
+
+
+# ---- release 5.186 (the redesign's decision 860): the other pages ----
+def test_the_other_pages_use_the_grid(pages):
+    """The capture, person, document, label and tagged label pages take the task page's facts grid, and a capture's content
+    text is the page's body under a section's head, with no band."""
+    m = pages.m
+    capture = next(c for c in m.captures.values() if not c.discarded)
+    shown = [pages.capture_page(capture.id, "Words of the capture."), pages.person_page("P003"), pages.document_page("D000002"),
+             pages.label_page("Line 1")]
+    if m.tagged and m.tagged.by_key:
+        shown.append(pages.tagged_page(next(iter(m.tagged.by_key))))
+    for html in shown:
+        assert 'class="gk"' in html and 'class="k"' not in html
+    page = shown[0]
+    assert '<p class="sec">Content text' in page
+    words = page.index("Words of the capture.")
+    assert 'class="box"' not in page[:words] or page.rfind("</table>", 0, words) > page.rfind('class="box"', 0, words)
+
+
+def test_links_on_the_other_pages(pages):
+    """Decision 844's rule on the other pages: a name that opens an item reads as text, a command is grey, a link inside a
+    sentence stays in the accent."""
+    person = pages.person_page("P003")
+    tasks = person.split(">Leads<")[1].split("</table>")[0]  # Leads and Assigned: their tasks as names
+    assert re.search(r'<a href="task:[^"]+"[^>]*><span class="tl">', tasks) and not re.search(r'<a href="task:[^"]+"[^>]*>[^<]', tasks)
+    assert re.search(r'<a href="summary:person:P003"[^>]*><span class="cmd">Quick summary', person)
+    assert re.search(r'<a href="agenda:P003"[^>]*><span class="cmd">Open agenda', person)
+    label = pages.label_page("Line 1")
+    assert re.search(r'<a href="summary:label:[^"]+"[^>]*><span class="cmd">Quick summary', label)
+    assert re.search(r'<a href="task:[^"]+"[^>]*><span class="tl">', label)
+    made = next(c for c in pages.m.captures.values() if c.created_task and c.task)  # "Created … under …", a sentence
+    did = pages.what_save_did(made)
+    assert re.search(r'<a href="task:[^"]+"[^>]*>[^<]', did)

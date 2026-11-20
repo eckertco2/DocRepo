@@ -169,7 +169,7 @@ class ChecklistSummary(QWidget):
         self.arrow.setAutoRaise(True)
         self.arrow.clicked.connect(lambda: self.set_folded(not self.is_folded, emit=True))
         self.arrow.setVisible(foldable)
-        self.title = QLabel("Checklist", font=tokens.ui_font(tokens.BODY, semibold=True))
+        self.title = QLabel("Checklist", font=tokens.ui_font(tokens.SECTION, semibold=True))  # a section's head (release 5.186)
         self.title.setVisible(foldable)  # in Edit task, its section's heading says it
         self.count = ElidedLabel(objectName="checkCount")  # it mustn't hold the page wider than its pane
         self.done_button = QPushButton(objectName="link")

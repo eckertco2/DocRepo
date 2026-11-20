@@ -45,7 +45,7 @@ from docrepo.tasks import unit_span
 from docrepo.ui import tokens
 from docrepo.ui.context import AppContext
 from docrepo.ui.icons import icon, icon_size
-from docrepo.ui.look import tip
+from docrepo.ui.look import floating, tip
 from docrepo.ui.style import style_sheet
 from docrepo.ui.task_picker import path_text
 from docrepo.ui.task_forms import key_date_rows
@@ -144,6 +144,7 @@ class QuickEdit(QWidget):
 
     def __init__(self, ctx: AppContext, task_id: str, parent: QWidget | None = None) -> None:
         super().__init__(parent, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
+        floating(self)  # release 5.187, decision 862
         self.ctx = ctx
         self.task_id = task_id
         self.model = ctx.model()
