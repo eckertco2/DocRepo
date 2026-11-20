@@ -258,3 +258,59 @@ def test_the_page_in_parts(pages):
     assert f"Closed {pages.long(done.closed)}" in text(pages.task_parts(done.id, PageState())["head"])
     meeting = text(pages.task_parts("T000010", PageState())["head"])
     assert "Next meeting" in meeting and "Meeting " not in meeting.split("Next meeting")[0]  # its dates say it's a meeting
+
+
+# ---- release 5.185 (the redesign's decision 859): the task page ----
+def test_status_actions(pages, sample_root):
+    """The status card's commands: Log progress… alone on an open task, Got it first while it waits; none on a closed task, a
+    discarded one or a collection. The card's words end with them as links, or leave them out for the buttons."""
+    from dataclasses import replace
+
+    from docrepo import waits
+
+    m = pages.m
+    t = m.task("T000008")
+    assert [w for _, w, _ in pages.status_actions(t)] == ["Log progress…"]
+    assert pages.status_actions(t)[0][0] == "progress:T000008"
+    assert pages.status_parts(t)[3].endswith("Log progress…</a></span>") and "Log progress…" not in pages.status_parts(t, acts=False)[3]
+    parts = pages.task_parts("T000008", PageState())
+    assert parts["status_actions"] == "\t".join(pages.status_actions(t)[0]) and "Log progress…" not in parts["status_body"]
+    for gone in (replace(t, state="Closed"), replace(t, discarded="2026-10-01T09:00:00"), replace(t, collection=True)):
+        assert pages.status_actions(gone) == [] and "Log progress…" not in pages.status_parts(gone)[3]
+    conn = sample_root[0]
+    waits.start(conn, m, "T000008", at="2026-10-08T09:00:00", line="Asked Mike for the drawings", on=["P004"], follow_up=None, via="test")
+    waiting = Pages(Model(conn), TODAY, pages.content_of, "P001", conn)
+    acts = waiting.status_actions(waiting.m.task("T000008"))
+    assert [w for _, w, _ in acts] == ["Got it", "Log progress…"] and acts[0][0] == "gotit:T000008"
+    shown = waiting.task_parts("T000008", PageState())["status_actions"].split("\n")
+    assert [line.split("\t")[1] for line in shown] == ["Got it", "Log progress…"]
+
+
+def test_section_commands_are_grey(pages):
+    """A section's command at its head's right is a grey command (class cmd), never the accent: every task's every section."""
+    seen = set()
+    for task_id in pages.m.tasks:
+        parts = pages.task_parts(task_id, PageState())
+        for key, html in parts.items():
+            if key.endswith("_summary"):
+                for m in re.finditer(r"<a [^>]*>", html):
+                    seen.add(key)
+                    assert html[m.end():].startswith('<span class="cmd">'), (task_id, key, html)
+    assert {"agenda_summary", "subtasks_summary", "files_summary", "summary_summary"} <= seen  # the sample has no meeting under a task
+
+
+def test_the_grids_names_read_as_text(pages):
+    """In the facts grid a person and an agenda are links in the text's colour; a tie's task, inside its sentence, stays a link
+    in the accent (decision 844: a link inside a sentence is one of the accent's jobs)."""
+    for t in pages.m.tasks.values():
+        grid = pages.facts_grid(t)
+        for m in re.finditer(r'<a href="(person|agenda):[^"]*"[^>]*>', grid):
+            assert grid[m.end():].startswith('<span class="tl">'), (t.id, grid)
+    tied = next((t for t in pages.m.tasks.values() if t.ties), None)
+    if tied is not None:
+        grid = pages.facts_grid(tied)
+        source = next(iter(tied.ties.values())).source
+        m = re.search(rf'<a href="task:{source}"[^>]*>', grid)
+        assert m and not grid[m.end():].startswith("<span")
+    on = next(t for t in pages.m.tasks.values() if pages.m.agendas_on(t.id))
+    assert re.search(r'<a href="(person|task|agenda):[^"]*"[^>]*><span class="tl">', pages.facts_grid(on).split("Agenda")[-1])

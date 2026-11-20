@@ -39,10 +39,15 @@ def test_the_new_colours_are_in_both_themes():
 def test_both_templates_take_every_scale_by_name_and_end_with_the_lanes_sections():
     """Five lane builders each write only between their own two lines, in the style sheet and in the pages' CSS, and name a size
     by its scale, never as a number (section 5a)."""
+    import re
+
+    # Each section in order, its rules (none, or a lane's own) between its two lines, and nothing between the sections (a lane's
+    # rules filled in since release 5.185, lane C's first).
+    sections = "\n".join(rf"/\* ---- lane {k} \({re.escape(name)}\) ---- \*/\n(?:(?!/\* ---- ).*\n|/\* (?!---- )[^\n]*\n)*?"
+                         rf"/\* ---- end lane {k} ---- \*/\n" for k, name in LANES)
     for template in (tokens._QSS.template, tokens._CSS.template):
         tail = template[template.index("/* ---- lane A"):]
-        want = "\n".join(f"/* ---- lane {k} ({name}) ---- */\n\n/* ---- end lane {k} ---- */\n" for k, name in LANES)
-        assert tail == want
+        assert re.fullmatch(sections, tail), tail[:200]
     for name in SCALES:
         assert name in tokens._SIZES, name
     for out in (tokens.qss(), tokens.css()):

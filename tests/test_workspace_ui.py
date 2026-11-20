@@ -178,7 +178,7 @@ def test_the_chain_shows_the_project_this_task_and_its_subtasks(setup):
     browse, work = setup
     w = opened(browse, work.crane)
     assert list(w.chain.cards) == [work.project, work.crane, work.rig]
-    assert "THIS TASK" in w.chain.cards[work.crane].text()
+    assert "This task" in w.chain.cards[work.crane].text()
     assert "waiting on Mike" in w.chain.cards[work.crane].text()
     assert "Survey booked for 17 Nov." in w.chain.cards[work.project].text()
 

@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from PySide6.QtCore import QPoint, QRect, QSize, Qt, Signal
 from PySide6.QtGui import QIcon, QKeySequence, QShortcut
@@ -23,7 +23,7 @@ from docrepo import workspace as ws
 from docrepo.ui import tokens
 from docrepo.ui.icons import icon
 from docrepo.ui.notes_outline import NotesOutline
-from docrepo.ui.task_header import fit_view
+from docrepo.ui.task_header import CardActions, fit_view, set_late
 from docrepo.ui.task_pane import TaskPane
 from docrepo.ui.task_tile import STATE_ICONS, TileWidget
 from docrepo.ui.widgets import DropButton, ElidedLabel
@@ -43,7 +43,8 @@ STATUS_CHARS = 130
 
 
 def _caption(text: str) -> QLabel:
-    """A column's or a group's small heading: "UP THE CHAIN", "SUBTASKS", "and under"."""
+    """A column's or a group's small heading, in sentence case since release 5.185 (the redesign's decision 859): "Up the
+    chain", "Subtasks", "and under"."""
     lb = QLabel(text, objectName="wsCaption")
     lb.setFont(tokens.ui_font(tokens.LABEL, semibold=True))
     return lb
@@ -101,7 +102,7 @@ class WorkPane(TaskPane):
         inner = self.widget().layout()
         self.card_slot = QWidget(objectName="wsCardSlot")
         cl = QVBoxLayout(self.card_slot)
-        cl.setContentsMargins(margin, 14, margin, 0)
+        cl.setContentsMargins(self._margin, 14, self._margin, 0)  # the page's edge, PAGE_EDGE at least (release 5.185)
         inner.insertWidget(0, self.card_slot)
         self.of_label = QLabel("", objectName="notesSaved")
         self.of_label.setFont(tokens.ui_font(tokens.CAPTION))
@@ -114,7 +115,7 @@ class WorkPane(TaskPane):
         self.wrap.layout().insertWidget(1, self.banner)
         self.dates_slot = QWidget(objectName="wsDatesSlot")
         dl = QVBoxLayout(self.dates_slot)
-        dl.setContentsMargins(margin, 4, margin, 18)
+        dl.setContentsMargins(self._margin, 4, self._margin, 18)
         inner.insertWidget(inner.indexOf(self.wrap) + 1, self.dates_slot)
         # The chain's outline is often taller than a short page: the notes start at the frame's top, beside it.
         self.notes_row.layout().setAlignment(self.notes, Qt.AlignmentFlag.AlignTop)
@@ -198,6 +199,8 @@ class CardFacts:
     state: str = ""
     later: bool = False
     add: bool = False
+    #: The card's commands as buttons (release 5.185): (address, words, tooltip), as ``Pages.status_actions`` gives them.
+    actions: list[tuple[str, str, str]] = field(default_factory=list)
 
 
 class StateButton(DropButton):
@@ -237,8 +240,9 @@ class StateButton(DropButton):
 
 class StatusCard(QFrame):
     """The status card at the middle column's top (664): whose it is when another task is picked, its status with its log
-    behind "4 changes", Got it and Log progress…, then the quick entry bar (678): the line to type in, the state's dropdown,
-    and Later… while the task is on Today or Add to Today while it isn't (702)."""
+    behind "4 changes", Got it and Log progress… (buttons since release 5.185, as the task page's card has them), then the
+    quick entry bar (678): the line to type in, the state's dropdown, and Later… while the task is on Today or Add to Today
+    while it isn't (702)."""
 
     link = Signal(str)
     entered = Signal(str, bool)
@@ -251,7 +255,7 @@ class StatusCard(QFrame):
     def __init__(self, css: str) -> None:
         super().__init__(objectName="statusCard")
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(14, 8, 8, 10)
+        lay.setContentsMargins(14, 10, 10, 12)  # the task page's card's (release 5.185)
         lay.setSpacing(0)
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
@@ -264,7 +268,7 @@ class StatusCard(QFrame):
         self.name.setFont(tokens.ui_font(tokens.CAPTION, semibold=True))
         self.when = QLabel("", objectName="statusWhen")
         self.when.setFont(tokens.ui_font(tokens.CAPTION))
-        self.wait = QLabel("", objectName="statusWhen")
+        self.wait = QLabel("", objectName="wsWait")  # in the second grey, the caution colour when late (release 5.185)
         self.wait.setFont(tokens.ui_font(tokens.CAPTION))
         self.log_button = QToolButton(objectName="statusLog")
         self.log_button.setIcon(icon("chevron-right"))
@@ -284,9 +288,13 @@ class StatusCard(QFrame):
         self.log.anchorClicked.connect(lambda url: self.link.emit(url.toString()))
         self.log.hide()
         self.log_open = False
+        self.actions = CardActions()
+        self.actions.link.connect(self.link)
+        self.actions.hide()
         lay.addLayout(row)
         lay.addWidget(self.body)
         lay.addWidget(self.log)
+        lay.addWidget(self.actions, 0, Qt.AlignmentFlag.AlignRight)
         self.entry_row = QWidget(objectName="wsEntryRow")
         el = QHBoxLayout(self.entry_row)
         el.setContentsMargins(0, 8, 4, 0)
@@ -374,9 +382,10 @@ class StatusCard(QFrame):
         self.when.setToolTip(f.when_tip)
         self.wait.setText(f"· {f.wait}" if f.wait else "")
         self.wait.setToolTip(f.wait_tip)
-        self.wait.setStyleSheet(f"color: {tokens.colour('caution')}; font-weight: 600" if f.late else f"color: {tokens.colour('accent')}")
+        set_late(self.wait, f.late)
         self.wait.setVisible(bool(f.wait))
         self.body.setHtml(f.body)
+        self.actions.set_actions(f.actions)
         self.log.setHtml(f.log or '<p class="note">No changes yet.</p>')
         self.log_button.setText(f.changes)
         self.log_button.setVisible(bool(f.changes))
@@ -418,16 +427,9 @@ class DayBox(QLineEdit):
         super().keyPressEvent(e)
 
 
-#: Each kind's chip colours: (text, background) token names.
-KIND_COLOURS = {"Due": ("text2", "hover"), "Deadline": ("critical", "critical_bg"), "Meeting": ("parked", "parked_bg"),
-                "Key date": ("accent", "info_bg"), "Plant event": ("accent", "info_bg"), "Follow-up": ("parked", "parked_bg"),
-                "Reminder": ("caution", "caution_bg")}
-
-
-def _chip_style(kind: str) -> str:
-    fg, bg = KIND_COLOURS.get(kind, ("text2", "hover"))
-    return (f"color: {tokens.colour(fg)}; background: {tokens.colour(bg)}; border-radius: {tokens.RADIUS_S}px; padding: 1px 8px;"
-            f" font-size: {tokens.CAPTION}pt")
+#: A kind's chip, by its ``kind`` property, whose colours are the token file's (release 5.185): a deadline red, a reminder in the
+#: caution colour, a meeting and a follow-up violet; a key date, a plant event and a Due in the quiet grey.
+KIND_TONES = {"Deadline": "deadline", "Reminder": "reminder", "Meeting": "meeting", "Follow-up": "follow_up"}
 
 
 class DatesView(QWidget):
@@ -451,7 +453,7 @@ class DatesView(QWidget):
         head = QHBoxLayout()
         head.setContentsMargins(0, 0, 0, 0)
         head.setSpacing(8)
-        self.title = QLabel("Dates", font=tokens.ui_font(tokens.BODY, semibold=True))
+        self.title = QLabel("Dates", font=tokens.ui_font(tokens.SECTION, semibold=True))
         self.count = QLabel("", objectName="count")
         self.words = QLabel("", objectName="hint")
         self.words.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
@@ -465,7 +467,8 @@ class DatesView(QWidget):
         head.addStretch()
         head.addWidget(self.add_button)
         lay.addLayout(head)
-        self.frame = QFrame(objectName="notesCard")
+        # A soft panel of its own name (release 5.185): it borrowed the notes' frame, which 5.186 takes away.
+        self.frame = QFrame(objectName="wsDatesFrame")
         self.grid = QGridLayout(self.frame)
         self.grid.setContentsMargins(12, 8, 8, 8)
         self.grid.setHorizontalSpacing(12)
@@ -505,8 +508,7 @@ class DatesView(QWidget):
                 for row in earlier:
                     r = self._row(row, r, today, editing, cell, shown_when)
         line = QLabel(f"Today · {shown_when(ws.DateRow(today, 'Due', '', '', ''))}", objectName="wsTodayLine")
-        line.setFont(tokens.ui_font(tokens.CAPTION, semibold=True))
-        line.setStyleSheet(f"color: {tokens.colour('accent')}; border-bottom: 1px solid {tokens.colour('accent')}; padding-bottom: 2px")
+        line.setFont(tokens.ui_font(tokens.CAPTION, semibold=True))  # its colour and rule are the token file's (release 5.185)
         self.grid.addWidget(line, r, 0, 1, 5)
         r += 1
         for row in coming:
@@ -537,10 +539,9 @@ class DatesView(QWidget):
             parts["day"] = day
         when = QLabel(row.when(today), objectName="wsWhen")
         soon = 0 <= (row.day - today).days <= 2
-        when.setStyleSheet(f"color: {tokens.colour('critical' if row.day < today else 'caution' if soon else 'text2')}"
-                           + ("; font-weight: 600" if soon or row.day < today else ""))
+        when.setProperty("tone", "late" if row.day < today else "soon" if soon else "")
         kind = QLabel(("◆ " if row.deadline and row.kind != "Deadline" else "") + row.kind, objectName="wsKind")
-        kind.setStyleSheet(_chip_style(row.kind))
+        kind.setProperty("kind", KIND_TONES.get(row.kind, ""))
         words = QLabel(objectName="wsWords")
         words.setTextFormat(Qt.TextFormat.RichText)
         words.setWordWrap(True)
@@ -589,14 +590,14 @@ class ChainCard(QFrame):
         self.setProperty("this", this)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(6, 4, 8, 6 if not compact else 4)
+        lay.setContentsMargins(6, 5, 8, 5 if not compact else 4)  # a row in the chain's panel (release 5.185)
         lay.setSpacing(1)
         self.tile = TileWidget(tile, self)
         self.tile.state_clicked.connect(self.state_clicked)
         self.tile.opened.connect(self.opened)
         lay.addWidget(self.tile)
         self.labels: list[QLabel] = []
-        for text, name in (("THIS TASK", "wsThis") if this else ("", ""), (status, "wsStatus"), (note, "wsNote")):
+        for text, name in (("This task", "wsThis") if this else ("", ""), (status, "wsStatus"), (note, "wsNote")):
             if not text:
                 continue
             lb = QLabel(text, objectName=name)
@@ -625,9 +626,10 @@ class ChainCard(QFrame):
 
 
 class ChainColumn(QScrollArea):
-    """The chain's column (664): UP THE CHAIN, a tile per task from the project down, a group's words over a second path
+    """The chain's column (664): "Up the chain", a tile per task from the project down, a group's words over a second path
     ("and under") and over the task under both (686: nothing about a parent's other subtasks), this task's tile, then
-    SUBTASKS with its open subtasks, New task and Show closed."""
+    "Subtasks" with its count, its open subtasks, New task and Show closed. Since release 5.185 (decision 859) it's a soft
+    rounded panel set in from the workspace's edges, its tasks rows in it."""
 
     picked = Signal(str)
     opened = Signal(str)
@@ -643,8 +645,8 @@ class ChainColumn(QScrollArea):
         self.setFrameShape(QFrame.Shape.NoFrame)
         inner = QWidget(objectName="wsChainInner")
         self.lay = QVBoxLayout(inner)
-        self.lay.setContentsMargins(12, 12, 10, 12)
-        self.lay.setSpacing(4)
+        self.lay.setContentsMargins(10, 10, 8, 10)
+        self.lay.setSpacing(2)
         self.setWidget(inner)
         self.cards: dict[str, ChainCard] = {}
 
@@ -657,19 +659,27 @@ class ChainColumn(QScrollArea):
                 w.deleteLater()
         self.cards = {}
 
-    def add_caption(self, text: str, link_html: str = "") -> None:
-        if not link_html:
+    def add_caption(self, text: str, link_html: str = "", count: str = "") -> None:
+        """A group's heading, with ``count`` ("3 of 4 open") beside it in the regular weight and ``link_html`` at its right."""
+        if not link_html and not count:
             self.lay.addWidget(_caption(text))
             return
         row = QWidget()
         rl = QHBoxLayout(row)
         rl.setContentsMargins(0, 8, 0, 0)
+        rl.setSpacing(8)
         rl.addWidget(_caption(text))
+        if count:
+            n = QLabel(count, objectName="wsCount")
+            n.setFont(tokens.ui_font(tokens.LABEL))
+            n.setContentsMargins(0, 6, 0, 0)  # level with the caption's words, which have its padding above
+            rl.addWidget(n)
         rl.addStretch()
-        lb = QLabel(link_html, objectName="hint")
-        lb.setTextFormat(Qt.TextFormat.RichText)
-        lb.linkActivated.connect(self.link)
-        rl.addWidget(lb)
+        if link_html:
+            lb = QLabel(link_html, objectName="hint")
+            lb.setTextFormat(Qt.TextFormat.RichText)
+            lb.linkActivated.connect(self.link)
+            rl.addWidget(lb)
         self.lay.addWidget(row)
 
     def add_card(self, card: ChainCard, indent: int = 0) -> None:
@@ -698,6 +708,10 @@ class ChainColumn(QScrollArea):
 
     def text(self) -> str:
         return "\n".join(c.text() for c in self.cards.values())
+
+    def captions(self) -> list[str]:
+        """The column's headings and counts, for the tests."""
+        return [lb.text() for lb in self.widget().findChildren(QLabel) if lb.objectName() in ("wsCaption", "wsCount")]
 
 
 def status_line(text: str, day: str) -> str:

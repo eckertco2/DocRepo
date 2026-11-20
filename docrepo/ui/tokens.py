@@ -460,7 +460,49 @@ QDialog#palette { background: $content; border: 1px solid $stroke_strong; }
 /* ---- end lane B ---- */
 
 /* ---- lane C (the pages) ---- */
+/* release 5.185 (lane C): the task page and the workspace (the redesign's decision 859). The rules above these that name the same
+   widgets are overridden here; 5.194 tidies them. */
+QFrame#statusCard, QFrame#statusCard[empty="true"] { background: $sunken; border: none; border-radius: ${radius_l}px; }
+QLabel#statusName { color: $text2; }
+QLabel#statusWhen, QLabel#groupSummaryLabel { color: $text3; }
+QLabel#statusWhen[late="true"] { color: $caution; font-weight: 600; }
+QToolButton#statusLog { border: none; border-radius: ${radius_s}px; background: transparent; padding: 2px 4px 2px 6px; color: $text3; }
+QToolButton#statusLog:hover { background: $hover; color: $text; text-decoration: none; }
+QPushButton#cardAction, QPushButton#wsState, QPushButton#wsLater, QPushButton#wsAdd { background: $content; color: $text;
+  border: 1px solid $stroke_strong; border-radius: ${radius_s}px; padding: 0 10px; min-height: 24px; max-height: 24px; font-weight: 400; }
+QPushButton#cardAction:hover, QPushButton#wsState:hover, QPushButton#wsLater:hover, QPushButton#wsAdd:hover { background: $hover; }
+QPushButton#cardAction:pressed, QPushButton#wsState:pressed, QPushButton#wsLater:pressed, QPushButton#wsAdd:pressed { background: $pressed; }
+QToolButton#groupHead { border: none; border-radius: ${radius_s}px; background: transparent; padding: 2px 6px 2px 2px; color: $text; }
+QToolButton#groupHead:hover { background: $hover; }
 
+QWidget#workspace, QWidget#wsHead, QWidget#wsBar, QWidget#wsResources { background: $content; }
+QWidget#wsBar { border-bottom: 1px solid $stroke; }
+QWidget#wsResources { border-left: 1px solid $stroke; }
+QScrollArea#wsChain { background: $sunken; border: none; border-radius: ${radius_l}px; }
+QWidget#wsChainInner { background: transparent; }
+QLabel#wsCaption, QLabel#wsKicker, QLabel#wsThis, QLabel#wsStatus, QLabel#wsCount { color: $text3; }
+QLabel#wsCaption { padding-top: 6px; }
+QLabel#wsNote, QLabel#wsWait { color: $text2; }
+QLabel#wsWait[late="true"] { color: $caution; font-weight: 600; }
+QFrame#wsChainCard { background: transparent; border: none; border-radius: ${radius_s}px; }
+QFrame#wsChainCard:hover { background: $hover; }
+QFrame#wsChainCard[picked="true"] { background: $selected; }
+QLabel#wsBanner { background: $sunken; border-radius: ${radius}px; padding: 7px 10px; margin-bottom: 6px; }
+QLabel#wsOn { color: $text2; background: $sunken; border-radius: ${radius_s}px; padding: 2px 9px; }
+QFrame#wsAgents { border: 1px dashed $stroke_strong; border-radius: ${radius_s}px; }
+QPushButton#wsLink { color: $text2; border: none; background: transparent; padding: 0; text-align: left; min-height: 0; }
+QPushButton#wsLink:hover { color: $text; text-decoration: underline; }
+QPushButton#wsDay { color: $text; border: none; background: transparent; padding: 2px 0; text-align: left; min-height: 0; }
+QPushButton#wsDay:hover { text-decoration: underline; }
+QFrame#wsDatesFrame { background: $sunken; border: none; border-radius: ${radius_l}px; }
+QLabel#wsTodayLine { color: $text2; border-bottom: 1px solid $stroke_strong; padding-bottom: 2px; }
+QLabel#wsWhen { color: $text3; }
+QLabel#wsWhen[tone="soon"] { color: $caution; font-weight: 600; }
+QLabel#wsWhen[tone="late"] { color: $critical; font-weight: 600; }
+QLabel#wsKind { color: $text2; background: $hover; border-radius: ${radius_s}px; padding: 1px 8px; font-size: ${caption}pt; }
+QLabel#wsKind[kind="deadline"] { color: $critical; background: $critical_bg; }
+QLabel#wsKind[kind="reminder"] { color: $caution; background: $caution_bg; }
+QLabel#wsKind[kind="meeting"], QLabel#wsKind[kind="follow_up"] { color: $parked; background: $parked_bg; }
 /* ---- end lane C ---- */
 
 /* ---- lane D (the floating windows) ---- */
@@ -495,7 +537,6 @@ body { color: $text; }
 a { color: $accent; text-decoration: none; }
 h2 { font-family: 'Segoe UI'; font-size: ${page_title}pt; font-weight: 600; margin-top: 2px; margin-bottom: 4px; }
 .ptitle { font-family: 'Segoe UI'; font-size: ${page_title}pt; font-weight: 600; }
-.crumbs { color: $text2; font-size: ${caption}pt; margin: 0; }
 .sub { color: $text3; font-size: ${caption}pt; font-weight: 400; }
 .faint { color: $text2; }
 .k { color: $text3; padding-right: 12px; }
@@ -541,7 +582,6 @@ h2 { font-family: 'Segoe UI'; font-size: ${page_title}pt; font-weight: 600; marg
 .dt { color: $text3; font-size: ${caption}pt; padding-right: 14px; }
 .rel { color: $text3; font-size: ${caption}pt; font-weight: 400; }
 .over { color: $critical; }
-.tile { background-color: $base; border-bottom: 2px solid $content; }
 .stat { background-color: $base; }
 .sk { color: $text3; font-size: ${caption}pt; }
 .desc { color: $text2; margin-top: 4px; }
@@ -559,9 +599,6 @@ h2 { font-family: 'Segoe UI'; font-size: ${page_title}pt; font-weight: 600; marg
 .hitline { margin: 0; background-color: $caution_bg; }
 .gap { margin: 0; color: $text2; }
 .stext { margin-top: 4px; margin-bottom: 0; }
-.gk { color: $text3; padding-right: 10px; }
-.relb { color: $text2; font-weight: 400; }
-.grid { margin-top: 12px; }
 .anday { color: $text3; font-size: ${label}pt; font-weight: 600; margin-top: 14px; margin-bottom: 2px; }
 .src { color: $text3; font-size: ${caption}pt; font-weight: 400; margin-top: 8px; margin-bottom: 2px; }
 .nl { margin: 0; }
@@ -583,7 +620,14 @@ h2 { font-family: 'Segoe UI'; font-size: ${page_title}pt; font-weight: 600; marg
 /* ---- end lane B ---- */
 
 /* ---- lane C (the pages) ---- */
-
+/* release 5.185 (lane C): the task page (the redesign's decision 859) */
+.crumbs { color: $text3; font-size: ${caption}pt; margin: 0; }
+.gk { color: $text3; font-size: ${caption}pt; padding-right: 10px; }
+.relb { color: $text3; font-size: ${caption}pt; font-weight: 400; }
+.grid { margin-top: 16px; }
+.pill { background-color: $sunken; }
+.cmd { color: $text2; font-size: ${caption}pt; }
+.tile { border-top: 1px solid $stroke; padding-top: 6px; padding-bottom: 6px; }
 /* ---- end lane C ---- */
 
 /* ---- lane D (the floating windows) ---- */
