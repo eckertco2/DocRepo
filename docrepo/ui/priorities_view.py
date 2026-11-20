@@ -10,13 +10,17 @@ Like the timeline, it takes the middle and right panes together. ``docrepo/prior
 Show (release 5.137, decisions 550 to 554) picks Work, Parents or All. In Parents a parent's card holds the subtasks
 folded into it: its opener (or Space) lists them as rows, and a row is picked, ranked, dragged and opened as a card is.
 A parent's card shows its subtasks' buckets as small squares (``Pips``), in Parents and All.
+
+Release 5.191 (the redesign's decision 866): the columns are soft panels with no outline; a column with no cards folds to a
+slim rail (``Rail``) while another has cards, and every rail opens while a card is dragged; a card is at most three lines:
+its title on two (``TwoLines``), then its people and days, its path in its tooltip.
 """
 from __future__ import annotations
 
 from datetime import date
 
-from PySide6.QtCore import QByteArray, QEvent, QMimeData, QObject, QPoint, QRect, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QDrag, QPainter, QPen
+from PySide6.QtCore import QByteArray, QEvent, QMimeData, QObject, QPoint, QRect, QRectF, QSize, Qt, Signal
+from PySide6.QtGui import QColor, QDrag, QFontMetrics, QPainter, QPen, QTextLayout, QTextOption
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -46,6 +50,14 @@ from docrepo.views import due_cell, find_text, path_text
 
 #: A column's least width: the board scrolls across in a narrower window, so it never sets the window's least width (release 5.58).
 COLUMN_MIN = 216
+#: A folded column's width (release 5.191, decision 866): a rail with its count and its name turned on its side.
+RAIL = 44
+#: A column's margins inside its panel.
+COLUMN_PAD = 8
+#: The card's colour mark (release 5.191): a bar this wide, this far in from the card's left edge and from its top and bottom.
+MARK_WIDTH, MARK_INSET, MARK_PAD = 3, 6, 8
+#: A rail's name starts this far under its count, beyond the layout's spacing.
+RAIL_GAP = 4
 #: A dragged card carries its task's ID.
 MIME = "application/x-docrepo-task"
 #: A state's chip colours, as the pages draw them.
@@ -105,9 +117,12 @@ class _Picked:
         drag.setMimeData(mime)
         drag.setPixmap(self.grab())  # type: ignore[attr-defined]
         drag.setHotSpot(event.position().toPoint())
-        self.view.dragging = self.task_id
+        view = self.view  # this card may be drawn again, and deleted, while the drag's loop runs
+        view.dragging = self.task_id
+        view.set_rails_open(True)  # after the picture is grabbed, so the held card is drawn as it was (release 5.191)
         drag.exec(Qt.DropAction.MoveAction)
-        self.view.dragging = None
+        view.dragging = None
+        view.set_rails_open(False)
 
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
         self._press = None
@@ -153,12 +168,72 @@ class Pips(QWidget):
         p.end()
 
 
-class Card(_Picked, QFrame):
-    """A task's card: its title, its path, and a line of facts (Urgent, the due date, its people), with its top-level
-    task's colour down its left edge. A parent's card adds a line for its subtasks, and in Parents the rows of those
-    inside it (``rows_box``), opened and closed by its ``opener``."""
+class TwoLines(QLabel):
+    """A title on at most two lines (release 5.191, decision 866), the second ending in "…" when there's more, and the
+    whole of it in the tooltip only when it was cut. Its font and colour are the style sheet's, as any label's."""
 
-    def __init__(self, view: "PrioritiesView", t: Task, colour: str, facts: str, path: str, selected: bool,
+    def __init__(self, text: str = "", objectName: str = "") -> None:  # noqa: N803 - Qt's name
+        super().__init__(text)
+        if objectName:
+            self.setObjectName(objectName)
+        self.setTextFormat(Qt.TextFormat.PlainText)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+
+    def lines(self, width: int) -> tuple[list[str], bool]:
+        """The lines drawn at ``width``, and whether the title was cut to fit them."""
+        text = " ".join(self.text().split())
+        if width <= 0 or not text:
+            return [text], False
+        layout = QTextLayout(text, self.font())
+        option = QTextOption()
+        option.setWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
+        layout.setTextOption(option)
+        layout.beginLayout()
+        first = layout.createLine()
+        first.setLineWidth(width)
+        end = first.textStart() + first.textLength()
+        layout.endLayout()
+        head, rest = text[:end].rstrip(), text[end:].strip()
+        if not rest:
+            return [head], False
+        second = self.fontMetrics().elidedText(rest, Qt.TextElideMode.ElideRight, width)
+        return [head, second], second != rest
+
+    def hasHeightForWidth(self) -> bool:  # noqa: N802 - Qt's name
+        return True
+
+    def heightForWidth(self, width: int) -> int:  # noqa: N802 - Qt's name
+        m = self.contentsMargins()
+        return len(self.lines(width - m.left() - m.right())[0]) * self.fontMetrics().lineSpacing() + m.top() + m.bottom()
+
+    def sizeHint(self) -> QSize:  # noqa: N802 - Qt's name
+        return QSize(self.fontMetrics().horizontalAdvance(self.text()), self.fontMetrics().lineSpacing())
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802 - Qt's name
+        return QSize(0, self.fontMetrics().lineSpacing())
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        super().resizeEvent(event)
+        self.setToolTip(self.text() if self.lines(self.contentsRect().width())[1] else "")
+
+    def paintEvent(self, _event) -> None:  # noqa: N802 - Qt's name
+        p = QPainter(self)
+        r = self.contentsRect()
+        step = self.fontMetrics().lineSpacing()
+        for i, line in enumerate(self.lines(r.width())[0]):
+            self.style().drawItemText(p, QRect(r.left(), r.top() + i * step, r.width(), step),
+                                      Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, self.palette(), self.isEnabled(),
+                                      line, self.foregroundRole())
+        p.end()
+
+
+class Card(_Picked, QFrame):
+    """A task's card, at most three lines (release 5.191, decision 866): its title on two, then Urgent's flag, its people,
+    its marks and its days, with its top-level task's colour as a mark inside its left edge. Its path is in its tooltip. A
+    parent's card adds a line for its subtasks, and in Parents the rows of those inside it (``rows_box``), opened and
+    closed by its ``opener``."""
+
+    def __init__(self, view: "PrioritiesView", t: Task, colour: str, who: str, path: str, selected: bool,
                  tile: task_tile.Tile | None = None) -> None:
         super().__init__(objectName="prCard")
         self.view, self.task_id, self.colour = view, t.id, colour
@@ -166,8 +241,9 @@ class Card(_Picked, QFrame):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setCursor(Qt.CursorShape.OpenHandCursor)
         self.setAccessibleName(f"{t.title}, {priorities.name(t.priority)}")
+        self.setToolTip(f"{t.title}\n{path}" if path else t.title)
         self.lay = QVBoxLayout(self)
-        self.lay.setContentsMargins(12, 8, 10, 8)
+        self.lay.setContentsMargins(16, 8, 10, 8)
         self.lay.setSpacing(2)
         # A task tile's parts on a card (release 5.138, the task tile plan's decision 575): the state's circle before the
         # title, which still wraps, and the marks and days at the end of the facts line.
@@ -189,21 +265,20 @@ class Card(_Picked, QFrame):
             self.kind.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.kind.setToolTip(mark[1])
             top.addWidget(self.kind, 0, Qt.AlignmentFlag.AlignTop)
-        title = QLabel(esc(t.title), objectName="prTitle")
-        title.setWordWrap(True)
-        top.addWidget(title, 1)
+        self.title = TwoLines(t.title, objectName="prTitle")
+        top.addWidget(self.title, 1)
         self.lay.addLayout(top)
-        if path:
-            self.lay.addWidget(ElidedLabel(path, objectName="fieldLabel"))
-        if facts or tile is not None:
+        days = tile is not None and (tile.days is not None or any(tile.marks))
+        if who or t.urgent or days:  # one line: Urgent's flag, the people cut to fit, then the marks and days at the right
             line = QHBoxLayout()
             line.setContentsMargins(0, 0, 0, 0)
             line.setSpacing(6)
-            f = QLabel(facts)
-            f.setWordWrap(True)
-            f.setTextFormat(Qt.TextFormat.RichText)
-            line.addWidget(f, 1)
-            if tile is not None and (tile.days is not None or any(tile.marks)):
+            if t.urgent:  # Urgent's flag, as on every tile (release 5.138, decision 569)
+                flag = QLabel(f'<span style="color:{tokens.colour("critical")}; font-weight:600">⚑</span>')
+                flag.setTextFormat(Qt.TextFormat.RichText)
+                line.addWidget(flag)
+            line.addWidget(ElidedLabel(who, objectName="prFacts"), 1)
+            if days and tile is not None:
                 line.addWidget(tile_ui.MarksDays(tile), 0, Qt.AlignmentFlag.AlignVCenter)
             self.lay.addLayout(line)
         for w in self.findChildren(QLabel):
@@ -225,8 +300,12 @@ class Card(_Picked, QFrame):
 
     def paintEvent(self, event) -> None:  # noqa: N802 - Qt's name
         super().paintEvent(event)
-        p = QPainter(self)
-        p.fillRect(0, 1, 3, self.height() - 2, QColor(self.colour))
+        p = QPainter(self)  # the top-level task's colour, a mark inside the card, clear of its rounded corners (release 5.191)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(self.colour))
+        bar = QRectF(MARK_INSET, MARK_PAD, MARK_WIDTH, max(self.height() - 2 * MARK_PAD, MARK_WIDTH))
+        p.drawRoundedRect(bar, tokens.RADIUS_EDGE, tokens.RADIUS_EDGE)
         p.end()
 
 
@@ -263,9 +342,61 @@ class Row(_Picked, QFrame):
         return r if r.contains(pos) else None
 
 
+class _Sideways(QWidget):
+    """A rail's name, turned a quarter turn to read from the bottom up, hugging the top, ending in "…" when the rail is
+    too short for it."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__()
+        self.name = name
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+        self.setMinimumHeight(RAIL_GAP + 16)
+
+    def shown(self) -> str:
+        """The name as drawn, cut to the rail's length when it must be."""
+        return QFontMetrics(tokens.ui_font(tokens.LABEL, semibold=True)).elidedText(self.name, Qt.TextElideMode.ElideRight,
+                                                                                   max(self.height() - RAIL_GAP, 0))
+
+    def paintEvent(self, _event) -> None:  # noqa: N802 - Qt's name
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+        p.setFont(tokens.ui_font(tokens.LABEL, semibold=True))
+        p.setPen(QColor(tokens.colour("text2")))
+        length = self.height() - RAIL_GAP
+        p.translate(0, self.height())
+        p.rotate(-90)  # x now runs up from the bottom; the name's end sits RAIL_GAP under the top
+        p.drawText(QRectF(0, 0, length, self.width()), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, self.shown())
+        p.end()
+
+
+class Rail(QWidget):
+    """What a folded column shows (release 5.191, decision 866): its key (with Show hints), its count, and its name on its
+    side. It takes no clicks; a card dragged onto it lands at its column's end."""
+
+    def __init__(self, col: priorities.Column) -> None:
+        super().__init__(objectName="prRail")
+        self.setFixedWidth(RAIL - 2 * COLUMN_PAD)
+        where = "out of its bucket" if not col.key else "here"
+        self.setToolTip(f"{col.name}: no cards. Drag a card here, or press {col.digit} to move the selected card {where}.")
+        self.setAccessibleName(f"{col.name}, empty")
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(4)
+        key = KeyBadge(col.digit)
+        key.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lay.addWidget(key, 0, Qt.AlignmentFlag.AlignHCenter)
+        self.count = QLabel(str(len(col.ids)), objectName="count")
+        self.count.setFont(tokens.numeric_font(tokens.CAPTION))
+        self.count.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lay.addWidget(self.count, 0, Qt.AlignmentFlag.AlignHCenter)
+        self.side = _Sideways(col.name)
+        lay.addWidget(self.side, 1)
+
+
 class Column(QFrame):
     """A bucket's column: its key, name and count, then its cards. A card dropped on it goes where the line shows, before
-    the card under the pointer's middle, or at the end; Not ranked has no order, so there's no line."""
+    the card under the pointer's middle, or at the end; Not ranked has no order, so there's no line. With no cards, while
+    another column has some, it folds to a ``Rail`` (release 5.191, decision 866), which opens while a card is dragged."""
 
     def __init__(self, view: "PrioritiesView", col: priorities.Column) -> None:
         super().__init__(objectName="prCol")
@@ -273,15 +404,26 @@ class Column(QFrame):
         self.setAcceptDrops(True)
         self.setMinimumWidth(COLUMN_MIN)
         self.setAccessibleName(col.name)
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(8, 8, 8, 8)
+        self.setProperty("rail", False)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(COLUMN_PAD, COLUMN_PAD, COLUMN_PAD, COLUMN_PAD)
+        outer.setSpacing(0)
+        #: What the column holds open: its head, Not ranked's sentence and its cards.
+        self.open_box = QWidget(objectName="prColBody")
+        lay = QVBoxLayout(self.open_box)
+        lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(6)
+        outer.addWidget(self.open_box, 1)
+        self.rail = Rail(col)
+        self.rail.hide()
+        outer.addWidget(self.rail, 1)
         head = QHBoxLayout()
         moves = f"Press {col.digit} to move the selected card {'out of its bucket' if not col.key else 'here'}"
         key = KeyBadge(col.digit)  # with Show hints; the Alt overlay and the tooltip have it otherwise (decision 7)
         key.setToolTip(moves)
         head.addWidget(key)
-        name = QLabel(f"<b>{esc(col.name)}</b>")
+        name = QLabel(col.name, objectName="prColName")
+        name.setTextFormat(Qt.TextFormat.PlainText)
         name.setToolTip(moves)
         head.addWidget(name)
         head.addStretch(1)
@@ -312,6 +454,24 @@ class Column(QFrame):
         self.line.hide()
         scroll.setWidget(body)
         lay.addWidget(scroll, 1)
+
+    @property
+    def is_rail(self) -> bool:
+        """Whether the column is folded to its rail."""
+        return bool(self.property("rail"))
+
+    def set_rail(self, on: bool) -> None:
+        """Fold the column to its rail, or open it to its full width (release 5.191, decision 866)."""
+        if on == self.is_rail:
+            return
+        self.open_box.setVisible(not on)
+        self.rail.setVisible(on)
+        self.setProperty("rail", on)
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self.setMinimumWidth(RAIL if on else COLUMN_MIN)
+        self.setMaximumWidth(RAIL if on else 16777215)
+        self.view.board_layout.setStretchFactor(self, 0 if on else 1)
 
     def _spot(self, y_in_column: int) -> Card | None:
         """The card a drop at this height lands before: the first whose middle is below the pointer."""
@@ -435,7 +595,7 @@ class PrioritiesView(QWidget):
         fb.addWidget(self.find_count)
         self.find_bar.hide()
         lay.addWidget(self.find_bar)
-        self.strip = QFrame(objectName="fileRow")
+        self.strip = QFrame(objectName="prStrip")
         sl = QVBoxLayout(self.strip)
         sl.setContentsMargins(12, 8, 12, 8)
         sl.setSpacing(8)
@@ -465,18 +625,21 @@ class PrioritiesView(QWidget):
         row.addStretch(1)
         self.open_button = QPushButton("Open task")
         self.open_button.clicked.connect(lambda: self.sel and self.open_task.emit(self.sel))
-        self.edit_button = QPushButton("Edit")
+        self.edit_button = QPushButton("Edit", objectName="subtle")
         self.edit_button.setToolTip("Edit task (E)")
         self.edit_button.clicked.connect(lambda: self.sel and self.edit_task.emit(self.sel))
         row.addWidget(self.open_button)
         row.addWidget(self.edit_button)
         sl.addLayout(row)
         lay.addWidget(self.strip)
-        self.board = QWidget()
+        self.board = QWidget(objectName="prBoard")
         self.board_layout = QHBoxLayout(self.board)
         self.board_layout.setContentsMargins(0, 0, 0, 0)
         self.board_layout.setSpacing(8)
-        board_scroll = QScrollArea()
+        #: The columns in the board's order, and whether the rails are open while a card is dragged (release 5.191).
+        self.column_widgets: list[Column] = []
+        self.rails_open = False
+        board_scroll = QScrollArea(objectName="prBoardScroll")
         board_scroll.setWidgetResizable(True)
         board_scroll.setFrameShape(QFrame.Shape.NoFrame)
         board_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -517,7 +680,7 @@ class PrioritiesView(QWidget):
         self.sel = sel if sel in shown or sel in inside else None
         self._controls()
         n, unranked = len(shown), len(self.columns[0].ids)
-        self.title.setText(f'Priorities&nbsp;&nbsp;<span style="color:{tokens.colour("text2")}; font-size:{tokens.CAPTION}pt; font-weight:400">'
+        self.title.setText(f'Priorities&nbsp;&nbsp;<span style="color:{tokens.colour("text3")}; font-size:{tokens.CAPTION}pt; font-weight:400">'
                            f'{n} open task{"" if n == 1 else "s"}{f", {unranked} not ranked" if unranked else ""}</span>')
         self._strip()
         while self.board_layout.count():
@@ -526,11 +689,27 @@ class PrioritiesView(QWidget):
                 w.hide()
                 w.deleteLater()
         self.cards, self.rows = {}, {}
+        self.column_widgets = []
         for col in self.columns:
-            self.board_layout.addWidget(Column(self, col), 1)
+            column = Column(self, col)
+            self.column_widgets.append(column)
+            self.board_layout.addWidget(column, 1)
+        self._fold()
         held = self._widget(self.sel)
         if had_focus and held is not None:
             held.setFocus(Qt.FocusReason.OtherFocusReason)
+
+    def _fold(self) -> None:
+        """Each column with no cards is a rail, while another has cards and no card is being dragged (release 5.191)."""
+        anything = any(c.ids for c in self.columns)
+        for column, col in zip(self.column_widgets, self.columns, strict=True):
+            column.set_rail(anything and not col.ids and not self.rails_open)
+
+    def set_rails_open(self, on: bool) -> None:
+        """Open every rail, while a card is dragged, or fold them again (release 5.191, decision 866). They open together
+        at the drag's start, so no column moves out from under the held card on the way."""
+        self.rails_open = on
+        self._fold()
 
     def _widget(self, task_id: str | None) -> QWidget | None:
         """The selected task's card, or its first row in an open card."""
@@ -577,7 +756,7 @@ class PrioritiesView(QWidget):
                      else f"{len(kids)} open subtask{'' if len(kids) == 1 else 's'}"]
         if not words:
             return
-        said = QLabel(f'<span style="color:{tokens.colour("text2")}">{esc(" · ".join(words))}</span>')
+        said = QLabel(f'<span style="color:{tokens.colour("text3")}">{esc(" · ".join(words))}</span>')
         said.setWordWrap(True)  # a narrow column wraps it, rather than the card running past the column's edge
         said.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         hl.addWidget(said, 1)
@@ -615,18 +794,13 @@ class PrioritiesView(QWidget):
         m = self.model
         assert m is not None
         t = m.task(task_id)
-        bits = []
         tile = task_tile.tile(m, t.id, self.today, task_tile.marks(m, self.today))
-        if t.urgent:  # Urgent's flag, as on every tile (release 5.138, decision 569); the days are the tile's, at the line's end
-            bits.append(f'<span style="color:{tokens.colour("critical")}; font-weight:600">⚑</span>')
         who = ", ".join("Me" if p == self.me else m.person_name(p).split()[0] for p in dict.fromkeys((*t.leads, *t.assignees)))
-        if who:
-            bits.append(f'<span style="color:{tokens.colour("text2")}">{esc(who)}</span>')
-        card = Card(self, t, self._colours.get(t.id, tokens.group_colour(-1)), " &nbsp;".join(bits), path_text(m, t.id), t.id == self.sel, tile)
+        card = Card(self, t, self._colours.get(t.id, tokens.group_colour(-1)), who, path_text(m, t.id), t.id == self.sel, tile)
         self._family(card, t)
         if task_id in self.context:  # shown only for the subtasks folded into it: dimmed, as the task tree's parents are
             card.setProperty("context", True)
-            card.setToolTip("Shown for the subtasks inside it; it doesn't match the filters itself")
+            card.setToolTip(f"{card.toolTip()}\nShown for the subtasks inside it; it doesn't match the filters itself")
             card.setAccessibleName(f"{card.accessibleName()}, shown for the subtasks inside it")
         self.cards[task_id] = card
         return card
@@ -700,7 +874,7 @@ class PrioritiesView(QWidget):
         for w in (self.buckets, self.open_button, self.edit_button):
             w.setVisible(t is not None)
         self.strip.setVisible(t is not None or LOOK.show_help)  # no card, and no sentence about it, until a card is picked
-        muted = tokens.colour("text2")
+        muted = tokens.colour("text3")
         if t is None or m is None:
             self.strip_text.setText(f'<span style="color:{muted}">{esc(NOTE)}</span>')
             return
