@@ -570,6 +570,30 @@ QPushButton#danger:hover { background: $critical_hover; border-color: $critical_
 QPushButton#danger:pressed { background: $critical_pressed; border-color: $critical_pressed; }
 QWidget#summaryTop { background: $content; border-bottom: 1px solid $stroke; }
 QWidget#summaryFoot { background: $content; border-top: 1px solid $stroke; }
+/* release 5.188: the capture window's chips (decision 861). The understood words are tinted in the text, so the found box
+   loses its yellow and a filled field its tint and marker; Save shows its key. */
+QWidget#footer { background: $content; border-top: 1px solid $stroke; }
+QFrame#found, QFrame#found[empty="true"] { background: transparent; border: none; }
+QToolButton#fact { border: 1px solid $stroke; border-radius: ${radius_s}px; background: transparent; color: $text;
+    padding: 0 8px; min-height: 22px; max-height: 22px; font-size: ${caption}pt; }
+QToolButton#fact:hover, QToolButton#factMore:hover { background: $hover; }
+QToolButton#factMore { border: none; border-radius: ${radius_s}px; background: transparent; color: $text3;
+    padding: 0 8px; min-height: 24px; max-height: 24px; font-size: ${caption}pt; }
+QToolButton#factMore:checked { background: $sunken; color: $text; }
+QFrame#factPopover { background: $content; border: 1px solid $stroke_strong; border-radius: ${radius_l}px; }
+QPushButton#primary[keyed="true"] { padding: 5px 86px 5px 16px; text-align: left; }
+QLabel#saveKey { background: rgba(255, 255, 255, 0.18); color: $on_accent; border-radius: ${radius_box}px; padding: 1px 6px;
+    font-size: ${caption}pt; font-weight: 400; }
+QWidget#capture QLineEdit[filled="true"], QWidget#capture QLineEdit[filled="dot"], QWidget#capture QPlainTextEdit[filled="true"],
+QWidget#capture QComboBox[filled="true"] { background: $content; border-color: $stroke_strong; }
+QWidget#capture QLineEdit[filled="true"], QWidget#capture QLineEdit[filled="dot"] { padding-right: 8px; }
+QWidget#capture QLineEdit#dateLine[filled="true"], QWidget#capture QLineEdit#dateLine[filled="dot"] { padding-left: 8px; }
+QWidget#capture QLineEdit[filled="true"]:focus, QWidget#capture QLineEdit[filled="dot"]:focus,
+QWidget#capture QPlainTextEdit[filled="true"]:focus, QWidget#capture QComboBox[filled="true"]:focus { border-color: $accent; }
+QWidget#capture QLineEdit[filled="true"]:focus, QWidget#capture QLineEdit[filled="dot"]:focus { padding-right: 7px; }
+QWidget#capture QLineEdit#dateLine[filled="true"]:focus, QWidget#capture QLineEdit#dateLine[filled="dot"]:focus { padding-left: 7px; }
+QWidget#capture QCheckBox[filled="true"] { background: transparent; }
+QWidget#capture QToolButton#chip[filled="true"] { background: $sunken; border-color: transparent; }
 /* ---- end lane D ---- */
 
 /* ---- lane E (planning views and forms) ---- */

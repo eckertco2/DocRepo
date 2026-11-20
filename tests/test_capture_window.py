@@ -122,7 +122,7 @@ def test_an_updates_first_sentence_is_its_current_status(window, ctx):
     window.u_status.setPlainText(Model(ctx.conn).task("T000009").current_status or "")
     window.parse()
     assert window.u_status.toPlainText() == (Model(ctx.conn).task("T000009").current_status or "")
-    assert "Update: Latest update" not in window.found_label.text()
+    assert "Update: Latest update" not in [c.fact.label for c in window.fact_chips.chips]  # its field is on screen (release 5.188)
 
 
 def test_an_update_changes_only_what_differs(window, ctx):
@@ -541,10 +541,12 @@ def test_what_parse_and_populate_understood_sits_under_the_content_text(window):
     window.set_type("update", True)
     window.content.setPlainText("Closed. The coupling is in.")
     window.parse()
+    # Since release 5.188 (decision 861): the facts as chips, Clear beside them, and the understood words tinted in the text.
     assert window.found_box.isVisibleTo(window) and window.clear_found.isVisibleTo(window)
-    assert "Understood" in window.found_label.text() and "Latest update" in window.found_label.text()
+    assert window.fact_chips.more_chip.isVisibleTo(window) and window.highlighter.understood
     window.clear_found.click()
-    assert not window.found_box.isVisibleTo(window)
+    assert window.found_box.isVisibleTo(window) and not window.clear_found.isVisibleTo(window)  # More fields stays
+    assert window.highlighter.understood == []
     window._arrange(600)
     assert window.main_layout.direction() == QBoxLayout.Direction.TopToBottom
     window._arrange(940)
@@ -672,7 +674,7 @@ def test_reference_fields_and_plant_events_in_the_capture_window(window, ctx):
     window.content.setPlainText("Spring outage prep under work order 48213, due Oct 30.")
     window.parse()
     assert window.n_refs["Work order #"].text() == "48213" and window.n_more.isHidden()
-    assert "<b>Work order #</b> 48213" in window.found_label.text()
+    assert "Work order # 48213" in [c.text() for c in window.fact_chips.chips]  # a chip since release 5.188
     window.n_plant.setChecked(True)
     window.save()
     new = Model(ctx.conn).task("T000020")
@@ -709,7 +711,7 @@ def test_parse_ticks_plant_event(window, ctx):
     window.set_type("new_task", True)
     window.content.setPlainText("**event, Fall turnaround, 2 to 6 Nov")
     window.parse()
-    assert window.n_plant.isChecked() and "Plant event" in window.found_label.text()
+    assert window.n_plant.isChecked() and "Plant event Yes" in [c.text() for c in window.fact_chips.chips]
     window.save()
     t = next(t for t in Model(ctx.conn).tasks.values() if t.title == "Fall turnaround")
     assert t.plant_event and t.due == "2026-11-06"
