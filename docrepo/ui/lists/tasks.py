@@ -24,7 +24,7 @@ from docrepo.kinds import is_work
 from docrepo.schedule import DueDate, is_open
 from docrepo.ui.task_forms import BulkEditDialog
 from docrepo.ui.tree_view import KEY_ROLE, Line, group_ground, tint, with_actions
-from docrepo.ui.widgets import CheckMenuButton, label_filter, people_filter
+from docrepo.ui.widgets import label_filter, people_filter
 from docrepo.views import (
     LIST_IDS,
     SORTS,
@@ -127,25 +127,23 @@ class TaskLists:
                        f"{sum(1 for t in m.tasks.values() if is_work(t))} open")
         # Urgent only (release 5.97, the consolidation plan's decision 386): what the Urgent view listed, in the tree, first
         # among the filters (the mock's place, the owner's choice of 2026-11-07).
+        # In the Filter panel since release 5.184 (decision 855), each with a chip while it's off its default.
         self._check("Urgent only", bool(f.get("urgent")), lambda on: self._set_filter("urgent", on),
                     "Only the tasks ticked Urgent, with their parents dimmed. Today's Due in the next 7 days puts them first too.")
-        self._check("Show parked", f["parked"], lambda on: self._set_filter("parked", on))
-        self._check("Show closed", f["closed"], lambda on: self._set_filter("closed", on))
-        self._check("Show routine", f["routine"], lambda on: self._set_filter("routine", on), "Recurring tasks, such as meetings, and their subtasks")
+        self._check("Show parked", f["parked"], lambda on: self._set_filter("parked", on), chip="Parked shown")
+        self._check("Show closed", f["closed"], lambda on: self._set_filter("closed", on), chip="Closed shown")
+        self._check("Show routine", f["routine"], lambda on: self._set_filter("routine", on), "Recurring tasks, such as meetings, and their subtasks",
+                    default=True, chip="Routine hidden")
         # Several labels and people at once (mods log round 1, M0018): a task matches with any of each.
         # A parent label ticks its sublabels, and a group its people (release 5.9).
         choices, sets = label_filter(m)
-        labels = CheckMenuButton("Labels", "any", choices, f["labels"], sets)
-        labels.chosen.connect(lambda values: self._set_filter("labels", values))
-        self._filter_widget(labels)
-        people_button = CheckMenuButton("People", "anyone", people_filter(m)[0], f["people"], people_filter(m)[1])
-        people_button.chosen.connect(lambda values: self._set_filter("people", values))
-        people_button.setToolTip(people_button.toolTip() or "Tasks any of the ticked people lead or are assigned")
-        self._filter_widget(people_button)
+        self._check_menu("Labels", "any", choices, f["labels"], sets, lambda values: self._set_filter("labels", values))
+        choices, sets = people_filter(m)
+        self._check_menu("People", "anyone", choices, f["people"], sets, lambda values: self._set_filter("people", values),
+                         "Tasks any of the ticked people lead or are assigned")
         # Priority (release 5.23): tasks in any of the ticked buckets, Not ranked among them.
-        ranked = CheckMenuButton("Priority", "any", [(label, key) for key, label, _ in priorities.COLUMNS], f["priorities"])
-        ranked.chosen.connect(lambda values: self._set_filter("priorities", values))
-        self._filter_widget(ranked)
+        self._check_menu("Priority", "any", [(label, key) for key, label, _ in priorities.COLUMNS], f["priorities"], [],
+                         lambda values: self._set_filter("priorities", values))
         self._sort_box("tasks")
         self._tree_group_box(m)
         self._select_controls()
@@ -194,7 +192,7 @@ class TaskLists:
         box.setToolTip("A section for each group, person or label, each with its tasks in tree shape. With People or Labels ticked, "
                        "only those get a section.")
         box.currentIndexChanged.connect(lambda _: self._set_tree_group(box.currentData()))
-        self._filter_widget(box)
+        self._filter_widget(box, "display")
 
     def _set_tree_group(self, how: str) -> None:
         """Group by, chosen: the branches open down to each section's tasks, so the groups show what's in them."""
@@ -229,7 +227,7 @@ class TaskLists:
         box.setCurrentIndex(max(0, box.findData(self.sorts.get(view_id, "default"))))
         box.setToolTip("Sorts the tasks under each parent, so the tree keeps its shape")
         box.currentIndexChanged.connect(lambda _: self._set_sort(view_id, box.currentData()))
-        self._filter_widget(box)
+        self._filter_widget(box, "display")
 
     def _set_sort(self, view_id: str, how: str) -> None:
         self.sorts[view_id] = how
@@ -237,13 +235,16 @@ class TaskLists:
 
     # ---- Select mode and Edit selected (mods log round 1, M0009) ----
     def _select_controls(self) -> None:
-        self._check("Select", self.selecting, self.set_selecting, "Tick tasks in this list, then Edit selected changes them all at once")
+        # Under Display while it's off; in the tool row with its four commands while it's on (release 5.184).
+        self._check("Select", self.selecting, self.set_selecting, "Tick tasks in this list, then Edit selected changes them all at once",
+                    where="tool" if self.selecting else "display")
         if not self.selecting:
             return
-        self._button("Select all shown", lambda: self.tick_shown(True), tip="Tick every task you can see in the list")
-        self.clear_ticks_button = self._button("Clear", lambda: self.tick_shown(False), tip="Untick them all")
-        self.edit_selected_button = self._button("", self.edit_selected, tip="Change the ticked tasks, after a preview")
-        self.apply_template_button = self._button("", self.apply_template_to_ticked, tip="Put a template into the ticked tasks, which keep all they have")
+        self._button("Select all shown", lambda: self.tick_shown(True), tip="Tick every task you can see in the list", where="tool")
+        self.clear_ticks_button = self._button("Clear", lambda: self.tick_shown(False), tip="Untick them all", where="tool")
+        self.edit_selected_button = self._button("", self.edit_selected, tip="Change the ticked tasks, after a preview", where="tool")
+        self.apply_template_button = self._button("", self.apply_template_to_ticked, tip="Put a template into the ticked tasks, which keep all they have",
+                                                  where="tool")
         self._sync_edit_selected()
 
     def set_selecting(self, on: bool) -> None:
