@@ -1103,7 +1103,7 @@ class SettingsView(QWidget):
         if path.resolve() == self.ctx.data_root.resolve():
             self.message("That's the data root DocRepo uses now.")
             return
-        if not self.confirm("Change data root", f"Use {path} as the data root from DocRepo's next start? It's set up if it's new. "
+        if not self.confirm("Change the data root?", f"DocRepo uses {path} from its next start. It's set up if it's new. "
                                                  "Nothing in the current data root moves or changes."):
             return
         try:

@@ -37,7 +37,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QInputDialog,
     QListWidget,
     QListWidgetItem,
     QMenu,
@@ -55,7 +54,7 @@ from docrepo import edits, save, summary
 from docrepo.detail import esc, section_head
 from docrepo.markup import page_title
 from docrepo.summary import AgendaRow, Builder, Section, Subject, Summary
-from docrepo.ui import conversation_page, tokens
+from docrepo.ui import confirm, conversation_page, tokens
 from docrepo.ui.front import bring_to_front
 from docrepo.ui.icons import icon
 from docrepo.ui.style import page_css, style_sheet
@@ -435,7 +434,7 @@ class QuickSummary(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
-        top = QWidget(objectName="toolbar")
+        top = QWidget(objectName="summaryTop")  # its own band since release 5.187, white with a hairline under it
         tl = QHBoxLayout(top)
         tl.setContentsMargins(14, 10, 14, 10)
         tl.setSpacing(6)
@@ -505,7 +504,7 @@ class QuickSummary(QWidget):
         self.stack.addWidget(self.scroll)
         lay.addWidget(self.stack, 1)
 
-        foot = QWidget(objectName="toolbar")
+        foot = QWidget(objectName="summaryFoot")
         fl = QHBoxLayout(foot)
         fl.setContentsMargins(14, 6, 14, 6)
         self.message = QLabel(objectName="hint")
@@ -960,9 +959,8 @@ class QuickSummary(QWidget):
 
     # ---- saved sets (decisions 649 and 650) ----
     def ask_name(self, title: str, words: str, name: str) -> str | None:
-        """A name, asked for in a small dialog over the window; None when it's cancelled."""
-        value, ok = QInputDialog.getText(self, title, words, text=name)
-        return value if ok else None
+        """A name, asked for in a small dialog over the window; None when it's cancelled. DocRepo's own since release 5.187."""
+        return confirm.ask_text(self, title, words, name, yes="Save")
 
     def save_or_rename(self) -> None:
         """Ctrl+S, or the header's button: Rename… on a saved set, Save as… on two subjects or more."""

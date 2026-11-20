@@ -188,7 +188,7 @@ def remove(w: BrowseWindow, glossary_id: int) -> None:
     g = glossaries.get(w.conn, glossary_id)
     if g is None:
         return
-    if not w.confirm("Remove the glossary", f"Remove {g.name} and its {g.rows:,} rows from DocRepo? The backups and the dump "
+    if not w.confirm("Remove this glossary?", f"{g.name} and its {g.rows:,} rows leave DocRepo. The backups and the dump "
                      "command keep the old ones. Nothing else changes: the tag list keeps any tags imported from it."):
         return
     file_name = pages.page_names(glossaries.all_glossaries(w.conn))[g.id]

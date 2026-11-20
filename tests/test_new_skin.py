@@ -41,6 +41,12 @@ def test_both_templates_take_every_scale_by_name_and_end_with_the_lanes_sections
     by its scale, never as a number (section 5a)."""
     for template in (tokens._QSS.template, tokens._CSS.template):
         tail = template[template.index("/* ---- lane A"):]
+        # Each lane's rules sit between its own two lines (release 5.187 wrote the first ones): take them out, and what's
+        # left is the five empty sections, in order, with nothing after them.
+        for k, name in LANES:
+            start, end = f"/* ---- lane {k} ({name}) ---- */\n", f"/* ---- end lane {k} ---- */\n"
+            i, j = tail.index(start) + len(start), tail.index(end)
+            tail = tail[:i] + "\n" + tail[j:]
         want = "\n".join(f"/* ---- lane {k} ({name}) ---- */\n\n/* ---- end lane {k} ---- */\n" for k, name in LANES)
         assert tail == want
     for name in SCALES:

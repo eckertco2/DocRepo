@@ -25,7 +25,6 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QHBoxLayout,
-    QInputDialog,
     QLabel,
     QLineEdit,
     QMenu,
@@ -62,7 +61,7 @@ from docrepo.ui.front import bring_to_front
 from docrepo.ui.problems import ProblemsLine
 from docrepo.ui.settings_view import SettingsView
 from docrepo.ui.search_scope import ScopeList, open_search
-from docrepo.ui import tokens
+from docrepo.ui import confirm, tokens
 from docrepo.ui.icons import icon
 from docrepo.ui.look import LOOK, Help, KeyTips, set_hints, tip
 from docrepo.ui.nav_pane import WIDTH as NAV_WIDTH, NavPane
@@ -82,7 +81,7 @@ from docrepo.ui.tree_view import HTML_ROLE, KEY_ROLE, RowTree
 from docrepo.ui import conversation_page, people_import, task_menus, task_open, tidy_follow_ups, tidy_notes, today_meetings
 from docrepo.ui import workspace as workspace_ui
 from docrepo.ui import task_tile as tile_ui
-from docrepo.ui.widgets import SAVE_KEYS, FlowLayout, Option, ViewStack, ask, label_options, people_options
+from docrepo.ui.widgets import SAVE_KEYS, FlowLayout, Option, ViewStack, label_options, people_options
 from docrepo.views import (
     LIST_IDS,
     RETIRED_VIEWS,
@@ -167,7 +166,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         #: What hands a checked link to the browser (release 5.67): Windows' "open", or a stand-in in the tests.
         self.link_starter: Callable[[str], None] | None = None
         #: Asks a yes-or-no question. Tests replace it.
-        self.confirm: Callable[[str, str], bool] = lambda title, text: ask(self, title, text, *_answers(title, text))
+        self.confirm: Callable[[str, str], bool] = lambda title, text: confirm.ask_for(self, title, text)
         #: Shows a form and waits for it: true when it was saved. Tests replace it.
         self.run_dialog: Callable[[QDialog], bool] = lambda dialog: bool(dialog.exec())
         #: Asks why something is discarded: the reason, or None to cancel. Tests replace it.
@@ -1424,7 +1423,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         if not self.editing:
             return
         changed = (self.edit_capture_title.text(), self.edit_summary.toPlainText()) != self._edit_start
-        if changed and not self.confirm(f"Edit capture {self.editing}", "Close without saving your changes?"):
+        if changed and not self.confirm("Close without saving?", f"What you changed in capture {self.editing} is lost."):
             return
         self.editing = None
         self.render_detail()
@@ -1719,17 +1718,16 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         return True
 
     def _ask_text(self, title: str, label: str, text: str) -> str | None:
-        value, ok = QInputDialog.getText(self, title, label, text=text)
-        return value if ok else None
+        return confirm.ask_text(self, title, label, text)
 
     # ---- discarding (mods log round 1, M0021) ----
     def _ask_reason(self, title: str, text: str) -> str | None:
-        reason, ok = QInputDialog.getText(self, title, text, text=edits.DISCARD_REASON)
-        return reason if ok else None
+        v = confirm.verbs(title, text)
+        return confirm.ask_text(self, title, text, edits.DISCARD_REASON, yes=v.yes, no=v.no, danger=v.danger)
 
     def discard_task(self, task_id: str) -> None:
         t = self.model().task(task_id)
-        reason = self.ask_reason("Discard task", f"Discard {t.title}? It's hidden from the task tree, the lists, the pickers, search and the "
+        reason = self.ask_reason("Discard this task?", f"Discard {t.title}? It's hidden from the task tree, the lists, the pickers, search and the "
                                                  "capacity calendar, and kept in the Discarded view, where Bring back restores it. Nothing "
                                                  "is deleted.\n\nWhy?")
         if reason is None:
@@ -1749,7 +1747,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
             self.say(message)
 
     def discard_capture(self, capture_id: str) -> None:
-        reason = self.ask_reason("Discard capture", f"Discard {capture_id}? It leaves its tasks' raw text logs, the Unfiled view and "
+        reason = self.ask_reason("Discard this capture?", f"Discard {capture_id}? It leaves its tasks' raw text logs, the Unfiled view and "
                                                     "search, and is kept in the Discarded view, where Bring back restores it. Its folder "
                                                     "stays, and any changes it made to tasks stay in their histories.\n\nWhy?")
         if reason is None:
@@ -1761,8 +1759,8 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         off = False
         if edited:
             names = ", ".join(model.task(t).title for t in edited)
-            off = self.confirm("Discard capture", f"{capture_id}'s block on the notes page of {names} was edited there. "
-                                                  "Take it off the page too?")
+            off = self.confirm("Take its block off the notes page?", f"{capture_id}'s block on the notes page of {names} was edited there. "
+                                                  "The capture is discarded either way.")
         self._do(lambda: edits.discard_capture(self.conn, self.ctx.data_root, self.ctx.fs, capture_id, reason, self._now(), off), ("capture", capture_id))
 
     def bring_back_capture(self, capture_id: str) -> None:

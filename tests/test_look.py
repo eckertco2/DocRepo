@@ -11,6 +11,7 @@ from datetime import date, datetime  # noqa: E402
 
 import pytest  # noqa: E402
 from PySide6.QtCore import QRect, qInstallMessageHandler  # noqa: E402
+from PySide6.QtGui import QColor  # noqa: E402
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
 from docrepo import db  # noqa: E402
@@ -276,3 +277,84 @@ def test_settings_keep_show_hints_and_have_no_look_row(ctx):
     assert set(update_settings(ctx, view.values())) == {"show_hints"}
     assert Settings.load(ctx.data_root).show_hints and Settings.load(ctx.data_root).look == "new"
     assert not hasattr(LOOK, "classic")
+
+
+# ---- release 5.187: floating surfaces (decision 862) ----
+def _palette_commands(ran: list) -> list[Command]:
+    return [Command("Task", "Add a note", lambda: ran.append("note"), "N"), Command("Task", "Edit task", lambda: ran.append("edit"), "E"),
+            Command("Go to", "Timeline", lambda: ran.append("timeline")), Command("Go to", "Today", lambda: ran.append("today"), "F5"),
+            Command("", "Keys", lambda: ran.append("keys"), "F1")]
+
+
+def _palette_rows(p) -> list[tuple[object, str]]:
+    from docrepo.ui.tree_view import HTML_ROLE, KEY_ROLE
+
+    return [(p.list.topLevelItem(i).data(0, KEY_ROLE), p.list.topLevelItem(i).data(0, HTML_ROLE)) for i in range(p.list.topLevelItemCount())]
+
+
+def test_the_palette_names_each_group_once(qapp):
+    """With nothing typed, each run of one group has a head, which never runs, and a command's row is its name alone; typed,
+    the rows are ranked with no heads, each with its group after its name."""
+    from docrepo.ui.palette import ROW, CommandPalette
+
+    ran: list[str] = []
+    host = QWidget()  # kept, or the palette goes with it
+    p = CommandPalette(host, _palette_commands(ran))
+    rows = _palette_rows(p)
+    heads = [html for key, html in rows if key is None]
+    assert len(heads) == 3 and "Task" in heads[0] and "Go to" in heads[1] and "More" in heads[2]
+    assert all('class="pgroup"' in h for h in heads)
+    assert [key for key, _ in rows] == [None, 0, 1, None, 2, 3, None, 4]
+    assert all("Task" not in html and "pgroup" not in html for key, html in rows if key is not None)
+    assert p.list.height() == len(rows) * ROW + 12
+    assert p.box.objectName() == "paletteBox"
+    p.box.setText("edit")
+    rows = _palette_rows(p)
+    assert all(key is not None for key, _ in rows) and "Edit task" in rows[0][1] and '<span class="pgroup">Task</span>' in rows[0][1]
+    p.deleteLater()
+
+
+def test_the_palettes_keys_go_past_its_heads(qapp):
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    from docrepo.ui.palette import CommandPalette
+    from docrepo.ui.tree_view import KEY_ROLE
+
+    ran: list[str] = []
+    host = QWidget()  # kept, or the palette goes with it
+    p = CommandPalette(host, _palette_commands(ran))
+    assert p.list.currentItem().data(0, KEY_ROLE) == 0
+    QTest.keyClick(p.box, Qt.Key.Key_Up)  # from the first command to the last, past the heads
+    assert p.list.currentItem().data(0, KEY_ROLE) == 4
+    QTest.keyClick(p.box, Qt.Key.Key_Down)
+    assert p.list.currentItem().data(0, KEY_ROLE) == 0
+    QTest.keyClick(p.box, Qt.Key.Key_Down)
+    QTest.keyClick(p.box, Qt.Key.Key_Down)
+    QTest.keyClick(p.box, Qt.Key.Key_Return)
+    assert ran == ["timeline"]
+    p._run_item(p.list.topLevelItem(0))  # a head never runs
+    assert ran == ["timeline"]
+    p.deleteLater()
+
+
+def test_a_floating_window_asks_windows_for_its_corners_and_edge(qapp, monkeypatch):
+    from docrepo.ui import look
+
+    calls = []
+    monkeypatch.setattr(look, "dwm_set", lambda window, attribute, value: calls.append((attribute, value)) or True)
+    w = QWidget()
+    look.dress_window(w)
+    assert [a for a, _v in calls] == [look.DWMWA_CAPTION_COLOR]
+    calls.clear()
+    look.floating(w)
+    assert w.property("floating") is True
+    look.dress_window(w)
+    edge = QColor(tokens.colour("stroke_strong"))
+    assert calls == [(look.DWMWA_WINDOW_CORNER_PREFERENCE, look.DWMWCP_ROUND),
+                     (look.DWMWA_BORDER_COLOR, edge.red() | edge.green() << 8 | edge.blue() << 16)]
+    calls.clear()
+    look.square(w, True)
+    look.square(w, False)
+    assert calls == [(look.DWMWA_WINDOW_CORNER_PREFERENCE, look.DWMWCP_DONOTROUND), (look.DWMWA_WINDOW_CORNER_PREFERENCE, look.DWMWCP_ROUND)]
+    w.deleteLater()

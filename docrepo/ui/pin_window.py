@@ -36,7 +36,7 @@ from docrepo.ui.icons import icon, icon_size
 from docrepo.ui.drop_target import DropOverlay
 from docrepo.ui.save_link import SaveLinkZones, zone_at
 from docrepo.ui.items_panel import RefPopup
-from docrepo.ui.look import tip
+from docrepo.ui.look import floating, tip
 from docrepo.ui.style import style_sheet
 
 if TYPE_CHECKING:
@@ -112,6 +112,7 @@ class PinWindow(QWidget):
         self.capture = capture
         self.setObjectName("pinWindow")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)  # so the style sheet draws its background and edge
+        floating(self)  # Windows' round corners and edge (release 5.187, decision 862)
         self.setWindowTitle("DocRepo Capture, pinned")
         self.setStyleSheet(style_sheet())
         self.setAcceptDrops(True)
@@ -165,6 +166,7 @@ class PinWindow(QWidget):
         self.ref_popup = RefPopup(self)
         self.ref_popup.setWindowFlags(Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint
                                       | Qt.WindowType.WindowDoesNotAcceptFocus)
+        floating(self.ref_popup)
         self.ref_popup.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         self.ref_popup.setStyleSheet(style_sheet())
         self.ref_popup.picked.connect(capture._pick_ref)
