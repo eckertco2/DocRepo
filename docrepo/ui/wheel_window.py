@@ -67,7 +67,8 @@ def animations_on() -> bool:
 
 
 def colours() -> dict[str, str]:
-    """The wheel's colours: Windows' own under high contrast, otherwise light or dark as Windows is set."""
+    """The wheel's colours: Windows' own under high contrast, otherwise light or dark as the colour scheme Qt has says, which
+    ``style.apply_look`` sets from the theme (release 5.180), so the wheel follows the theme."""
     if _high_contrast():
         get = ctypes.windll.user32.GetSysColor
 
@@ -78,7 +79,7 @@ def colours() -> dict[str, str]:
         window, text, lit, on_lit, grey = sys(5), sys(8), sys(13), sys(14), sys(17)
         return {"content": window, "base": window, "stroke_strong": text, "text": text, "text2": text, "disabled": grey, "accent": lit, "on_accent": on_lit}
     dark = QGuiApplication.styleHints().colorScheme() == Qt.ColorScheme.Dark
-    return tokens.DARK if dark else tokens.LIGHT
+    return tokens.THEMES["dark" if dark else "light"]
 
 
 class WheelWindow(QWidget):
@@ -375,11 +376,11 @@ class WheelWindow(QWidget):
             if slot.icon:
                 p.drawPixmap(QPointF(at.x() - 10, top), self._icon(slot.icon, ink))
             p.setPen(QColor(ink))
-            p.setFont(_font(tokens.CAPTION + 0.5, bold=lit))
+            p.setFont(_font(tokens.CAPTION_L, bold=lit))
             p.drawText(QRectF(at.x() - width / 2, top + 22, width, 30), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap,
                        slot.label)
             p.setPen(QColor(quiet))
-            p.setFont(_font(tokens.CAPTION - 0.5))
+            p.setFont(_font(tokens.CAPTION_S))
             hint = "later" if slot.held else f"{ARROWS[d]}  {DIGITS[d]}"
             p.drawText(QRectF(at.x() - width / 2, top + 50, width, 16), Qt.AlignmentFlag.AlignHCenter, hint)
 
@@ -397,7 +398,7 @@ class WheelWindow(QWidget):
         box = QRectF(mid.x() - INNER + 6, mid.y() - 24, 2 * INNER - 12, 26)
         p.drawText(box, Qt.AlignmentFlag.AlignCenter, self.wheel.name)
         p.setPen(QColor(c["text2"]))
-        p.setFont(_font(tokens.CAPTION - 0.5))
+        p.setFont(_font(tokens.CAPTION_S))
         p.drawText(QRectF(mid.x() - INNER + 6, mid.y() + 2, 2 * INNER - 12, 18), Qt.AlignmentFlag.AlignCenter, self.note or "Esc cancels")
 
 

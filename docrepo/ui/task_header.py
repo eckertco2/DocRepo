@@ -214,7 +214,7 @@ class TaskHeader(QWidget):
         self.status_wait.setText(f"· {wait}")
         self.status_wait.setToolTip(parts.get("status_wait_tip", ""))
         late = bool(parts.get("status_wait_late"))  # from the follow-up day, in the caution colour
-        self.status_wait.setStyleSheet(f"color: {tokens.LIGHT['caution']}; font-weight: 600" if late else "")
+        self.status_wait.setStyleSheet(f"color: {tokens.colour('caution')}; font-weight: 600" if late else "")
         self.status_wait.setVisible(bool(wait))
         self.status_body.setHtml(parts["status_body"])
         self.status_log.setHtml(parts["status_log"])

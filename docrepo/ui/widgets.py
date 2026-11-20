@@ -149,7 +149,7 @@ class DropButton(QPushButton):
         self.style().drawItemText(p, QRect(left, room.top(), wide + 2, room.height()),
                                   int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter | Qt.TextFlag.TextShowMnemonic),
                                   option.palette, self.isEnabled(), shown, self.foregroundRole())
-        colour = tokens.LIGHT["disabled" if not self.isEnabled() else "text2"]
+        colour = tokens.colour("disabled" if not self.isEnabled() else "text2")
         p.drawPixmap(left + wide + 6, (self.height() - 14) // 2, tinted(self.arrow, colour, 14, max(1.0, self.devicePixelRatioF())))
 
 

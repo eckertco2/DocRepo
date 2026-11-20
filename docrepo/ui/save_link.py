@@ -25,6 +25,7 @@ from pathlib import Path
 from PySide6.QtCore import QPoint, Qt, Signal
 from PySide6.QtWidgets import QButtonGroup, QFrame, QHBoxLayout, QLabel, QToolButton, QVBoxLayout, QWidget
 
+from docrepo.ui import tokens
 from docrepo.ui.tokens import C
 
 SAVE, LINK = "save", "link"
@@ -85,10 +86,10 @@ class SaveLinkZones(QWidget):
             zl.addStretch()
             lay.addWidget(zone, 1)
             self.zones[key], self.titles[key], self.lines[key] = zone, title, line
-        size = (11, 8) if compact else (16, 10)  # the title and the line under it, in points
+        size = (tokens.ZONE_TITLE_S, tokens.ZONE_LINE_S) if compact else (tokens.ZONE_TITLE, tokens.ZONE_LINE)  # the title and the line under it
         self.setStyleSheet(
             f"QWidget#saveLinkZones {{ background: {C.content}; }}"
-            f"QFrame#zone {{ background: {C.content}; border: 2px dashed {C.control}; border-radius: 8px; }}"
+            f"QFrame#zone {{ background: {C.content}; border: 2px dashed {C.control}; border-radius: {tokens.RADIUS_XL}px; }}"
             f"QFrame#zone[lit=\"true\"] {{ background: {C.info_bg}; border: 2px solid {C.accent}; }}"
             # Folders alone: Save doesn't take them, so it never lights, even under the pointer (decision 628).
             f"QFrame#zone[off=\"true\"] {{ background: {C.base}; border: 2px dashed {C.stroke_strong}; }}"
@@ -195,8 +196,9 @@ class SaveLinkSwitch(QWidget):
         self.group.buttonClicked.connect(lambda _b: self.changed.emit(self.saved()))
         self.setStyleSheet(
             f"QToolButton#seg {{ border: 1px solid {C.control}; background: {C.content}; color: {C.text2}; padding: 1px 8px; }}"
-            "QToolButton#seg[end=\"left\"] { border-top-left-radius: 9px; border-bottom-left-radius: 9px; border-right: none; }"
-            "QToolButton#seg[end=\"right\"] { border-top-right-radius: 9px; border-bottom-right-radius: 9px; }"
+            f"QToolButton#seg[end=\"left\"] {{ border-top-left-radius: {tokens.RADIUS_CHIP}px; border-bottom-left-radius: {tokens.RADIUS_CHIP}px; "
+            "border-right: none; }"
+            f"QToolButton#seg[end=\"right\"] {{ border-top-right-radius: {tokens.RADIUS_CHIP}px; border-bottom-right-radius: {tokens.RADIUS_CHIP}px; }}"
             f"QToolButton#seg:checked {{ background: {C.info_bg}; color: {C.accent}; border-color: {C.accent}; font-weight: 600; }}"
             f"QToolButton#seg:disabled {{ color: {C.text2}; }}"
             f"QToolButton#seg:checked:disabled {{ color: {C.text2}; background: {C.hover}; border-color: {C.stroke_strong}; }}")

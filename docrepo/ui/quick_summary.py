@@ -78,14 +78,14 @@ ROW_ROLE = Qt.ItemDataRole.UserRole
 def summary_css() -> str:
     """The page styles, and the headline's chips (decision 522): grey, with the accent for what to raise, red for late and
     amber for soon."""
-    t = tokens.LIGHT
+    t = tokens.active()
     return page_css() + f"""
 .chip {{ color: {t['text2']}; background-color: {t['hover']}; }}
 .chipraise {{ color: {t['accent']}; background-color: {t['info_bg']}; }}
 .chiplate {{ color: {t['critical']}; background-color: {t['critical_bg']}; }}
 .chipsoon {{ color: {t['caution']}; background-color: {t['caution_bg']}; }}
 .chipcalm {{ color: {t['text2']}; }}
-.fl {{ color: {t['text2']}; font-size: 9pt; }}
+.fl {{ color: {t['text2']}; font-size: {tokens.CAPTION}pt; }}
 .kindline {{ color: {t['text2']}; }}
 """
 
@@ -93,15 +93,15 @@ def summary_css() -> str:
 def window_css() -> str:
     """The window's own styles: the page white, as the browse tool's pages are; an agenda item's tick a box that fills with
     the accent; the add box's task as a chip."""
-    t = tokens.LIGHT
+    t = tokens.active()
     return f"""
 QScrollArea#summaryScroll, QWidget#summaryPage {{ background: {t['content']}; border: none; }}
-QToolButton#agendaTick {{ border: 1px solid {t['control']}; border-radius: 4px; background: {t['content']}; padding: 0; }}
+QToolButton#agendaTick {{ border: 1px solid {t['control']}; border-radius: {tokens.RADIUS}px; background: {t['content']}; padding: 0; }}
 QToolButton#agendaTick:hover {{ border-color: {t['accent']}; }}
 QToolButton#agendaTick:checked {{ background: {t['accent']}; border-color: {t['accent']}; }}
-QToolButton#addTask, QToolButton#summaryChip {{ background: {t['info_bg']}; color: {t['accent']}; border: none; border-radius: 10px; padding: 2px 8px; }}
+QToolButton#addTask, QToolButton#summaryChip {{ background: {t['info_bg']}; color: {t['accent']}; border: none; border-radius: {tokens.RADIUS_PILL}px; padding: 2px 8px; }}
 QToolButton#summaryChip:hover {{ background: {t['selected']}; }}
-QWidget#agendaRow {{ border-radius: 6px; }}
+QWidget#agendaRow {{ border-radius: {tokens.RADIUS_L}px; }}
 QWidget#agendaRow:hover {{ background: {t['hover']}; }}
 """
 
@@ -132,7 +132,7 @@ class SubjectDelegate(QStyledItemDelegate):
 
     def paint(self, p: QPainter, option, index) -> None:
         kind, _key, words = index.data(ROW_ROLE)
-        t = tokens.LIGHT
+        t = tokens.active()
         r = option.rect
         p.save()
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -146,18 +146,18 @@ class SubjectDelegate(QStyledItemDelegate):
         if option.state & QStyle.StateFlag.State_Selected:
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(QColor(t["selected"]))
-            p.drawRoundedRect(r.adjusted(4, 1, -4, -1), 5, 5)
+            p.drawRoundedRect(r.adjusted(4, 1, -4, -1), tokens.RADIUS_ROW, tokens.RADIUS_ROW)
         elif option.state & QStyle.StateFlag.State_MouseOver:
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(QColor(t["hover"]))
-            p.drawRoundedRect(r.adjusted(4, 1, -4, -1), 5, 5)
+            p.drawRoundedRect(r.adjusted(4, 1, -4, -1), tokens.RADIUS_ROW, tokens.RADIUS_ROW)
         x = r.left() + 12
         small = tokens.ui_font(tokens.CAPTION)
         if words.get("number"):
             box = QRect(x, r.center().y() - 10, 20, 20)
             p.setPen(QColor(t["stroke_strong"]))
             p.setBrush(Qt.BrushStyle.NoBrush)
-            p.drawRoundedRect(box, 4, 4)
+            p.drawRoundedRect(box, tokens.RADIUS, tokens.RADIUS)
             p.setFont(small)
             p.setPen(QColor(t["text2"]))
             p.drawText(box, Qt.AlignmentFlag.AlignCenter, words["number"])
@@ -296,7 +296,7 @@ class AgendaBody(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(margin - 8, 0, margin, 8)
         lay.setSpacing(0)
-        t = tokens.LIGHT
+        t = tokens.active()
         self.answer_box: QLineEdit | None = None
         self.ticks: dict[int, QToolButton] = {}
         for a in rows:
@@ -493,7 +493,7 @@ class QuickSummary(QWidget):
         self.page_lay.addWidget(self.header)
         rule = QFrame(objectName="summaryRule")
         rule.setFrameShape(QFrame.Shape.HLine)
-        rule.setStyleSheet(f"color: {tokens.LIGHT['stroke']}")
+        rule.setStyleSheet(f"color: {tokens.colour('stroke')}")
         self.page_lay.addWidget(rule)
         self.sections_lay = QVBoxLayout()
         self.sections_lay.setContentsMargins(0, 8, 0, 0)

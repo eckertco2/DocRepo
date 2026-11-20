@@ -11,7 +11,7 @@ from docrepo.ui import tokens
 
 
 def _colour(name: str) -> QColor:
-    return QColor(tokens.LIGHT[name])
+    return QColor(tokens.colour(name))
 
 
 def paint_lines(p: QPainter, width: float, height: float, scale: Scale) -> None:
@@ -36,10 +36,10 @@ def paint_lane(p: QPainter, width: float, height: float, scale: Scale | None, ba
     p.setPen(Qt.PenStyle.NoPen)
     if kind == "g":
         p.setBrush(_colour("text2"))
-        p.drawRoundedRect(QRectF(left, height / 2 - 1, span, 2), 1, 1)
+        p.drawRoundedRect(QRectF(left, height / 2 - 1, span, 2), tokens.RADIUS_HAIR, tokens.RADIUS_HAIR)
         return
     p.setBrush(_colour("accent") if kind == "a" else _colour("control"))
-    p.drawRoundedRect(QRectF(left, height / 2 - 5, span, 10), 2, 2)
+    p.drawRoundedRect(QRectF(left, height / 2 - 5, span, 10), tokens.RADIUS_BAR, tokens.RADIUS_BAR)
 
 
 def paint_ruler(p: QPainter, width: float, height: float, scale: Scale | None) -> None:
@@ -48,7 +48,7 @@ def paint_ruler(p: QPainter, width: float, height: float, scale: Scale | None) -
         return
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
     font = QFont("Segoe UI")
-    font.setPixelSize(10)
+    font.setPixelSize(tokens.MARK_PX)
     for weeks in scale.ticks():
         text = timing.tick_label(weeks)
         font.setWeight(QFont.Weight.DemiBold if weeks == 0 else QFont.Weight.Normal)

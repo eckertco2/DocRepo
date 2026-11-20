@@ -69,7 +69,7 @@ def paint_ticks(painter: QPainter, x: int, mid: int, n: int) -> None:
     painter.setBrush(colour)
     right = x + TICK_SLOT - 2
     for i in range(k):
-        painter.drawRoundedRect(right - i * 3 - 1, mid - 6, 1.5, 12, 0.75, 0.75)
+        painter.drawRoundedRect(right - i * 3 - 1, mid - 6, 1.5, 12, tokens.RADIUS_TICK, tokens.RADIUS_TICK)
     painter.restore()
 
 
@@ -422,7 +422,7 @@ class TileWidget(QWidget):
             if self._lit:
                 p.setPen(Qt.PenStyle.NoPen)
                 p.setBrush(QColor(tokens.colour("pressed")))
-                p.drawRoundedRect(self._circle_rect, 4, 4)
+                p.drawRoundedRect(self._circle_rect, tokens.RADIUS, tokens.RADIUS)
             p.drawPixmap(QPoint(x, mid - STATE // 2), tinted(name, tokens.colour(colour), STATE, scale))
             x += STATE + 8
         x = paint_kind(p, x, mid, t, scale, self._hits)

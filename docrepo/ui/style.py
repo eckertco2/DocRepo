@@ -4,8 +4,9 @@ The look (the visual overhaul, releases 5.10 to 5.16) is Qt's Fusion style with 
 all made from the design tokens in ``tokens``. ``apply_look`` sets it up when DocRepo starts. Release 5.179 (the redesign's
 decision 840) retired release 5.9's look, which Settings kept selectable until then, with its own style sheets here.
 
-DocRepo's colours are light. With Windows in dark mode, Qt would draw its own controls dark and mix them with those light
-colours, so ``apply_look`` asks for the light colour scheme and sets every role of the palette.
+The theme (release 5.180, the redesign's decision 841) is light, or dark, which isn't offered yet. With Windows in dark mode,
+Qt would draw its own controls dark and mix them with light colours, so ``apply_look`` asks Qt for the theme's own colour
+scheme and sets every role of the palette.
 """
 from __future__ import annotations
 
@@ -16,7 +17,8 @@ from PySide6.QtWidgets import QApplication
 from docrepo.ui import tokens
 from docrepo.ui.look import LOOK, configure, watch_focus
 
-_QSS_CACHE: list[str] = []
+#: The style sheet, made once a theme.
+_QSS_CACHE: dict[str, str] = {}
 
 
 def style_sheet() -> str:
@@ -24,28 +26,30 @@ def style_sheet() -> str:
     instead (``apply_look``), so this is empty: Qt parses it only once."""
     if LOOK.app_sheet:
         return ""
-    if not _QSS_CACHE:
-        _QSS_CACHE.append(tokens.qss())
+    theme = tokens.theme()
+    if theme not in _QSS_CACHE:
+        _QSS_CACHE[theme] = tokens.qss()
     app = QApplication.instance()
     if app is not None:  # the first window to ask puts it on the application, for every window after it
-        app.setStyleSheet(_QSS_CACHE[0])
+        app.setStyleSheet(_QSS_CACHE[theme])
         LOOK.app_sheet = True
         return ""
-    return _QSS_CACHE[0]
+    return _QSS_CACHE[theme]
 
 
 def page_css() -> str:
-    """The HTML styles of the browse tool's pages and list cells, and the forms' previews."""
-    return tokens.CSS
+    """The HTML styles of the browse tool's pages and list cells, and the forms' previews, in the active theme."""
+    return tokens.css()
 
 
-def apply_look(app: QGuiApplication, look: str = "new", hints: bool = False) -> None:
-    """Set the look up from Settings, once the application exists and before any window is made. ``look`` is kept for
-    its callers and has one value since release 5.179: any other is read as it (5.180 makes it the theme)."""
+def apply_look(app: QGuiApplication, theme: str = "light", hints: bool = False) -> None:
+    """Set the look up from Settings, once the application exists and before any window is made. ``theme`` is "light" or
+    "dark" (release 5.180); anything else, such as the "new" and "classic" looks callers passed before, is read as light."""
+    tokens.use(theme if theme in tokens.THEMES else "light")
     configure(hints)
     hints_ = app.styleHints()
-    if hasattr(hints_, "setColorScheme"):  # Qt 6.8: light, whatever Windows is set to (a dark theme comes later, decision 14)
-        hints_.setColorScheme(Qt.ColorScheme.Light)
+    if hasattr(hints_, "setColorScheme"):  # Qt 6.8: the theme's own, whatever Windows is set to
+        hints_.setColorScheme(Qt.ColorScheme.Dark if tokens.theme() == "dark" else Qt.ColorScheme.Light)
     app.setStyle("Fusion")
     app.setPalette(tokens.palette())
     app.setFont(tokens.ui_font())

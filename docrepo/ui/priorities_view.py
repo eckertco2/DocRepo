@@ -146,7 +146,7 @@ class Pips(QWidget):
             else:
                 p.setPen(QPen(QColor(tokens.colour("control")), 1.25))
                 p.setBrush(Qt.BrushStyle.NoBrush)
-            p.drawRoundedRect(box, 2, 2)
+            p.drawRoundedRect(box, tokens.RADIUS_BAR, tokens.RADIUS_BAR)
         if len(self.buckets) > self.MOST:
             p.setPen(QColor(tokens.colour("text2")))
             p.drawText(QRectF(self.MOST * (self.SIZE + self.GAP), 0, 14, self.height()), Qt.AlignmentFlag.AlignCenter, "+")
@@ -249,7 +249,7 @@ class Row(_Picked, QFrame):
         lay.addWidget(Pips(m, [t.id]), 0, Qt.AlignmentFlag.AlignVCenter)
         # A task tile (release 5.138, the task tile plan's decision 575), its pip in its edge's place: the circle, the title
         # cut to fit, the flag, the marks and the days.
-        self.tile = tile_ui.TileWidget(task_tile.tile(m, t.id, today, task_tile.marks(m, today)), font=tokens.ui_font(tokens.CAPTION + 0.5))
+        self.tile = tile_ui.TileWidget(task_tile.tile(m, t.id, today, task_tile.marks(m, today)), font=tokens.ui_font(tokens.CAPTION_L))
         self.tile.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         lay.addWidget(self.tile, 1)
         self.setToolTip(f"{t.title}: {priorities.name(t.priority)}")

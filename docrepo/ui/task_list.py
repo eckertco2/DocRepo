@@ -153,7 +153,7 @@ class TaskRowDelegate(QStyledItemDelegate):
         """The backplate under a chevron the pointer is on: it's a button."""
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QColor(tokens.colour("hover")))
-        p.drawRoundedRect(box, 4, 4)
+        p.drawRoundedRect(box, tokens.RADIUS, tokens.RADIUS)
 
     def _words(self, p: QPainter, o: Words, rect: QRect) -> None:
         """A row that can't be picked: no hover, no selection, its words in grey."""

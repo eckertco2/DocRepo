@@ -116,7 +116,7 @@ class ViewRow(_Row):
         if on:
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(_c("accent"))
-            p.drawRoundedRect(QRectF(0, (h - 16) / 2, 3, 16), 1.5, 1.5)
+            p.drawRoundedRect(QRectF(0, (h - 16) / 2, 3, 16), tokens.RADIUS_EDGE, tokens.RADIUS_EDGE)
         self._icon.paint(p, QRect(PAD, (h - 16) // 2, 16, 16), Qt.AlignmentFlag.AlignCenter, QIcon.Mode.Normal,
                          QIcon.State.On if on else QIcon.State.Off)
         right = w - GAP

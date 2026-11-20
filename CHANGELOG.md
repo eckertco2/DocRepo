@@ -10,6 +10,7 @@ Built for the train of Thursday 2026-11-26 (the design workspace's `docs/mods/re
 
 | Release | Date | What |
 |---|---|---|
+| 5.180 | 2026-11-19 | Tokens that can change theme (the redesign's decision 841, the owner's "Start groundwork"). Nothing on screen changes: the colours now answer from a theme, light or dark, set once when DocRepo starts, and every colour, corner and text size the windows drew from a number of their own is a named token at the same value, so the redesign's new look (5.181) and its dark theme (5.194) are changes in one place. Dark isn't offered in Settings yet. No schema change. |
 | 5.179 | 2026-11-19 | The Classic look retired (the redesign's decision 840, the owner's "Start groundwork"). Settings' Look row goes; Show hints, Open a task in and the version stay in that card. A settings file that still says `"look": "classic"` starts the new look, which nothing about changes. Release 5.9's style sheets, page styles and every branch for them in the windows went with it, Capacity's own view among them (Capacity has been on the Timeline's page in the new look since release 5.40). No schema change. |
 
 ## Train of 2026-11-19

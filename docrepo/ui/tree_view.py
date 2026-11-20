@@ -53,7 +53,8 @@ RULE_ROLE = Qt.ItemDataRole.UserRole + 9
 #: the accent edge.
 NOW_ROLE = Qt.ItemDataRole.UserRole + 10
 
-GROUP_COLOURS = tuple(tokens.LIGHT[k] for k in tokens.GROUP_KEYS)
+#: The categories' colours, read from the active theme when they're drawn (release 5.180).
+GROUP_COLOURS = tokens.LiveList(tokens.GROUP_KEYS)
 #: The least room a list's first column keeps: in a narrower list its last columns go first (release 5.58).
 MIN_TITLE = 160
 #: A row in a two-line view (decision L1): Agendas, Documents, Activity and Search, whose second line is the substance.
@@ -279,7 +280,7 @@ class HtmlDelegate(QStyledItemDelegate):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QColor(tokens.colour("pressed")))
-        painter.drawRoundedRect(rect, 4, 4)
+        painter.drawRoundedRect(rect, tokens.RADIUS, tokens.RADIUS)
         painter.restore()
 
     @staticmethod
@@ -414,7 +415,7 @@ class HtmlDelegate(QStyledItemDelegate):
                 pill = QRect(x, first.center().y() - 9, w, 19)
                 painter.setPen(Qt.PenStyle.NoPen)
                 painter.setBrush(QColor(tokens.colour(bg)))
-                painter.drawRoundedRect(pill, 4, 4)
+                painter.drawRoundedRect(pill, tokens.RADIUS, tokens.RADIUS)
                 painter.setFont(chip_font if bold else small)
                 painter.setPen(QColor(tokens.colour(fg)))
                 painter.drawText(pill, Qt.AlignmentFlag.AlignCenter, text)

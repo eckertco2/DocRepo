@@ -287,23 +287,52 @@ def test_a_drop_buttons_text_is_only_its_words(qapp):
 
 
 # ---- V4: colour by one rule ----
+#: What release 5.180's scan reads beside ``docrepo/ui``: the modules outside it that make the pages' HTML or draw DocRepo's
+#: icon. ``docrepo/decisions.py``'s table for pasting into an email keeps its own grey: it's what's sent, not the look.
+STYLED_OUTSIDE_UI = ("detail.py", "markup.py", "app.py")
+#: The colours' and the sizes' own homes.
+TOKEN_HOMES = ("tokens.py", "colours.py")
+
+
+def _scanned() -> list[Path]:
+    return [*sorted(UI.rglob("*.py")), *(UI.parent / name for name in STYLED_OUTSIDE_UI)]
+
+
 def test_no_raw_colours_outside_the_tokens():
-    """Each colour has a name and one job (with no exception for the Classic look's own since release 5.179)."""
+    """Each colour has a name and one job (with no exception for the Classic look's own since release 5.179). Since release
+    5.180 (the redesign's decision 841) the scan reads ``docrepo/ui``'s subfolders and the modules that style pages outside
+    it, and no colour is read from one theme's table by name: ``colour()``, ``C`` and ``active()`` answer from the active
+    theme. The SVG files in ``ui/icons`` aren't read: four of them carry a colour of their own (the arrow's grey, the
+    filled marker's amber, the white tick, and the closed state's white tick), for release 5.194 (the dark theme)."""
     found = []
-    for path in sorted(UI.glob("*.py")):
-        if path.name == "tokens.py":
+    for path in _scanned():
+        if path.name in TOKEN_HOMES:
             continue
         for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-            if re.search(r"#[0-9a-fA-F]{6}\b", line):
-                found.append(f"{path.name}:{n}")
+            if re.search(r"#[0-9a-fA-F]{6}\b|\b(LIGHT|DARK)\[|\btokens\.CSS\b", line):
+                found.append(f"{path.relative_to(UI.parent)}:{n}")
+    assert found == []
+
+
+def test_no_corner_or_text_size_written_as_a_number_outside_the_tokens():
+    """Release 5.180 (decision 841): a corner's size in a style sheet or a painter, and a text size in a style sheet, is a
+    token, so the redesign changes it in ``tokens.py``. Arithmetic on a token (``tokens.RADIUS - 2``) and a pill's half
+    height are left: they follow the token or the shape."""
+    found = []
+    for path in sorted(UI.rglob("*.py")):
+        if path.name in TOKEN_HOMES:
+            continue
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if re.search(r"radius:\s*[\d.]+px|font-size:\s*[\d.]+pt|RoundedRect\(.*,\s*[\d.]+,\s*[\d.]+\)\s*(#.*)?$|QFont\(\"[^\"]+\",\s*\d", line):
+                found.append(f"{path.relative_to(UI.parent)}:{n}")
     assert found == []
 
 
 def test_selection_keeps_its_colour_to_itself():
     """The review's finding 6: one blue did seven jobs."""
-    assert tokens.CSS.count(f"background-color: {tokens.colour('selected')}") == 0
-    assert f".st-ip {{ color: {tokens.colour('accent')}; background-color: {tokens.colour('info_bg')}; }}" in tokens.CSS
-    assert f".u2 {{ background-color: {tokens.colour('caution_bg')}; }}" in tokens.CSS
+    assert tokens.css().count(f"background-color: {tokens.colour('selected')}") == 0
+    assert f".st-ip {{ color: {tokens.colour('accent')}; background-color: {tokens.colour('info_bg')}; }}" in tokens.css()
+    assert f".u2 {{ background-color: {tokens.colour('caution_bg')}; }}" in tokens.css()
     assert set(tokens.LIGHT) == set(tokens.DARK)
 
 

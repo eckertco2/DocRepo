@@ -63,7 +63,7 @@ def _list_box(lines: list[str], kind: str) -> QLabel:
     """A red list of problems or an amber list of warnings, each line rich text."""
     colour, back = (tokens.colour("critical"), tokens.colour("critical_bg")) if kind == "bad" else (tokens.colour("caution"), tokens.colour("caution_bg"))
     box = _words("<br>".join(lines))
-    box.setStyleSheet(f"QLabel {{ color: {colour}; background: {back}; padding: 8px 12px; border-radius: 6px; }} QLabel a {{ color: {colour}; }}")
+    box.setStyleSheet(f"QLabel {{ color: {colour}; background: {back}; padding: 8px 12px; border-radius: {tokens.RADIUS_L}px; }} QLabel a {{ color: {colour}; }}")
     return box
 
 

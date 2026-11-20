@@ -617,7 +617,7 @@ class RichEdit(QTextEdit):
             it += 1
         for pos, length, fmt in ranges:
             if done:
-                fmt.setForeground(QColor(markup.TICKED_GREY))
+                fmt.setForeground(QColor(tokens.colour("ticked")))
             else:
                 fmt.clearForeground()
             r = QTextCursor(self.document())
@@ -627,7 +627,7 @@ class RichEdit(QTextEdit):
         if self.textCursor().block() == block:  # what's typed next on the line matches it
             fmt = self.currentCharFormat()
             if done:
-                fmt.setForeground(QColor(markup.TICKED_GREY))
+                fmt.setForeground(QColor(tokens.colour("ticked")))
             else:
                 fmt.clearForeground()
             self.setCurrentCharFormat(fmt)
@@ -1083,7 +1083,7 @@ class RichEdit(QTextEdit):
         if b.blockFormat().marker() == MARKER.Checked:
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(QColor(tokens.colour("accent")))
-            p.drawRoundedRect(box, 3, 3)
+            p.drawRoundedRect(box, tokens.RADIUS_S, tokens.RADIUS_S)
             tick = QPainterPath()
             tick.moveTo(box.left() + 3.2, box.center().y() + 0.2)
             tick.lineTo(box.left() + 5.6, box.bottom() - 3.4)
@@ -1097,7 +1097,7 @@ class RichEdit(QTextEdit):
         else:
             p.setPen(QPen(QColor(tokens.colour("control")), 1))
             p.setBrush(QColor(tokens.colour("content")))
-            p.drawRoundedRect(box.adjusted(0.5, 0.5, -0.5, -0.5), 3, 3)
+            p.drawRoundedRect(box.adjusted(0.5, 0.5, -0.5, -0.5), tokens.RADIUS_S, tokens.RADIUS_S)
 
     # ---- moving about (mods log round 3, M0055) ----
     def to_paragraph(self, step: int, select: bool = False) -> None:

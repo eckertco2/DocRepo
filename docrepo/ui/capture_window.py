@@ -178,7 +178,7 @@ MIN_HEIGHT = 380
 #: The placeholder in the found list, before Parse and populate runs (shown with Show hints).
 #: More fields than this filled by Parse and populate, and each shows only its dot.
 MOST_FILLED = 2
-FOUND_EMPTY = (f"<span style='color:{C.text2}'>Alt+P reads the content text and fills the fields. What it finds is listed here, beside "
+FOUND_EMPTY = ("<span style='color:{text2}'>Alt+P reads the content text and fills the fields. What it finds is listed here, beside "
                "the text, so you can check it without scrolling.</span>")
 
 
@@ -3303,7 +3303,7 @@ class CaptureWindow(QWidget):
 
     def _clear_found(self) -> None:
         """The found list, before Parse and populate runs (or after Clear): hidden in the new look, unless hints are shown."""
-        self.found_label.setText(FOUND_EMPTY if LOOK.show_help else "")
+        self.found_label.setText(FOUND_EMPTY.format(text2=C.text2) if LOOK.show_help else "")
         self.clear_found.hide()
         set_filled(self.found_box, False, "empty", True)
         self.found_box.setVisible(LOOK.show_help)
