@@ -72,7 +72,7 @@ def _style() -> str:
             f"QLabel#wsThis {{ color: {t('accent')}; }}"
             f"QLabel#wsNote {{ color: {t('accent')}; }}"
             f"QLabel#wsBanner {{ background: {t('info_bg')}; border-radius: {tokens.RADIUS}px; padding: 7px 10px; margin-bottom: 6px; }}"
-            f"QLabel#wsOn {{ color: {t('accent')}; background: {t('info_bg')}; border-radius: {tokens.RADIUS_PILL}px; padding: 2px 9px; }}"
+            f"QLabel#wsOn {{ color: {t('accent')}; background: {t('info_bg')}; border-radius: {tokens.RADIUS_S}px; padding: 2px 9px; }}"
             f"QFrame#wsAgents {{ border: 1px dashed {t('stroke_strong')}; border-radius: {tokens.RADIUS}px; }}"
             f"QPushButton#wsLink {{ color: {t('accent')}; border: none; background: transparent; padding: 0; text-align: left; }}"
             f"QPushButton#wsLink:hover {{ text-decoration: underline; }}"
@@ -143,8 +143,8 @@ class Workspace(QWidget):
         names = QVBoxLayout()
         names.setSpacing(0)
         kicker = QLabel("WORKSPACE", objectName="wsKicker")
-        kicker.setFont(tokens.ui_font(tokens.CAPTION, semibold=True))
-        self.title = QLabel(objectName="paneTitle")
+        kicker.setFont(tokens.ui_font(tokens.LABEL, semibold=True))
+        self.title = QLabel(objectName="pageTitle")
         self.title.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         names.addWidget(kicker)
         names.addWidget(self.title)
@@ -277,7 +277,7 @@ class Workspace(QWidget):
         bl.setContentsMargins(12, 12, 6, 0)
         bl.setSpacing(6)
         cap = QLabel("RESOURCES", objectName="wsCaption")
-        cap.setFont(tokens.ui_font(tokens.CAPTION, semibold=True))
+        cap.setFont(tokens.ui_font(tokens.LABEL, semibold=True))
         self.search = search_box()
         self.search.textChanged.connect(lambda _: self.draw_resources())
         self.search.installEventFilter(self)

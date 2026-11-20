@@ -21,6 +21,7 @@ from PySide6.QtWidgets import QLineEdit
 
 from docrepo import edits, glossaries, pages
 from docrepo.detail import esc, fields_table, none_text
+from docrepo.markup import page_title
 from docrepo.model import Model
 from docrepo.safe_fs import WriteRefused
 from docrepo.ui.tree_view import Line
@@ -110,7 +111,7 @@ def page(w: BrowseWindow, item: str) -> str:
     body = "".join("<tr>" + "".join(f"<td valign='top'>{'<b>' if i == tag else ''}{esc(r[i] if i < len(r) else '')}{'</b>' if i == tag else ''}</td>"
                                     for i in range(len(g.columns))) + "</tr>" for r in rows)
     table = f'<table cellspacing="0" cellpadding="3"><tr>{head}</tr>{body}</table>' if rows else '<p class="note">No row has every word.</p>'
-    return f'<p class="crumbs">Glossary</p><h2>{esc(g.name)}</h2>{fields_table(facts)}<p class="sec">{said}</p>{table}'
+    return f'<p class="crumbs">Glossary</p>{page_title(esc(g.name))}{fields_table(facts)}<p class="sec">{said}</p>{table}'
 
 
 # ---- the changes ----

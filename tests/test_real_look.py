@@ -11,6 +11,8 @@ from pathlib import Path
 
 import pytest
 
+from docrepo.ui import tokens
+
 REPO = Path(__file__).resolve().parent.parent
 windows_only = pytest.mark.skipif(os.name != "nt", reason="Windows' own Qt platform")
 
@@ -66,7 +68,8 @@ print(json.dumps(out))
 
 @windows_only
 def test_controls_share_a_height():
-    """A row of controls lines up: inputs and buttons are 32 px, icon buttons 28 and one line of a list 28, as the tokens say."""
+    """A row of controls lines up: buttons and the type strip are 32 px, fields 34 since release 5.181 (decision 848, a field's
+    even edge), icon buttons 28 and one line of a list 28, as the tokens say."""
     sizes = run_look("""
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QComboBox, QLabel, QLineEdit, QPushButton, QSpinBox, QToolButton, QVBoxLayout, QWidget
@@ -102,8 +105,10 @@ out["date"] = date.line.height()
 out["row"] = tree.visualItemRect(tree.topLevelItem(0)).height()
 print(json.dumps(out))
 """, "windows")
-    for name in ("button", "primary", "line", "combo", "editable", "spin", "strip", "chips", "date"):
-        assert sizes[name] == 32, (name, sizes)
+    for name in ("button", "primary", "strip"):
+        assert sizes[name] == tokens.CONTROL, (name, sizes)
+    for name in ("line", "combo", "editable", "spin", "chips", "date"):
+        assert sizes[name] == tokens.FIELD, (name, sizes)
     assert sizes["tool"] == sizes["only"] == 28, sizes
     assert 28 <= sizes["row"] <= 30, sizes  # 28 at most scales: a line of text's height depends a little on the computer's scaling
 
@@ -112,11 +117,15 @@ def test_view_titles_are_semibold_in_a_font_that_shows_it():
     """Under Segoe UI Variable's "Text" style, a weight in a style sheet comes out light at a title's size, so titles name Segoe UI."""
     title = run_look("""
 from PySide6.QtWidgets import QLabel
-label = QLabel("Timeline", objectName="paneTitle")
-label.ensurePolished()
-print(json.dumps([label.font().family(), label.font().pointSizeF(), label.font().weight().value]))
+out = []
+for name in ("paneTitle", "pageTitle"):
+    label = QLabel("Timeline", objectName=name)
+    label.ensurePolished()
+    out.append([label.font().family(), label.font().pointSizeF(), label.font().weight().value])
+print(json.dumps(out))
 """, "offscreen")
-    assert title == ["Segoe UI", 15.0, 600]
+    # Release 5.181 (decision 849, the type range): a view's title 11.5 pt, a page's own 19 pt, both semibold
+    assert title == [["Segoe UI", tokens.VIEW_TITLE, 600], ["Segoe UI", tokens.PAGE_TITLE, 600]]
 
 
 def test_the_keyboard_shows_focus_and_the_mouse_doesnt():

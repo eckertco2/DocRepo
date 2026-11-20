@@ -442,8 +442,11 @@ def html(t: Tile, link: Callable[[str, str], str], context: str = "") -> str:
     return (f'<tr><td class="tile" width="20" valign="middle">{circle_html(t)}</td>'
             f'<td class="tile" valign="middle">{title_html(t, link)}{extras_html(t)}{(" " + context) if context else ""}</td>'
             f'<td class="tile" align="right" valign="middle" width="{18 * len(t.marks) + 4}">{marks_html(t)}</td>'
-            f'<td class="tile" align="right" valign="middle" width="34">{days_html(t.days, block=False)}</td></tr>')
+            f'<td class="tile" align="right" valign="middle" width="{DAYS_CELL}">{days_html(t.days, block=False)}</td></tr>')
 
 
 #: A page's table of tiles: the cells meet, and each row's white underline sets it apart (decision 571).
+#: A page tile's days cell, inside its 4 px of padding: 38 px since release 5.181, as "◆ 22" at the new caption size (9.5 pt)
+#: broke over two lines in 34.
+DAYS_CELL = 38
 TABLE = '<table width="100%" cellspacing="0" cellpadding="4" style="border-collapse: collapse">'

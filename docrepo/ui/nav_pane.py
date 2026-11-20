@@ -160,7 +160,7 @@ class Heading(_Row):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         self._backplate(p, self._hover_fill())
-        font = tokens.ui_font(tokens.CAPTION, semibold=True)
+        font = tokens.ui_font(tokens.LABEL, semibold=True)
         tw = QFontMetrics(font).horizontalAdvance(self.text())
         p.setFont(font)
         p.setPen(_c("text") if self.underMouse() else _c("text2"))

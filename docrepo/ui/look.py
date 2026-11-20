@@ -168,7 +168,9 @@ def watch_focus(app: QApplication) -> None:
 _KEYS = (QEvent.Type.KeyPress, QEvent.Type.KeyRelease, QEvent.Type.WindowDeactivate, QEvent.Type.ApplicationDeactivate)
 #: Windows 11's desktop window manager: a window's corners, and its title bar's colour. Windows 10 refuses both, and nothing changes.
 DWMWA_WINDOW_CORNER_PREFERENCE, DWMWA_CAPTION_COLOR = 33, 35
-DWMWCP_ROUNDSMALL = 3
+#: The corners asked for (release 5.181, the redesign's decision 846): a popup's are Windows' full round ones, as anything
+#: that floats is rounded at 12 px; ``DWMWCP_ROUNDSMALL`` is kept for whoever needs the small ones.
+DWMWCP_ROUND, DWMWCP_ROUNDSMALL = 2, 3
 
 
 def dwm_set(window: QWidget, attribute: int, value: int) -> bool:
@@ -180,10 +182,10 @@ def dwm_set(window: QWidget, attribute: int, value: int) -> bool:
 
 
 def dress_window(window: QWidget) -> None:
-    """As a window shows (release 5.59): a popup gets Windows 11's small round corners, and any other window a title bar in the
-    base colour, so there's no seam between it and the toolbar under it."""
+    """As a window shows (release 5.59): a popup gets Windows 11's round corners (the full ones since release 5.181, decision
+    846), and any other window a title bar in the base colour, so there's no seam between it and the toolbar under it."""
     if window.windowType() in (Qt.WindowType.Popup, Qt.WindowType.ToolTip, Qt.WindowType.SplashScreen) or isinstance(window, QMenu):
-        dwm_set(window, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUNDSMALL)
+        dwm_set(window, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND)
     else:
         c = QColor(tokens.colour("base"))
         dwm_set(window, DWMWA_CAPTION_COLOR, c.red() | c.green() << 8 | c.blue() << 16)

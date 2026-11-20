@@ -798,7 +798,7 @@ class TimelineChart(QWidget):
             rect = QRectF(x, top + 7, badge_w - 4, 14)
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(QColor(C.hover))
-            p.drawRoundedRect(rect, tokens.RADIUS_BADGE, tokens.RADIUS_BADGE)
+            p.drawRoundedRect(rect, tokens.RADIUS_S, tokens.RADIUS_S)
             p.setPen(QColor(C.text2))
             p.drawText(rect, Qt.AlignmentFlag.AlignCenter, badge)
         if off:  # a tag, as the mock's: taken off in this what-if

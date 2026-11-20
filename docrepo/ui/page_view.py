@@ -213,7 +213,7 @@ def face(key: str, scale: float) -> QImage:
     p.setPen(Qt.PenStyle.NoPen)
     if key in FACE_ICONS:  # a label's, an agenda's, a tag's or several's mark (release 5.131)
         p.setBrush(_colour("base"))
-        p.drawRoundedRect(QRectF(0, 0, FACE, FACE), tokens.RADIUS_CHIP, tokens.RADIUS_CHIP)
+        p.drawRoundedRect(QRectF(0, 0, FACE, FACE), tokens.RADIUS_L, tokens.RADIUS_L)
         p.drawPixmap(QPointF(10, 10), tinted(FACE_ICONS[key], tokens.colour("text2"), 20, scale))
     else:
         p.setBrush(_colour("info_bg"))

@@ -132,7 +132,7 @@ class Bins(QWidget):
                 p.setPen(Qt.PenStyle.NoPen)
                 if tint.alphaF() > 0:
                     p.setBrush(tint)
-                    p.drawRoundedRect(inner, tokens.RADIUS_ROW, tokens.RADIUS_ROW)
+                    p.drawRoundedRect(inner, tokens.RADIUS_S, tokens.RADIUS_S)
                 if urgent:
                     size = 10
                     colour = tokens.colour("content") if lit else tokens.colour("critical")

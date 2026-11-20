@@ -46,13 +46,14 @@ def ratio(a: str, b: str) -> float:
 
 
 def test_the_tokens_meet_wcag_aa():
-    """Decisions 11 to 13: two readable greys, a 3:1 edge on inputs, and status text that passes on its own tint."""
+    """Decisions 11 to 13: readable greys, and status text that passes on its own tint. A field's edge no longer keeps 3:1:
+    release 5.181's decision 848 (a field's even edge) gave that up, and the focus edge is the accent."""
     t = tokens.LIGHT
     for text in ("text", "text2", "accent"):
         for ground in ("content", "base", "selected"):
             assert ratio(t[text], t[ground]) >= 4.5, (text, ground)
-    assert ratio(t["control"], t["content"]) >= 3 and ratio(t["control"], t["base"]) >= 3
-    assert ratio(t["on_accent"], t["accent"]) >= 4.5
+    assert ratio(t["text3"], t["content"]) >= 4.5
+    assert ratio(t["on_accent"], t["accent_fill"]) >= 4.5
     for fg, bg in (("caution", "caution_bg"), ("critical", "critical_bg"), ("success", "success_bg")):
         assert ratio(t[fg], t[bg]) >= 4.5, fg
     assert set(tokens.DARK) == set(tokens.LIGHT)  # the dark theme's names are all reserved (decision 14)
@@ -238,11 +239,29 @@ def test_the_flow_layout_keeps_its_margins_and_centres_each_line(qapp):
 
 
 def test_no_text_is_styled_below_the_floor():
-    """Decision 2: captions are 9 pt, and nothing is smaller, in the new look's style sheets."""
+    """Decision 2: nothing is smaller than a group label (9 pt, ``LABEL``; captions are 9.5 since release 5.181) in the style sheets."""
     from docrepo.ui.today_panel import QSS
 
     sizes = re.findall(r"font-size:\s*([\d.]+)pt", tokens.qss() + tokens.css() + QSS.format(caption=tokens.CAPTION, radius=tokens.RADIUS, **tokens.active()))
-    assert sizes and min(float(s) for s in sizes) >= tokens.CAPTION
+    assert sizes and min(float(s) for s in sizes) >= tokens.LABEL
+
+
+#: The contrast of each pair the redesign plan's section 3 checked (release 5.181), light and dark, to one decimal place:
+#: (foreground, ground, light, dark), None where the plan names no figure for that set.
+SECTION_3 = (("text", "content", 17.7, 14.6), ("text2", "content", 6.6, 6.9), ("text3", "content", 4.6, 4.5), ("accent", "content", 6.0, 6.5),
+             ("critical", "content", 5.3, None), ("caution", "content", 5.1, None), ("success", "content", 5.4, None),
+             ("parked", "content", 5.5, None), ("on_accent", "accent_fill", 6.0, 5.1))
+
+
+def test_the_redesigns_contrast_figures_hold_in_both_themes():
+    """Release 5.181 (the new skin): the redesign plan's section 3 contrast figures, light and dark, and each at least what
+    WCAG 2.2 AA asks of its job: 4.5 for words."""
+    for fg, ground, light, dark in SECTION_3:
+        for t, want in ((tokens.LIGHT, light), (tokens.DARK, dark)):
+            got = ratio(t[fg], t[ground])
+            assert got >= 4.5, (fg, ground, got)
+            if want is not None:
+                assert round(got, 1) == want, (fg, ground, got, want)
 
 
 def test_settings_keep_show_hints_and_have_no_look_row(ctx):

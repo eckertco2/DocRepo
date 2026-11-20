@@ -41,9 +41,10 @@ TICK_SLOT = 12      # the depth ticks' slot, in a flat list
 DAYS_W = 34         # the days number's column
 PRIORITY_EDGES = {"critical": "pri_critical", "high": "pri_high", "medium": "pri_medium", "parking": "pri_parking"}
 #: The state circle's icon and colour token for each state, and a collection's folder: defined here only, for every tile
-#: (release 5.168, decision 786: one recipe for the three renderers).
-STATE_ICONS = {"Not started": ("state-ns", "text2"), "In progress": ("state-ip", "accent"), "Parked": ("state-pk", "parked"),
-               "Closed": ("state-cl", "text2"), "Collection": ("folder", "text2")}  # a collection's folder (release 5.167)
+#: (release 5.168, decision 786: one recipe for the three renderers). Colour as well as shape since release 5.181 (decision 858):
+#: not started grey, in progress the accent, parked violet, closed green.
+STATE_ICONS = {"Not started": ("state-ns", "text3"), "In progress": ("state-ip", "accent"), "Parked": ("state-pk", "parked"),
+               "Closed": ("state-cl", "success"), "Collection": ("folder", "text2")}  # a collection's folder (release 5.167)
 
 
 def marks_width(marks: tuple) -> int:

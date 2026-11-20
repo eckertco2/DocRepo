@@ -196,9 +196,9 @@ class SaveLinkSwitch(QWidget):
         self.group.buttonClicked.connect(lambda _b: self.changed.emit(self.saved()))
         self.setStyleSheet(
             f"QToolButton#seg {{ border: 1px solid {C.control}; background: {C.content}; color: {C.text2}; padding: 1px 8px; }}"
-            f"QToolButton#seg[end=\"left\"] {{ border-top-left-radius: {tokens.RADIUS_CHIP}px; border-bottom-left-radius: {tokens.RADIUS_CHIP}px; "
+            f"QToolButton#seg[end=\"left\"] {{ border-top-left-radius: {tokens.RADIUS}px; border-bottom-left-radius: {tokens.RADIUS}px; "
             "border-right: none; }"
-            f"QToolButton#seg[end=\"right\"] {{ border-top-right-radius: {tokens.RADIUS_CHIP}px; border-bottom-right-radius: {tokens.RADIUS_CHIP}px; }}"
+            f"QToolButton#seg[end=\"right\"] {{ border-top-right-radius: {tokens.RADIUS}px; border-bottom-right-radius: {tokens.RADIUS}px; }}"
             f"QToolButton#seg:checked {{ background: {C.info_bg}; color: {C.accent}; border-color: {C.accent}; font-weight: 600; }}"
             f"QToolButton#seg:disabled {{ color: {C.text2}; }}"
             f"QToolButton#seg:checked:disabled {{ color: {C.text2}; background: {C.hover}; border-color: {C.stroke_strong}; }}")

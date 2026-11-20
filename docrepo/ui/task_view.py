@@ -83,7 +83,7 @@ QLabel#tvCount, QLabel#tvFoot {{ color: {text2}; }}
 QWidget#tvFootBar {{ background: {base}; border-top: 1px solid {stroke}; }}
 QPushButton#tvChip {{ background: {info_bg}; border: none; border-radius: {radius}px; padding: 2px 10px; min-height: 18px; }}
 QPushButton#tvChip:hover {{ background: {pressed}; }}
-QLineEdit#tvSearch {{ padding: 7px 10px; border-bottom: 2px solid {accent}; }}
+QLineEdit#tvSearch {{ padding: 6px 10px; }}
 QListView#taskViewList {{ background: {content}; border: none; }}
 QWidget#tvPreview {{ background: {content}; border-left: 1px solid {stroke}; }}
 QTextBrowser#tvPage {{ background: transparent; border: none; }}

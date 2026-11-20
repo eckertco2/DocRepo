@@ -27,7 +27,7 @@ from docrepo import (all_notes, capacity, decisions, email_conversations, items,
 from docrepo.colours import colour
 from docrepo.dates import ago, days_words, long_date, monday_of, short, to_date
 from docrepo.file_rows import dated_name, type_name
-from docrepo.markup import esc
+from docrepo.markup import esc, page_title
 from docrepo.links import FOLDER_TEXT, NO_TEXT, is_folder, is_link, reference_link
 from docrepo.model import PRIORITY_NAMES, TODAY, TYPE_NAMES, Capture, Model, Task, is_person
 from docrepo.overview import file_type, sender_of
@@ -583,8 +583,8 @@ class Pages:
             gone = " (discarded)" if origin.discarded else ""
             made = f'<p class="rel">From template: {link(f"tplrow:{origin.row}", " › ".join(origin.path), "Open it in Templates")}{gone}</p>'
         if grid is not None:
-            return f'{crumbs}<h2 title="{t.id}">{esc(t.title)}</h2>{desc}{made}{grid}'
-        return f'{crumbs}<h2 title="{t.id}">{esc(t.title)}</h2><p class="tags">{tags}</p>{fact}{desc}{made}'
+            return f'{crumbs}{page_title(esc(t.title), t.id)}{desc}{made}{grid}'
+        return f'{crumbs}{page_title(esc(t.title), t.id)}<p class="tags">{tags}</p>{fact}{desc}{made}'
 
     def state_button(self, t: Task) -> str:
         """The task's state under its title: a link that opens the state menu, with its chevron, as a page has no hover to show
@@ -1453,7 +1453,7 @@ class Pages:
         span = self.day(first) if first[:10] == last[:10] else f"{self.day(first)} to {self.day(last)}"
         tasks = cv.tasks()
         on = "on " + ", ".join(self.task_link(x) for x in tasks) if tasks else '<span class="faint">not filed to a task</span>'
-        head = (back + f"<h2>{esc(cv.subject)}</h2>"
+        head = (back + page_title(esc(cv.subject))
                 + f'<p class="facts">{esc(ec.who(self.senders(cv), me, most=6))} · {n} email{"s" if n != 1 else ""} · {esc(span)} · {on}</p>')
         blocks, filed = [], set()
         for i, e in enumerate(cv.emails):
@@ -1730,7 +1730,7 @@ class Pages:
         text = (box(f'<span class="sub">Content text</span><br>{shown}') if content
                 else box('<span class="sub">Content text</span><br><span class="sub">None</span>') if content == ""
                 else box("This capture's capture.md couldn't be read, so its content text can't be shown.", "warn"))
-        return f'<p class="crumbs">Capture {c.id}</p><h2>{esc(c.title)}</h2>{unfiled}{fields_table(rows)}<p></p>{text}'
+        return f'<p class="crumbs">Capture {c.id}</p>{page_title(esc(c.title))}{unfiled}{fields_table(rows)}<p></p>{text}'
 
     # ---- documents, people and labels ----
     def document_page(self, document_id: str) -> str:
@@ -1747,14 +1747,14 @@ class Pages:
             rows = [("File description", esc(d.description) if d.description else none_text("None yet")), ("ID", d.id),
                     ("Link", f"<span>{esc(d.original)}</span>"), ("Text", esc(f"No text: {NO_TEXT}")),
                     ("Tasks", ", ".join(self.task_link(x) for x in tasks) or none_text("Not filed yet")), *self.tagged_rows("document", d.id)]
-            return (f'<p class="crumbs">Link {d.id}</p><h2>{esc(d.name)}</h2>{fields_table(rows)}'
+            return (f'<p class="crumbs">Link {d.id}</p>{page_title(esc(d.name))}{fields_table(rows)}'
                     '<p class="note">Open link hands it to your default browser, only when you click it (release 5.67). Copy link puts the address on the clipboard. DocRepo never fetches it.</p>')
         if is_folder(d.original):
             # A folder (release 5.66, round 6's decision 318): kept by where it is, with no text, checks or saved file.
             rows = [("File description", esc(d.description) if d.description else none_text("None yet")), ("ID", d.id),
                     ("Folder", f"<span>{esc(d.original)}</span>"), ("Text", esc(f"No text: {FOLDER_TEXT}")),
                     ("Tasks", ", ".join(self.task_link(x) for x in tasks) or none_text("Not filed yet")), *self.tagged_rows("document", d.id)]
-            return (f'<p class="crumbs">Folder {d.id}</p><h2>{esc(d.name)}</h2>{fields_table(rows)}'
+            return (f'<p class="crumbs">Folder {d.id}</p>{page_title(esc(d.name))}{fields_table(rows)}'
                     '<p class="note">Show in File Explorer opens the folder.</p>')
         # Release 5.145 (the save or link plan's decision 631): a saved file is a file of its own, and where it came from is
         # a fact; a linked file is read where it is.
@@ -1778,7 +1778,7 @@ class Pages:
         if any(f.old for f in copies):
             rows.append(("Old versions", "<br>".join(link(f"show:copy:{f.id}", f"Tasks\\{f.task}\\Files\\_old versions\\{f.name}") for f in copies if f.old)))
         rows += self.tagged_rows("document", d.id)
-        return f'<p class="crumbs">Document {d.id}</p><h2>{esc(d.name)}</h2>{fields_table(rows)}'
+        return f'<p class="crumbs">Document {d.id}</p>{page_title(esc(d.name))}{fields_table(rows)}'
 
     # ---- tagged labels (release 5.79, the tagged labels plan, decisions 367, 376 and 379) ----
     def tagged_chip(self, lb: tagged.Label, n: int = 0, item: str = "") -> str:
@@ -1919,7 +1919,7 @@ class Pages:
                 'again.</p>') if suggested else ""
         plate = f'<span class="tgn">&nbsp;{esc(lb.label)}&nbsp;</span><span class="tgw">&nbsp;new</span>' if suggested else \
             f'<span class="tg">&nbsp;{esc(lb.label)}&nbsp;</span>'
-        return (f'<p class="crumbs">{crumbs}</p><h2>{plate}</h2>{fields_table(rows)}{what}'
+        return (f'<p class="crumbs">{crumbs}</p>{page_title(plate)}{fields_table(rows)}{what}'
                 + (body if uses else '<p class="note">Nothing mentions it yet.</p>'))
 
     def scheduled(self, person_id: str) -> tuple[float, float]:
@@ -1947,7 +1947,7 @@ class Pages:
         added = f'<p class="note">{esc(p.added_note)}</p>' if p.added_note else ""
         tags = f'<p class="tags">{chips.strip()}</p>' if chips else ""  # under the name, at the chips' own size
         summary = link(f"summary:person:{p.id}", "Quick summary", "Their agenda, the tasks you share and what's changed (release 5.131)")
-        return f'<p class="crumbs">Person {p.id} &nbsp;{summary}</p><h2>{esc(p.name)}</h2>{tags}{added}{fields_table(rows)}{self.agenda_block(person_id)}'
+        return f'<p class="crumbs">Person {p.id} &nbsp;{summary}</p>{page_title(esc(p.name))}{tags}{added}{fields_table(rows)}{self.agenda_block(person_id)}'
 
     def label_page(self, name: str) -> str:
         """A label's page: its tasks, or its sublabels' tasks under each sublabel."""
@@ -1960,7 +1960,7 @@ class Pages:
             for s in subs:
                 tasks = label_tasks(self.m, s)
                 rows.append((s, "<br>".join(self.task_link(t) + (' <span class="sub">inherited</span>' if inh else "") for t, inh in tasks) or none_text()))
-            return (f'<p class="crumbs">Label &nbsp;{self.summary_link(name)}</p><h2>{esc(label.name)}</h2>{fields_table(rows)}'
+            return (f'<p class="crumbs">Label &nbsp;{self.summary_link(name)}</p>{page_title(esc(label.name))}{fields_table(rows)}'
                     '<p class="note">A label with labels under it is a heading: tasks get one of its labels, not it.</p>')
         tasks = label_tasks(self.m, name)
         parent = self.m.parent_label(name)
@@ -1968,7 +1968,7 @@ class Pages:
                 ("Keywords", esc(", ".join(label.keywords)) or none_text()), ("Status", esc(label.status)),
                 ("Tasks", "<br>".join(self.task_link(t) + (' <span class="sub">inherited</span>' if inh else "") for t, inh in tasks) or none_text())]
         return (f'<p class="crumbs">{"Label › " + esc(parent) if parent else "Label"} &nbsp;{self.summary_link(name)}</p>'
-                f'<h2>{esc(label.name)}</h2>{fields_table(rows)}')
+                f'{page_title(esc(label.name))}{fields_table(rows)}')
 
     def summary_link(self, label_name: str) -> str:
         """A label's Quick summary (release 5.131): where its open tasks stand, what needs attention and what's changed."""

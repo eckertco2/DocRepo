@@ -476,7 +476,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         form = QWidget()
         lay = QVBoxLayout(form)
         lay.setContentsMargins(14, 10, 14, 14)
-        self.edit_title = QLabel(objectName="paneTitle")
+        self.edit_title = QLabel(objectName="pageTitle")
         lay.addWidget(self.edit_title)
         # Release 5.25 (decision 112): Edit fixes the title and summary. The text stays as it arrived, and its words are
         # fixed on the task's notes page, which Go to it on the page opens.

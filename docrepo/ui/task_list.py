@@ -104,7 +104,7 @@ class TaskRowDelegate(QStyledItemDelegate):
         self.font = tokens.ui_font(tokens.BODY)
         self.bold = tokens.ui_font(tokens.BODY, semibold=True)
         self.small = tokens.ui_font(tokens.CAPTION)
-        self.small_bold = tokens.ui_font(tokens.CAPTION, semibold=True)
+        self.small_bold = tokens.ui_font(tokens.LABEL, semibold=True)
 
     def row_height(self) -> int:
         return max(28, QFontMetrics(self.font).height() + 8)

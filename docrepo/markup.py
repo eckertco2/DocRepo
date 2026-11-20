@@ -45,6 +45,18 @@ MARKS = ("b", "i", "s", "u", "mark")
 _PAIRS = {"b": "**", "i": "*", "s": "~~"}
 
 
+#: A page's title (release 5.181, the redesign's decision 849): a paragraph of class ``ptitle``, which the pages' styles set at
+#: ``tokens.PAGE_TITLE``. Not an ``h2``: Qt's rich text sizes a heading by its level and takes no font size from a style for
+#: it. Its margins are written on it, as Qt takes a paragraph's margins from its own style and not from a class.
+TITLE_MARGINS = "margin-top: 2px; margin-bottom: 4px"
+
+
+def page_title(words_html: str, tip: str = "", margins: str = TITLE_MARGINS) -> str:
+    """A page's title: ``words_html`` (HTML already), with ``tip`` (escaped here) as its tooltip when given."""
+    title = f' title="{esc(tip)}"' if tip else ""
+    return f'<p class="ptitle" style="{margins}"{title}>{words_html}</p>'
+
+
 def esc(text: object) -> str:
     """Any value as HTML text, for a page or a Qt label: ``&``, ``<``, ``>`` and both quotes escaped, so it's safe
     inside an attribute too; None is empty. DocRepo's one HTML escape (release 5.102)."""

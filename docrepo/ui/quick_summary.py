@@ -53,6 +53,7 @@ from PySide6.QtWidgets import (
 
 from docrepo import edits, save, summary
 from docrepo.detail import esc, section_head
+from docrepo.markup import page_title
 from docrepo.summary import AgendaRow, Builder, Section, Subject, Summary
 from docrepo.ui import conversation_page, tokens
 from docrepo.ui.front import bring_to_front
@@ -99,7 +100,7 @@ QScrollArea#summaryScroll, QWidget#summaryPage {{ background: {t['content']}; bo
 QToolButton#agendaTick {{ border: 1px solid {t['control']}; border-radius: {tokens.RADIUS}px; background: {t['content']}; padding: 0; }}
 QToolButton#agendaTick:hover {{ border-color: {t['accent']}; }}
 QToolButton#agendaTick:checked {{ background: {t['accent']}; border-color: {t['accent']}; }}
-QToolButton#addTask, QToolButton#summaryChip {{ background: {t['info_bg']}; color: {t['accent']}; border: none; border-radius: {tokens.RADIUS_PILL}px; padding: 2px 8px; }}
+QToolButton#addTask, QToolButton#summaryChip {{ background: {t['info_bg']}; color: {t['accent']}; border: none; border-radius: {tokens.RADIUS_S}px; padding: 2px 8px; }}
 QToolButton#summaryChip:hover {{ background: {t['selected']}; }}
 QWidget#agendaRow {{ border-radius: {tokens.RADIUS_L}px; }}
 QWidget#agendaRow:hover {{ background: {t['hover']}; }}
@@ -112,7 +113,7 @@ def header_html(s: Summary) -> str:
     chips = " ".join(f'<span class="chip{c.kind}">&nbsp;{c.html}&nbsp;</span>' for c in s.chips)
     face = esc(s.face)
     return (f'<table cellspacing="0" cellpadding="0"><tr><td valign="top" width="54"><img src="face:{face}" width="40" height="40"></td>'
-            f'<td valign="top"><h2 style="margin: 0">{esc(s.subject.name)}</h2><p class="kindline" style="margin: 0">{esc(s.kind_line)}</p>'
+            f'<td valign="top">{page_title(esc(s.subject.name), margins="margin: 0")}<p class="kindline" style="margin: 0">{esc(s.kind_line)}</p>'
             f'<p style="margin: 6px 0 0 0">{facts}</p></td></tr></table><p style="margin: 10px 0 0 0">{chips}</p>')
 
 
@@ -137,7 +138,7 @@ class SubjectDelegate(QStyledItemDelegate):
         p.save()
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         if kind == "head":
-            f = tokens.ui_font(tokens.CAPTION, semibold=True)
+            f = tokens.ui_font(tokens.LABEL, semibold=True)
             p.setFont(f)
             p.setPen(QColor(t["text2"]))
             p.drawText(r.adjusted(12, 6, -12, 0), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, words["title"].upper())
@@ -146,11 +147,11 @@ class SubjectDelegate(QStyledItemDelegate):
         if option.state & QStyle.StateFlag.State_Selected:
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(QColor(t["selected"]))
-            p.drawRoundedRect(r.adjusted(4, 1, -4, -1), tokens.RADIUS_ROW, tokens.RADIUS_ROW)
+            p.drawRoundedRect(r.adjusted(4, 1, -4, -1), tokens.RADIUS_S, tokens.RADIUS_S)
         elif option.state & QStyle.StateFlag.State_MouseOver:
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(QColor(t["hover"]))
-            p.drawRoundedRect(r.adjusted(4, 1, -4, -1), tokens.RADIUS_ROW, tokens.RADIUS_ROW)
+            p.drawRoundedRect(r.adjusted(4, 1, -4, -1), tokens.RADIUS_S, tokens.RADIUS_S)
         x = r.left() + 12
         small = tokens.ui_font(tokens.CAPTION)
         if words.get("number"):

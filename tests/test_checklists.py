@@ -18,6 +18,7 @@ from docrepo import db, items, markup, notes_page  # noqa: E402
 from docrepo.config import Settings  # noqa: E402
 from docrepo.model import Model  # noqa: E402
 from docrepo.save import CaptureDraft, FileRow, first_line, item_names, save_capture  # noqa: E402
+from docrepo.ui import tokens  # noqa: E402
 from docrepo.ui.browse_window import BrowseWindow  # noqa: E402
 from docrepo.ui.capture_window import CaptureWindow  # noqa: E402
 from docrepo.ui.checklist_summary import ChecklistSummary  # noqa: E402
@@ -39,7 +40,7 @@ def qapp():
 def test_checklist_lines_in_the_markup():
     assert [markup.check_of(x) for x in ("- [ ] a", "- [x] b", "  - [X] c", "- a", "1. [ ] d", "[ ] e")] == [False, True, True, None, None, None]
     html = markup.to_html("- [ ] Order the seal\n- [x] Check the guards")
-    assert '<li class="unchecked"' in html and '<li class="checked"' in html and "[ ]" not in html and "color:#5a6571" in html
+    assert '<li class="unchecked"' in html and '<li class="checked"' in html and "[ ]" not in html and f"color:{tokens.colour('ticked')}" in html
     assert "☐&nbsp;Order the seal" in markup.to_line_html("- [ ] Order the seal")
     assert markup.to_plain("- [x] **Done** it") == "- [x] Done it"
 
@@ -73,7 +74,7 @@ def test_ctrl_1_brackets_ticks_and_enter(qapp):
     e.show()  # offscreen: laid out, so the box has its place
     QApplication.processEvents()
     QTest.mouseClick(e.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, e.checkbox_point(b))
-    assert b.blockFormat().marker() == MARKER.Checked and b.begin().fragment().charFormat().foreground().color().name() == "#5a6571"
+    assert b.blockFormat().marker() == MARKER.Checked and b.begin().fragment().charFormat().foreground().color().name() == tokens.colour("ticked")
     e.undo()
     assert b.blockFormat().marker() == MARKER.Unchecked
     c = QTextCursor(b.next())
@@ -112,7 +113,7 @@ def test_the_page_keeps_checklist_lines_and_adds_and_removes_them(qapp):
     notes.set_page(PAGE)
     assert notes.page() == PAGE
     first = next(b for b, _ in notes.checklist_blocks())
-    assert notes.kind(first) == "text" and first.begin().fragment().charFormat().foreground().color().name() == "#5a6571"
+    assert notes.kind(first) == "text" and first.begin().fragment().charFormat().foreground().color().name() == tokens.colour("ticked")
     added = notes.add_check_item("Sling *drawing* done")
     assert notes.page().endswith("\n- [ ] Sling \\*drawing\\* done") and notes.is_check(added)
     notes.remove_line(added)

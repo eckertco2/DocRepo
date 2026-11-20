@@ -376,11 +376,11 @@ class WheelWindow(QWidget):
             if slot.icon:
                 p.drawPixmap(QPointF(at.x() - 10, top), self._icon(slot.icon, ink))
             p.setPen(QColor(ink))
-            p.setFont(_font(tokens.CAPTION_L, bold=lit))
+            p.setFont(_font(tokens.CAPTION, bold=lit))
             p.drawText(QRectF(at.x() - width / 2, top + 22, width, 30), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap,
                        slot.label)
             p.setPen(QColor(quiet))
-            p.setFont(_font(tokens.CAPTION_S))
+            p.setFont(_font(tokens.LABEL))
             hint = "later" if slot.held else f"{ARROWS[d]}  {DIGITS[d]}"
             p.drawText(QRectF(at.x() - width / 2, top + 50, width, 16), Qt.AlignmentFlag.AlignHCenter, hint)
 
@@ -398,7 +398,7 @@ class WheelWindow(QWidget):
         box = QRectF(mid.x() - INNER + 6, mid.y() - 24, 2 * INNER - 12, 26)
         p.drawText(box, Qt.AlignmentFlag.AlignCenter, self.wheel.name)
         p.setPen(QColor(c["text2"]))
-        p.setFont(_font(tokens.CAPTION_S))
+        p.setFont(_font(tokens.LABEL))
         p.drawText(QRectF(mid.x() - INNER + 6, mid.y() + 2, 2 * INNER - 12, 18), Qt.AlignmentFlag.AlignCenter, self.note or "Esc cancels")
 
 

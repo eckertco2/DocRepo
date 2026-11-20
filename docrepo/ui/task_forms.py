@@ -915,7 +915,9 @@ class TaskEditDialog(FormDialog):
         # The visual overhaul's O4: one column of 560 px in sections, labels above fields, 8, 16 and 32 px apart, each field
         # as wide as what goes in it, the rarer fields under More options, and no scrolling unless the screen is small.
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(24, 20, 24, 20)
+        # 18 above and below since release 5.181: its fields are 34 px high (decision 848), and the 4 px they took came from here,
+        # so the form still opens unscrolled on a short screen. Release 5.193 (forms and Settings) lays it out anew.
+        outer.setContentsMargins(24, 18, 24, 18)
         outer.setSpacing(12)
         outer.addWidget(Help("Each change goes into the task's history as Browse tool. For a change that comes with a note, use Update "
                              "in the capture window instead."))
