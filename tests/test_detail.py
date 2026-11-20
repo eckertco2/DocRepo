@@ -46,7 +46,11 @@ def test_a_task_page(pages):
     at = [words.find(part) for part in order]
     assert -1 not in at and at == sorted(at), dict(zip(order, at))
     assert 'title="The latest update was written 3 days ago"' in html and 'title="Due Wed 14 Oct, in 6 days"' in html
-    assert "3 days ago" not in words and "6 d" not in words and "<b>" not in html  # one rule for time, two weights (R7, R10)
+    # one rule for time, two weights (R7, R10): no age in words but a tile's days, which carry their unit since release 5.183
+    # (decision 857, "6 d")
+    untiled = text(re.sub(r'<span class="(?:rel|caution|over)"[^>]*>.*?</span>', "", html))
+    assert "3 days ago" not in words and "6 d" not in untiled and "<b>" not in html
+    assert ">6 d</span>" in html
     for gone in ("Reminder", "—", "Subtasks Summaries", "SUBTASKS", "Scope:", "Order:", "Top-level task"):  # empty fields, the old tab and lines
         assert gone not in words, gone
     assert {"task:T000001", "person:P003", "label:Line%201", "fold:details", "menu:scope", "menu:order", "new:T000008", "tab:log",

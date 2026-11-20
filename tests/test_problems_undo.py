@@ -109,7 +109,7 @@ def test_undo_after_done_puts_it_back_on_today(windows, ctx):
     edits.add_to_today(ctx.conn, ctx.data_root, ctx.fs, None, "Sign the overtime sheets", datetime(2026, 10, 8, 9, 0))
     item = next(a for a in Model(ctx.conn).today_items() if a.subject is None)
     browse.close_today_item(item.id, "Done")
-    assert "Undo" in browse.status.text()
+    assert browse.toast.offers_undo()
     browse._status_link("undo")
     again = next(a for a in Model(ctx.conn).agenda if a.id == item.id)
     assert again.closed is None and again.how is None
@@ -142,7 +142,7 @@ def test_undo_after_save_discards_the_capture_and_opens_it_again(windows, ctx):
     capture.content.setPlainText("The vendor called back about the seals.")
     capture.save()
     cid = max(Model(ctx.conn).captures)
-    assert "Undo" in browse.status.text() and not capture.isVisible()
+    assert browse.toast.offers_undo() and not capture.isVisible()
     browse._status_link("undo")
     c = Model(ctx.conn).captures[cid]
     assert c.discarded and c.discard_reason == "undone"  # nothing deleted: it's in the Discarded view
@@ -159,7 +159,7 @@ def test_a_save_that_made_a_task_has_no_undo(windows, ctx):
     capture.title.setText("Book the crane")
     capture.content.setPlainText("Book the crane for Tuesday.")
     capture.save()
-    assert "Undo" not in browse.status.text()
+    assert not browse.toast.offers_undo()
 
 
 def test_the_footer_offers_undo_if_the_window_opens_again_soon(windows, ctx):

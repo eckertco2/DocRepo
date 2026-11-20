@@ -86,7 +86,7 @@ def shown(w: BrowseWindow) -> str:
 
 
 def undo_offered(w: BrowseWindow) -> bool:
-    return 'href="undo"' in w.status.text() and w._undo is not None
+    return w.toast.offers_undo() and w._undo is not None
 
 
 def states(w: BrowseWindow, *ids: str) -> list[str]:
@@ -187,7 +187,7 @@ def test_closed_leaves_the_open_list_and_undo_brings_it_back(browse):
     assert ("task", RIGGING) not in browse.tree.keys()  # the task tree shows open tasks: it's gone at once
     assert shown(browse) == "Closed: Rigging plan."
     assert undo_offered(browse) and browse._status_timer.interval() == UNDO_MS
-    browse.status.linkActivated.emit("undo")
+    browse.toast.undo.click()
     assert states(browse, RIGGING) == [was] and ("task", RIGGING) in browse.tree.keys()
     assert browse.status.text() == "Set back. The history keeps both changes." and not undo_offered(browse)
     changes = [(e.from_value, e.to_value) for e in browse.model().status if e.task == RIGGING and e.field == "State" and e.at.startswith("2026-10-08 14:10")]
@@ -210,7 +210,7 @@ def test_a_branch_closes_every_open_level_and_one_undo_takes_it_back(browse):
     assert set(states(browse, INSTALLATION, *below)) == {"Closed"}
     n = len(below)
     assert shown(browse) == f"Closed: Installation and its {n} open subtask{'s' if n != 1 else ''}."
-    browse.status.linkActivated.emit("undo")
+    browse.toast.undo.click()
     assert states(browse, INSTALLATION, *below) == was
 
 

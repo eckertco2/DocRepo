@@ -164,6 +164,12 @@ class Days:
     #: Both dates in words: "Due Fri 9 Oct, tomorrow · Deadline Mon 19 Oct, in 11 days".
     tip: str
 
+    @property
+    def shown(self) -> str:
+        """The number with its unit, as a tile draws it (release 5.183, the redesign's decision 857): "50 d", "0 d", "−3 d",
+        "99+ d". ``text`` stays the bare number."""
+        return f"{self.text} d"
+
 
 def days(task: Task, today: date) -> Days | None:
     """Days to the nearer of the task's Due and Deadline (a Deadline on the same day counts as the Deadline), or to a routine
@@ -395,13 +401,13 @@ def _img(src: str, size: int, tip: str) -> str:
 
 
 def days_html(d: Days | None, align: str = "right", block: bool = True) -> str:
-    """The days number as a list's cell writes it (a paragraph, aligned), or as words in a page's cell (``block`` False)."""
+    """The days number with its unit as a list's cell writes it (a paragraph, aligned), or as words in a page's cell (``block`` False)."""
     if d is None:
         return ""
     cls = {"over": "over", "soon": "caution"}.get(d.kind, "rel")
     weight = ' style="font-weight:600"' if d.kind else ""
     mark = '<span style="font-size:7pt">◆</span>&nbsp;' if d.deadline else ""
-    words = f'<span class="{cls}"{weight} title="{escape(d.tip)}">{mark}{escape(d.text)}</span>'
+    words = f'<span class="{cls}"{weight} title="{escape(d.tip)}">{mark}{escape(d.shown)}</span>'
     return f'<p align="{align}" title="{escape(d.tip)}">{words}</p>' if block else words
 
 
@@ -447,6 +453,6 @@ def html(t: Tile, link: Callable[[str, str], str], context: str = "") -> str:
 
 #: A page's table of tiles: the cells meet, and each row's white underline sets it apart (decision 571).
 #: A page tile's days cell, inside its 4 px of padding: 38 px since release 5.181, as "◆ 22" at the new caption size (9.5 pt)
-#: broke over two lines in 34.
-DAYS_CELL = 38
+#: broke over two lines in 34; 52 px since release 5.183, for the unit ("◆ 22 d", decision 857).
+DAYS_CELL = 52
 TABLE = '<table width="100%" cellspacing="0" cellpadding="4" style="border-collapse: collapse">'

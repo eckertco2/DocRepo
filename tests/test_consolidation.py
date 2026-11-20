@@ -308,7 +308,7 @@ def test_remove_from_under_on_a_rows_menu_says_so_with_undo_which_puts_it_back(b
     menu = browse.tree.row_menu(row(browse, "T000008"))
     edit_entry(menu, "Remove from under…").trigger()
     assert Model(browse.conn).parents_of("T000008") == []
-    assert browse.status.text().startswith("Installation is a top-level task now.") and 'href="undo"' in browse.status.text()
+    assert browse.status.text().startswith("Installation is a top-level task now.") and browse.toast.offers_undo()
     browse._status_link("undo")
     m = Model(browse.conn)
     assert m.parents_of("T000008") == ["T000001"] and m.children_of("T000001") == siblings  # second of four again
@@ -324,7 +324,7 @@ def test_move_on_the_task_pages_edit_menu_has_undo_until_the_next_message(browse
     browse._pick_task = lambda anchor, picked, none, keep=None: picked("T000002")
     move.trigger()
     assert browse.status.text().startswith("Installation moved from under Reactor impeller upgrade to Verification walkthrough readiness.")
-    assert 'href="undo"' in browse.status.text()
+    assert browse.toast.offers_undo()
     browse.say("Something else.")  # a new line: the Undo was for the last one (decision 363's)
     browse._status_link("undo")
     assert Model(browse.conn).parents_of("T000008") == ["T000002"]
@@ -348,11 +348,11 @@ def test_a_move_from_find_files_says_so_in_its_footer_with_undo(browse):
     view = find_files_move(browse, "T000012", "Move…", "T000002")
     assert view.foot.text() == "Rigging plan moved from under Installation to Verification walkthrough readiness."
     assert view.foot_undo.isVisibleTo(view) and "where it was" in view.foot_undo.toolTip()
-    assert 'href="undo"' in browse.status.text()  # the browse tool's status line says it too
+    assert browse.toast.offers_undo()  # the browse tool's status line says it too
     view.foot_undo.click()
     assert Model(browse.conn).parents_of("T000012") == ["T000008"]
     assert view.foot.text().startswith("Set back: Rigging plan is under Installation again.") and not view.foot_undo.isVisibleTo(view)
-    assert 'href="undo"' not in browse.status.text()  # once, from either place
+    assert not browse.toast.offers_undo()  # once, from either place
     view.foot_undo.offer(lambda: None)
     assert view.foot_undo.toolTip().startswith("Set the state back")  # a state pick's own tip, as before
 
