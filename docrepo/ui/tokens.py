@@ -563,6 +563,9 @@ QFrame#prRow[sel="true"] { background: $selected; border-color: $info_line; }
 QPushButton#prOpener { border-radius: ${radius_s}px; }
 QFrame#prDrop { background: $accent; border: none; border-radius: ${radius_hair}px; }
 QFrame#prStrip { background: $sunken; border: none; border-radius: ${radius_l}px; }
+/* release 5.192 (the Timeline and Capacity), lane E: the mode strips (the line under the chart already has its rule above) */
+QFrame#modeStrip { background: $selected; border: none; border-radius: ${radius_l}px; }
+QFrame#modeStrip QLineEdit { background: $content; }
 /* ---- end lane E ---- */
 """)
 
