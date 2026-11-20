@@ -299,7 +299,7 @@ def test_later_from_today_and_its_undo(browse, monkeypatch):
     _actions(browse, ("task", "T000012"))["Later…"]()
     m = Model(browse.conn)
     assert not any(a.id == item.id for a in m.today_items()) and m.task("T000012").reminder == "2026-10-13"
-    assert "off Today until Tue 13 Oct" in browse.status.text() and "Undo" in browse.status.text()
+    assert "off Today until Tue 13 Oct" in browse.status.text() and browse.toast.offers_undo()
     browse._status_link("undo")
     m = Model(browse.conn)
     assert any(a.id == item.id for a in m.today_items()) and m.task("T000012").reminder is None

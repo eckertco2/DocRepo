@@ -88,7 +88,7 @@ def test_the_bins_ten_targets_and_a_drop_on_the_urgent_part_with_undo(app):
     assert browse.bin_today(i["plain"], "high", urgent=True)  # its band's urgent part: ticked, the priority kept
     m = Model(app.ctx.conn)
     assert m.task("T000012").urgent and m.task("T000012").priority == "high"
-    assert "Rigging plan: High, urgent." in browse.status.text() and "Undo" in browse.status.text()
+    assert "Rigging plan: High, urgent." in browse.status.text() and browse.toast.offers_undo()
     browse._status_link("undo")
     assert not Model(app.ctx.conn).task("T000012").urgent
     assert rows_in_order(browse.tree)[-3:] == [i["ticked"], i["soon"], i["plain"]]

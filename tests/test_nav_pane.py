@@ -55,7 +55,7 @@ def test_the_rows_their_order_and_the_foot(browse):
     assert main == [*TOP, "Lists", *LIST_IDS, "Plan", *PLAN, "Manage", *MANAGE]
     assert [r.view_id for r in nav.order if nav.foot.isAncestorOf(r)] == ["discarded", "settings"]
     assert nav.rows["due"].text() == "Overdue and next 7 days" and nav.headings["Plan"].accessibleName() == "Plan"
-    assert all(r.height() == 32 for r in nav.rows.values()) and all(h.height() == 26 for h in nav.headings.values())
+    assert all(r.height() == 30 for r in nav.rows.values()) and all(h.height() == 26 for h in nav.headings.values())
 
 
 def test_counts_only_where_they_ask_for_something(browse):
@@ -92,14 +92,18 @@ def test_a_click_opens_the_view_and_marks_it(browse):
 
 
 def test_folding_stays_and_keeps_the_open_view_in_sight(browse, ctx):
-    """Decision 80, and decision 10's folding kept in docs.db."""
+    """Decision 80, and decision 10's folding kept in docs.db. Manage starts folded on a data root that never folded a
+    group (release 5.182, decision 854), and the first fold by hand keeps it with the rest."""
     nav = browse.nav
+    assert nav.headings["Manage"].folded and nav.rows["people"].isHidden() and db.get_state(ctx.conn, NAV_FOLDED_KEY) is None
     browse.set_view("due")
     nav.headings["Lists"].click()
-    assert db.get_state(ctx.conn, NAV_FOLDED_KEY) == "Lists" and nav.headings["Lists"].folded
+    assert db.get_state(ctx.conn, NAV_FOLDED_KEY) == "Lists,Manage" and nav.headings["Lists"].folded
     assert not nav.rows["due"].isHidden() and all(nav.rows[v].isHidden() for v in LIST_IDS if v != "due")
     browse.set_view("tasks")
     assert all(nav.rows[v].isHidden() for v in LIST_IDS)
+    nav.headings["Manage"].click()  # opens it
+    assert db.get_state(ctx.conn, NAV_FOLDED_KEY) == "Lists" and not nav.rows["people"].isHidden()
     nav.headings["Manage"].click()
     assert db.get_state(ctx.conn, NAV_FOLDED_KEY) == "Lists,Manage"
     again = BrowseWindow(ctx, None)

@@ -39,8 +39,12 @@ def test_the_new_colours_are_in_both_themes():
 def test_both_templates_take_every_scale_by_name_and_end_with_the_lanes_sections():
     """Five lane builders each write only between their own two lines, in the style sheet and in the pages' CSS, and name a size
     by its scale, never as a number (section 5a)."""
+    import re
+
     for template in (tokens._QSS.template, tokens._CSS.template):
         tail = template[template.index("/* ---- lane A"):]
+        # what a lane writes between its own two lines is its own (release 5.182 on): the lines and their order stay
+        tail = re.sub(r"(/\* ---- lane (\w) \([^)]*\) ---- \*/\n).*?(/\* ---- end lane \2 ---- \*/)", r"\1\n\3", tail, flags=re.S)
         want = "\n".join(f"/* ---- lane {k} ({name}) ---- */\n\n/* ---- end lane {k} ---- */\n" for k, name in LANES)
         assert tail == want
     for name in SCALES:
