@@ -33,7 +33,7 @@ MAKE_TASK = "make-task"
 
 def state_icon(state: str) -> QIcon:
     name, colour = MARKS.get(state, MARKS["Not started"])
-    c = tokens.LIGHT[colour]
+    c = tokens.colour(colour)
     return icon(name, c, on=c)
 
 
@@ -64,7 +64,7 @@ class StateMenu(QMenu):
         for a in self.actions():
             if a.isCheckable() and a.isChecked():
                 r = self.actionGeometry(a)
-                p.drawPixmap(QPoint(r.right() - TICK_INSET - TICK, r.top() + (r.height() - TICK) // 2), tinted("tick", tokens.LIGHT["accent"], TICK, scale))
+                p.drawPixmap(QPoint(r.right() - TICK_INSET - TICK, r.top() + (r.height() - TICK) // 2), tinted("tick", tokens.colour("accent"), TICK, scale))
         p.end()
 
 
@@ -93,7 +93,7 @@ def state_menu(parent: QWidget | None, model: Model, task_id: str, pick: Callabl
         if s == t.state:
             current = a
         if s == "In progress" and wait is not None and t.state != "Closed":
-            w = menu.addAction(icon("waiting", tokens.LIGHT["accent"]), WAITING)
+            w = menu.addAction(icon("waiting", tokens.colour("accent")), WAITING)
             w.setToolTip("Log progress on this task, waiting on someone's reply: it stays In progress, with the hourglass")
             w.triggered.connect(lambda _=False: wait())
     below = open_below(model, task_id)
@@ -117,7 +117,7 @@ def collection_menu(parent: QWidget | None, model: Model, task_id: str, pick: Ca
     menu = QMenu("Collection" if title == "State" else title, parent)
     menu.setObjectName("collectionMenu")
     menu.setToolTipsVisible(True)
-    menu.setIcon(icon("folder", tokens.LIGHT["text2"]))
+    menu.setIcon(icon("folder", tokens.colour("text2")))
     if t.state == "Closed":
         a = menu.addAction(ce.RESTORE, lambda: pick(ce.restored_state(model, task_id), False))
         a.setToolTip("Back among the open collections, with what's under it as it is")

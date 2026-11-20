@@ -119,7 +119,7 @@ class Bins(QWidget):
             pen = QPen(ink, 1.5, Qt.PenStyle.SolidLine if hot else Qt.PenStyle.DashLine)
             p.setPen(pen)
             p.setBrush(ground)
-            p.drawRoundedRect(QRectF(r).adjusted(0.75, 0.75, -0.75, -0.75), 6, 6)
+            p.drawRoundedRect(QRectF(r).adjusted(0.75, 0.75, -0.75, -0.75), tokens.RADIUS_L, tokens.RADIUS_L)
             # Its two parts (decision 822): the urgent part a stronger tint with the Urgent icon; the part a drop goes to
             # filled with the bin's colour; the dragged task's own part dimmed.
             for (_k, urgent), part in ((t, q) for t, q in self.parts() if t[0] == key):
@@ -132,7 +132,7 @@ class Bins(QWidget):
                 p.setPen(Qt.PenStyle.NoPen)
                 if tint.alphaF() > 0:
                     p.setBrush(tint)
-                    p.drawRoundedRect(inner, 5, 5)
+                    p.drawRoundedRect(inner, tokens.RADIUS_ROW, tokens.RADIUS_ROW)
                 if urgent:
                     size = 10
                     colour = tokens.colour("content") if lit else tokens.colour("critical")

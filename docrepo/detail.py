@@ -24,6 +24,7 @@ from urllib.parse import quote
 
 from docrepo import (all_notes, capacity, decisions, email_conversations, items, markup, meeting_rows, notes_page, repeats, tagged, task_tile,
                      ties, topics, transcripts, waits)
+from docrepo.colours import colour
 from docrepo.dates import ago, days_words, long_date, monday_of, short, to_date
 from docrepo.file_rows import dated_name, type_name
 from docrepo.markup import esc
@@ -71,10 +72,11 @@ CLIP = '<img src="lk:attach" width="14" height="14">'
 ROLLED_SHOWN = 4
 #: The kinds of line a run of files is made of (decision 715).
 FILE_KINDS = ("file", "picture", "attachment")
-#: The bar beside a follow-up's lines opened in its meeting's notes (decision 604), and beside a meeting's unfolded notes.
-NEST_BAR, UNFOLD_BAR = "#9dc0e3", "#d6dce3"
-#: The bar beside lines a pointer line opens into (release 5.143): the success colour, as moved lines aren't a follow-up's.
-MOVED_BAR = "#7fb7a8"
+#: The bar beside a follow-up's lines opened in its meeting's notes (decision 604), and beside a meeting's unfolded notes: colour
+#: tokens, read from the active theme when a page is made (release 5.180).
+NEST_BAR, UNFOLD_BAR = "nest_bar", "unfold_bar"
+#: The bar beside lines a pointer line opens into (release 5.143): green, as moved lines aren't a follow-up's.
+MOVED_BAR = "moved_bar"
 #: The line between a conversation's emails: a block one pixel high in the rule's grey (Qt draws an <hr> dark).
 RULE = '<p class="rule" style="font-size: 1px; margin-top: 16px; margin-bottom: 0px">&nbsp;</p>'
 SCOPE_NAMES = {"self": "This task", "ancestors": "With parent tasks", "descendants": "With subtasks", "family": "Whole family"}
@@ -1090,11 +1092,11 @@ class Pages:
         return self._barred(body + f'<p class="rel" style="margin-top: 4px">{foot}</p>', UNFOLD_BAR, 0)
 
     @staticmethod
-    def _barred(inner: str, colour: str, indent: int) -> str:
-        """``inner`` with a thin bar down its left side, ``indent`` px in."""
+    def _barred(inner: str, bar: str, indent: int) -> str:
+        """``inner`` with a thin bar down its left side in the colour token ``bar``, ``indent`` px in."""
         pad = f'<td width="{indent}"></td>' if indent else ""
         return (f'<table width="100%" cellspacing="0" cellpadding="0" style="margin-top: 2px; margin-bottom: 4px"><tr>{pad}'
-                f'<td width="2" bgcolor="{colour}"></td><td width="10"></td><td>{inner}</td></tr></table>')
+                f'<td width="2" bgcolor="{colour(bar)}"></td><td width="10"></td><td>{inner}</td></tr></table>')
 
     def note_line_html(self, x: notes_page.Line, hit: bool = False, also_on: str | None = None, page: str = "") -> str:
         """One line of a notes page, read only (All notes and a meeting's unfolded notes): a day heading small and grey,

@@ -22,8 +22,9 @@ from docrepo.timeline import Band, Timeline
 from docrepo.ui import tokens
 from docrepo.ui.tokens import C
 
-TINTS = {"t1": C.load1, "t2": C.load2, "t3": C.load3, "t4": C.load4, "t5": C.load5, "none": C.load1}
-INKS = {"t5": C.load5_ink, "none": C.text2}
+#: A cell's ground and its words by load step, read from the active theme when they're drawn (release 5.180).
+TINTS = tokens.LiveMap({"t1": "load1", "t2": "load2", "t3": "load3", "t4": "load4", "t5": "load5", "none": "load1"})
+INKS = tokens.LiveMap({"t5": "load5_ink", "none": "text2"})
 #: A number shows only when its cell has this much to spare.
 PAD = 6
 

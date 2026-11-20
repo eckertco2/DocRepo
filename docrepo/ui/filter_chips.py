@@ -42,7 +42,7 @@ class FilterChips(QWidget):
         self.row = QHBoxLayout(self)
         self.row.setContentsMargins(12, 0, 12, 6)
         self.row.setSpacing(4)
-        self.setStyleSheet(f"QPushButton#filterChip {{ background: {tokens.colour('info_bg')}; border: none; border-radius: 4px;"
+        self.setStyleSheet(f"QPushButton#filterChip {{ background: {tokens.colour('info_bg')}; border: none; border-radius: {tokens.RADIUS}px;"
                            f" padding: 2px 10px; min-height: 18px; }}"
                            f" QPushButton#filterChip:hover {{ background: {tokens.colour('pressed')}; }}")
         self.hide()

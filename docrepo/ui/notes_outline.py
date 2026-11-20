@@ -54,7 +54,7 @@ class _Rows(QStyledItemDelegate):
             p.setRenderHint(QPainter.RenderHint.Antialiasing)
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(QColor(tokens.colour("hover")))
-            p.drawRoundedRect(r, 4, 4)
+            p.drawRoundedRect(r, tokens.RADIUS, tokens.RADIUS)
         accent = QColor(tokens.colour("accent"))
         if current:
             p.fillRect(QRect(r.x(), r.y() + 5, 2, r.height() - 10), accent)

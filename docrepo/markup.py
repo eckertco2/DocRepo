@@ -22,8 +22,10 @@ from __future__ import annotations
 import html
 import re
 
-#: The highlight colours, by name, as pages and the editor show them.
-HIGHLIGHTS = {"yellow": "#fff1a8", "green": "#cdeccd", "pink": "#f8d0e3"}
+from docrepo import colours
+
+#: The highlight colours, by name, as pages and the editor show them: tokens, read from the active theme (release 5.180).
+HIGHLIGHTS = colours.LiveMap({"yellow": "mark_yellow", "green": "mark_green", "pink": "mark_pink"})
 #: After a backslash, these stand for themselves.
 ESCAPABLE = frozenset("\\*~<-.")
 LIST_LINE = re.compile(r"^((?:  )*)(- |(\d+)\. )")
@@ -36,8 +38,6 @@ _HEADING_LIKE = re.compile(r"^\\*#{1,3} ")
 _ESCAPED_HEADING = re.compile(r"^\\+#{1,3} ")
 #: A checklist line's box, at the start of a list item's text: "[ ] " or "[x] " (release 5.26).
 CHECK = re.compile(r"\[([ xX])\] ")
-#: Ticked lines' words are grey (decision 91).
-TICKED_GREY = "#5a6571"
 _LIKE_LIST = re.compile(r"^(\s*)(-|\d+\.)(?=\s|\Z)")
 _TAG = re.compile(r'<u>|</u>|<mark(?: class="(\w+)")?>|</mark>')
 #: The marks, in the order they're written and nested.
@@ -290,11 +290,11 @@ def to_html(markup: str) -> str:
             out.append(f'<{kind} style="margin-top:0; margin-bottom:0">')
             stack.append([kind, False])
         rest, check = line[m.end():], None if m.group(3) else CHECK.match(line, m.end())
-        if check:  # a checklist line: Qt's list item with a box (release 5.26)
+        if check:  # a checklist line: Qt's list item with a box (release 5.26); ticked lines' words are grey (decision 91)
             done = check.group(1) in "xX"
             rest = line[check.end():]
             out.append(f'<li class="{"checked" if done else "unchecked"}" style="white-space:pre-wrap'
-                       f'{"; color:" + TICKED_GREY if done else ""}">{inline_html(rest)}')
+                       f'{"; color:" + colours.colour("ticked") if done else ""}">{inline_html(rest)}')
         else:
             out.append(f'<li style="white-space:pre-wrap">{inline_html(rest)}')
         stack[-1][1] = True

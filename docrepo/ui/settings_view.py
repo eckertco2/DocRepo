@@ -44,6 +44,7 @@ from docrepo.markup import esc
 from docrepo.model import Model
 from docrepo.pages import write_pages
 from docrepo.safe_fs import WriteRefused
+from docrepo.ui import tokens
 from docrepo.ui.tokens import C
 from docrepo.ui.context import AppContext
 from docrepo.ui.icons import icon, set_fold
@@ -284,7 +285,9 @@ class ReportDialog(QDialog):
         lay.addWidget(intro)
         self.text = QPlainTextEdit(text)
         self.text.setReadOnly(True)
-        self.text.setFont(QFont("Consolas", 9))
+        mono = QFont("Consolas")
+        mono.setPointSizeF(tokens.CAPTION)
+        self.text.setFont(mono)
         lay.addWidget(self.text, 1)
         buttons = QHBoxLayout()
         self.copy = QPushButton("Copy report")

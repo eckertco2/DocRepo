@@ -83,7 +83,7 @@ def test_the_style_sheet_parses(qapp):
         w.ensurePolished()
     finally:
         qInstallMessageHandler(previous)
-    assert problems == [] and "$" not in tokens.qss() and "$" not in tokens.CSS
+    assert problems == [] and "$" not in tokens.qss() and "$" not in tokens.css()
 
 
 def test_help_shows_only_with_show_hints(qapp):
@@ -241,7 +241,7 @@ def test_no_text_is_styled_below_the_floor():
     """Decision 2: captions are 9 pt, and nothing is smaller, in the new look's style sheets."""
     from docrepo.ui.today_panel import QSS
 
-    sizes = re.findall(r"font-size:\s*([\d.]+)pt", tokens.qss() + tokens.CSS + QSS.format(caption=tokens.CAPTION, **tokens.LIGHT))
+    sizes = re.findall(r"font-size:\s*([\d.]+)pt", tokens.qss() + tokens.css() + QSS.format(caption=tokens.CAPTION, radius=tokens.RADIUS, **tokens.active()))
     assert sizes and min(float(s) for s in sizes) >= tokens.CAPTION
 
 

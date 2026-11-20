@@ -38,11 +38,16 @@ def tinted(name: str, colour: str, size: int, scale: float = 1.0) -> QPixmap:
     return _pixmap(name, colour, size, scale)
 
 
-@lru_cache(maxsize=None)
 def icon(name: str, colour: str | None = None, on: str | None = None, size: int = 16) -> QIcon:
     """The icon ``name`` in ``colour`` (secondary text by default), the disabled colour when disabled, and ``on`` (the
-    accent by default) when its button is checked. Drawn at 1x, 1.5x and 2x so it stays sharp at 125% to 200%."""
-    t = tokens.LIGHT
+    accent by default) when its button is checked. Drawn at 1x, 1.5x and 2x so it stays sharp at 125% to 200%. Kept by
+    theme as well (release 5.180), so an icon asked for after a switch is in the new theme's colours."""
+    return _icon(tokens.theme(), name, colour, on, size)
+
+
+@lru_cache(maxsize=None)
+def _icon(theme: str, name: str, colour: str | None, on: str | None, size: int) -> QIcon:
+    t = tokens.THEMES[theme]
     result = QIcon()
     for scale in (1.0, 1.5, 2.0):
         result.addPixmap(_pixmap(name, colour or t["text2"], size, scale), QIcon.Mode.Normal, QIcon.State.Off)

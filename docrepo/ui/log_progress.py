@@ -360,8 +360,8 @@ class LogProgress(QWidget):
 
     def _render_email(self, m: Model) -> None:
         e, a = self.email, self.attached
-        strong = f"color:{tokens.LIGHT['text']}; font-weight:600"
-        soft = f"color:{tokens.LIGHT['text2']}"
+        strong = f"color:{tokens.colour('text')}; font-weight:600"
+        soft = f"color:{tokens.colour('text2')}"
         if self.next_step:
             after = m.tasks[self.next_after].title if self.next_after in m.tasks else "the task"
             self.email_line.setText(f"<span style='{strong}'>Next step, after {esc(after)}</span><br>"

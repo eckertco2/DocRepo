@@ -107,7 +107,7 @@ QSS = """
 QWidget#todayPanel {{ background: {content}; border: 1px solid {stroke_strong}; }}
 QWidget#tpTop {{ background: {base}; border-bottom: 1px solid {stroke}; }}
 QWidget#tpList {{ background: {base}; }}
-QFrame#tpRow {{ background: {content}; border-radius: 4px; }}
+QFrame#tpRow {{ background: {content}; border-radius: {radius}px; }}
 QFrame#tpRow:hover {{ background: {hover}; }}
 QFrame#tpRow[current="true"] {{ background: {selected}; }}
 QFrame#tpRow[drop="true"] {{ background: {selected}; border: 1px solid {accent}; }}
@@ -116,15 +116,15 @@ QLabel#tpTitle {{ color: {text}; }}
 QLabel#tpSub {{ color: {text2}; font-size: {caption}pt; }}
 QLabel#tpDue {{ color: {text2}; font-size: {caption}pt; }}
 QLabel#tpGroup {{ color: {text2}; font-size: {caption}pt; font-weight: 600; }}
-QWidget#tpHoverBar {{ background: {hover}; border-radius: 4px; }}
+QWidget#tpHoverBar {{ background: {hover}; border-radius: {radius}px; }}
 QFrame#tpRow[current="true"] QWidget#tpHoverBar {{ background: {selected}; }}
 QLabel#tpDone {{ color: {disabled}; text-decoration: line-through; }}
 QToolButton#tpFold {{ border: 0; color: {text2}; font-size: {caption}pt; font-weight: 600; text-align: left; padding: 2px; }}
 QPushButton#tpLink {{ border: 0; background: transparent; color: {accent}; padding: 0 3px; min-height: 0; font-size: {caption}pt; }}
 QPushButton#tpLink:hover {{ text-decoration: underline; }}
-QPushButton#tpState {{ border: 0; border-radius: 4px; background: transparent; color: {text2}; padding: 0 3px; min-height: 0; font-size: {caption}pt; }}
+QPushButton#tpState {{ border: 0; border-radius: {radius}px; background: transparent; color: {text2}; padding: 0 3px; min-height: 0; font-size: {caption}pt; }}
 QPushButton#tpState:hover {{ background: {pressed}; }}
-QWidget#tpNow {{ background: {now}; border-left: 3px solid {accent}; border-radius: 4px; }}
+QWidget#tpNow {{ background: {now}; border-left: 3px solid {accent}; border-radius: {radius}px; }}
 QLabel#tpNowHead {{ color: {accent}; font-size: {caption}pt; font-weight: 600; padding: 2px 4px 0 6px; }}
 QFrame#tpRow[now="true"] {{ background: {now}; }}
 QFrame#tpRow[now="true"]:hover {{ background: {hover}; }}
@@ -225,7 +225,7 @@ class _BandRule(QWidget):
         caption = QFont(tokens.ui_font(tokens.CAPTION))
         height = max(9, round((QFontMetrics(caption).height() + 4) * 0.55))
         self._font = QFont(tokens.ui_font(tokens.CAPTION, semibold=True))
-        self._font.setPixelSize(max(7, height - 2))
+        self._font.setPixelSize(max(tokens.SMALLEST_PX, height - 2))
         self.setFixedHeight(height)
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
 
@@ -463,16 +463,16 @@ class _DropCover(DropOverlay):
             r = QRect(w.mapTo(panel, QPoint(0, 0)), w.size()).adjusted(1, 1, -1, -1)
             hot = w is panel._cover_target
             p.setPen(QPen(QColor(C.accent), 2 if hot else 1, Qt.PenStyle.SolidLine if hot else Qt.PenStyle.DashLine))
-            p.setBrush(QColor(tokens.LIGHT["selected" if hot else "content"]))
-            p.drawRoundedRect(r, 4, 4)
-            p.setPen(QColor(tokens.LIGHT["text"]))
+            p.setBrush(QColor(tokens.colour("selected" if hot else "content")))
+            p.drawRoundedRect(r, tokens.RADIUS, tokens.RADIUS)
+            p.setPen(QColor(tokens.colour("text")))
             words = r.adjusted(8, 0, -8, 0)
             p.drawText(words, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
                        QFontMetrics(font).elidedText(w.title, Qt.TextElideMode.ElideRight, words.width()))
         p.setClipping(False)
         p.setPen(QPen(QColor(C.accent), 2, Qt.PenStyle.DashLine))
         p.setBrush(Qt.BrushStyle.NoBrush)
-        p.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 6, 6)
+        p.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), tokens.RADIUS_L, tokens.RADIUS_L)
         p.end()
 
 
@@ -485,7 +485,7 @@ class TodayPanel(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
         self.setObjectName("todayPanel")
-        self.setStyleSheet(style_sheet() + QSS.format(caption=tokens.CAPTION, **tokens.LIGHT))
+        self.setStyleSheet(style_sheet() + QSS.format(caption=tokens.CAPTION, radius=tokens.RADIUS, **tokens.active()))
         self.setWindowTitle("Today")
         self.setAccessibleName("Today side panel")
         self.setMouseTracking(True)

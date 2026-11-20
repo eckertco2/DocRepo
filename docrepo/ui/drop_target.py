@@ -25,6 +25,7 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QLabel, QWidget
 
 from docrepo import diagnose, msg
+from docrepo.ui import tokens
 from docrepo.ui.tokens import C
 
 try:
@@ -231,7 +232,7 @@ class DropOverlay(QLabel):
         self.setObjectName("dropOverlay")
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setWordWrap(True)
-        self.setStyleSheet(f"QLabel#dropOverlay {{ background: {C.info_bg}; border: 2px dashed {C.accent}; border-radius: 8px; color: {C.accent}; "
+        self.setStyleSheet(f"QLabel#dropOverlay {{ background: {C.info_bg}; border: 2px dashed {C.accent}; border-radius: {tokens.RADIUS_XL}px; color: {C.accent}; "
                            "font-weight: 600; padding: 12px; }")
         self.hide()
         self._watch = QTimer(self)

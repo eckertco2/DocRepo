@@ -1,8 +1,9 @@
 """The visual overhaul's design tokens (``docs/ui-design`` in the parent workspace: the playbook and decisions 1 to 18).
 
 One place holds every colour, size and spacing the new look uses. They generate the QPalette, the style sheet and the
-pages' HTML styles, so no widget code needs a colour of its own. Light values are used now; the dark names are reserved
-and filled in, so a dark theme is a change of values, not of code (decision 14).
+pages' HTML styles, so no widget code needs a colour of its own. The colours answer from the active theme (release 5.180,
+the redesign's decision 841): ``use("dark")`` before the look is set up (``style.apply_look``) and everything drawn after it
+is dark. Light is the one offered; dark's values are filled in, for release 5.194 to settle (decision 14).
 """
 from __future__ import annotations
 
@@ -10,77 +11,30 @@ from string import Template
 
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QPalette
 
-# ---- colour (decisions 8, 9, 11 to 13; contrast checked against WCAG 2.2 AA) ----
-LIGHT = {
-    "base": "#f4f6f8",        # the window's base layer: the sidebar, toolbars, footers
-    "content": "#ffffff",     # the content layer: lists, pages, inputs, cards
-    "hover": "#eef1f4",
-    "pressed": "#e3e7ec",
-    "selected": "#dbe8f5",    # a selected row, with the accent bar beside it
-    "now": "#eef4fb",         # the current task's row under Now on Today (release 5.177, decision 828): lighter than selected
-    "text": "#1a1f25",        # 16.6:1 on white
-    "text2": "#5a6571",       # secondary text, 5.9:1 on white
-    "disabled": "#87919c",    # disabled controls only
-    "stroke": "#e3e6ea",      # cards, dividers, pane edges, an input's outline
-    "stroke_strong": "#d6dce3",
-    "control": "#7d8793",     # an input's bottom edge, a tick box's outline: 3.6:1 on white
-    "accent": "#1d5e98",      # the one accent: primary buttons, links, focus, selection
-    "accent_hover": "#174d7d",
-    "accent_pressed": "#123e66",
-    "on_accent": "#ffffff",
-    "info_bg": "#e8f0f8", "info_line": "#9dc0e3",  # the accent's family where nothing is selected: chips, a mention, a drop's overlay; selection keeps "selected"
-    "parked": "#585a70", "parked_bg": "#eae8f2",
-    "caution": "#9d5d00", "caution_bg": "#fff4ce", "caution_line": "#ead9a4",   # filled from the capture text, warnings
-    "critical": "#c42b1c", "critical_bg": "#fde7e9",                           # overdue, over capacity, errors
-    "success": "#0f7b0f", "success_bg": "#dff6dd",
-    "scroll": "#c3cbd4", "scroll_hover": "#9aa4af",
-    # Plant events: their bars, lane and band.
-    "event": "#b07a12", "event_bg": "#f7e3b5", "event_ink": "#6e4700",
-    # The Timeline's lanes: a small dot beside dark words, never the words' colour or a band of it (the review's decision V4).
-    "lane1": "#2a78d6", "lane2": "#eb6834", "lane3": "#1baf7a", "lane4": "#eda100", "lane5": "#e87ba4", "lane6": "#008300", "lane7": "#6250d6", "lane8": "#e34948",
-    # Hours a week on the Timeline's bars, light to dark, and the text on each.
-    "hour1": "#86b6ef", "hour2": "#5598e7", "hour3": "#256abf", "hour4": "#184f95", "hour5": "#0d366b",
-    "hour_ink1": "#0b1b2e", "hour_ink2": "#0b1b2e", "hour_ink3": "#ffffff", "hour_ink4": "#ffffff", "hour_ink5": "#ffffff",
-    # The Timeline page (release 5.40): bars' one colour, the team chart's hours within capacity, and a week's load, a cell's
-    # steps from under 40% to 125% or more, with the text on the last.
-    "bar": "#64788c", "bar_soft": "#9fabb8",
-    "load1": "#f4f4f5", "load2": "#e1e2e3", "load3": "#f7d894", "load4": "#e6a6a0", "load5": "#b3261a", "load5_ink": "#ffffff",
-    # The capture window's item cards, each kind's edge, and its references.
-    "item_task": "#e3ecf7", "item_note": "#e0f1ee", "item_update": "#f6ecd8", "item_decision": "#ece6f6", "item_date": "#e8f0dc", "item_heading": "#e9edf1",
-    "ref_task": "#22706a", "ref_task_bg": "#d6eeea",
-    # Categories: the top-level tasks' colours (decision 9), as marks, never as text.
-    "g1": "#3b78c4", "g2": "#2e9483", "g3": "#c08419", "g4": "#8460c2",
-    # Priorities (release 5.81): a task row's left edge, as marks, never as text, each 3:1 or more on white and on hover.
-    "pri_critical": "#c42b1c", "pri_high": "#c27400", "pri_medium": "#3b78c4", "pri_parking": "#7f8b98",
-    # File types (the Task view, release 5.34): their icons' colours only, never text's, each 3:1 or more on white.
-    "type_doc": "#2b579a", "type_sheet": "#217346", "type_slides": "#c43e1c", "type_pdf": "#b30b00", "type_picture": "#8460c2",
-    "type_mail": "#1d5e98", "type_drawing": "#2e9483", "type_link": "#5a6571", "type_other": "#5a6571",
-}
-#: The dark theme's values, reserved for later (decision 14): the same names, not yet used.
-DARK = {
-    "base": "#202020", "content": "#2b2b2b", "hover": "#333333", "pressed": "#3a3a3a", "selected": "#1f3447", "now": "#1b2a37",
-    "text": "#ffffff", "text2": "#c5c5c5", "disabled": "#7a7a7a", "stroke": "#3a3a3a", "stroke_strong": "#454545",
-    "control": "#9a9a9a", "accent": "#7cb0e2", "accent_hover": "#93bfe8", "accent_pressed": "#6aa2d8", "on_accent": "#0c1622",
-    "info_bg": "#1b2a38", "info_line": "#3d5a75", "parked": "#b9b6d6", "parked_bg": "#2d2b3d",
-    "event": "#dca64a", "event_bg": "#3a2e13", "event_ink": "#f0d49a",
-    "lane1": "#6fa6e8", "lane2": "#f08a69", "lane3": "#56c2b0", "lane4": "#dca64a", "lane5": "#ee9fbd", "lane6": "#5cbf86", "lane7": "#ad8ee8", "lane8": "#f3968e",
-    "hour1": "#1c3a5e", "hour2": "#25507f", "hour3": "#3a70ad", "hour4": "#6699d4", "hour5": "#9cc0ea",
-    "hour_ink1": "#ffffff", "hour_ink2": "#ffffff", "hour_ink3": "#ffffff", "hour_ink4": "#0b1b2e", "hour_ink5": "#0b1b2e",
-    "bar": "#8fa3b6", "bar_soft": "#5f6f7d",
-    "load1": "#343434", "load2": "#454545", "load3": "#6b5220", "load4": "#8a3a32", "load5": "#e8776c", "load5_ink": "#1b1b1b",
-    "item_task": "#1f3447", "item_note": "#1c3532", "item_update": "#3a2e13", "item_decision": "#2d2b3d", "item_date": "#26331c", "item_heading": "#333333",
-    "ref_task": "#56c2b0", "ref_task_bg": "#1c3532",
-    "caution": "#e8b85c", "caution_bg": "#3a2e13", "caution_line": "#5a4720", "critical": "#f3968e", "critical_bg": "#3e1f1c",
-    "success": "#82d098", "success_bg": "#1b3323", "scroll": "#555555", "scroll_hover": "#777777",
-    "g1": "#6fa6e8", "g2": "#56c2b0", "g3": "#dca64a", "g4": "#ad8ee8",
-    "pri_critical": "#f3968e", "pri_high": "#e8b85c", "pri_medium": "#6fa6e8", "pri_parking": "#8a949e",
-    "type_doc": "#7fa7e6", "type_sheet": "#5cbf86", "type_slides": "#f08a69", "type_pdf": "#f3968e", "type_picture": "#ad8ee8",
-    "type_mail": "#7cb0e2", "type_drawing": "#56c2b0", "type_link": "#a0aab4", "type_other": "#a0aab4",
-}
+# ---- colour (decisions 8, 9, 11 to 13; contrast checked against WCAG 2.2 AA): the values are in ``docrepo.colours``, which
+# pages made without Qt read too; ``use`` sets the active theme (release 5.180, decision 841), and every colour below and in
+# the windows is read from it when it's drawn ----
+from docrepo.colours import DARK, LIGHT, THEMES, C, LiveList, LiveMap, active, colour, theme, use  # noqa: F401 - re-exported: docrepo.ui reads them here
+
 GROUP_KEYS = ("g1", "g2", "g3", "g4")
 
 # ---- type (decisions 1 and 2): Windows 11's ramp, in points for Qt (1 pt is 1.333 px at 100%) ----
 CAPTION, BODY, SUBTITLE, TITLE = 9.0, 10.5, 15.0, 21.0
+#: The redesign's type scale (release 5.180, decision 841): names holding today's sizes for what will use them, which release
+#: 5.181 (the new skin) changes.
+PAGE_TITLE = SUBTITLE   # a page's title: the pages' h2
+VIEW_TITLE = SUBTITLE   # a view's title over its list (paneTitle)
+SECTION = BODY          # a section's head on a page
+NOTES = BODY            # the notes' words
+LABEL = CAPTION         # a field's name over it
+#: Text sizes off the scale, each a name of its own at the size it had, so nothing moved (release 5.180).
+CAPTION_S, CAPTION_L = CAPTION - 0.5, CAPTION + 0.5  # 8.5 and 9.5: the wheels' small words and their names; a tile on Priorities
+TOPIC = 12              # All notes' topic bands, and their loose notes' heading (release 5.157, By topic)
+INITIALS = 12           # a person's initials in the quick summary's face
+ZONE_TITLE, ZONE_LINE = 16, 10        # Save or link's two zones: the title, and the line under it
+ZONE_TITLE_S, ZONE_LINE_S = 11, 8     # the same, compact
+SMALLEST = 7.0          # the least the Timeline's small words shrink to
+MARK_PX, SMALLEST_PX = 10, 7          # words sized in pixels: an avatar's initials and the timing chart's ruler; the least a mark's
 #: The classes Windows' theme gives their own font, so the application's font doesn't reach them (release 5.57).
 BODY_FONT_CLASSES = ("QAbstractItemView", "QMenu", "QMenuBar", "QMessageBox", "QDockWidgetTitle")
 
@@ -91,6 +45,20 @@ ICON_BUTTON = 28  # toolbar icon buttons, with a 16 px icon
 TREE_ROW = 28
 LIST_ROW = 32
 RADIUS = 4        # controls; windows, menus and dialogs use 8
+#: The redesign's corner scale (release 5.180, decision 841): names holding today's sizes for what will use them, which release
+#: 5.181 (the new skin) changes. ``RADIUS`` is its middle step.
+RADIUS_S = 3      # tick boxes, key caps, the Timeline's tags and pills, a subtask's row on a Priorities card
+RADIUS_L = 6      # cards and panels: the notes' frame, a Priorities column, a settings card, a file's row, a Today bin
+RADIUS_XL = 8     # popovers and floating frames: a popover, the task picker, a drop's overlay, Save or link's zones
+#: Corners off the scale, each a name of its own at the size it had, so nothing moved (release 5.180).
+RADIUS_HAIR = 1     # a 2 px line's ends (the timing chart's), the Priorities board's drop line
+RADIUS_TICK = 0.75  # a depth tick's ends, 1.5 px wide (the task tile)
+RADIUS_EDGE = 1.5   # a 3 px edge bar's round ends: a selected row's, a priority's
+RADIUS_BAR = 2      # thin bars and small marks: a progress bar, a swatch, a priority's box, the Timeline's thin bars
+RADIUS_ROW = 5      # a row's tint inside a list: the quick summary's, a Today bin's part
+RADIUS_BADGE = 7    # the Timeline's count badge, 14 px high
+RADIUS_CHIP = 9     # a kind's chip on the workspace, Save or link's two halves, a summary's face
+RADIUS_PILL = 10    # round-ended chips: the quick summary's, the workspace's "on" mark
 #: Sizes for new code, beside SPACE (release 5.102): row heights, icon sizes and control heights, as the code already uses
 #: them. New code names these rather than writing a number; the literals already in ``ui/`` stay as they are.
 SIZE = {
@@ -111,24 +79,9 @@ SIZE = {
 }
 
 
-def colour(name: str) -> str:
-    """A colour token's value in the light theme, as #rrggbb."""
-    return LIGHT[name]
-
-
-class _Named:
-    """The colours by name, for f-strings: ``{C.text2}``."""
-
-    def __getattr__(self, name: str) -> str:
-        return LIGHT[name]
-
-
-C = _Named()
-
-
 def group_colour(group: int) -> str:
     """A top-level task's colour: the four categories in turn, grey for none."""
-    return LIGHT["stroke_strong"] if group < 0 else LIGHT[GROUP_KEYS[group % len(GROUP_KEYS)]]
+    return colour("stroke_strong") if group < 0 else colour(GROUP_KEYS[group % len(GROUP_KEYS)])
 
 
 # ---- fonts (decision 1): Segoe UI Variable where Windows has it, Segoe UI otherwise; numbers in Segoe UI ----
@@ -159,9 +112,9 @@ def numeric_font(size: float = BODY) -> QFont:
 
 
 def palette() -> QPalette:
-    """The full QPalette for the Fusion style, from the light tokens. Every role is set, so nothing falls back to the
+    """The full QPalette for the Fusion style, from the active theme's tokens. Every role is set, so nothing falls back to the
     system's colours (which, in Windows' dark mode, would mix dark controls into a light window)."""
-    t = LIGHT
+    t = active()
     roles = {
         QPalette.ColorRole.Window: t["base"], QPalette.ColorRole.WindowText: t["text"], QPalette.ColorRole.Base: t["content"],
         QPalette.ColorRole.AlternateBase: t["base"], QPalette.ColorRole.Text: t["text"], QPalette.ColorRole.Button: t["content"],
@@ -186,7 +139,7 @@ QToolTip { background: $content; color: $text; border: 1px solid $stroke_strong;
 
 /* text fields: a soft outline with a 3:1 bottom edge, and the accent there when focused (decision 11) */
 QLineEdit, QPlainTextEdit, QTextEdit, QComboBox, QSpinBox, QDoubleSpinBox, QTimeEdit, QDateEdit {
-  background: $content; color: $text; border: 1px solid $stroke; border-bottom: 1px solid $control; border-radius: 4px;
+  background: $content; color: $text; border: 1px solid $stroke; border-bottom: 1px solid $control; border-radius: ${radius}px;
   selection-background-color: $selected; selection-color: $text; }
 QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QTimeEdit, QDateEdit { padding: 5px 8px; min-height: 20px; max-height: 20px; }
 QPlainTextEdit, QTextEdit { padding: 4px; }
@@ -209,7 +162,7 @@ QLineEdit[filled="true"], QPlainTextEdit[filled="true"], QComboBox[filled="true"
   background: $caution_bg; border-color: $caution_line; border-bottom-color: $caution; }
 QLineEdit[filled="true"] { background-image: url("$marker"); background-repeat: no-repeat; background-position: right center;
   padding-right: 24px; }
-QCheckBox[filled="true"] { background: $caution_bg; border-radius: 4px; }
+QCheckBox[filled="true"] { background: $caution_bg; border-radius: ${radius}px; }
 QLineEdit#dateLine[filled="true"], QLineEdit#dateLine[filled="dot"] { background-position: left center; padding-left: 22px; padding-right: 8px; }  /* its calendar button has the right */
 /* when Parse and populate filled most of a window, each field has only its dot: a tint on all of them says nothing */
 QLineEdit[filled="dot"] { background-image: url("$marker"); background-repeat: no-repeat; background-position: right center;
@@ -219,7 +172,7 @@ QLineEdit[filled="dot"] { background-image: url("$marker"); background-repeat: n
 QPushButton, QToolButton, QCheckBox, QRadioButton { outline: none; }
 
 /* buttons: neutral by default, one accent button per window (the objectName "primary"), 32 px high */
-QPushButton { background: $content; color: $text; border: 1px solid $stroke_strong; border-radius: 4px; padding: 5px 12px;
+QPushButton { background: $content; color: $text; border: 1px solid $stroke_strong; border-radius: ${radius}px; padding: 5px 12px;
   min-height: 20px; }
 QPushButton:hover { background: $hover; }
 QPushButton:pressed { background: $pressed; }
@@ -241,7 +194,7 @@ QPushButton#link:hover, QPushButton#moreLink:hover, QPushButton#rowLink:hover { 
 QWidget#rowActions { background: $hover; }
 QWidget#rowActions[sel="true"] { background: $selected; }
 /* their icon buttons (release 5.78, decision L5): no frame, a tint under the pointer */
-QPushButton#rowIcon { background: transparent; border: none; border-radius: 4px; padding: 0; min-height: 0; min-width: 0; }
+QPushButton#rowIcon { background: transparent; border: none; border-radius: ${radius}px; padding: 0; min-height: 0; min-width: 0; }
 QPushButton#rowIcon:hover { background: $pressed; }
 QPushButton::menu-indicator { image: url("$arrow"); width: 12px; height: 12px; subcontrol-origin: padding; subcontrol-position: right center;
   right: 6px; }
@@ -251,7 +204,7 @@ QPushButton#iconOnly { background: transparent; border: 1px solid transparent; p
   min-height: 26px; max-height: 26px; }
 QPushButton#iconOnly:hover { background: $hover; }
 QPushButton#iconOnly::menu-indicator { image: none; width: 0; }
-QToolButton { background: transparent; border: 1px solid transparent; border-radius: 4px; padding: 4px; color: $text; }
+QToolButton { background: transparent; border: 1px solid transparent; border-radius: ${radius}px; padding: 4px; color: $text; }
 QToolButton:hover { background: $hover; }
 QToolButton:pressed { background: $pressed; }
 QToolButton:checked { background: $selected; color: $accent; }
@@ -265,8 +218,8 @@ QToolButton#iconButton:checked { background: transparent; }  /* the icon says it
 QToolButton#iconButton:checked:hover { background: $hover; }
 
 /* the capture types: toggles that combine, in one segmented strip, the height of the controls beside it */
-QWidget#typeStrip { background: $base; border: 1px solid $stroke; border-radius: 6px; min-height: 30px; max-height: 30px; }
-QCheckBox#typeToggle { color: $text2; padding: 2px 12px; border-radius: 4px; spacing: 0; border: 1px solid transparent; border-bottom: 2px solid transparent; }
+QWidget#typeStrip { background: $base; border: 1px solid $stroke; border-radius: ${radius_l}px; min-height: 30px; max-height: 30px; }
+QCheckBox#typeToggle { color: $text2; padding: 2px 12px; border-radius: ${radius}px; spacing: 0; border: 1px solid transparent; border-bottom: 2px solid transparent; }
 QCheckBox#typeToggle::indicator { width: 0; height: 0; border: none; }
 QCheckBox#typeToggle:hover { color: $text; background: $hover; }
 QCheckBox#typeToggle:checked { background: $content; color: $text; font-weight: 600; border: 1px solid $stroke; border-bottom: 2px solid $accent; }
@@ -274,14 +227,14 @@ QCheckBox#typeToggle:disabled { color: $disabled; }
 
 /* tick boxes and radio buttons */
 QCheckBox, QRadioButton { spacing: 8px; color: $text; }
-QCheckBox::indicator { width: 16px; height: 16px; border: 1px solid $control; border-radius: 3px; background: $content; }
+QCheckBox::indicator { width: 16px; height: 16px; border: 1px solid $control; border-radius: ${radius_s}px; background: $content; }
 QCheckBox::indicator:hover { border-color: $text2; }
 QCheckBox::indicator:checked { background: $accent; border-color: $accent; image: url("$tick"); }
 QCheckBox::indicator:disabled { border-color: $stroke_strong; background: $base; }
 
 /* menus */
 QMenu { background: $content; border: 1px solid $stroke_strong; padding: 4px; }
-QMenu::item { padding: 6px 28px 6px 12px; border-radius: 4px; color: $text; }
+QMenu::item { padding: 6px 28px 6px 12px; border-radius: ${radius}px; color: $text; }
 QMenu::item:selected { background: $hover; }
 QMenu::item:disabled { color: $disabled; }
 QMenu::separator { height: 1px; background: $stroke; margin: 4px 8px; }
@@ -300,7 +253,7 @@ QTreeView[tiled="true"] { background: $base; }
 QTreeView::item, QListView::item { padding: 2px 4px; }
 QTreeView::item:hover, QListView::item:hover { background: $hover; }
 QTreeView::item:selected, QListView::item:selected, QTableView::item:selected { background: $selected; color: $text; }
-QTreeView::indicator { width: 16px; height: 16px; border: 1px solid $control; border-radius: 3px; background: $content; }
+QTreeView::indicator { width: 16px; height: 16px; border: 1px solid $control; border-radius: ${radius_s}px; background: $content; }
 QTreeView::indicator:hover { border-color: $text2; }
 QTreeView::indicator:checked { background: $accent; border-color: $accent; image: url("$tick"); }
 QTreeView::branch { background: transparent; }
@@ -315,8 +268,8 @@ QTableCornerButton::section { background: $content; border: none; }
 /* scroll bars: thin, no arrows */
 QScrollBar:vertical { background: transparent; width: 10px; margin: 0; }
 QScrollBar:horizontal { background: transparent; height: 10px; margin: 0; }
-QScrollBar::handle:vertical { background: $scroll; border-radius: 3px; min-height: 28px; margin: 2px; }
-QScrollBar::handle:horizontal { background: $scroll; border-radius: 3px; min-width: 28px; margin: 2px; }
+QScrollBar::handle:vertical { background: $scroll; border-radius: ${radius_s}px; min-height: 28px; margin: 2px; }
+QScrollBar::handle:horizontal { background: $scroll; border-radius: ${radius_s}px; min-width: 28px; margin: 2px; }
 QScrollBar::handle:hover { background: $scroll_hover; }
 QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; }
 QScrollBar::add-page, QScrollBar::sub-page { background: none; }
@@ -343,23 +296,23 @@ QLabel#heading { font-weight: 600; color: $text; }
 QLabel#subtitle { font-family: "Segoe UI"; font-size: ${subtitle}pt; font-weight: 600; color: $text; }
 
 /* text roles */
-QLabel#fieldLabel { color: $text2; font-size: ${caption}pt; }
+QLabel#fieldLabel { color: $text2; font-size: ${label}pt; }
 QLabel#hint, QLabel#help, QLabel#paneNote { color: $text2; font-size: ${caption}pt; }
 QLabel#does { color: $text2; font-size: ${caption}pt; }
 QLabel#error { color: $critical; font-size: ${caption}pt; font-weight: 600; background: transparent; padding: 0; }
-QLabel#tip { color: $text; background: $selected; border-radius: 4px; padding: 6px 9px; font-size: ${caption}pt; }
-QLabel#hotkey { color: $text2; font-family: Consolas; font-size: ${caption}pt; border: 1px solid $stroke; border-radius: 3px; padding: 1px 4px; }
-QLabel#paneTitle { font-family: "Segoe UI"; font-size: ${subtitle}pt; font-weight: 600; color: $text; }
+QLabel#tip { color: $text; background: $selected; border-radius: ${radius}px; padding: 6px 9px; font-size: ${caption}pt; }
+QLabel#hotkey { color: $text2; font-family: Consolas; font-size: ${caption}pt; border: 1px solid $stroke; border-radius: ${radius_s}px; padding: 1px 4px; }
+QLabel#paneTitle { font-family: "Segoe UI"; font-size: ${view_title}pt; font-weight: 600; color: $text; }
 QLabel#count { color: $text2; font-size: ${caption}pt; }
 QToolButton#info { min-width: 16px; max-width: 16px; min-height: 16px; max-height: 16px; border: 1px solid $control; border-radius: 8px;
   color: $text2; font-size: ${caption}pt; font-weight: 600; padding: 0; }
 QToolButton#info:checked, QToolButton#info:hover { background: $accent; border-color: $accent; color: $on_accent; }
-QLabel#keyTip { background: $text; color: $content; border-radius: 3px; padding: 0 5px; font-size: ${caption}pt; font-weight: 600; }
+QLabel#keyTip { background: $text; color: $content; border-radius: ${radius_s}px; padding: 0 5px; font-size: ${caption}pt; font-weight: 600; }
 
 /* the task page with its notes page (release 5.25): one white page; the notes are part of it, not a box on it */
 QWidget#taskPaneInner, QWidget#notesWrap { background: $content; }
 /* the notes' frame (release 5.27, decision 130): the capture window's editor frame, its header band on the base colour */
-QFrame#notesCard { background: $content; border: 1px solid $stroke_strong; border-radius: 6px; }
+QFrame#notesCard { background: $content; border: 1px solid $stroke_strong; border-radius: ${radius_l}px; }
 QFrame#notesCard[typing="true"] { border: 1px solid $stroke_strong; border-bottom: 2px solid $accent; }
 /* release 5.113 (the task panel plan): the Notes heading is a section's head over its frame, not a band inside it */
 QWidget#notesHead { background: transparent; border: none; }
@@ -373,26 +326,26 @@ QTextBrowser#fitView { background: transparent; border: none; padding: 0; }
 QFrame#statusCard { background: $base; border: none; border-left: 3px solid $accent; }
 QFrame#statusCard[empty="true"] { border-left: 3px solid $stroke_strong; }
 QLabel#statusName, QLabel#statusWhen, QLabel#groupSummaryLabel { color: $text2; }
-QToolButton#statusLog { border: none; border-radius: 4px; background: transparent; padding: 2px 4px 2px 6px; color: $text2; }
+QToolButton#statusLog { border: none; border-radius: ${radius}px; background: transparent; padding: 2px 4px 2px 6px; color: $text2; }
 QToolButton#statusLog:hover { background: $hover; color: $text; }
-QToolButton#groupHead { border: none; border-radius: 4px; background: transparent; padding: 2px 6px 2px 2px; color: $text; }
+QToolButton#groupHead { border: none; border-radius: ${radius}px; background: transparent; padding: 2px 6px 2px 2px; color: $text; }
 QToolButton#groupHead:hover { background: $hover; }
 QTextEdit#notesPage, QTextEdit#notesPage:focus { border: none; border-radius: 0; background: transparent; padding: 0; }
 QLabel#notesSaved { color: $text2; }
 /* the Checklist summary (release 5.26): rows bound to the page's checklist lines */
 QWidget#summaryBox { background: transparent; }
-QWidget#checkRow { border-radius: 4px; }
+QWidget#checkRow { border-radius: ${radius}px; }
 QWidget#checkRow:hover { background: $hover; }
 QTextEdit#checkText, QTextEdit#checkText:focus { border: none; border-radius: 0; background: transparent; padding: 0; }
 QLabel#checkCount, QLabel#checkHeading { color: $text2; }
 QLabel#checkHeading { padding-top: 6px; padding-left: 4px; }
 /* the sticky title line (release 5.86): the task's title once the header has scrolled off; opaque, over the page */
 QWidget#stickyTitle { background: $content; border-bottom: 1px solid $stroke_strong; }
-QToolButton#stickyButton { border: none; border-radius: 4px; background: transparent; padding: 1px 8px; color: $accent; }
+QToolButton#stickyButton { border: none; border-radius: ${radius}px; background: transparent; padding: 1px 8px; color: $accent; }
 QToolButton#stickyButton:hover { background: $hover; }
 QToolButton#checkFold, QToolButton#rowAction { border: none; background: transparent; padding: 0 2px; }
-QFrame#popover, QFrame#capCard { background: $content; border: 1px solid $stroke_strong; border-radius: 8px; }
-QPushButton#filterChip { background: $info_bg; border: none; border-radius: 4px; padding: 2px 10px; min-height: 18px; max-height: 22px; }
+QFrame#popover, QFrame#capCard { background: $content; border: 1px solid $stroke_strong; border-radius: ${radius_xl}px; }
+QPushButton#filterChip { background: $info_bg; border: none; border-radius: ${radius}px; padding: 2px 10px; min-height: 18px; max-height: 22px; }
 QPushButton#filterChip:hover { background: $pressed; }
 QFrame#timelineFoot { background: $content; border-top: 1px solid $stroke; }
 QSplitter#timelineSplit::handle:vertical { height: 7px; background: $base; border-top: 1px solid $stroke_strong; border-bottom: 1px solid $stroke_strong; }
@@ -408,7 +361,7 @@ QLineEdit#addItem { margin-top: 4px; }
 /* the capture window */
 QWidget#capture QScrollArea, QWidget#capture QScrollArea > QWidget > QWidget { background: $content; }
 QWidget#footer { background: $base; border-top: 1px solid $stroke; }
-QFrame#editor { background: $content; border: 1px solid $stroke; border-bottom: 1px solid $control; border-radius: 4px; }
+QFrame#editor { background: $content; border: 1px solid $stroke; border-bottom: 1px solid $control; border-radius: ${radius}px; }
 QFrame#editor QTextEdit, QFrame#editor QPlainTextEdit { border: none; border-radius: 0; background: transparent; padding: 6px 8px; }
 /* the pinned capture window (mods log round 3, M0053): a drop zone that lights up while something is dragged over it */
 QWidget#pinWindow { background: $content; border: 1px solid $stroke_strong; }
@@ -420,44 +373,44 @@ QCheckBox#typeToggle[compact="true"] { padding: 2px 8px; font-size: ${caption}pt
 QCheckBox#typeToggle[compact="true"]:checked { border-bottom: 2px solid $accent; }
 QFrame#dropZone QLineEdit { border: none; background: transparent; padding: 0 2px; min-height: 0; }
 QWidget#pinWindow QLineEdit { min-height: 0; padding: 1px 6px; }
-QFrame#dropZone { background: $base; border: 1px dashed $stroke_strong; border-radius: 6px; }
+QFrame#dropZone { background: $base; border: 1px dashed $stroke_strong; border-radius: ${radius_l}px; }
 QFrame#dropZone[over="true"] { background: $selected; border: 1px solid $accent; }
 QWidget#formatBar { border-bottom: 1px solid $stroke; }
 QWidget#formatBar QToolButton { color: $text2; padding: 3px 6px; min-width: 16px; }
 QWidget#formatBar QToolButton:hover { color: $text; background: $hover; border-color: $stroke; }
 QWidget#formatBar QToolButton:checked { color: $accent; background: $selected; }
-QFrame#found { background: $caution_bg; border: none; border-radius: 4px; }
+QFrame#found { background: $caution_bg; border: none; border-radius: ${radius}px; }
 QFrame#found[empty="true"] { background: $base; }
-QFrame#items, QFrame#agendaPanel { background: $base; border: none; border-radius: 6px; }
+QFrame#items, QFrame#agendaPanel { background: $base; border: none; border-radius: ${radius_l}px; }
 QFrame#items[empty="true"] { background: transparent; }
 QFrame#itemCard { background: $content; border: 1px solid $stroke; border-left: 3px solid $stroke_strong; border-radius: 0; }
 QFrame#itemCard QLabel { background: transparent; border: none; }
-QFrame#itemCard QLabel#itemValue { background: $base; border: 1px solid $stroke; border-bottom: 1px solid $control; border-radius: 4px; padding: 5px 8px; }
+QFrame#itemCard QLabel#itemValue { background: $base; border: 1px solid $stroke; border-bottom: 1px solid $control; border-radius: ${radius}px; padding: 5px 8px; }
 QFrame#itemCard QLabel#itemValue:disabled { color: $disabled; }
-QListWidget#refPopup, QListWidget#headingList, QListWidget#suggestions { background: $content; border: 1px solid $stroke_strong; border-radius: 4px; padding: 2px; }
+QListWidget#refPopup, QListWidget#headingList, QListWidget#suggestions { background: $content; border: 1px solid $stroke_strong; border-radius: ${radius}px; padding: 2px; }
 QListWidget#refPopup::item:selected, QListWidget#headingList::item:selected, QListWidget#suggestions::item:selected { background: $hover; color: $text; }
-QFrame#taskPicker { background: $content; border: 1px solid $stroke_strong; border-radius: 8px; }
+QFrame#taskPicker { background: $content; border: 1px solid $stroke_strong; border-radius: ${radius_xl}px; }
 QListWidget#taskPickerList { background: $content; border: none; padding: 0; }
 QListWidget#taskPickerList::item:selected { background: $hover; color: $text; }
 QFrame#divider { color: $stroke; }
 QPushButton#today { background: transparent; border: 1px solid transparent; }
 QPushButton#today:hover { background: $hover; }
 QPushButton#today:checked { background: $selected; color: $accent; border-color: $selected; }
-QFrame#fileRow { border: 1px solid $stroke; border-radius: 6px; background: $content; }
-QToolButton#chip { border: 1px solid $stroke; border-radius: 4px; background: $hover; padding: 1px 8px; font-size: ${caption}pt; }
+QFrame#fileRow { border: 1px solid $stroke; border-radius: ${radius_l}px; background: $content; }
+QToolButton#chip { border: 1px solid $stroke; border-radius: ${radius}px; background: $hover; padding: 1px 8px; font-size: ${caption}pt; }
 QToolButton#chip[filled="true"] { background: $caution_bg; border-color: $caution_line; color: $text; }
-QFrame#personChip { border: 1px solid $stroke; border-radius: 4px; background: $hover; }
+QFrame#personChip { border: 1px solid $stroke; border-radius: ${radius}px; background: $hover; }
 QFrame#personChip:focus { border: 1px solid $accent; }
 QFrame#personChip QLabel { font-size: ${caption}pt; background: transparent; }
 QFrame#personChip QLabel#personShare { color: $accent; font-weight: 600; }
 QFrame#personChip QToolButton { border: none; background: transparent; padding: 0 2px; font-size: ${caption}pt; }
 QFrame#involvementBox { border: 1px solid $stroke_strong; background: $content; }
-QFrame#tieBox { border: 1px solid $stroke; border-radius: 4px; background: $content; }
+QFrame#tieBox { border: 1px solid $stroke; border-radius: ${radius}px; background: $content; }
 QFrame#timingHead { border-bottom: 1px solid $stroke_strong; }
 QFrame#timingRow { border-bottom: 1px solid $stroke; }
 QFrame#timingRow[anchor="true"] { background: $selected; }
-QLabel#anchorPill { color: $accent; background: $info_bg; border: 1px solid $accent; border-radius: 4px; padding: 0 6px; font-size: ${caption}pt; }
-QWidget#chips { border: 1px solid $stroke; border-bottom: 1px solid $control; border-radius: 4px; background: $content; }
+QLabel#anchorPill { color: $accent; background: $info_bg; border: 1px solid $accent; border-radius: ${radius}px; padding: 0 6px; font-size: ${caption}pt; }
+QWidget#chips { border: 1px solid $stroke; border-bottom: 1px solid $control; border-radius: ${radius}px; background: $content; }
 /* with the chip field's margins, 32 px high, and its text where a text box's starts */
 QWidget#chips QLineEdit, QWidget#chips QLineEdit:focus { background: transparent; border: none; padding: 4px 5px; min-height: 22px; max-height: 22px; }
 
@@ -471,44 +424,49 @@ QLabel#status[error="true"] { background: $critical_bg; color: $critical; }
 QWidget#navPane, QWidget#navBody { background: $base; }
 QFrame#navFoot { background: $base; border: none; border-top: 1px solid $stroke; }
 /* the Priorities board (release 5.23): a column per bucket, a card per task; the card's left edge is painted in its colour */
-QFrame#prCol { background: $base; border: 1px solid $stroke; border-radius: 6px; }
+QFrame#prCol { background: $base; border: 1px solid $stroke; border-radius: ${radius_l}px; }
 QFrame#prCol[over="true"] { background: $selected; border-color: $accent; }
 QWidget#prCards { background: transparent; }
-QFrame#prCard { background: $content; border: 1px solid $stroke; border-radius: 4px; }
+QFrame#prCard { background: $content; border: 1px solid $stroke; border-radius: ${radius}px; }
 QFrame#prCard:hover { border-color: $stroke_strong; }
 QFrame#prCard[sel="true"] { background: $selected; border-color: $accent; }
-QFrame#prDrop { background: $accent; border: none; border-radius: 1px; }
+QFrame#prDrop { background: $accent; border: none; border-radius: ${radius_hair}px; }
 QLabel#prTitle { font-weight: 600; color: $text; }
 /* a parent shown only for the subtasks folded into it (release 5.136): dimmed, as the task tree's parents are */
 QFrame#prCard[context="true"] QLabel#prTitle { font-weight: 400; color: $text2; }
 /* the subtasks inside a parent's card in Parents, and its opener (release 5.137, decisions 552 and 553) */
 QFrame#prRows { border: none; border-top: 1px solid $stroke; background: transparent; }
-QFrame#prRow { background: transparent; border: 1px solid transparent; border-radius: 3px; }
+QFrame#prRow { background: transparent; border: 1px solid transparent; border-radius: ${radius_s}px; }
 QFrame#prRow:hover { background: $hover; }
 QFrame#prRow[sel="true"] { background: $selected; border-color: $accent; }
 QLabel#prRowTitle { color: $text; }
-QPushButton#prOpener { border: none; background: transparent; color: $text2; padding: 0; border-radius: 3px; }
+QPushButton#prOpener { border: none; background: transparent; color: $text2; padding: 0; border-radius: ${radius_s}px; }
 QPushButton#prOpener:hover { background: $hover; color: $text; }
 QTextBrowser { border: none; background: $content; }
-QWidget#settingsCard { background: $content; border: 1px solid $stroke; border-radius: 6px; }
+QWidget#settingsCard { background: $content; border: 1px solid $stroke; border-radius: ${radius_l}px; }
 QDialog#palette { background: $content; border: 1px solid $stroke_strong; }
 """)
 
 
+#: The sizes the style sheets name, beside the colours.
+_SIZES = {"caption": CAPTION, "subtitle": SUBTITLE, "view_title": VIEW_TITLE, "page_title": PAGE_TITLE, "label": LABEL, "topic": TOPIC,
+          "radius": RADIUS, "radius_s": RADIUS_S, "radius_l": RADIUS_L, "radius_xl": RADIUS_XL, "radius_hair": RADIUS_HAIR}
+
+
 def qss() -> str:
-    """The new look's style sheet, from the tokens."""
+    """The look's style sheet, from the active theme's tokens."""
     from docrepo.ui.icons import file_url  # the icons module reads the tokens too
 
-    return _QSS.substitute(LIGHT, caption=CAPTION, subtitle=SUBTITLE, arrow=file_url("arrow-down-grey"), tick=file_url("tick-white"),
+    return _QSS.substitute(active(), **_SIZES, arrow=file_url("arrow-down-grey"), tick=file_url("tick-white"),
                            marker=file_url("filled-marker"), branch_closed=file_url("chevron-right"), branch_open=file_url("chevron-down"),
                            chev_left=file_url("chevron-left"), chev_right=file_url("chevron-right"))
 
 
 #: The pages' and the list cells' HTML styles (Qt's rich text), from the same tokens. Numbers use Segoe UI so they line up.
-CSS = Template("""
+_CSS = Template("""
 body { color: $text; }
 a { color: $accent; text-decoration: none; }
-h2 { font-family: 'Segoe UI'; font-size: ${subtitle}pt; font-weight: 600; margin-top: 2px; margin-bottom: 4px; }
+h2 { font-family: 'Segoe UI'; font-size: ${page_title}pt; font-weight: 600; margin-top: 2px; margin-bottom: 4px; }
 .crumbs { color: $text2; font-size: ${caption}pt; margin: 0; }
 .sub { color: $text2; font-size: ${caption}pt; font-weight: 400; }
 .faint { color: $text2; }
@@ -581,8 +539,17 @@ h2 { font-family: 'Segoe UI'; font-size: ${subtitle}pt; font-weight: 600; margin
 .nl { margin: 0; }
 .also { color: $text2; font-size: ${caption}pt; }
 .occ { font-weight: 600; }
-.topic { font-size: 12pt; font-weight: 600; }
+.topic { font-size: ${topic}pt; font-weight: 600; }
 .sub2 { font-weight: 600; }
-.loose { color: $text2; font-size: 12pt; font-weight: 600; }
+.loose { color: $text2; font-size: ${topic}pt; font-weight: 600; }
 .tag { color: $text2; font-size: ${caption}pt; }
-""").substitute(LIGHT, caption=CAPTION, subtitle=SUBTITLE)
+""")
+_CSS_CACHE: dict[str, str] = {}
+
+
+def css() -> str:
+    """The pages' HTML styles in the active theme (made once a theme)."""
+    name = theme()
+    if name not in _CSS_CACHE:
+        _CSS_CACHE[name] = _CSS.substitute(active(), **_SIZES)
+    return _CSS_CACHE[name]

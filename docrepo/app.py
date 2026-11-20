@@ -33,7 +33,7 @@ from docrepo.panel_rules import OPEN_KEY
 from docrepo.safe_fs import SafeFS
 from docrepo.kinds import is_work
 from docrepo.schedule import due_of
-from docrepo.ui import current_ui
+from docrepo.ui import current_ui, tokens
 from docrepo.ui.browse_window import BrowseWindow
 from docrepo.ui.capture_window import CaptureWindow
 from docrepo.ui.context import AppContext
@@ -64,11 +64,11 @@ def make_icon() -> QIcon:
         pixmap.fill(QColor(0, 0, 0, 0))
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setBrush(QColor("#1d5e98"))
-        painter.setPen(QColor("#1d5e98"))
+        painter.setBrush(QColor(tokens.colour("brand")))
+        painter.setPen(QColor(tokens.colour("brand")))
         inset, radius = size / 16, size * 3 / 16
         painter.drawRoundedRect(QRectF(inset, inset, size - 2 * inset, size - 2 * inset), radius, radius)
-        painter.setPen(QColor("#ffffff"))
+        painter.setPen(QColor(tokens.colour("brand_ink")))
         font = QFont("Segoe UI")
         font.setPixelSize(round(size * 0.62))
         font.setWeight(QFont.Weight.Bold)
@@ -509,7 +509,7 @@ def run(data_root: Path, settings: Settings, fs: SafeFS, browse: bool = False) -
     qt = QApplication.instance() or QApplication(sys.argv)
     qt.setQuitOnLastWindowClosed(False)
     qt.setApplicationName("DocRepo")
-    apply_look(qt, "new", settings.show_hints)  # light, whatever Windows is set to
+    apply_look(qt, "light", settings.show_hints)  # light, whatever Windows is set to (a dark theme isn't offered yet)
     set_identity(qt)
     lock = QLockFile(str(fs.checked_path(data_root / LOCK_FILE)))
     lock.setStaleLockTime(0)

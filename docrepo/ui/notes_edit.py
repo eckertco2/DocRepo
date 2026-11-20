@@ -471,7 +471,7 @@ class NotesEdit(RichEdit):
             for text, marks, colour in markup._segments(rest):
                 f = QTextCharFormat()
                 if done:
-                    f.setForeground(QColor(markup.TICKED_GREY))
+                    f.setForeground(QColor(tokens.colour("ticked")))
                 if "b" in marks:
                     f.setFontWeight(QFont.Weight.Bold)
                 if "i" in marks:
@@ -980,7 +980,7 @@ class NotesEdit(RichEdit):
         while not it.atEnd():
             fmt = QTextCharFormat(it.fragment().charFormat())
             if done:
-                fmt.setForeground(QColor(markup.TICKED_GREY))
+                fmt.setForeground(QColor(tokens.colour("ticked")))
             else:
                 fmt.clearForeground()
             c.insertText(it.fragment().text(), fmt)

@@ -42,7 +42,7 @@ def layout_of(width: int) -> int:
 
 
 def _colour(name: str) -> QColor:
-    return QColor(tokens.LIGHT.get(name, name))
+    return QColor(tokens.active().get(name, name))
 
 
 def _canvas(width: int, height: int, scale: float) -> tuple[QImage, QPainter]:
@@ -62,10 +62,10 @@ def avatar(key: str, scale: float) -> QImage:
     p.setBrush(_colour("selected" if me else "pressed"))
     p.drawEllipse(QRectF(0, 0, AVATAR, AVATAR))
     if me:
-        p.drawPixmap(QPointF(3, 3), tinted("person", tokens.LIGHT["accent"], AVATAR - 6, scale))
+        p.drawPixmap(QPointF(3, 3), tinted("person", tokens.colour("accent"), AVATAR - 6, scale))
     else:
         font = QFont("Segoe UI")
-        font.setPixelSize(10)  # as large as two letters fit in the circle; it's a mark, with the name beside it
+        font.setPixelSize(tokens.MARK_PX)  # as large as two letters fit in the circle; it's a mark, with the name beside it
         font.setWeight(QFont.Weight.DemiBold)
         p.setFont(font)
         p.setPen(_colour("text"))
@@ -77,7 +77,7 @@ def avatar(key: str, scale: float) -> QImage:
 def mark(state: str, scale: float) -> QImage:
     image, p = _canvas(MARK, MARK, scale)
     colour = MARK_COLOURS.get(state, "text2")
-    p.drawPixmap(QPointF(0, 0), tinted("folder" if state == "co" else f"state-{state}", tokens.LIGHT.get(colour, colour), MARK, scale))
+    p.drawPixmap(QPointF(0, 0), tinted("folder" if state == "co" else f"state-{state}", tokens.active().get(colour, colour), MARK, scale))
     p.end()
     return image
 
@@ -92,7 +92,7 @@ LINK_MARKS = {"link": ("link", "text2"), "folder": ("folder", "text2"), "note": 
 def link_mark(key: str, scale: float) -> QImage:
     name, colour = LINK_MARKS[key]
     image, p = _canvas(MARK, MARK, scale)
-    p.drawPixmap(QPointF(0, 0), tinted(name, tokens.LIGHT[colour], MARK, scale))
+    p.drawPixmap(QPointF(0, 0), tinted(name, tokens.colour(colour), MARK, scale))
     p.end()
     return image
 
@@ -103,7 +103,7 @@ FILE_MARK = 16
 
 def file_mark(kind: str, scale: float) -> QImage:
     image, p = _canvas(FILE_MARK, FILE_MARK, scale)
-    p.drawPixmap(QPointF(0, 0), tinted(type_icon(kind), tokens.LIGHT[type_colour(kind)], FILE_MARK, scale))
+    p.drawPixmap(QPointF(0, 0), tinted(type_icon(kind), tokens.colour(type_colour(kind)), FILE_MARK, scale))
     p.end()
     return image
 
@@ -118,14 +118,14 @@ def tile_mark(key: str, scale: float) -> QImage:
     name, colour, size = TILE_MARKS[key]
     image, p = _canvas(size, size, scale)
     if name:
-        p.drawPixmap(QPointF(0, 0), tinted(name, tokens.LIGHT[colour], size, scale))
+        p.drawPixmap(QPointF(0, 0), tinted(name, tokens.colour(colour), size, scale))
     p.end()
     return image
 
 
 def chevron(direction: str, scale: float) -> QImage:
     image, p = _canvas(MARK, MARK, scale)
-    p.drawPixmap(QPointF(0, 0), tinted(f"chevron-{direction}", tokens.LIGHT["text2"], MARK, scale))
+    p.drawPixmap(QPointF(0, 0), tinted(f"chevron-{direction}", tokens.colour("text2"), MARK, scale))
     p.end()
     return image
 
@@ -135,10 +135,10 @@ def progress(done: int, total: int, width: int, scale: float) -> QImage:
     image, p = _canvas(width, PROGRESS_HEIGHT, scale)
     p.setPen(Qt.PenStyle.NoPen)
     p.setBrush(_colour("pressed"))
-    p.drawRoundedRect(QRectF(0, 0, width, PROGRESS_HEIGHT), 2, 2)
+    p.drawRoundedRect(QRectF(0, 0, width, PROGRESS_HEIGHT), tokens.RADIUS_BAR, tokens.RADIUS_BAR)
     if total and done:
         p.setBrush(_colour("success"))
-        p.drawRoundedRect(QRectF(0, 0, width * min(done, total) / total, PROGRESS_HEIGHT), 2, 2)
+        p.drawRoundedRect(QRectF(0, 0, width * min(done, total) / total, PROGRESS_HEIGHT), tokens.RADIUS_BAR, tokens.RADIUS_BAR)
     p.end()
     return image
 
@@ -162,7 +162,7 @@ def stack(counts: list[int], width: int, scale: float) -> QImage:
         w = (width - gaps) * n / total
         p.setBrush(_colour(BUCKET_COLOURS[bucket]))
         if i == len(shown) - 1:
-            p.drawRoundedRect(QRectF(x, 0, w, STACK_H), 3, 3)
+            p.drawRoundedRect(QRectF(x, 0, w, STACK_H), tokens.RADIUS_S, tokens.RADIUS_S)
             p.drawRect(QRectF(x, 0, min(w, 4), STACK_H))  # only the far end is rounded
         else:
             p.drawRect(QRectF(x, 0, w, STACK_H))
@@ -201,7 +201,7 @@ def swatch(bucket: str, scale: float) -> QImage:
     image, p = _canvas(SWATCH, SWATCH, scale)
     p.setPen(Qt.PenStyle.NoPen)
     p.setBrush(_colour(BUCKET_COLOURS[bucket]))
-    p.drawRoundedRect(QRectF(0, 0, SWATCH, SWATCH), 2, 2)
+    p.drawRoundedRect(QRectF(0, 0, SWATCH, SWATCH), tokens.RADIUS_BAR, tokens.RADIUS_BAR)
     p.end()
     return image
 
@@ -213,12 +213,12 @@ def face(key: str, scale: float) -> QImage:
     p.setPen(Qt.PenStyle.NoPen)
     if key in FACE_ICONS:  # a label's, an agenda's, a tag's or several's mark (release 5.131)
         p.setBrush(_colour("base"))
-        p.drawRoundedRect(QRectF(0, 0, FACE, FACE), 9, 9)
-        p.drawPixmap(QPointF(10, 10), tinted(FACE_ICONS[key], tokens.LIGHT["text2"], 20, scale))
+        p.drawRoundedRect(QRectF(0, 0, FACE, FACE), tokens.RADIUS_CHIP, tokens.RADIUS_CHIP)
+        p.drawPixmap(QPointF(10, 10), tinted(FACE_ICONS[key], tokens.colour("text2"), 20, scale))
     else:
         p.setBrush(_colour("info_bg"))
         p.drawEllipse(QRectF(0, 0, FACE, FACE))
-        f = QFont("Segoe UI", 12)
+        f = QFont("Segoe UI", tokens.INITIALS)
         f.setWeight(QFont.Weight.DemiBold)
         p.setFont(f)
         p.setPen(_colour("accent"))
@@ -232,7 +232,7 @@ def edge(bucket: str, scale: float) -> QImage:
     image, p = _canvas(3, 18, scale)
     p.setPen(Qt.PenStyle.NoPen)
     p.setBrush(_colour(BUCKET_COLOURS[bucket]))
-    p.drawRoundedRect(QRectF(0, 0, 3, 18), 1.5, 1.5)
+    p.drawRoundedRect(QRectF(0, 0, 3, 18), tokens.RADIUS_EDGE, tokens.RADIUS_EDGE)
     p.end()
     return image
 

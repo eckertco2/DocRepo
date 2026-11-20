@@ -81,7 +81,7 @@ QTabBar#tvKinds::tab:selected {{ border-bottom: 2px solid {accent}; font-weight:
 QTabBar#tvKinds::tab:hover:!selected {{ background: {hover}; }}
 QLabel#tvCount, QLabel#tvFoot {{ color: {text2}; }}
 QWidget#tvFootBar {{ background: {base}; border-top: 1px solid {stroke}; }}
-QPushButton#tvChip {{ background: {info_bg}; border: none; border-radius: 4px; padding: 2px 10px; min-height: 18px; }}
+QPushButton#tvChip {{ background: {info_bg}; border: none; border-radius: {radius}px; padding: 2px 10px; min-height: 18px; }}
 QPushButton#tvChip:hover {{ background: {pressed}; }}
 QLineEdit#tvSearch {{ padding: 7px 10px; border-bottom: 2px solid {accent}; }}
 QListView#taskViewList {{ background: {content}; border: none; }}
@@ -125,7 +125,7 @@ class TaskView(QWidget):
         super().__init__(None, Qt.WindowType.Window)
         self.browse, self.ctx, self.task_id = browse, browse.ctx, task_id
         self.setObjectName("browse")
-        self.setStyleSheet(_QSS.format(**tokens.LIGHT))
+        self.setStyleSheet(_QSS.format(radius=tokens.RADIUS, **tokens.active()))
         self.setAcceptDrops(True)
         # Files from File Explorer: Save in DocRepo or Link (release 5.145, decision 633), raised over the rest while dragged.
         self.zones = SaveLinkZones(self, lambda zone, paths: self.take_drop("files", paths, zone))
@@ -511,9 +511,9 @@ class TaskView(QWidget):
             item.setData(0, Qt.ItemDataRole.UserRole, tid)
             item.setToolTip(0, t.title)
             item.setTextAlignment(1, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            item.setForeground(1, QColor(tokens.LIGHT["text2"]))
+            item.setForeground(1, QColor(tokens.colour("text2")))
             if t.state == "Closed" and depth:
-                item.setForeground(0, QColor(tokens.LIGHT["text2"]))
+                item.setForeground(0, QColor(tokens.colour("text2")))
             (parent.addChild if isinstance(parent, QTreeWidgetItem) else self.outline.addTopLevelItem)(item)
             for child in m.children_of(tid):
                 if child not in fam:
@@ -529,7 +529,7 @@ class TaskView(QWidget):
         if closed or self.show_closed:
             more = QTreeWidgetItem([("Hide" if self.show_closed else "Show") + (f" {closed} closed" if closed else " closed"), ""])
             more.setData(0, Qt.ItemDataRole.UserRole, "closed")
-            more.setForeground(0, QColor(tokens.LIGHT["accent"]))
+            more.setForeground(0, QColor(tokens.colour("accent")))
             self.outline.addTopLevelItem(more)
         self.outline.header().setStretchLastSection(False)
         self.outline.header().setSectionResizeMode(0, self.outline.header().ResizeMode.Stretch)
@@ -1234,7 +1234,7 @@ class TaskView(QWidget):
 
     def say(self, text: str, error: bool = False) -> None:
         self.foot.setText(text or self._rest_foot())
-        self.foot.setStyleSheet(f"color: {tokens.LIGHT['critical' if error else 'text' if text else 'text2']};")
+        self.foot.setStyleSheet(f"color: {tokens.colour('critical' if error else 'text' if text else 'text2')};")
         if text:
             self._foot_timer.start(6000)
 
@@ -1298,7 +1298,7 @@ class TaskView(QWidget):
         for t in TYPE_ORDER:
             n = sum(1 for r in scoped if r.type == t)
             if n:
-                a = menu.addAction(icon(f"type-{t}", tokens.LIGHT.get(f"type_{t}")), f"{TYPE_NAMES[t]}\t{n}")
+                a = menu.addAction(icon(f"type-{t}", tokens.active().get(f"type_{t}")), f"{TYPE_NAMES[t]}\t{n}")
                 a.setCheckable(True)
                 a.setChecked(t in f.types)
                 a.toggled.connect(lambda on, t=t: (f.types.add(t) if on else f.types.discard(t), self.refresh()))

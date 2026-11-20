@@ -98,7 +98,7 @@ class ResultModel(QAbstractListModel):
 
 
 def _c(name: str) -> QColor:
-    return QColor(tokens.LIGHT.get(name, name))
+    return QColor(tokens.active().get(name, name))
 
 
 class ResultDelegate(QStyledItemDelegate):
@@ -136,7 +136,7 @@ class ResultDelegate(QStyledItemDelegate):
             box = rect.adjusted(16, 4, -16, -4)
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(_c("base"))
-            p.drawRoundedRect(box, 4, 4)
+            p.drawRoundedRect(box, tokens.RADIUS, tokens.RADIUS)
             p.setFont(self.small)
             p.setPen(_c("text2"))
             p.drawText(box.adjusted(10, 0, -10, 0), Qt.AlignmentFlag.AlignVCenter, row.label)
@@ -164,7 +164,7 @@ class ResultDelegate(QStyledItemDelegate):
         p.drawLine(rect.left(), rect.bottom(), rect.right(), rect.bottom())
         x = rect.left() + 16
         if row.fold:
-            p.drawPixmap(QPoint(x - 4, rect.top() + (rect.height() - 14) // 2), tinted("chevron-right" if row.folded else "chevron-down", tokens.LIGHT["text2"], 14,
+            p.drawPixmap(QPoint(x - 4, rect.top() + (rect.height() - 14) // 2), tinted("chevron-right" if row.folded else "chevron-down", tokens.colour("text2"), 14,
                                                                                          p.device().devicePixelRatioF()))
             x += 14
         p.setFont(self.bold)
@@ -188,7 +188,7 @@ class ResultDelegate(QStyledItemDelegate):
             p.fillRect(rect, _c("selected"))
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(_c("accent"))
-            p.drawRoundedRect(QRect(rect.left() + 4, rect.top() + (rect.height() - 16) // 2, 3, 16), 1.5, 1.5)
+            p.drawRoundedRect(QRect(rect.left() + 4, rect.top() + (rect.height() - 16) // 2, 3, 16), tokens.RADIUS_EDGE, tokens.RADIUS_EDGE)
             if self.view.hasFocus():  # keyboard focus: a 2 px ring inside the row (WCAG 2.2's focus appearance)
                 p.setBrush(Qt.BrushStyle.NoBrush)
                 p.setPen(QPen(_c("accent"), 2))
@@ -211,7 +211,7 @@ class ResultDelegate(QStyledItemDelegate):
         if show_actions:
             for _name, icon, _ in self.actions_for(r):
                 right -= 28
-                p.drawPixmap(QPoint(right + 6, rect.top() + (rect.height() - 16) // 2), tinted(icon, tokens.LIGHT["text2"], 16, scale))
+                p.drawPixmap(QPoint(right + 6, rect.top() + (rect.height() - 16) // 2), tinted(icon, tokens.colour("text2"), 16, scale))
             right -= 6
         else:
             right = self.paint_right(p, rect, row, right)
@@ -232,7 +232,7 @@ class ResultDelegate(QStyledItemDelegate):
         p.setPen(_c("text2"))
         right -= 16
         if row.pinned:
-            p.drawPixmap(QPoint(right + 2, rect.top() + (rect.height() - 14) // 2), tinted("pin", tokens.LIGHT["accent"], 14, p.device().devicePixelRatioF()))
+            p.drawPixmap(QPoint(right + 2, rect.top() + (rect.height() - 14) // 2), tinted("pin", tokens.colour("accent"), 14, p.device().devicePixelRatioF()))
         right -= 8
         when = row.why or (short(to_date(r.at), self.view.today) if r.kind != "task" else r.state)
         w = max(64, QFontMetrics(self.numbers).horizontalAdvance(when))
@@ -241,10 +241,10 @@ class ResultDelegate(QStyledItemDelegate):
             p.save()
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(_c("pressed"))
-            p.drawRoundedRect(button, 4, 4)
+            p.drawRoundedRect(button, tokens.RADIUS, tokens.RADIUS)
             p.restore()
             p.drawPixmap(QPoint(button.right() - STATE_CHEVRON - 2, button.top() + (button.height() - STATE_CHEVRON) // 2),
-                         tinted("chevron-down", tokens.LIGHT["text2"], STATE_CHEVRON, p.device().devicePixelRatioF()))
+                         tinted("chevron-down", tokens.colour("text2"), STATE_CHEVRON, p.device().devicePixelRatioF()))
         p.drawText(QRect(right - w, rect.top(), w, rect.height()), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, when)
         right -= w + 14
         if row.subtask:
@@ -281,14 +281,14 @@ class ResultDelegate(QStyledItemDelegate):
     def icon_of(self, r: Record) -> tuple[str, str]:
         if r.kind == "task":
             return {"Not started": "state-ns", "In progress": "state-ip", "Parked": "state-pk", "Closed": "state-cl"}.get(r.state, "state-ns"), \
-                tokens.LIGHT["accent" if r.state == "In progress" else "text2"]
+                tokens.colour("accent" if r.state == "In progress" else "text2")
         if r.kind == "note":
-            return ("update" if r.type == "update" else "note"), tokens.LIGHT["text2"]
+            return ("update" if r.type == "update" else "note"), tokens.colour("text2")
         if r.kind == "email":
-            return "type-mail", tokens.LIGHT["type_mail"]
+            return "type-mail", tokens.colour("type_mail")
         if r.type == "folder":  # release 5.66
-            return "folder", tokens.LIGHT["type_other"]
-        return f"type-{r.type if r.type in ('doc', 'sheet', 'slides', 'pdf', 'picture', 'drawing', 'mail', 'link') else 'other'}", tokens.LIGHT.get(f"type_{r.type}", tokens.LIGHT["type_other"])
+            return "folder", tokens.colour("type_other")
+        return f"type-{r.type if r.type in ('doc', 'sheet', 'slides', 'pdf', 'picture', 'drawing', 'mail', 'link') else 'other'}", tokens.active().get(f"type_{r.type}", tokens.colour("type_other"))
 
     @staticmethod
     def actions_for(r: Record) -> tuple:

@@ -51,12 +51,11 @@ from docrepo.ui.task_list import HEAD_ROLE as _HEAD, OPTION_ROLE as _OPTION, tas
 from docrepo.ui.widgets import DateField, ElidedCheck, ElidedLabel
 
 #: Each line's tint, by the part it plays: the item it makes, the new task's own line, or a heading.
-TINTS = {"task": tokens.colour("item_task"), "note": tokens.colour("item_note"), "update": tokens.colour("item_update"), "decision": tokens.colour("item_decision"),
-         "date": tokens.colour("item_date"), "param": tokens.colour("item_date"), "heading": tokens.colour("item_heading")}
+TINTS = tokens.LiveMap({"task": "item_task", "note": "item_note", "update": "item_update", "decision": "item_decision", "date": "item_date",
+                        "param": "item_date", "heading": "item_heading"})
 #: The operators' colours: (text, background).
-REF_COLOURS = {"person": (tokens.colour("accent"), tokens.colour("info_bg")), "new": (tokens.colour("caution"), tokens.colour("caution_bg")),
-               "none": (tokens.colour("text2"), tokens.colour("hover")), "task": (tokens.colour("ref_task"), tokens.colour("ref_task_bg")),
-               "type": (tokens.colour("caution"), tokens.colour("caution_bg"))}
+REF_COLOURS = tokens.LiveMap({"person": ("accent", "info_bg"), "new": ("caution", "caution_bg"), "none": ("text2", "hover"),
+                              "task": ("ref_task", "ref_task_bg"), "type": ("caution", "caution_bg")})
 #: A line's colours: (its tint, and each operator's (start, length, a key of ``REF_COLOURS``)).
 NO_COLOURS: tuple[str | None, tuple[tuple[int, int, str], ...]] = (None, ())
 

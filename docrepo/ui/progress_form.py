@@ -193,7 +193,7 @@ class ProgressForm(QObject):
     def fill_states(self, states: tuple[tuple[str, str, str], ...]) -> None:
         self.state_box.clear()
         for n, (key, words, does) in enumerate(states):
-            mark = icon("waiting", tokens.LIGHT["accent"]) if key == progress.WAITING else state_icon(
+            mark = icon("waiting", tokens.colour("accent")) if key == progress.WAITING else state_icon(
                 progress.TASK_STATE.get(key) or progress.NEXT_STATE[key])
             self.state_box.addItem(mark, words, key)
             self.state_box.setItemData(n, does, Qt.ItemDataRole.ToolTipRole)
