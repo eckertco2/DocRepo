@@ -121,7 +121,7 @@ from docrepo.ui.lists.common import (  # noqa: F401 - the helpers, here as befor
     log,
     NAV_FOLDED_KEY,
     NESTING_VIEWS,
-    NO_HEADINGS,
+    HEADINGS,
     priorities_of,
     ROW_DENSITY,
     SELECT_VIEWS,
@@ -903,7 +903,6 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         self.tree.stop_row_moves()  # the Templates view turns it back on
         self.tree.begin()
         self.tree.set_density(*ROW_DENSITY.get(self.view, (tokens.LIST_ROW, False)))
-        self.tree.set_tiled(self.view in TASK_VIEWS)  # tiles set apart by tone (release 5.138, decision 571)
         self.tree.priorities = priorities_of(self.model())
         try:
             if builder:
@@ -916,8 +915,8 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
             self._mark_states()
         finally:
             self.tree.end(self._row_to_select())
-        # no column headings over nothing, or where they say nothing the cells don't (decision L6)
-        self.tree.setHeaderHidden(self.view in NO_HEADINGS or not any(k is not None for k in self.tree.keys()))
+        # column heads only on the real tables, and never over nothing (release 5.183, decision 856)
+        self.tree.setHeaderHidden(self.view not in HEADINGS or not any(k is not None for k in self.tree.keys()))
         if self.view in NESTING_VIEWS:
             self._sync_level_buttons()
         self.filters.setVisible(any(_in_bar(self.filters_layout.itemAt(i)) for i in range(self.filters_layout.count())))

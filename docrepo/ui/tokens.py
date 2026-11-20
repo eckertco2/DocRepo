@@ -44,8 +44,8 @@ SPACE = {"xs": 2, "s": 4, "m": 8, "l": 12, "xl": 16, "xxl": 24, "xxxl": 32}
 CONTROL = 32      # buttons, and the type strip
 FIELD = 34        # a field: one line of text, a combo box, a spin box, a date (release 5.181, decision 848)
 ICON_BUTTON = 28  # toolbar icon buttons, with a 16 px icon
-TREE_ROW = 28
-LIST_ROW = 32
+TREE_ROW = 30  # one row height for every one-line list since release 5.183 (lane B, decision 850)
+LIST_ROW = 30
 #: The corner scale (release 5.181, the redesign's decision 845): four sizes for today's nine.
 RADIUS_S = 6      # rows, chips and small controls: a row's tint, a chip, a tag, a subtask's row on a Priorities card
 RADIUS = 8        # buttons and fields
@@ -479,6 +479,21 @@ QToolButton#toastClose:hover { background: $content; }
 /* ---- end lane A ---- */
 
 /* ---- lane B (the lists) ---- */
+/* ---- release 5.183 (rows and group heads) ---- */
+/* rows: the tree paints its own rounded ground (RowTree.drawRow), so the style sheet paints none, and no tiles */
+QTreeView#rowTree { background: $content; }
+QTreeView#rowTree::item { padding: 2px 4px; }
+QTreeView#rowTree::item:hover, QTreeView#rowTree::item:selected { background: transparent; color: $text; }
+QTreeView#rowTree { show-decoration-selected: 0; selection-background-color: transparent; }
+QTreeView#rowTree::branch:selected, QTreeView#rowTree::branch:hover { background: transparent; }
+/* a row's actions sit inside its ground, at its end */
+QWidget#rowActions { background: $hover; border-top-right-radius: ${radius_s}px; border-bottom-right-radius: ${radius_s}px; }
+QWidget#rowActions[sel="true"] { background: $selected; }
+/* column heads, on the three real tables only */
+QTreeView#rowTree QHeaderView::section { background: $content; color: $text3; border: none; border-bottom: 1px solid $stroke;
+  padding: 6px 8px; font-size: ${label}pt; font-weight: 600; }
+/* the # list and its like: TaskRowDelegate paints its rows' rounded ground itself and draws no item from the style, so
+   no rule here; the recent captures' and glossary lookup's lists keep the style's ground, under their own delegates */
 
 /* ---- end lane B ---- */
 
