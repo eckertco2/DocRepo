@@ -196,7 +196,7 @@ def test_the_browse_tool_in_the_new_look(ctx):
     names = [c.label for c in w.palette_commands()]
     assert {"Task: Edit task", "View: Timeline", "View: Capacity", "Keys"} <= set(names)
     w.nav.headings["Lists"].click()
-    assert w.nav.rows["due"].isHidden() and db.get_state(ctx.conn, NAV_FOLDED_KEY) == "Lists"
+    assert w.nav.rows["due"].isHidden() and db.get_state(ctx.conn, NAV_FOLDED_KEY) == "Lists,Manage"  # Manage folded at first (5.182)
     w.render_nav()
     assert w.nav.headings["Lists"].folded and w.nav.rows["due"].isHidden()
     w.hide()

@@ -452,7 +452,30 @@ QDialog#palette { background: $content; border: 1px solid $stroke_strong; }
 
 /* The lanes' rules (the redesign plan's section 5a): one section a lane, each written only between its own two lines. */
 /* ---- lane A (the shell) ---- */
-
+/* release 5.182 (one content surface, the sidebar, the toast): the browse window's grey frame, its one white card
+   (docrepo/ui/content_card.py paints it), the top bar with no line, the sidebar on the frame, and the message at the bottom
+   (docrepo/ui/toast.py) where the status strip was */
+QWidget#browse[frame="true"] { background: $base; }
+/* scoped to this window: the quick summary and File search have a bar named toolbar too */
+QWidget#browse[frame="true"] QWidget#toolbar { background: transparent; border-bottom: none; }
+QWidget#browse[frame="true"] QWidget#toolbar QToolButton#iconButton { min-width: 22px; max-width: 22px; min-height: 22px; max-height: 22px; border-radius: ${radius}px; }
+QLineEdit#topSearch { background: $field; border: 1px solid transparent; border-radius: ${radius}px; padding: 5px 8px; min-height: 20px; max-height: 20px; }
+QLineEdit#topSearch:focus { background: $content; border: 2px solid $accent; padding: 4px 7px; }
+QPushButton#problemsLine { background: $caution_bg; color: $caution; border: none; border-radius: ${radius}px; padding: 6px 12px; min-height: 20px; text-align: left; }
+QPushButton#problemsLine:hover { text-decoration: underline; }
+QSplitter#browseSplit::handle { background: transparent; }
+QWidget#browse[frame="true"] QWidget#paneHead { background: transparent; border-bottom: none; }
+QWidget#browse[frame="true"] QTreeView[tiled="true"] { background: $content; }
+QWidget#navPane, QWidget#navBody { background: transparent; }
+QFrame#navFoot { background: transparent; border: none; }
+QFrame#toast { background: $text; border: none; border-radius: ${radius_l}px; }
+QFrame#toast[error="true"] { background: $critical_bg; border: 1px solid $critical; }
+QLabel#toastText { background: transparent; color: $content; }
+QLabel#toastText[error="true"] { color: $critical; }
+QPushButton#toastUndo { background: $text2; color: $content; border: none; border-radius: ${radius_s}px; padding: 0 10px; min-height: 28px; max-height: 28px; font-weight: 600; }
+QPushButton#toastUndo:hover { background: $text3; }
+QToolButton#toastClose { background: transparent; border: none; border-radius: ${radius_s}px; padding: 4px; }
+QToolButton#toastClose:hover { background: $content; }
 /* ---- end lane A ---- */
 
 /* ---- lane B (the lists) ---- */
