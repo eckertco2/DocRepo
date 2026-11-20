@@ -29,7 +29,6 @@ from docrepo.detail import esc
 from docrepo.meetings import DayMeetings, Meeting
 from docrepo.model import Model, is_person
 from docrepo.ui.lists.common import _due_html, _row_word, _shape
-from docrepo.ui.look import LOOK
 from docrepo.ui.task_list import Row, Words
 from docrepo.ui.task_picker import SEARCH_LIMIT, TaskPicker
 from docrepo.ui.tree_view import HTML_ROLE, LINE_ROLE, Line
@@ -126,7 +125,7 @@ def add_group(browse: BrowseWindow, grey) -> None:
 
 def _add_row(browse: BrowseWindow, parent: QTreeWidgetItem, m: Model, x: Meeting) -> None:
     cell = time_cell(x, browse.today())
-    item = browse.tree.add_row(parent, row_key(x), _shape([meeting_line(m, x), _row_word("Meeting"), _due_html(cell, False)]), tip=cell.tip)
+    item = browse.tree.add_row(parent, row_key(x), _shape([meeting_line(m, x), _row_word("Meeting"), _due_html(cell)]), tip=cell.tip)
     browse.tree.set_actions(item, actions(browse, x))
     browse.meeting_rows[x.appointment] = item
 
@@ -252,9 +251,9 @@ def tick(browse: BrowseWindow) -> None:
         line = meeting_line(m, x)
         if item.data(0, LINE_ROLE) != line:
             item.setData(0, LINE_ROLE, line)
-            item.setData(0, HTML_ROLE, line.html(LOOK.classic))
+            item.setData(0, HTML_ROLE, line.html())
             cell = time_cell(x, browse.today())
-            item.setData(browse.tree.columnCount() - (2 if LOOK.classic else 1), HTML_ROLE, _due_html(cell, False))
+            item.setData(browse.tree.columnCount() - 1, HTML_ROLE, _due_html(cell))
             item.setToolTip(0, cell.tip)
 
 

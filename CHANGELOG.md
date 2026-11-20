@@ -4,6 +4,14 @@ One line per release, newest first: its number, the date it was built, and what 
 
 Since 2026-11-12, releases ship in weekly trains (the design workspace's `docs/mods/cold-eyes-plan.md`, decisions 464 to 468): each train has a heading with the day it was pushed to GitHub, over its releases. Releases keep their own numbers and tags.
 
+## Next train
+
+Built for the train of Thursday 2026-11-26 (the design workspace's `docs/mods/redesign-plan.md`); not pushed yet.
+
+| Release | Date | What |
+|---|---|---|
+| 5.179 | 2026-11-19 | The Classic look retired (the redesign's decision 840, the owner's "Start groundwork"). Settings' Look row goes; Show hints, Open a task in and the version stay in that card. A settings file that still says `"look": "classic"` starts the new look, which nothing about changes. Release 5.9's style sheets, page styles and every branch for them in the windows went with it, Capacity's own view among them (Capacity has been on the Timeline's page in the new look since release 5.40). No schema change. |
+
 ## Train of 2026-11-19
 
 Releases 5.164 to 5.178, pushed to GitHub on Thursday 2026-11-19 at the owner's word ("Yes, push then"), a week before the Thursday they were planned for. They were built overnight from the owner's voice memos of 2026-11-18 and the evening of 2026-11-17, each from its plan (the design workspace's `docs/mods/memos-2026-11-18-plan.md`), and merged as each was checked. The train carries concepts (collections and a task's kind, stock headings, discussions and meetings, glossaries, a current task), so the train after it settles (decision 467). Schema 31, from 29: 30 with 5.167 and 31 with 5.171, both made on the first start, after one copy of docs.db as it was (`docs-before-v29.db`). No new package. The version is 5.178. The runs before the push, on `main` with all fifteen: ruff clean; the fast run 2317 passed; the Qt tests, in four pieces, 2256 passed and 2 skipped (one of 5.177's tests failed after two other test files in the same process, where the browse window wasn't the one in front; the test now makes it so); the scale run 8 within budget and 7 expected to fail, with Search everything within its budget though expected to miss. Today docked (5.178) was tested against a stand-in for Windows only. Their corporate test is the design workspace's `handoff/docrepo/train-2026-11-19-test.md`.

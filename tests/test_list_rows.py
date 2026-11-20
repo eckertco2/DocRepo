@@ -214,12 +214,6 @@ def test_the_context_goes_before_the_title_is_cut(qapp):
     assert whole > title + urgent
 
 
-def test_the_classic_look_keeps_its_words_and_bold(qapp):
-    line = Line("Reactor impeller upgrade", context="Top of the tree", strong=True, muted=("Line 1",))
-    assert line.html(classic=True).startswith("<b>Reactor impeller upgrade</b>") and '<br><span class="sub">Top of the tree' in line.html(classic=True)
-    assert "<b>" not in line.html() and "<br>" not in line.html()
-
-
 def test_search_rows_show_no_ids_and_a_tasks_state(browse):
     browse.search_box.setText("impeller")
     browse._run_search()

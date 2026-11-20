@@ -48,7 +48,7 @@ from docrepo.templates import Choice, Library, Row, plural
 from docrepo.ui import tokens
 from docrepo.ui.dialogs import _Form
 from docrepo.ui.icons import icon, set_fold
-from docrepo.ui.look import LOOK, Help
+from docrepo.ui.look import Help
 from docrepo.ui.rich_edit import FormatBar, RichEdit
 from docrepo.ui.style import style_sheet
 from docrepo.ui.task_forms import BAD_DURATION, MON_TO_FRI, HoursRow, PeoplePicker, PickTask, TiePanel, chips_people, days_valid, people_chips, typed_days
@@ -179,8 +179,7 @@ class RowDialog(FormDialog):
         bar.layout().setContentsMargins(4, 2, 4, 2)
         el.addWidget(bar)
         el.addWidget(self.notes, 1)
-        if not LOOK.classic:
-            bar.show_on_use(editor)
+        bar.show_on_use(editor)
         g.addWidget(editor)
         g.addWidget(_hint("Copied onto each new task's notes page. The page is the task's own from then on, so changes here reach only new tasks."))
 
@@ -1171,8 +1170,7 @@ class TemplatesPane:
         top = template.top == row_id
         make = w._action("Make tasks" if top else "Make tasks from here", lambda: self.make(row_id),
                          "Copy this template into the task tree" if top else "Copy this row and what's under it into the task tree", primary=True)
-        if not LOOK.classic:
-            make.setIcon(icon("add", tokens.colour("on_accent")))
+        make.setIcon(icon("add", tokens.colour("on_accent")))
         w._action("Add subtask", lambda: self.add_subtask(row_id), "A new row under this one", icon_name="task")
         w._action("Edit", lambda: self.edit_row(row_id), "Change what this row fills", icon_name="edit")
         if top:

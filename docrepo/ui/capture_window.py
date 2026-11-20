@@ -744,8 +744,7 @@ class CaptureWindow(QWidget):
         self.format_bar.layout().setContentsMargins(4, 2, 4, 2)
         el.addWidget(self.format_bar)
         el.addWidget(self.content, 1)
-        if not LOOK.classic:
-            self.format_bar.show_on_use(editor)
+        self.format_bar.show_on_use(editor)
         # In Discussions and meetings, Notes, Summary and Transcript tabs over it (release 5.170, decision 795).
         self.tabs = MeetingTabs(editor)
         self.content_field = field("Content text", self.tabs, "content")
@@ -862,10 +861,6 @@ class CaptureWindow(QWidget):
         self.summary.setFixedHeight(70)
         self.summary_field = field("Summary", self.summary, "summary", "paste the LLM's answer here")
         b.addWidget(self.summary_field)
-        self.add_summary = QPushButton("Add a summary", objectName="link")  # also in More
-        self.add_summary.clicked.connect(lambda: self._show_summary(True))
-        self.add_summary.hide()
-        b.addWidget(self.add_summary)
         self._build_new_fields()
         self._build_update_fields()
         self.body.addStretch()
@@ -928,10 +923,6 @@ class CaptureWindow(QWidget):
         self.more_menu.aboutToShow.connect(self._fill_more)
         more.setMenu(self.more_menu)
         fl.addWidget(more)
-        self.clear_button = QPushButton("Clear")  # in More in the new look; beside Save in the Classic one
-        self.clear_button.clicked.connect(self.clear)
-        self.clear_button.setVisible(LOOK.classic)
-        fl.addWidget(self.clear_button)
         save = QPushButton("Save", objectName="primary")
         save.setMinimumWidth(96)
         tip(save, "Save", "Ctrl+Enter")
@@ -1099,8 +1090,7 @@ class CaptureWindow(QWidget):
         g.addWidget(self.n_more)
         self.new_heading = QLabel(objectName="heading")
         g.insertWidget(0, self.new_heading)
-        if not LOOK.classic:
-            g.setContentsMargins(0, 12, 0, 0)
+        g.setContentsMargins(0, 12, 0, 0)
         self.new_heading.hide()  # the task picker and the footer's line say where it goes, and the window keeps the room
         self.lower_layout.addWidget(self.new_group)
         self._watch("new", {"due": self.n_due, "deadline": self.n_deadline, "deadline_desc": self.n_deadline_desc, "urgent": self.n_urgent,
@@ -1165,9 +1155,8 @@ class CaptureWindow(QWidget):
         g.addWidget(self.changes_label)
         self.upd_heading = QLabel(objectName="heading")
         g.insertWidget(0, self.upd_heading)
-        if not LOOK.classic:
-            g.setContentsMargins(0, 12, 0, 0)
-        self.upd_heading.setVisible(not LOOK.classic)
+        g.setContentsMargins(0, 12, 0, 0)
+        self.upd_heading.setVisible(True)
         self.lower_layout.addWidget(self.upd_group)
         self._watch("upd", {"state": self.u_state, "current_status": self.u_status, "due": self.u_due, "deadline": self.u_deadline,
                             "deadline_desc": self.u_deadline_desc, "lead_hours": self.u_lead_hours, "assignee_hours": self.u_asg_hours,
@@ -1417,15 +1406,13 @@ class CaptureWindow(QWidget):
         self.move(area.x() + (area.width() - width) // 2, area.y() + max(16, int(area.height() * 0.05)))
 
     def _fitting_height(self, area) -> int:
-        """The Classic look's window is 600 px or more; the new look's fits its content, up to most of the screen."""
-        if LOOK.classic:
-            return min(int(area.height() * 0.88), max(600, self.sizeHint().height()))
+        """The window fits its content, up to most of the screen."""
         inner = self.scroll.widget().sizeHint().height() + self._footer.sizeHint().height() + 4
         return min(int(area.height() * 0.88), max(MIN_HEIGHT, inner))
 
     def _fit(self) -> None:
         """Grow or shrink to the content as capture types and fields come and go, keeping the window's top where it is."""
-        if LOOK.classic or self.expanded or not self.isVisible() or self.pages.currentIndex() != 0:
+        if self.expanded or not self.isVisible() or self.pages.currentIndex() != 0:
             return
         screen = self.screen() or QGuiApplication.primaryScreen()
         height = self._fitting_height(screen.availableGeometry())
@@ -2088,7 +2075,7 @@ class CaptureWindow(QWidget):
         rows = [(e.row, e.src, e.line) for e in self.files]
         self.reset_draft()
         self.forget_draft()
-        if not LOOK.classic and (state["content"].strip() or state["title"].strip() or rows):
+        if state["content"].strip() or state["title"].strip() or rows:
 
             def undo() -> None:
                 self.reset_draft()
@@ -2543,10 +2530,7 @@ class CaptureWindow(QWidget):
         self.content_field.property("label").setText("Content text" + (f"  <span style='color:{C.text2}'>becomes the new task's description</span>" if new else ""))
         self.parse_button.setEnabled(new or upd or bool(t))
         self.new_group.setVisible(new)
-        if LOOK.classic:
-            self.new_group.setTitle(f"NEW TASK UNDER {t.title.upper()}" if t else "NEW TOP-LEVEL TASK")
-        else:
-            self.new_heading.setText(f"New task under {t.title}" if t else "New top-level task")
+        self.new_heading.setText(f"New task under {t.title}" if t else "New top-level task")
         inherited = [name for name, _ in m.labels_of(t.id)] if t else []
         self.n_inherit_row.setVisible(bool(t))
         self.n_inherited.setText(("Inherited: " + ", ".join(inherited) if inherited else "The parent has none.") if self.n_inherit.isChecked() else "")
@@ -2558,10 +2542,7 @@ class CaptureWindow(QWidget):
             length.setVisible(not routine)
         self.upd_group.setVisible(upd and bool(t))
         if t:
-            if LOOK.classic:
-                self.upd_group.setTitle(f"UPDATE {t.title.upper()}")
-            else:
-                self.upd_heading.setText(f"Update {t.title}")
+            self.upd_heading.setText(f"Update {t.title}")
         self.u_repeat_field.setVisible(self.u_recurrence.currentIndex() > 0)
         shown = self._agenda_shown()
         what = "the new task" if new else "the picked task" if upd and t else "this note"
@@ -3251,10 +3232,7 @@ class CaptureWindow(QWidget):
                     value = w.id or w.name
                     if value not in chips.values():
                         chips.set_chips([*chips.chips(), Chip(value, m.person_name(w.id) if w.id else w.name, new=w.is_new, filled=True)])
-            # What it fills under More fields is on the Understood line, so in the new look More stays shut and the window doesn't scroll.
-            if LOOK.classic and any(f.key in ("start", "recurrence", "reminder", "state", "lead_hours", "assignee_hours", "plant_event", "refs", "urgent", "meeting", "deadline_desc")
-                                    and not f.why for f in r.found):
-                self._set_more(self.n_more, self.n_more_button, True)
+            # What it fills under More fields is on the Understood line, so More stays shut and the window doesn't scroll.
             found += [("", f) for f in r.found]
         if "update" in self.types and self.task:
             r = parse_capture(text, "update", today, people, labels, events, refs=self.ctx.settings.reference_fields)
@@ -3266,8 +3244,6 @@ class CaptureWindow(QWidget):
                 r.deadline_desc = ""
             self._fill("upd", r)
             self._hours_read(r, self.u_lead_row, self.u_asg_row)
-            if LOOK.classic and any(f.key in ("plant_event", "refs", "deadline_desc") and not f.why for f in r.found):
-                self._set_more(self.u_more, self.u_more_button, True)
             found += [("Update: " if "new_task" in self.types else "", f) for f in r.found]
         self._settle_filled()
         self._show_found(found)
@@ -3335,19 +3311,9 @@ class CaptureWindow(QWidget):
     def _show_found(self, found: list[tuple[str, Found]]) -> None:
         if not found:
             self.found_label.setText(f"<span style='color:{C.text2}'>Nothing found. Fill in the fields by hand.</span>")
-        else:
-            items = []
-            for lead, f in found:
-                value = f.value if len(f.value) <= 80 else f.value[:80] + "…"
-                source = f.source if len(f.source) <= 80 else f.source[:80] + "…"
-                extra = (f": {esc(f.calc)}" if f.calc else "") + (f". {esc(f.why)}" if f.why else "")
-                items.append(f"<li><b>{esc(lead + f.field)}</b> {esc(value)} <span style='color:{C.text2}'>from “{esc(source)}”{extra}</span></li>")
-            if LOOK.classic:
-                self.found_label.setText(f"<ul style='margin:0'>{''.join(items)}</ul><span style='color:{C.text2}'>Filled fields stay "
-                                         "highlighted until you edit them. Nothing is saved until you press Save.</span>")
-            else:  # one line of what it understood (the Title field shows the title); where each value came from is in the tooltip
-                self.found_label.setText(understood_html([(lead, f) for lead, f in found if f.field != "Title"] or found))
-                self.found_box.setToolTip("<br>".join(f"<b>{esc(lead + f.field)}</b> from “{esc(f.source[:80])}”" for lead, f in found))
+        else:  # one line of what it understood (the Title field shows the title); where each value came from is in the tooltip
+            self.found_label.setText(understood_html([(lead, f) for lead, f in found if f.field != "Title"] or found))
+            self.found_box.setToolTip("<br>".join(f"<b>{esc(lead + f.field)}</b> from “{esc(f.source[:80])}”" for lead, f in found))
         self.clear_found.show()
         set_filled(self.found_box, False, "empty", False)
         self.found_box.show()
@@ -3384,7 +3350,6 @@ class CaptureWindow(QWidget):
 
     def _show_summary(self, on: bool) -> None:
         self.summary_field.setVisible(on)
-        self.add_summary.setVisible(not on and LOOK.classic)  # in the new look, Add a summary is in More
         if on:
             self.summary.setFocus()
 

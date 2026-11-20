@@ -337,29 +337,3 @@ def move(widget, at: QPoint) -> None:
     """The mouse moving to a point, with no button down, as the offscreen platform doesn't send it for QTest.mouseMove."""
     QApplication.sendEvent(widget, QMouseEvent(QEvent.Type.MouseMove, QPointF(at), QPointF(widget.mapToGlobal(at)), Qt.MouseButton.NoButton,
                                                Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier))
-
-
-def test_the_classic_look_keeps_its_state_cell_as_the_button(qapp, sample_root):
-    """The Classic look keeps its State column (release 5.78), so the cell is the button there, as 5.76 built it."""
-    from docrepo.ui.look import configure
-
-    conn, root, fs = sample_root
-    configure("classic", False)
-    try:
-        w = BrowseWindow(AppContext(conn, root, fs, Settings(me="P001"), now=lambda: NOW), None)
-        w.menus = []
-        w.show_browse(view="tasks")
-        w.resize(1600, 900)
-        QApplication.processEvents()
-        header = w.tree.headerItem()
-        column = [header.text(i) for i in range(w.tree.columnCount())].index("State")
-        item = row(w, INSTALLATION)
-        assert item.data(column, STATE_ROLE) == INSTALLATION and item.data(0, STATE_ROLE) is None
-        assert item.toolTip(column).endswith("Click to change the state.")
-        picking(w, "Parked")
-        w.tree.open_state_menu(item, column)
-        assert w.menus and states(w, INSTALLATION) == ["Parked"]
-        w.hide()
-        w.deleteLater()
-    finally:
-        configure("new", False)

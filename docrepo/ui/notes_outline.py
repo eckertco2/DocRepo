@@ -18,7 +18,6 @@ from PySide6.QtWidgets import QFrame, QListWidget, QListWidgetItem, QStyle, QSty
 
 from docrepo import notes_page
 from docrepo.ui import tokens
-from docrepo.ui.look import LOOK
 
 #: The outline's width, its divider included.
 OUTLINE_WIDTH = 188
@@ -56,7 +55,7 @@ class _Rows(QStyledItemDelegate):
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(QColor(tokens.colour("hover")))
             p.drawRoundedRect(r, 4, 4)
-        accent = QColor(tokens.colour("accent") if not LOOK.classic else "#1d5e98")
+        accent = QColor(tokens.colour("accent"))
         if current:
             p.fillRect(QRect(r.x(), r.y() + 5, 2, r.height() - 10), accent)
         level, day = index.data(LEVEL) or 1, bool(index.data(DAY))
@@ -72,7 +71,7 @@ class _Rows(QStyledItemDelegate):
             words = str(count)
             width = QFontMetrics(small).horizontalAdvance(words)
             p.setFont(small)
-            p.setPen(QColor(tokens.colour("text2") if not LOOK.classic else "#87919c"))
+            p.setPen(QColor(tokens.colour("text2")))
             p.drawText(QRect(right - width - 6, r.y(), width + 2, r.height()), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, words)
             right -= width + 10
             p.setFont(font)

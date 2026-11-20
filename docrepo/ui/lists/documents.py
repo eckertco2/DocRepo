@@ -15,7 +15,6 @@ from docrepo.dates import short
 from docrepo.detail import esc
 from docrepo.file_rows import GROUP_NAMES, dated_name, doc_places, place_words, type_colour, type_icon, type_name, without_title
 from docrepo.overview import file_type
-from docrepo.ui.look import LOOK
 from docrepo.ui.tree_view import Line, group_ground, state_icon
 from docrepo.ui.widgets import DropButton
 from docrepo.views import (
@@ -67,16 +66,13 @@ class DocumentLists:
         else:
             self._set_head(f"Search: {rest if scope else self.query}", f"{count}. Every word you type must be in the item. "
                            "Narrow it as File search does, with type:pdf, from:name, after:1 sep, is:pinned or tag:, or a #task first.", count)
-        if LOOK.classic:
-            self.tree.set_columns(["Result"])
-        else:  # a date at the row's end, as Documents has (release 5.114, decision 430)
-            self.tree.set_columns(["Result", "When"], [0, 76])
+        self.tree.set_columns(["Result", "When"], [0, 76])  # a date at the row's end, as Documents has (release 5.114, decision 430)
         grey, group = group_ground(), ""
-        places = doc_places(m) if not LOOK.classic else {}
+        places = doc_places(m)
 
         def say(text: str) -> None:  # a line of its own above or in place of the results
-            self.tree.add_row(None, None, [f'<span class="sub">{esc(text)}</span>'] + ([] if LOOK.classic else [""]), selectable=False,
-                              span=not LOOK.classic, tip=text)  # a long one is cut at the list's edge: hovering says it all
+            self.tree.add_row(None, None, [f'<span class="sub">{esc(text)}</span>', ""], selectable=False,
+                              span=True, tip=text)  # a long one is cut at the list's edge: hovering says it all
 
         for hint in scope.hints if scope else ():  # a filter still being typed, or one that names nothing (decision 452)
             say(hint)
@@ -84,12 +80,8 @@ class DocumentLists:
             if r.group != group:
                 group = r.group
                 n = sum(1 for x in results if x.group == group)
-                head = f"<b>{esc(GROUP_NAMES.get(group, group))}</b>" + ("" if LOOK.classic else f' <span class="faint">&nbsp;{n}</span>')
-                self.tree.add_row(None, None, [head] if LOOK.classic else [head, ""], grey, selectable=False, span=not LOOK.classic)
-            if LOOK.classic:
-                snippet = f'<br><span class="sub">{esc(r.snippet)}</span>' if r.snippet else ""
-                self.tree.add_row(None, (r.kind, r.id), [f'{esc(r.title)}<br><span class="sub">{esc(r.sub)}</span>{snippet}'])
-                continue
+                head = f"<b>{esc(GROUP_NAMES.get(group, group))}</b>" + f' <span class="faint">&nbsp;{n}</span>'
+                self.tree.add_row(None, None, [head, ""], grey, selectable=False, span=True)
             line, when = self._result_line(m, r, places)
             self.tree.add_row(None, (r.kind, r.id), [line, f'<p align="right">{esc(when)}</p>'], tip=f"{r.title}\n{r.sub}")
         if not results and self.query.lower().startswith("search "):  # 5.108's place words went (decision 454)
@@ -141,7 +133,7 @@ class DocumentLists:
             icon, colour, tip = {"person": "person", "label": "labels", "tagged": "tagged"}.get(r.kind, "file"), "text2", r.kind.capitalize()
             rest = snippet or re.sub(rf"^{re.escape(r.id)}( · )?", "", r.sub)  # no ID (decision L4): it's in the tooltip
         second = " · ".join(x for x in (where, rest) if x)
-        if r.kind == "task" and r.group not in ("Saved file", "Notes") and r.id in m.tasks and not LOOK.classic:
+        if r.kind == "task" and r.group not in ("Saved file", "Notes") and r.id in m.tasks:
             # A task tile (release 5.138, the task tile plan's decision 563): its depth ticks (search is flat), flag, two-parents
             # mark and marks; no days, as the When column keeps a task's empty (decision 430).
             from docrepo.ui.lists.common import tile_cells

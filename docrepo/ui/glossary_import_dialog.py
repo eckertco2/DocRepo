@@ -36,7 +36,7 @@ from docrepo import tagged_import as ti
 from docrepo.excel_import import WorkbookError
 from docrepo.markup import esc
 from docrepo.ui.context import AppContext
-from docrepo.ui.look import LOOK, Help
+from docrepo.ui.look import Help
 from docrepo.ui.style import page_css
 from docrepo.ui.tokens import C
 
@@ -131,7 +131,7 @@ class GlossaryImportDialog(QDialog):
         lay.addWidget(self.error)
         buttons = QHBoxLayout()
         buttons.addStretch()
-        self.import_button = QPushButton("Import", objectName="primary" if LOOK.classic else "")
+        self.import_button = QPushButton("Import")
         self.import_button.setDefault(True)
         self.import_button.setEnabled(False)
         self.import_button.clicked.connect(self.import_now)

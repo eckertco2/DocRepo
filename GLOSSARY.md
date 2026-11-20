@@ -208,7 +208,7 @@ These are the words DocRepo's code, docs and AI assistants use, and what each on
 - **Build phase**: a numbered step in building DocRepo, phases 1 to 6 in `PROGRESS.md`.
 - **Mods log**: DocRepo's own list of changes the owner wants made to it.
 - **IDs**: T task, C capture, D document, P person, M mod.
-- **Look**: how DocRepo's windows are drawn: the new look (from release 5.10), or the **Classic look**, release 5.9's colours, fonts and hints on the same layouts. Chosen in Settings.
+- **Look**: how DocRepo's windows are drawn: the new look, from release 5.10, the only one since release 5.179 retired the **Classic look** (release 5.9's colours, fonts and hints on the same layouts, chosen in Settings until then).
 - **Show hints**: the setting that shows the help text, the **i** buttons and the key badges in every window. Off by default.
 - **Key tips**: the labels that show each control's key while Alt (letter keys) or Ctrl (Ctrl shortcuts) is held.
 - **Find files**: a window of its own for one task (releases 5.34 and 5.35, as the Task view; renamed in release 5.98), opened from the Files group on the task page, or with O: its latest update at a glance, an outline of its subtasks, and a search that finds its files, emails, notes and updates as you type, with a preview, built for finding and opening its documents. Its one command is Task page: the task page is a task's home.

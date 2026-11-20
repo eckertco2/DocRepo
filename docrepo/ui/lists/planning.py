@@ -1,40 +1,25 @@
-"""The Timeline, Capacity and Priorities pages' hooks into the window: dates and key dates saved from a drag, what-ifs, moves that ask first, Quick edit, and Capacity's table. Methods of ``BrowseWindow``, as a mixin it inherits (release 5.95, the review's F11): moved from
+"""The Timeline and Priorities pages' hooks into the window: dates and key dates saved from a drag, what-ifs, moves that ask first, and Quick edit. Methods of ``BrowseWindow``, as a mixin it inherits (release 5.95, the review's F11): moved from
 ``browse_window.py`` unchanged, so they still use the window's own helpers through ``self``."""
 from __future__ import annotations
 
 
 import json
 from collections.abc import Callable
-from datetime import timedelta
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QHeaderView,
-    QTableWidgetItem,
     QWidget,
 )
 
-from docrepo import capacity, edits, priorities, ties, whatif
+from docrepo import edits, priorities, ties, whatif
 from docrepo.agenda import AgendaError
-from docrepo.dates import long_date, short, to_date
+from docrepo.dates import long_date, to_date
 from docrepo.people import PeopleError
 from docrepo.tasks import TaskError
-from docrepo.ui import tokens
-from docrepo.ui.look import LOOK
 from docrepo.ui.templates_view import PreviewDialog, PreviewEntry
-from docrepo.timeline import bands as timeline_bands
-from docrepo.ui.tokens import C
-from docrepo.ui.tree_view import group_ground
-from docrepo.views import (
-    CapacityRow,
-    capacity_grid,
-    capacity_weeks,
-)
 
 
 class PlanningHooks:
-    """The Timeline, Capacity and Priorities pages' hooks into the window: dates and key dates saved from a drag, what-ifs, moves that ask first, Quick edit, and Capacity's table."""
+    """The Timeline and Priorities pages' hooks into the window: dates and key dates saved from a drag, what-ifs, moves that ask first, and Quick edit."""
 
 
     # ---- the Priorities board (mods log round 2, M0029, M0030; release 5.23) ----
@@ -167,103 +152,3 @@ class PlanningHooks:
         """Alt+Up and Alt+Down on the board: one place up or down in its bucket, not in the status log. A place changes no
         view's count and no Find files window, so neither is drawn again (release 5.159)."""
         self._do(lambda: priorities.nudge(self.conn, task_id, step, shown), ("task", task_id), counts=False, reach=())
-
-    # ---- capacity ----
-    def render_capacity(self) -> None:
-        m, today = self.model(), self.today()
-        weeks = capacity_weeks(today, self.cap_offset)
-        rows = capacity_grid(self.conn, m, weeks)
-        nobody = not rows and not LOOK.classic
-        for w in (self.cap_nav, self.cap_table, self.cap_legend, self.cap_detail):
-            w.setVisible(not nobody)
-        self.cap_empty.setVisible(nobody)
-        # Grouped (release 5.9): each group's people under its heading, then those with no group.
-        lines: list[CapacityRow | str] = list(rows)
-        if self.cap_by_group.isChecked():
-            group_of = {p.id: p.group or "" for p in m.people.values()}
-            lines = []
-            for g in [*m.groups(), ""]:
-                members = [r for r in rows if group_of.get(r.person, "") == g]
-                if members:
-                    lines += [g or "No group", *members]
-        t = self.cap_table
-        t.clear()
-        t.clearSpans()
-        t.setRowCount(len(lines))
-        t.setColumnCount(len(weeks) + 1)
-        # A week with a plant event names it under its date (M0028).
-        bands = timeline_bands(m, weeks[0], weeks[-1] + timedelta(days=7))
-        heads = []
-        for w in weeks:
-            names = [b.title for b in bands if b.start <= w + timedelta(days=6) and b.end >= w]
-            heads.append(short(w, today) + ("\n" + ", ".join(names) if names else ""))
-        t.setHorizontalHeaderLabels(["Person", *heads])
-        for i, _w in enumerate(weeks):
-            if "\n" in heads[i]:
-                t.horizontalHeaderItem(i + 1).setBackground(QColor(C.event_bg))
-                t.horizontalHeaderItem(i + 1).setToolTip("A plant event this week: " + heads[i].split("\n", 1)[1])
-        # Neutral under 80%, caution's tint from 80% to 100%, red over 100% (the Classic look: green, amber, red). Decision 18 had the
-        # accent's tint in the middle, which was selection's, so a selected cell couldn't be told from a busy one (release 5.60).
-        colours = ({"u1": "#e2f2e6", "u2": "#fcefcf", "u3": "#fbe3e1"} if LOOK.classic else
-                   {"u2": tokens.colour("caution_bg"), "u3": tokens.colour("critical_bg")})
-        t.setShowGrid(LOOK.classic)
-        self._cap_line_rows = lines
-        for r, row in enumerate(lines):
-            if isinstance(row, str):  # a group's heading
-                head = QTableWidgetItem(row)
-                if LOOK.classic:
-                    f = head.font()
-                    f.setBold(True)
-                    head.setFont(f)
-                else:
-                    head.setFont(tokens.ui_font(semibold=True))  # from the helper: setBold on an item's font is lost under its style name
-                head.setBackground(group_ground())
-                head.setFlags(Qt.ItemFlag.ItemIsEnabled)
-                t.setItem(r, 0, head)
-                t.setSpan(r, 0, 1, len(weeks) + 1)
-                continue
-            head = QTableWidgetItem(f"{row.name}\n{'%g h a week' % row.hours_a_week if row.hours_a_week else 'Hours not set'}")
-            t.setItem(r, 0, head)
-            for i, c in enumerate(row.cells):
-                sep = "\n" if LOOK.classic else "  ·  "
-                text = f"{c.hours:.1f}" + (f"{sep}{round(c.use * 100)}%" if c.hours and c.use is not None else "") if c.hours else "–"
-                item = QTableWidgetItem(text)
-                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter if LOOK.classic else Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                if c.cls in colours:
-                    item.setBackground(QColor(colours[c.cls]))
-                if c.cls == "u3" and not LOOK.classic:  # over 100%: red and bold, so it never needs colour alone
-                    item.setForeground(QColor(tokens.colour("critical")))
-                    item.setFont(tokens.ui_font(semibold=True))
-                item.setToolTip(f"{row.name}, week of {long_date(weeks[i], today)}: {c.hours:.1f} h")
-                t.setItem(r, i + 1, item)
-        t.resizeRowsToContents()
-        if not LOOK.classic:
-            header = t.horizontalHeader()
-            header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-            for i in range(1, t.columnCount()):
-                header.setSectionResizeMode(i, QHeaderView.ResizeMode.Stretch)
-            # All its rows when there's room, with none cut by a scroll bar across it, and no gap under its last row.
-            t.setMaximumHeight(header.sizeHint().height() + sum(t.rowHeight(r) for r in range(t.rowCount())) + t.horizontalScrollBar().sizeHint().height() + 4)
-            if self.cap_cell:  # the cell clicked stays marked when the table is drawn again
-                person, week = self.cap_cell
-                for r, line in enumerate(lines):
-                    if not isinstance(line, str) and line.person == person and week + 1 < t.columnCount():
-                        t.setCurrentCell(r, week + 1)
-        t.resizeColumnToContents(0)
-        height = t.horizontalHeader().height() + sum(t.rowHeight(r) for r in range(t.rowCount())) + 2 * t.frameWidth() + 2
-        t.setFixedHeight(min(height, 420))
-        self._cap_rows, self._cap_weeks = rows, weeks
-        unestimated, unscheduled = capacity.unplaced(m, today, self.ctx.settings)
-        self.cap_detail.setHtml(self.pages().capacity_detail(rows, weeks, self.cap_cell, unestimated, unscheduled))
-
-    def _capacity_clicked(self, row: int, column: int) -> None:
-        lines = getattr(self, "_cap_line_rows", self._cap_rows)
-        if column == 0 or row >= len(lines) or isinstance(lines[row], str):
-            return
-        self.cap_cell = (lines[row].person, column - 1)
-        self.render_capacity()
-
-    def _move_capacity(self, step: int) -> None:
-        self.cap_offset = 0 if step == 0 else self.cap_offset + step
-        self.cap_cell = None
-        self.render_capacity()

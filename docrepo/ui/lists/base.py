@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
 
 from docrepo.detail import esc
 from docrepo.ui.icons import icon
-from docrepo.ui.look import LOOK
 from docrepo.ui.keymap import KeyMapDialog
 from docrepo.ui.tree_view import DIM_ROLE, HTML_ROLE, KEY_ROLE, LINE_ROLE, group_ground, state_icon
 from docrepo.ui.widgets import DropButton
@@ -30,7 +29,6 @@ from docrepo.views import (
 )
 from docrepo.ui.lists.common import (
     _empty,
-    _row_state,
 )
 
 
@@ -42,25 +40,14 @@ class ListBasics:
         """Each task row's State cell becomes a button that opens the state menu (release 5.76, decisions 360 and 361): the
         cells that show the row's task's own state, not a key date's, a reminder's or a context row's."""
         m = self.model()
-        if not LOOK.classic:
-            # The new look has no State column: a task's state is the icon before its title (release 5.78, the list rows
-            # review's decision L7), and that icon is the menu's button, on rows whose icon is their task's own state.
-            for item in self.tree.items():
-                line = item.data(0, LINE_ROLE)
-                task_id = self.tree.row_task(item)
-                t = m.tasks.get(task_id) if task_id and line is not None else None
-                if t is not None and not t.discarded and line.icon_tip == t.state and line.icon == state_icon(t.state)[0]:
-                    self.tree.mark_state(item, 0, t.id, t.state)
-            return
-        header = self.tree.headerItem()
-        column = next((i for i in range(self.tree.columnCount()) if header.text(i) == "State"), None)
-        if column is None:
-            return
+        # There's no State column: a task's state is the icon before its title (release 5.78, the list rows review's
+        # decision L7), and that icon is the menu's button, on rows whose icon is their task's own state.
         for item in self.tree.items():
+            line = item.data(0, LINE_ROLE)
             task_id = self.tree.row_task(item)
-            t = m.tasks.get(task_id) if task_id else None
-            if t is not None and not t.discarded and item.data(column, HTML_ROLE) == _row_state(t.state):
-                self.tree.mark_state(item, column, t.id, t.state)
+            t = m.tasks.get(task_id) if task_id and line is not None else None
+            if t is not None and not t.discarded and line.icon_tip == t.state and line.icon == state_icon(t.state)[0]:
+                self.tree.mark_state(item, 0, t.id, t.state)
 
     def _row_to_select(self):
         """The row to show selected: the page on the right's, or in Activity the line clicked last, while it opens that page."""
@@ -159,10 +146,8 @@ class ListBasics:
         return item.data(0, KEY_ROLE) or ("row", item.data(0, HTML_ROLE))
 
     def _level_button(self, expand: bool, clicked: Callable[[], None], enabled: bool = True) -> QPushButton:
-        """Collapse a level or Expand a level. Two icon buttons in the new look, which often were the reason a bar wrapped (release 5.59)."""
-        name, sign, tip_text = ("Expand a level", "+", "Open every branch one more level") if expand else ("Collapse a level", "−", "Fold every branch up one level")
-        if LOOK.classic:
-            return self._button(f"{sign} {name}", clicked, enabled, tip_text)
+        """Collapse a level or Expand a level. Two icon buttons, as their words often were the reason a bar wrapped (release 5.59)."""
+        name, tip_text = ("Expand a level", "Open every branch one more level") if expand else ("Collapse a level", "Fold every branch up one level")
         b = self._button("", clicked, enabled, f"{name}: {tip_text.lower()}")
         b.setObjectName("iconOnly")
         b.setIcon(icon("level-open" if expand else "level-fold"))
@@ -198,9 +183,8 @@ class ListBasics:
         rows = self._branches()
         self._lvl_collapse.setEnabled(any(x.isExpanded() for x in rows))
         self._lvl_expand.setEnabled(any(not x.isExpanded() for x in rows))
-        if not LOOK.classic:  # gone where nothing nests
-            self._lvl_collapse.setVisible(bool(rows))
-            self._lvl_expand.setVisible(bool(rows))
+        self._lvl_collapse.setVisible(bool(rows))  # gone where nothing nests
+        self._lvl_expand.setVisible(bool(rows))
 
     def _apply_shut(self) -> None:
         """Fold again the rows folded by hand in this view."""
@@ -271,20 +255,18 @@ class ListBasics:
 
     def _action(self, label: str, clicked: Callable[[], None] | None = None, tip: str = "", enabled: bool = True,
                 menu: QMenu | None = None, primary: bool = False, icon_name: str | None = None, key: str = "", drop: bool = False) -> QPushButton:
-        """A command on the detail pane's bar. In the new look it's a subtle button with an icon and its key in the tooltip
-        (and under Alt); in the Classic look the key is in its label. ``primary`` is the page's main command: neutral, not
-        subtle, as New capture is the window's one accent button (the review's decision V2). ``drop`` gives it a chevron."""
-        if LOOK.classic and key:
-            label = f"{label}   {key}"
-        name = "primary" if primary and LOOK.classic else "" if primary or LOOK.classic else "subtle"
+        """A command on the detail pane's bar: a subtle button with an icon and its key in the tooltip (and under Alt).
+        ``primary`` is the page's main command: neutral, not subtle, as New capture is the window's one accent button
+        (the review's decision V2). ``drop`` gives it a chevron."""
+        name = "" if primary else "subtle"
         b = DropButton(label) if drop else QPushButton(label)
         b.setObjectName(name)
-        b.setToolTip(f"{tip} ({key})" if key and tip and not LOOK.classic else tip)
-        if icon_name and not LOOK.classic:
+        b.setToolTip(f"{tip} ({key})" if key and tip else tip)
+        if icon_name:
             b.setIcon(icon(icon_name))
-        if menu is not None and not LOOK.classic:
+        if menu is not None:
             b.setProperty("menu", True)
-        if key and not LOOK.classic:
+        if key:
             self.keytips.add(b, key, group="actions")
         b.setEnabled(enabled)
         if menu is not None:
@@ -303,16 +285,16 @@ class ListBasics:
         lay = QHBoxLayout(box)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
-        main = QPushButton(f"{label}   {key}" if LOOK.classic and key else label, box)
-        main.setObjectName("" if LOOK.classic else "subtle")
-        main.setToolTip(f"{tip} ({key})" if key and not LOOK.classic else tip)
-        if icon_name and not LOOK.classic:
+        main = QPushButton(label, box)
+        main.setObjectName("subtle")
+        main.setToolTip(f"{tip} ({key})" if key else tip)
+        if icon_name:
             main.setIcon(icon(icon_name))
-        if key and not LOOK.classic:
+        if key:
             self.keytips.add(main, key, group="actions")
         main.clicked.connect(lambda _=False: clicked())
         chevron = QPushButton("", box)
-        chevron.setObjectName("" if LOOK.classic else "iconOnly")
+        chevron.setObjectName("iconOnly")
         chevron.setIcon(icon("chevron-down"))
         chevron.setToolTip(menu_tip)
         chevron.setAccessibleName(menu_tip.split(":")[0])

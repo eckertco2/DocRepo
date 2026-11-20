@@ -48,7 +48,7 @@ from docrepo.schedule import length_of, placed, start_of, week_of
 from docrepo.tasks import REVIEW_WEEKS, TIE_LINKS, KeyDateRow, hours_values, review_every_words
 from docrepo.ui.tokens import C
 from docrepo.ui.icons import icon, set_fold
-from docrepo.ui.look import LOOK, Help
+from docrepo.ui.look import Help
 from docrepo.ui.repeat_field import RepeatField
 from docrepo.ui.style import page_css, style_sheet
 from docrepo.ui.task_picker import full_path, path_text
@@ -926,7 +926,7 @@ class TaskEditDialog(FormDialog):
         body = QWidget(objectName="capture")
         g = QVBoxLayout(body)
         g.setContentsMargins(0, 0, 8, 0)
-        g.setSpacing(16 if LOOK.classic else 12)
+        g.setSpacing(12)
         scroll.setWidget(body)
         outer.addWidget(scroll, 1)
         self._scroll = scroll
@@ -977,23 +977,21 @@ class TaskEditDialog(FormDialog):
         for note in notes:
             g.addWidget(note)
         self.status = QPlainTextEdit(t.current_status)
-        self.status.setFixedHeight(64 if LOOK.classic else 60)
+        self.status.setFixedHeight(60)
         g.addWidget(field("Latest update", self.status, "status"))
         self.description = QPlainTextEdit(t.description)
-        self.description.setFixedHeight(96 if LOOK.classic else 80)
+        self.description.setFixedHeight(80)
         description_field = field("Description", self.description)
         g.addWidget(description_field)
         # Its checklist (release 5.26, decision 88 as redone): the notes page's checklist lines, bound to them. A tick or
         # a rewording here changes the page at once, so Cancel leaves it; nothing goes into the status log.
         self.checklist = checklist
         if checklist is not None:  # up front once it has lines, as it's part of the task's content
-            where = g if checklist.total or LOOK.classic else ml
+            where = g if checklist.total else ml
             section(where, "Checklist")
             where.addWidget(checklist)
 
         # ---- people ----
-        if LOOK.classic:
-            section(g, "People")
         grid = QGridLayout()
         grid.setHorizontalSpacing(16)
         grid.setVerticalSpacing(16)
@@ -1030,8 +1028,6 @@ class TaskEditDialog(FormDialog):
         ml.addLayout(hours_grid)
 
         # ---- dates ----
-        if LOOK.classic:
-            section(g, "Dates")
         self.start, self.due, self.deadline, self.reminder, self.repeat = DateField(), DateField(), DateField(), DateField(), DateField()
         for w, value in ((self.start, t.start or (None if t.duration or "start" in t.ties else start_of(t).isoformat())), (self.due, t.due), (self.deadline, t.deadline),
                          (self.reminder, t.reminder), (self.repeat, t.repeat_until)):

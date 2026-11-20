@@ -32,7 +32,6 @@ from PySide6.QtWidgets import (
 from docrepo import excel_import as xi
 from docrepo.db import STATES
 from docrepo.markup import esc
-from docrepo.ui.look import LOOK
 from docrepo.ui.tokens import C
 from docrepo.ui.style import page_css
 from docrepo.model import Model
@@ -52,7 +51,7 @@ class ImportDialog(QDialog):
                            f"QLabel#error {{ background: {C.critical_bg}; color: {C.critical}; padding: 6px 10px; }} "
                            f"QPushButton#primary {{ background: {C.accent}; color: {C.content}; border: 1px solid {C.accent}; padding: 4px 14px; }}"
                            f"QPushButton#primary:disabled {{ background: {C.stroke_strong}; border-color: {C.stroke_strong}; }}")
-        self.resize(1100, 820) if LOOK.classic else self.resize(760, 420)  # it grows when a workbook is chosen
+        self.resize(760, 420)  # it grows when a workbook is chosen
         self.path: Path | None = None
         self.rows: list[list[object]] = []
         self.plan: xi.Plan | None = None

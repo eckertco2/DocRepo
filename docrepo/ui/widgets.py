@@ -297,7 +297,7 @@ class FlowLayout(QLayout):
 
 
 class InfoButton(_Gate, QToolButton):
-    """The small "i" button that shows what a field is for. Shown only with Show hints on, or in the Classic look."""
+    """The small "i" button that shows what a field is for. Shown only with Show hints on."""
 
     def __init__(self, key: str, note: QLabel) -> None:
         super().__init__()
@@ -322,7 +322,7 @@ def field(label: str, widget: QWidget | None, help_key: str | None = None, sub: 
     box = QWidget()
     layout = QVBoxLayout(box)
     layout.setContentsMargins(0, 0, 0, 0)
-    layout.setSpacing(3 if LOOK.classic else 6)
+    layout.setSpacing(6)
     row = QHBoxLayout()
     row.setSpacing(6)
     sub = sub if LOOK.show_help else ""  # a label's own hint, such as "a description for each", only with Show hints
@@ -406,11 +406,10 @@ class DateField(QWidget):
         menu = QMenu(self)
         self.calendar = QCalendarWidget()
         self.calendar.setGridVisible(False)
-        if not LOOK.classic:  # Qt's weekends are red, and red means something's wrong
-            weekend = QTextCharFormat()
-            weekend.setForeground(QColor(C.text2))
-            self.calendar.setWeekdayTextFormat(Qt.DayOfWeek.Saturday, weekend)
-            self.calendar.setWeekdayTextFormat(Qt.DayOfWeek.Sunday, weekend)
+        weekend = QTextCharFormat()  # Qt's weekends are red, and red means something's wrong
+        weekend.setForeground(QColor(C.text2))
+        self.calendar.setWeekdayTextFormat(Qt.DayOfWeek.Saturday, weekend)
+        self.calendar.setWeekdayTextFormat(Qt.DayOfWeek.Sunday, weekend)
         self.calendar.clicked.connect(self._picked)
         action = QWidgetAction(menu)
         action.setDefaultWidget(self.calendar)
@@ -419,21 +418,13 @@ class DateField(QWidget):
         menu.aboutToShow.connect(self._sync_calendar)
         self._menu = menu
         layout.addWidget(self.line, 1)
-        if LOOK.classic:
-            button = QToolButton()
-            button.setText("▾")  # Classic's
-            button.setToolTip("Pick a date")
-            button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-            button.setMenu(menu)
-            layout.addWidget(button)
-        else:
-            from docrepo.ui.icons import icon  # icons are drawn once there's an application, so not at import
+        from docrepo.ui.icons import icon  # icons are drawn once there's an application, so not at import
 
-            pick = self.line.addAction(icon("calendar"), QLineEdit.ActionPosition.TrailingPosition)
-            pick.setToolTip("Pick a date")
-            pick.triggered.connect(lambda: menu.popup(self.line.mapToGlobal(self.line.rect().bottomLeft())))
-            self.line.installEventFilter(self)
-            self.setMaximumWidth(self.WIDTH)
+        pick = self.line.addAction(icon("calendar"), QLineEdit.ActionPosition.TrailingPosition)
+        pick.setToolTip("Pick a date")
+        pick.triggered.connect(lambda: menu.popup(self.line.mapToGlobal(self.line.rect().bottomLeft())))
+        self.line.installEventFilter(self)
+        self.setMaximumWidth(self.WIDTH)
         self._show_timer = QTimer(self)  # after a focus change, by a timer that goes with the field
         self._show_timer.setSingleShot(True)
         self._show_timer.setInterval(0)
@@ -455,8 +446,6 @@ class DateField(QWidget):
     def _show(self) -> None:
         """The new look: the date in words while you're not in the field, YYYY-MM-DD while you are. A date that isn't one
         is left as typed, so you can see what to fix."""
-        if LOOK.classic:
-            return
         day = parse_day(self.line.text())
         if day is not None:
             self.line.setText(day.isoformat() if self.line.hasFocus() else f"{day:%a} {day.day} {day:%b %Y}")
@@ -597,8 +586,7 @@ class ChipPicker(QWidget):
         self.box = QWidget()
         self.box.setObjectName("chips")
         self._flow = FlowLayout(self.box)
-        if not LOOK.classic:
-            self._flow.setContentsMargins(4, 1, 4, 1)
+        self._flow.setContentsMargins(4, 1, 4, 1)
         self.edit = QLineEdit()
         self.edit.setPlaceholderText(placeholder)
         self.edit.setFrame(False)

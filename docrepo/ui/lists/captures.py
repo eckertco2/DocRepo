@@ -5,8 +5,7 @@ from __future__ import annotations
 
 
 
-from docrepo.detail import chip, esc
-from docrepo.ui.look import LOOK
+from docrepo.detail import esc
 from docrepo.ui.tree_view import Line
 from docrepo.views import (
     VIEW_IDS,
@@ -25,13 +24,12 @@ class CaptureLists:
 
     def _unfiled_view(self) -> None:
         self._set_head("Unfiled", UNFILED_NOTE)
-        self.tree.set_columns(["Capture", "Source", "Saved"] if LOOK.classic else ["Capture", "Saved"])
+        self.tree.set_columns(["Capture", "Saved"])
         rows = unfiled_rows(self.model(), self.today())
         for r in rows:  # one line: its source's icon, its title and how many documents; no ID (decision L4)
             name, colour = SOURCE_ICONS.get(r.source, ("note", "text2"))
             line = Line(r.title, icon=name, icon_colour=colour, icon_tip=r.source, context=r.sub)
-            source = [chip(r.source, "st-ns")] if LOOK.classic else []
-            self.tree.add_row(None, ("capture", r.id), [line, *source, f'<p align="right">{esc(r.saved)}</p>'], tip=f"{r.id} · {r.source}")
+            self.tree.add_row(None, ("capture", r.id), [line, f'<p align="right">{esc(r.saved)}</p>'], tip=f"{r.id} · {r.source}")
         if not rows:
             self.tree.add_row(None, None, ['<span class="sub">No unfiled captures.</span>'], selectable=False, span=True)
 

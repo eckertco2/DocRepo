@@ -41,7 +41,6 @@ from docrepo.ui import tokens
 from docrepo.ui.front import bring_to_front
 from docrepo.ui.icons import icon
 from docrepo.ui.lists.notes_pages import grouped_outline
-from docrepo.ui.look import LOOK
 from docrepo.ui.page_view import PageView
 from docrepo.ui.progress_form import ProgressForm, guarded, said_after
 from docrepo.ui.style import page_css
@@ -90,8 +89,7 @@ class Workspace(QWidget):
         self.browse = browse
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        if not LOOK.classic:
-            self.setStyleSheet(_style())
+        self.setStyleSheet(_style())
         self.here = ""
         self.picked = ""
         self.meeting = ""
@@ -191,8 +189,7 @@ class Workspace(QWidget):
                  lambda: b.open_capture(task=self.acting, meeting=True)),
                 ("find", "Find files", "search", "Search, preview and open its files (O)", lambda: b.open_task_view(self.acting))):
             btn = QPushButton(label, objectName="subtle")
-            if not LOOK.classic:
-                btn.setIcon(icon(name))
+            btn.setIcon(icon(name))
             btn.setToolTip(tip)
             btn.clicked.connect(do)
             self.bar.addWidget(btn)
@@ -211,8 +208,7 @@ class Workspace(QWidget):
         line.setFrameShape(QFrame.Shape.VLine)
         self.bar.addWidget(line)
         done = QPushButton("Done for today", objectName="subtle")
-        if not LOOK.classic:
-            done.setIcon(icon("tick"))
+        done.setIcon(icon("tick"))
         done.setToolTip("Off Today as done; you stay here, and Esc goes back to Today, where it's under Done for today")
         done.clicked.connect(self.done_for_today)
         self.bar.addWidget(done)
@@ -236,7 +232,7 @@ class Workspace(QWidget):
 
     def _build_middle(self) -> QWidget:
         css = page_css()
-        self.pane = WorkPane(css, 14 if LOOK.classic else 22)
+        self.pane = WorkPane(css, 22)
         b = self.browse
         b.wire_notes(self.pane, b.say, b.open_ref, back=False)
         # This page or All notes, All notes' links and the outline's places are the workspace's own (683).

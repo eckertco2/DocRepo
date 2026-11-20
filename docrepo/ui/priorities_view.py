@@ -463,7 +463,7 @@ class PrioritiesView(QWidget):
             bl.addWidget(b)
         row.addWidget(self.buckets)
         row.addStretch(1)
-        self.open_button = QPushButton("Open task", objectName="primary" if LOOK.classic else "")
+        self.open_button = QPushButton("Open task")
         self.open_button.clicked.connect(lambda: self.sel and self.open_task.emit(self.sel))
         self.edit_button = QPushButton("Edit")
         self.edit_button.setToolTip("Edit task (E)")

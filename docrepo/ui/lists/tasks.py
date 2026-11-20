@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QComboBox,
 )
 
-from docrepo import bulk, edits, key_dates, priorities, task_tile, waits
+from docrepo import bulk, edits, key_dates, priorities, task_tile
 from docrepo.lists import key_dates_due
 from docrepo.dates import short
 from docrepo.file_rows import doc_places, type_colour, type_icon, type_name
@@ -22,9 +22,8 @@ from docrepo.overview import file_type
 from docrepo.model import Model
 from docrepo.kinds import is_work
 from docrepo.schedule import DueDate, is_open
-from docrepo.ui.look import LOOK
 from docrepo.ui.task_forms import BulkEditDialog
-from docrepo.ui.tree_view import KEY_ROLE, Line, group_ground, state_icon, tint, with_actions
+from docrepo.ui.tree_view import KEY_ROLE, Line, group_ground, tint, with_actions
 from docrepo.ui.widgets import CheckMenuButton, label_filter, people_filter
 from docrepo.views import (
     LIST_IDS,
@@ -35,12 +34,10 @@ from docrepo.views import (
     TreeFilter,
     collapse_level,
     due_cell,
-    key_date_cell,
     expand_level,
     full_path,
     list_date,
     list_tree,
-    markers,
     sort_tree,
     task_tree,
     tree_sections,
@@ -48,7 +45,6 @@ from docrepo.views import (
 )
 from docrepo.ui.lists.common import (
     _cols,
-    _due_css,
     _due_html,
     _row_state,
     _row_word,
@@ -66,13 +62,11 @@ class TaskLists:
     # ---- rows ----
     def _task_cells(self, task_id: str, depth: int, context: bool = False, muted: tuple[str, ...] = (), people: str = "",
                     when: DueDate | None = None, use_due: bool = True) -> list:
-        """A task's row. In the new look, a tile (release 5.138, the task tile plan's decisions 563 to 570): its state's icon,
+        """A task's row, a tile (release 5.138, the task tile plan's decisions 563 to 570): its state's icon,
         its title, Urgent's flag, the two-parents mark, its context (``people``, Waiting on others', after its wait's words
         "waiting on Dana · Thu"; then ``muted``, a view's own words, such as the weekly review's), its marks, and the days to
         its nearer date; no labels, recurrence or Critical chip (569). Reminders keeps its reminder's day (``when``) in place
-        of the days. The Classic look keeps its row: labels and marks as words, State, the date."""
-        if LOOK.classic:
-            return self._classic_task_cells(task_id, depth, context, muted, people, when, use_due)
+        of the days."""
         m, today = self.model(), self.today()
         if people:  # Waiting on others: what's waited on first, so a narrow row cuts the names' end (5.139's decision 594)
             wait = task_tile.marks(m, today).waits.get(task_id)
@@ -86,35 +80,6 @@ class TaskLists:
         if when is not None or not use_due:
             days = _due_html(due_cell(m.task(task_id), today, when, use_due))
         return _shape([line, _row_state(m.task(task_id).state), days])
-
-    def _classic_task_cells(self, task_id: str, depth: int, context: bool = False, muted: tuple[str, ...] = (), people: str = "",
-                            when: DueDate | None = None, use_due: bool = True) -> list:
-        """The Classic look's task row: a ``Line`` (its state's icon, its title, Urgent or Critical as chips, its other marks and
-        ``muted`` as quiet words, and ``people``), then its State, and its date. Its top-level tasks are bold."""
-        m, t = self.model(), self.model().task(task_id)
-        shown = "Collection" if t.collection else t.state  # a collection's folder (release 5.167)
-        icon, colour = state_icon(shown)
-        if context:
-            return _shape([Line(t.title, icon=icon, icon_tip=shown, dim=True, strong=depth == 0), "", ""])
-        chips, quiet = [], []
-        for text, cls in markers(m, t):  # a chip only for an exception; the rest are quiet words (the review's recipe)
-            (chips if LOOK.classic or cls in ("urgent", "pri-critical") else quiet).append((text, cls))
-        # The waiting mark (release 5.139, decision 580; "asked Mon" in release 5.125): before the people, where there are
-        # some, so a narrow row cuts the end of their names first and keeps it; else with the quiet words.
-        asked = waits.row_text(m, task_id, self.today())
-        if asked and people:
-            people, asked = f"{asked} · {people}", ""
-        line = Line(t.title, icon=icon, icon_colour=colour, icon_tip=shown, chips=tuple(chips),
-                    muted=(*(x for x, _ in quiet), *muted, *((asked,) if asked else ())),
-                    context=people, strong=depth == 0, closed=t.state == "Closed")
-        if t.collection:
-            return _shape([line, "", ""])
-        return _shape([line, _row_state(t.state), _due_html(due_cell(t, self.today(), when, use_due))])
-
-    def _label_words(self, task_id: str, skip: str = "") -> tuple[str, ...]:
-        """After a title in the task tree (item 76, decision 235): the task's own labels, as quiet words rather than chips.
-        Not the ones it inherits, or every subtask would repeat its parent's, nor ``skip``, which its section is named for."""
-        return tuple(name for name in self.model().task(task_id).labels if name != skip)
 
     def _add_nodes(self, nodes: list[Node], parent=None, filtered: bool = False, expand_all: bool = True,
                    row: Callable[[Node], tuple[list[str], str]] | None = None) -> None:
@@ -192,15 +157,14 @@ class TaskLists:
         can_fold, can_open = collapse_level(nodes, self.open) != self.open, expand_level(nodes, self.open) != self.open
         collapse = self._level_button(False, lambda: self._level(nodes, "collapse"), can_fold)
         expand = self._level_button(True, lambda: self._level(nodes, "expand"), can_open)
-        collapse.setVisible(can_fold or can_open or LOOK.classic)  # gone where nothing nests
-        expand.setVisible(can_fold or can_open or LOOK.classic)
+        collapse.setVisible(can_fold or can_open)  # gone where nothing nests
+        expand.setVisible(can_fold or can_open)
         self.tree.set_columns(*_cols(["Title", "State", "Due"], [0, 96, DAYS_COL]))
 
-        def row(n: Node, section: str = "") -> tuple[list, str]:
+        def row(n: Node) -> tuple[list, str]:
             dimmed = bool(how or filtered) and not n.match
-            # A tile names no labels (release 5.138, decision 569); the Classic look keeps them as words (decision 235).
-            words = self._label_words(n.id, section) if LOOK.classic else ()
-            return self._task_cells(n.id, n.depth, dimmed, muted=words), full_path(m, n.id)
+            # A tile names no labels (release 5.138, decision 569).
+            return self._task_cells(n.id, n.depth, dimmed), full_path(m, n.id)
 
         if how:  # a section per group, each with its tasks in tree shape (release 5.24)
             grey = group_ground()
@@ -208,12 +172,11 @@ class TaskLists:
                 sub = f' <span class="sub">{esc(s.sub)}</span>' if s.sub else ""
                 head = self.tree.add_row(None, None, [f'<b>{esc(s.name)}</b>{sub} &nbsp;<span class="sub">{s.count}</span>'], grey,
                                          selectable=False, span=True)
-                named = s.name if how == "label" or how.startswith("pl:") else ""  # its section says it already
-                self._add_nodes(s.nodes, head, filtered=True, expand_all=False, row=lambda n, x=named: row(n, x))
+                self._add_nodes(s.nodes, head, filtered=True, expand_all=False, row=row)
                 head.setExpanded(True)
         else:
             self._add_nodes(nodes, filtered=filtered, expand_all=False, row=row)
-        if not nodes and not LOOK.classic and not any(not t.discarded for t in m.tasks.values()):  # first use, not a filter's doing
+        if not nodes and not any(not t.discarded for t in m.tasks.values()):  # first use, not a filter's doing
             self.tree.show_empty("No tasks yet.", "New task", lambda: self.open_capture(mode="new_task"))
         elif not nodes:
             self.tree.add_row(None, None, ['<span class="sub">No tasks match these filters.</span>'], selectable=False, span=True)
@@ -385,15 +348,11 @@ class TaskLists:
             self.tree.add_row(None, None, ['<span class="sub">Nothing here right now.</span>'], selectable=False, span=True)
 
     def _key_date_cells(self, d: key_dates.Due) -> list:
-        """A key date's row (release 5.31): its task's title, the key date's words after it in quiet text (under it in the
-        Classic look), its plant and deadline marks, a Key date icon (a chip in the Classic look), and its days until due, red
-        when it's overdue."""
+        """A key date's row (release 5.31): its task's title, the key date's words after it in quiet text, its plant and
+        deadline marks, a Key date icon, and its days until due, red when it's overdue."""
         today = self.today()
-        cell = key_date_cell(d, today)
         marks = ((("⚑", "caution"),) if d.key_date.plant else ()) + ((("◆", "critical"),) if d.key_date.deadline else ())
         line = Line(d.task.title, icon="calendar", icon_tip="Key date", chips=marks, context=d.text(today))
-        if LOOK.classic:
-            return _shape([line, _row_word("Key date"), f'<p align="right" style="{_due_css(cell.cls)}">{esc(cell.text)}</p>'])
         # The same number as a task's tile, so the column reads one way (release 5.138, decision 568).
         return _shape([line, _row_word("Key date"), task_tile.days_html(task_tile.days_to(d.day, today, "Starts" if d.starts else "Due"))])
 

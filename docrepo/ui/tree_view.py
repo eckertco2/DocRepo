@@ -1,11 +1,10 @@
 """The browse tool's middle pane list: a tree of rows.
 
 Rows carry a key, such as ("task", "T000008"), that says what selecting them
-opens. In the new look a row is one line at its view's height (the list rows
-review, release 5.78): its first column a ``Line``, painted part by part and cut
-with "…" to fit, and its other cells small pieces of HTML on one line. A
-top-level task's row has its group's colour as an edge. The Classic look keeps
-release 5.9's rows: HTML that wraps, tinted by group.
+opens. A row is one line at its view's height (the list rows review, release
+5.78): its first column a ``Line``, painted part by part and cut with "…" to
+fit, and its other cells small pieces of HTML on one line. A top-level task's
+row has its group's colour as an edge.
 """
 from __future__ import annotations
 
@@ -24,8 +23,8 @@ from docrepo.model import PRIORITY_NAMES
 from docrepo.task_tile import fit_title
 from docrepo.ui import tokens
 from docrepo.ui.icons import icon, icon_size, tinted
-from docrepo.ui.look import LOOK, paint_focus_ring
-from docrepo.ui.style import CLASSIC_TREE, page_css
+from docrepo.ui.look import paint_focus_ring
+from docrepo.ui.style import page_css
 from docrepo.ui.task_tile import FLAG, KIND, STATE_ICONS, TICK_SLOT, marks_width, paint_marks, paint_ticks
 
 KEY_ROLE = Qt.ItemDataRole.UserRole
@@ -37,11 +36,10 @@ DIM_ROLE = Qt.ItemDataRole.UserRole + 2
 PRIORITY_EDGES = {"critical": "pri_critical", "high": "pri_high", "medium": "pri_medium", "parking": "pri_parking"}
 #: A row's actions, a ``RowActions`` (release 5.59).
 ACTIONS_ROLE = Qt.ItemDataRole.UserRole + 4
-#: The new look's first column, a ``Line`` (release 5.78).
+#: A row's first column, a ``Line`` (release 5.78).
 LINE_ROLE = Qt.ItemDataRole.UserRole + 5
-#: On a task's state: the task, so the state is a button that opens the state menu (release 5.76, decision 360). In the new
-#: look it's on the first column, whose icon is the state (the list rows review's decision L7); in the Classic look, on the
-#: State cell.
+#: On a task's state: the task, so the state is a button that opens the state menu (release 5.76, decision 360). It's on
+#: the first column, whose icon is the state (the list rows review's decision L7).
 STATE_ROLE = Qt.ItemDataRole.UserRole + 6
 #: What a row move calls the row, when it isn't the row's key (release 5.148): a Today item's number, as ("today", 7), since
 #: a task's row is keyed by its task and a note's may have no key. ``allow_row_moves``' callbacks get it.
@@ -54,16 +52,8 @@ RULE_ROLE = Qt.ItemDataRole.UserRole + 9
 #: The current task's row under Now on Today (release 5.177, the current task plan's decision 828): the ``now`` ground and
 #: the accent edge.
 NOW_ROLE = Qt.ItemDataRole.UserRole + 10
-#: The chevron after a Classic State cell's word on hover, and the room it takes.
-STATE_CHEVRON = 12
 
 GROUP_COLOURS = tuple(tokens.LIGHT[k] for k in tokens.GROUP_KEYS)
-GREY = "#b8c1cb"  # Classic's, for a task with no group
-#: How strongly a group's colour shows, by depth: top-level tasks most, each level down less.
-TINTS = (0.15, 0.09, 0.05, 0.025)
-ROW_MIN_HEIGHT = 26
-#: The room a row's tick box takes, in Select mode.
-CHECK_WIDTH = 22
 #: The least room a list's first column keeps: in a narrower list its last columns go first (release 5.58).
 MIN_TITLE = 160
 #: A row in a two-line view (decision L1): Agendas, Documents, Activity and Search, whose second line is the substance.
@@ -99,9 +89,9 @@ def state_icon(state: str) -> tuple[str, str]:
 
 @dataclass
 class Line:
-    """A row's first column in the new look (the list rows review, release 5.78): one line, or two in a two-line view, painted
+    """A row's first column (the list rows review, release 5.78): one line, or two in a two-line view, painted
     by ``HtmlDelegate``. When it doesn't fit, its parts are cut in turn: the context first, then the quiet words, the lead,
-    the chips, and the title last. ``html`` says the same words for Find, the tests and the Classic look."""
+    the chips, and the title last. ``html`` says the same words for Find and the tests."""
 
     title: str
     #: Drawn before the title: a task's state (decision L7), or the kind of thing the row is. ``icon_tip`` says it in words.
@@ -120,7 +110,7 @@ class Line:
     second: str | None = None
     #: A parent's open subtasks, shown while it's folded (decision L8).
     count: int = 0
-    #: The Classic look's bold top-level task (the new look has none, decision L2).
+    #: A top-level task. Drawn no differently (no bold top-level task, decision L2); its callers still set it.
     strong: bool = False
     #: Struck through and quiet: done or closed.
     closed: bool = False
@@ -148,10 +138,8 @@ class Line:
         """How far the state's icon sits from the line's start: past the depth ticks, in a flat list."""
         return TICKS_W if self.depth >= 0 else 0
 
-    def html(self, classic: bool = False) -> str:
+    def html(self) -> str:
         title = esc(self.title)
-        if classic and self.strong:
-            title = f"<b>{title}</b>"
         if self.closed:
             title = f'<s><span class="faint">{title}</span></s>'
         elif self.dim:
@@ -164,7 +152,7 @@ class Line:
         if self.muted:
             out += f' <span class="faint">&nbsp;{esc(" · ".join(self.muted))}</span>'
         if self.context:
-            out += f'<br><span class="sub">{esc(self.context)}</span>' if classic else f' <span class="faint">&nbsp;{esc(self.context)}</span>'
+            out += f' <span class="faint">&nbsp;{esc(self.context)}</span>'
         if self.second:
             out += f'<br><span class="sub">{esc(self.second)}</span>'
         return out
@@ -176,23 +164,19 @@ class Line:
 
 
 def tint(group: int, depth: int) -> QColor | None:
-    """A group's colour mixed into white, for a row at ``depth``. The new look has none: the group's colour is an edge on
-    its top-level row instead (``edge``)."""
-    if not LOOK.classic:
-        return None
-    base = QColor(GREY if group < 0 else GROUP_COLOURS[group % len(GROUP_COLOURS)])
-    p = TINTS[min(depth, len(TINTS) - 1)]
-    return QColor(round(255 + (base.red() - 255) * p), round(255 + (base.green() - 255) * p), round(255 + (base.blue() - 255) * p))
+    """A row's ground by its group, for a row at ``depth``: none, as the group's colour is an edge on its top-level row
+    instead (``edge``)."""
+    return None
 
 
 def group_ground() -> QColor:
     """Behind a group's heading in a list."""
-    return QColor(GREY).lighter(135) if LOOK.classic else QColor(tokens.colour("base"))
+    return QColor(tokens.colour("base"))
 
 
 def with_actions(labels: list[str], widths: list[int], width: int) -> tuple[list[str], list[int]]:
-    """A list's columns. The Classic look gives a row's actions a column of ``width`` px; the new look shows them over the row."""
-    return ([*labels, ""], [*widths, width]) if LOOK.classic else (labels, widths)
+    """A list's columns: a row's actions take no column (``width`` is unused), as they show over the row."""
+    return (labels, widths)
 
 
 class RowActions:
@@ -203,19 +187,19 @@ class RowActions:
 
 
 class ActionStrip(QWidget):
-    """A row's actions. In the new look, icon buttons over the end of the row, where its date is, only while the row is under
+    """A row's actions: icon buttons over the end of the row, where its date is, only while the row is under
     the mouse, so a list isn't a column of links and the title is never covered (release 5.78, decision L5). Each button's
-    words are its accessible name and start its tooltip. In the Classic look they're links in a cell, always there."""
+    words are its accessible name and start its tooltip."""
 
     def __init__(self, row: RowActions, item: QTreeWidgetItem | None = None, parent: QWidget | None = None) -> None:
         super().__init__(parent, objectName="rowActions")
         self.item = item
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0) if LOOK.classic else lay.setContentsMargins(ACTION_PAD, 0, ACTION_PAD, 0)
-        lay.setSpacing(4 if LOOK.classic else 0)
+        lay.setContentsMargins(ACTION_PAD, 0, ACTION_PAD, 0)
+        lay.setSpacing(0)
         for label, clicked, tip in row.actions:
-            name = None if LOOK.classic else ACTION_ICONS.get(label)
+            name = ACTION_ICONS.get(label)
             if name:
                 b = QPushButton(objectName="rowIcon")
                 b.setIcon(icon(name, tokens.colour("text2")))
@@ -228,8 +212,6 @@ class ActionStrip(QWidget):
             b.setAccessibleName(label)
             b.clicked.connect(lambda _=False, c=clicked: c())
             lay.addWidget(b)
-        if LOOK.classic:
-            lay.addStretch()
 
 
 def strip_width(row: RowActions) -> int:
@@ -238,9 +220,8 @@ def strip_width(row: RowActions) -> int:
 
 
 class HtmlDelegate(QStyledItemDelegate):
-    """Draws a row's cells. In the new look (release 5.78) a ``Line`` is painted part by part, and any other cell's HTML on one
-    line, at the view's row height, cut with "…" when it doesn't fit. In the Classic look a cell's HTML wraps to the column's
-    width, and the row grows to hold it."""
+    """Draws a row's cells (release 5.78): a ``Line`` is painted part by part, and any other cell's HTML on one
+    line, at the view's row height, cut with "…" when it doesn't fit."""
 
     def __init__(self, view: QTreeWidget) -> None:
         super().__init__(view)
@@ -259,19 +240,8 @@ class HtmlDelegate(QStyledItemDelegate):
         doc.setTextWidth(max(20, width))
         return doc
 
-    def _width(self, index: QModelIndex) -> int:
-        width = self.view.columnWidth(index.column())
-        if index.column() == 0:
-            level, parent = 0, index.parent()
-            while parent.isValid():
-                level, parent = level + 1, parent.parent()
-            width -= self.view.indentation() * (level + (1 if self.view.rootIsDecorated() else 0))
-        if index.data(Qt.ItemDataRole.CheckStateRole) is not None:
-            width -= CHECK_WIDTH
-        return width - self.view.cell_pad - 3
-
     def paint(self, painter, option, index) -> None:  # noqa: D102 - Qt's
-        line = None if LOOK.classic else index.data(LINE_ROLE)
+        line = index.data(LINE_ROLE)
         html = index.data(HTML_ROLE)
         if html is None and line is None:
             super().paint(painter, option, index)
@@ -285,35 +255,22 @@ class HtmlDelegate(QStyledItemDelegate):
         if opt.features & QStyleOptionViewItem.ViewItemFeature.HasCheckIndicator:  # a tick box, drawn above: the words go after it
             left = style.subElementRect(QStyle.SubElement.SE_ItemViewItemText, opt, opt.widget).left()
         # A state that's a button, under the mouse or with its menu open, has a backplate (release 5.76, decision 360): round
-        # the State cell's word in the Classic look, round the state's icon before the title in the new look (decision L7).
+        # the state's icon before the title (decision L7).
         lit = index.data(STATE_ROLE) is not None and self.view.state_lit(index)
         painter.save()
         if index.siblingAtColumn(0).data(DIM_ROLE):
             painter.setOpacity(0.5)
-        if LOOK.classic:
-            doc = self._doc(html, opt.rect.right() - left - self.view.cell_pad - 3, opt)
-            if lit:
-                self._plate(painter, QRect(left + self.view.cell_pad - 3, opt.rect.top() + 3, int(doc.idealWidth()) + STATE_CHEVRON + 6,
-                                           opt.rect.height() - 6))
-            top = opt.rect.top() + max(0, (opt.rect.height() - doc.size().height()) / 2)
-            painter.translate(left + self.view.cell_pad, top)
-            self._draw_doc(painter, doc)
+        painter.setClipRect(opt.rect)
+        rect = QRect(left + self.view.cell_pad, opt.rect.top(), opt.rect.right() - left - self.view.cell_pad - 3, opt.rect.height())
+        if index.column() == 0:  # a hovered row's actions lie over its end: its words stop short of them
+            strip = self.view.strip_left(self.view.itemFromIndex(index))
+            if strip is not None:
+                rect.setRight(min(rect.right(), strip - 8))
+        if line is not None:
+            self._paint_line(painter, rect, line, opt, index, lit)
         else:
-            painter.setClipRect(opt.rect)
-            rect = QRect(left + self.view.cell_pad, opt.rect.top(), opt.rect.right() - left - self.view.cell_pad - 3, opt.rect.height())
-            if index.column() == 0:  # a hovered row's actions lie over its end: its words stop short of them
-                strip = self.view.strip_left(self.view.itemFromIndex(index))
-                if strip is not None:
-                    rect.setRight(min(rect.right(), strip - 8))
-            if line is not None:
-                self._paint_line(painter, rect, line, opt, index, lit)
-            else:
-                self._paint_html(painter, rect, html, opt)
+            self._paint_html(painter, rect, html, opt)
         painter.restore()
-        if lit and LOOK.classic:  # and the chevron that says the word opens a menu
-            x = left + self.view.cell_pad + int(doc.idealWidth())
-            y = opt.rect.top() + (opt.rect.height() - STATE_CHEVRON) // 2
-            painter.drawPixmap(QPoint(x, y), tinted("chevron-down", tokens.LIGHT["text2"], STATE_CHEVRON, painter.device().devicePixelRatioF()))
 
     @staticmethod
     def _plate(painter: QPainter, rect: QRect) -> None:
@@ -327,7 +284,7 @@ class HtmlDelegate(QStyledItemDelegate):
 
     @staticmethod
     def icon_box(cell: QRect) -> QRect:
-        """Where a one-line row's icon sits in its first cell, with 3 px round it: the state's button in the new look."""
+        """Where a one-line row's icon sits in its first cell, with 3 px round it: the state's button."""
         left = cell.left() + 2
         top = cell.center().y() - ROW_ICON // 2 + 1
         return QRect(left - 3, top - 3, ROW_ICON + 6, ROW_ICON + 6)
@@ -499,7 +456,7 @@ class HtmlDelegate(QStyledItemDelegate):
     def helpEvent(self, event, view, option, index) -> bool:  # noqa: N802 - Qt's name
         """Over a row's icon, what the icon means (decision L7); over a tile's ticks, flag, two-parents mark or marks, what
         each says (decisions 566 to 570); elsewhere, the row's own tooltip."""
-        line = None if LOOK.classic else index.data(LINE_ROLE)
+        line = index.data(LINE_ROLE)
         if line is not None and index.column() == 0:
             left = option.rect.left() + self.view.cell_pad + 2 + line.icon_offset
             if line.icon_tip and left - 2 <= event.pos().x() <= left + ROW_ICON + 2:
@@ -510,7 +467,7 @@ class HtmlDelegate(QStyledItemDelegate):
             if said:
                 QToolTip.showText(event.globalPos(), said, view)
                 return True
-        bucket = "" if LOOK.classic else self.view.row_priority(index)
+        bucket = self.view.row_priority(index)
         if bucket:  # the row's tooltip names its priority, as its edge shows it only by colour (decision L9)
             said = f"Priority: {PRIORITY_NAMES.get(bucket, bucket)}"
             tip = index.data(Qt.ItemDataRole.ToolTipRole) or index.siblingAtColumn(0).data(Qt.ItemDataRole.ToolTipRole) or ""
@@ -520,16 +477,12 @@ class HtmlDelegate(QStyledItemDelegate):
 
     def sizeHint(self, option, index) -> QSize:  # noqa: N802
         html = index.data(HTML_ROLE)
-        if not LOOK.classic:  # one height per view (decision L1): its row height, or two lines for a two-line row
-            line = index.data(LINE_ROLE)
-            if html is None and line is None:
-                return super().sizeHint(option, index)
-            gap = TILE_GAP if self.view.tiled else 0  # every row, headings too, so the rows keep one height (decision 571)
-            return QSize(1, (TWO_LINE_ROW if line is not None and line.second is not None and self.view.two_lines else self.view.row_height) + gap)
-        if html is None:
+        # one height per view (decision L1): its row height, or two lines for a two-line row
+        line = index.data(LINE_ROLE)
+        if html is None and line is None:
             return super().sizeHint(option, index)
-        doc = self._doc(html, self._width(index), option)
-        return QSize(int(doc.idealWidth()), max(ROW_MIN_HEIGHT, int(doc.size().height()) + 6))
+        gap = TILE_GAP if self.view.tiled else 0  # every row, headings too, so the rows keep one height (decision 571)
+        return QSize(1, (TWO_LINE_ROW if line is not None and line.second is not None and self.view.two_lines else self.view.row_height) + gap)
 
 
 class RowTree(QTreeWidget):
@@ -542,21 +495,19 @@ class RowTree(QTreeWidget):
     def __init__(self) -> None:
         super().__init__()
         self.cell_pad = 3  # the room before each cell's text; the sidebar's views have more
-        #: The new look's row height for the view shown, and whether its rows with a second line take two lines (``set_density``).
+        #: The row height for the view shown, and whether its rows with a second line take two lines (``set_density``).
         self.row_height = tokens.TREE_ROW
         self.two_lines = False
         #: Each open, ranked task's priority bucket, by its ID: its row's left edge (release 5.81). The browse window sets it as it
         #: fills the list, so drawing a row never reads the database.
         self.priorities: dict[str, str] = {}
         self.setItemDelegate(HtmlDelegate(self))
-        self.setUniformRowHeights(not LOOK.classic)
-        self.setWordWrap(LOOK.classic)
-        self.setIndentation(14 if LOOK.classic else 16)
+        self.setUniformRowHeights(True)
+        self.setWordWrap(False)
+        self.setIndentation(16)
         self.setAlternatingRowColors(False)
         self.setExpandsOnDoubleClick(False)
         self.setSelectionMode(QTreeWidget.SelectionMode.SingleSelection)
-        if LOOK.classic:
-            self.setStyleSheet(CLASSIC_TREE)
         self._building = False
         self._moves: tuple[Callable, Callable, Callable] | None = None
         #: Files, links and emails dropped on a row (release 5.115, decision 419): whether a row's key takes one, and what to do.
@@ -590,12 +541,11 @@ class RowTree(QTreeWidget):
         self._relayout.timeout.connect(self.doItemsLayout)
         self._relayout.timeout.connect(self._sync_strips)
         self.header().sectionResized.connect(lambda *_: self._relayout.start())
-        if not LOOK.classic:
-            self.setMouseTracking(True)
-            self.verticalScrollBar().valueChanged.connect(lambda _: self._hover_from_cursor())
-            self.horizontalScrollBar().valueChanged.connect(lambda _: self._sync_strips())
-            self.itemExpanded.connect(lambda _: self._sync_strips())
-            self.itemCollapsed.connect(lambda _: self._sync_strips())
+        self.setMouseTracking(True)
+        self.verticalScrollBar().valueChanged.connect(lambda _: self._hover_from_cursor())
+        self.horizontalScrollBar().valueChanged.connect(lambda _: self._sync_strips())
+        self.itemExpanded.connect(lambda _: self._sync_strips())
+        self.itemCollapsed.connect(lambda _: self._sync_strips())
         self.currentItemChanged.connect(self._current_changed)
         self.itemChanged.connect(self._item_changed)
         self.set_columns(["Title", "State", "Due"])
@@ -816,7 +766,7 @@ class RowTree(QTreeWidget):
     def _fit_columns(self) -> None:
         """In a narrow list its columns go, the one after the title first, as a date at the row's end says more than a state, so
         the title keeps enough room to read. They come back with the room. What they say is on the row's page beside it (release 5.58)."""
-        if LOOK.classic or not self._widths:
+        if not self._widths:
             return
         shown = list(range(1, len(self._widths)))
         while shown and self.viewport().width() - sum(self._widths[i] for i in shown) < MIN_TITLE:
@@ -849,13 +799,11 @@ class RowTree(QTreeWidget):
         """The view's row height (decision L1): ``tokens.TREE_ROW`` where rows nest, ``tokens.LIST_ROW`` elsewhere. In a view with
         ``two_lines``, a row whose ``Line`` has a second line is ``TWO_LINE_ROW`` high, and its headings keep ``height``."""
         self.row_height, self.two_lines = height, two_lines
-        if not LOOK.classic:
-            self.setUniformRowHeights(not two_lines)
+        self.setUniformRowHeights(not two_lines)
 
     def set_tiled(self, on: bool) -> None:
         """Draw selectable rows as tiles (release 5.138, the task tile plan's decision 571): each the content's white with
-        4 px corners, ``TILE_GAP`` apart on the base grey, no outline. Headings stay on the ground. Not in the Classic look."""
-        on = on and not LOOK.classic
+        4 px corners, ``TILE_GAP`` apart on the base grey, no outline. Headings stay on the ground."""
         if on == self.tiled:
             return
         self.tiled = on
@@ -873,9 +821,9 @@ class RowTree(QTreeWidget):
         self._hover_from_cursor()
 
     def _size_columns(self) -> None:
-        """In the new look a column after the title is as wide as the widest thing in it, from its set width up to ``MAX_CELL``,
+        """A column after the title is as wide as the widest thing in it, from its set width up to ``MAX_CELL``,
         so a date such as "◆ 31 Oct · 23 d" is never cut. Its words never wrap."""
-        if LOOK.classic or not self._widths:
+        if not self._widths:
             return
         widths = list(self._widths)
         option = QStyleOptionViewItem()
@@ -895,14 +843,14 @@ class RowTree(QTreeWidget):
 
     def add_row(self, parent: QTreeWidgetItem | None, key: object, cells: list, background: QColor | None = None,
                 tip: str = "", selectable: bool = True, span: bool = False) -> QTreeWidgetItem:
-        """A row. Its first cell may be a ``Line`` (the new look paints it; its HTML is kept for Find and the Classic look), and
+        """A row. Its first cell may be a ``Line`` (painted part by part; its HTML is kept for Find), and
         the rest are HTML."""
         item = QTreeWidgetItem(parent) if parent is not None else QTreeWidgetItem(self)
         item.setData(0, KEY_ROLE, key)
         for i, html in enumerate(cells):
             if isinstance(html, Line):
                 item.setData(i, LINE_ROLE, html)
-                html = html.html(LOOK.classic)
+                html = html.html()
             item.setData(i, HTML_ROLE, html)
             if background is not None:
                 item.setBackground(i, background)
@@ -936,21 +884,21 @@ class RowTree(QTreeWidget):
 
     # ---- a task's state from its row (release 5.76, round 7's item 101, decisions 360 and 361) ----
     def mark_state(self, item: QTreeWidgetItem, column: int, task_id: str, state: str) -> None:
-        """Make a row's state a button that opens the state menu for ``task_id``: the Classic look's State cell, or the new
-        look's first column, whose icon is the state (the list rows review's decision L7), which says so in its own tooltip."""
+        """Make a row's state a button that opens the state menu for ``task_id``: the first column, whose icon is the state
+        (the list rows review's decision L7), which says so in its own tooltip, or another column, which gets a tooltip."""
         item.setData(column, STATE_ROLE, task_id)
-        if LOOK.classic or column != 0:
+        if column != 0:
             item.setToolTip(column, f"{state}. Click to change the state.")
 
     def state_cell(self, pos: QPoint) -> tuple[QTreeWidgetItem, int, str] | None:
-        """The state at a point in the viewport: its row, its column and its task. In the new look only the state's icon is the
-        button: the rest of the first column is the row."""
+        """The state at a point in the viewport: its row, its column and its task. In the first column only the state's icon is
+        the button: the rest of it is the row."""
         item = self.itemAt(pos)
         column = self.columnAt(pos.x())
         task = item.data(column, STATE_ROLE) if item is not None and column >= 0 else None
         if not task:
             return None
-        if not LOOK.classic and column == 0:
+        if column == 0:
             cell = self.visualRect(self.indexFromItem(item, 0))
             line = item.data(0, LINE_ROLE)
             left = cell.left() + self.cell_pad + 2 + (line.icon_offset if isinstance(line, Line) else 0)
@@ -1004,11 +952,8 @@ class RowTree(QTreeWidget):
 
     # ---- a row's actions (release 5.59): over the row on hover and when current, and as its right-click menu ----
     def set_actions(self, item: QTreeWidgetItem, actions: list[tuple[str, Callable[[], None], str]]) -> None:
-        """Give a row its actions: (label, clicked, tooltip). The Classic look has a column for them, its last."""
-        row = RowActions(actions)
-        item.setData(0, ACTIONS_ROLE, row)
-        if LOOK.classic:
-            self.setItemWidget(item, self.columnCount() - 1, ActionStrip(row))
+        """Give a row its actions: (label, clicked, tooltip)."""
+        item.setData(0, ACTIONS_ROLE, RowActions(actions))
 
     def set_menu_lines(self, item: QTreeWidgetItem, lines: list[tuple[str, Callable[[], None], str]]) -> None:
         """Lines for a row's right-click menu only, after its actions, with no button on the row: Today's Move to top and
@@ -1017,8 +962,6 @@ class RowTree(QTreeWidget):
 
     def action_strip(self, item: QTreeWidgetItem) -> ActionStrip | None:
         """The row's strip, showing it if it wasn't. What tests click, as a person would after moving the mouse there."""
-        if LOOK.classic:
-            return self.itemWidget(item, self.columnCount() - 1)
         self._hover = item
         self._sync_strips()
         return next((s for s in self._strips if s.item is item), None)
@@ -1034,7 +977,7 @@ class RowTree(QTreeWidget):
     def _sync_strips(self) -> None:
         """A strip on the row under the mouse, at the row's right end, over its date (decision L5). The current row shows its
         date; its actions are on hover, in its right-click menu and on their keys."""
-        if LOOK.classic or self._building:
+        if self._building:
             return
         item = self._hover if self._hover is not None and self._hover.data(0, ACTIONS_ROLE) is not None else None
         for strip in [s for s in self._strips if s.item is not item]:
@@ -1064,7 +1007,7 @@ class RowTree(QTreeWidget):
 
     def strip_left(self, item: QTreeWidgetItem | None) -> int | None:
         """Where the row's strip of actions starts, while the row is under the mouse, so its words stop short of it."""
-        if LOOK.classic or item is None or item is not self._hover or item.data(0, ACTIONS_ROLE) is None:
+        if item is None or item is not self._hover or item.data(0, ACTIONS_ROLE) is None:
             return None
         return self.viewport().width() - strip_width(item.data(0, ACTIONS_ROLE))
 
@@ -1084,7 +1027,7 @@ class RowTree(QTreeWidget):
 
     def _hover_from_cursor(self) -> None:
         """The row under the mouse now: after the list is drawn again or scrolls, it's under a still mouse."""
-        if LOOK.classic or self._building:
+        if self._building:
             return
         at = self.viewport().mapFromGlobal(QCursor.pos())
         self._hover = self.itemAt(at) if self.viewport().rect().contains(at) else None
@@ -1093,14 +1036,13 @@ class RowTree(QTreeWidget):
     def mouseMoveEvent(self, event) -> None:  # noqa: N802 - Qt's name
         super().mouseMoveEvent(event)
         self._hover_state(event.position().toPoint())
-        if not LOOK.classic:
-            item = self.itemAt(event.position().toPoint())
-            if item is not self._hover:
-                for was in (self._hover, item):  # the rows' words make room for the strip, or take it back
-                    if was is not None:
-                        self.viewport().update(self._row_rect(was))
-                self._hover = item
-                self._sync_strips()
+        item = self.itemAt(event.position().toPoint())
+        if item is not self._hover:
+            for was in (self._hover, item):  # the rows' words make room for the strip, or take it back
+                if was is not None:
+                    self.viewport().update(self._row_rect(was))
+            self._hover = item
+            self._sync_strips()
 
     def leaveEvent(self, event) -> None:  # noqa: N802 - Qt's name
         super().leaveEvent(event)
@@ -1198,11 +1140,8 @@ class RowTree(QTreeWidget):
         return self.priorities.get(key[1], "") if isinstance(key, tuple) and len(key) == 2 and key[0] == "task" else ""
 
     def drawRow(self, painter, option, index) -> None:  # noqa: N802 - Qt's name
-        """The new look's mark at a row's left edge: the accent bar on the selected row, else the task's priority in its
+        """The mark at a row's left edge: the accent bar on the selected row, else the task's priority in its
         colour (release 5.81, decision L9), at any depth. Nothing on an unranked row. A row kept for context has it faded."""
-        if LOOK.classic:
-            super().drawRow(painter, option, index)
-            return
         first = index.siblingAtColumn(0)
         selected = self.selectionModel().isSelected(first)
         # A tile (release 5.138, decision 571): the content's white under the row, then whatever the row draws, then the
@@ -1263,7 +1202,7 @@ class RowTree(QTreeWidget):
     def paintEvent(self, event) -> None:  # noqa: N802 - Qt's name
         super().paintEvent(event)
         item = self.currentItem()
-        if (not LOOK.classic and item is not None and self.hasFocus()
+        if (item is not None and self.hasFocus()
                 and self.window().testAttribute(Qt.WidgetAttribute.WA_KeyboardFocusChange)):
             p = QPainter(self.viewport())
             paint_focus_ring(p, self._row_rect(item))
@@ -1297,7 +1236,7 @@ class RowTree(QTreeWidget):
         self._sync_strips()
         if self._building or current is None:
             return
-        if not LOOK.classic and self.hasFocus():  # Qt redraws only a row's cell here: the ring goes round the whole row
+        if self.hasFocus():  # Qt redraws only a row's cell here: the ring goes round the whole row
             self.viewport().update(self._row_rect(current))
             if previous is not None:
                 self.viewport().update(self._row_rect(previous))

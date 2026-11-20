@@ -1,7 +1,7 @@
 """Which look the windows wear, and the parts of it that come and go: help text and key tips.
 
-The visual overhaul (releases 5.10 to 5.16) keeps release 5.9's colours selectable as the Classic look (decision 15).
-Help text, the ⓘ buttons and key badges show only with Show hints on, or in the Classic look (decision 7). Keys live in
+The visual overhaul (releases 5.10 to 5.16) made the look DocRepo wears; release 5.179 retired the one it replaced (the
+redesign's decision 840). Help text, the ⓘ buttons and key badges show only with Show hints on (decision 7). Keys live in
 tooltips, menus, F1 and the command palette; holding Alt shows each control's letter key, and holding Ctrl for half a
 second shows the Ctrl shortcuts (decision 5).
 """
@@ -21,22 +21,21 @@ from docrepo.ui import tokens
 
 @dataclass
 class Look:
-    classic: bool = False  # release 5.9's colours, fonts and hints
     hints: bool = False    # Show hints: help text, ⓘ buttons and key badges
-    app_sheet: bool = False  # the new look's style sheet is set on the application, so windows needn't set it again
+    app_sheet: bool = False  # the style sheet is set on the application, so windows needn't set it again
 
     @property
     def show_help(self) -> bool:
-        return self.classic or self.hints
+        """Whether help text, ⓘ buttons and key badges show: Show hints alone (release 5.179)."""
+        return self.hints
 
 
 LOOK = Look()
 _gated: "weakref.WeakSet[QWidget]" = weakref.WeakSet()
 
 
-def configure(look: str, hints: bool) -> None:
-    """Set the look from Settings, before any window is made."""
-    LOOK.classic = look == "classic"
+def configure(hints: bool) -> None:
+    """Set Show hints from Settings, before any window is made."""
     LOOK.hints = hints
 
 
@@ -76,7 +75,7 @@ class Help(_Gate, QLabel):
 
 
 class KeyBadge(_Gate, QLabel):
-    """A key printed beside a control, such as "Alt+N". Shown only with Show hints on, or in the Classic look."""
+    """A key printed beside a control, such as "Alt+N". Shown only with Show hints on."""
 
     def __init__(self, text: str = "", parent: QWidget | None = None) -> None:
         super().__init__(text, parent)
@@ -84,11 +83,6 @@ class KeyBadge(_Gate, QLabel):
         self._init_gate()
         if not LOOK.show_help:
             QLabel.setVisible(self, False)
-
-
-def with_key(label: str, key: str) -> str:
-    """A button's label: with its key in the Classic look, as release 5.9 had it, else alone (the key is in its tooltip)."""
-    return f"{label}   {key}" if LOOK.classic else label
 
 
 def tip(widget: QWidget, text: str, key: str = "") -> None:
@@ -190,7 +184,7 @@ def dress_window(window: QWidget) -> None:
     base colour, so there's no seam between it and the toolbar under it."""
     if window.windowType() in (Qt.WindowType.Popup, Qt.WindowType.ToolTip, Qt.WindowType.SplashScreen) or isinstance(window, QMenu):
         dwm_set(window, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUNDSMALL)
-    elif not LOOK.classic:
+    else:
         c = QColor(tokens.colour("base"))
         dwm_set(window, DWMWA_CAPTION_COLOR, c.red() | c.green() << 8 | c.blue() << 16)
 
@@ -222,7 +216,7 @@ class _TipsHub(QObject):
     def eventFilter(self, watched, event) -> bool:  # noqa: N802 - Qt's name
         kind = event.type()
         if kind == QEvent.Type.Show:
-            if watched.isWidgetType() and watched.isWindow() and not LOOK.classic:
+            if watched.isWidgetType() and watched.isWindow():
                 dress_window(watched)
             return False
         if kind not in _KEYS:
@@ -262,7 +256,7 @@ class KeyTips(QObject):
         self.ctrl = [x for x in self.ctrl if x[2] != group]
 
     def show_tips(self, kind: str) -> None:
-        if LOOK.classic or not self.window.isVisible() or not self.window.isActiveWindow():
+        if not self.window.isVisible() or not self.window.isActiveWindow():
             return
         self.hide_tips()
         self._shown = kind

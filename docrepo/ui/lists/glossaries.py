@@ -23,7 +23,6 @@ from docrepo import edits, glossaries, pages
 from docrepo.detail import esc, fields_table, none_text
 from docrepo.model import Model
 from docrepo.safe_fs import WriteRefused
-from docrepo.ui.look import LOOK
 from docrepo.ui.tree_view import Line
 
 if TYPE_CHECKING:
@@ -72,8 +71,7 @@ def view(w: BrowseWindow) -> None:
         return
     for g in listed:
         context = f"{len(g.columns)} column{'s' if len(g.columns) != 1 else ''} · imported {g.imported[:10]}"
-        cell = (esc(g.name) + f' <span class="sub">{esc(context)}</span>' if LOOK.classic
-                else Line(g.name, icon="tagged", icon_tip="Glossary", context=context))
+        cell = Line(g.name, icon="tagged", icon_tip="Glossary", context=context)
         w.tree.add_row(None, (KIND, str(g.id)), [cell, f'<p align="right">{g.rows:,}</p>', esc(g.tag_name) or none_text("None")],
                        tip=f"{g.name}: {', '.join(g.columns)}")
 

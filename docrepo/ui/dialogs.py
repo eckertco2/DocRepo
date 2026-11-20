@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from docrepo.ui.look import LOOK, Help
+from docrepo.ui.look import Help
 from docrepo.ui.style import style_sheet
 from docrepo.ui.widgets import FormDialog, dialog_buttons
 
@@ -35,11 +35,10 @@ class _Form(FormDialog):
         self.layout_.setSpacing(16)
         if note:
             self.layout_.addWidget(Help(note))
-        # Labels above their fields, 8 px apart, 16 px between fields (the visual overhaul's O4); beside them in the Classic look.
+        # Labels above their fields, 8 px apart, 16 px between fields (the visual overhaul's O4).
         self.form = QFormLayout()
-        if not LOOK.classic:
-            self.form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
-            self.form.setVerticalSpacing(16)
+        self.form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
+        self.form.setVerticalSpacing(16)
         self.layout_.addLayout(self.form)
         self.error = QLabel(objectName="error")
         self.error.setWordWrap(True)
@@ -51,12 +50,12 @@ class _Form(FormDialog):
 
     def showEvent(self, event) -> None:  # noqa: N802 - Qt's name
         super().showEvent(event)
-        if not LOOK.classic:  # the labels QFormLayout makes, in the role every form's labels have (release 5.61)
-            for row in range(self.form.rowCount()):
-                item = self.form.itemAt(row, QFormLayout.ItemRole.LabelRole)
-                if item is not None and item.widget() is not None and item.widget().objectName() != "fieldLabel":
-                    item.widget().setObjectName("fieldLabel")
-                    item.widget().style().polish(item.widget())
+        # the labels QFormLayout makes, in the role every form's labels have (release 5.61)
+        for row in range(self.form.rowCount()):
+            item = self.form.itemAt(row, QFormLayout.ItemRole.LabelRole)
+            if item is not None and item.widget() is not None and item.widget().objectName() != "fieldLabel":
+                item.widget().setObjectName("fieldLabel")
+                item.widget().style().polish(item.widget())
 
     def save(self) -> None:
         self._accept()

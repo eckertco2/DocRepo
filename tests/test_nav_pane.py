@@ -18,7 +18,6 @@ from docrepo import db  # noqa: E402
 from docrepo.config import Settings  # noqa: E402
 from docrepo.ui.browse_window import NAV_FOLDED_KEY, BrowseWindow  # noqa: E402
 from docrepo.ui.context import AppContext  # noqa: E402
-from docrepo.ui.look import configure  # noqa: E402
 from docrepo.ui.nav_pane import Heading, NavPane  # noqa: E402
 from docrepo.views import ASKS, LIST_IDS, view_counts  # noqa: E402
 
@@ -161,17 +160,3 @@ def test_a_long_name_ends_in_an_ellipsis(browse):
     row.resize(row.width() - 30, 32)
     row.grab()
     assert row._elided
-
-
-def test_the_classic_look_keeps_the_tree(ctx):
-    from docrepo.ui.tree_view import RowTree
-
-    configure("classic", False)
-    try:
-        w = BrowseWindow(ctx, None)
-        w.show_browse()
-        assert isinstance(w.nav, RowTree) and ("view", "people") in w.nav.keys()
-        w.hide()
-        w.deleteLater()
-    finally:
-        configure("new", False)

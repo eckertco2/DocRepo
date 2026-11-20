@@ -320,11 +320,10 @@ class TaskView(QWidget):
         return FOOT if LOOK.show_help else ""
 
     def _menu_button(self, label: str, menu: QMenu, tip: str) -> QPushButton:
-        b = QPushButton(label, objectName="" if LOOK.classic else "subtle")
+        b = QPushButton(label, objectName="subtle")
         b.setMenu(menu)
         b.setToolTip(tip)
-        if not LOOK.classic:
-            b.setProperty("menu", True)
+        b.setProperty("menu", True)
         return b
 
     def _commands(self) -> None:
@@ -334,7 +333,7 @@ class TaskView(QWidget):
             w = self.commands.takeAt(0).widget()
             if w:
                 w.deleteLater()
-        btn = QPushButton("Task page", objectName="subtle" if not LOOK.classic else "")
+        btn = QPushButton("Task page", objectName="subtle")
         btn.setIcon(icon("open"))
         btn.setToolTip("Open it in the browse tool: its notes, latest update, commands and Details")
         btn.clicked.connect(lambda _=False: self.open_task_page())
@@ -775,7 +774,7 @@ class TaskView(QWidget):
             b.clicked.connect(lambda _=False, undo=undo: (undo(), self.refresh()))
             self.chip_row.addWidget(b)
         if len(chips) > 1:
-            clear = QPushButton("Clear all", objectName="subtle" if not LOOK.classic else "")
+            clear = QPushButton("Clear all", objectName="subtle")
             clear.clicked.connect(self.clear_filters)
             self.chip_row.addWidget(clear)
         self.chip_row.addStretch(1)

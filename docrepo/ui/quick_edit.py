@@ -45,8 +45,8 @@ from docrepo.tasks import unit_span
 from docrepo.ui import tokens
 from docrepo.ui.context import AppContext
 from docrepo.ui.icons import icon, icon_size
-from docrepo.ui.look import LOOK, tip
-from docrepo.ui.style import CLASSIC_QUICK_EDIT, style_sheet
+from docrepo.ui.look import tip
+from docrepo.ui.style import style_sheet
 from docrepo.ui.task_picker import path_text
 from docrepo.ui.task_forms import key_date_rows
 from docrepo.ui.widgets import DateField, FlowLayout, HoursField, set_filled
@@ -62,8 +62,6 @@ NO_REPEAT = "Doesn't repeat"
 
 def _extra_style() -> str:
     """Its own rules, beside the look's style sheet: the frame, the top line and the chips' states."""
-    if LOOK.classic:
-        return CLASSIC_QUICK_EDIT
     c = tokens.colour
     return f"""
 QWidget#quickEdit {{ background: {c("content")}; border: 1px solid {c("stroke_strong")}; }}

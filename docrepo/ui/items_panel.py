@@ -44,7 +44,7 @@ from docrepo.model import AgendaItem, Model
 from docrepo.ui import tokens
 from docrepo.ui.tokens import C
 from docrepo.ui.icons import icon
-from docrepo.ui.look import LOOK, Help
+from docrepo.ui.look import Help
 from docrepo.ui.task_list import MAX_W, MIN_W, ROWS, TaskList
 # The names the @ and # list had here before release 5.103 moved them to the task list, for the capture window and the tests.
 from docrepo.ui.task_list import HEAD_ROLE as _HEAD, OPTION_ROLE as _OPTION, task_colour  # noqa: F401 - the old names, kept
@@ -200,8 +200,8 @@ class ItemCard(QFrame):
     def __init__(self, it: items.Item, where: str, stripe: str | None = None) -> None:
         super().__init__(objectName="itemCard")
         self.key = it.key
-        self.setProperty("kind", it.kind if it.on else "off")  # its left edge's colour (style.py)
-        if stripe and not LOOK.classic:
+        self.setProperty("kind", it.kind if it.on else "off")
+        if stripe:
             self.setStyleSheet(f"QFrame#itemCard {{ border-left: 3px solid {stripe if it.on else tokens.colour('stroke_strong')}; }}")
         lay = QVBoxLayout(self)
         lay.setContentsMargins(8, 5, 6, 6)
@@ -209,9 +209,8 @@ class ItemCard(QFrame):
         top = QHBoxLayout()
         name = "Plant event" if it.plant_event else it.label or items.KIND_NAMES[it.kind]
         self.tick = QCheckBox(name + (f": {it.state}" if it.state else ""))
-        if not LOOK.classic:
-            self.tick.setIcon(icon("task" if it.kind == "task" else "calendar" if it.kind == "date"
-                                   else it.kind if it.kind in ("note", "update", "decision") else "note"))
+        self.tick.setIcon(icon("task" if it.kind == "task" else "calendar" if it.kind == "date"
+                               else it.kind if it.kind in ("note", "update", "decision") else "note"))
         self.tick.setChecked(it.on)
         self.tick.setEnabled(not it.problem)
         self.tick.setToolTip("Untick to skip it")
