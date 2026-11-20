@@ -168,6 +168,8 @@ def watch_focus(app: QApplication) -> None:
 _KEYS = (QEvent.Type.KeyPress, QEvent.Type.KeyRelease, QEvent.Type.WindowDeactivate, QEvent.Type.ApplicationDeactivate)
 #: Windows 11's desktop window manager: a window's corners, and its title bar's colour. Windows 10 refuses both, and nothing changes.
 DWMWA_WINDOW_CORNER_PREFERENCE, DWMWA_CAPTION_COLOR = 33, 35
+#: A window's frame and title bar drawn dark by Windows (release 5.194, the dark theme), Windows 11 and Windows 10's later builds.
+DWMWA_USE_IMMERSIVE_DARK_MODE = 20
 #: The corners asked for (release 5.181, the redesign's decision 846): a popup's are Windows' full round ones, as anything
 #: that floats is rounded at 12 px; ``DWMWCP_ROUNDSMALL`` is kept for whoever needs the small ones.
 DWMWCP_ROUND, DWMWCP_ROUNDSMALL = 2, 3
@@ -207,7 +209,9 @@ def square(window: QWidget, on: bool) -> None:
 def dress_window(window: QWidget) -> None:
     """As a window shows (release 5.59): a popup, a menu or a window marked ``floating`` gets Windows 11's round corners (the
     full ones since release 5.181, decision 846) and an edge in ``stroke_strong`` (release 5.187, decision 862); any other
-    window a title bar in the base colour, so there's no seam between it and the toolbar under it."""
+    window a title bar in the base colour, so there's no seam between it and the toolbar under it. Every window's frame is
+    Windows' dark one in the dark theme (release 5.194, decision 869)."""
+    dwm_set(window, DWMWA_USE_IMMERSIVE_DARK_MODE, 1 if tokens.theme() == "dark" else 0)
     if (window.windowType() in (Qt.WindowType.Popup, Qt.WindowType.ToolTip, Qt.WindowType.SplashScreen)
             or isinstance(window, QMenu) or window.property("floating")):
         dwm_set(window, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND)

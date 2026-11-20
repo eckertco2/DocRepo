@@ -67,5 +67,9 @@ def icon_size(size: int = 16) -> QSize:
 
 
 def file_url(name: str) -> str:
-    """An icon file's path as the style sheet's url() wants it."""
+    """An icon file's path as the style sheet's url() wants it. A style sheet can't colour an icon, so the few it draws from a
+    file have a copy in ``icons/dark/`` in the dark theme's greys (release 5.194), which this gives while that theme is on."""
+    dark = ICON_DIR / "dark" / f"{name}.svg"
+    if tokens.theme() == "dark" and dark.exists():
+        return dark.as_posix()
     return (ICON_DIR / f"{name}.svg").as_posix()

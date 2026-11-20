@@ -255,7 +255,6 @@ QTabBar::tab:selected { color: $text; font-weight: 600; border-bottom-color: $ac
 /* lists, trees and tables */
 QTreeView, QListView, QTableView { background: $content; border: none; outline: 0; selection-background-color: $selected;
   selection-color: $text; alternate-background-color: $content; }
-QTreeView[tiled="true"] { background: $base; }
 QTreeView::item, QListView::item { padding: 2px 4px; }
 QTreeView::item:hover, QListView::item:hover { background: $hover; }
 QTreeView::item:selected, QListView::item:selected, QTableView::item:selected { background: $selected; color: $text; }
@@ -297,9 +296,6 @@ QGroupBox { border: none; margin-top: 0; padding: 0; background: transparent; }
 QGroupBox[title=""] { margin-top: 0; }
 QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; left: 0; padding: 0; color: $text; }
 QLabel#heading { font-weight: 600; color: $text; }
-/* Subtitles name Segoe UI: under Segoe UI Variable's "Text" style a weight in a style sheet comes out light at this size. Its
-   Semibold matches ui_font's. */
-QLabel#subtitle { font-family: "Segoe UI"; font-size: ${subtitle}pt; font-weight: 600; color: $text; }
 
 /* text roles */
 QLabel#fieldLabel { color: $text3; font-size: ${label}pt; }
@@ -373,7 +369,6 @@ QFrame#editor { background: $content; border: 1px solid $stroke_strong; border-r
 QFrame#editor QTextEdit, QFrame#editor QPlainTextEdit { border: none; border-radius: 0; background: transparent; padding: 6px 8px; }
 /* the pinned capture window (mods log round 3, M0053): a drop zone that lights up while something is dragged over it */
 QWidget#pinWindow { background: $content; border: 1px solid $stroke_strong; }
-QLabel#pinTitle { font-weight: 600; }
 QWidget#pinWindow QTextEdit { padding: 4px 6px; }
 QPushButton#pinTask { text-align: left; padding: 2px 6px; font-weight: 600; background: transparent; border: 1px solid transparent; }
 QPushButton#pinTask:hover { background: $hover; border-color: $stroke; }
@@ -426,11 +421,6 @@ QWidget#chips QLineEdit, QWidget#chips QLineEdit:focus { background: transparent
 QWidget#toolbar { background: $base; border-bottom: 1px solid $stroke; }
 QWidget#paneHead { background: $content; border-bottom: 1px solid $stroke; }
 QWidget#actions { background: $content; }
-QLabel#status { background: $base; border-top: 1px solid $stroke; color: $text; padding: 4px 12px; font-size: ${caption}pt; }
-QLabel#status[error="true"] { background: $critical_bg; color: $critical; }
-/* the sidebar (stage O10): docrepo/ui/nav_pane.py paints its rows from these same tokens */
-QWidget#navPane, QWidget#navBody { background: $base; }
-QFrame#navFoot { background: $base; border: none; border-top: 1px solid $stroke; }
 /* the Priorities board (release 5.23): a column per bucket, a card per task; the card's left edge is painted in its colour */
 QFrame#prCol { background: $sunken; border: 1px solid transparent; border-radius: ${radius_l}px; }
 QFrame#prCol[over="true"] { background: $selected; border-color: $info_line; }
@@ -447,7 +437,6 @@ QFrame#prRows { border: none; border-top: 1px solid $stroke; background: transpa
 QFrame#prRow { background: transparent; border: 1px solid transparent; border-radius: ${radius_s}px; }
 QFrame#prRow:hover { background: $hover; }
 QFrame#prRow[sel="true"] { background: $selected; border-color: $accent; }
-QLabel#prRowTitle { color: $text; }
 QPushButton#prOpener { border: none; background: transparent; color: $text2; padding: 0; border-radius: ${radius_s}px; }
 QPushButton#prOpener:hover { background: $hover; color: $text; }
 QTextBrowser { border: none; background: $content; }
@@ -469,7 +458,6 @@ QPushButton#problemsLine { background: $caution_bg; color: $caution; border: non
 QPushButton#problemsLine:hover { text-decoration: underline; }
 QSplitter#browseSplit::handle { background: transparent; }
 QWidget#browse[frame="true"] QWidget#paneHead { background: transparent; border-bottom: none; }
-QWidget#browse[frame="true"] QTreeView[tiled="true"] { background: $content; }
 QWidget#navPane, QWidget#navBody { background: transparent; }
 QFrame#navFoot { background: transparent; border: none; }
 QFrame#toast { background: $text; border: none; border-radius: ${radius_l}px; }

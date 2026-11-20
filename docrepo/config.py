@@ -17,6 +17,9 @@ from docrepo.safe_fs import SafeFS
 
 #: Open a task in (release 5.174, decision 815): each choice and its words in Settings.
 OPEN_TASKS_IN = {"workspace": "Its workspace", "page": "Its page"}
+#: The themes Settings offers (release 5.194, the redesign's decision 869), each with its words there. "system" follows Windows'
+#: own light or dark setting, read as DocRepo starts.
+THEMES = {"light": "Light", "dark": "Dark", "system": "As Windows is set"}
 
 log = logging.getLogger(__name__)
 
@@ -215,6 +218,9 @@ class Settings:
     #: or "page". What opening a task from a list, a tile, Task search, the quick summary or File search does; the other one
     #: is the tile menu's second line, and Shift. A link inside a page always goes to the task's page. Written once it's changed.
     open_tasks_in: str = "workspace"
+    #: The theme (release 5.194, decision 869): "light", "dark" or "system" (as Windows is set), one of ``THEMES``, taking effect
+    #: at DocRepo's next start. A settings file without it is light; it's written once it's changed.
+    theme: str = "light"
 
     @classmethod
     def load(cls, data_root: Path) -> Settings:
@@ -302,6 +308,9 @@ class Settings:
         if "open_tasks_in" in data and data["open_tasks_in"] not in OPEN_TASKS_IN:  # release 5.174
             log.warning("Ignoring open_tasks_in in %s: it isn't one of %s", file, ", ".join(OPEN_TASKS_IN))
             del data["open_tasks_in"]
+        if "theme" in data and data["theme"] not in THEMES:  # release 5.194: light, then
+            log.warning("Ignoring theme in %s: it isn't one of %s", file, ", ".join(THEMES))
+            del data["theme"]
         if "other_links" in data and data["other_links"] not in OTHER_LINKS:
             log.warning("Ignoring other_links in %s: it isn't one of %s", file, ", ".join(OTHER_LINKS))
             del data["other_links"]
@@ -338,7 +347,8 @@ class Settings:
         # Release 5.146 (decision 639): the link lists and Other links, written once they differ from their start, so an
         # existing data root gets Never keep's start too, and a list emptied on purpose stays empty.
         for key, default in (("links_keep", []), ("links_drop", list(DEFAULT_DROP)), ("other_links", "keep"),
-                             ("stock_headings", _stock_defaults()), ("open_tasks_in", "workspace")):  # 5.169 (decision 788) and 5.174: the same
+                             ("stock_headings", _stock_defaults()), ("open_tasks_in", "workspace"),
+                             ("theme", "light")):  # 5.169 (decision 788), 5.174 and 5.194: the same
             if data[key] == default:
                 del data[key]
         return fs.write_text(data_root / SETTINGS_FILE, json.dumps(data, indent=2) + "\n")

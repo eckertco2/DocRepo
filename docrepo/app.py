@@ -509,7 +509,7 @@ def run(data_root: Path, settings: Settings, fs: SafeFS, browse: bool = False) -
     qt = QApplication.instance() or QApplication(sys.argv)
     qt.setQuitOnLastWindowClosed(False)
     qt.setApplicationName("DocRepo")
-    apply_look(qt, "light", settings.show_hints)  # light, whatever Windows is set to (a dark theme isn't offered yet)
+    apply_look(qt, settings.theme, settings.show_hints)  # Settings' Theme (release 5.194): light, dark, or as Windows is set
     set_identity(qt)
     lock = QLockFile(str(fs.checked_path(data_root / LOCK_FILE)))
     lock.setStaleLockTime(0)
