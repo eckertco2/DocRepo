@@ -85,6 +85,11 @@ def _grey() -> QColor:
     return QColor(tokens.colour("text2"))
 
 
+def _faint() -> QColor:
+    """A day's label (release 5.186, the redesign's decision 860): the third grey."""
+    return QColor(tokens.colour("text3"))
+
+
 #: The word a file line starts with (``notes_page.file_line``'s "File: Pump spec.docx, the vendor's datasheet").
 FILE_WORD = "File: "
 _NAME_END = re.compile(r"\.[A-Za-z0-9]{1,5}(?=, )")
@@ -238,8 +243,8 @@ class NotesEdit(RichEdit):
         f = QTextBlockFormat()
         if kind == "heading":
             f.setHeadingLevel(level)
-            f.setTopMargin(12 if day else {1: 16, 2: 10}.get(level, 8))
-            f.setBottomMargin(2 if day else 4)
+            f.setTopMargin(16 if day else {1: 16, 2: 10}.get(level, 8))  # a day: a small label with air above (release 5.186)
+            f.setBottomMargin(4)
             f.setLineHeight(115, PROPORTIONAL)
         elif kind in ("caption", "lead"):
             f.setTopMargin(10)
@@ -255,10 +260,10 @@ class NotesEdit(RichEdit):
 
     def _char_format(self, kind: str, level: int = 0, href: str = "", day: bool = False) -> QTextCharFormat:
         f = QTextCharFormat()
-        if kind == "heading" and day:  # a day heading is a quiet divider (release 5.85, R5): Caption Strong, secondary
-            f.setFontPointSize(tokens.CAPTION)
+        if kind == "heading" and day:  # a day heading is a quiet divider (release 5.85, R5); a small grey label since 5.186
+            f.setFontPointSize(tokens.LABEL)
             f.setFontWeight(QFont.Weight.DemiBold)
-            f.setForeground(_grey())
+            f.setForeground(_faint())
         elif kind == "heading":
             f.setFontPointSize(tokens.BODY + HEADING_SIZES.get(level, 0.5))
             f.setFontWeight(QFont.Weight.DemiBold)
@@ -413,9 +418,10 @@ class NotesEdit(RichEdit):
         p.drawPixmap(QPoint(circle.left() + 2, circle.top() + 2), tinted(name, tokens.colour(colour), tile_ui.STATE, scale))
         for box, what, _task, _tip in parts[1:]:
             if what == "days" and t.days is not None:
-                p.setFont(tokens.ui_font(tokens.CAPTION, semibold=True))
+                # As a tile draws them since release 5.183 (decision 857): with their unit, semibold only when soon or late.
+                p.setFont(tokens.ui_font(tokens.CAPTION, semibold=bool(t.days.kind)))
                 p.setPen(QColor(tokens.colour(tile_ui.days_colour(t.days))))
-                p.drawText(box, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, ("◆ " if t.days.deadline else "") + t.days.text)
+                p.drawText(box, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, ("◆ " if t.days.deadline else "") + t.days.shown)
         if t.marks:
             edge = self.viewport().width() - int(self.document().documentMargin()) - 2 - tile_ui.DAYS_W - 8
             tile_ui.paint_marks(p, edge, circle.center().y(), t.marks, scale)

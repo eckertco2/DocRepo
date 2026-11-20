@@ -837,10 +837,10 @@ state on a soft square-cornered fill). From 540 px wide the two sit side by side
     `old_days`) folds every day heading more than 14 days before today as the page opens; the fold arrow, Jump to or
     the caret unfolds one, and turning it off unfolds them.
   - **The outline** (release 5.113, the notes workspace plan's decision 349, the owner's ask of 2026-11-10;
-    `docrepo/ui/notes_outline.py`): a column at the left of the notes, inside their frame, lists the page's headings
-    and day dividers in the page's order (the owner's headings indented by level, a day in Caption size and secondary
-    text, without its year when every day on the page is in one year), and marks where you are with the accent and a
-    bar: the heading over the caret while you type, or else the last heading that has reached the top of the view (at
+    `docrepo/ui/notes_outline.py`): a column at the left of the notes lists the page's headings
+    and day dividers in the page's order (the owner's headings indented by level in the second grey, a day as a small
+    label in the third, without its year when every day on the page is in one year), and marks where you are, dark and
+    semibold (the accent and a bar until release 5.186, which made the column a quiet gutter with no line beside it): the heading over the caret while you type, or else the last heading that has reached the top of the view (at
     the page's end, the last one in view); a heading picked in it stays marked until the page is scrolled by hand. A
     click goes there as Jump to does. The pane has one scroll bar, so the column keeps its place beside the notes and
     moves its list down as the page scrolls, under the sticky line, so it stays in view while the notes do; a list
@@ -899,9 +899,10 @@ state on a soft square-cornered fill). From 540 px wide the two sit side by side
     run of file, attachment and picture lines, with the description lines under them, is one line: a paperclip and the
     files' names, each opening its file with its description as its tooltip, "+3 more" after four (their names in its
     tooltip). This page, the editor, doesn't change (717).
-  - **The Notes heading** (release 5.113, decision 423) is a section's head over the frame (Notes, Saved, the format
-    bar while typing, the outline's button, Jump to and the menu), not a band inside it; the frame round the notes
-    (decision 130) is a single line with rounded corners, its bottom edge the accent while you type.
+  - **The Notes heading** (release 5.113, decision 423) is a section's head over the notes (Notes, Saved, the format
+    bar while typing, the outline's button, Jump to and the menu), not a band inside it. Since release 5.186 (the redesign's
+    decision 860) it sits under the page's one hairline, and the format bar keeps its room while hidden, so the notes don't
+    move when it shows: where it doesn't fit beside the heading it has a line of its own under it, empty at rest, and in the narrowest pane the switch and All notes' Group strip a line each too.
   - **Copy and paste** inside the page keep whole lines as they are (headings, captions, lists); a line's words go in at
     the caret. Text from elsewhere comes in as `RichEdit` takes it. **Alt+Shift+Up and Down** move a line with the list
     items under it, or a folded heading with its section, keeping what each line is; one Ctrl+Z puts it back.
@@ -930,10 +931,10 @@ state on a soft square-cornered fill). From 540 px wide the two sit side by side
     notes, staying a moment for a click on one of its menus; the ⋯ menu is always there.
   - **The notes' lines stop at about 90 characters** (release 5.83, R11, `task_pane.NOTES_LINE`), however wide the
     frame; the frame's header and summary keep its width.
-  - **The frame** (release 5.27, decision 130, by the UI playbook's grouping ladder): Notes, its format bar, the
-    Checklist summary and the page sit in one frame, the capture window's editor frame, so the one part of the task page
-    that's typed in stands apart from the facts above it and the history below. Its header band is tinted, with a
-    hairline under it, and its bottom edge turns to the accent while the page has the caret.
+  - **The notes are the page's body** (release 5.186, the redesign's decision 860, which retired decision 130's frame of
+    release 5.27): no box round the Checklist summary and the page; the notes' gutter for fold arrows and marks hangs in
+    the page's margin, so their words start under the title's; each day is a small grey label. Where you type shows by
+    the caret and the format bar, and a click on the bar keeps the caret in the notes.
   - **Pictures** (release 5.27, decisions 124, 125 and 127): Ctrl+V of a picture (a screenshot, or one copied from a
     document) keeps it as a capture of the page's (6.11) and shows it at the caret, at its own size up to the page's
     width, with an empty list item under it, the caret there, for what it shows. Typing on a picture goes to the end of

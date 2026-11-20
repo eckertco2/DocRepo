@@ -35,9 +35,9 @@ COUNT = Qt.ItemDataRole.UserRole + 3
 
 
 class _Rows(QStyledItemDelegate):
-    """Paints a row: the heading's words indented by level, a day in the secondary colour and the Caption size, the
-    owner's top headings in Semibold, a tint under the pointer, and the row you're in in the accent with a bar at its
-    left, the way the sidebar marks its view."""
+    """Paints a row: the heading's words indented by level, in the second grey; a day as a small label in the third; the
+    owner's top headings in Semibold; a tint under the pointer; and the row you're in dark and semibold. Since release 5.186
+    (the redesign's decision 860) the outline is a quiet gutter: no bar and no accent, which isn't one of its six jobs."""
 
     def __init__(self, outline: NotesOutline) -> None:
         super().__init__(outline)
@@ -54,14 +54,11 @@ class _Rows(QStyledItemDelegate):
             p.setRenderHint(QPainter.RenderHint.Antialiasing)
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(QColor(tokens.colour("hover")))
-            p.drawRoundedRect(r, tokens.RADIUS, tokens.RADIUS)
-        accent = QColor(tokens.colour("accent"))
-        if current:
-            p.fillRect(QRect(r.x(), r.y() + 5, 2, r.height() - 10), accent)
+            p.drawRoundedRect(r, tokens.RADIUS_S, tokens.RADIUS_S)
         level, day = index.data(LEVEL) or 1, bool(index.data(DAY))
-        font = tokens.ui_font(tokens.CAPTION if day else tokens.BODY, semibold=current or (level == 1 and not day))
+        font = tokens.ui_font(tokens.LABEL if day else tokens.BODY, semibold=current or (level == 1 and not day) or day)
         p.setFont(font)
-        colour = accent if current else QColor(tokens.colour("text2" if day else "text"))
+        colour = QColor(tokens.colour("text" if current else "text3" if day else "text2"))
         p.setPen(colour)
         x = r.x() + 10 + INDENT * max(0, level - 1)
         right = r.right()
@@ -71,7 +68,7 @@ class _Rows(QStyledItemDelegate):
             words = str(count)
             width = QFontMetrics(small).horizontalAdvance(words)
             p.setFont(small)
-            p.setPen(QColor(tokens.colour("text2")))
+            p.setPen(QColor(tokens.colour("text3")))
             p.drawText(QRect(right - width - 6, r.y(), width + 2, r.height()), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, words)
             right -= width + 10
             p.setFont(font)

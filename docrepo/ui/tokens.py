@@ -541,6 +541,16 @@ QLabel#wsKind { color: $text2; background: $hover; border-radius: ${radius_s}px;
 QLabel#wsKind[kind="deadline"] { color: $critical; background: $critical_bg; }
 QLabel#wsKind[kind="reminder"] { color: $caution; background: $caution_bg; }
 QLabel#wsKind[kind="meeting"], QLabel#wsKind[kind="follow_up"] { color: $parked; background: $parked_bg; }
+/* release 5.186 (lane C): the notes without a frame (the redesign's decision 860, which retires decision 130's frame) */
+QFrame#notesCard { background: transparent; border: none; }
+QFrame#notesCard[typing="true"] { background: transparent; border: none; }
+QWidget#notesHead { background: transparent; border: none; }
+QFrame#notesRule { background: $stroke; border: none; }
+QWidget#notesHead QWidget#formatBar { border: none; }
+QWidget#notesHead QWidget#formatBar QToolButton { padding: 3px 4px; }
+QFrame#outlineSlot { background: transparent; border: none; }
+QWidget#checkRow { border-radius: ${radius_s}px; }
+QLabel#checkCount, QLabel#checkHeading { color: $text3; }
 /* ---- end lane C ---- */
 
 /* ---- lane D (the floating windows) ---- */
@@ -594,7 +604,6 @@ h2 { font-family: 'Segoe UI'; font-size: ${page_title}pt; font-weight: 600; marg
 .k { color: $text3; padding-right: 12px; }
 .fk { color: $text3; font-size: ${caption}pt; }
 .note { color: $text3; font-size: ${caption}pt; }
-.box { background-color: $base; }
 .info { background-color: $info_bg; }
 .caution { color: $caution; }
 .critical { color: $critical; }
@@ -651,7 +660,6 @@ h2 { font-family: 'Segoe UI'; font-size: ${page_title}pt; font-weight: 600; marg
 .hitline { margin: 0; background-color: $caution_bg; }
 .gap { margin: 0; color: $text2; }
 .stext { margin-top: 4px; margin-bottom: 0; }
-.anday { color: $text3; font-size: ${label}pt; font-weight: 600; margin-top: 14px; margin-bottom: 2px; }
 .src { color: $text3; font-size: ${caption}pt; font-weight: 400; margin-top: 8px; margin-bottom: 2px; }
 .nl { margin: 0; }
 .also { color: $text3; font-size: ${caption}pt; }
@@ -680,6 +688,9 @@ h2 { font-family: 'Segoe UI'; font-size: ${page_title}pt; font-weight: 600; marg
 .pill { background-color: $sunken; }
 .cmd { color: $text2; font-size: ${caption}pt; }
 .tile { border-top: 1px solid $stroke; padding-top: 6px; padding-bottom: 6px; }
+/* release 5.186 (lane C): the notes' days, and the other pages' soft panels */
+.anday { color: $text3; font-size: ${label}pt; font-weight: 600; margin-top: 16px; margin-bottom: 4px; }
+.box { background-color: $sunken; }
 /* ---- end lane C ---- */
 
 /* ---- lane D (the floating windows) ---- */
