@@ -14,7 +14,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
 from PySide6.QtCore import QEvent, QPointF, QRectF, Qt, QTimer, QVariantAnimation
-from PySide6.QtGui import QColor, QFont, QGuiApplication, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QGuiApplication, QPainter, QPainterPath, QPen, QPixmap, QRadialGradient
 from PySide6.QtWidgets import QWidget
 
 from docrepo.ui import tokens
@@ -23,7 +23,14 @@ from docrepo.wheel import ARROWS, DIAGONALS, DIGITS, DIRECTIONS, NUMPAD, Session
 from docrepo.wheels_config import Slot, Timing, Wheel
 
 SIZE = 380
-OUTER, INNER = 184, 60
+#: The disc and the hub (release 5.190, the redesign's decision 865): one disc inside the window, with room round it for the
+#: shadow it paints itself, and a hub 116 px across.
+OUTER, INNER = 170, 58
+SHADOW = 20  # the room outside the disc: (SIZE / 2) - OUTER
+#: The shadows' strength, as alpha out of 255: the disc's, and the hub's, which is smaller.
+SHADOW_ALPHA, HUB_SHADOW_ALPHA = 46, 20
+#: A label's width at its radius: an eight-way wedge is about 92 px across there, a four-way one wider.
+LABEL_WIDTH = {True: 92, False: 112}
 #: A wedge's angle in Qt's terms: 0 at three o'clock, counter-clockwise.
 ANGLE = {"N": 90, "NE": 45, "E": 0, "SE": 315, "S": 270, "SW": 225, "W": 180, "NW": 135}
 ARROW_KEYS = {Qt.Key.Key_Up: "U", Qt.Key.Key_Right: "R", Qt.Key.Key_Down: "D", Qt.Key.Key_Left: "L"}
@@ -77,7 +84,8 @@ def colours() -> dict[str, str]:
             return f"#{v & 255:02x}{v >> 8 & 255:02x}{v >> 16 & 255:02x}"
 
         window, text, lit, on_lit, grey = sys(5), sys(8), sys(13), sys(14), sys(17)
-        return {"content": window, "base": window, "stroke_strong": text, "text": text, "text2": text, "disabled": grey, "accent": lit, "on_accent": on_lit}
+        return {"content": window, "base": window, "stroke": text, "stroke_strong": text, "text": text, "text2": text, "text3": text,
+                "disabled": grey, "accent": lit, "on_accent": on_lit, "selected": lit, "contrast": "1"}
     dark = QGuiApplication.styleHints().colorScheme() == Qt.ColorScheme.Dark
     return tokens.THEMES["dark" if dark else "light"]
 
@@ -349,64 +357,120 @@ class WheelWindow(QWidget):
         p.end()
 
     def _draw_slots(self, p: QPainter, c: dict[str, str], mid: QPointF) -> None:
+        """One disc on a soft shadow, the wedge under the pointer in the selected tint, hairline spokes, then each slot: its
+        icon, its label on at most two lines, and its keys (release 5.190, decision 865)."""
         wheel = self.wheel
         directions = DIRECTIONS if wheel.eight_way else DIRECTIONS[::2]
         span = 360 / len(directions)
-        rim = QColor(c["text"])
-        rim.setAlpha(24)
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(rim)
-        p.drawEllipse(mid, OUTER + 4, OUTER + 4)
-        label_at = (OUTER + INNER) / 2 + (6 if wheel.eight_way else 0)
-        width = 96 if wheel.eight_way else 112
+        contrast = "contrast" in c
+        if not contrast:  # the window is translucent and round, so it draws its own shadow: Windows can't
+            _shadow(p, c, mid, OUTER, SHADOW, SHADOW_ALPHA, 6)
+        p.setPen(QPen(QColor(c["stroke_strong"]), 1))
+        p.setBrush(QColor(c["content"]))
+        p.drawEllipse(mid, OUTER, OUTER)
+        if self.lit in directions:
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QColor(c["accent"] if contrast else c["selected"]))
+            p.drawPath(_wedge(mid, INNER, OUTER, ANGLE[self.lit] - span / 2, span))
+        p.setPen(QPen(QColor(c["stroke"]), 1))
+        for d in directions:  # a spoke on each boundary between two directions
+            edge = ANGLE[d] + span / 2
+            p.drawLine(_at(mid, INNER, edge), _at(mid, OUTER, edge))
+        label_at = (OUTER + INNER) / 2 + 6
+        width = LABEL_WIDTH[wheel.eight_way]
         for d in directions:
             slot = wheel.slots.get(d)
-            lit = d == self.lit
-            usable = slot is not None and not slot.held
-            fill = c["accent"] if lit else c["content"] if usable else c["base"]
-            p.setPen(QPen(QColor(c["stroke_strong"]), 1))
-            p.setBrush(QColor(fill))
-            p.drawPath(_wedge(mid, INNER + 4, OUTER, ANGLE[d] - span / 2 + 1.2, span - 2.4))
-            if slot is None:
+            if slot is None:  # an empty slot is left plain
                 continue
-            ink = c["on_accent"] if lit else c["text"] if usable else c["disabled"]
-            quiet = c["on_accent"] if lit else c["text2"] if usable else c["disabled"]
+            lit = d == self.lit
+            usable = not slot.held
+            if contrast and lit:
+                ink = icon_ink = quiet = c["on_accent"]
+            else:
+                ink = c["accent"] if lit else c["text"] if usable else c["disabled"]
+                icon_ink = c["accent"] if lit else c["text2"] if usable else c["disabled"]
+                quiet = c["text3"] if usable else c["disabled"]
             at = _at(mid, label_at, ANGLE[d])
-            top = at.y() - 32
             if slot.icon:
-                p.drawPixmap(QPointF(at.x() - 10, top), self._icon(slot.icon, ink))
+                p.drawPixmap(QPointF(at.x() - 10, at.y() - 30), self._icon(slot.icon, icon_ink))
+            font = _label_font(slot.label, width, lit)
+            line = QFontMetrics(font).lineSpacing()
             p.setPen(QColor(ink))
-            p.setFont(_font(tokens.CAPTION, bold=lit))
-            p.drawText(QRectF(at.x() - width / 2, top + 22, width, 30), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap,
-                       slot.label)
+            p.setFont(font)
+            box = QRectF(at.x() - width / 2, at.y() - 6, width, 2 * line + 2)
+            p.drawText(box, Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap,
+                       _two_lines(slot.label, font, width))
             p.setPen(QColor(quiet))
-            p.setFont(_font(tokens.LABEL))
+            p.setFont(tokens.ui_font(tokens.LABEL))
             hint = "later" if slot.held else f"{ARROWS[d]}  {DIGITS[d]}"
-            p.drawText(QRectF(at.x() - width / 2, top + 50, width, 16), Qt.AlignmentFlag.AlignHCenter, hint)
+            p.drawText(QRectF(at.x() - width / 2, box.bottom(), width, 16), Qt.AlignmentFlag.AlignHCenter, hint)
 
     def _draw_centre(self, p: QPainter, c: dict[str, str], mid: QPointF) -> None:
-        halo = QColor(c["text"])
-        halo.setAlpha(36)
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(halo)
-        p.drawEllipse(mid, INNER + 3, INNER + 3)
+        """The hub: a disc of its own on a small shadow, the wheel's name, and the note or "Esc cancels"."""
+        if "contrast" not in c:
+            _shadow(p, c, mid, INNER, 4, HUB_SHADOW_ALPHA, 2)
         p.setPen(QPen(QColor(c["stroke_strong"]), 1))
         p.setBrush(QColor(c["content"]))
         p.drawEllipse(mid, INNER, INNER)
         p.setPen(QColor(c["text"]))
-        p.setFont(_font(tokens.BODY, bold=True))
+        p.setFont(tokens.ui_font(tokens.VIEW_TITLE, semibold=True))
         box = QRectF(mid.x() - INNER + 6, mid.y() - 24, 2 * INNER - 12, 26)
         p.drawText(box, Qt.AlignmentFlag.AlignCenter, self.wheel.name)
-        p.setPen(QColor(c["text2"]))
-        p.setFont(_font(tokens.LABEL))
+        p.setPen(QColor(c["text3"]))
+        p.setFont(tokens.ui_font(tokens.LABEL))
         p.drawText(QRectF(mid.x() - INNER + 6, mid.y() + 2, 2 * INNER - 12, 18), Qt.AlignmentFlag.AlignCenter, self.note or "Esc cancels")
 
 
-def _font(size: float, bold: bool = False) -> QFont:
-    font = QFont()
-    font.setPointSizeF(size)
-    font.setBold(bold)
+def _shadow(p: QPainter, c: dict[str, str], mid: QPointF, radius: float, spread: float, alpha: int, drop: float) -> None:
+    """A soft shadow under a disc: the text's colour at ``alpha`` inside the disc, fading out over ``spread``, ``drop`` lower."""
+    centre = QPointF(mid.x(), mid.y() + drop)
+    gradient = QRadialGradient(centre, radius + spread)
+    dark, clear = QColor(c["text"]), QColor(c["text"])
+    dark.setAlpha(alpha)
+    clear.setAlpha(0)
+    gradient.setColorAt(0.0, dark)
+    gradient.setColorAt(radius / (radius + spread), dark)
+    gradient.setColorAt(1.0, clear)
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(gradient)
+    p.drawEllipse(centre, radius + spread, radius + spread)
+
+
+#: The smallest a label goes to fit its two lines.
+LABEL_SMALLEST = tokens.LABEL - 1
+
+
+def _lines(font: QFont, width: float, text: str) -> int:
+    fm = QFontMetrics(font)
+    height = fm.boundingRect(0, 0, int(width), 1000, Qt.AlignmentFlag.AlignHCenter | Qt.TextFlag.TextWordWrap, text).height()
+    return round(height / fm.lineSpacing())
+
+
+def _label_font(text: str, width: float, lit: bool) -> QFont:
+    """A slot's label at the caption size, semibold when lit, a half point smaller at a time while it takes more than two
+    lines at ``width``, down to ``LABEL_SMALLEST``."""
+    size = tokens.CAPTION
+    font = tokens.ui_font(size, semibold=lit)
+    while _lines(font, width, text) > 2 and size > LABEL_SMALLEST:
+        size -= 0.5
+        font = tokens.ui_font(size, semibold=lit)
     return font
+
+
+def _two_lines(text: str, font: QFont, width: float) -> str:
+    """The label as it's drawn: whole when it fits two lines, else its second line cut with an ellipsis (one unbroken long
+    word at the smallest size; no default wheel's label gets here)."""
+    if _lines(font, width, text) <= 2:
+        return text
+    fm = QFontMetrics(font)
+    words, first = text.split(), ""
+    for i, word in enumerate(words):
+        trial = f"{first} {word}".strip()
+        if fm.horizontalAdvance(trial) > width and first:
+            rest = " ".join(words[i:])
+            return f"{first}\n{fm.elidedText(rest, Qt.TextElideMode.ElideRight, int(width))}"
+        first = trial
+    return fm.elidedText(text, Qt.TextElideMode.ElideRight, int(2 * width))
 
 
 def _at(mid: QPointF, radius: float, angle: float) -> QPointF:
