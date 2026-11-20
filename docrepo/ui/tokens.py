@@ -74,6 +74,10 @@ SIZE = {
     "control_s": 24,              # a small square button on a row or a card
     "icon_button": ICON_BUTTON,   # a toolbar's icon button, holding a 16 px icon
     "control": CONTROL,           # inputs and buttons
+    # lane D, release 5.189: the Today panel's row, a band's head, and an empty band's slim target
+    "row_today": 30,
+    "today_head": 26,
+    "today_head_empty": 30,
 }
 
 

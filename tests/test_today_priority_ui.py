@@ -11,7 +11,7 @@ from datetime import datetime  # noqa: E402
 
 import pytest  # noqa: E402
 from PySide6.QtCore import QMimeData, QPoint, QPointF, Qt  # noqa: E402
-from PySide6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent  # noqa: E402
+from PySide6.QtGui import QDragEnterEvent, QDragLeaveEvent, QDragMoveEvent, QDropEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon  # noqa: E402
 
 from docrepo import capacity, db, edits, hotkey, panel_rules, priorities, prompts  # noqa: E402
@@ -103,7 +103,7 @@ def test_the_view_shows_todays_bands_under_today(app):
     heads = [tree.topLevelItem(n) for n in range(tree.topLevelItemCount())]
     today = next(h for h in heads if h.data(0, HTML_ROLE) == "<b>Today</b>")
     kids = [today.child(n) for n in range(today.childCount())]
-    words = [str(k.data(0, HTML_ROLE)) for k in kids if k.data(0, MOVE_ROLE) is None]
+    words = [str(k.data(0, HTML_ROLE)) for k in kids if k.data(0, MOVE_ROLE) is None and not k.isHidden()]  # empty bands' heads hide (5.189)
     assert [w.split(">")[1].split("<")[0] for w in words] == ["High", "Medium", "Not ranked"]  # decision 688
     assert rows_in_order(tree)[-4:] == [i["high"], i["medium"], i["plain"], i["note"]]
     assert order(app, i) == ["high", "medium", "plain", "note"]
@@ -118,8 +118,9 @@ def test_a_drag_in_the_view_lands_only_in_its_band(app):
     assert order(app, i) == ["high", "medium", "note", "plain"]
 
 
-def bin_point(bins: today_bins.Bins, band: str) -> QPoint:
-    rect = dict(bins.rects())[band]
+def bin_point(bins: today_bins.DropGroups, band: str) -> QPoint:
+    """A band's head, left of its Urgent chip: the drop that sets the priority and unticks Urgent (release 5.189)."""
+    rect = dict(bins.parts())[(band, False)]
     return bins.mapTo(bins.parentWidget(), rect.center())
 
 
@@ -131,8 +132,8 @@ def test_a_tasks_drag_opens_the_bins_and_a_drop_sets_its_priority(app):
     own, counts, own_urgent = browse._today_bins_for(("today", i["plain"]))
     assert own == "" and not own_urgent and counts == {"critical": 0, "high": 1, "medium": 1, "": 2, "parking": 0}
     tree.setCurrentItem(today_row(tree, i["plain"]))
-    tree._bins.open_for(own, counts, tree.viewport().rect())
-    assert tree._bins.isVisible() and tree._bins.width() == today_bins.VIEW_WIDTH
+    assert tree.open_bins(("today", i["plain"])) and tree._bins.isVisible()  # each band a target (release 5.189)
+    assert {b for b, _r in tree._bins.rects()} == set(today_bins.TODAY_BANDS)  # the empty ones too, as slim heads
     at = bin_point(tree._bins, own)  # its own bin takes nothing
     move = OwnMove(tree, at, Qt.DropAction.MoveAction, QMimeData(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
     tree.dragMoveEvent(move)
@@ -144,7 +145,7 @@ def test_a_tasks_drag_opens_the_bins_and_a_drop_sets_its_priority(app):
     drop = OwnDrop(tree, QPointF(at), Qt.DropAction.MoveAction, QMimeData(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
     tree.dropEvent(drop)
     assert drop.dropAction() == Qt.DropAction.IgnoreAction  # Qt moves no row: the records change
-    tree._bins.close_bins()
+    tree.close_drop_groups()
     QApplication.processEvents()
     m = Model(app.ctx.conn)
     assert m.task("T000019").priority == "critical" and order(app, i)[0] == "plain"  # decision 691
@@ -163,15 +164,16 @@ def test_other_views_have_no_bins(app):
 
 
 # ---- the Today side panel, widened ----
-def test_the_widened_panel_names_its_bands(app, panel):
+def test_the_panel_names_its_bands_at_rest_and_widened(app, panel):
+    """Release 5.189 (decision 864): the heads show at rest too, a band with nothing on Today only while a task is dragged."""
     put(app)
     panel.hover.contract()
     panel.refresh()
-    bands = [w for w in panel.extras if w.objectName() == "tpBand"]
-    assert [b.text().split("  ")[0] for b in bands] == ["HIGH", "MEDIUM", "NOT RANKED"] and not any(b.isVisibleTo(panel) for b in bands)
+    bands = [h for h in panel.heads if h.count]
+    assert [b.name for b in bands] == ["High", "Medium", "Not ranked"] and all(b.isVisibleTo(panel) for b in bands)
+    assert not any(h.isVisibleTo(panel) for h in panel.heads if not h.count)
     wide(panel)
-    bands = [w for w in panel.extras if w.objectName() == "tpBand"]
-    assert all(b.isVisibleTo(panel) for b in bands)
+    assert [h.name for h in panel.heads if h.count and h.isVisibleTo(panel)] == ["High", "Medium", "Not ranked"]
     i = {r.task_id or "note": r for r in panel.rows}
     assert [r.band for r in panel.rows] == ["high", "medium", "", ""] and i["T000019"].band == ""
 
@@ -400,3 +402,47 @@ def test_the_grip_dragged_while_widened_keeps_it_wide(app, panel):
     panel._hover_tick()
     assert panel.hover.wide
     panel.grip._from = None
+
+
+# ---- the groups as targets (release 5.189, the redesign's decision 864) ----
+def test_a_tasks_drag_shows_every_band_and_lights_one(app, panel, monkeypatch):
+    """A task's drag in the panel: a head for each of the five bands, the empty ones too, hidden again after; the band under
+    the pointer lit, its head and its rows; the insert line at the foot of its half; and nothing drawn inside a row."""
+    from PySide6.QtGui import QImage, QRegion
+    from PySide6.QtWidgets import QWidget
+
+    i = put(app)
+    wide(panel)
+    seen: dict = {}
+
+    def run(drag):
+        mime = drag.mimeData()
+        bins = panel.bins
+        seen["heads"] = {h.band: h.isVisibleTo(panel) for h in panel.heads}
+        at = bin_point(bins, "high")
+        move, buttons, keys = Qt.DropAction.MoveAction, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier
+        QApplication.sendEvent(panel, QDragEnterEvent(at, move, mime, buttons, keys))
+        QApplication.sendEvent(panel, QDragMoveEvent(at, move, mime, buttons, keys))
+        seen["hot"] = bins.hot
+        seen["lit_heads"] = {h.band for h in panel.heads if h.lit}
+        seen["lit_rows"] = {r.band for r in panel.rows if r.property("lit")}
+        group = next(g for g in bins.groups if g.band == "high")
+        picture = QImage(bins.size(), QImage.Format.Format_ARGB32_Premultiplied)  # the overlay alone, on nothing
+        picture.fill(0)
+        bins.render(picture, QPoint(), QRegion(), QWidget.RenderFlag.DrawChildren)
+        ratio = 1
+        line = today_bins.insert_at(group, False)
+        seen["line"] = picture.pixelColor(round(group.whole.center().x() * ratio), round(line * ratio)).name()
+        # Inside a row of another band, away from its edges, the overlay draws nothing.
+        other = next(g for g in bins.groups if g.band == "medium")
+        middle = other.rest_rows.center()
+        seen["row_inside"] = picture.pixelColor(round(middle.x() * ratio), round(middle.y() * ratio)).alpha()
+        QApplication.sendEvent(panel, QDragLeaveEvent())
+
+    monkeypatch.setattr(panel, "run_drag", run)
+    panel.start_row_drag(panel_row(panel, i["plain"]))
+    assert len(seen["heads"]) == 5 and all(seen["heads"].values())
+    assert seen["hot"] == ("high", False) and seen["lit_heads"] == {"high"} and seen["lit_rows"] == {"high"}
+    assert seen["line"] == today_panel.tokens.colour("accent") and seen["row_inside"] == 0
+    assert not any(h.isVisibleTo(panel) for h in panel.heads if not h.count)  # the empty ones hide again
+    assert not any(h.lit for h in panel.heads) and not any(r.property("lit") for r in panel.rows)

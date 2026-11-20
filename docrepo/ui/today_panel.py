@@ -36,11 +36,12 @@ from datetime import date
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QByteArray, QEasingCurve, QMimeData, QPoint, QRect, Qt, QTimer, QVariantAnimation
-from PySide6.QtGui import QColor, QCursor, QDrag, QFont, QFontMetrics, QGuiApplication, QPainter, QPen
+from PySide6.QtGui import QColor, QCursor, QDrag, QFontMetrics, QGuiApplication, QPainter, QPen
 from PySide6.QtWidgets import (
+    QAbstractButton,
     QApplication,
-    QCheckBox,
     QFrame,
+    QGraphicsOpacityEffect,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -56,7 +57,8 @@ from PySide6.QtWidgets import (
 
 from docrepo import appbar, db, edits, key_dates, markup, meetings, notes_page, panel_rules, selection, task_tile, urgency, waits
 from docrepo.detail import Pages, PageState, esc
-from docrepo.model import Model, Task, is_person
+from docrepo.dates import WEEKDAYS
+from docrepo.model import TODAY_BAND_NAMES, TODAY_BANDS, Model, Task, is_person
 from docrepo.panel_rules import OPEN_KEY, REST_WIDTH_KEY, WIDE_WIDTH_KEY, Hover, Monitor, Place, Rect
 from docrepo.kinds import is_work
 from docrepo.ui import look, tokens
@@ -64,7 +66,7 @@ from docrepo.ui.browse_window import TODAY_MINE_KEY
 from docrepo.ui.capture_window import note_drag, read_drop
 from docrepo.ui.context import AppContext
 from docrepo.ui.drop_target import DropOverlay, DropRead
-from docrepo.ui.icons import icon, icon_size
+from docrepo.ui.icons import icon, icon_size, tinted
 from docrepo.ui.page_view import PageView
 from docrepo.ui import current_ui, today_bins, today_meetings
 from docrepo.ui.tree_view import PRIORITY_EDGES
@@ -105,30 +107,40 @@ ROW_MIME = "application/x-docrepo-today-item"
 
 QSS = """
 QWidget#todayPanel {{ background: {content}; border: 1px solid {stroke_strong}; }}
-QWidget#tpTop {{ background: {base}; border-bottom: 1px solid {stroke}; }}
-QWidget#tpList {{ background: {base}; }}
-QFrame#tpRow {{ background: {content}; border-radius: {radius}px; }}
+QWidget#tpTop, QWidget#tpList {{ background: {content}; border: none; }}
+QLabel#tpHead {{ color: {text}; font-size: {view_title}pt; font-weight: 600; }}
+QLabel#tpGroup {{ color: {text3}; font-size: {caption}pt; font-weight: 400; }}
+QFrame#tpRow {{ background: transparent; border-radius: {radius_s}px; }}
 QFrame#tpRow:hover {{ background: {hover}; }}
 QFrame#tpRow[current="true"] {{ background: {selected}; }}
+QFrame#tpRow[lit="true"], QFrame#tpRow[lit="true"]:hover {{ background: {selected}; border-radius: 0; }}
+QWidget#tpBand[lit="true"] {{ background: {selected}; }}
 QFrame#tpRow[drop="true"] {{ background: {selected}; border: 1px solid {accent}; }}
 QFrame#tpDropLine {{ background: {accent}; border: 0; }}
 QLabel#tpTitle {{ color: {text}; }}
-QLabel#tpSub {{ color: {text2}; font-size: {caption}pt; }}
-QLabel#tpDue {{ color: {text2}; font-size: {caption}pt; }}
-QLabel#tpGroup {{ color: {text2}; font-size: {caption}pt; font-weight: 600; }}
-QWidget#tpHoverBar {{ background: {hover}; border-radius: {radius}px; }}
+QLabel#tpSub, QLabel#tpDue {{ color: {text3}; font-size: {caption}pt; }}
+QWidget#tpHoverBar {{ background: {hover}; border-radius: {radius_s}px; }}
 QFrame#tpRow[current="true"] QWidget#tpHoverBar {{ background: {selected}; }}
 QLabel#tpDone {{ color: {disabled}; text-decoration: line-through; }}
-QToolButton#tpFold {{ border: 0; color: {text2}; font-size: {caption}pt; font-weight: 600; text-align: left; padding: 2px; }}
-QPushButton#tpLink {{ border: 0; background: transparent; color: {accent}; padding: 0 3px; min-height: 0; font-size: {caption}pt; }}
-QPushButton#tpLink:hover {{ text-decoration: underline; }}
-QPushButton#tpState {{ border: 0; border-radius: {radius}px; background: transparent; color: {text2}; padding: 0 3px; min-height: 0; font-size: {caption}pt; }}
+QToolButton#tpFold {{ border: 0; color: {text3}; font-size: {label}pt; font-weight: 600; text-align: left; padding: 2px; }}
+QPushButton#tpLink {{ border: 0; background: transparent; color: {text2}; padding: 0 3px; min-height: 0; font-size: {caption}pt; }}
+QPushButton#tpLink:hover {{ color: {text}; text-decoration: underline; }}
+QPushButton#tpState {{ border: 0; border-radius: {radius_s}px; background: transparent; color: {text2}; padding: 0 3px; min-height: 0; font-size: {caption}pt; }}
 QPushButton#tpState:hover {{ background: {pressed}; }}
-QWidget#tpNow {{ background: {now}; border-left: 3px solid {accent}; border-radius: {radius}px; }}
-QLabel#tpNowHead {{ color: {accent}; font-size: {caption}pt; font-weight: 600; padding: 2px 4px 0 6px; }}
-QFrame#tpRow[now="true"] {{ background: {now}; }}
-QFrame#tpRow[now="true"]:hover {{ background: {hover}; }}
+QWidget#tpNow {{ background: transparent; border: none; }}
+QLabel#tpNowHead {{ color: {text3}; font-size: {label}pt; font-weight: 600; padding: 8px 4px 2px 10px; }}
+QFrame#tpRow[now="true"] {{ background: {selected}; }}
+QFrame#tpRow[now="true"]:hover {{ background: {selected}; }}
+QWidget#tpBoxRow {{ border-top: 1px solid {stroke}; }}
+QPushButton#tpAdd {{ border: none; background: transparent; color: {text3}; text-align: left; padding: 0 10px; min-height: 30px; }}
+QPushButton#tpAdd:hover {{ color: {text}; background: {hover}; border-radius: {radius_s}px; }}
 """
+
+
+def panel_qss() -> str:
+    """The panel's own sheet in the active theme, its sizes from the tokens' scales (release 5.189)."""
+    return QSS.format(caption=tokens.CAPTION, label=tokens.LABEL, view_title=tokens.VIEW_TITLE, radius=tokens.RADIUS,
+                      radius_s=tokens.RADIUS_S, **tokens.active())
 
 
 #: The hairline's tooltip (release 5.176, the urgency plan's decision 821).
@@ -200,7 +212,7 @@ def fill_due(label: QLabel, cell: DueCell | task_tile.Days) -> None:
         colour = tile_ui.days_colour(cell)
         weight = "; font-weight:600" if cell.kind else ""
         label.setTextFormat(Qt.TextFormat.RichText)
-        label.setText(f'<span style="color:{tokens.colour(colour)}{weight}">{"◆ " if cell.deadline else ""}{esc(cell.text)}</span>')
+        label.setText(f'<span style="color:{tokens.colour(colour)}{weight}">{"◆ " if cell.deadline else ""}{esc(cell.shown)}</span>')
         label.setProperty("days", cell.text)
         label.setToolTip(cell.tip)
         return
@@ -213,33 +225,94 @@ def fill_due(label: QLabel, cell: DueCell | task_tile.Days) -> None:
     label.setToolTip(cell.tip)
 
 
-class _BandRule(QWidget):
-    """A priority band's heading on Today (release 5.154, decision 688), as a thin rule in its priority's colour with its
-    name and count small at the left (release 5.165, decision 772): about half the height a heading of words took."""
+#: A band head's dot, in pixels.
+DOT = 7
 
-    def __init__(self, name: str, count: int, colour: QColor) -> None:
+
+class _GroupHead(QWidget):
+    """A priority band's head on Today (release 5.189, the redesign's decision 864, in place of decision 772's thin rule): a
+    dot in its priority's colour, its name in sentence case and its count, shown at rest as well as widened. While a task's
+    row is dragged it's a target: the count gives way to what a drop does ("Make it High") when it's lit, and an Urgent chip
+    at its right end takes a drop that ticks Urgent. A band with nothing on Today has a head too, hidden but for a drag, when
+    it's a slim target."""
+
+    def __init__(self, band: str, name: str, count: int) -> None:
         super().__init__(objectName="tpBand")
-        self._text, self.colour = f"{name.upper()}  {count}", colour
-        # About half the height of the caption line and padding it was, with its own font fitted to it in pixels (the
-        # panel's style sheet sets every widget's): capitals and digits, so nothing goes under the line.
-        caption = QFont(tokens.ui_font(tokens.CAPTION))
-        height = max(9, round((QFontMetrics(caption).height() + 4) * 0.55))
-        self._font = QFont(tokens.ui_font(tokens.CAPTION, semibold=True))
-        self._font.setPixelSize(max(tokens.SMALLEST_PX, height - 2))
-        self.setFixedHeight(height)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)  # its ground, lit
+        self.band, self.name, self.count = band, name, count
+        self.colour = today_bins.colour_of(band)
+        self.words: str | None = None
+        self.lit = False
+        self.urgent_lit = False
+        self.show_urgent = False
+        self.setFixedHeight(tokens.SIZE["today_head"] if count else tokens.SIZE["today_head_empty"])
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
 
     def text(self) -> str:
-        return self._text
+        """"High 3": its name and its count."""
+        return f"{self.name} {self.count}"
+
+    def set_drop(self, words: str | None, lit: bool, urgent_lit: bool, show_urgent: bool) -> None:
+        """Its look in a drag: lit or not, what a drop does in place of the count, and the Urgent chip."""
+        if (words, lit, urgent_lit, show_urgent) == (self.words, self.lit, self.urgent_lit, self.show_urgent):
+            return
+        self.words, self.lit, self.urgent_lit, self.show_urgent = words, lit, urgent_lit, show_urgent
+        self.setProperty("lit", lit)
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self.update()
+
+    def urgent_rect(self) -> QRect:
+        """The Urgent chip's rectangle, in the head's coordinates."""
+        return today_bins.chip_rect(self.rect().adjusted(0, 0, -4, 0))
+
+    def paintEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        super().paintEvent(event)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(self.colour)
+        p.drawEllipse(10, (self.height() - DOT) // 2, DOT, DOT)
+        right = self.urgent_rect().left() - 6 if self.show_urgent else self.width() - 6
+        name_font = tokens.ui_font(tokens.LABEL, semibold=True)
+        x = 10 + DOT + 8
+        p.setFont(name_font)
+        p.setPen(QColor(tokens.colour("accent" if self.lit else "text3")))
+        fm = QFontMetrics(name_font)
+        name = fm.elidedText(self.name, Qt.TextElideMode.ElideRight, max(0, right - x))
+        p.drawText(QRect(x, 0, max(0, right - x), self.height()), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, name)
+        x += fm.horizontalAdvance(name) + 6
+        tail = self.words if self.lit and self.words else str(self.count)
+        if x < right:  # the count, or the drop's words, goes first when the panel is narrow
+            p.setFont(tokens.ui_font(tokens.LABEL, semibold=bool(self.lit and self.words)))
+            p.drawText(QRect(x, 0, right - x, self.height()), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                       QFontMetrics(p.font()).elidedText(tail, Qt.TextElideMode.ElideRight, right - x))
+        if self.show_urgent:
+            today_bins.paint_chip(p, self.urgent_rect(), self.urgent_lit, self.devicePixelRatioF())
+        p.end()
+
+
+class _Circle(QAbstractButton):
+    """A note's Done on Today (release 5.189, decision 864): a 14 px ring in the third grey that ticks it, in place of the
+    square tick box."""
+
+    SIZE = 14
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setFixedSize(self.SIZE, self.SIZE)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
 
     def paintEvent(self, event) -> None:  # noqa: N802 - Qt's name
         p = QPainter(self)
-        p.setFont(self._font)
-        p.setPen(self.colour)
-        fm = QFontMetrics(self._font)
-        p.drawText(QRect(2, 0, self.width() - 4, self.height()), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, self._text)
-        x = 2 + fm.horizontalAdvance(self._text) + 6
-        p.fillRect(x, self.height() // 2, max(0, self.width() - x - 2), 1, self.colour)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        ink = tokens.colour("accent" if self.isDown() or self.underMouse() else "text3")
+        p.setPen(QPen(QColor(ink), 1.5))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawEllipse(1, 1, self.SIZE - 2, self.SIZE - 2)
+        if self.isDown():
+            p.drawPixmap(2, 2, tinted("tick", ink, self.SIZE - 4, self.devicePixelRatioF()))
         p.end()
 
 
@@ -259,14 +332,21 @@ class _Row(_EdgeFrame):
         self.panel, self.item_id, self.task_id, self.title = panel, item_id, task_id, title
         self.band = ""  # its band on Today (release 5.154, decision 688), set as the list is drawn
         self.setProperty("current", False)
+        self.setFixedHeight(tokens.SIZE["row_today"])  # one 30 px line (release 5.189, decision 864)
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(4, 3, 4, 3)
-        lay.setSpacing(6)
-        self.tick = QCheckBox()
-        self.tick.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.tick.setToolTip("Done: take it off Today")
-        self.tick.clicked.connect(lambda: panel.done(self.item_id))
-        lay.addWidget(self.tick, 0, Qt.AlignmentFlag.AlignVCenter)
+        lay.setContentsMargins(10, 0, 8, 0)
+        lay.setSpacing(8)
+        # A task's circle is its tile's, which opens the state menu as everywhere; it has no tick box. A note's box is a
+        # circle that ticks it Done (release 5.189). ``tick`` stays a widget for those who ask whether it shows.
+        if task_id and tile is not None:
+            self.tick: QWidget = QWidget()
+            self.tick.setFixedSize(0, 0)
+            self.tick.hide()
+        else:
+            self.tick = _Circle()
+            self.tick.setToolTip("Done: take it off Today")
+            self.tick.clicked.connect(lambda: panel.done(self.item_id))
+            lay.addWidget(self.tick, 0, Qt.AlignmentFlag.AlignVCenter)
         self.title_label = _Elided(title)
         #: What the second line said until release 5.165 (its project, "reminder", "since…"): the row's tooltip now.
         self.subtitle = _Elided(sub, "tpSub")
@@ -331,7 +411,7 @@ class _Row(_EdgeFrame):
         (decision 576), on the same line (decision 772). A note keeps its box. The links show under the pointer, or on
         the current row, while it's widened."""
         self.due.setVisible(bool(self.due.text()))
-        self.tick.setVisible(wide or self.tile is None)
+        self.tick.setVisible(self.tile is None)  # a note's circle, at rest and widened; a task has none (release 5.189)
         if self.tile is not None:
             self.tile.set_compact(not wide)
         self.show_buttons(wide and not self.panel.detail_id() and (self.underMouse() or bool(self.property("current"))))
@@ -464,7 +544,7 @@ class _DropCover(DropOverlay):
             hot = w is panel._cover_target
             p.setPen(QPen(QColor(C.accent), 2 if hot else 1, Qt.PenStyle.SolidLine if hot else Qt.PenStyle.DashLine))
             p.setBrush(QColor(tokens.colour("selected" if hot else "content")))
-            p.drawRoundedRect(r, tokens.RADIUS, tokens.RADIUS)
+            p.drawRoundedRect(r, tokens.RADIUS_S, tokens.RADIUS_S)
             p.setPen(QColor(tokens.colour("text")))
             words = r.adjusted(8, 0, -8, 0)
             p.drawText(words, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
@@ -472,7 +552,7 @@ class _DropCover(DropOverlay):
         p.setClipping(False)
         p.setPen(QPen(QColor(C.accent), 2, Qt.PenStyle.DashLine))
         p.setBrush(Qt.BrushStyle.NoBrush)
-        p.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), tokens.RADIUS_L, tokens.RADIUS_L)
+        p.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), tokens.RADIUS, tokens.RADIUS)
         p.end()
 
 
@@ -486,7 +566,7 @@ class TodayPanel(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
         self.setObjectName("todayPanel")
         look.floating(self)  # Windows' round corners and edge while it floats (release 5.187, decision 862)
-        self.setStyleSheet(style_sheet() + QSS.format(caption=tokens.CAPTION, radius=tokens.RADIUS, **tokens.active()))
+        self.setStyleSheet(style_sheet() + panel_qss())
         self.setWindowTitle("Today")
         self.setAccessibleName("Today side panel")
         self.setMouseTracking(True)
@@ -510,7 +590,10 @@ class TodayPanel(QWidget):
         self._wide = db.get_state(self.ctx.conn, WIDE_WIDTH_KEY) or None  # the width widened, dragged and kept (decision 694)
         self._binned: tuple[int, tuple[str, bool]] | None = None  # a row's drag dropped on a bin: the item and its target (691, 822)
         self._own_drop = False  # a drop of the panel's own is being made: it draws once, after (release 5.159, decision 730)
-        self.bins: today_bins.Bins | None = None
+        self.bins: today_bins.DropGroups | None = None  # the drop targets while a task's row is dragged (release 5.189)
+        self.heads: list[_GroupHead] = []  # the bands' heads, at rest and widened (release 5.189)
+        self.band_rows: dict[str, tuple[list[_Row], list[_Row]]] = {}  # each band's rows: its urgent half, then the rest
+        self._dimmed: _Row | None = None
         self._dragging = False  # a drag of files, links or an email is over the panel (decision 407)
         self._moving: int | None = None  # the Today item one of its rows is being dragged to move (release 5.148)
         self._moved: tuple[int, int, str] | None = None  # where that drag was dropped: the item, the row beside, before or after
@@ -554,9 +637,14 @@ class TodayPanel(QWidget):
         top.installEventFilter(self)
         self.top = top
         tl = QHBoxLayout(top)
-        tl.setContentsMargins(8, 4, 4, 4)
+        tl.setContentsMargins(16, 10, 8, 6)
+        tl.setSpacing(8)
+        head = QLabel("Today", objectName="tpHead")  # release 5.189 (decision 864): the panel's name, then the day and the count
+        head.setMinimumWidth(1)  # its words' width when there's room; dragged narrow, it gives way too (decision 406)
+        tl.addWidget(head)
         self.count = QLabel(objectName="tpGroup")
         self.count.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)  # dragged narrow, the width decides (decision 406)
+        self.count.setProperty("total", 0)
         tl.addWidget(self.count, 1)
         close = QToolButton()
         close.setIcon(icon("close"))
@@ -565,6 +653,7 @@ class TodayPanel(QWidget):
         close.setAutoRaise(True)
         close.clicked.connect(lambda: self.action("close"))
         tl.addWidget(close)
+        self.close_button = close  # shown while widened
         outer.addWidget(top)
         self.stack = QStackedWidget()
         outer.addWidget(self.stack, 1)
@@ -578,8 +667,8 @@ class TodayPanel(QWidget):
         self.list_widget.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
         self.list_widget.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)  # the panel's width decides, not its rows
         self.list_lay = QVBoxLayout(self.list_widget)
-        self.list_lay.setContentsMargins(4, 4, 4, 4)
-        self.list_lay.setSpacing(2)  # tiles 2 px apart (release 5.138, decision 571)
+        self.list_lay.setContentsMargins(6, 0, 6, 6)
+        self.list_lay.setSpacing(0)  # flat rows that meet, so a lit group's rows meet too (release 5.189, decision 864)
         self.scroll.setWidget(self.list_widget)
         self.stack.addWidget(self.scroll)
         # Where a dragged row will land: a line between two rows (release 5.148, decision 643), outside the layout.
@@ -630,10 +719,20 @@ class TodayPanel(QWidget):
         self._note_timer = QTimer(self, singleShot=True, interval=UNDO_MS, timeout=self.note_row.hide)
         self.note_row.hide()
         outer.addWidget(self.note_row)
-        self.box_row = QWidget()
+        self.box_row = QWidget(objectName="tpBoxRow")
+        self.box_row.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)  # its hairline
+        self.box_row.setFixedHeight(42)
         bl = QHBoxLayout(self.box_row)
-        bl.setContentsMargins(6, 4, 6, 6)
+        bl.setContentsMargins(6, 6, 6, 6)
         bl.setSpacing(4)
+        # "Add a task" (release 5.189, decision 864): a quiet row while the box is empty and hasn't the keyboard; a click on
+        # it, or N, makes it the box.
+        self.add_button = QPushButton("Add a task", objectName="tpAdd")
+        self.add_button.setIcon(icon("add", tokens.colour("text3")))
+        self.add_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.add_button.setToolTip("A quick task, or a note on Today (N)")
+        self.add_button.clicked.connect(self.open_box)
+        bl.addWidget(self.add_button, 1)
         self.box = QLineEdit()
         self.box.setPlaceholderText("A quick task")
         self.box.returnPressed.connect(self.add_from_box)
@@ -646,6 +745,16 @@ class TodayPanel(QWidget):
         bl.addWidget(self.kind_button)
         self.box_row.hide()
         outer.addWidget(self.box_row)
+        self._show_add(True)
+
+    def _say_count(self) -> None:
+        """The top line's words: "Thu 8 Oct · 6 tasks" while the panel is 220 px wide or more, "6" under that."""
+        total = int(self.count.property("total") or 0)
+        if self.width() >= 220:
+            day = self._today()
+            self.count.setText(f"{WEEKDAYS[day.weekday()]} {day.day} {day.strftime('%b')} · {total} task{'' if total == 1 else 's'}")
+        else:
+            self.count.setText(str(total))
 
     # ================= opening and closing =================
     def action(self, do: str) -> None:
@@ -750,6 +859,8 @@ class TodayPanel(QWidget):
                 w.deleteLater()
         self.rows = []
         self.extras = []
+        self.heads = []
+        self.band_rows = {}
         self._add_meeting_line(m)  # first, the next meeting (release 5.127, decision 490)
         # Now: the current task (release 5.177, the current task plan's decision 828), shown once, so its band leaves it out.
         self.now_row = None
@@ -760,14 +871,24 @@ class TodayPanel(QWidget):
         bands = today_bands(m, today, workdays, now)
         hot = urgency.urgent_ids(m, (a for _, _, g in bands for a in g), today, workdays)
         total = sum(len(items) for _, _, items in bands) + sum(1 for a in m.today_items() if now and a.subject == now)
-        self.count.setText(f"Today · {total}")
-        if bands:
-            self._add(QLabel("Today", objectName="tpGroup"))
-        for band, name, items in bands:
-            label = _BandRule(name, len(items), today_bins.colour_of(band))
-            label.setToolTip(f"{name}: drag a task onto a bin to change its priority")
-            self.extras.append(label)
+        self.count.setProperty("total", total)
+        self._say_count()
+        shown = {band for band, _name, _items in bands}
+        names = {band: name for band, name, _items in bands}
+        for band in TODAY_BANDS:  # every band has a head; one with nothing on Today shows only while a task is dragged
+            if band not in shown:
+                empty = _GroupHead(band, TODAY_BAND_NAMES[band], 0)
+                empty.hide()
+                self.heads.append(empty)
+                self.list_lay.addWidget(empty)  # hidden, in its place
+                continue
+            items = next(g for b, _n, g in bands if b == band)
+            name = names[band]
+            label = _GroupHead(band, name, len(items))
+            label.setToolTip(f"{name}: drag a task onto a group to change its priority")
+            self.heads.append(label)
             self._add(label)
+            self.band_rows[band] = ([], [])
             first_rest = next((a.id for a in items if a.id not in hot), None) if any(a.id in hot for a in items) else None
             for a in items:
                 t = m.tasks.get(a.subject) if a.subject else None
@@ -789,9 +910,10 @@ class TodayPanel(QWidget):
                 why = f"Urgent: {urgency.why(m, t, today, workdays)}" if t is not None and a.id in hot and not t.urgent else ""
                 row = _Row(self, a.id, t.id if t else None, t.title if t else a.note,
                            " · ".join(x for x in (where, reminder, since.rstrip(" ·")) if x) + (f"\n{why}" if why else ""),
-                           cell, state, edge_of(t), tile)
+                           cell, state, "", tile)  # its group's head says its priority: no edge (release 5.189)
                 row.band = band
                 row.urgent = a.id in hot  # its half (decision 820)
+                self.band_rows[band][0 if row.urgent else 1].append(row)
                 if a.id == first_rest:  # the hairline between the halves (decision 821)
                     row.rule = today_bins.colour_of(band).name()
                     row.setToolTip("\n".join(x for x in (row.toolTip(), RULE_TIP) if x))
@@ -1094,14 +1216,13 @@ class TodayPanel(QWidget):
         drag.setPixmap(row.grab())
         drag.setHotSpot(row.mapFromGlobal(QCursor.pos()))
         self._moving, self._moved, self._binned = row.item_id, None, None
-        self._open_bins(row)  # a task's drag opens the bins (release 5.154, decision 690)
+        self._open_bins(row)  # a task's drag makes the groups targets (release 5.154, decision 690; 5.189, 864)
         try:
             self.run_drag(drag)
         finally:
             self._moving = None
             self._show_row_line(None)
-            if self.bins is not None:
-                self.bins.close_bins()
+            self._close_groups()
         moved, self._moved = self._moved, None
         binned, self._binned = self._binned, None
         if binned is not None:
@@ -1112,7 +1233,9 @@ class TodayPanel(QWidget):
 
     # ================= the bins (release 5.154, decisions 690 and 691) =================
     def _open_bins(self, row: _Row) -> None:
-        """The bins down the list's left side, while a task's row is dragged; none for a note (decision 692)."""
+        """While a task's row is dragged, each priority group is a target (release 5.189, decision 864, redrawing 690's bins):
+        the empty bands' heads show as slim targets, every head shows its Urgent chip, the groups are outlined, and the
+        dragged row is dimmed. None for a note (decision 692)."""
         if not row.task_id:
             return
         m = self._model()
@@ -1120,24 +1243,93 @@ class TodayPanel(QWidget):
         a = next((x for x in items if x.id == row.item_id), None)
         if a is None:
             return
+        for head in self.heads:
+            if not head.count:
+                head.show()
+            head.set_drop(None, False, False, True)
+        # Laid out at once, the list as tall as its rows now, so the groups are measured where they'll be.
+        self.list_widget.resize(self.list_widget.width(), max(self.list_widget.height(), self.list_lay.sizeHint().height()))
+        self.list_lay.activate()
         if self.bins is None:
-            self.bins = today_bins.Bins(self, today_bins.PANEL_WIDTH)
+            self.bins = today_bins.DropGroups(self)
+            self.scroll.verticalScrollBar().valueChanged.connect(lambda _v: self._regroup())
+        area, groups = self._groups()
+        self.bins.open_for(m.today_band(a), today_bins.counts_of(m, items), area,
+                           bool(getattr(row, "urgent", False)), groups)  # its own half isn't a target (release 5.176, decision 822)
+        effect = QGraphicsOpacityEffect(row)
+        effect.setOpacity(0.35)
+        row.setGraphicsEffect(effect)
+        self._dimmed = row
+
+    def _groups(self) -> tuple[QRect, list[today_bins.Group]]:
+        """The list's area in the panel, and each band as a target in it: its head, its chip and its halves' rows."""
         viewport = self.scroll.viewport()
-        self.bins.open_for(m.today_band(a), today_bins.counts_of(m, items), QRect(viewport.mapTo(self, QPoint(0, 0)), viewport.size()),
-                           bool(getattr(row, "urgent", False)))  # its own part isn't a target (release 5.176, decision 822)
+        area = QRect(viewport.mapTo(self, QPoint(0, 0)), viewport.size())
+
+        def box(w: QWidget) -> QRect:
+            return QRect(w.mapTo(self, QPoint(0, 0)) - area.topLeft(), w.size())
+
+        groups = []
+        for head in self.heads:
+            if not head.isVisibleTo(self):
+                continue
+            urgent, rest = self.band_rows.get(head.band, ([], []))
+            hb = box(head)
+            chip = head.urgent_rect().translated(hb.topLeft())
+            groups.append(today_bins.make_group(head.band, hb, chip, [box(r) for r in urgent], [box(r) for r in rest], head.count))
+        return area, groups
+
+    def _regroup(self) -> None:
+        """The groups again, as the list scrolled."""
+        if self.bins is not None and self.bins.isVisible():
+            self.bins.set_groups(*self._groups())
+
+    def _close_groups(self) -> None:
+        """The drag is over: the targets go, the empty heads hide, nothing is lit and the dragged row is itself again."""
+        if self.bins is not None:
+            self.bins.close_bins()
+        self._light(None)
+        for head in self.heads:
+            head.set_drop(None, False, False, False)
+            if not head.count:
+                head.hide()
+        if self._dimmed is not None:
+            try:
+                self._dimmed.setGraphicsEffect(None)
+            except RuntimeError:  # the list was drawn again under it
+                pass
+            self._dimmed = None
 
     def _bin_under(self, event) -> tuple[str, bool] | None | bool:
-        """Where a row's drag is over the bins: the target (the bin's band and whether its urgent part, release 5.176), None
-        on the bins but not on one a drop would go to, or False away from them."""
+        """Where a row's drag is over the groups: the target (a band, and whether its urgent half), None inside a group where
+        a drop changes nothing, or False away from them and over the dragged task's own half, where the row drag reorders."""
         if self.bins is None or not self.bins.isVisible():
             return False
-        at = self.mapToGlobal(event.position().toPoint())
-        if not self.bins.over(at):
-            self.bins.set_hot(None)
-            return False
-        found = self.bins.bin_at(at)
-        self.bins.set_hot(found)
+        self._regroup()
+        found = self.bins.target(self.mapToGlobal(event.position().toPoint()))
+        hot = found if isinstance(found, tuple) else None
+        if hot != self.bins.hot:
+            self.bins.set_hot(hot)
+            self._light(hot)
         return found
+
+    def _light(self, target: tuple[str, bool] | None) -> None:
+        """Light the band a drop would go to (its head and rows, and the head's words), and take it off the one lit before."""
+        was = getattr(self, "_lit_band", None)
+        own = self.bins.own if self.bins is not None else None
+        band = target[0] if target is not None else None
+        for head in self.heads:
+            if head.band == band and target is not None:
+                head.set_drop(today_bins.drop_words(band, target[1], band == own), True, target[1], True)
+            elif head.band == was and was != band:
+                head.set_drop(None, False, False, self.bins is not None and self.bins.isVisible())
+        for b in {was, band} - {None}:
+            for half in self.band_rows.get(b, ([], [])):
+                for r in half:
+                    r.setProperty("lit", b == band)
+                    r.style().unpolish(r)
+                    r.style().polish(r)
+        self._lit_band = band
 
     def bin_item(self, item_id: int, target: tuple[str, bool] | str) -> None:
         """A task dropped on a bin: its priority set by the browse tool's own (``bin_today``), said on the panel's line, and the
@@ -1214,6 +1406,24 @@ class TodayPanel(QWidget):
             event.setDropAction(Qt.DropAction.MoveAction)
             event.accept()
         return target
+
+    def _show_add(self, on: bool) -> None:
+        """"Add a task" in place of the box, or the box."""
+        self.add_button.setVisible(on)
+        self.box.setVisible(not on)
+        self.kind_button.setVisible(not on)
+
+    def open_box(self) -> None:
+        """"Add a task" pressed, or N: the box, with the keyboard, as its hotkey's press gives it (release 5.189)."""
+        self._show_add(False)
+        self._came_from = selection.foreground()
+        self._set_no_activate(False)
+        self.activateWindow()
+        self.box.setFocus()
+
+    def _takes_keyboard(self, child: QWidget | None) -> bool:
+        """A click that takes the keyboard: on a box, or on "Add a task", which becomes the box."""
+        return isinstance(child, QLineEdit) or (child is not None and child is self.add_button)
 
     def add_from_box(self) -> None:
         text = self.box.text().strip()
@@ -1335,6 +1545,7 @@ class TodayPanel(QWidget):
         for w in getattr(self, "extras", []):
             w.setVisible(wide)
         self.box_row.setVisible(wide and self._detail is None)
+        self.close_button.setVisible(wide)
 
     def target_width(self) -> int:
         """At rest, widened, or with a detail (a task's page) showing, at least as wide as it widens to (decision 694)."""
@@ -1427,6 +1638,7 @@ class TodayPanel(QWidget):
     def resizeEvent(self, event) -> None:  # noqa: N802 - Qt's name
         super().resizeEvent(event)
         self._place_grip()
+        self._say_count()
         cover = getattr(self, "drop_cover", None)
         if cover is not None and cover.isVisible():
             cover.setGeometry(self.rect())
@@ -1656,6 +1868,8 @@ class TodayPanel(QWidget):
         elif watched is self.box and event.type() == event.Type.KeyPress and event.key() == Qt.Key.Key_Escape:
             self.keyPressEvent(event)
             return True
+        elif watched is self.box and event.type() == event.Type.FocusOut and not self.box.text():
+            QTimer.singleShot(0, lambda: self._show_add(not self.box.hasFocus() and not self.box.text()))
         return super().eventFilter(watched, event)
 
     def dropped(self, centre: QPoint) -> None:
@@ -1743,6 +1957,8 @@ class TodayPanel(QWidget):
             self.done(current.item_id)
         elif key == Qt.Key.Key_Delete and current is not None:
             self.remove(current.item_id)
+        elif key == Qt.Key.Key_N and not event.modifiers() and self.add_button.isVisible():
+            self.open_box()  # "Add a task" from the keyboard (release 5.189)
         elif key == Qt.Key.Key_F5:  # the calendar read again (release 5.127, decision 493)
             today_meetings.read_again(self.ctx)
             self.refresh()
@@ -1770,7 +1986,7 @@ class TodayPanel(QWidget):
                 self.place_window(animate=False)
                 return True, 0
             if msg.message == WM_MOUSEACTIVATE:
-                if not isinstance(self.childAt(self.mapFromGlobal(QCursor.pos())), QLineEdit):
+                if not self._takes_keyboard(self.childAt(self.mapFromGlobal(QCursor.pos()))):
                     return True, MA_NOACTIVATE
                 self._came_from = selection.foreground()
                 self._set_no_activate(False)
