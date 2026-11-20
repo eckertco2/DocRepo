@@ -126,7 +126,7 @@ class ProgressForm(QObject):
 
     # ---- building ----
     def _build(self) -> None:
-        self.line_name = QLabel("What you did", objectName="hint")
+        self.line_name = QLabel("What you did", objectName="fieldLabel")  # a form's label (release 5.193, decision 868)
         for key in ROWS:
             label = QLabel(objectName="progressProblem")
             label.setWordWrap(True)
@@ -150,17 +150,20 @@ class ProgressForm(QObject):
         self.who.returnPressed.connect(self.add_person)  # with the completer's list open, Enter comes this way
         self.who.installEventFilter(self)  # otherwise, Enter is the filter's (decision 753)
         wl.addWidget(self.who, 1)
-        self.who_name = QLabel("Waiting on", objectName="hint")
+        self.who_name = QLabel("Waiting on", objectName="fieldLabel")
         self.who_note = QLabel(objectName="hint")
         self.who_note.setWordWrap(True)
         self._dim(self.who_name, self.who_widget)
         self.back = BackRow(self.today, lambda: _workdays(self.ctx.settings))
         self.back.changed.connect(self._back_picked)
-        self.today_name = QLabel("Today", objectName="hint")
+        self.today_name = QLabel("Today", objectName="fieldLabel")
         self.today_name.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.today_name.setContentsMargins(0, 6, 0, 0)
+        # The three lines under State, Waiting on and Today are their controls' tooltips since release 5.193 (decision 868):
+        # kept, with their words set as before, and never shown.
         self.today_note = self.back.note
-        self.state_name = QLabel("State", objectName="hint")
+        self.today_note.hide()
+        self.state_name = QLabel("State", objectName="fieldLabel")
         for name in (self.line_name, self.state_name, self.who_name):
             name.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
@@ -182,10 +185,8 @@ class ProgressForm(QObject):
         bl.addWidget(self.state_box)
         bl.addStretch()
         put(self.state_name, box)
-        put(None, self.state_note)
         put(self.who_name, self.who_widget)
         put(None, self.problems["who"])
-        put(None, self.who_note)
         put(self.today_name, self.back)
         put(None, self.problems["back"])
         return row
@@ -277,6 +278,7 @@ class ProgressForm(QObject):
         states = progress.NEXT_STATES if self.next_step else progress.STATES
         self.state_box.setCurrentIndex(next(n for n, s in enumerate(states) if s[0] == self.state_key))
         self.state_note.setText(self.state_words(m))
+        self.state_box.setToolTip(f"{self.state_note.text()}\n\nWhere this line leaves the task")
         while self.chips.count():
             w = self.chips.takeAt(0).widget()
             if w is not None:
@@ -292,6 +294,8 @@ class ProgressForm(QObject):
             self.who_note.setText(PICK_WAITING)
         else:
             self.who_note.setText("From the email's To, matched in People." if self.to_people else "Type a name from People.")
+        for w in (self.who, self.who_name):
+            w.setToolTip(self.who_note.text())
         for effect in self._dimmed:
             effect.setEnabled(not waiting)
         if self.next_step:
@@ -306,6 +310,9 @@ class ProgressForm(QObject):
             self.back.set_mode(back_row.ON_TODAY if self.on_today(m) else back_row.OFF_TODAY)
         self.back.setEnabled(self.state_key != progress.CLOSED)
         self.today_note.setText(self.back_words(m))
+        self.today_note.hide()  # in case the row shows its own line again
+        for w in (self.back, self.today_name):
+            w.setToolTip(self.today_note.text())
 
     def state_words(self, m: Model) -> str:
         """The line under State: what Enter does to the task's state (decisions 589, 695 and 696)."""

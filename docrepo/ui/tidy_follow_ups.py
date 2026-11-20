@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QDialog, QDialogButtonBox, QLabel, QListWidget, QListWidgetItem, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QPushButton, QVBoxLayout, QWidget
 
 from docrepo import edits
 from docrepo.model import Model
@@ -49,12 +49,17 @@ class TidyDialog(QDialog):
             it.setCheckState(Qt.CheckState.Checked)
             self.rows.addItem(it)
         lay.addWidget(self.rows, 1)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
-        self.move_button = buttons.addButton("Move", QDialogButtonBox.ButtonRole.AcceptRole)
+        buttons = QHBoxLayout()  # Move at the right end, as a form's primary (release 5.193); Windows' button box put it first
+        buttons.addStretch()
+        self.move_button = QPushButton("Move")
         self.move_button.setDefault(True)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        lay.addWidget(buttons)
+        self.move_button.clicked.connect(self.accept)
+        cancel = QPushButton("Cancel")
+        cancel.clicked.connect(self.reject)
+        buttons.addWidget(cancel)
+        buttons.addWidget(self.move_button)
+        lay.addLayout(buttons)
+        QWidget.setTabOrder(self.move_button, cancel)
         self.resize(720, min(560, 170 + 30 * n))
 
     def chosen(self) -> list[edits.Tidy]:

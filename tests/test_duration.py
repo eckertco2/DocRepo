@@ -494,7 +494,8 @@ def test_edit_task_moves_the_block(browse, ctx):
     t = task(ctx.conn, start="2026-11-02", duration=5)
     browse.refresh()
     d = form(browse, t)
-    assert d.due.value() == "2026-11-06" and d.date_hint.isVisibleTo(d)
+    # the sentence in Duration's tooltip since release 5.193 (decision 868), whether or not the task has one
+    assert d.due.value() == "2026-11-06" and d.date_hint.text() in d.duration.toolTip() and not d.date_hint.isVisibleTo(d)
     typed(d.start, "2026-11-05")
     assert d.due.value() == "2026-11-11" and d.due.line.property("worked") and "Worked out" in d.due.line.toolTip()
     typed(d.due, "2026-11-20")
@@ -523,7 +524,7 @@ def test_an_empty_duration_shows_the_length_in_grey(browse, ctx):
     browse.refresh()
     d = form(browse, t)
     assert d.duration.text() == "" and d.duration.placeholderText() == "5" and "Type a number" in d.duration.toolTip()
-    assert not d.date_hint.isVisibleTo(d)
+    assert not d.date_hint.isVisibleTo(d) and d.date_hint.text() in d.duration.toolTip()
     typed(d.due, "2026-11-13")  # no Duration typed: Start stays
     assert d.start.value() == "2026-11-02" and d.duration.placeholderText() == "10"
     browse.save_task_edit(t, d.values())

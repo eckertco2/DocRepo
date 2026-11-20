@@ -19,7 +19,6 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QFileDialog,
-    QFormLayout,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -48,8 +47,9 @@ from docrepo.ui import tokens
 from docrepo.ui.tokens import C
 from docrepo.ui.context import AppContext
 from docrepo.ui.icons import icon, set_fold
-from docrepo.ui.look import Help, set_hints
+from docrepo.ui.look import LOOK, Help, _gated, set_hints
 from docrepo.ui.wheel_commands import SPECS, icon_names
+from docrepo.ui.widgets import Toggle
 
 log = logging.getLogger(__name__)
 
@@ -289,16 +289,19 @@ class ReportDialog(QDialog):
         mono.setPointSizeF(tokens.CAPTION)
         self.text.setFont(mono)
         lay.addWidget(self.text, 1)
+        # the form's footer order (release 5.193, decision 868): Show in File Explorer quiet at the left, then Copy report, and
+        # Close last, the default
         buttons = QHBoxLayout()
-        self.copy = QPushButton("Copy report")
-        self.copy.clicked.connect(lambda: (QGuiApplication.clipboard().setText(text), self.copy.setText("Copied")))
-        buttons.addWidget(self.copy)
         if path:
-            show = QPushButton("Show in File Explorer")
+            show = QPushButton("Show in File Explorer", objectName="subtle")
             show.clicked.connect(lambda: reveal(path))
             buttons.addWidget(show)
         buttons.addStretch()
+        self.copy = QPushButton("Copy report")
+        self.copy.clicked.connect(lambda: (QGuiApplication.clipboard().setText(text), self.copy.setText("Copied")))
+        buttons.addWidget(self.copy)
         close = QPushButton("Close")
+        close.setDefault(True)
         close.clicked.connect(self.accept)
         buttons.addWidget(close)
         lay.addLayout(buttons)
@@ -425,6 +428,28 @@ class SiteList(QWidget):
         return text.split("\n") if text.strip() else []
 
 
+def first_sentence(text: str) -> str:
+    """A settings row's line (release 5.193, decision 868): up to its first full stop followed by a space, or all of it."""
+    at = text.find(". ")
+    return text if at < 0 else text[:at + 1]
+
+
+class Explain(QLabel):
+    """A settings row's line: its first sentence, or all of it with Show hints on, changing at once when Show hints does,
+    as a ``Help`` line shows and hides (release 5.193, decision 868). All of it is in the row's tooltips."""
+
+    def __init__(self, what: str) -> None:
+        super().__init__(objectName="hint")
+        self.what = what
+        self.setWordWrap(True)
+        self.setToolTip(what)
+        _gated.add(self)
+        self.apply_gate()
+
+    def apply_gate(self) -> None:
+        self.setText(self.what if LOOK.show_help else first_sentence(self.what))
+
+
 class SettingsView(QWidget):
     """The form. ``message`` shows a line in the browse tool's status line."""
 
@@ -437,12 +462,13 @@ class SettingsView(QWidget):
         self.reveal = reveal
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
-        scroll = self.scroll = QScrollArea()
+        outer.setSpacing(0)
+        scroll = self.scroll = QScrollArea(objectName="settingsScroll")  # on the content card's white (release 5.193)
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         body = QWidget()
         scroll.setWidget(body)
-        outer.addWidget(scroll)
+        outer.addWidget(scroll, 1)
         # The visual overhaul's O6: Windows' settings cards, at most 1000 px wide. Each row has its name and a line on what it
         # does on the left, and its control on the right, as wide as what goes in it.
         page = QWidget()
@@ -484,6 +510,9 @@ class SettingsView(QWidget):
         self._build_outlook(lay)
         # ---- the troubleshooting report, to bring to the personal computer ----
         self._build_troubleshooting(lay)
+        lay.addStretch()
+        # ---- the foot, outside the scroll so it's always in view (release 5.193) ----
+        self._build_foot(outer)
 
     def _build_data_root(self, lay, open_import) -> None:
         """The data root and start-up (part of ``__init__``, release 5.95)."""
@@ -511,7 +540,8 @@ class SettingsView(QWidget):
 
     def _build_look(self, lay) -> None:
         """The look (decision 7) (part of ``__init__``, release 5.95). Its Look row went with the Classic look (release 5.179)."""
-        self.hints = QCheckBox("Show hints")
+        self.hints = Toggle()  # a switch: it applies the moment it's flipped (release 5.193, decision 868)
+        self.hints.setAccessibleName("Show hints")
         self.hints.setToolTip("Help text, the ⓘ buttons and key badges, in every window, at once")
         self.hints.toggled.connect(self._hints_toggled)
         # Open a task in (release 5.174, the design workspace's docs/mods/today-workspace-carry-plan.md, decision 815).
@@ -536,33 +566,28 @@ class SettingsView(QWidget):
         self.hotkey = QLineEdit()
         self.hotkey.setPlaceholderText("Such as Ctrl+Shift+Space")
         self.hotkey.setFixedWidth(240)
-        more = QWidget()
-        more_form = QFormLayout(more)
-        more_form.setContentsMargins(0, 0, 0, 0)
-        more_form.setHorizontalSpacing(12)
-        more_form.setVerticalSpacing(8)
-        more_form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
-        more_form.setFormAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        # Each further hotkey a row of the card's own kind (release 5.193, decision 868): its name at the left, its box at the
+        # right, a hairline between rows. The wheels' rows (release 5.41, decision 216) are filled by load(), so a new wheel
+        # gets its row; Use the suggested keys is the last row's control.
+        more = QWidget(objectName="hotkeyRows")
+        self.more_grid = QGridLayout(more)
+        self.more_grid.setContentsMargins(0, 0, 0, 0)
+        self.more_grid.setHorizontalSpacing(24)
+        self.more_grid.setVerticalSpacing(0)
+        self.more_grid.setColumnStretch(0, 1)
         self.more_hotkeys: dict[str, QLineEdit] = {}
-        for setting, label in hotkey.HOTKEYS[1:]:
+        for setting, _label in hotkey.HOTKEYS[1:]:
             box = QLineEdit()
             box.setPlaceholderText("Off, such as Ctrl+Shift+4" if setting == "today_panel_hotkey" else "Off")
             box.setFixedWidth(200)
             self.more_hotkeys[setting] = box
-            more_form.addRow(label, box)
-        # A box per wheel in Config\wheels.jsonc (release 5.41, decision 216), filled by load(), so a new wheel gets its box.
-        self.wheel_rows = QWidget()
-        self.wheel_form = QFormLayout(self.wheel_rows)
-        self.wheel_form.setContentsMargins(0, 0, 0, 0)
-        self.wheel_form.setHorizontalSpacing(12)
-        self.wheel_form.setVerticalSpacing(8)
-        self.wheel_form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
+        self.hotkey_labels = dict(hotkey.HOTKEYS[1:])
         self.wheel_hotkeys: dict[str, QLineEdit] = {}
-        more_form.addRow(self.wheel_rows)
-        suggest = QPushButton("Use the suggested keys")
+        self.wheel_names: dict[str, str] = {}
+        self.suggest = suggest = QPushButton("Use the suggested keys")
         suggest.setToolTip("Fills each empty box with Ctrl+Shift and its letter: " + ", ".join(hotkey.SUGGESTED.values()))
         suggest.clicked.connect(self.suggest_hotkeys)
-        more_form.addRow("", suggest)
+        self._fill_hotkey_rows()
         more.hide()
         more_fold = QPushButton("Show", objectName="moreLink")  # release 5.61: each hotkey a row of its own, under a fold
         more_fold.setIcon(icon("chevron-right"))
@@ -799,22 +824,42 @@ class SettingsView(QWidget):
              _row(check)),
         ])
 
+
+    def _build_foot(self, outer: QVBoxLayout) -> None:
+        """Save settings and Undo changes, under the scroll, the page's width, a hairline over them (release 5.193, decision
+        868): the error at the left, Undo changes quiet, Save settings at the right end. It's the secondary button: the browse
+        window's one primary is New capture. Tab reaches Save settings before Undo changes, as before."""
+        foot = QWidget(objectName="settingsFoot")
+        foot.setMaximumWidth(1000)
+        fl = QVBoxLayout(foot)
+        fl.setContentsMargins(24, 0, 24, 12)
+        fl.setSpacing(12)
+        rule = QFrame(objectName="divider")
+        rule.setFrameShape(QFrame.Shape.HLine)
+        rule.setFrameShadow(QFrame.Shadow.Plain)
+        rule.setFixedHeight(1)
+        fl.addWidget(rule)
+        buttons = QHBoxLayout()
+        buttons.setSpacing(8)
         self.error = QLabel(objectName="error")
         self.error.setWordWrap(True)
         self.error.hide()
-        lay.addSpacing(8)
-        lay.addWidget(self.error)
-        buttons = QHBoxLayout()
-        buttons.setSpacing(8)
+        buttons.addWidget(self.error, 1)
+        buttons.addStretch()
         save = QPushButton("Save settings")
         save.clicked.connect(self.save)
-        undo = QPushButton("Undo changes")
+        undo = QPushButton("Undo changes", objectName="subtle")
         undo.clicked.connect(self.load)
-        buttons.addWidget(save)
         buttons.addWidget(undo)
-        buttons.addStretch()
-        lay.addLayout(buttons)
-        lay.addStretch()
+        buttons.addWidget(save)
+        fl.addLayout(buttons)
+        holder = QHBoxLayout()
+        holder.setContentsMargins(0, 0, 0, 0)
+        holder.addWidget(foot, 1)
+        holder.addStretch(0)
+        outer.addLayout(holder)
+        QWidget.setTabOrder(save, undo)  # once both are in the page's chain
+        self.save_button, self.undo_button = save, undo
 
     def _card(self, lay: QVBoxLayout, title: str, rows: list) -> QWidget:
         """A group of settings: its heading, then a card with a row for each: its name and what it does, then its control."""
@@ -835,11 +880,13 @@ class SettingsView(QWidget):
             ll = QVBoxLayout(left)
             ll.setContentsMargins(0, 12, 0, 12)
             ll.setSpacing(2)
-            ll.addWidget(QLabel(name) if isinstance(name, str) else name)
-            if what:
-                note = QLabel(what, objectName="hint")
-                note.setWordWrap(True)
-                ll.addWidget(note)
+            label = QLabel(name) if isinstance(name, str) else name
+            ll.addWidget(label)
+            if what:  # its first sentence, the whole in the tooltips, and with Show hints (release 5.193, decision 868)
+                ll.addWidget(Explain(what))
+                label.setToolTip(what)
+                if not control.toolTip():
+                    control.setToolTip(what)
             ll.addStretch(1)  # beside a tall control (release 5.146's lists) the name and its line stay at the top
             grid.addWidget(left, 2 * i, 0)
             grid.addWidget(control, 2 * i, 1, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
@@ -850,6 +897,28 @@ class SettingsView(QWidget):
                 grid.addWidget(line, 2 * i + 1, 0, 1, 2)
         lay.addWidget(card)
         return card
+
+    def _fill_hotkey_rows(self) -> None:
+        """The further hotkeys' rows, each as a card's row (release 5.193): the topics', then each wheel's, then Use the
+        suggested keys. Made again when the wheels change."""
+        grid = self.more_grid
+        keep = {*self.more_hotkeys.values(), *self.wheel_hotkeys.values(), self.suggest}
+        while grid.count():
+            w = grid.takeAt(0).widget()
+            if w is not None and w not in keep:
+                w.hide()
+                w.deleteLater()
+        rows = ([(self.hotkey_labels[k], box) for k, box in self.more_hotkeys.items()]
+                + [(self.wheel_names[k], box) for k, box in self.wheel_hotkeys.items()] + [("", self.suggest)])
+        for i, (name, control) in enumerate(rows):
+            line = QFrame(objectName="divider")
+            line.setFrameShape(QFrame.Shape.HLine)
+            grid.addWidget(line, 2 * i, 0, 1, 2)
+            label = QLabel(name)
+            label.setContentsMargins(0, 12, 0, 12)
+            grid.addWidget(label, 2 * i + 1, 0)
+            grid.addWidget(control, 2 * i + 1, 1, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            control.show()
 
     def _hints_toggled(self, on: bool) -> None:
         """Show hints applies at once, in every window (decision 7); Save settings keeps it."""
@@ -868,15 +937,17 @@ class SettingsView(QWidget):
         """A box per wheel, from the config file: its hotkey, or none until you set one (decision 216)."""
         rows = wheels_config.hotkey_rows(self.ctx.data_root, SPECS, icon_names())
         if [w for w, _ in rows] != list(self.wheel_hotkeys):
-            while self.wheel_form.rowCount():
-                self.wheel_form.removeRow(0)
-            self.wheel_hotkeys = {}
+            for box in self.wheel_hotkeys.values():
+                box.hide()
+                box.deleteLater()
+            self.wheel_hotkeys, self.wheel_names = {}, {}
             for n, (wheel_id, name) in enumerate(rows, 1):
                 box = QLineEdit()
                 box.setPlaceholderText(f"Off, such as Ctrl+Shift+{n}" if n < 10 else "Off")
                 box.setFixedWidth(200)
                 self.wheel_hotkeys[wheel_id] = box
-                self.wheel_form.addRow(f"The {name} wheel", box)
+                self.wheel_names[wheel_id] = f"The {name} wheel"
+            self._fill_hotkey_rows()
         for wheel_id, box in self.wheel_hotkeys.items():
             box.setText(self.ctx.settings.wheel_hotkeys.get(wheel_id, ""))
 

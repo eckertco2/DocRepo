@@ -137,9 +137,10 @@ class GlossaryImportDialog(QDialog):
         self.import_button.clicked.connect(self.import_now)
         close = QPushButton("Close")
         close.clicked.connect(self.reject)
-        buttons.addWidget(self.import_button)
         buttons.addWidget(close)
+        buttons.addWidget(self.import_button)  # the primary at the right end, made first so Tab reaches it first (release 5.193)
         lay.addLayout(buttons)
+        QWidget.setTabOrder(self.import_button, close)
         self._show_sheet(False)
         self._show_tags(False)
 

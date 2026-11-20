@@ -258,7 +258,9 @@ def test_edit_tasks_duration_and_ties_are_under_more_options(browse, ctx):
     for w in (plain.duration_field, plain.calendar, plain.tie_panel, *plain.tie_buttons.values(), plain.key_dates):
         assert plain.more.isAncestorOf(w)
     assert not plain.more.isAncestorOf(plain.start) and not plain.more.isAncestorOf(plain.due) and not plain.more.isAncestorOf(plain.deadline)
-    assert plain.when_hint.text() == WHEN_HINT and "Quick edit" in WHEN_HINT and not plain.when_hint.isHidden()
+    # in Start's, Due's and More options' tooltips since release 5.193 (decision 868), the line no longer shown
+    assert plain.when_hint.text() == WHEN_HINT and "Quick edit" in WHEN_HINT and not plain.when_hint.isVisibleTo(plain)
+    assert WHEN_HINT in plain.start.line.toolTip() and WHEN_HINT in plain.due.line.toolTip() and WHEN_HINT in plain.more_button.toolTip()
     assert [b.text() for b in plain.tie_buttons.values()] == ["Tie Start…", "Tie Due…"]
     plain.deleteLater()
     ctx.conn.execute("UPDATE tasks SET duration = 5 WHERE id = 'T000001'")

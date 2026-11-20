@@ -42,7 +42,6 @@ from docrepo.db import RECURRENCES
 from docrepo.model import Model
 from docrepo.schedule import placed
 from docrepo.tasks import unit_span
-from docrepo.ui import tokens
 from docrepo.ui.context import AppContext
 from docrepo.ui.icons import icon, icon_size
 from docrepo.ui.look import floating, tip
@@ -57,25 +56,9 @@ UNITS = ("all", "day", "week")  # the unit box's choices, in order
 CHIP_TEXT = 102  # what a person's chip has room for beside the hours and their unit: a longer name is shortened
 #: The top line's height: dragging it, outside its buttons, moves the window.
 HEAD = 32
+#: Quick edit's one height (release 5.193, decision 868): its fields, Save and the close button.
+CONTROL = 28
 NO_REPEAT = "Doesn't repeat"
-
-
-def _extra_style() -> str:
-    """Its own rules, beside the look's style sheet: the frame, the top line and the chips' states."""
-    c = tokens.colour
-    return f"""
-QWidget#quickEdit {{ background: {c("content")}; border: 1px solid {c("stroke_strong")}; }}
-QWidget#qeHead {{ background: {c("base")}; border-bottom: 1px solid {c("stroke")}; }}
-QLabel#qeKind {{ color: {c("text2")}; font-size: {tokens.CAPTION}pt; }}
-QLabel#qeTitle {{ font-weight: 600; color: {c("text")}; }}
-QLabel#qeField {{ color: {c("text2")}; font-size: {tokens.CAPTION}pt; }}
-QWidget#quickEdit QLineEdit, QWidget#quickEdit QComboBox, QWidget#quickEdit QAbstractSpinBox {{ min-height: 20px; max-height: 20px; padding: 3px 6px; }}
-QWidget#quickEdit QLineEdit:focus, QWidget#quickEdit QComboBox:focus, QWidget#quickEdit QAbstractSpinBox:focus {{ padding-bottom: 2px; }}
-QWidget#quickEdit QComboBox QLineEdit, QWidget#quickEdit QAbstractSpinBox QLineEdit {{ padding: 0; min-height: 0; }}
-QWidget#quickEdit QPushButton {{ min-height: 20px; max-height: 20px; padding: 3px 10px; }}
-QToolButton#chip[off="true"] {{ color: {c("text2")}; background: {c("content")}; text-decoration: line-through; }}
-QToolButton#chip[why="true"] {{ color: {c("text2")}; background: {c("content")}; border-style: dashed; }}
-"""
 
 
 class PeopleRow(QWidget):
@@ -95,7 +78,6 @@ class PeopleRow(QWidget):
         self.add_button.setAccessibleName("Add a lead" if role == "leads" else "Add an assignee")
         self.add_button.setToolTip(self.add_button.accessibleName())
         self.add_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        self.add_button.setStyleSheet("QToolButton::menu-indicator { image: none; width: 0; }")
         self.add_menu = QMenu(self.add_button)
         self.add_button.setMenu(self.add_menu)
         self._flow.addWidget(self.add_button)
@@ -109,7 +91,7 @@ class PeopleRow(QWidget):
                 item.widget().deleteLater()
         for i, p in enumerate(self.ids):
             b = QToolButton(objectName="chip")
-            b.setStyleSheet("QToolButton#chip { padding: 1px 2px; }")
+            b.setProperty("person", True)  # its tighter padding is in lane E's block of the style sheet (release 5.193)
             b.ensurePolished()
             name, tail = self.model.person_name(p), f" {self.shares[p]}% ×" if p in self.shares else "  ×"
             metrics = b.fontMetrics()
@@ -161,7 +143,7 @@ class QuickEdit(QWidget):
         self.setObjectName("quickEdit")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setWindowTitle(f"Quick edit: {self.task.title}")
-        self.setStyleSheet(style_sheet() + _extra_style())
+        self.setStyleSheet(style_sheet())  # its own rules are in lane E's block of the style sheet (release 5.193, decision 868)
         self.setFixedWidth(WIDTH)
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -184,7 +166,7 @@ class QuickEdit(QWidget):
         close = QToolButton(objectName="iconButton")
         close.setIcon(icon("close"))
         close.setIconSize(icon_size(16))
-        close.setFixedSize(24, 24)
+        close.setFixedSize(CONTROL, CONTROL)
         close.setAccessibleName("Close")
         tip(close, "Close; asks first when something changed", "Esc")
         close.clicked.connect(self.escape)

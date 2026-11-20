@@ -47,10 +47,8 @@ class ImportDialog(QDialog):
         super().__init__(parent)
         self.ctx = ctx
         self.setWindowTitle("Import projects from Excel")
-        self.setStyleSheet(f"QDialog {{ background: {C.content}; }} QLabel#hint {{ color: {C.text2}; }} "
-                           f"QLabel#error {{ background: {C.critical_bg}; color: {C.critical}; padding: 6px 10px; }} "
-                           f"QPushButton#primary {{ background: {C.accent}; color: {C.content}; border: 1px solid {C.accent}; padding: 4px 14px; }}"
-                           f"QPushButton#primary:disabled {{ background: {C.stroke_strong}; border-color: {C.stroke_strong}; }}")
+        # no style sheet of its own since release 5.193 (decision 868): the application's has a dialog's, a hint's, an error's
+        # and the primary button's rules
         self.resize(760, 420)  # it grows when a workbook is chosen
         self.path: Path | None = None
         self.rows: list[list[object]] = []
@@ -132,9 +130,10 @@ class ImportDialog(QDialog):
         self.import_button.clicked.connect(self.import_now)
         close = QPushButton("Close")
         close.clicked.connect(self.reject)
-        buttons.addWidget(self.import_button)
         buttons.addWidget(close)
+        buttons.addWidget(self.import_button)  # the primary at the right end, made first so Tab reaches it first (release 5.193)
         lay.addLayout(buttons)
+        QWidget.setTabOrder(self.import_button, close)
         self._show_states([])
         self.preview.setHtml('<p class="note">Choose the workbook that holds your project list.</p>')
 

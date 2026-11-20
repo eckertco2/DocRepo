@@ -130,12 +130,14 @@ class TextWindow(_Window):
         for i, (words, what, told) in enumerate(buttons):
             b = QPushButton(words, objectName="primary" if i == len(buttons) - 1 else "")
             b.clicked.connect(lambda _=False, w=what, t=told: self.copy(w, t))
-            row.addWidget(b)
             self.copies.append(b)
         back = QPushButton(close)
         back.clicked.connect(lambda _=False: self.reject())
-        row.addWidget(back)
+        row.addWidget(back)  # before the copies, so the primary is at the right end (release 5.193); Tab still reaches them first
+        for b in self.copies:
+            row.addWidget(b)
         self.outer.addLayout(row)
+        self.footer_row = row
 
     def copy(self, text: str, told: str) -> None:
         _copy(text)
@@ -208,10 +210,10 @@ class TreeImportDialog(_Window):
         self.commit_button = QPushButton("Import as template", objectName="primary")
         self.commit_button.setDefault(True)
         self.commit_button.clicked.connect(lambda _=False: self.save())
-        foot.addWidget(self.commit_button)
         cancel = QPushButton("Cancel")
         cancel.clicked.connect(lambda _=False: self.reject())
         foot.addWidget(cancel)
+        foot.addWidget(self.commit_button)  # the primary at the right end, made first so Tab reaches it first (release 5.193)
         self.outer.addLayout(foot)
         self.tree: QTreeWidget | None = None
         self.detail: QTextBrowser | None = None
@@ -576,10 +578,10 @@ class EditReviewDialog(_Window):
         self.commit_button = QPushButton(objectName="primary")
         self.commit_button.setDefault(True)
         self.commit_button.clicked.connect(lambda _=False: self.save())
-        foot.addWidget(self.commit_button)
         cancel = QPushButton("Cancel")
         cancel.clicked.connect(lambda _=False: self.reject())
         foot.addWidget(cancel)
+        foot.addWidget(self.commit_button)  # the primary at the right end, made first so Tab reaches it first (release 5.193)
         self.outer.addLayout(foot)
         self._sync()
 

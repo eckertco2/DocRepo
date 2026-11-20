@@ -95,6 +95,16 @@ MORE_OPTIONS = "More options: hours, Duration, ties, key dates, reminder, recurr
 #: edit's, and the rest of what shapes a task's dates is under More options.
 WHEN_HINT = ("Dates in words, such as “due Fri” or “every Monday”, go in Quick edit: Q or a right-click on the Timeline. "
              "Duration, ties and key dates are under More options.")
+#: Edit task's Duration (release 5.46): how a Duration and the dates move together.
+DATE_HINT = ("With a Duration, changing Start or Due moves the block, and only the Duration changes its length. Clear a date to take "
+             "it off the calendar, keeping its size.")
+#: What a key date is: the key dates editor's empty line until release 5.193, the tooltip of + Add key date since.
+KEY_DATE_HINT = "A key date is a date in the task's story: a start, a target or a window, without a subtask."
+
+
+def tip_join(*parts: str) -> str:
+    """Tooltips that each apply, one after another with a blank line between (release 5.193, decision 868)."""
+    return "\n\n".join(x for x in parts if x)
 
 
 class ShareSpin(QSpinBox):
@@ -520,12 +530,13 @@ class KeyDatesEditor(QWidget):
         self.list = QVBoxLayout()
         self.list.setSpacing(6)
         lay.addLayout(self.list)
-        self.empty = QLabel("None. A key date is a date in the task's story: a start, a target or a window, without a subtask.",
+        self.empty = QLabel("None yet.",
                             objectName="hint")
         self.empty.setWordWrap(True)
         lay.addWidget(self.empty)
         self.add_button = QPushButton("+ Add key date")
-        self.add_button.setToolTip("A start, an end or both, with a description: such as a trial's execution window")
+        # what a key date is, in the button's tooltip since release 5.193 (decision 868), not on the form
+        self.add_button.setToolTip(tip_join(KEY_DATE_HINT, "A start, an end or both, with a description: such as a trial's execution window"))
         self.add_button.clicked.connect(lambda: self.add_row())
         lay.addWidget(self.add_button, 0, Qt.AlignmentFlag.AlignLeft)
         self.lines: list[KeyDateLine] = []
@@ -1056,7 +1067,7 @@ class TaskEditDialog(FormDialog):
         self.duration.setAccessibleName("Duration in days")
         self.calendar = QCheckBox("Runs through weekends")
         self.calendar.setChecked(t.calendar_days)
-        self.calendar.setToolTip("Count every day, for its Due and where its hours land, not only workdays")
+        self.calendar.setToolTip(tip_join("Count every day, for its Due and where its hours land, not only workdays", DATE_HINT))
         days_box = QWidget()
         days_row = QHBoxLayout(days_box)
         days_row.setContentsMargins(0, 0, 0, 0)
@@ -1074,10 +1085,10 @@ class TaskEditDialog(FormDialog):
             when.addWidget(w)
         when.addStretch()
         g.addLayout(when)
-        # Where dates are typed in words, and where the rest is (release 5.100, decisions 395 and 396): a line, no control.
-        self.when_hint = QLabel(WHEN_HINT, objectName="hint")
-        self.when_hint.setWordWrap(True)
-        g.addWidget(self.when_hint)
+        # Where dates are typed in words, and where the rest is (release 5.100, decisions 395 and 396): in the tooltips of
+        # Start, Due and More options since release 5.193 (decision 868); the label is kept, never shown, for what reads it.
+        self.when_hint = QLabel(WHEN_HINT, self, objectName="hint")
+        self.when_hint.hide()
         self.date_warn = QLabel(objectName="linkLeaving")
         self.date_warn.setWordWrap(True)
         g.addWidget(self.date_warn)
@@ -1092,10 +1103,9 @@ class TaskEditDialog(FormDialog):
         calendar_row.addWidget(self.calendar, 0, Qt.AlignmentFlag.AlignBottom)
         calendar_row.addStretch()
         ml.addLayout(calendar_row)
-        self.date_hint = QLabel("With a Duration, changing Start or Due moves the block, and only the Duration changes its length. Clear a date to take "
-                                "it off the calendar, keeping its size.", objectName="hint")
-        self.date_hint.setWordWrap(True)
-        ml.addWidget(self.date_hint)
+        # in the tooltips of Duration and Runs through weekends since release 5.193 (decision 868), never shown
+        self.date_hint = QLabel(DATE_HINT, self, objectName="hint")
+        self.date_hint.hide()
         self.tie_panel = TiePanel(m, task_id, t.ties, pick_task, link)
         self.tie_buttons: dict[str, QToolButton] = {}
         ties_row = QHBoxLayout()
@@ -1245,6 +1255,7 @@ class TaskEditDialog(FormDialog):
                          or t.duration is not None or t.ties or any(t.references.get(n) for n in reference_fields) or t.review_every is not None)
         self.more.setVisible(open_more)
         set_fold(self.more_button, MORE_OPTIONS, open_more)
+        self.more_button.setToolTip(WHEN_HINT)
         self.more_button.clicked.connect(self._toggle_more)
         g.addStretch()
 
@@ -1522,15 +1533,16 @@ class TaskEditDialog(FormDialog):
         days = typed_days(self.duration)
         length = None if days is not None or not self.duration.text().strip() == "" else self._length_now()
         self.duration.setPlaceholderText(str(length) if length else "")
+        # with both dates tied, the length is theirs and moving the block doesn't come into it; otherwise the hint follows
         self.duration.setToolTip("Both dates are tied, so the length comes from them." if len(self.tie_panel.ties) == 2 else
-                                 f"{length} day{'' if length == 1 else 's'} from its dates. Type a number to keep it when the dates move." if length
-                                 else "How many days it takes. Typed, it's kept when the dates move.")
+                                 tip_join(f"{length} day{'' if length == 1 else 's'} from its dates. Type a number to keep it when the dates move." if length
+                                          else "How many days it takes. Typed, it's kept when the dates move.", DATE_HINT))
         for name, box, other in (("start", self.start, "Due"), ("due", self.due, "Start")):
             worked, tie = name in self._worked, self.tie_panel.ties.get(name)
             set_filled(box.line, worked or tie is not None, name="worked")
+            # a tied date says what its tie does; one that's typed has where dates in words go (release 5.193)
             box.line.setToolTip(f"Tied: {self.tie_panel.sentence(tie)}. Change it, and the tie stays with a new gap." if tie
-                                else f"Worked out from {other} and Duration" if worked else "")
-        self.date_hint.setVisible(days is not None and not self.recurrence.currentIndex())
+                                else tip_join(f"Worked out from {other} and Duration" if worked else "", WHEN_HINT))
         due, deadline = self._due_value(), self.deadline.value() if self.deadline.is_valid() else None
         late = bool(days is not None and due and deadline and due > deadline)
         self.date_warn.setText(f"Due is after the Deadline, {long_date(to_date(deadline), self.today)}." if late else "")
@@ -1897,10 +1909,16 @@ class LabelMatchDialog(FormDialog):
             self.rows.add_tick(item, False)
         self.rows.end()
         lay.addWidget(self.rows, 1)
+        # the form's footer (release 5.193, decision 868): a hairline, then Tick all and Clear quiet, Close, and Apply at the
+        # right end, Apply made first so Tab reaches it before Close
+        rule = QFrame(objectName="divider")
+        rule.setFrameShape(QFrame.Shape.HLine)
+        rule.setFrameShadow(QFrame.Shadow.Plain)
+        lay.addWidget(rule)
         buttons = QHBoxLayout()
         buttons.addWidget(Help("Ctrl+Enter applies."))
         for text, on in (("Tick all", True), ("Clear", False)):
-            b = QPushButton(text)
+            b = QPushButton(text, objectName="subtle")
             b.clicked.connect(lambda _=False, on=on: self.tick_all(on))
             buttons.addWidget(b)
         buttons.addStretch()
@@ -1908,9 +1926,11 @@ class LabelMatchDialog(FormDialog):
         self.apply_button.clicked.connect(self.apply)
         close = QPushButton("Close")
         close.clicked.connect(self.reject)
-        buttons.addWidget(self.apply_button)
         buttons.addWidget(close)
+        buttons.addWidget(self.apply_button)
         lay.addLayout(buttons)
+        self.footer_row = buttons
+        QWidget.setTabOrder(self.apply_button, close)
         self._sync()
 
     def save(self) -> None:

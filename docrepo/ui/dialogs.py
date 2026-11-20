@@ -6,7 +6,6 @@ from collections.abc import Callable
 
 from PySide6.QtWidgets import (
     QComboBox,
-    QFormLayout,
     QLabel,
     QLineEdit,
     QVBoxLayout,
@@ -15,12 +14,25 @@ from PySide6.QtWidgets import (
 
 from docrepo.ui.look import Help
 from docrepo.ui.style import style_sheet
-from docrepo.ui.widgets import FormDialog, dialog_buttons
+from docrepo.ui.widgets import FormDialog, dialog_buttons, field
 
 
 def split_list(text: str) -> list[str]:
     """A comma-separated list, such as aliases or keywords."""
     return [x.strip() for x in text.split(",") if x.strip()]
+
+
+class _Rows:
+    """A small form's fields (release 5.193, decision 868): each a grey label 4 px over its field, 16 px between them, as
+    every form has them. ``addRow(label, widget)`` adds a field; ``addRow(widget)`` a widget alone, such as a sentence."""
+
+    def __init__(self) -> None:
+        self.layout = QVBoxLayout()
+        self.layout.setContentsMargins(0, 0, 0, 0)
+        self.layout.setSpacing(16)
+
+    def addRow(self, label: str | QWidget, widget: QWidget | None = None) -> None:  # noqa: N802 - QFormLayout's name, kept for its callers
+        self.layout.addWidget(label if widget is None else field(label, widget))
 
 
 class _Form(FormDialog):
@@ -31,31 +43,18 @@ class _Form(FormDialog):
         self.setStyleSheet(style_sheet())
         self.setMinimumWidth(480)
         self.layout_ = QVBoxLayout(self)
-        self.layout_.setContentsMargins(24, 20, 24, 20)
+        self.layout_.setContentsMargins(24, 20, 24, 16)  # the form design's (release 5.193, decision 868)
         self.layout_.setSpacing(16)
         if note:
             self.layout_.addWidget(Help(note))
-        # Labels above their fields, 8 px apart, 16 px between fields (the visual overhaul's O4).
-        self.form = QFormLayout()
-        self.form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
-        self.form.setVerticalSpacing(16)
-        self.layout_.addLayout(self.form)
+        self.form = _Rows()
+        self.layout_.addLayout(self.form.layout)
         self.error = QLabel(objectName="error")
         self.error.setWordWrap(True)
         self.error.hide()
         self.layout_.addWidget(self.error)
-        self.layout_.addWidget(Help(self.KEYS_HINT))
-        self.layout_.addLayout(dialog_buttons(self, "Save", self._accept, self.reject))
+        self.layout_.addLayout(dialog_buttons(self, "Save", self._accept, self.reject, Help(self.KEYS_HINT)))
         self.check: Callable[[], str | None] = lambda: None
-
-    def showEvent(self, event) -> None:  # noqa: N802 - Qt's name
-        super().showEvent(event)
-        # the labels QFormLayout makes, in the role every form's labels have (release 5.61)
-        for row in range(self.form.rowCount()):
-            item = self.form.itemAt(row, QFormLayout.ItemRole.LabelRole)
-            if item is not None and item.widget() is not None and item.widget().objectName() != "fieldLabel":
-                item.widget().setObjectName("fieldLabel")
-                item.widget().style().polish(item.widget())
 
     def save(self) -> None:
         self._accept()
