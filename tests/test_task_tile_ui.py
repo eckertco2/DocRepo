@@ -20,7 +20,7 @@ from docrepo.ui import tokens  # noqa: E402
 from docrepo.ui.browse_window import BrowseWindow  # noqa: E402
 from docrepo.ui.capture_window import CaptureWindow  # noqa: E402
 from docrepo.ui.context import AppContext  # noqa: E402
-from docrepo.ui.tree_view import KEY_ROLE, LINE_ROLE, TILE_GAP, Line  # noqa: E402
+from docrepo.ui.tree_view import KEY_ROLE, LINE_ROLE, Line, RowTree  # noqa: E402
 
 NOW = datetime(2026, 10, 8, 14, 10)
 BOOK, RIGGING, OVERTIME, REACTOR, INSTALL, DRAFTING = "T000019", "T000012", "T000015", "T000001", "T000008", "T000011"
@@ -79,7 +79,7 @@ def test_the_days_column_is_a_number(browse):
     browse.render_list()
     from docrepo.ui.tree_view import HTML_ROLE
 
-    assert ">1</span>" in row(browse, BOOK).data(1, HTML_ROLE)  # due tomorrow (decision 568)
+    assert ">1 d</span>" in row(browse, BOOK).data(1, HTML_ROLE)  # due tomorrow (decision 568), with its unit (857)
     assert "◆" in row(browse, INSTALL).data(1, HTML_ROLE)  # its deadline is the nearer date
 
 
@@ -92,14 +92,17 @@ def test_today_is_flat_so_its_tiles_have_depth_ticks_and_no_sun(browse, ctx):
     assert len(rigging.marks) == 2  # the sun's slot is left out: every task on Today is on it
 
 
-def test_tiled_views_set_their_rows_apart_by_the_gap(browse):
-    browse.set_view("tasks")
-    assert browse.tree.tiled
-    QApplication.processEvents()
-    browse.tree.doItemsLayout()
-    assert browse.tree.visualItemRect(row(browse, REACTOR)).height() == tokens.TREE_ROW + TILE_GAP
-    browse.set_view("people")
-    assert not browse.tree.tiled
+def test_rows_are_flat_at_one_height(browse):
+    """No tiles since release 5.183 (decision 850): the task tree's rows and People's are both 30 px."""
+    assert not hasattr(RowTree, "set_tiled") and not hasattr(browse.tree, "tiled")
+    heights = []
+    for view in ("tasks", "people"):
+        browse.set_view(view)
+        QApplication.processEvents()
+        browse.tree.doItemsLayout()
+        first = next(i for i in browse.tree.items() if i.data(0, KEY_ROLE) is not None)
+        heights.append(browse.tree.visualItemRect(first).height())
+    assert heights == [30, 30] == [tokens.TREE_ROW, tokens.LIST_ROW]
 
 
 # ---- the clicks (decision 572) ----

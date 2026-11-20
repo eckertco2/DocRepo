@@ -21,9 +21,9 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 
-from PySide6.QtCore import QPoint, QPointF, QRect, QSize, Qt, Signal
+from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QGuiApplication, QPainter, QPen
-from PySide6.QtWidgets import QApplication, QListWidget, QListWidgetItem, QStyle, QStyledItemDelegate, QStyleOptionViewItem, QWidget
+from PySide6.QtWidgets import QListWidget, QListWidgetItem, QStyle, QStyledItemDelegate, QStyleOptionViewItem, QWidget
 
 from docrepo import items
 from docrepo.task_tile import fit_title
@@ -107,7 +107,7 @@ class TaskRowDelegate(QStyledItemDelegate):
         self.small_bold = tokens.ui_font(tokens.LABEL, semibold=True)
 
     def row_height(self) -> int:
-        return max(28, QFontMetrics(self.font).height() + 8)
+        return max(30, QFontMetrics(self.font).height() + 8)  # 30 px, as every list's row since release 5.183
 
     def parts(self, o: Row, head: bool) -> tuple[tuple[bool, str] | None, bool, str, str]:
         """What a row shows beside its name: its mark ((top-level, colour), or None for a person), whether it's indented
@@ -153,7 +153,7 @@ class TaskRowDelegate(QStyledItemDelegate):
         """The backplate under a chevron the pointer is on: it's a button."""
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QColor(tokens.colour("hover")))
-        p.drawRoundedRect(box, tokens.RADIUS, tokens.RADIUS)
+        p.drawRoundedRect(box, tokens.RADIUS_S, tokens.RADIUS_S)
 
     def _words(self, p: QPainter, o: Words, rect: QRect) -> None:
         """A row that can't be picked: no hover, no selection, its words in grey."""
@@ -174,16 +174,17 @@ class TaskRowDelegate(QStyledItemDelegate):
             self._words(p, o, option.rect)
             return
         head = bool(index.data(HEAD_ROLE))
-        opt = QStyleOptionViewItem(option)
-        self.initStyleOption(opt, index)
-        opt.text = ""
-        style = opt.widget.style() if opt.widget is not None else QApplication.style()
-        rect = opt.rect
-        if head:  # the level's header (decision 330): a faint fill under the style's hover and selection
-            p.fillRect(rect, QColor(tokens.colour("base")))
-        style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, p, opt.widget)  # the row's back and selection, from the style sheet
+        rect = option.rect
         p.save()
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if head:  # the level's header (decision 330): a faint fill, under the hover's
+            p.fillRect(rect, QColor(tokens.colour("sunken")))
+        # The current row's ground, and the row under the pointer's, painted here rounded rather than by the style (release 5.183,
+        # decision 850): 4 px in from each side and a pixel off its top and bottom.
+        if option.state & (QStyle.StateFlag.State_Selected | QStyle.StateFlag.State_MouseOver):
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QColor(tokens.colour("hover")))
+            p.drawRoundedRect(QRectF(rect.adjusted(4, 1, -4, -1)), tokens.RADIUS_S, tokens.RADIUS_S)
         if head:
             p.setPen(QPen(QColor(tokens.colour("stroke")), 1))
             p.drawLine(QPointF(rect.left(), rect.bottom() + 0.5), QPointF(rect.left() + rect.width(), rect.bottom() + 0.5))

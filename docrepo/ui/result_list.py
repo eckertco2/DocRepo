@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from PySide6.QtCore import QAbstractListModel, QEvent, QModelIndex, QPoint, QRect, QSize, Qt, Signal
+from PySide6.QtCore import QAbstractListModel, QEvent, QModelIndex, QPoint, QRect, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import QAbstractItemView, QFrame, QListView, QStyle, QStyledItemDelegate, QStyleOptionViewItem
 
@@ -21,7 +21,7 @@ from docrepo.ui import tokens
 from docrepo.ui.icons import tinted
 from docrepo.ui.task_tile import STATE_ICONS
 
-ITEM_HEIGHT, COMPACT_HEIGHT, HEAD_HEIGHT, SUB_HEIGHT, TIP_HEIGHT, MORE_HEIGHT, EMPTY_HEIGHT = 48, 32, 30, 26, 34, 32, 110
+ITEM_HEIGHT, COMPACT_HEIGHT, HEAD_HEIGHT, SUB_HEIGHT, TIP_HEIGHT, MORE_HEIGHT, EMPTY_HEIGHT = 48, 30, 30, 26, 34, 32, 110  # 30 px rows since 5.183
 ROW_ROLE = Qt.ItemDataRole.UserRole + 1
 #: The chevron after a task row's state, on hover (release 5.76, round 7's decision 360).
 STATE_CHEVRON = 12
@@ -136,8 +136,8 @@ class ResultDelegate(QStyledItemDelegate):
         elif row.kind == "tip":
             box = rect.adjusted(16, 4, -16, -4)
             p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(_c("base"))
-            p.drawRoundedRect(box, tokens.RADIUS, tokens.RADIUS)
+            p.setBrush(_c("sunken"))
+            p.drawRoundedRect(box, tokens.RADIUS_S, tokens.RADIUS_S)
             p.setFont(self.small)
             p.setPen(_c("text2"))
             p.drawText(box.adjusted(10, 0, -10, 0), Qt.AlignmentFlag.AlignVCenter, row.label)
@@ -160,22 +160,23 @@ class ResultDelegate(QStyledItemDelegate):
         p.restore()
 
     def paint_head(self, p: QPainter, rect: QRect, row: Row) -> None:
+        """A group's head (release 5.183, decision 856): a small grey semibold label and its count, on the content's white (a
+        stuck head is drawn over rows), with no line under it."""
         p.fillRect(rect, _c("content"))
-        p.setPen(QPen(_c("stroke"), 1))
-        p.drawLine(rect.left(), rect.bottom(), rect.right(), rect.bottom())
         x = rect.left() + 16
         if row.fold:
             p.drawPixmap(QPoint(x - 4, rect.top() + (rect.height() - 14) // 2), tinted("chevron-right" if row.folded else "chevron-down", tokens.colour("text2"), 14,
                                                                                          p.device().devicePixelRatioF()))
             x += 14
-        p.setFont(self.bold)
-        p.setPen(_c("text"))
-        fm = QFontMetrics(self.bold)
+        label, count = tokens.ui_font(tokens.LABEL, semibold=True), tokens.ui_font(tokens.LABEL)
+        p.setFont(label)
+        p.setPen(_c("text3"))
+        fm = QFontMetrics(label)
         p.drawText(QRect(x, rect.top(), rect.width(), rect.height()), Qt.AlignmentFlag.AlignVCenter, row.label)
-        x += fm.horizontalAdvance(row.label) + 8
+        x += fm.horizontalAdvance(row.label) + 6
         if row.count is not None:
-            p.setFont(self.numbers)
-            p.setPen(_c("text2"))
+            p.setFont(count)
+            p.setPen(_c("text3"))
             p.drawText(QRect(x, rect.top(), 80, rect.height()), Qt.AlignmentFlag.AlignVCenter, str(row.count))
         if row.hint:
             p.setFont(self.small)
@@ -183,19 +184,19 @@ class ResultDelegate(QStyledItemDelegate):
             p.drawText(rect.adjusted(0, 0, -16, 0), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, row.hint)
 
     def paint_back(self, p: QPainter, option, rect: QRect) -> None:
+        """A row's rounded ground (release 5.183, decision 850): 6 px in from each side and a pixel off its top and bottom, the
+        accent's tint when it's chosen and the hover grey under the pointer, with no accent bar (decision 844)."""
         selected = bool(option.state & QStyle.StateFlag.State_Selected)
         hovered = bool(option.state & QStyle.StateFlag.State_MouseOver)
-        if selected:
-            p.fillRect(rect, _c("selected"))
+        box = QRectF(rect.adjusted(6, 1, -6, -1))
+        if selected or hovered:
             p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(_c("accent"))
-            p.drawRoundedRect(QRect(rect.left() + 4, rect.top() + (rect.height() - 16) // 2, 3, 16), tokens.RADIUS_EDGE, tokens.RADIUS_EDGE)
-            if self.view.hasFocus():  # keyboard focus: a 2 px ring inside the row (WCAG 2.2's focus appearance)
-                p.setBrush(Qt.BrushStyle.NoBrush)
-                p.setPen(QPen(_c("accent"), 2))
-                p.drawRect(rect.adjusted(1, 1, -1, -1))
-        elif hovered:
-            p.fillRect(rect, _c("hover"))
+            p.setBrush(_c("selected" if selected else "hover"))
+            p.drawRoundedRect(box, tokens.RADIUS_S, tokens.RADIUS_S)
+        if selected and self.view.hasFocus():  # keyboard focus: a 2 px ring on the ground (WCAG 2.2's focus appearance)
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.setPen(QPen(_c("accent"), 2))
+            p.drawRoundedRect(box.adjusted(1, 1, -1, -1), tokens.RADIUS_S - 1, tokens.RADIUS_S - 1)
 
     def paint_item(self, p: QPainter, option, rect: QRect, row: Row) -> None:
         r = row.record
@@ -242,7 +243,7 @@ class ResultDelegate(QStyledItemDelegate):
             p.save()
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(_c("pressed"))
-            p.drawRoundedRect(button, tokens.RADIUS, tokens.RADIUS)
+            p.drawRoundedRect(button, tokens.RADIUS_S, tokens.RADIUS_S)
             p.restore()
             p.drawPixmap(QPoint(button.right() - STATE_CHEVRON - 2, button.top() + (button.height() - STATE_CHEVRON) // 2),
                          tinted("chevron-down", tokens.colour("text2"), STATE_CHEVRON, p.device().devicePixelRatioF()))

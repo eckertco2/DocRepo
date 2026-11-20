@@ -9,11 +9,13 @@ row has its group's colour as an edge.
 from __future__ import annotations
 
 import contextlib
+import html as html_lib
+import re
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 
 from PySide6.QtCore import QModelIndex, QPoint, QRect, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import (QAbstractTextDocumentLayout, QColor, QCursor, QFont, QFontMetrics, QPainter, QPainterPath, QPalette, QTextDocument,
+from PySide6.QtGui import (QAbstractTextDocumentLayout, QColor, QCursor, QFont, QFontMetrics, QPainter, QPalette, QTextDocument,
                            QTextOption)
 from PySide6.QtWidgets import (QAbstractItemView, QHBoxLayout, QHeaderView, QLabel, QMenu, QPushButton, QStyle, QStyledItemDelegate, QStyleOptionViewItem,
                                QToolTip, QTreeWidget, QTreeWidgetItem, QWidget)
@@ -52,6 +54,8 @@ RULE_ROLE = Qt.ItemDataRole.UserRole + 9
 #: The current task's row under Now on Today (release 5.177, the current task plan's decision 828): the ``now`` ground and
 #: the accent edge.
 NOW_ROLE = Qt.ItemDataRole.UserRole + 10
+#: A group's head (release 5.183, the redesign's decision 856): a ``Head``, painted as a small grey label with no band.
+HEAD_ROLE = Qt.ItemDataRole.UserRole + 11
 
 #: The categories' colours, read from the active theme when they're drawn (release 5.180).
 GROUP_COLOURS = tokens.LiveList(tokens.GROUP_KEYS)
@@ -78,8 +82,13 @@ CHIPS = {"urgent": ("critical", "critical_bg", True), "pri-critical": ("on_accen
          "routine": ("text", "hover", False), "count": ("text2", "hover", False)}
 #: Marks drawn as coloured words, not chips: a key date's plant flag and deadline diamond.
 MARKS = ("critical", "caution")
-#: The room between tiles in a tiled view (release 5.138, the task tile plan's decision 571), and their corners.
-TILE_GAP, TILE_RADIUS, TILE_INSET = 2, 4, 4
+#: Flat rows on white (release 5.183, the redesign's decision 850, retiring decision 571's tiles): a row's rounded ground stands
+#: ``ROW_INSET`` from the pane's left and right edges, and its last words stop ``ROW_END`` inside it.
+ROW_INSET, ROW_END = 6, 10
+#: A task's priority mark (decision L9), in the gutter left of the ground: its left, its width and its height.
+EDGE_X, EDGE_W, EDGE_H = 2, 3, 16
+#: A group head's dot (Today's bands), and the room after it.
+HEAD_DOT, HEAD_DOT_GAP = 7, 7
 #: The depth ticks' slot and the room after it, before the state circle, in a flat list (decision 570).
 TICKS_W = TICK_SLOT + 2
 
@@ -171,8 +180,43 @@ def tint(group: int, depth: int) -> QColor | None:
 
 
 def group_ground() -> QColor:
-    """Behind a group's heading in a list."""
+    """The sign of a group's head, passed as ``add_row``'s ``background``: since release 5.183 (decision 856) a head paints no
+    band, so this is never set on the row, and a row given it that can't be selected and says ``<b>…</b>`` is a ``Head``."""
     return QColor(tokens.colour("base"))
+
+
+@dataclass
+class Head:
+    """A group's head (release 5.183, the redesign's decision 856): a small grey semibold name, its count and any words after
+    it, on one line, with no band. ``dot`` is a colour for a dot before the name (Today's bands); ``tag`` is the view's own,
+    such as Today's band key."""
+
+    name: str
+    count: str = ""
+    sub: str = ""
+    dot: str = ""
+    tag: str = ""
+
+
+_TAGS = re.compile(r"<[^>]+>")
+_COUNT = re.compile(r"[\d,\s]+")
+
+
+def _plain(markup: str) -> str:
+    return " ".join(html_lib.unescape(_TAGS.sub(" ", markup)).replace("\xa0", " ").split())
+
+
+def head_of(markup: str) -> Head:
+    """A head from the HTML its caller wrote (``<b>Name</b> <span class="sub">12</span>``): the words inside the first
+    ``<b>…</b>`` are the name; the plain text of the rest, a leading "·" dropped, is the count when it's digits, commas and
+    spaces only, else the words after the name."""
+    m = re.search(r"<b>(.*?)</b>", markup, re.S)
+    if m is None:
+        return Head(_plain(markup))
+    rest = _plain(markup[m.end():]).lstrip("·").strip()
+    if rest and _COUNT.fullmatch(rest):
+        return Head(_plain(m.group(1)), count=rest)
+    return Head(_plain(m.group(1)), sub=rest)
 
 
 def with_actions(labels: list[str], widths: list[int], width: int) -> tuple[list[str], list[int]]:
@@ -247,6 +291,11 @@ class HtmlDelegate(QStyledItemDelegate):
         if html is None and line is None:
             super().paint(painter, option, index)
             return
+        head = index.siblingAtColumn(0).data(HEAD_ROLE)
+        if head is not None:  # a group's head: a small grey label, no band (release 5.183, decision 856)
+            if index.column() == 0:
+                self._paint_head(painter, option, head)
+            return
         opt = QStyleOptionViewItem(option)
         self.initStyleOption(opt, index)
         opt.text = ""
@@ -263,6 +312,9 @@ class HtmlDelegate(QStyledItemDelegate):
             painter.setOpacity(0.5)
         painter.setClipRect(opt.rect)
         rect = QRect(left + self.view.cell_pad, opt.rect.top(), opt.rect.right() - left - self.view.cell_pad - 3, opt.rect.height())
+        if self.view.is_last_shown(index.column()) or (index.column() == 0 and self.view.itemFromIndex(index).isFirstColumnSpanned()):
+            # the row's ground stops ROW_INSET short of the pane's edge, so its last words stop sooner (release 5.183)
+            rect.setRight(min(rect.right(), self.view.viewport().width() - ROW_INSET - ROW_END))
         if index.column() == 0:  # a hovered row's actions lie over its end: its words stop short of them
             strip = self.view.strip_left(self.view.itemFromIndex(index))
             if strip is not None:
@@ -280,7 +332,36 @@ class HtmlDelegate(QStyledItemDelegate):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QColor(tokens.colour("pressed")))
-        painter.drawRoundedRect(rect, tokens.RADIUS, tokens.RADIUS)
+        painter.drawRoundedRect(rect, tokens.RADIUS_S, tokens.RADIUS_S)
+        painter.restore()
+
+    def _paint_head(self, painter: QPainter, option: QStyleOptionViewItem, head: Head) -> None:
+        """A group's head (release 5.183, decision 856): on one line in the middle of the row, from the cell's own left, the dot
+        when there is one, the name small and semibold in the third grey, then its count and any words after it, small and
+        regular, cut with "…" at the row's end. No fill and no line."""
+        r = option.rect
+        right = self.view.viewport().width() - ROW_INSET - ROW_END
+        x = r.left() + self.view.cell_pad + 2
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setClipRect(QRect(r.left(), r.top(), max(0, right - r.left()), r.height()))
+        if head.dot:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(head.dot))
+            painter.drawEllipse(QRectF(x, r.center().y() - HEAD_DOT / 2 + 1, HEAD_DOT, HEAD_DOT))
+            x += HEAD_DOT + HEAD_DOT_GAP
+        name_font, rest_font = tokens.ui_font(tokens.LABEL, semibold=True), tokens.ui_font(tokens.LABEL)
+        nfm, rfm = QFontMetrics(name_font), QFontMetrics(rest_font)
+        painter.setPen(QColor(tokens.colour("text3")))
+        painter.setFont(name_font)
+        name = nfm.elidedText(head.name, Qt.TextElideMode.ElideRight, max(0, right - x))
+        painter.drawText(QRect(x, r.top(), max(0, right - x), r.height()), Qt.AlignmentFlag.AlignVCenter, name)
+        x += nfm.horizontalAdvance(name) + 6
+        rest = " ".join(w for w in (head.count, head.sub) if w)
+        if rest and x < right:
+            painter.setFont(rest_font)
+            painter.drawText(QRect(x, r.top(), right - x, r.height()), Qt.AlignmentFlag.AlignVCenter,
+                             rfm.elidedText(rest, Qt.TextElideMode.ElideRight, right - x))
         painter.restore()
 
     @staticmethod
@@ -415,7 +496,7 @@ class HtmlDelegate(QStyledItemDelegate):
                 pill = QRect(x, first.center().y() - 9, w, 19)
                 painter.setPen(Qt.PenStyle.NoPen)
                 painter.setBrush(QColor(tokens.colour(bg)))
-                painter.drawRoundedRect(pill, tokens.RADIUS, tokens.RADIUS)
+                painter.drawRoundedRect(pill, tokens.RADIUS_S, tokens.RADIUS_S)
                 painter.setFont(chip_font if bold else small)
                 painter.setPen(QColor(tokens.colour(fg)))
                 painter.drawText(pill, Qt.AlignmentFlag.AlignCenter, text)
@@ -482,8 +563,7 @@ class HtmlDelegate(QStyledItemDelegate):
         line = index.data(LINE_ROLE)
         if html is None and line is None:
             return super().sizeHint(option, index)
-        gap = TILE_GAP if self.view.tiled else 0  # every row, headings too, so the rows keep one height (decision 571)
-        return QSize(1, (TWO_LINE_ROW if line is not None and line.second is not None and self.view.two_lines else self.view.row_height) + gap)
+        return QSize(1, TWO_LINE_ROW if line is not None and line.second is not None and self.view.two_lines else self.view.row_height)
 
 
 class RowTree(QTreeWidget):
@@ -495,6 +575,7 @@ class RowTree(QTreeWidget):
 
     def __init__(self) -> None:
         super().__init__()
+        self.setObjectName("rowTree")  # the style sheet's handle on the list's own ground (release 5.183)
         self.cell_pad = 3  # the room before each cell's text; the sidebar's views have more
         #: The row height for the view shown, and whether its rows with a second line take two lines (``set_density``).
         self.row_height = tokens.TREE_ROW
@@ -530,8 +611,6 @@ class RowTree(QTreeWidget):
         #: A task tile's whole right-click menu (release 5.138, the task tile plan's decision 573): given the task, the menu and
         #: the row's own actions, it fills the menu. When set, it's used for task rows in place of ``task_menus`` and ``state_menu``.
         self.tile_menu: Callable[[str, QMenu, list], None] | None = None
-        #: Rows drawn as tiles, set apart by tone on the list's ground (decision 571): the views of tasks set it.
-        self.tiled = False
         #: Enter on a task's row (decision 572): the browse window opens its page.
         self.task_opened: Callable[[str], None] | None = None
         self._state_hover: tuple[QTreeWidgetItem, int] | None = None  # the State cell under the mouse
@@ -802,17 +881,6 @@ class RowTree(QTreeWidget):
         self.row_height, self.two_lines = height, two_lines
         self.setUniformRowHeights(not two_lines)
 
-    def set_tiled(self, on: bool) -> None:
-        """Draw selectable rows as tiles (release 5.138, the task tile plan's decision 571): each the content's white with
-        4 px corners, ``TILE_GAP`` apart on the base grey, no outline. Headings stay on the ground."""
-        if on == self.tiled:
-            return
-        self.tiled = on
-        self.setProperty("tiled", on)
-        self.style().unpolish(self)
-        self.style().polish(self)
-        self.viewport().update()
-
     def end(self, select: object | None = None) -> None:
         if select is not None:
             self.select_key(select)
@@ -830,12 +898,14 @@ class RowTree(QTreeWidget):
         option = QStyleOptionViewItem()
         option.font = self.font()
         delegate = self.itemDelegate()
+        last = self.columnCount() - 1  # the last column's words stop inside the row's ground (release 5.183)
         for item in self.items():
             for i in range(1, self.columnCount()):
                 html = item.data(i, HTML_ROLE)
                 if html and not item.isFirstColumnSpanned():
                     need = int(delegate._doc(html, 1000, option, wrap=False).idealWidth()) + self.cell_pad + 12
-                    widths[i] = max(widths[i], min(MAX_CELL, need))
+                    end = ROW_INSET + ROW_END if i == last else 0
+                    widths[i] = max(widths[i], min(MAX_CELL, need) + end)
         if widths != self._widths:
             self._widths = widths
             for i in range(1, len(widths)):
@@ -853,14 +923,27 @@ class RowTree(QTreeWidget):
                 item.setData(i, LINE_ROLE, html)
                 html = html.html()
             item.setData(i, HTML_ROLE, html)
-            if background is not None:
-                item.setBackground(i, background)
             if tip:
                 item.setToolTip(i, tip)
+        # No ground is set on a row (release 5.183, decision 856): a row given one that can't be selected and whose first cell
+        # names a group in <b>…</b> is a head, painted as a small grey label.
+        first = cells[0] if cells else None
+        if background is not None and not selectable and isinstance(first, str) and "<b>" in first:
+            item.setData(0, HEAD_ROLE, head_of(first))
         if not selectable:
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
         if span:
             item.setFirstColumnSpanned(True)
+        return item
+
+    def add_head(self, parent: QTreeWidgetItem | None, name: str, count: str = "", sub: str = "", dot: str = "", tag: str = "",
+                 tip: str = "") -> QTreeWidgetItem:
+        """A group's head made directly (release 5.183, decision 856): a row that can't be selected, spanning the list, its
+        ``HTML_ROLE`` written as ``add_row``'s callers write a head's, so Find and the tests read it the same."""
+        words = " ".join(esc(w) for w in (count, sub) if w)
+        item = self.add_row(parent, None, [f"<b>{esc(name)}</b>" + (f' <span class="sub">{words}</span>' if words else "")], None, tip,
+                            selectable=False, span=True)
+        item.setData(0, HEAD_ROLE, Head(name, count, sub, dot, tag))
         return item
 
     @contextlib.contextmanager
@@ -1001,7 +1084,8 @@ class RowTree(QTreeWidget):
             strip.hide()
             return
         width = strip_width(item.data(0, ACTIONS_ROLE))
-        strip.setGeometry(self.viewport().width() - width, rect.top(), width, rect.height())
+        fill = self.fill_rect(rect)  # inside the row's ground, at its end (release 5.183)
+        strip.setGeometry(fill.right() + 1 - width, fill.top(), width, fill.height())
         strip.show()
         strip.raise_()
         self.viewport().update(rect)  # its words stop short of the strip
@@ -1010,7 +1094,7 @@ class RowTree(QTreeWidget):
         """Where the row's strip of actions starts, while the row is under the mouse, so its words stop short of it."""
         if item is None or item is not self._hover or item.data(0, ACTIONS_ROLE) is None:
             return None
-        return self.viewport().width() - strip_width(item.data(0, ACTIONS_ROLE))
+        return self.viewport().width() - ROW_INSET - strip_width(item.data(0, ACTIONS_ROLE))
 
     def show_empty(self, text: str, label: str, clicked: Callable[[], None]) -> None:
         """An empty list's words and the one action that adds something (the playbook's empty states, release 5.61). Gone at the next ``begin``."""
@@ -1031,7 +1115,12 @@ class RowTree(QTreeWidget):
         if self._building:
             return
         at = self.viewport().mapFromGlobal(QCursor.pos())
+        was = self._hover
         self._hover = self.itemAt(at) if self.viewport().rect().contains(at) else None
+        if self._hover is not was:  # the ground follows the row under a still pointer (release 5.183)
+            for row in (was, self._hover):
+                if row is not None and self.indexFromItem(row).isValid():
+                    self.viewport().update(self._row_rect(row))
         self._sync_strips()
 
     def mouseMoveEvent(self, event) -> None:  # noqa: N802 - Qt's name
@@ -1047,6 +1136,8 @@ class RowTree(QTreeWidget):
 
     def leaveEvent(self, event) -> None:  # noqa: N802 - Qt's name
         super().leaveEvent(event)
+        if self._hover is not None and self.indexFromItem(self._hover).isValid():  # its ground goes (release 5.183)
+            self.viewport().update(self._row_rect(self._hover))
         self._hover = None
         self._hover_state(None)
         self._sync_strips()
@@ -1140,51 +1231,50 @@ class RowTree(QTreeWidget):
         key = index.siblingAtColumn(0).data(KEY_ROLE)
         return self.priorities.get(key[1], "") if isinstance(key, tuple) and len(key) == 2 and key[0] == "task" else ""
 
+    def fill_rect(self, rect: QRect) -> QRect:
+        """A row's rounded ground (release 5.183, decision 850): ``ROW_INSET`` in from the pane's left and right edges, and a
+        pixel off its top and bottom, so a hovered row beside the selected one reads as two."""
+        return QRect(ROW_INSET, rect.top() + 1, self.viewport().width() - 2 * ROW_INSET, rect.height() - 2)
+
+    def is_last_shown(self, column: int) -> bool:
+        """Whether ``column`` is the last one not hidden: its words stop inside the row's ground."""
+        return column == max((i for i in range(self.columnCount()) if not self.isColumnHidden(i)), default=0)
+
     def drawRow(self, painter, option, index) -> None:  # noqa: N802 - Qt's name
-        """The mark at a row's left edge: the accent bar on the selected row, else the task's priority in its
-        colour (release 5.81, decision L9), at any depth. Nothing on an unranked row. A row kept for context has it faded."""
+        """A row flat on white (release 5.183, decision 850): under a row that can be selected, a rounded ground, the
+        accent's tint when it's selected, the hover grey under the pointer, ``now`` on the current task's row; then the row;
+        then, in the gutter left of the ground, its mark: the task's priority in its colour (decision L9), selected or not, or
+        the accent on the current task's row (5.177). A row kept for context has its mark faded. A head has none of it."""
         first = index.siblingAtColumn(0)
         selected = self.selectionModel().isSelected(first)
-        # A tile (release 5.138, decision 571): the content's white under the row, then whatever the row draws, then the
-        # ground's grey put back in the gap and the corners round it, so a hover or a selection is a tile too.
-        tile = self.tiled and bool(first.flags() & Qt.ItemFlag.ItemIsSelectable)
-        row = QRect(0, option.rect.top(), self.viewport().width(), option.rect.height())
-        box = row.adjusted(TILE_INSET, TILE_GAP // 2, -TILE_INSET, -(TILE_GAP - TILE_GAP // 2))
-        if tile:
+        ground = None
+        if first.flags() & Qt.ItemFlag.ItemIsSelectable:
+            item = self.itemFromIndex(first)
+            ground = ("selected" if selected else "hover" if item is not None and item is self._hover
+                      else "now" if first.data(NOW_ROLE) else None)
+        if ground:
             painter.save()
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(tokens.colour("now" if first.data(NOW_ROLE) and not selected else "content")))
-            painter.drawRoundedRect(QRectF(box), TILE_RADIUS, TILE_RADIUS)
+            painter.setBrush(QColor(tokens.colour(ground)))
+            painter.drawRoundedRect(QRectF(self.fill_rect(option.rect)), tokens.RADIUS_S, tokens.RADIUS_S)
             painter.restore()
         super().drawRow(painter, option, index)
-        if tile:
-            ground = QPainterPath()
-            ground.addRect(QRectF(row))
-            inner = QPainterPath()
-            inner.addRoundedRect(QRectF(box), TILE_RADIUS, TILE_RADIUS)
-            painter.save()
-            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-            painter.fillPath(ground.subtracted(inner), QColor(tokens.colour("base")))
-            painter.restore()
-        bucket = "" if selected else self.row_priority(first)
-        mark = (tokens.colour("accent") if selected or first.data(NOW_ROLE)  # the current task's row: the accent edge (5.177)
+        bucket = self.row_priority(first)
+        mark = (tokens.colour("accent") if first.data(NOW_ROLE)  # the current task's row: the accent mark (5.177)
                 else tokens.colour(PRIORITY_EDGES[bucket]) if bucket in PRIORITY_EDGES else None)
         if mark:
             painter.save()
-            if not selected and first.data(DIM_ROLE):
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            if first.data(DIM_ROLE):
                 painter.setOpacity(0.5)
-            if tile:  # the edge is the tile's own left edge, inside its corners
-                edge = QPainterPath()
-                edge.addRoundedRect(QRectF(box), TILE_RADIUS, TILE_RADIUS)
-                painter.setClipPath(edge)
-                painter.fillRect(box.left(), box.top(), 3, box.height(), QColor(mark))
-            else:
-                painter.fillRect(0, option.rect.top() + 2, 3, option.rect.height() - 4, QColor(mark))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(mark))
+            painter.drawRoundedRect(QRectF(EDGE_X, option.rect.center().y() + 0.5 - EDGE_H / 2, EDGE_W, EDGE_H), tokens.RADIUS_EDGE, tokens.RADIUS_EDGE)
             painter.restore()
         rule = first.data(RULE_ROLE)
         if rule:  # the hairline over the first of a band's rest (decision 821)
-            painter.fillRect(TILE_INSET + 6, option.rect.top(), self.viewport().width() - 2 * TILE_INSET - 12, 1, QColor(rule))
+            painter.fillRect(ROW_INSET + 8, option.rect.top(), self.viewport().width() - 2 * (ROW_INSET + 8), 1, QColor(rule))
 
     def _item_changed(self, item: QTreeWidgetItem, column: int) -> None:
         if self._building or column != 0 or item.data(0, Qt.ItemDataRole.CheckStateRole) is None:
@@ -1206,7 +1296,7 @@ class RowTree(QTreeWidget):
         if (item is not None and self.hasFocus()
                 and self.window().testAttribute(Qt.WidgetAttribute.WA_KeyboardFocusChange)):
             p = QPainter(self.viewport())
-            paint_focus_ring(p, self._row_rect(item))
+            paint_focus_ring(p, self.fill_rect(self.visualItemRect(item)))  # round the row's ground (release 5.183)
             p.end()
 
     def mousePressEvent(self, event) -> None:  # noqa: N802 - Qt's name

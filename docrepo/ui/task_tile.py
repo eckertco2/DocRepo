@@ -38,7 +38,7 @@ FLAG = 13           # Urgent's flag and the two-parents mark
 KIND = 12           # a parent's or a routine task's mark, between the circle and the title (release 5.168, decision 786)
 KIND_GAP = 5        # after the kind's mark
 TICK_SLOT = 12      # the depth ticks' slot, in a flat list
-DAYS_W = 34         # the days number's column
+DAYS_W = 46         # the days number's column, with its unit (release 5.183, decision 857: "50 d")
 PRIORITY_EDGES = {"critical": "pri_critical", "high": "pri_high", "medium": "pri_medium", "parking": "pri_parking"}
 #: The state circle's icon and colour token for each state, and a collection's folder: defined here only, for every tile
 #: (release 5.168, decision 786: one recipe for the three renderers). Colour as well as shape since release 5.181 (decision 858):
@@ -53,8 +53,8 @@ def marks_width(marks: tuple) -> int:
 
 
 def days_colour(d: task_tile.Days) -> str:
-    """The days number's colour token: critical when late, caution when soon, else secondary text."""
-    return {"over": "critical", "soon": "caution"}.get(d.kind, "text2")
+    """The days number's colour token: critical when late, caution when soon, else the third grey (release 5.183)."""
+    return {"over": "critical", "soon": "caution"}.get(d.kind, "text3")
 
 
 def paint_ticks(painter: QPainter, x: int, mid: int, n: int) -> None:
@@ -327,10 +327,10 @@ class MarksDays(QWidget):
         self._hits = []
         if self.tile.days is not None:
             d = self.tile.days
-            p.setFont(tokens.ui_font(tokens.CAPTION, semibold=True))
+            p.setFont(tokens.ui_font(tokens.CAPTION, semibold=bool(d.kind)))  # semibold only when soon or late (decision 857)
             p.setPen(QColor(tokens.colour(days_colour(d))))
             box = QRect(r.right() - DAYS_W, r.top(), DAYS_W, r.height())
-            p.drawText(box, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, ("◆ " if d.deadline else "") + d.text)
+            p.drawText(box, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, ("◆ " if d.deadline else "") + d.shown)
             self._hits.append((box, d.tip))
         if self.tile.marks:
             self._hits += paint_marks(p, r.right() - DAYS_W - 6, mid, self.tile.marks, self.devicePixelRatioF())
@@ -429,11 +429,10 @@ class TileWidget(QWidget):
         x = paint_kind(p, x, mid, t, scale, self._hits)
         right = r.right() - 4
         fm = QFontMetrics(self._font)
-        small = tokens.ui_font(tokens.CAPTION, semibold=True)
         if t.days is not None:
-            p.setFont(small)
+            p.setFont(tokens.ui_font(tokens.CAPTION, semibold=bool(t.days.kind)))  # semibold only when soon or late (decision 857)
             p.setPen(QColor(tokens.colour(days_colour(t.days))))
-            text = ("◆ " if t.days.deadline else "") + t.days.text
+            text = ("◆ " if t.days.deadline else "") + t.days.shown
             box = QRect(right - DAYS_W, r.top(), DAYS_W, r.height())
             p.drawText(box, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, text)
             self._hits.append((box, t.days.tip))
