@@ -631,6 +631,28 @@ QFrame#prStrip { background: $sunken; border: none; border-radius: ${radius_l}px
 /* release 5.192 (the Timeline and Capacity), lane E: the mode strips (the line under the chart already has its rule above) */
 QFrame#modeStrip { background: $selected; border: none; border-radius: ${radius_l}px; }
 QFrame#modeStrip QLineEdit { background: $content; }
+/* release 5.193 (forms and Settings), lane E: the form design, Quick edit, Log progress (decision 868) */
+QLabel#heading { font-size: ${section}pt; font-weight: 600; color: $text; }
+QLabel#fieldLabel, QLabel#qeField { color: $text2; font-size: ${caption}pt; }
+QPushButton#progressTask { background: $content; color: $text; border: 1px solid $stroke_strong; border-radius: ${radius}px;
+  padding: 0 10px; min-height: 32px; max-height: 32px; text-align: left; }
+QPushButton#progressTask:hover { background: $hover; }
+QPushButton#progressTask:focus { border: 2px solid $accent; padding: 0 9px; }
+QWidget#quickEdit { background: $content; border: 1px solid $stroke_strong; }
+QWidget#qeHead { background: $content; border: none; }
+QLabel#qeKind { color: $text3; font-size: ${caption}pt; }
+QLabel#qeTitle { font-weight: 600; color: $text; }
+QWidget#quickEdit QLineEdit, QWidget#quickEdit QComboBox, QWidget#quickEdit QAbstractSpinBox { min-height: 26px; max-height: 26px; padding: 0 8px; }
+QWidget#quickEdit QLineEdit:focus, QWidget#quickEdit QComboBox:focus, QWidget#quickEdit QAbstractSpinBox:focus { padding: 0 7px; }
+QWidget#quickEdit QComboBox QLineEdit, QWidget#quickEdit QAbstractSpinBox QLineEdit { padding: 0; min-height: 0; }
+QWidget#quickEdit QPushButton { min-height: 26px; max-height: 26px; padding: 0 12px; }  /* 28 with its edge */
+QWidget#quickEdit QPushButton#link { min-height: 0; padding: 0 2px; }
+QWidget#quickEdit QToolButton#chip { min-height: 20px; max-height: 20px; padding: 0 6px; border-radius: ${radius_s}px; }
+QWidget#quickEdit QToolButton#chip[person="true"] { padding: 0 2px; }
+QWidget#quickEdit QToolButton#chip::menu-indicator { image: none; width: 0; }
+QWidget#quickEdit QToolButton#chip[off="true"] { color: $text2; background: $content; text-decoration: line-through; }
+QWidget#quickEdit QToolButton#chip[why="true"] { color: $text2; background: $content; border-style: dashed; }
+QScrollArea#settingsScroll, QScrollArea#settingsScroll > QWidget > QWidget { background: $content; }  /* Settings on the content card's white, not a grey of its own */
 /* ---- end lane E ---- */
 """)
 

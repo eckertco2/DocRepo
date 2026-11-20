@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLayout,
@@ -72,6 +73,15 @@ class FormDialog(QDialog):
 
     def save(self) -> None:
         self.accept()
+
+    def showEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        """The footer's buttons changed sides in release 5.193; the keyboard's order didn't: the last field, the commit
+        button, then Cancel."""
+        super().showEvent(event)
+        commit, cancel = getattr(self, "commit_button", None), getattr(self, "cancel_button", None)
+        if commit is not None and cancel is not None and not getattr(self, "_tab_held", False):
+            self._tab_held = True
+            QWidget.setTabOrder(commit, cancel)
 
     def snapshot(self) -> Any:
         """What's in the form's boxes, to tell whether anything changed since ``mark_clean``."""
@@ -312,12 +322,64 @@ class InfoButton(_Gate, QToolButton):
             QToolButton.setVisible(self, False)
 
 
+class Toggle(QCheckBox):
+    """A switch (release 5.193, decision 868): for a setting that takes effect the moment it's flipped, where a tick box is
+    for a yes or no saved with its form. A 30 by 18 px track with round ends, the accent's fill when on; a 14 px knob 2 px
+    inside it; its words, when it has any, 8 px after. It's a tick box to the keyboard and to a screen reader: Space flips
+    it, and a click anywhere on it does. Painted from the theme's colours, with no style rule."""
+
+    TRACK = QSize(30, 18)
+    KNOB = 14
+    GAP = 8
+
+    def __init__(self, text: str = "", parent: QWidget | None = None) -> None:
+        super().__init__(text, parent)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def sizeHint(self) -> QSize:  # noqa: N802 - Qt's name
+        words = self.fontMetrics().horizontalAdvance(self.text()) + self.GAP if self.text() else 0
+        return QSize(self.TRACK.width() + words + 2, max(20, self.TRACK.height() + 2, self.fontMetrics().height()))
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802 - Qt's name
+        return self.sizeHint()
+
+    def hitButton(self, pos: QPoint) -> bool:  # noqa: N802 - Qt's name
+        return self.rect().contains(pos)
+
+    def paintEvent(self, _event) -> None:  # noqa: N802 - Qt's name
+        from PySide6.QtCore import QRectF
+
+        from docrepo.ui import tokens
+
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        track = QRectF(1, (self.height() - self.TRACK.height()) / 2, self.TRACK.width(), self.TRACK.height())
+        on = self.isChecked()
+        fill = "stroke_strong" if not self.isEnabled() else "accent_fill" if on else "control"
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(tokens.colour(fill)))
+        p.drawRoundedRect(track, track.height() / 2, track.height() / 2)
+        inset = (self.TRACK.height() - self.KNOB) / 2
+        x = track.right() - inset - self.KNOB if on else track.left() + inset
+        p.setBrush(QColor(tokens.colour("on_accent")))
+        p.drawEllipse(QRectF(x, track.top() + inset, self.KNOB, self.KNOB))
+        if self.hasFocus() and self.focusPolicy() != Qt.FocusPolicy.NoFocus:
+            from docrepo.ui.look import paint_focus_ring
+
+            paint_focus_ring(p, track.toAlignedRect().adjusted(-1, -1, 1, 1))
+        if self.text():
+            p.setPen(QColor(tokens.colour("text" if self.isEnabled() else "disabled")))
+            left = int(track.right()) + self.GAP
+            p.drawText(QRect(left, 0, self.width() - left, self.height()), int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft), self.text())
+        p.end()
+
+
 def field(label: str, widget: QWidget | None, help_key: str | None = None, sub: str = "") -> QWidget:
     """A labelled field: its label (with an "i" button when there's help), the help note, then the widget."""
     box = QWidget()
     layout = QVBoxLayout(box)
     layout.setContentsMargins(0, 0, 0, 0)
-    layout.setSpacing(6)
+    layout.setSpacing(4)  # the label 4 px over its field (release 5.193, decision 868)
     row = QHBoxLayout()
     row.setSpacing(6)
     sub = sub if LOOK.show_help else ""  # a label's own hint, such as "a description for each", only with Show hints
@@ -348,25 +410,37 @@ def section(layout: QVBoxLayout, title: str) -> QLabel:
 
 
 def dialog_buttons(dialog: QWidget, commit: str, on_commit: Callable[[], None], on_cancel: Callable[[], None],
-                   note: QWidget | None = None, cancel: str = "Cancel") -> QHBoxLayout:
-    """A form's buttons, Windows' way: the commit button first, then Cancel, at the right, the same width; the commit button
-    is the window's one accent button. ``dialog.commit_button`` is the commit button."""
+                   note: QWidget | None = None, cancel: str = "Cancel") -> QVBoxLayout:
+    """A form's footer (release 5.193, decision 868, one form design): a hairline across the form, 12 px over a row of the
+    note at the left (the keys' hint, shown with Show hints), then Cancel, then the commit button at the right end, the
+    window's one accent button and its default. ``dialog.commit_button``, ``dialog.cancel_button`` and ``dialog.footer_row``
+    (the row) are set; ``FormDialog`` keeps Tab going from the commit button to Cancel, as before the two changed sides."""
+    foot = QVBoxLayout()
+    foot.setSpacing(12)
+    rule = QFrame(objectName="divider")
+    rule.setFrameShape(QFrame.Shape.HLine)
+    rule.setFrameShadow(QFrame.Shadow.Plain)  # one line in the stroke colour, not a sunken pair
+    rule.setFixedHeight(1)
+    foot.addWidget(rule)
     row = QHBoxLayout()
     row.setSpacing(8)
     if note is not None:
         row.addWidget(note, 1)
     row.addStretch()
-    button = QPushButton(commit, objectName="primary")
+    button = QPushButton(commit, objectName="primary")  # made first, so it's first in the focus chain
     button.setDefault(True)
     button.setMinimumWidth(96)
     button.clicked.connect(lambda _=False: on_commit())
     close = QPushButton(cancel)
-    close.setMinimumWidth(96)
+    close.setMinimumWidth(88)
     close.clicked.connect(lambda _=False: on_cancel())
-    row.addWidget(button)
     row.addWidget(close)
+    row.addWidget(button)
+    foot.addLayout(row)
     dialog.commit_button = button  # type: ignore[attr-defined]
-    return row
+    dialog.cancel_button = close  # type: ignore[attr-defined]
+    dialog.footer_row = row  # type: ignore[attr-defined]
+    return foot
 
 
 def fit_dialog(dialog: QWidget, body: QWidget, width: int, chrome: int = 140) -> None:

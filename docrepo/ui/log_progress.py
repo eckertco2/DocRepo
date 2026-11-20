@@ -236,11 +236,10 @@ class LogProgress(QWidget):
         lay.addLayout(row)
 
     def _build_task(self, grid: QGridLayout) -> None:
-        self.task_button = QPushButton(objectName="progressTask")
-        self.task_button.setStyleSheet("text-align: left; padding: 6px 10px;")
+        self.task_button = QPushButton(objectName="progressTask")  # drawn as a field that opens a list, in lane E's block (release 5.193)
         self.task_button.setToolTip("The task (Ctrl+T, or #): the # list")
         self.task_button.clicked.connect(self.pick_task)
-        name = QLabel("Task", objectName="hint")
+        name = QLabel("Task", objectName="fieldLabel")
         name.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         grid.addWidget(name, 0, 0)
         grid.addWidget(self.task_button, 0, 1)

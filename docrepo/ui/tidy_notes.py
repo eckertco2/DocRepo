@@ -10,7 +10,7 @@ import re
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QDialog, QDialogButtonBox, QLabel, QListWidget, QListWidgetItem, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QPushButton, QVBoxLayout, QWidget
 
 from docrepo import edits, markup, notes_page, page_lines
 from docrepo.model import Model
@@ -76,12 +76,17 @@ class TidyNotesDialog(QDialog):
             it.setCheckState(Qt.CheckState.Checked)
             self.rows.addItem(it)
         lay.addWidget(self.rows, 1)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
-        self.tidy_button = buttons.addButton("Tidy", QDialogButtonBox.ButtonRole.AcceptRole)
+        buttons = QHBoxLayout()  # Tidy at the right end, as a form's primary (release 5.193); Windows' button box put it first
+        buttons.addStretch()
+        self.tidy_button = QPushButton("Tidy")
         self.tidy_button.setDefault(True)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        lay.addWidget(buttons)
+        self.tidy_button.clicked.connect(self.accept)
+        cancel = QPushButton("Cancel")
+        cancel.clicked.connect(self.reject)
+        buttons.addWidget(cancel)
+        buttons.addWidget(self.tidy_button)
+        lay.addLayout(buttons)
+        QWidget.setTabOrder(self.tidy_button, cancel)
         self.resize(760, min(560, 170 + 30 * n))
 
     def chosen(self) -> list[page_lines.TidyLine]:
