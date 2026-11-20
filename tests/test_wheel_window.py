@@ -600,3 +600,39 @@ def test_the_blank_capture_with_nothing_in_the_window_just_opens(capture, data_r
     capture.set_task("T000008")
     capture.open_blank()
     assert capture.task is None and drafts.listed(data_root) == []
+
+
+# ---- the wheel redrawn (release 5.190, the redesign's decision 865) ----
+def _picture(w):
+    from PySide6.QtGui import QImage
+
+    picture = w.grab().toImage().convertToFormat(QImage.Format.Format_ARGB32)
+    return picture, w.devicePixelRatioF()
+
+
+def test_one_disc_on_a_shadow_with_a_clear_corner(wheel_window):
+    from docrepo.ui import tokens
+    from docrepo.ui import wheel_window as ww
+
+    w = wheel_window
+    open_tapped(w, "capture")
+    w.ring = 1.0
+    img, ratio = _picture(w)
+
+    def at(x: float, y: float):
+        return img.pixelColor(round(x * ratio), round(y * ratio))
+
+    mid = ww.SIZE / 2
+    assert at(2, 2).alpha() == 0  # the window's corner is clear: no square behind the disc
+    assert at(mid, mid).alpha() == 255
+    above = at(mid, mid - ww.OUTER - 4)  # just above the disc: the shadow, soft
+    assert 0 < above.alpha() < 255
+    # An empty slot's wedge is the disc's own colour, with nothing on it.
+    from PySide6.QtCore import QPointF
+    middle = ww._at(QPointF(mid, mid), (ww.OUTER + ww.INNER) / 2, ww.ANGLE["SE"])
+    assert at(middle.x(), middle.y()).name() == tokens.colour("content")
+    # The lit wedge is the selected tint, away from its words.
+    w.lit = "N"
+    img, ratio = _picture(w)
+    edge = ww._at(QPointF(mid, mid), ww.OUTER - 8, ww.ANGLE["N"] + 15)
+    assert at(edge.x(), edge.y()).name() == tokens.colour("selected")
