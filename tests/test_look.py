@@ -345,13 +345,14 @@ def test_a_floating_window_asks_windows_for_its_corners_and_edge(qapp, monkeypat
     monkeypatch.setattr(look, "dwm_set", lambda window, attribute, value: calls.append((attribute, value)) or True)
     w = QWidget()
     look.dress_window(w)
-    assert [a for a, _v in calls] == [look.DWMWA_CAPTION_COLOR]
+    # release 5.194: every window's frame light or dark with the theme, then its caption colour
+    assert [a for a, _v in calls] == [look.DWMWA_USE_IMMERSIVE_DARK_MODE, look.DWMWA_CAPTION_COLOR]
     calls.clear()
     look.floating(w)
     assert w.property("floating") is True
     look.dress_window(w)
     edge = QColor(tokens.colour("stroke_strong"))
-    assert calls == [(look.DWMWA_WINDOW_CORNER_PREFERENCE, look.DWMWCP_ROUND),
+    assert calls == [(look.DWMWA_USE_IMMERSIVE_DARK_MODE, 1 if tokens.theme() == "dark" else 0), (look.DWMWA_WINDOW_CORNER_PREFERENCE, look.DWMWCP_ROUND),
                      (look.DWMWA_BORDER_COLOR, edge.red() | edge.green() << 8 | edge.blue() << 16)]
     calls.clear()
     look.square(w, True)

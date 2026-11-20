@@ -36,7 +36,7 @@ from PySide6.QtWidgets import (
 
 from docrepo import __version__, backup, capacity, db, diagnose, hotkey, layer0, outlook, prompts, search, startup, stock_headings, tagged, wheels_config
 from docrepo import tagged_masks as masks
-from docrepo.config import OPEN_TASKS_IN, REVIEW_DAYS, Settings, data_root_problem, init_data_root, make_safe_fs, resolve_data_root, save_location
+from docrepo.config import OPEN_TASKS_IN, REVIEW_DAYS, THEMES, Settings, data_root_problem, init_data_root, make_safe_fs, resolve_data_root, save_location
 from docrepo.dates import WEEKDAYS, long_date, stamp
 from docrepo.links import check_link_template
 from docrepo.markup import esc
@@ -144,6 +144,8 @@ def check_values(ctx: AppContext, values: dict[str, Any]) -> dict[str, Any]:
         raise SettingsProblem("Gone quiet is after 1 to 365 days.")
     if out.get("open_tasks_in", "workspace") not in OPEN_TASKS_IN:  # release 5.174
         raise SettingsProblem("A task opens in its workspace or its page.")
+    if out.get("theme", "light") not in THEMES:  # release 5.194
+        raise SettingsProblem("The theme is Light, Dark or As Windows is set.")
     if out.get("me") and out["me"] not in Model(ctx.conn).people:
         raise SettingsProblem(f"There's no person {out['me']}.")
     if "tagged_patterns" in out or "tagged_never" in out:  # release 5.80
@@ -549,7 +551,13 @@ class SettingsView(QWidget):
         for key, words in OPEN_TASKS_IN.items():
             self.open_tasks_in.addItem(words, key)
         self.open_tasks_in.setFixedWidth(240)
+        # Theme (release 5.194, the redesign's decision 869): light, dark or as Windows is set, from the next start.
+        self.theme = QComboBox()
+        for key, words in THEMES.items():
+            self.theme.addItem(words, key)
+        self.theme.setFixedWidth(240)
         self._card(lay, "Look", [
+            ("Theme", "Light, dark, or as Windows is set when DocRepo starts. It changes at DocRepo's next start.", self.theme),
             ("Open a task in", "What a double-click or Enter on a task does, in a list, on a tile, in Task search, the quick summary and "
                                "File search. Shift does the other, and so does the second line of a task's right-click menu. A link "
                                "inside a page always goes to the task's page, and a collection opens at its page.", self.open_tasks_in),
@@ -988,6 +996,7 @@ class SettingsView(QWidget):
         self.backup_days.setValue(s.backup_every_days)
         self.backup_keep.setValue(s.backup_keep)
         self.open_tasks_in.setCurrentIndex(max(0, self.open_tasks_in.findData(s.open_tasks_in)))  # release 5.174
+        self.theme.setCurrentIndex(max(0, self.theme.findData(s.theme)))  # release 5.194
         self.hints.blockSignals(True)
         self.hints.setChecked(s.show_hints)
         self.hints.blockSignals(False)
@@ -1018,7 +1027,7 @@ class SettingsView(QWidget):
             "extracted_text_cap_chars": self.cap.value(), "prompt_warn_chars": self.warn.value(), "doc_check_minutes": self.check.value(),
             "backup_every_days": self.backup_days.value(), "backup_keep": self.backup_keep.value(),
             "show_hints": self.hints.isChecked(), "outlook_categories": self.categories.isChecked(),
-            "open_tasks_in": self.open_tasks_in.currentData(),
+            "open_tasks_in": self.open_tasks_in.currentData(), "theme": self.theme.currentData(),
             "outlook_category_colour": self.colour.currentData(), "today_meetings": self.meetings_on.isChecked(),
             "progress_sends": self.progress_sends.isChecked(),
             "links_keep": self.links_keep.lines(), "links_drop": self.links_drop.lines(), "other_links": self.other_links.currentData(),

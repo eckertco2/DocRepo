@@ -14,7 +14,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
 from PySide6.QtCore import QEvent, QPointF, QRectF, Qt, QTimer, QVariantAnimation
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QGuiApplication, QPainter, QPainterPath, QPen, QPixmap, QRadialGradient
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen, QPixmap, QRadialGradient
 from PySide6.QtWidgets import QWidget
 
 from docrepo.ui import tokens
@@ -74,8 +74,8 @@ def animations_on() -> bool:
 
 
 def colours() -> dict[str, str]:
-    """The wheel's colours: Windows' own under high contrast, otherwise light or dark as the colour scheme Qt has says, which
-    ``style.apply_look`` sets from the theme (release 5.180), so the wheel follows the theme."""
+    """The wheel's colours: Windows' own under high contrast, otherwise the theme's (release 5.194; until then, as the colour
+    scheme Qt had said)."""
     if _high_contrast():
         get = ctypes.windll.user32.GetSysColor
 
@@ -86,8 +86,7 @@ def colours() -> dict[str, str]:
         window, text, lit, on_lit, grey = sys(5), sys(8), sys(13), sys(14), sys(17)
         return {"content": window, "base": window, "stroke": text, "stroke_strong": text, "text": text, "text2": text, "text3": text,
                 "disabled": grey, "accent": lit, "on_accent": on_lit, "selected": lit, "contrast": "1"}
-    dark = QGuiApplication.styleHints().colorScheme() == Qt.ColorScheme.Dark
-    return tokens.THEMES["dark" if dark else "light"]
+    return tokens.active()  # the theme's, since release 5.194 (decision 869); Windows' own setting only through "As Windows is set"
 
 
 class WheelWindow(QWidget):

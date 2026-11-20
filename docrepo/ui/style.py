@@ -42,10 +42,22 @@ def page_css() -> str:
     return tokens.css()
 
 
+def theme_of(app: QGuiApplication, theme: str) -> str:
+    """The set a Settings theme means (release 5.194, decision 869): "dark" and "light" themselves; "system" Windows' own
+    setting, as Qt reads it with nothing asked of it; anything else, such as the "new" and "classic" looks callers passed
+    before, light."""
+    if theme == "system":
+        hints = app.styleHints()
+        if hasattr(hints, "unsetColorScheme"):  # Qt 6.8: forget any scheme asked before, to read Windows' own
+            hints.unsetColorScheme()
+        return "dark" if hasattr(hints, "colorScheme") and hints.colorScheme() == Qt.ColorScheme.Dark else "light"
+    return theme if theme in tokens.THEMES else "light"
+
+
 def apply_look(app: QGuiApplication, theme: str = "light", hints: bool = False) -> None:
-    """Set the look up from Settings, once the application exists and before any window is made. ``theme`` is "light" or
-    "dark" (release 5.180); anything else, such as the "new" and "classic" looks callers passed before, is read as light."""
-    tokens.use(theme if theme in tokens.THEMES else "light")
+    """Set the look up from Settings, once the application exists and before any window is made. ``theme`` is Settings'
+    Theme: "light", "dark" (release 5.180) or "system" (release 5.194, as Windows is set); anything else is light."""
+    tokens.use(theme_of(app, theme))
     configure(hints)
     hints_ = app.styleHints()
     if hasattr(hints_, "setColorScheme"):  # Qt 6.8: the theme's own, whatever Windows is set to
