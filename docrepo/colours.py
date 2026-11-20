@@ -67,6 +67,8 @@ LIGHT = {
     "ticked": "#5c5c66", "mark_yellow": "#fff1a8", "mark_green": "#cdeccd", "mark_pink": "#f8d0e3",
     # DocRepo's own icon, for the tray, the title bars and the taskbar (``app.make_icon``): the same in every theme.
     "brand": "#1d5e98", "brand_ink": "#ffffff",
+    # Lane D, release 5.187 (decision 863): a confirmation's doing button for what can't be undone, filled as the primary is.
+    "critical_fill": "#c9302c", "critical_hover": "#b32a27", "critical_pressed": "#9e2522",
 }
 #: The dark theme's values (decision 14): the same names. Not offered yet; release 5.194 settles how dark looks.
 DARK = {
@@ -92,6 +94,8 @@ DARK = {
     "nest_bar": "#3d4380", "unfold_bar": "#38383f", "moved_bar": "#4f8f80",
     "ticked": "#a3a3ad", "mark_yellow": "#5a4d12", "mark_green": "#1f4224", "mark_pink": "#4d2438",
     "brand": "#1d5e98", "brand_ink": "#ffffff",
+    # Lane D, release 5.187: the danger button's fill, dark enough for white words (6.5 to 1), as accent_fill is.
+    "critical_fill": "#b8372f", "critical_hover": "#c4453c", "critical_pressed": "#a3302a",
 }
 
 #: The themes by name.

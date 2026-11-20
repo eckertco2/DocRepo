@@ -1428,7 +1428,7 @@ class TemplatesPane:
         """Detach from template: all of a task's links end, and its values stay."""
         w = self.w
         name = w.model().origins[task_id].template if task_id in w.model().origins else None
-        if name and w.confirm("Detach from template", f"Detach {w.model().task(task_id).title} from {name}? Its values stay, and it won't follow {name} any more."):
+        if name and w.confirm("Detach from its template?", f"{w.model().task(task_id).title}'s values stay, and it won't follow {name} any more."):
             w._do(lambda: templates.detach(w.conn, w.ctx.data_root, w.ctx.fs, task_id, w._now()))
 
     def _moved(self, row_id: int, change: Callable[[], object]) -> None:
@@ -1476,7 +1476,7 @@ class TemplatesPane:
     def discard(self, template_id: int) -> None:
         w, lib = self.w, self.library()
         name = lib.name(template_id)
-        reason = w.ask_reason("Discard template", f"Discard {name}? It's hidden from Templates and kept in the Discarded view, where Bring back "
+        reason = w.ask_reason("Discard this template?", f"Discard {name}? It's hidden from Templates and kept in the Discarded view, where Bring back "
                                                   "restores it. Its tasks keep their values. Nothing is deleted.\n\nWhy?")
         if reason is None:
             return

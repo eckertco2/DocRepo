@@ -9,7 +9,7 @@ import logging
 from docrepo.detail import esc, row_state
 from docrepo.model import Model
 from docrepo.kinds import is_work
-from docrepo.ui import tokens
+from docrepo.ui import confirm, tokens
 from docrepo.views import (
     LIST_IDS,
 )
@@ -47,12 +47,10 @@ UNFILED_NOTE = ("Unfiled captures: saved without a task. Their folders are alrea
 
 
 def _answers(title: str, text: str) -> tuple[str, str]:
-    """What a question's two buttons say: what each does, not Yes and No (release 5.61)."""
-    if "without saving" in text:
-        return "Close without saving", "Keep editing"
-    if "off the page" in text:
-        return "Take it off the page", "Leave it on the page"
-    return title, "Cancel"
+    """What a question's two buttons say: what each does, not Yes and No (release 5.61). Since release 5.187 the words
+    are ``confirm.verbs``' table, found by the question's title."""
+    v = confirm.verbs(title, text)
+    return v.yes, v.no
 
 
 def _due_css(cls: str) -> str:

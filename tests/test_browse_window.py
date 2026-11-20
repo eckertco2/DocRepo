@@ -490,7 +490,7 @@ def test_discard_and_bring_back(browse):
     edit_menu = next(b for b in browse.actions.findChildren(QPushButton) if b.accessibleName() == "More ways to edit").menu()
     assert edit_menu.actions()[-1].text() == "Discard…"
     browse.discard_task("T000017")
-    assert asked == ["Discard task"] and ("task", "T000017") not in rows(browse) and browse.sel == ("task", "T000002")
+    assert asked == ["Discard this task?"] and ("task", "T000017") not in rows(browse) and browse.sel == ("task", "T000002")
     assert "Discarded Rails need to be painted red." in browse.status.text()
     browse.go_task("T000017")  # opening it from elsewhere shows it in the Discarded view
     assert browse.view == "discarded" and rows(browse) == [("task", "T000017")] and "Typed twice" in shown(browse)
@@ -832,12 +832,12 @@ def test_ctrl_enter_and_esc_in_a_capture_edit(browse):
     browse.confirm = lambda title, text: asked.append(title) or False
     browse.edit_capture_title.setText("Drawings late")
     _shortcut(form, "Escape").activated.emit()
-    assert asked == ["Edit capture C000017"] and browse.editing == "C000017"  # No keeps the edit open
+    assert asked == ["Close without saving?"] and browse.editing == "C000017"  # No keeps the edit open
     _shortcut(form, "Ctrl+Return").activated.emit()
     assert browse.editing is None and browse.status.text().startswith("Saved C000017.")
     browse.start_capture_edit("C000017")
     _shortcut(form, "Escape").activated.emit()  # nothing changed: it closes without asking
-    assert browse.editing is None and asked == ["Edit capture C000017"]
+    assert browse.editing is None and asked == ["Close without saving?"]
 
 
 def test_one_letter_per_topic(browse, monkeypatch):

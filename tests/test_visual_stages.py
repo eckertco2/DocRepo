@@ -11,12 +11,12 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest  # noqa: E402
 from PySide6.QtCore import QSize  # noqa: E402
-from PySide6.QtWidgets import QApplication, QLabel, QMessageBox, QPushButton, QTreeWidgetItem, QWidget  # noqa: E402
+from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QTreeWidgetItem, QWidget  # noqa: E402
 
 from docrepo import db  # noqa: E402
 from docrepo.config import Settings  # noqa: E402
 from docrepo.detail import row_state  # noqa: E402
-from docrepo.ui import browse_window, tokens  # noqa: E402
+from docrepo.ui import browse_window, confirm, tokens  # noqa: E402
 from docrepo.ui.browse_window import BrowseWindow  # noqa: E402
 from docrepo.ui.capture_window import CaptureWindow  # noqa: E402
 from docrepo.ui.context import AppContext  # noqa: E402
@@ -389,18 +389,17 @@ def test_parse_leaves_more_fields_shut(ctx):
 def test_a_question_says_what_its_buttons_do(qapp, monkeypatch):
     seen = {}
 
-    def answer(box: QMessageBox) -> int:
-        seen["buttons"] = [b.text() for b in box.buttons()]
-        seen["icon"] = box.icon()
-        seen["default"] = box.defaultButton().text()
-        return 0
+    def answer(box: confirm.Confirm) -> bool:  # DocRepo's own confirmation since release 5.187 (decision 863)
+        seen["buttons"] = [box.stay.text(), box.go.text()]
+        seen["default"] = box.stay.text() if box.stay.isDefault() else box.go.text()
+        return False
 
-    monkeypatch.setattr(QMessageBox, "exec", answer)
-    assert ask(None, "Discard capture", "Sure?", "Discard capture") is False
-    assert seen == {"buttons": ["Discard capture", "Cancel"], "icon": QMessageBox.Icon.NoIcon, "default": "Cancel"}
-    assert browse_window._answers("Edit capture C1", "Close without saving your changes?") == ("Close without saving", "Keep editing")
-    assert browse_window._answers("Discard capture", "Take it off the page too?") == ("Take it off the page", "Leave it on the page")
-    assert browse_window._answers("Change data root", "Use it?") == ("Change data root", "Cancel")
+    monkeypatch.setattr(confirm, "run", answer)
+    assert ask(None, "Discard this capture?", "Sure?", "Discard capture") is False
+    assert seen == {"buttons": ["Cancel", "Discard capture"], "default": "Cancel"}
+    assert browse_window._answers("Close without saving?", "What you changed in capture C1 is lost.") == ("Close without saving", "Keep editing")
+    assert browse_window._answers("Take its block off the notes page?", "It was edited there.") == ("Take it off the page", "Leave it on the page")
+    assert browse_window._answers("Change the data root?", "Use it?") == ("Change data root", "Keep this one")
 
 
 def test_edit_task_puts_the_rarer_fields_under_more_options(browse):

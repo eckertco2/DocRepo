@@ -15,6 +15,8 @@ from PySide6.QtWidgets import QDialog, QLabel, QLineEdit, QTreeWidgetItem, QVBox
 
 from docrepo import summary
 from docrepo.detail import esc
+from docrepo.ui import tokens
+from docrepo.ui.icons import icon
 from docrepo.ui.tree_view import KEY_ROLE, RowTree
 
 try:  # an approved package, used when it's there (requirements.txt pins it)
@@ -24,6 +26,9 @@ except ImportError:  # pragma: no cover - the fallback below
 
 #: How many commands the palette shows at once.
 SHOWN = 12
+#: A row's height, a group's head's too (release 5.187, decision 862), and how many rows show before the list scrolls.
+ROW = 34
+MOST_ROWS = 13
 #: Recent captures' row in the browse tool's and the capture window's palettes (release 5.158, decision 723), there
 #: whether or not a wheel has its slot.
 RECENT_CAPTURES = "Recent captures: open one on its notes page"
@@ -91,10 +96,11 @@ class CommandPalette(QDialog):
         self.commands = commands
         self.setMinimumWidth(520)
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(8, 8, 8, 8)
+        lay.setContentsMargins(6, 6, 6, 6)
         lay.setSpacing(6)
-        self.box = QLineEdit()
+        self.box = QLineEdit(objectName="paletteBox")
         self.box.setPlaceholderText("Type a command or a view")
+        self.box.addAction(icon("search", tokens.colour("text3")), QLineEdit.ActionPosition.LeadingPosition)
         self.box.textChanged.connect(self._fill)
         self.box.installEventFilter(self)
         lay.addWidget(self.box)
@@ -104,6 +110,7 @@ class CommandPalette(QDialog):
         self.list.setHeaderHidden(True)
         self.list.setRootIsDecorated(False)
         self.list.setIndentation(0)
+        self.list.set_density(ROW)
         self.list.itemActivated.connect(lambda item, _col: self._run_item(item))
         self.list.itemClicked.connect(lambda item, _col: self._run_item(item))
         lay.addWidget(self.list)
@@ -126,21 +133,36 @@ class CommandPalette(QDialog):
         return list(self._shown)
 
     def _fill(self, text: str) -> None:
+        """The commands for ``text``. With nothing typed they're in their own order, each run of one group under a head that
+        names it once (release 5.187, decision 862); typed, they're ranked, with no heads, and each row names its group after
+        the command, so two of one name can be told apart. A row's key is its command's place in ``_shown``; a head's is None."""
         self._shown = rank(text, self.commands)[:SHOWN]
+        heads = not text.strip()
         self.list.begin()
+        last: str | None = None
+        rows = 0
         for i, c in enumerate(self._shown):
-            group = f'<span class="sub">{esc(c.group)}:</span> ' if c.group else ""
-            self.list.add_row(None, i, [group + esc(c.name), f'<p align="right" class="sub">{esc(c.key)}</p>' if c.key else ""])
+            if heads and c.group != last:
+                self.list.add_row(None, None, [f'<span class="pgroup">{esc(c.group or "More")}</span>', ""], selectable=False, span=True)
+                last = c.group
+                rows += 1
+            name = esc(c.name)
+            if not heads and c.group:
+                name += f' <span class="pgroup">{esc(c.group)}</span>'
+            self.list.add_row(None, i, [name, f'<p align="right" class="pkey">{esc(c.key)}</p>' if c.key else ""])
+            rows += 1
         self.list.end(0 if self._shown else None)
         self.none.setVisible(not self._shown)
-        self.list.setFixedHeight(max(1, min(SHOWN, len(self._shown))) * 32 + 6)
+        self.list.setFixedHeight(max(1, min(MOST_ROWS, rows)) * ROW + 12)
 
     def eventFilter(self, watched, event) -> bool:  # noqa: N802 - Qt's name
         if watched is self.box and event.type() == QEvent.Type.KeyPress:
             key = event.key()
             if key in (Qt.Key.Key_Down, Qt.Key.Key_Up) and self._shown:
                 now = self.list.currentItem()
-                row = now.data(0, KEY_ROLE) if now is not None else -1
+                row = now.data(0, KEY_ROLE) if now is not None else None
+                if row is None:  # nothing current, or a group's head (release 5.187)
+                    row = -1
                 self.list.select_key((row + (1 if key == Qt.Key.Key_Down else -1)) % len(self._shown))
                 return True
             if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):

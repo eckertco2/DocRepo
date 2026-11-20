@@ -455,7 +455,7 @@ def test_detach_from_the_more_menu_asks_first(browse):
     asked = []
     browse.confirm = lambda title, text: asked.append(text) or False
     browse.templates.detach(made[1])
-    assert "Its values stay" in asked[0] and made[1] in Model(browse.conn).origins
+    assert "values stay" in asked[0] and made[1] in Model(browse.conn).origins
     browse.confirm = lambda title, text: True
     browse.templates.detach(made[1])
     assert made[1] not in Model(browse.conn).origins and "Detached." in browse.status.text()
