@@ -38,13 +38,15 @@ PANEL_PAD, PANEL_GAP, PANEL_MIN = 12, 8, 240
 #: The room kept for the count before a command folds under More: none, so a command keeps its place on the row while the
 #: count can be cut to make room for it (no command moves into a menu while there's room for it).
 COUNT_KEEP = 0
+#: Qt's largest widget size (QWIDGETSIZE_MAX, which PySide6 doesn't export): a width with no cap.
+WIDGET_MAX = (1 << 24) - 1
 #: The least of the title the row keeps when it's at its narrowest.
 TITLE_LEAST = 40
 #: The least room a cut count is shown in: with less, it goes, rather than show a stub such as "2…".
 COUNT_MIN = 48
 #: The header's least width, and the most its row asks for: the list pane keeps room for a title, Filter and More, and asks
 #: for its row's whole width up to this, as the bar of controls it replaces held the pane open.
-HEAD_MIN, HEAD_NATURAL_MAX = 220, 560
+HEAD_MIN, HEAD_NATURAL_MAX = 160, 560
 
 
 def shown(widget: QWidget | None) -> bool:
@@ -262,6 +264,9 @@ class ViewHeader(QWidget):
         self._focus = ""
         self._fitting = False
         self._fitted = -1  # the width the row was last fitted to
+        #: Filter's and Display's words, which a narrow row leaves off (``_compact``).
+        self._words = {self.filter_button: "Filter", self.display_button: "Display"}
+        self._compacted = False
         self._natural = -1  # the row's natural width when last asked
 
     def _row_button(self, words: str, icon_name: str, tip: str) -> QPushButton:
@@ -308,6 +313,7 @@ class ViewHeader(QWidget):
         _empty(self.commands_layout)
         _empty(self.folds_layout)
         _empty(self.tools_layout)
+        self.tools_layout.invalidate()  # its least width was the last view's: the next view's tool row asks again
         self._chips = []
 
     def add(self, widget: QWidget, where: str, label: str = "") -> QWidget:
@@ -341,13 +347,16 @@ class ViewHeader(QWidget):
         panel refilled."""
         self.chips.show_chips(self._chips)
         n = len(self._chips)
-        self.filter_button.setText(f"Filter · {n}" if n else "Filter")
+        self._words[self.filter_button] = f"Filter · {n}" if n else "Filter"
+        if not self._compacted:
+            self.filter_button.setText(self._words[self.filter_button])
+        self._tips()
         self.filter_button.setVisible(not self.filter_panel.is_empty())
         self.display_button.setVisible(not self.display_panel.is_empty())
         self.tools.setVisible(any(shown(self.tools_layout.itemAt(i).widget()) for i in range(self.tools_layout.count())))
         self.folds_box.setVisible(self.folds_layout.count() > 0)
         natural = self._row_natural()
-        if natural != self._natural and self.isVisible():  # the pane's layout asked again only when the row's width changed
+        if self.isVisible():  # the pane's layout asks again: the row's width, and the tool row's least, are this view's now
             self._natural = natural
             self.updateGeometry()
         self._fit()
@@ -385,6 +394,7 @@ class ViewHeader(QWidget):
             _cap(self.count, count_w)
             return
         fixed = [w for w in (self.filter_button, self.display_button, self.folds_box) if shown(w)]
+        self._compact(False)
 
         def width(widgets: list[QWidget]) -> int:
             return sum(w.sizeHint().width() for w in widgets) + GAP * len(widgets)
@@ -401,6 +411,8 @@ class ViewHeader(QWidget):
 
         while need() > room and len(hidden) < len(commands):
             hidden.insert(0, commands[len(commands) - 1 - len(hidden)])
+        if need() - title_w + min(title_w, TITLE_LEAST) > room:  # still too narrow: Filter and Display as their icons alone
+            self._compact(True)
         for b in hidden:
             b.setVisible(False)
         self.more_button.setVisible(bool(hidden))
@@ -412,6 +424,29 @@ class ViewHeader(QWidget):
             count_shown = 0
         _cap(self.title, title_shown)  # a cap, not a size: the labels ask for no width (ElidedLabel)
         _cap(self.count, count_shown)
+
+    def _compact(self, on: bool) -> None:
+        """Filter and Display with their words, or, in a row too narrow for them once every command has folded, as their
+        icons alone, their words (and Filter's count) in their tooltips: so the list pane can be dragged as narrow as it
+        could before release 5.184."""
+        if on == self._compacted:  # nothing to change: no relayout asked for
+            return
+        self._compacted = on
+        for b, words in self._words.items():
+            b.setText("" if on else words)
+            if on:
+                b.setFixedWidth(BUTTON_HEIGHT)
+            else:
+                b.setMinimumWidth(0)
+                b.setMaximumWidth(WIDGET_MAX)
+        self._tips()
+
+    def _tips(self) -> None:
+        """Filter's and Display's tooltips start with their words, which say Filter's count while the words are off."""
+        for b, words in self._words.items():
+            tip = f"{words}: {b.toolTip().split(': ', 1)[-1]}"
+            if b.toolTip() != tip:
+                b.setToolTip(tip)
 
     def folded(self) -> list[QPushButton]:
         """The commands under More now."""
@@ -438,12 +473,13 @@ class ViewHeader(QWidget):
         self._fit()
 
     def _row_least(self) -> int:
-        """The row's width with every command folded and the count gone: the title's first letters, Filter, Display, the
-        folds and More."""
-        parts = [w for w in (self.filter_button, self.display_button, self.folds_box) if shown(w)]
+        """The row's width with every command folded and the count gone: the title's first letters, Filter and Display as
+        their icons alone, the folds and More."""
+        buttons = sum(BUTTON_HEIGHT + GAP for w in (self.filter_button, self.display_button) if shown(w))
+        folds = self.folds_box.sizeHint().width() + GAP if shown(self.folds_box) else 0
         more = self.more_button.sizeHint().width() + GAP if self._commands else 0
         title = min(self.title.fontMetrics().horizontalAdvance(self._title) + 2, TITLE_LEAST)
-        return ROW_LEFT + ROW_RIGHT + title + more + sum(w.sizeHint().width() + GAP for w in parts)
+        return ROW_LEFT + ROW_RIGHT + title + buttons + folds + more
 
     def _row_natural(self) -> int:
         """The row's width with nothing folded or cut."""
