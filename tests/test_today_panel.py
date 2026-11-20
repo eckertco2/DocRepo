@@ -273,7 +273,8 @@ def test_the_today_view_draws_the_same_due_rows_as_before(app):
 
 def test_at_rest_it_is_narrow_and_says_the_count(app, panel):
     put_on_today(app)
-    assert panel.count.text().startswith("Today · ")
+    total = panel.count.property("total")
+    assert total >= 1 and panel.count.text() == str(total)  # narrow, the number alone (release 5.189)
     assert panel.target_width() == 180
     assert not panel.box_row.isVisibleTo(panel)
 
@@ -284,7 +285,8 @@ def test_widened_it_shows_more(app, panel):
     panel._update_state()
     assert panel.target_width() == 320
     assert panel.box_row.isVisibleTo(panel)
-    assert panel.rows and panel.rows[0].tick.isVisibleTo(panel.rows[0])  # its project's in its tooltip (release 5.165, decision 772)
+    # whole when widened; a task has no tick box since release 5.189 (decision 864): its circle is its state's menu
+    assert panel.rows and (panel.rows[0].tile is None or not panel.rows[0].tile.compact)
 
 
 def test_widths_come_from_the_config(app, panel, data_root, fs):
@@ -628,7 +630,7 @@ def test_a_task_is_its_tile_with_its_project_in_its_tooltip(app, panel):
     row = next(r for r in panel.rows if r.task_id == task)
     assert row.tile is not None and row.tile.tile.task_id == task and not row.tile.compact
     assert not hasattr(row, "second") and row.buttons.parent() is row and not row.subtitle.isVisibleTo(row)
-    assert row.tick.isVisibleTo(row) and (not row.subtitle.full or row.subtitle.full in row.tile.toolTip())
+    assert not row.tick.isVisibleTo(row) and (not row.subtitle.full or row.subtitle.full in row.tile.toolTip())  # no tick box (5.189)
     panel.hover.contract()
     panel._update_state()
     assert not row.tick.isVisibleTo(row) and row.tile.compact
@@ -650,15 +652,15 @@ def test_a_row_keeps_one_height_at_rest_widened_and_under_the_pointer(app, panel
     assert row.buttons.geometry().right() <= row.width() and row.buttons.geometry().height() <= row.height()
 
 
-def test_a_band_heading_is_a_thin_rule(app, panel):
-    """Decision 772: about half the height its words took (a caption line and its padding)."""
+def test_a_band_head_is_a_dot_a_name_and_a_count_at_rest(app, panel):
+    """Release 5.189 (decision 864, in place of 772's thin rule): a band's head is a dot, its name in sentence case and its
+    count, 26 px high, at rest as well as widened."""
     put_on_today(app)
+    panel.hover.contract()
     panel.refresh()
-    _wide(panel)
-    band = next(w for w in panel.extras if w.objectName() == "tpBand")
-    before = QLabel("HIGH  1")  # the heading as it was: a caption's words and their padding
-    before.setStyleSheet(f"font-size: {today_panel.tokens.CAPTION}pt; font-weight: 600; padding: 4px 2px 0 2px;")
-    assert band.height() <= before.sizeHint().height() * 0.65 and band.text().split("  ")[0] in ("HIGH", "MEDIUM", "LOW", "NOT RANKED")
+    band = next(h for h in panel.heads if h.count)
+    assert band.isVisibleTo(panel) and band.height() == today_panel.tokens.SIZE["today_head"]
+    assert band.text() == f"{band.name} {band.count}" and band.name in ("Critical", "High", "Medium", "Not ranked", "Parking lot")
 
 
 def test_the_state_is_the_tiles_circle_and_the_date_its_number(app, panel):
@@ -693,7 +695,7 @@ def test_due_in_the_next_7_days_has_the_short_date(app, panel):
     panel.refresh()
     _wide(panel)
     dates = [w for line in panel.extras for w in line.findChildren(QLabel, "tpDue")]
-    assert dates and all("·" not in w.text() and " d" not in w.text() and w.toolTip() for w in dates)  # the tile's number (568)
+    assert dates and all("·" not in w.text() and w.toolTip() for w in dates)  # short: the tile's days, with their unit since 5.183
 
 
 # ---- the width at rest (release 5.106, decision 406) ----
@@ -996,3 +998,32 @@ def test_a_note_s_row_has_no_workspace(app, panel):
     panel.refresh()
     row = next(r for r in panel.rows if r.task_id is None)
     assert row.tile is None  # nothing to double-click into: a note's row does what it did
+
+
+# ---- one circle a row, and "Add a task" (release 5.189, the redesign's decision 864) ----
+def test_a_task_has_no_tick_box_and_a_notes_circle_ticks_it(app, panel, monkeypatch):
+    task = _with_a_due(app)
+    note_on_today(app)
+    _wide(panel)
+    task_row = next(r for r in panel.rows if r.task_id == task)
+    note_row = next(r for r in panel.rows if r.task_id is None)
+    assert not task_row.tick.isVisibleTo(task_row) and isinstance(note_row.tick, today_panel._Circle) and note_row.tick.isVisibleTo(note_row)
+    asked = []
+    monkeypatch.setattr(panel, "state_clicked", lambda row, at=None: asked.append(row.task_id))
+    task_row.tile.state_clicked.emit(task, QPoint(1, 1))
+    assert asked == [task]  # the tile's circle is still its state's menu
+    note_id = note_row.item_id
+    note_row.tick.click()
+    assert note_id not in [a.id for a in Model(app.ctx.conn).today_items()]
+
+
+def test_add_a_task_becomes_the_box(app, panel):
+    put_on_today(app)
+    _wide(panel)
+    assert panel.add_button.isVisibleTo(panel) and not panel.box.isVisibleTo(panel)
+    panel.add_button.click()
+    assert panel.box.isVisibleTo(panel) and not panel.add_button.isVisibleTo(panel)
+    panel._show_add(True)  # left empty: the quiet row again (the box's focus going is what calls it)
+    key(panel, Qt.Key.Key_N)
+    assert panel.box.isVisibleTo(panel)
+    assert panel._takes_keyboard(panel.add_button) and panel._takes_keyboard(panel.box) and not panel._takes_keyboard(panel.rows[0])

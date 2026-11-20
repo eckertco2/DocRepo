@@ -660,43 +660,80 @@ class RowTree(QTreeWidget):
         self._file_drops = (takes, dropped)
         self.setAcceptDrops(True)
 
-    def set_bins(self, opens: Callable[[object], tuple | None], dropped: Callable[[object, tuple[str, bool]], None]) -> None:
-        """Today's bins (release 5.154, decisions 690 and 691), with row moves on: when a row's drag starts, ``opens`` gets its
-        move key and says the band it's in, each band's count and whether it's in the band's urgent half, or None for no bins
-        (a note's drag). While the drag lasts the bins are drawn down the list's left side; a drop on one calls ``dropped``
-        with the key and the target, the bin's band and whether its urgent part (release 5.176, decision 822)."""
-        from docrepo.ui.today_bins import VIEW_WIDTH, Bins  # here: today_bins needs nothing of this module, but keeps it light
+    def set_bins(self, opens: Callable[[object], tuple | None], dropped: Callable[[object, tuple[str, bool]], None],
+                 groups: Callable[[], dict] | None = None) -> None:
+        """Today's drop targets (release 5.154, decisions 690 and 691; the groups themselves since release 5.189, decision
+        864), with row moves on: when a row's drag starts, ``opens`` gets its move key and says the band it's in, each band's
+        count and whether it's in the band's urgent half, or None for none (a note's drag); ``groups`` gives each band's head
+        row and its rows by half, ``{band: (head, urgent rows, the rest)}``. While the drag lasts each band is a target,
+        outlined over the list, its empty heads shown; a drop on one calls ``dropped`` with the key and the target, the band
+        and whether its urgent half (release 5.176, decision 822)."""
+        from docrepo.ui.today_bins import DropGroups  # here: today_bins needs nothing of this module, but keeps it light
 
-        self._bin_hooks = (opens, dropped)
+        self._bin_hooks = (opens, dropped, groups)
         if self._bins is None:
-            self._bins = Bins(self.viewport(), VIEW_WIDTH)
+            self._bins = DropGroups(self.viewport(), heads=True)
+
+    def open_bins(self, key: object) -> bool:
+        """A row's drag starting: the bands as targets, the empty ones' heads shown, for the row ``key``. False for none."""
+        if not self._bin_hooks or self._bins is None:
+            return False
+        found = self._bin_hooks[0](key)
+        if found is None:
+            return False
+        self._drop_heads = self._bin_hooks[2]() if self._bin_hooks[2] is not None else {}
+        self._shown_heads = [head for head, _u, _r in self._drop_heads.values() if head.isHidden()]
+        for head in self._shown_heads:
+            head.setHidden(False)
+        self.executeDelayedItemsLayout()
+        self._bins.open_for(found[0], found[1], self.viewport().rect(), *found[2:3], groups=self._drop_groups())
+        return True
+
+    def close_drop_groups(self) -> None:
+        """The drag is over: the targets go and the empty bands' heads hide again."""
+        if self._bins is not None:
+            self._bins.close_bins()
+        for head in getattr(self, "_shown_heads", []):
+            try:
+                head.setHidden(True)
+            except RuntimeError:  # the list was drawn again
+                pass
+        self._shown_heads = []
+
+    def _drop_groups(self) -> list:
+        """Each band's head and halves, as targets in the viewport's coordinates."""
+        from docrepo.ui.today_bins import chip_rect, make_group
+
+        out = []
+        for band, (head, urgent, rest) in getattr(self, "_drop_heads", {}).items():
+            try:
+                rect = self.visualItemRect(head)
+            except RuntimeError:  # the list was drawn again
+                continue
+            if head.isHidden() or rect.isNull():
+                continue
+            out.append(make_group(band, rect, chip_rect(rect), [self.visualItemRect(i) for i in urgent],
+                                  [self.visualItemRect(i) for i in rest], len(urgent) + len(rest)))
+        return out
 
     def startDrag(self, actions) -> None:  # noqa: N802 - Qt's name
-        """A row's drag. Where the view asks for bins (``set_bins``), they open beside the list while it lasts (release 5.154)."""
-        opened = False
-        if self._bin_hooks and self._bins is not None:
-            found = self._bin_hooks[0](self.move_key(self.currentItem()))
-            if found is not None:
-                self._bins.open_for(found[0], found[1], self.viewport().rect(), *found[2:])
-                opened = True
+        """A row's drag. Where the view asks for drop targets (``set_bins``), each band is one while it lasts (release 5.189)."""
+        opened = self.open_bins(self.move_key(self.currentItem()))
         try:
             super().startDrag(actions)
         finally:
             if opened:
-                self._bins.close_bins()
+                self.close_drop_groups()
 
     def _over_bins(self, event) -> tuple[str, bool] | None | bool:
-        """Where a row's drag is over the bins: the target (the bin's band, and whether its urgent part), None on the bins but
-        not on one a drop would go to, or False away from them (the list's own rules then)."""
+        """Where a row's drag is over the targets: a band and whether its urgent half; None inside a group where a drop
+        changes nothing; or False away from them and over the dragged task's own half, where the list's own rules reorder."""
         bins = self._bins
         if not self._bin_hooks or bins is None or not bins.isVisible():
             return False
-        at = self.viewport().mapToGlobal(event.position().toPoint())
-        if not bins.over(at):
-            bins.set_hot(None)
-            return False
-        found = bins.bin_at(at)
-        bins.set_hot(found)
+        bins.set_groups(self.viewport().rect(), self._drop_groups())  # the list may have scrolled
+        found = bins.target(self.viewport().mapToGlobal(event.position().toPoint()))
+        bins.set_hot(found if isinstance(found, tuple) else None)
         return found
 
     def _file_drop(self, event) -> tuple[object, str, list[str]] | None:

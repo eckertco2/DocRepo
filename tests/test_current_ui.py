@@ -142,7 +142,7 @@ def test_now_in_the_side_panel_at_rest_with_its_two_buttons(browse, panel):
     shown = [b.text() for b in box.findChildren(QPushButton) if b.isVisibleTo(panel) and b.text() in (current_ui.LOG, current_ui.WORKSPACE)]
     assert not panel.hover.wide and shown == [current_ui.LOG, current_ui.WORKSPACE]  # at rest, always shown
     assert box.height() > panel.rows[0].height()  # the one taller row
-    assert panel.count.text() == "Today · 2"
+    assert panel.count.property("total") == 2
     current.stop(browse.conn)
     panel.refresh()
     assert panel.now_row is None

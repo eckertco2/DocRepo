@@ -241,9 +241,9 @@ def test_the_flow_layout_keeps_its_margins_and_centres_each_line(qapp):
 
 def test_no_text_is_styled_below_the_floor():
     """Decision 2: nothing is smaller than a group label (9 pt, ``LABEL``; captions are 9.5 since release 5.181) in the style sheets."""
-    from docrepo.ui.today_panel import QSS
+    from docrepo.ui.today_panel import panel_qss
 
-    sizes = re.findall(r"font-size:\s*([\d.]+)pt", tokens.qss() + tokens.css() + QSS.format(caption=tokens.CAPTION, radius=tokens.RADIUS, **tokens.active()))
+    sizes = re.findall(r"font-size:\s*([\d.]+)pt", tokens.qss() + tokens.css() + panel_qss())
     assert sizes and min(float(s) for s in sizes) >= tokens.LABEL
 
 

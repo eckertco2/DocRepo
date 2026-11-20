@@ -98,6 +98,7 @@ PANEL_KEYS = (
     ("Enter", "Shows the item's detail"),
     ("Space", "Done: off Today, and on a task an Update opens on it"),
     ("Delete", "Removes it from Today"),
+    ("N", "A quick task, or a note, typed into Today (release 5.189)"),
     ("Esc", "Back from the detail; then it contracts and the keyboard goes back to the window you were in"),
 )
 #: The wheels' task search and file search (release 5.42), Recent captures (release 5.158) and the glossary lookup (release 5.172).
