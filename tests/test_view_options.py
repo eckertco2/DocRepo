@@ -369,3 +369,50 @@ def test_the_list_pane_goes_as_narrow_as_it_did(browse, view):
         QApplication.processEvents()
     if head.filter_button.isVisibleTo(browse):
         assert head.filter_button.text().startswith("Filter")
+
+
+#: The browse window's least width on `main` before release 5.184 (`baadef8`): the Task tree's 910, its list pane 296; Agendas'
+#: list pane 332 (its "Agenda for" combo), so its window 946.
+WINDOW_BEFORE, TASKS_PANE_BEFORE = {"tasks": 910, "agenda": 946}, 296
+
+
+@pytest.mark.parametrize("how", ["plain", "panel opened", "commands folded"])
+def test_wide_then_narrow_the_header_holds_nothing(browse, how):
+    """Whatever width the window has been, the header gives it back: wide, then narrow again, the window's least width and
+    the list pane's are no more than before release 5.184; a panel having been opened, or commands folded under More, the same."""
+    view = "agenda" if how == "commands folded" else "tasks"
+    browse.set_view(view)
+    browse.resize(1749, 900)
+    for _ in range(5):
+        QApplication.processEvents()
+    if how == "panel opened":
+        browse.head.filter_button.click()
+        QApplication.processEvents()
+        browse.head.filter_panel.hide()
+    browse.resize(900, 700)
+    if how == "commands folded":
+        browse.split.setSizes([248, 200, 1000])
+    for _ in range(5):
+        QApplication.processEvents()
+    assert browse.width() <= max(900, WINDOW_BEFORE[view]), browse.width()
+    assert browse.minimumSizeHint().width() <= WINDOW_BEFORE[view], browse.minimumSizeHint()
+    if view == "tasks":
+        assert browse.middle.minimumSizeHint().width() <= TASKS_PANE_BEFORE
+    else:
+        assert browse.head.folded() or not browse.head.commands()
+
+
+def test_a_window_narrower_than_the_workspace_gets_its_size_back(browse):
+    """Leaving the workspace, the window has the size it had (decision 771), whatever the workspace's own least width: 950
+    px failed on `main` too, the layouts between the splitter and the window keeping the workspace's least width."""
+    from docrepo.ui import workspace as workspace_ui
+
+    browse.set_view("tasks")
+    browse.setGeometry(100, 100, 950, 650)
+    for _ in range(3):
+        QApplication.processEvents()
+    before = browse.geometry().size()
+    workspace_ui.open_workspace(browse, "T000008")
+    assert workspace_ui.is_open(browse) and browse.isMaximized()
+    workspace_ui.leave(browse)
+    assert browse.geometry().size() == before

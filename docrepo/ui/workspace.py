@@ -1063,6 +1063,13 @@ def leave(browse: BrowseWindow) -> None:
         if not was_maximised:
             browse.setWindowState(browse.windowState() & ~Qt.WindowState.WindowMaximized)
             if geometry.isValid():
+                # The layouts between the splitter and the window still hold the workspace's least width (some 1,500 px,
+                # cached while it showed): each is told what's under it changed and works its least width out again, so the
+                # window can have its size back. The splitter itself already knows.
+                for widget in (browse.split, browse.card):
+                    widget.updateGeometry()
+                if browse.layout() is not None:
+                    browse.layout().activate()
                 browse.setGeometry(geometry)
 
 
