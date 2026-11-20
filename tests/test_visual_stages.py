@@ -11,7 +11,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest  # noqa: E402
 from PySide6.QtCore import QSize  # noqa: E402
-from PySide6.QtWidgets import QApplication, QFrame, QLabel, QMessageBox, QPushButton, QTreeWidgetItem, QWidget  # noqa: E402
+from PySide6.QtWidgets import QApplication, QLabel, QMessageBox, QPushButton, QTreeWidgetItem, QWidget  # noqa: E402
 
 from docrepo import db  # noqa: E402
 from docrepo.config import Settings  # noqa: E402
@@ -21,7 +21,7 @@ from docrepo.ui.browse_window import BrowseWindow  # noqa: E402
 from docrepo.ui.capture_window import CaptureWindow  # noqa: E402
 from docrepo.ui.context import AppContext  # noqa: E402
 from docrepo.ui.look import LOOK, set_hints  # noqa: E402
-from docrepo.ui.priorities_view import COLUMN_MIN  # noqa: E402
+from docrepo.ui.priorities_view import COLUMN_MIN, RAIL  # noqa: E402
 from docrepo.ui.task_pane import TaskPane  # noqa: E402
 from docrepo.ui.task_view import FOOT  # noqa: E402
 from docrepo.ui.tree_view import ACTIONS_ROLE, KEY_ROLE, Line, RowTree, with_actions  # noqa: E402
@@ -125,7 +125,10 @@ def test_a_narrow_list_drops_columns_from_after_the_title_and_brings_them_back(q
 def test_priorities_scrolls_across_rather_than_holding_the_windows_width(browse):
     browse.set_view("priorities")
     assert browse.priorities.board.parent().parent().horizontalScrollBar() is not None
-    assert all(c.minimumWidth() == COLUMN_MIN for c in browse.priorities.board.findChildren(QFrame, "prCol"))
+    # release 5.191 (decision 866): an open column is at least COLUMN_MIN, a column folded to its rail RAIL
+    columns = browse.priorities.column_widgets
+    assert any(c.is_rail for c in columns) and not all(c.is_rail for c in columns)
+    assert all(c.minimumWidth() == (RAIL if c.is_rail else COLUMN_MIN) for c in columns)
     browse.split.sizes()  # the middle pane asks for what's on show, not the board's five columns
     assert browse.priorities.minimumSizeHint().width() < 5 * COLUMN_MIN
 

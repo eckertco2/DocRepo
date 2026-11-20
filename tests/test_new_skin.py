@@ -41,8 +41,10 @@ def test_both_templates_take_every_scale_by_name_and_end_with_the_lanes_sections
     by its scale, never as a number (section 5a)."""
     for template in (tokens._QSS.template, tokens._CSS.template):
         tail = template[template.index("/* ---- lane A"):]
-        want = "\n".join(f"/* ---- lane {k} ({name}) ---- */\n\n/* ---- end lane {k} ---- */\n" for k, name in LANES)
-        assert tail == want
+        # each lane's two lines, in order, a blank line between sections; what a lane writes between its own two is its own
+        # (release 5.191, lane E's first block, made this test read the sections' frame and not their insides)
+        want = r"\n".join(rf"/\* ---- lane {k} \({re.escape(name)}\) ---- \*/\n(?:.*\n)*?/\* ---- end lane {k} ---- \*/\n" for k, name in LANES)
+        assert re.fullmatch(want, tail), tail
     for name in SCALES:
         assert name in tokens._SIZES, name
     for out in (tokens.qss(), tokens.css()):

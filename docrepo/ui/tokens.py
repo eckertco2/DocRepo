@@ -468,7 +468,21 @@ QDialog#palette { background: $content; border: 1px solid $stroke_strong; }
 /* ---- end lane D ---- */
 
 /* ---- lane E (planning views and forms) ---- */
-
+/* release 5.191 (Priorities), lane E: columns as panels set apart on the content's white, an empty column a rail, the card */
+QScrollArea#prBoardScroll, QWidget#prBoard { background: $content; }
+QFrame#prCol { background: $sunken; border: none; border-radius: ${radius_l}px; }
+QFrame#prCol[over="true"] { background: $selected; border: none; }
+QWidget#prColBody, QWidget#prRail { background: transparent; }
+QLabel#prColName { color: $text; font-size: ${section}pt; font-weight: 600; }
+QFrame#prCard { background: $content; border: 1px solid $stroke; border-radius: ${radius}px; }
+QFrame#prCard:hover { border-color: $stroke_strong; }
+QFrame#prCard[sel="true"] { background: $selected; border-color: $info_line; }
+QLabel#prFacts { color: $text3; font-size: ${caption}pt; }
+QFrame#prRow { border-radius: ${radius_s}px; }
+QFrame#prRow[sel="true"] { background: $selected; border-color: $info_line; }
+QPushButton#prOpener { border-radius: ${radius_s}px; }
+QFrame#prDrop { background: $accent; border: none; border-radius: ${radius_hair}px; }
+QFrame#prStrip { background: $sunken; border: none; border-radius: ${radius_l}px; }
 /* ---- end lane E ---- */
 """)
 
