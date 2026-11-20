@@ -17,7 +17,7 @@ from docrepo import topics
 from docrepo.ui import tokens
 from docrepo.ui.icons import icon
 from docrepo.ui.checklist_summary import ChecklistSummary
-from docrepo.ui.notes_edit import NotesEdit
+from docrepo.ui.notes_edit import LEFT, NotesEdit
 from docrepo.ui.notes_outline import OUTLINE_MIN_TEXT, OUTLINE_WIDTH, NotesOutline, OutlineSlot
 from docrepo.detail import RAIL
 from docrepo.ui.page_view import FitPageView, layout_of
@@ -67,7 +67,7 @@ class LandmarkBar(QScrollBar):
         if not self.marks or self.total <= 0:
             return
         p = QPainter(self)
-        heading = QColor(tokens.colour("accent"))
+        heading = QColor(tokens.colour("text2"))  # grey since release 5.186, as the outline's current row lost the accent
         divider = QColor(tokens.colour("scroll_hover"))
         for top, _level, day, _text in self.marks:
             p.fillRect(QRect(2, self.bar_y(top), self.width() - 4, 2), divider if day else heading)
@@ -194,13 +194,19 @@ class TaskPane(QScrollArea):
         head = QWidget(objectName="notesHead")
         head.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         hv = QVBoxLayout(head)
-        hv.setContentsMargins(0, 0, 0, 6)
+        # On the page's edge, under the one hairline on the page (release 5.186, decision 860): a rule inside the heading, so
+        # it starts where the heading's words do; the gutter of the notes under it hangs in the margin.
+        hv.setContentsMargins(margin, 0, 0, 6)
         hv.setSpacing(4)
+        self.rule = QFrame(objectName="notesRule")
+        self.rule.setFixedHeight(1)
+        hv.addWidget(self.rule)
+        hv.addSpacing(9)
         hl = QHBoxLayout()
         hl.setContentsMargins(0, 0, 0, 0)
         hv.addLayout(hl)
         self.head_lines = hv
-        self.title = QLabel("Notes", font=tokens.ui_font(tokens.BODY, semibold=True))
+        self.title = QLabel("Notes", font=tokens.ui_font(tokens.SECTION, semibold=True))  # a section's head (release 5.186)
         self.saved = QLabel("", objectName="notesSaved")
         self.saved.setFont(tokens.ui_font(tokens.CAPTION))
         self.menu_button = QToolButton(objectName="notesMenu")
@@ -330,12 +336,13 @@ class TaskPane(QScrollArea):
         # In a narrow pane the format bar has a line of its own, so the page can be as narrow as the pane (release 5.58).
         self.head_row, self.bar_row, self.head_margin = hl, None, margin
         self._mode_at = hl.indexOf(self.mode_strip)
+        self._head_level = 0  # the Notes heading's lines: 0 one row, 1 the bar under it, 2 a line each (_fit_head)
         self.notes.viewport().installEventFilter(self)
         self.notes.on_page_key = self.page_key
         self.notes.cursorPositionChanged.connect(self.follow_caret)
         row = QWidget()
         rl = QHBoxLayout(row)
-        rl.setContentsMargins(0, 0, 14, 10)
+        rl.setContentsMargins(0, 0, 0, 0)  # its left margin is _place_rows' (release 5.186)
         rl.setSpacing(6)
         self.outline = self.OUTLINE(self.notes)
         self.outline.picked.connect(self._outline_picked)
@@ -352,7 +359,7 @@ class TaskPane(QScrollArea):
         self.summary = ChecklistSummary(self.notes)
         box = QWidget(objectName="summaryBox")
         bl = QHBoxLayout(box)
-        bl.setContentsMargins(14, 10, 14, 6)
+        bl.setContentsMargins(margin, 6, 0, 8)  # on the page's edge, with no frame round it (release 5.186)
         bl.addWidget(self.summary, 1)
         # The Checklist summary only when the page has a checklist line (R8): Ctrl+1 or the Checklist button makes the first.
         self.summary_box = box
@@ -363,10 +370,20 @@ class TaskPane(QScrollArea):
         self._bar_timer.setSingleShot(True)
         self._bar_timer.setInterval(BAR_LINGER_MS)
         self._bar_timer.timeout.connect(self._bar_check)
+        # Hidden, the bar and the table button keep their room (release 5.186, decision 860), so showing them while the notes
+        # have the keyboard moves no word; whether the bar has a line of its own depends on the pane's width alone.
         for w in (self.format_bar, self.table_button):
+            sp = w.sizePolicy()
+            sp.setRetainSizeWhenHidden(True)
+            w.setSizePolicy(sp)
+            # A click on the bar keeps the caret in the notes (release 5.186): a button that takes no focus hands the click's
+            # focus up to the first ancestor that takes it, which was the pane, so the bar and the table button take it for
+            # the notes.
+            w.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+            w.setFocusProxy(self.notes)
             w.hide()
-        # The frame round the notes (decision 130): the capture window's editor frame, by the UI playbook's grouping
-        # ladder, so the one editable part of the page stands apart. Its bottom edge turns to the accent while you type.
+        # The notes' container (decision 130's frame until release 5.186, the redesign's decision 860): no edge now, the notes
+        # the page's body; its name and its "typing" property stay, and where you type shows by the caret and the format bar.
         self.card = QFrame(objectName="notesCard")
         cl = QVBoxLayout(self.card)
         cl.setContentsMargins(0, 0, 0, 0)
@@ -377,7 +394,7 @@ class TaskPane(QScrollArea):
         # All notes in the frame, in the notes' place (release 5.140, decisions 602 to 605): read only, with an outline of
         # its days and the pages in it, which narrow it to one.
         self.all_view.document().setDefaultStyleSheet(css)
-        self.all_view.document().setDocumentMargin(10)
+        self.all_view.document().setDocumentMargin(4)  # its words on the page's edge, as the notes' (release 5.186)
         self.all_view.edit_there.connect(lambda task, capture: self.all_notes_link.emit(f"notesgo:{task}:{capture}"))
         self.all_outline = NotesOutline()
         self.all_outline.picked.connect(self._all_picked)
@@ -386,7 +403,7 @@ class TaskPane(QScrollArea):
         self._all_targets: list[tuple[str, str]] = []
         self.all_row = QWidget(objectName="allNotesRow")
         al = QHBoxLayout(self.all_row)
-        al.setContentsMargins(0, 0, 14, 10)
+        al.setContentsMargins(0, 0, 0, 0)  # its left margin is _place_rows' (release 5.186)
         al.setSpacing(6)
         al.addWidget(self.all_slot)
         al.addWidget(self.all_view, 1)
@@ -397,9 +414,11 @@ class TaskPane(QScrollArea):
         self.card.setMaximumWidth(NOTES_MAX)
         head.setMaximumWidth(NOTES_MAX)
         self.notes.focus_changed.connect(self._card_focus)
+        # The notes start at the pane's edge (release 5.186): their gutter for fold arrows and marks hangs in the page's margin,
+        # so their words start where the title's do; the heading, with the one hairline on the page over it, on the edge.
         self.wrap = QWidget(objectName="notesWrap")
         wl = QVBoxLayout(self.wrap)
-        wl.setContentsMargins(margin, 14, margin, 16)
+        wl.setContentsMargins(0, 14, margin, 16)
         wl.setSpacing(0)
         wl.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         wl.addWidget(head)
@@ -606,37 +625,66 @@ class TaskPane(QScrollArea):
         QTimer.singleShot(0, self._sticky_check)
 
     def _fit_head(self) -> None:
-        """The format bar (and All notes' Group strip, release 5.157) beside the Notes heading while they fit there, or else
-        on a line of their own under it; since release 5.185 the This page or All notes switch goes to that line too, so the
-        heading fits the narrowest pane with the page's wider edge (``PAGE_EDGE``)."""
+        """The Notes heading's lines, by the pane's width alone (release 5.186, the redesign's decision 860): all in one row
+        while it fits, the format bar (and the table button's room) counted whether shown or not; else the bar on a line
+        of its own under the heading, there at rest and empty, so the notes don't move when it shows; and in the narrowest
+        pane the This page or All notes switch and All notes' Group strip a line each too (from release 5.157 to 5.185 the
+        Group strip, the switch and the bar shared one line, made only while they didn't fit)."""
         spare = self.viewport().width() - 2 * self.head_margin - 22
-        need = sum(w.sizeHint().width() + 8 for w in (self.title, self.mode_strip, self.group_box, self.saved, self.format_bar, self.table_button,
-                                                      self.outline_button, self.jump_button, self.menu_button)
-                   if not w.isHidden())
-        narrow = need > spare
-        if narrow == (self.bar_row is not None):
+
+        def need(widgets) -> int:
+            return sum(w.sizeHint().width() + 8 for w in widgets if not w.isHidden() or w in (self.format_bar, self.table_button))
+
+        row = (self.title, self.mode_strip, self.group_box, self.saved, self.table_button, self.outline_button, self.jump_button,
+               self.menu_button)
+        level = 0 if need((*row, self.format_bar)) <= spare else 1 if need(row) <= spare else 2
+        if level == self._head_level:
             return
-        if narrow:
-            self.head_row.removeWidget(self.format_bar)
-            self.head_row.removeWidget(self.group_box)
+        self._unstack_head()
+        self._head_level = level
+        if level == 0:
+            return
+        moved = (self.format_bar,) if level == 1 else self.bar_widgets()
+        if self.mode_strip in moved:
             self._mode_at = self.head_row.indexOf(self.mode_strip)  # where it goes back, after the title (and the workspace's words)
-            self.head_row.removeWidget(self.mode_strip)
-            self.bar_row = QHBoxLayout()
-            self.bar_row.setContentsMargins(0, 0, 0, 0)
-            self.bar_row.addWidget(self.mode_strip)
-            self.bar_row.addWidget(self.group_box)
-            self.bar_row.addWidget(self.format_bar)
-            self.bar_row.addStretch()
-            self.head_lines.addLayout(self.bar_row)
-        else:
-            self.bar_row.removeWidget(self.format_bar)
-            self.bar_row.removeWidget(self.group_box)
-            self.bar_row.removeWidget(self.mode_strip)
-            self.head_lines.removeItem(self.bar_row)
-            self.bar_row = None
+        for w in moved:
+            self.head_row.removeWidget(w)
+        self.bar_row = QVBoxLayout()
+        self.bar_row.setContentsMargins(0, 0, 0, 0)
+        self.bar_row.setSpacing(4)
+        for w in moved:
+            line = QHBoxLayout()
+            line.setContentsMargins(0, 0, 0, 0)
+            line.addWidget(w)
+            line.addStretch()
+            self.bar_row.addLayout(line)
+        self.head_lines.addLayout(self.bar_row)
+
+    def _unstack_head(self) -> None:
+        """Everything back in the heading's row, where it was."""
+        if self.bar_row is None:
+            return
+        moved = self.bar_lines()
+        for i, w in enumerate(moved):
+            self.bar_row.itemAt(i).layout().removeWidget(w)
+        self.head_lines.removeItem(self.bar_row)
+        self.bar_row = None
+        if self.format_bar in moved:
             self.head_row.insertWidget(self.head_row.count() - 2, self.format_bar)
+        if self.group_box in moved:
             self.head_row.insertWidget(self.head_row.indexOf(self.saved), self.group_box)
+        if self.mode_strip in moved:
             self.head_row.insertWidget(self._mode_at, self.mode_strip)
+
+    def bar_widgets(self) -> tuple[QWidget, QWidget, QWidget]:
+        """What goes under the Notes heading in the narrowest pane, a line each, in this order (the bar alone in a narrow one)."""
+        return self.mode_strip, self.group_box, self.format_bar
+
+    def bar_lines(self) -> list[QWidget]:
+        """The widget on each of those lines, for the tests; none while they sit in the heading's row."""
+        if self.bar_row is None:
+            return []
+        return [self.bar_row.itemAt(i).layout().itemAt(0).widget() for i in range(self.bar_row.count())]
 
     # ---- the outline (release 5.113) ----
     def set_outline_on(self, on: bool) -> None:
@@ -652,9 +700,30 @@ class TaskPane(QScrollArea):
     def outline_shown(self) -> bool:
         return not self.outline_slot.isHidden()
 
+    def gutter(self, view) -> int:
+        """How far a view's words start in from its left: the notes' gutter for fold arrows and marks (``LEFT``) with their
+        document's margin; All notes' document margin alone."""
+        return (LEFT if view is self.notes else 0) + round(view.document().documentMargin())
+
+    def _place_rows(self) -> None:
+        """Where the notes and All notes start (release 5.186, decision 860): with the outline beside them, the outline's rows
+        on the page's edge and the notes after it; without, the notes' gutter hung in the page's margin, so their words
+        start on the edge, under the title's."""
+        for row, view, slot in ((self.notes_row, self.notes, self.outline_slot), (self.all_row, self.all_view, self.all_slot)):
+            left = self._margin if not slot.isHidden() else max(0, self._margin - self.gutter(view))
+            m = row.layout().contentsMargins()
+            if m.left() != left:
+                row.layout().setContentsMargins(left, 0, 0, 0)
+
     def _fit_outline(self) -> None:
         """The outline shows when it's on, fits and the page has a heading; Jump to's button shows whenever it doesn't.
         In All notes (release 5.140) its own outline of days and pages shows instead, and Jump to isn't there."""
+        try:
+            self._fit_outline_now()
+        finally:
+            self._place_rows()
+
+    def _fit_outline_now(self) -> None:
         fits = self.outline_fits()
         if self.all_mode:
             if self.outline_shown():

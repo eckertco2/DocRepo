@@ -138,9 +138,11 @@ def none_text(text: str = "None") -> str:
 
 
 def fields_table(rows: list[tuple[str, str]]) -> str:
-    """Rows of a name and its value, as a two-column table; the values are HTML already."""
-    cells = "".join(f'<tr><td class="k" width="118" valign="top">{esc(k)}</td><td valign="top">{v}</td></tr>' for k, v in rows)
-    return f'<table cellspacing="0" cellpadding="3">{cells}</table>'
+    """Rows of a name and its value, as a two-column table; the values are HTML already. Since release 5.186 (the redesign's
+    decision 860) in the task page's facts grid's look: a small name in the third grey, rows 26 px."""
+    cells = "".join(f'<tr><td class="gk" width="118" valign="top" style="padding: 4px 14px 4px 0px">{esc(k)}</td>'
+                    f'<td valign="top" style="padding: 4px 12px 4px 0px">{v}</td></tr>' for k, v in rows)
+    return f'<table cellspacing="0" cellpadding="0">{cells}</table>'
 
 
 #: The task page (the visual overhaul's O9, release 5.21): two columns from WIDE_PAGE wide, with the facts in a rail RAIL
@@ -342,11 +344,13 @@ class Pages:
         items = self.m.open_items_for(target)
         if not items:
             return ""
-        lines = [f'<b>Agenda: {len(items)} open item{"s" if len(items) > 1 else ""}</b> &nbsp; {link(f"agenda:{target}", "Open agenda")}']
+        lines = []
         for a in items:
             note = f' <span class="sub">{esc(clip(a.note, 90))}</span>' if a.subject and a.note else ""
-            lines.append((self.task_link(a.subject) if a.subject else esc(a.note)) + note)
-        return box("<br>".join(lines))
+            lines.append((self.task_link(a.subject, "tl") if a.subject else esc(a.note)) + note)
+        # A section's head with its count and a grey command, over its lines (release 5.186): no band.
+        head = section("Agenda", f' <span class="rel">{len(items)} open</span> &nbsp;{link(f"agenda:{target}", "Open agenda", quiet="cmd")}')
+        return head + f'<p style="margin-top: 0px">{"<br>".join(lines)}</p>'
 
     def discarded_box(self, at: str, reason: str | None, hidden_from: str) -> str:
         """The note on a discarded task's or capture's page (mods log round 1, M0021)."""
@@ -1464,7 +1468,7 @@ class Pages:
         (the quoted emails folded, decision 462), its capture's files, and Open in Outlook, Reply all and Open capture."""
         ec = email_conversations
         cv = ec.find(self.m, conversation_id)
-        back = (f'<p class="crumbs">{link(f"task:{task_id}", "‹ " + self.m.task(task_id).title, "Back to the task")}</p>'
+        back = (f'<p class="crumbs">{link(f"task:{task_id}", "‹ " + self.m.task(task_id).title, "Back to the task", "tq")}</p>'
                 if task_id in self.m.tasks else "")
         if cv is None:
             return back + '<p class="note">This conversation isn\'t here any more: the captures of its emails were discarded.</p>'
@@ -1473,7 +1477,9 @@ class Pages:
         first, last = cv.emails[0].at, cv.newest.at
         span = self.day(first) if first[:10] == last[:10] else f"{self.day(first)} to {self.day(last)}"
         tasks = cv.tasks()
-        on = "on " + ", ".join(self.task_link(x) for x in tasks) if tasks else '<span class="faint">not filed to a task</span>'
+        # The task it was opened from in words, as the crumbs above are the way back; the others as names (release 5.186).
+        on = "on " + ", ".join(esc(self.m.task(x).title) if x == task_id else self.task_link(x, "tl") for x in tasks) if tasks \
+            else '<span class="faint">not filed to a task</span>'
         head = (back + page_title(esc(cv.subject))
                 + f'<p class="facts">{esc(ec.who(self.senders(cv), me, most=6))} · {n} email{"s" if n != 1 else ""} · {esc(span)} · {on}</p>')
         blocks, filed = [], set()
@@ -1483,7 +1489,7 @@ class Pages:
             sender = ec.who([self.sender(e)], me) if self.sender(e) else "An unknown sender"
             when = f"{self.long(e.at)} {e.at[11:16]}".strip()
             to = f'<span class="sub"> &nbsp;to {esc(clip(ec.to_words(text.to, me), 120))}</span>' if text.to else ""
-            newest = f" &nbsp;{chip('Newest', 'st-ip')}" if i == n - 1 and n > 1 else ""
+            newest = f" &nbsp;{chip('Newest', 'lbl')}" if i == n - 1 and n > 1 else ""
             # An email whose subject was changed says its own (a reply joined by In-Reply-To, decision 457).
             own_subject = (f'<br><span class="sub">Subject: {esc(e.subject)}</span>'
                            if e.subject and ec.clean_subject(e.subject) != cv.subject else "")
@@ -1498,9 +1504,9 @@ class Pages:
                 key = f"q:{e.ref}"
                 if key in state.expanded:
                     parts.append(f'<p class="sub" style="margin-top: 6px">{multiline(quoted)}</p>'
-                                 f'<p class="sub">{link("more:" + key, "Hide the quoted emails")}</p>')
+                                 f'<p class="sub">{link("more:" + key, "Hide the quoted emails", quiet="cmd")}</p>')
                 else:
-                    parts.append(f'<p class="sub" style="margin-top: 4px">{link("more:" + key, "Show the quoted emails", "What it quotes of the emails before it")}</p>')
+                    parts.append(f'<p class="sub" style="margin-top: 4px">{link("more:" + key, "Show the quoted emails", "What it quotes of the emails before it", "cmd")}</p>')
             if text.note:
                 parts.append(f'<p class="sub" style="margin-top: 6px">Your words with it: {multiline(clip(text.note, 400))}</p>')
             if e.capture not in filed:  # a capture's files, under the first of its emails here (decision 461)
@@ -1508,9 +1514,9 @@ class Pages:
                 parts.append(self._capture_files(e.capture))
             acts = []
             if e.can_open:
-                acts.append(link(f"outlook:{e.ref}", "Open in Outlook", "The email itself in Outlook: from its place there, else its saved .msg"))
-                acts.append(link(f"replyall:{e.ref}", "Reply all", "Reply all in Outlook, as a T-mail: its replies come back to its task"))
-            acts.append(self.capture_link(e.capture, "Open capture"))
+                acts.append(link(f"outlook:{e.ref}", "Open in Outlook", "The email itself in Outlook: from its place there, else its saved .msg", "cmd"))
+                acts.append(link(f"replyall:{e.ref}", "Reply all", "Reply all in Outlook, as a T-mail: its replies come back to its task", "cmd"))
+            acts.append(self.capture_link(e.capture, "Open capture", "cmd"))
             where = (self.from_chip(e.tasks[0], task_id) if task_id not in e.tasks else "") if e.tasks else ' <span class="faint">not filed</span>'
             also = f' <span class="faint">· also in {esc(", ".join(c for c, _p in e.also))}</span>' if e.also else ""
             parts.append(f'<p class="sub" style="margin-top: 6px">{" &nbsp;·&nbsp; ".join(acts)}{where}{also}</p>')
@@ -1715,7 +1721,7 @@ class Pages:
         if c.emails:  # each email, its .msg file and what it's about (round 7's item 93, release 5.74)
             # Reply all beside each email DocRepo can find (release 5.105, the knowledge base's stage K8, release B).
             tip = "Reply all in Outlook, as a T-mail: its replies come back to its task"
-            reply = {e.pos: f' &nbsp;{link(f"replyall:{c.id}:{e.pos}", "Reply all", tip)}' for e in c.emails
+            reply = {e.pos: f' &nbsp;{link(f"replyall:{c.id}:{e.pos}", "Reply all", tip, "cmd")}' for e in c.emails
                      if (e.entry_id or e.file) and not c.discarded}
             rows.append(("Emails", "<br>".join(
                 f'{esc(e.subject or "(no subject)")} <span class="sub">{esc(e.file or "not saved as a file")}</span>{reply.get(e.pos, "")}'
@@ -1729,7 +1735,7 @@ class Pages:
                 # Saved or linked (release 5.145, decision 630), as its row said when it was saved.
                 choices = (" · Link" if is_link(d.original) else " · Folder" if is_folder(d.original) else " · Saved" if cd.save_a_copy
                            else " · Linked" if d.original else "") + (" · Extract information" if cd.extract else "")
-                files.append(f'{link(f"doc:{d.id}", d.name)} <span class="sub">{d.id}{choices}</span>'
+                files.append(f'{link(f"doc:{d.id}", d.name, quiet="tl")} <span class="sub">{d.id}{choices}</span>'
                              + (f'<br><span class="sub">{esc(d.description)}</span>' if d.description else ""))
             rows.append(("Files", "<br>".join(files)))
         if c.summary:
@@ -1744,14 +1750,15 @@ class Pages:
             unfiled = self.discarded_box(c.discarded, c.discard_reason, "its tasks' logs, the Unfiled view and search. Its folder stays")
         if self.m.is_unfiled(c):
             unfiled = (box("<b>Unfiled.</b> Pick a task and File to task, or Make it a task, with the buttons above. Filing links it to the task "
-                           "and sets the task in its capture.md; the folder stays where it is.", "info") if self.hints
+                           "and sets the task in its capture.md; the folder stays where it is.") if self.hints
                        else f'<p>{chip("Unfiled", "st-ns")}</p>')
         content = items.unstore(content) if content else content  # each @ and # by its name (release 5.8)
         shown = markup.to_html(content) if content and c.formatted else f'<span class="text">{multiline(content or "")}</span>'
-        text = (box(f'<span class="sub">Content text</span><br>{shown}') if content
-                else box('<span class="sub">Content text</span><br><span class="sub">None</span>') if content == ""
+        # The content text under a section's head, as the page's body, with no band (release 5.186).
+        text = (section("Content text") + f'<p style="margin-top: 0px">{shown}</p>' if content
+                else section("Content text") + '<p style="margin-top: 0px"><span class="sub">None</span></p>' if content == ""
                 else box("This capture's capture.md couldn't be read, so its content text can't be shown.", "warn"))
-        return f'<p class="crumbs">Capture {c.id}</p>{page_title(esc(c.title))}{unfiled}{fields_table(rows)}<p></p>{text}'
+        return f'<p class="crumbs">Capture {c.id}</p>{page_title(esc(c.title))}{unfiled}{fields_table(rows)}{text}'
 
     # ---- documents, people and labels ----
     def document_page(self, document_id: str) -> str:
@@ -1767,14 +1774,14 @@ class Pages:
             # A link (mods log round 1, M0001): only its address is kept, so it has no text, checks or saved file.
             rows = [("File description", esc(d.description) if d.description else none_text("None yet")), ("ID", d.id),
                     ("Link", f"<span>{esc(d.original)}</span>"), ("Text", esc(f"No text: {NO_TEXT}")),
-                    ("Tasks", ", ".join(self.task_link(x) for x in tasks) or none_text("Not filed yet")), *self.tagged_rows("document", d.id)]
+                    ("Tasks", ", ".join(self.task_link(x, "tl") for x in tasks) or none_text("Not filed yet")), *self.tagged_rows("document", d.id)]
             return (f'<p class="crumbs">Link {d.id}</p>{page_title(esc(d.name))}{fields_table(rows)}'
                     '<p class="note">Open link hands it to your default browser, only when you click it (release 5.67). Copy link puts the address on the clipboard. DocRepo never fetches it.</p>')
         if is_folder(d.original):
             # A folder (release 5.66, round 6's decision 318): kept by where it is, with no text, checks or saved file.
             rows = [("File description", esc(d.description) if d.description else none_text("None yet")), ("ID", d.id),
                     ("Folder", f"<span>{esc(d.original)}</span>"), ("Text", esc(f"No text: {FOLDER_TEXT}")),
-                    ("Tasks", ", ".join(self.task_link(x) for x in tasks) or none_text("Not filed yet")), *self.tagged_rows("document", d.id)]
+                    ("Tasks", ", ".join(self.task_link(x, "tl") for x in tasks) or none_text("Not filed yet")), *self.tagged_rows("document", d.id)]
             return (f'<p class="crumbs">Folder {d.id}</p>{page_title(esc(d.name))}{fields_table(rows)}'
                     '<p class="note">Show in File Explorer opens the folder.</p>')
         # Release 5.145 (the save or link plan's decision 631): a saved file is a file of its own, and where it came from is
@@ -1783,7 +1790,7 @@ class Pages:
         came = min((c.saved for c in m.captures.values() if document_id in c.document_ids), default="")
         day = f' <span class="sub">{esc(short(to_date(came[:10]), self.today))}</span>' if came else ""
         if saved:
-            where = [("Saved file", "<br>".join(link(f"show:copy:{f.id}", f"Tasks\\{f.task}\\Files\\{f.name}") for f in saved)),
+            where = [("Saved file", "<br>".join(link(f"show:copy:{f.id}", f"Tasks\\{f.task}\\Files\\{f.name}", quiet="tl") for f in saved)),
                      ("Came from", (f"<span>{esc(d.original)}</span>" if d.original else f"An email, in {self.capture_link(d.capture)}"
                                     if d.capture else none_text()) + day)]
         elif d.original:
@@ -1795,9 +1802,10 @@ class Pages:
                 ("Last checked", esc(d.checked[:16]) if d.checked else none_text("Not yet")),
                 ("Versions", ", ".join(esc(self.long(v.at)) for v in versions) + f' <span class="sub">{len(versions)} change{"s" if len(versions) > 1 else ""} '
                              f'in the raw text log of its tasks</span>' if versions else none_text("No changes found yet")),
-                ("Tasks", ", ".join(self.task_link(x) for x in tasks) or none_text("Not filed yet"))]
+                ("Tasks", ", ".join(self.task_link(x, "tl") for x in tasks) or none_text("Not filed yet"))]
         if any(f.old for f in copies):
-            rows.append(("Old versions", "<br>".join(link(f"show:copy:{f.id}", f"Tasks\\{f.task}\\Files\\_old versions\\{f.name}") for f in copies if f.old)))
+            rows.append(("Old versions", "<br>".join(link(f"show:copy:{f.id}", f"Tasks\\{f.task}\\Files\\_old versions\\{f.name}", quiet="tl")
+                                                     for f in copies if f.old)))
         rows += self.tagged_rows("document", d.id)
         return f'<p class="crumbs">Document {d.id}</p>{page_title(esc(d.name))}{fields_table(rows)}'
 
@@ -1863,16 +1871,16 @@ class Pages:
         if u.kind == "capture":
             c = m.captures[u.id]
             kind = "Email" if c.source == "email" else "Capture"
-            return (f'{self.capture_link(c.id, c.title)} <span class="sub">{c.id} · {kind} · {esc(self.day(c.saved))}</span>', c.saved,
+            return (f'{self.capture_link(c.id, c.title, "tl")} <span class="sub">{c.id} · {kind} · {esc(self.day(c.saved))}</span>', c.saved,
                     m.capture_tasks(c))
         if u.kind == "document":
             d = m.documents[u.id]
             when = min((c.saved for c in m.captures.values() if u.id in c.document_ids), default="")
-            return f'{link(f"doc:{d.id}", d.name)} <span class="sub">{d.id} · Document</span>', when, m.document_holders(d.id)
+            return f'{link(f"doc:{d.id}", d.name, quiet="tl")} <span class="sub">{d.id} · Document</span>', when, m.document_holders(d.id)
         t = m.task(u.id)
         if u.kind == "page":
-            return f'{link(f"task:{t.id}", f"Notes of {t.title}")} <span class="sub">{t.id} · its notes page</span>', "", [t.id]
-        return f'{self.task_link(t.id)} <span class="sub">{t.id} · the task&#8217;s own fields</span>', t.created or "", [t.id]
+            return f'{link(f"task:{t.id}", f"Notes of {t.title}", quiet="tl")} <span class="sub">{t.id} · its notes page</span>', "", [t.id]
+        return f'{self.task_link(t.id, "tl")} <span class="sub">{t.id} · the task&#8217;s own fields</span>', t.created or "", [t.id]
 
     #: The most glossary rows a tagged label's page shows for it (release 5.171): a tag in more than this many is rare.
     GLOSSARY_ROWS = 5
@@ -1931,7 +1939,7 @@ class Pages:
             for top in tops:
                 groups.setdefault(top, []).append(entry)
         order = sorted(groups, key=lambda g: (g is None, -len(groups[g]), m.task(g).title if g else ""))
-        body = "".join(f'<p class="sec">{self.task_link(g) if g else "Not filed yet"} <span class="sub">{len(groups[g])}</span></p>'
+        body = "".join(f'<p class="sec">{self.task_link(g, "tl") if g else "Not filed yet"} <span class="sub">{len(groups[g])}</span></p>'
                        + "".join(e for _, e in sorted(groups[g], key=lambda x: x[0], reverse=True)) for g in order)
         crumbs = "Tagged label" if lb.status == "glossary" else "Tagged label · suggested"
         what = ('<p class="note">Suggested (decision 374): it&#8217;s on what mentions it already, marked new. <b>Add to the tag list</b> '
@@ -1964,10 +1972,11 @@ class Pages:
                 ("Role", esc(p.role) if p.role else none_text("None")),
                 ("Hours a week", num(p.hours) if p.hours is not None else none_text("Not set")),
                 ("Status", esc(p.status)), ("Scheduled", f"{this_week:.1f} h this week, {next_week:.1f} h next week"),
-                ("Leads", ", ".join(self.task_link(x) for x in leads) or "None"), ("Assigned", ", ".join(self.task_link(x) for x in assigned) or "None")]
+                ("Leads", ", ".join(self.task_link(x, "tl") for x in leads) or "None"),
+                ("Assigned", ", ".join(self.task_link(x, "tl") for x in assigned) or "None")]
         added = f'<p class="note">{esc(p.added_note)}</p>' if p.added_note else ""
         tags = f'<p class="tags">{chips.strip()}</p>' if chips else ""  # under the name, at the chips' own size
-        summary = link(f"summary:person:{p.id}", "Quick summary", "Their agenda, the tasks you share and what's changed (release 5.131)")
+        summary = link(f"summary:person:{p.id}", "Quick summary", "Their agenda, the tasks you share and what's changed (release 5.131)", "cmd")
         return f'<p class="crumbs">Person {p.id} &nbsp;{summary}</p>{page_title(esc(p.name))}{tags}{added}{fields_table(rows)}{self.agenda_block(person_id)}'
 
     def label_page(self, name: str) -> str:
@@ -1977,23 +1986,23 @@ class Pages:
         # Nested labels (release 5.9, M0051): a parent label lists its sublabels' tasks, under each sublabel.
         if subs:
             rows = [("Keywords", esc(", ".join(label.keywords)) or none_text()), ("Status", esc(label.status)),
-                    ("Labels under it", ", ".join(link(label_href(s), s) for s in subs))]
+                    ("Labels under it", ", ".join(link(label_href(s), s, quiet="tl") for s in subs))]
             for s in subs:
                 tasks = label_tasks(self.m, s)
-                rows.append((s, "<br>".join(self.task_link(t) + (' <span class="sub">inherited</span>' if inh else "") for t, inh in tasks) or none_text()))
+                rows.append((s, "<br>".join(self.task_link(t, "tl") + (' <span class="sub">inherited</span>' if inh else "") for t, inh in tasks) or none_text()))
             return (f'<p class="crumbs">Label &nbsp;{self.summary_link(name)}</p>{page_title(esc(label.name))}{fields_table(rows)}'
                     '<p class="note">A label with labels under it is a heading: tasks get one of its labels, not it.</p>')
         tasks = label_tasks(self.m, name)
         parent = self.m.parent_label(name)
-        rows = [*([("Under", link(label_href(parent), parent))] if parent else []),
+        rows = [*([("Under", link(label_href(parent), parent, quiet="tl"))] if parent else []),
                 ("Keywords", esc(", ".join(label.keywords)) or none_text()), ("Status", esc(label.status)),
-                ("Tasks", "<br>".join(self.task_link(t) + (' <span class="sub">inherited</span>' if inh else "") for t, inh in tasks) or none_text())]
+                ("Tasks", "<br>".join(self.task_link(t, "tl") + (' <span class="sub">inherited</span>' if inh else "") for t, inh in tasks) or none_text())]
         return (f'<p class="crumbs">{"Label › " + esc(parent) if parent else "Label"} &nbsp;{self.summary_link(name)}</p>'
                 f'{page_title(esc(label.name))}{fields_table(rows)}')
 
     def summary_link(self, label_name: str) -> str:
         """A label's Quick summary (release 5.131): where its open tasks stand, what needs attention and what's changed."""
-        return link("summary:label:" + quote(label_name, safe=""), "Quick summary", "Where its open tasks stand, what needs attention, what's changed")
+        return link("summary:label:" + quote(label_name, safe=""), "Quick summary", "Where its open tasks stand, what needs attention, what's changed", "cmd")
 
     # ---- capacity ----
     def capacity_detail(self, rows: list[CapacityRow], weeks: list[date], cell: tuple[str, int] | None, unestimated: list[str],

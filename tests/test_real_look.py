@@ -267,6 +267,37 @@ print(json.dumps(got))
 
 
 @windows_only
+def test_the_timeline_pages_controls_fit_one_row_at_1520_with_the_dates_whole():
+    """Release 5.192 (decision 867): the bar's quiet buttons keep the row to one line in a window 1520 px wide, inside the
+    content card (it took about 1570 before), and From and To are as wide as the widest date in words, which 158 px cut. At
+    1440 the range still goes to a second row: it needs about 75 px more, which no button or field gives without cutting
+    its words or a date."""
+    got = run_look(SAMPLE + """
+browse.set_view("timeline")
+browse.resize(1520, 900)
+settle()
+view = browse.timeline
+got = {"tools": view.tools.height(), "button": view.plan_button.height(), "dates": []}
+from docrepo.ui.widgets import DateField
+wide = DateField()  # a field as wide as any, to say where a date's first letter is when nothing is scrolled
+wide.setFixedWidth(DateField.WIDTH)
+wide.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen)
+wide.show()
+for day in ("2026-05-27", "2026-09-28", "2026-11-29"):  # Wed and May are the widest words a date has
+    for field in (view.range_from, view.range_to, wide):
+        field.set_value(day)
+    settle()
+    for field in (view.range_from, view.range_to, wide):
+        field.line.setCursorPosition(0)
+    got["dates"].append([field.line.cursorRect().x() for field in (view.range_from, view.range_to, wide)] + [view.range_from.width()])
+print(json.dumps(got))
+""", "windows")
+    assert got["tools"] <= got["button"] + 2, got
+    for start_from, start_to, unscrolled, _ in got["dates"]:
+        assert start_from == start_to == unscrolled, got  # not scrolled: the date's first letter shows, so the whole date does
+
+
+@windows_only
 def test_the_task_page_is_as_narrow_as_its_pane():
     """It stayed 481 px wide in a 288 px pane, so its words ran off the edge with nothing to show it."""
     got = run_look(SAMPLE + """

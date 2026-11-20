@@ -477,3 +477,53 @@ def test_tasks_with_no_dates_join_the_chart_only_while_their_fold_is_open(browse
     view.set_plan(False)
     view.undated_fold.click()
     assert "Plan mode" in view.undated_names.text() and view.undated_names.text().count("task:") == n
+
+
+# ---- release 5.192 (the Timeline and Capacity), decision 867: the bars' buttons quiet, the chart untouched but for its greys ----
+def test_the_bars_buttons_are_quiet(browse):
+    view = browse.timeline
+    words = {b.text(): b for b in view.tools.findChildren(QPushButton)}
+    for name in ("Earlier", "This week", "Later", "Plan", "What-ifs", "Display", "Legend"):
+        assert words[name].objectName() == "subtle", name
+    assert view.people_button is not None and view.people_button.objectName() == "subtle"
+    assert view.open_button.objectName() != "subtle"  # the line's one secondary
+    for b in (view.quick_button, view.update_button, view.off_button):
+        assert b.objectName() == "subtle", b.text()
+    for buttons in (view.hours_buttons, view.unit_buttons):  # a segmented strip, as Priorities' Show
+        assert all(b.objectName() == "subtle" and b.isCheckable() for b in buttons.values())
+        assert next(iter(buttons.values())).parent().objectName() == "typeStrip"
+
+
+def test_priority_bars_take_the_boards_colours():
+    from docrepo.ui.timeline_view import PRIORITY_COLOURS
+
+    assert PRIORITY_COLOURS["medium"] == tokens.colour("pri_medium") != tokens.colour("accent")
+    assert PRIORITY_COLOURS["parking"] == tokens.colour("pri_parking")
+    assert PRIORITY_COLOURS["critical"] == tokens.colour("pri_critical") and PRIORITY_COLOURS["high"] == tokens.colour("pri_high")
+
+
+def test_the_mode_strips_have_no_sheet_of_their_own(browse):
+    view = browse.timeline
+    for strip in (view.plan_strip, view.whatif_strip):
+        assert strip.objectName() == "modeStrip" and strip.styleSheet() == ""
+    assert view.whatif_undo.objectName() == "subtle" and view.whatif_review.objectName() != "subtle"
+
+
+def test_group_by_group_is_a_button_that_stays_down(browse):
+    view = browse.timeline
+    assert isinstance(view.cap_group, QPushButton) and view.cap_group.isCheckable() and not view.cap_by_group
+    view.cap_group.click()
+    assert view.cap_group.isChecked() and view.cap_by_group
+    view.cap_group.click()
+    assert not view.cap_group.isChecked() and not view.cap_by_group
+
+
+def test_the_dates_are_as_wide_as_a_date_and_no_wider_than_elsewhere(browse):
+    """That a date shows whole in them is checked with Windows' own fonts, in ``test_real_look.py``."""
+    from docrepo.ui.timeline_view import DATE_ROOM
+    from docrepo.ui.widgets import DateField
+
+    view = browse.timeline
+    for field in (view.range_from, view.range_to):
+        widest = max(field.line.fontMetrics().horizontalAdvance(f"Wed 30 {m} 2026") for m in ("Sep", "May", "Nov", "Mar"))
+        assert field.minimumWidth() == field.maximumWidth() == min(DateField.WIDTH, widest + DATE_ROOM)
