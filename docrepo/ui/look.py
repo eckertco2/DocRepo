@@ -171,6 +171,9 @@ DWMWA_WINDOW_CORNER_PREFERENCE, DWMWA_CAPTION_COLOR = 33, 35
 #: The corners asked for (release 5.181, the redesign's decision 846): a popup's are Windows' full round ones, as anything
 #: that floats is rounded at 12 px; ``DWMWCP_ROUNDSMALL`` is kept for whoever needs the small ones.
 DWMWCP_ROUND, DWMWCP_ROUNDSMALL = 2, 3
+#: A floating surface's edge, in Windows' own colour field, and the square corners of a strip docked at the screen's edge
+#: (release 5.187, decision 862).
+DWMWA_BORDER_COLOR, DWMWCP_DONOTROUND = 34, 1
 
 
 def dwm_set(window: QWidget, attribute: int, value: int) -> bool:
@@ -181,14 +184,36 @@ def dwm_set(window: QWidget, attribute: int, value: int) -> bool:
     return ctypes.windll.dwmapi.DwmSetWindowAttribute(ctypes.c_void_p(int(window.winId())), attribute, ctypes.byref(number), ctypes.sizeof(number)) == 0
 
 
+def _colorref(name: str) -> int:
+    """A token's colour as Windows takes it: red in the low byte."""
+    c = QColor(tokens.colour(name))
+    return c.red() | c.green() << 8 | c.blue() << 16
+
+
+def floating(window: QWidget) -> None:
+    """Mark a window as a floating surface (release 5.187, decision 862, one floating design): something that lies over
+    another window for a moment or stays on top of it, such as the pinned window, the Today panel, Quick edit or a
+    confirmation. As it shows, ``dress_window`` asks Windows for its round corners and an edge in ``stroke_strong``, as it
+    does for popups and menus, which it knows by their window type. Its style rule keeps a square 1 px edge, which Windows
+    clips where it rounds."""
+    window.setProperty("floating", True)
+
+
+def square(window: QWidget, on: bool) -> None:
+    """Square a floating window's corners, or round them again: the Today panel docked against the screen's edge is square."""
+    dwm_set(window, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND if on else DWMWCP_ROUND)
+
+
 def dress_window(window: QWidget) -> None:
-    """As a window shows (release 5.59): a popup gets Windows 11's round corners (the full ones since release 5.181, decision
-    846), and any other window a title bar in the base colour, so there's no seam between it and the toolbar under it."""
-    if window.windowType() in (Qt.WindowType.Popup, Qt.WindowType.ToolTip, Qt.WindowType.SplashScreen) or isinstance(window, QMenu):
+    """As a window shows (release 5.59): a popup, a menu or a window marked ``floating`` gets Windows 11's round corners (the
+    full ones since release 5.181, decision 846) and an edge in ``stroke_strong`` (release 5.187, decision 862); any other
+    window a title bar in the base colour, so there's no seam between it and the toolbar under it."""
+    if (window.windowType() in (Qt.WindowType.Popup, Qt.WindowType.ToolTip, Qt.WindowType.SplashScreen)
+            or isinstance(window, QMenu) or window.property("floating")):
         dwm_set(window, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND)
+        dwm_set(window, DWMWA_BORDER_COLOR, _colorref("stroke_strong"))
     else:
-        c = QColor(tokens.colour("base"))
-        dwm_set(window, DWMWA_CAPTION_COLOR, c.red() | c.green() << 8 | c.blue() << 16)
+        dwm_set(window, DWMWA_CAPTION_COLOR, _colorref("base"))
 
 
 class _TipsHub(QObject):

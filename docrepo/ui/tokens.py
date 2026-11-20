@@ -554,7 +554,22 @@ QLabel#checkCount, QLabel#checkHeading { color: $text3; }
 /* ---- end lane C ---- */
 
 /* ---- lane D (the floating windows) ---- */
-
+/* release 5.187: floating surfaces and confirmations (decisions 862, 863). A top-level window keeps a square edge: Windows
+   rounds it and clips the corners. */
+QDialog#palette, QFrame#taskPicker, QWidget#pinWindow, QFrame#draftsList, QDialog#confirm
+    { background: $content; border: 1px solid $stroke_strong; border-radius: 0; }
+QLineEdit#paletteBox { border: none; border-bottom: 1px solid $stroke; border-radius: 0; background: transparent;
+    min-height: 43px; max-height: 43px; padding: 0 12px 0 8px; }
+QLineEdit#paletteBox:focus { border: none; border-bottom: 1px solid $stroke; padding: 0 12px 0 8px; }
+QTreeWidget#paletteList { border: none; background: transparent; }
+QListWidget#taskPickerList::item:selected, QListWidget#refPopup::item:selected { background: $hover; color: $text; border-radius: ${radius_s}px; }
+QLabel#confirmTitle { color: $text; font-size: ${section}pt; font-weight: 600; }
+QLabel#confirmText { color: $text2; }
+QPushButton#danger { background: $critical_fill; color: $on_accent; border: 1px solid $critical_fill; font-weight: 600; padding: 5px 16px; }
+QPushButton#danger:hover { background: $critical_hover; border-color: $critical_hover; }
+QPushButton#danger:pressed { background: $critical_pressed; border-color: $critical_pressed; }
+QWidget#summaryTop { background: $content; border-bottom: 1px solid $stroke; }
+QWidget#summaryFoot { background: $content; border-top: 1px solid $stroke; }
 /* ---- end lane D ---- */
 
 /* ---- lane E (planning views and forms) ---- */
@@ -694,7 +709,9 @@ h2 { font-family: 'Segoe UI'; font-size: ${page_title}pt; font-weight: 600; marg
 /* ---- end lane C ---- */
 
 /* ---- lane D (the floating windows) ---- */
-
+/* release 5.187: the command palette's group heads and keys (decision 862) */
+.pgroup { color: $text3; font-size: ${label}pt; font-weight: 600; }
+.pkey { color: $text3; font-size: ${caption}pt; }
 /* ---- end lane D ---- */
 
 /* ---- lane E (planning views and forms) ---- */

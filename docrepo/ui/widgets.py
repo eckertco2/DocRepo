@@ -23,7 +23,6 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMenu,
-    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QSizePolicy,
@@ -39,6 +38,7 @@ from PySide6.QtWidgets import (
 )
 
 from docrepo.model import Model
+from docrepo.ui import confirm
 from docrepo.ui.tokens import C
 from docrepo.ui.help_text import HELP
 from docrepo.ui.look import LOOK, _Gate
@@ -48,14 +48,9 @@ SAVE_KEYS = ("Ctrl+Return", "Ctrl+Enter")
 
 
 def ask(parent: QWidget | None, title: str, text: str, yes: str, no: str = "Cancel") -> bool:
-    """A question whose buttons say what they do, with no glossy icon, and Esc or Enter on the safe answer (release 5.61). True for ``yes``."""
-    box = QMessageBox(QMessageBox.Icon.NoIcon, title, text, QMessageBox.StandardButton.NoButton, parent)
-    go = box.addButton(yes, QMessageBox.ButtonRole.AcceptRole)
-    stay = box.addButton(no, QMessageBox.ButtonRole.RejectRole)
-    box.setDefaultButton(stay)
-    box.setEscapeButton(stay)
-    box.exec()
-    return box.clickedButton() is go
+    """A question whose buttons say what they do, with no glossy icon, and Esc or Enter on the safe answer (release 5.61). True for ``yes``.
+    DocRepo's own confirmation since release 5.187 (decision 863)."""
+    return confirm.ask(parent, title, text, yes, no)
 
 
 class FormDialog(QDialog):
@@ -73,7 +68,7 @@ class FormDialog(QDialog):
         for keys in SAVE_KEYS:
             QShortcut(QKeySequence(keys), self, self.save)
         self._clean: Any = None
-        self.ask_discard: Callable[[], bool] = lambda: ask(self, self.windowTitle(), "Close without saving your changes?", "Close without saving", "Keep editing")
+        self.ask_discard: Callable[[], bool] = lambda: confirm.ask(self, "Close without saving?", f"What you changed in {self.windowTitle()} is lost.", "Close without saving", "Keep editing", danger=True)
 
     def save(self) -> None:
         self.accept()
