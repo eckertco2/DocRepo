@@ -339,7 +339,7 @@ def test_captions_tuck_behind_a_mark_and_day_headings_are_dividers(qapp):
     QTest.mouseClick(notes.viewport(), Qt.MouseButton.LeftButton, pos=QPoint(LEFT // 2, r.center().y()))
     assert opened == ["C000101"]
     assert notes.go_to("C000101") and notes.textCursor().block() == text and notes.textCursor().positionInBlock() == 0
-    assert day.begin().fragment().charFormat().fontPointSize() == tokens.CAPTION  # a divider
+    assert day.begin().fragment().charFormat().fontPointSize() == tokens.LABEL  # a divider: a small label since release 5.186
     assert design.begin().fragment().charFormat().fontPointSize() == tokens.BODY + HEADING_SIZES[2]
     removed: list[str] = []
     notes.message.connect(removed.append)

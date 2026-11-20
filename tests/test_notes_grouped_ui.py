@@ -100,7 +100,7 @@ def test_a_narrow_pane_puts_the_strip_on_a_line_of_its_own(setup):
     for _ in range(5):
         QApplication.processEvents()
     # Since release 5.185 the This page or All notes switch goes there too, first, so the heading fits with the page's wider edge.
-    assert pane.bar_row is not None and pane.bar_row.indexOf(pane.mode_strip) == 0 and pane.bar_row.indexOf(pane.group_box) == 1
+    assert pane.bar_row is not None and pane.bar_lines() == [pane.mode_strip, pane.group_box, pane.format_bar]  # a line each since 5.186
     assert pane.head_row.indexOf(pane.group_box) == -1 and pane.head_row.indexOf(pane.mode_strip) == -1
     w.resize(2000, 900)
     w.split.setSizes([248, 200, 1550])

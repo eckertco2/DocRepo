@@ -265,3 +265,18 @@ def test_show_email_says_when_it_isnt_there(monkeypatch):
     monkeypatch.setattr(outlook, "connect", lambda: (App(Session(Item(fails=True))), "GetActiveObject"))
     with pytest.raises(outlook.OutlookError, match="didn't show it"):
         outlook.show_email("E1", "S1")
+
+
+def test_links_on_a_conversations_page(env):
+    """Release 5.186 (the redesign's decision 860): the way back is the crumbs, so the facts line names the task it was opened
+    from in words; another task there is a name that opens it, in the text's colour; the email's commands are grey."""
+    _conn, _root, capture, pages = env
+    first = capture(email(body="Hi,\nThe crane is booked for Tuesday.", entry="E1"), task=RIGGING)
+    here = pages().conversation_page(RIGGING, G1, PageState())
+    facts = here.split('<p class="facts">')[1].split("</p>")[0]
+    assert "Rigging plan" in facts and "task:" not in facts
+    away = pages().conversation_page(INSTALLATION, G1, PageState())
+    facts = away.split('<p class="facts">')[1].split("</p>")[0]
+    assert re.search(rf'<a href="task:{RIGGING}"[^>]*><span class="tl">Rigging plan', facts)
+    assert re.search(rf'<a href="outlook:{first}:0"[^>]*><span class="cmd">Open in Outlook', away)
+    assert re.search(r'<a href="task:[^"]+"[^>]*><span class="tq">‹ Installation', away)
