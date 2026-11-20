@@ -173,7 +173,7 @@ def test_close_asks_before_closing_open_subtasks_and_review_every_sets_the_inter
     for _ in range(3):
         review_list.go(browse)
     actions(row(browse, ("task", WALKTHROUGH)))["Close"]()
-    assert asked[0][0] == "Close all 3"
+    assert asked[0][0] == "Close all 3?"
     m = Model(browse.conn)
     assert m.task(WALKTHROUGH).state == "Closed" and all(m.task(x).state == "Closed" for x in m.children_of(WALKTHROUGH))
     picked = []

@@ -86,6 +86,7 @@ from docrepo.ui.widgets import CheckMenuButton, DateField, DropButton, FlowLayou
 
 #: The most room the open list of tasks with no dates takes under the chart: four lines of Caption text, then it scrolls.
 UNDATED_MAX_HEIGHT = 68
+DATE_ROOM = 49  # a date field's padding, edges and text margin, and its calendar button with the gap before it, measured on Windows (release 5.192)
 #: Plant events (release 5.29): their bars, lane and band, are ``C.event_bg``, ``C.event`` and ``C.event_ink``. The colours are read
 #: from the active theme where they're drawn (release 5.180), as ``C``'s names.
 #: Order by's keys, each a lane's dot, in this order; a ninth key and on are grey.
@@ -94,7 +95,8 @@ KEY_COLOURS = tokens.LiveList([f"lane{i}" for i in range(1, 9)])
 HOUR_COLOURS = tokens.LiveList([f"hour{i}" for i in range(1, 6)])
 HOUR_INK = tokens.LiveList([f"hour_ink{i}" for i in range(1, 6)])
 #: The Priorities board's buckets.
-PRIORITY_COLOURS = tokens.LiveMap({"critical": "critical", "high": "pri_high", "medium": "accent", "parking": "disabled"})
+# the priorities' own colours, as the board's squares have them (release 5.192), so Medium doesn't take the accent
+PRIORITY_COLOURS = tokens.LiveMap({"critical": "pri_critical", "high": "pri_high", "medium": "pri_medium", "parking": "pri_parking"})
 FLAG = "⚑"
 
 
@@ -1434,7 +1436,7 @@ class TimelineView(QWidget):
         self.scroll.setWidgetResizable(True)
         self.scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.scroll.setWidget(self.chart)
-        self.plan_strip = QFrame(objectName="fileRow")
+        self.plan_strip = QFrame(objectName="modeStrip")  # styled in lane E's block of the style sheet (release 5.192)
         ps = QHBoxLayout(self.plan_strip)
         ps.setContentsMargins(10, 4, 6, 4)
         # It says what mode you're in. How it works is behind Show hints (decision 7, release 5.59).
@@ -1445,15 +1447,14 @@ class TimelineView(QWidget):
         done = QPushButton("Done")
         done.clicked.connect(lambda: self.set_plan(False))
         ps.addWidget(done)
-        self.plan_strip.setStyleSheet(f"QFrame#fileRow {{ background-color: {C.selected}; border: 1px solid {C.info_line}; border-radius: {tokens.RADIUS}px; }}")
         self.open_button = QPushButton("Open task")
         self.open_button.clicked.connect(lambda: self.sel and self.open_task.emit(self.sel))
-        self.quick_button = QPushButton("Quick edit")
+        self.quick_button = QPushButton("Quick edit", objectName="subtle")
         self.quick_button.setToolTip("Its dates and people in a line of words (Q)")
         self.quick_button.clicked.connect(self._quick_from_card)
-        self.update_button = QPushButton("Update")
+        self.update_button = QPushButton("Update", objectName="subtle")
         self.update_button.clicked.connect(lambda: self.sel and self.update_task.emit(self.sel))
-        self.off_button = QPushButton("Remove")  # the page's: in a what-if, or starting one (release 5.64)
+        self.off_button = QPushButton("Remove", objectName="subtle")  # the page's: in a what-if, or starting one (release 5.64)
         self.off_button.setToolTip("See the load without it and everything under it, in a what-if. Your tasks don't change.")
         self.off_button.clicked.connect(lambda: self.sel and (self.put_back if self.sel in self.chart.off else self.take_off)(self.sel))
         self.off_button.hide()
@@ -1484,13 +1485,20 @@ class TimelineView(QWidget):
         rb.addWidget(QLabel("to", objectName="hint"))
         rb.addWidget(self.range_to)
         for field, name, which, what in ((self.range_from, "First day shown", "from", "first"), (self.range_to, "Last day shown", "to", "last")):
-            field.setFixedWidth(158)
+            field.setFixedWidth(self._date_width(field))
             field.line.setAccessibleName(name)
             field.line.setToolTip(f"The {what} day to show. Type a date such as 2027-01-31, 31 Jan 2027 or Jan 2027, then press Enter")
             field.line.editingFinished.connect(lambda which=which: self._range_typed(which))
             field.picked.connect(lambda which=which: self._range_typed(which))
         self.range_note = QLabel(objectName="error")  # what's wrong with a typed day, on its own line so the boxes stay put
         self.range_note.hide()
+
+    @staticmethod
+    def _date_width(field: DateField) -> int:
+        """As wide as the longest date in words needs, with the field's padding and edge and its calendar button, and never
+        wider than a date field elsewhere (release 5.192), so the row of tools has room."""
+        widest = max(field.line.fontMetrics().horizontalAdvance(f"Wed 30 {month} 2026") for month in ("Sep", "May", "Nov", "Mar"))
+        return min(DateField.WIDTH, widest + DATE_ROOM)
 
     @staticmethod
     def _marks(colour: str) -> list[tuple[str, str]]:
@@ -1517,13 +1525,14 @@ class TimelineView(QWidget):
                              ("This week", 0, "From last week"),
                              ("Later", 1, "On four weeks (13 over six months, 26 over a year), never more than the range shown")):
             b = DropButton(text, arrow="chevron-right") if s > 0 else QPushButton(text)
+            b.setObjectName("subtle")  # the bar's buttons are quiet (decision 867)
             if s < 0:
                 b.setIcon(icon("chevron-left"))
             b.setToolTip(tip)
             b.clicked.connect(lambda _=False, s=s: self.shift(s))
             ml.addWidget(b)
         self.time_layout.addWidget(moves)
-        self.plan_button = QPushButton("Plan")
+        self.plan_button = QPushButton("Plan", objectName="subtle")
         self.plan_button.setIcon(icon("edit"))
         self.plan_button.setCheckable(True)
         self.plan_button.setToolTip("Plan mode: drag bars and names to set dates (P)")
@@ -1534,8 +1543,10 @@ class TimelineView(QWidget):
         self.people_button: CheckMenuButton | None = None  # made when there's a model, with its people
         self.labels_button: CheckMenuButton | None = None
         self.display_button = DropButton("Display")
+        self.display_button.setObjectName("subtle")
         self.display_button.setToolTip("Order by, Colour bars by, Hours, Focus, Show routine and Labels")
         self.legend_button = DropButton("Legend")
+        self.legend_button.setObjectName("subtle")
         self.legend_button.setToolTip("What the marks and colours mean")
         self.time_layout.addWidget(self.display_button)
         self.time_layout.addWidget(self.legend_button)
@@ -1645,6 +1656,7 @@ class TimelineView(QWidget):
         """The what-ifs' button and its list, and the strip that stays while one is showing, so it can't be taken for the real
         plan (release 5.64)."""
         self.whatif_button = DropButton("What-ifs")
+        self.whatif_button.setObjectName("subtle")
         self.whatif_button.setCheckable(True)  # pressed while one is showing
         self.whatif_button.clicked.connect(lambda: (self.whatif_button.setChecked(self.cur is not None), self._open_whatifs()))
         self.whatif_box = Popover(self)
@@ -1652,7 +1664,7 @@ class TimelineView(QWidget):
         self.whatif_list.setContentsMargins(8, 8, 8, 8)
         self.whatif_list.setHorizontalSpacing(8)
         self.whatif_list.setVerticalSpacing(2)
-        self.whatif_strip = QFrame(objectName="fileRow")
+        self.whatif_strip = QFrame(objectName="modeStrip")
         ws = QHBoxLayout(self.whatif_strip)
         ws.setContentsMargins(10, 4, 6, 4)
         ws.setSpacing(8)
@@ -1665,30 +1677,30 @@ class TimelineView(QWidget):
         ws.addWidget(QLabel("Your tasks haven't changed."))
         self.whatif_facts = QLabel(objectName="hint")
         ws.addWidget(self.whatif_facts, 1)
-        self.whatif_undo = QPushButton("Undo")
+        self.whatif_undo = QPushButton("Undo", objectName="subtle")
         self.whatif_undo.setToolTip("The last change in this what-if (Ctrl+Z)")
         self.whatif_undo.clicked.connect(self.undo_whatif)
         self.whatif_review = QPushButton("Review and apply")
         self.whatif_review.setToolTip("See each change, and apply those you want to your tasks")
         self.whatif_review.clicked.connect(self.review)
-        back = QPushButton("Back to the real plan")
+        back = QPushButton("Back to the real plan", objectName="subtle")
         back.clicked.connect(lambda: self.show_whatif(None))
         for b in (self.whatif_undo, self.whatif_review, back):
             ws.addWidget(b)
-        self.whatif_strip.setStyleSheet(f"QFrame#fileRow {{ background-color: {C.selected}; border: 1px solid {C.info_line}; border-radius: {tokens.RADIUS}px; }}")
         self.whatif_strip.hide()
 
     @staticmethod
     def _seg(items, picked: Callable, tip: str = "") -> tuple[QWidget, dict]:
-        """Two buttons of which one is on."""
-        seg = QWidget()
+        """Two buttons of which one is on, as a segmented strip like Priorities' Show (release 5.192)."""
+        seg = QWidget(objectName="typeStrip")
+        seg.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         sl = QHBoxLayout(seg)
-        sl.setContentsMargins(0, 0, 0, 0)
-        sl.setSpacing(0)
+        sl.setContentsMargins(2, 2, 2, 2)
+        sl.setSpacing(2)
         group = QButtonGroup(seg)
         buttons = {}
         for value, text in items:
-            b = QPushButton(text)
+            b = QPushButton(text, objectName="subtle")
             b.setCheckable(True)
             b.setToolTip(tip)
             group.addButton(b)
@@ -1713,7 +1725,7 @@ class TimelineView(QWidget):
         self.cap_fold.clicked.connect(lambda: self._set("cap_open", not self.cap_open))
         head.addWidget(self.cap_fold)
         title = QLabel("Capacity")
-        title.setFont(tokens.ui_font(semibold=True))
+        title.setFont(tokens.ui_font(tokens.SECTION, semibold=True))
         head.addWidget(title)
         self.cap_say = QLabel()
         self.cap_say.setWordWrap(True)
@@ -1723,7 +1735,8 @@ class TimelineView(QWidget):
         seg, self.unit_buttons = self._seg((("pct", "Percent"), ("hours", "Hours")), lambda unit: self._set("cap_unit", unit),
                                            "What each cell says. The other number is in its tooltip")
         head.addWidget(seg)
-        self.cap_group = QCheckBox("Group by group")
+        self.cap_group = QPushButton("Group by group", objectName="subtle")  # a quiet button that stays down (release 5.192)
+        self.cap_group.setCheckable(True)
         self.cap_group.setToolTip("Put people under their groups' headings")
         self.cap_group.toggled.connect(lambda on: self._set("cap_by_group", on))
         head.addWidget(self.cap_group)
@@ -1918,7 +1931,7 @@ class TimelineView(QWidget):
         self.routine_box.blockSignals(False)
         choices, sets = people_filter(m)
         self.people_button = self._menu_button(self.people_button, "People", "anyone", choices, sets, self.people, "people",
-                                               lambda b: self.time_layout.insert_widget(self.time_layout.indexOf(self.display_button), b))
+                                               lambda b: (b.setObjectName("subtle"), self.time_layout.insert_widget(self.time_layout.indexOf(self.display_button), b)))
         choices, sets = label_filter(m)
         self.labels_button = self._menu_button(self.labels_button, "Labels", "any", choices, sets, self.labels, "labels",
                                                lambda b: self.display_grid.addWidget(b, 5, 1))
@@ -2356,7 +2369,7 @@ class TimelineView(QWidget):
         if w is None:
             return
         n = len(w.actions)
-        if n and not self.confirm(f"Delete {w.name}", f"Its {n} change{'' if n == 1 else 's'} go with it. Your tasks never changed."):
+        if n and not self.confirm("Delete this what-if?", f"{w.name} and its {n} change{'' if n == 1 else 's'} go. Your tasks never changed."):
             return
         self.whatifs.remove(w)
         self.wi_undo.pop(wid, None)

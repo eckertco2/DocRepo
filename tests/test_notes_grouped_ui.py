@@ -99,12 +99,15 @@ def test_a_narrow_pane_puts_the_strip_on_a_line_of_its_own(setup):
     w.split.setSizes([248, 2000, 0])  # the detail pane as narrow as it goes (test_real_look's)
     for _ in range(5):
         QApplication.processEvents()
-    assert pane.bar_row is not None and pane.bar_row.indexOf(pane.group_box) == 0 and pane.head_row.indexOf(pane.group_box) == -1
+    # Since release 5.185 the This page or All notes switch goes there too, first, so the heading fits with the page's wider edge.
+    assert pane.bar_row is not None and pane.bar_lines() == [pane.mode_strip, pane.group_box, pane.format_bar]  # a line each since 5.186
+    assert pane.head_row.indexOf(pane.group_box) == -1 and pane.head_row.indexOf(pane.mode_strip) == -1
     w.resize(2000, 900)
     w.split.setSizes([248, 200, 1550])
     for _ in range(5):
         QApplication.processEvents()
     assert pane.bar_row is None and pane.head_row.indexOf(pane.group_box) == pane.head_row.indexOf(pane.saved) - 1
+    assert pane.head_row.indexOf(pane.mode_strip) == pane.head_row.indexOf(pane.title) + 2  # back after the title, as it was
     pane.mode_buttons["page"].click()  # This page: no Group strip on either line
     QApplication.processEvents()
     assert pane.group_box.isHidden()

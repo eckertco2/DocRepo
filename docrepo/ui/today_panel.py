@@ -59,7 +59,7 @@ from docrepo.detail import Pages, PageState, esc
 from docrepo.model import Model, Task, is_person
 from docrepo.panel_rules import OPEN_KEY, REST_WIDTH_KEY, WIDE_WIDTH_KEY, Hover, Monitor, Place, Rect
 from docrepo.kinds import is_work
-from docrepo.ui import tokens
+from docrepo.ui import look, tokens
 from docrepo.ui.browse_window import TODAY_MINE_KEY
 from docrepo.ui.capture_window import note_drag, read_drop
 from docrepo.ui.context import AppContext
@@ -485,6 +485,7 @@ class TodayPanel(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
         self.setObjectName("todayPanel")
+        look.floating(self)  # Windows' round corners and edge while it floats (release 5.187, decision 862)
         self.setStyleSheet(style_sheet() + QSS.format(caption=tokens.CAPTION, radius=tokens.RADIUS, **tokens.active()))
         self.setWindowTitle("Today")
         self.setAccessibleName("Today side panel")

@@ -248,7 +248,7 @@ def test_deleting_a_what_if_with_changes_asks_first(browse):
     asked = []
     view.confirm = lambda title, words: asked.append((title, words)) or False
     view._delete_whatif(view.cur)
-    assert asked == [("Delete What-if 1", "Its 1 change go with it. Your tasks never changed.")] and view.whatifs
+    assert asked == [("Delete this what-if?", "What-if 1 and its 1 change go. Your tasks never changed.")] and view.whatifs
     view.confirm = lambda title, words: True
     view._delete_whatif(view.cur)
     assert not view.whatifs and view.cur is None and kept(browse) == []

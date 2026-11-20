@@ -175,7 +175,7 @@ def test_document_person_and_label_pages(pages):
     doc = text(pages.document_page("D000002"))
     assert "Installation procedure.docx" in doc and "Tasks Installation" in doc and "1 change in the raw text log of its tasks" in doc
     person = text(pages.person_page("P003"))
-    assert "Tom Becker" in person and "Aliases Tom, Thomas" in person and "h this week" in person and "Agenda: 1 open item" in person
+    assert "Tom Becker" in person and "Aliases Tom, Thomas" in person and "h this week" in person and "Agenda 1 open Open agenda" in person  # a section head since release 5.186
     me = text(pages.person_page("P001"))
     assert me.startswith("Person P001 Quick summary Me me")  # release 5.131: the quick summary's link beside the crumbs
     label = text(pages.label_page("Safety"))
@@ -262,3 +262,93 @@ def test_the_page_in_parts(pages):
     assert f"Closed {pages.long(done.closed)}" in text(pages.task_parts(done.id, PageState())["head"])
     meeting = text(pages.task_parts("T000010", PageState())["head"])
     assert "Next meeting" in meeting and "Meeting " not in meeting.split("Next meeting")[0]  # its dates say it's a meeting
+
+
+# ---- release 5.185 (the redesign's decision 859): the task page ----
+def test_status_actions(pages, sample_root):
+    """The status card's commands: Log progress… alone on an open task, Got it first while it waits; none on a closed task, a
+    discarded one or a collection. The card's words end with them as links, or leave them out for the buttons."""
+    from dataclasses import replace
+
+    from docrepo import waits
+
+    m = pages.m
+    t = m.task("T000008")
+    assert [w for _, w, _ in pages.status_actions(t)] == ["Log progress…"]
+    assert pages.status_actions(t)[0][0] == "progress:T000008"
+    assert pages.status_parts(t)[3].endswith("Log progress…</a></span>") and "Log progress…" not in pages.status_parts(t, acts=False)[3]
+    parts = pages.task_parts("T000008", PageState())
+    assert parts["status_actions"] == "\t".join(pages.status_actions(t)[0]) and "Log progress…" not in parts["status_body"]
+    for gone in (replace(t, state="Closed"), replace(t, discarded="2026-10-01T09:00:00"), replace(t, collection=True)):
+        assert pages.status_actions(gone) == [] and "Log progress…" not in pages.status_parts(gone)[3]
+    conn = sample_root[0]
+    waits.start(conn, m, "T000008", at="2026-10-08T09:00:00", line="Asked Mike for the drawings", on=["P004"], follow_up=None, via="test")
+    waiting = Pages(Model(conn), TODAY, pages.content_of, "P001", conn)
+    acts = waiting.status_actions(waiting.m.task("T000008"))
+    assert [w for _, w, _ in acts] == ["Got it", "Log progress…"] and acts[0][0] == "gotit:T000008"
+    shown = waiting.task_parts("T000008", PageState())["status_actions"].split("\n")
+    assert [line.split("\t")[1] for line in shown] == ["Got it", "Log progress…"]
+
+
+def test_section_commands_are_grey(pages):
+    """A section's command at its head's right is a grey command (class cmd), never the accent: every task's every section."""
+    seen = set()
+    for task_id in pages.m.tasks:
+        parts = pages.task_parts(task_id, PageState())
+        for key, html in parts.items():
+            if key.endswith("_summary"):
+                for m in re.finditer(r"<a [^>]*>", html):
+                    seen.add(key)
+                    assert html[m.end():].startswith('<span class="cmd">'), (task_id, key, html)
+    assert {"agenda_summary", "subtasks_summary", "files_summary", "summary_summary"} <= seen  # the sample has no meeting under a task
+
+
+def test_the_grids_names_read_as_text(pages):
+    """In the facts grid a person and an agenda are links in the text's colour; a tie's task, inside its sentence, stays a link
+    in the accent (decision 844: a link inside a sentence is one of the accent's jobs)."""
+    for t in pages.m.tasks.values():
+        grid = pages.facts_grid(t)
+        for m in re.finditer(r'<a href="(person|agenda):[^"]*"[^>]*>', grid):
+            assert grid[m.end():].startswith('<span class="tl">'), (t.id, grid)
+    tied = next((t for t in pages.m.tasks.values() if t.ties), None)
+    if tied is not None:
+        grid = pages.facts_grid(tied)
+        source = next(iter(tied.ties.values())).source
+        m = re.search(rf'<a href="task:{source}"[^>]*>', grid)
+        assert m and not grid[m.end():].startswith("<span")
+    on = next(t for t in pages.m.tasks.values() if pages.m.agendas_on(t.id))
+    assert re.search(r'<a href="(person|task|agenda):[^"]*"[^>]*><span class="tl">', pages.facts_grid(on).split("Agenda")[-1])
+
+
+# ---- release 5.186 (the redesign's decision 860): the other pages ----
+def test_the_other_pages_use_the_grid(pages):
+    """The capture, person, document, label and tagged label pages take the task page's facts grid, and a capture's content
+    text is the page's body under a section's head, with no band."""
+    m = pages.m
+    capture = next(c for c in m.captures.values() if not c.discarded)
+    shown = [pages.capture_page(capture.id, "Words of the capture."), pages.person_page("P003"), pages.document_page("D000002"),
+             pages.label_page("Line 1")]
+    if m.tagged and m.tagged.by_key:
+        shown.append(pages.tagged_page(next(iter(m.tagged.by_key))))
+    for html in shown:
+        assert 'class="gk"' in html and 'class="k"' not in html
+    page = shown[0]
+    assert '<p class="sec">Content text' in page
+    words = page.index("Words of the capture.")
+    assert 'class="box"' not in page[:words] or page.rfind("</table>", 0, words) > page.rfind('class="box"', 0, words)
+
+
+def test_links_on_the_other_pages(pages):
+    """Decision 844's rule on the other pages: a name that opens an item reads as text, a command is grey, a link inside a
+    sentence stays in the accent."""
+    person = pages.person_page("P003")
+    tasks = person.split(">Leads<")[1].split("</table>")[0]  # Leads and Assigned: their tasks as names
+    assert re.search(r'<a href="task:[^"]+"[^>]*><span class="tl">', tasks) and not re.search(r'<a href="task:[^"]+"[^>]*>[^<]', tasks)
+    assert re.search(r'<a href="summary:person:P003"[^>]*><span class="cmd">Quick summary', person)
+    assert re.search(r'<a href="agenda:P003"[^>]*><span class="cmd">Open agenda', person)
+    label = pages.label_page("Line 1")
+    assert re.search(r'<a href="summary:label:[^"]+"[^>]*><span class="cmd">Quick summary', label)
+    assert re.search(r'<a href="task:[^"]+"[^>]*><span class="tl">', label)
+    made = next(c for c in pages.m.captures.values() if c.created_task and c.task)  # "Created … under …", a sentence
+    did = pages.what_save_did(made)
+    assert re.search(r'<a href="task:[^"]+"[^>]*>[^<]', did)

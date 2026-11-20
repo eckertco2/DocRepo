@@ -16,6 +16,7 @@ place. Nothing here ever docks on this computer: the tests run offscreen, with t
 from __future__ import annotations
 
 import atexit
+import contextlib
 import logging
 from typing import TYPE_CHECKING
 
@@ -24,6 +25,7 @@ from PySide6.QtGui import QGuiApplication
 
 from docrepo import appbar, db
 from docrepo.panel_rules import Rect, dock_rect
+from docrepo.ui import look
 
 if TYPE_CHECKING:
     from docrepo.ui.today_panel import TodayPanel
@@ -96,12 +98,15 @@ class Dock:
             log.info("Today panel: docking refused; floating")
             return False
         self.strip = got
+        look.square(self.panel, True)  # square against the screen's edge (release 5.187)
         return True
 
     def undock(self) -> None:
         """Give the strip back; nothing when there's none."""
         if self.bar is not None:
             self.bar.undock()
+            with contextlib.suppress(RuntimeError):  # at exit the panel may be gone already
+                look.square(self.panel, False)
         self.strip = None
 
     def rect(self) -> QRect | None:

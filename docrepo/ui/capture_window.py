@@ -52,7 +52,6 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
-    QInputDialog,
     QLabel,
     QLineEdit,
     QMenu,
@@ -103,7 +102,7 @@ from docrepo.save import (
 )
 from docrepo.schedule import is_open, length_of, start_of, week_of
 from docrepo.tasks import KeyDateRow, hours_values, stated
-from docrepo.ui import tokens
+from docrepo.ui import capture_facts, confirm, tokens
 from docrepo.ui.tokens import C
 from docrepo.ui.context import AppContext
 from docrepo.ui import drafts as draft_ui
@@ -180,17 +179,6 @@ MIN_HEIGHT = 380
 MOST_FILLED = 2
 FOUND_EMPTY = ("<span style='color:{text2}'>Alt+P reads the content text and fills the fields. What it finds is listed here, beside "
                "the text, so you can check it without scrolling.</span>")
-
-
-def understood_html(found: list) -> str:
-    """What Parse and populate understood, as one line under the content text (the visual overhaul's O3)."""
-    sep = " &nbsp;·&nbsp; "
-    parts = []
-    for lead, f in found:
-        value = f.value if len(f.value) <= 40 else f.value[:40] + "…"
-        why = f" <span style='color:{tokens.colour('text2')}'>({esc(f.why)})</span>" if f.why else ""
-        parts.append(f"<b>{esc(lead + f.field)}</b> {esc(value)}{why}")
-    return f"<span style='color:{tokens.colour('caution')}'>Understood</span>&nbsp;&nbsp;" + sep.join(parts)
 
 
 def and_list(items: list[str]) -> str:
@@ -776,9 +764,18 @@ class CaptureWindow(QWidget):
         attach_menu.addAction(icon("mail"), "The email selected in Outlook", self.add_outlook)
         self.attach_button.setMenu(attach_menu)
         tools.addWidget(self.attach_button)
-        self.found_box = QFrame(objectName="found")  # what Parse and populate understood: one line, under the text
-        fbl = QHBoxLayout(self.found_box)
-        fbl.setContentsMargins(8, 4, 8, 4)
+        # The facts as chips (release 5.188, the redesign's decision 861), then the line of what no chip says (nothing found,
+        # or what Parse didn't fill) and Clear, which takes the tint off the text.
+        self.found_box = QFrame(objectName="found")
+        fv = QVBoxLayout(self.found_box)
+        fv.setContentsMargins(0, 0, 0, 0)
+        fv.setSpacing(4)
+        self.fact_chips = capture_facts.FactChips()
+        self.fact_chips.opened.connect(self._open_fact)
+        self.fact_chips.more.connect(self._set_fields_open)
+        self.fact_chips.rebuilt.connect(self._chain_chips)
+        fv.addWidget(self.fact_chips)
+        fbl = QHBoxLayout()
         fbl.setSpacing(8)
         self.found_label = QLabel()
         self.found_label.setWordWrap(True)
@@ -786,9 +783,12 @@ class CaptureWindow(QWidget):
         self.found_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)  # it wraps to the room it has
         fbl.addWidget(self.found_label, 1)
         self.clear_found = QPushButton("Clear", objectName="link")
-        tip(self.clear_found, "Forget what Parse and populate found. The fields keep their values.")
+        tip(self.clear_found, "Forget what Parse and populate marked in the text. The fields keep their values.")
         self.clear_found.clicked.connect(self._clear_found)
         fbl.addWidget(self.clear_found, 0, Qt.AlignmentFlag.AlignTop)
+        fv.addLayout(fbl)
+        self._understood: list = []
+        self.fields_open = False
         tools.addWidget(self.found_box, 1)
         tools.addStretch(0)
         lc.addLayout(tools)
@@ -864,6 +864,7 @@ class CaptureWindow(QWidget):
         self._build_new_fields()
         self._build_update_fields()
         self.body.addStretch()
+        self.fact_popover = capture_facts.FactPopover(self)
 
     def _icon_button(self, name: str, text: str, key: str = "", tip_key: str = "") -> QToolButton:
         """A 28 px icon button with its tooltip, and its key tip while Alt is held."""
@@ -923,8 +924,9 @@ class CaptureWindow(QWidget):
         self.more_menu.aboutToShow.connect(self._fill_more)
         more.setMenu(self.more_menu)
         fl.addWidget(more)
-        save = QPushButton("Save", objectName="primary")
-        save.setMinimumWidth(96)
+        save = capture_facts.KeyedButton("Save", "Ctrl Enter")  # its key on it (release 5.188)
+        save.setObjectName("primary")
+        self.save_button = save
         tip(save, "Save", "Ctrl+Enter")
         save.clicked.connect(self.save)
         self.keytips.add(save, "Ctrl+Enter", ctrl=True)
@@ -1005,6 +1007,8 @@ class CaptureWindow(QWidget):
             log.warning("Couldn't keep Show hints in settings.json: %s", e)
         if self.draft_label.text() in ("", DRAFT_NOTE):  # not while it says the draft was kept, cleared or brought back
             self.draft_label.setText(DRAFT_NOTE if LOOK.show_help else "")
+        if on:
+            self._set_fields_open(True)  # the hints explain the fields, so they show (release 5.188)
         self.refresh()
 
     def _build_new_fields(self) -> None:
@@ -1017,6 +1021,14 @@ class CaptureWindow(QWidget):
         self.n_inherit.toggled.connect(self.refresh)
         self.n_inherited = QLabel(objectName="hint")
         # The compact block (the review's stage V6): Labels, then two pairs. The rest is under More fields, so the window doesn't scroll.
+        # Since release 5.188 (decision 861) the whole block is behind the More fields chip, its values shown as chips.
+        outer = g
+        self.n_main = QWidget()
+        g = QVBoxLayout(self.n_main)
+        g.setContentsMargins(0, 0, 0, 0)
+        g.setSpacing(12)
+        self.n_main.hide()
+        outer.addWidget(self.n_main)
         g.addWidget(field("Labels", self.n_labels, "labels"))
         inh = QHBoxLayout()
         inh.addWidget(self.n_inherit)
@@ -1088,6 +1100,7 @@ class CaptureWindow(QWidget):
         more.addWidget(self.n_waiting, 13, 0, 1, 2)
         self.n_more.hide()
         g.addWidget(self.n_more)
+        g = outer
         self.new_heading = QLabel(objectName="heading")
         g.insertWidget(0, self.new_heading)
         g.setContentsMargins(0, 12, 0, 0)
@@ -1106,6 +1119,13 @@ class CaptureWindow(QWidget):
         self.u_status = QPlainTextEdit()
         self.u_status.setFixedHeight(56)
         g.addWidget(field("Latest update", self.u_status, "status"))
+        outer = g
+        self.u_main = QWidget()  # Due, Deadline and the rest, behind the More fields chip (release 5.188, decision 861)
+        g = QVBoxLayout(self.u_main)
+        g.setContentsMargins(0, 0, 0, 0)
+        g.setSpacing(12)
+        self.u_main.hide()
+        outer.addWidget(self.u_main)
         grid = QGridLayout()
         grid.setHorizontalSpacing(16)
         grid.addWidget(field("Due", self.u_due, "due"), 0, 0)
@@ -1150,6 +1170,7 @@ class CaptureWindow(QWidget):
         self.u_refs: dict[str, QLineEdit] = {}
         self.u_more.hide()
         g.addWidget(self.u_more)
+        g = outer
         self.changes_label = QLabel(objectName="hint")
         self.changes_label.setWordWrap(True)
         g.addWidget(self.changes_label)
@@ -1422,6 +1443,9 @@ class CaptureWindow(QWidget):
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
         self._arrange(self.width())
+        popover = getattr(self, "fact_popover", None)
+        if popover is not None and popover.is_open():  # it stays under its chip (release 5.188)
+            popover.place()
 
     def _arrange(self, width: int) -> None:
         """Narrow, what Parse and populate found goes under the content text instead of beside it."""
@@ -2205,6 +2229,7 @@ class CaptureWindow(QWidget):
         """Closing the window (X, Esc, Alt+F4, the main hotkey) files what it holds in Drafts, so the next open starts
         empty (decision 333). Not when it's pinned, which hides it for the pinned window, nor when it's minimized."""
         super().hideEvent(event)
+        self.fact_popover.close_it(back=False)
         if not event.spontaneous() and not self.pinned and not self._saving:
             self._closed()
 
@@ -2394,6 +2419,8 @@ class CaptureWindow(QWidget):
         self._clear_found()
         self.error.hide()
         self.read_items()
+        self._set_fields_open(LOOK.show_help)  # every new capture starts with its fields shut, unless hints are on (release 5.188)
+        capture_facts.snapshot(self)
 
     def make_task_from(self, capture_id: str) -> None:
         """Make it a task: a new task from an unfiled capture. Saving creates it and files the capture to it."""
@@ -2501,6 +2528,7 @@ class CaptureWindow(QWidget):
                 self.touched.discard(key)
                 set_filled(w.line if isinstance(w, DateField) else w, False)
         self._setting = False
+        capture_facts.snapshot(self)
 
     # ================= what Save will do =================
     def refresh(self) -> None:
@@ -2608,6 +2636,15 @@ class CaptureWindow(QWidget):
             if self.meeting_on else
             "Type or paste. Drop files or Outlook emails anywhere on this window. Start with “Closed.” or another state for a quick update. "
             "@, # and ** make items (Items, on the right).")
+        # The facts as chips (release 5.188): the popover closes first if its field's block is no longer showing.
+        if not hasattr(self, "fact_popover"):
+            return
+        if self.fact_popover.is_open():
+            key = self.fact_popover.key
+            if (key.startswith("new.") and not new) or (key.startswith("upd.") and not (upd and t)):
+                self.fact_popover.close_it(back=False)
+        self.fact_chips.show_facts(capture_facts.facts(self))
+        self._show_found_box()
         self._fit_timer.start()
         if self.pinned:
             self.pin_window.sync()
@@ -2836,9 +2873,9 @@ class CaptureWindow(QWidget):
     def add_link(self) -> None:
         """Add link…: asks for the address, starting with the clipboard's when it holds one."""
         clip = QGuiApplication.clipboard().text().strip()
-        url, ok = QInputDialog.getText(self, "Add link", "A web or SharePoint link. DocRepo keeps the address and never fetches it; it opens in your browser when you click it.",
-                                       text=read_address(clip).value if read_address(clip).kind == "link" else "")
-        if ok and url.strip():
+        url = confirm.ask_text(self, "Add link", "A web or SharePoint link. DocRepo keeps the address and never fetches it; it opens in your browser when you click it.",
+                               read_address(clip).value if read_address(clip).kind == "link" else "", yes="Add link")
+        if url is not None and url.strip():
             self.add_link_url(url)
 
     def add_link_url(self, url: str, name: str = "") -> None:
@@ -3210,6 +3247,7 @@ class CaptureWindow(QWidget):
                            if self.task else "Check New task, or pick a task, first.", self.content)
                 return
         text = "\n".join([content, *self._email_texts()])
+        understood: list = []
         today = self.ctx.now().date()
         people, labels, events = self.ctx.parse_people(m), self.ctx.parse_labels(m), self.ctx.settings.event_words
         found: list[tuple[str, Found]] = []
@@ -3234,6 +3272,7 @@ class CaptureWindow(QWidget):
                         chips.set_chips([*chips.chips(), Chip(value, m.person_name(w.id) if w.id else w.name, new=w.is_new, filled=True)])
             # What it fills under More fields is on the Understood line, so More stays shut and the window doesn't scroll.
             found += [("", f) for f in r.found]
+            understood += [("new", f) for f in r.found]
         if "update" in self.types and self.task:
             r = parse_capture(text, "update", today, people, labels, events, refs=self.ctx.settings.reference_fields)
             if "new_task" in self.types:  # the dates and first sentence belong to the new task; Update takes only a quick update's
@@ -3245,8 +3284,11 @@ class CaptureWindow(QWidget):
             self._fill("upd", r)
             self._hours_read(r, self.u_lead_row, self.u_asg_row)
             found += [("Update: " if "new_task" in self.types else "", f) for f in r.found]
+            understood += [("upd", f) for f in r.found]
         self._settle_filled()
+        self._understood = understood
         self._show_found(found)
+        self._tint(capture_facts.understood_phrases(found))
         self.refresh()
 
     def _settle_filled(self) -> None:
@@ -3302,21 +3344,101 @@ class CaptureWindow(QWidget):
             set_filled(target, True)
 
     def _clear_found(self) -> None:
-        """The found list, before Parse and populate runs (or after Clear): hidden in the new look, unless hints are shown."""
+        """Before Parse and populate runs, or after Clear: no tint in the text and no line (its placeholder with hints on).
+        The chips stay: they're the fields' values (release 5.188)."""
+        self._understood = []
+        self._tint([])
         self.found_label.setText(FOUND_EMPTY.format(text2=C.text2) if LOOK.show_help else "")
+        self.found_label.setVisible(LOOK.show_help)
+        self.found_box.setToolTip("")
         self.clear_found.hide()
         set_filled(self.found_box, False, "empty", True)
-        self.found_box.setVisible(LOOK.show_help)
+        self._show_found_box()
 
     def _show_found(self, found: list[tuple[str, Found]]) -> None:
+        """After a parse: the line says what no chip does, "Nothing found" (and the fields open, to be filled by hand), or the
+        finds Parse didn't fill, each with why; where each value came from is in the box's tooltip and on its chip."""
+        missed = [(lead, f) for lead, f in found if f.why]
         if not found:
             self.found_label.setText(f"<span style='color:{C.text2}'>Nothing found. Fill in the fields by hand.</span>")
-        else:  # one line of what it understood (the Title field shows the title); where each value came from is in the tooltip
-            self.found_label.setText(understood_html([(lead, f) for lead, f in found if f.field != "Title"] or found))
+        elif missed:
+            self.found_label.setText(f"<span style='color:{C.caution}'>" + " &nbsp;·&nbsp; ".join(
+                f"<b>{esc(lead + f.field)}</b> {esc(f.value[:40])}: {esc(f.why)}" for lead, f in missed) + "</span>")
+        else:
+            self.found_label.setText("")
+        self.found_label.setVisible(bool(self.found_label.text()))
+        if found:
             self.found_box.setToolTip("<br>".join(f"<b>{esc(lead + f.field)}</b> from “{esc(f.source[:80])}”" for lead, f in found))
         self.clear_found.show()
         set_filled(self.found_box, False, "empty", False)
-        self.found_box.show()
+        if not found:
+            self._set_fields_open(True)
+        self._show_found_box()
+
+    def _show_found_box(self) -> None:
+        """The box shows when it has a chip, More fields (in New task and Update), a line, or, with hints on, its placeholder."""
+        new, upd = "new_task" in self.types, "update" in self.types and bool(self.task)
+        self.fact_chips.more_chip.setVisible(new or upd)
+        self.found_box.setVisible(new or upd or bool(self.fact_chips.chips) or not self.found_label.isHidden())
+
+    # ---- the facts' chips and the fields behind More fields (release 5.188, decision 861) ----
+    def _tint(self, phrases: list[tuple[str, str]]) -> None:
+        """Tint the understood words, as colours, not a change to the text: no draft is marked changed."""
+        self._highlighting = True
+        try:
+            self.highlighter.set_understood(phrases)
+        finally:
+            self._highlighting = False
+
+    def _set_fields_open(self, on: bool) -> None:
+        """Show or hide the New task and Update fields, as the More fields chip does."""
+        self.fact_popover.close_it(back=False)
+        self.fields_open = on
+        self.n_main.setVisible(on)
+        self.u_main.setVisible(on)
+        self.fact_chips.set_more(on)
+        self._fit_timer.start()
+
+    def _chain_chips(self) -> None:
+        """The chips in the Tab order where the line was: after Attach, before Clear."""
+        capture_facts.chain_focus(self.attach_button, [*self.fact_chips.chips, self.fact_chips.more_chip], self.clear_found)
+
+    @staticmethod
+    def _field_focus(widget: QWidget) -> QWidget:
+        """The part of a field the keyboard goes to."""
+        if isinstance(widget, DateField):
+            return widget.line
+        if isinstance(widget, ChipPicker):
+            return widget.edit
+        box = getattr(widget, "box", None)  # Waiting on
+        return box if isinstance(box, QLineEdit) else widget
+
+    def _open_fact(self, fact: capture_facts.Fact) -> None:
+        """A chip pressed: with the fields open, its field in place, keyboard and all; with them shut, the field in a popover
+        under the chip. The same chip again closes the popover."""
+        if self.fact_popover.is_open() and self.fact_popover.key == fact.key:
+            self.fact_popover.close_it()
+            return
+        if fact.widget is None:
+            self._set_fields_open(True)
+            return
+        focus = self._field_focus(fact.widget)
+        if self.fields_open:
+            for box, button in ((self.n_more, self.n_more_button), (self.u_more, self.u_more_button)):
+                if box.isAncestorOf(fact.widget) and box.isHidden():
+                    self._set_more(box, button, True)
+            self.scroll.ensureWidgetVisible(fact.widget)
+            focus.setFocus()
+            return
+        blocks = (self.n_main, self.n_more, self.u_main, self.u_more)
+        wrapper = capture_facts.wrapper_of(fact.widget, blocks)
+        chip = self.fact_chips.chip_for(fact.key)
+        home = capture_facts.home_of(wrapper, wrapper.parentWidget().layout()) if wrapper is not None else None
+        if wrapper is None or chip is None or home is None:
+            self._set_fields_open(True)
+            focus.setFocus()
+            return
+        self.fact_popover.open_for(chip, wrapper, home, focus)
 
     # ================= Copy prompt =================
     def _load_summary_types(self) -> None:
@@ -3371,6 +3493,13 @@ class CaptureWindow(QWidget):
         self.error.setText(message)
         self.error.show()
         self.scroll.ensureWidgetVisible(self.error)
+        if focus is not None and hasattr(self, "n_main") and (self.n_main.isAncestorOf(focus) or self.u_main.isAncestorOf(focus)):
+            if not self.fields_open:  # the field at fault is behind More fields: open them (release 5.188)
+                self._set_fields_open(True)
+            for box, button in ((self.n_more, self.n_more_button), (self.u_more, self.u_more_button)):
+                if box.isAncestorOf(focus) and box.isHidden():
+                    self._set_more(box, button, True)
+            self.scroll.ensureWidgetVisible(focus)
         if focus is not None:
             focus.setFocus()
 
@@ -3499,6 +3628,7 @@ class CaptureWindow(QWidget):
         if self.pages.currentIndex() == 1:
             self.mods.save()
             return
+        self.fact_popover.close_it(back=False)  # its field goes home before anything reads it (release 5.188)
         self._saving = True
         try:
             if self._items_timer.isActive():  # keys just before Save: a # among them still fills the task picker

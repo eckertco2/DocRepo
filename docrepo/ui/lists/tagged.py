@@ -354,8 +354,8 @@ def add_to(w: BrowseWindow, item_kind: str, item_id: str) -> None:
         return
     key = tagged.key_of(value)
     if key not in tg.by_key:
-        if not w.confirm("Add to the tag list", f"{value.strip()} isn't on the tag list. Add it, then put it on this "
-                                                f"{'capture' if item_kind == 'capture' else 'document'}?"):
+        if not w.confirm("Add it to the tag list?", f"{value.strip()} isn't on the tag list. It's added, then put on this "
+                                                f"{'capture' if item_kind == 'capture' else 'document'}."):
             return
         key = add(w, value.strip())
         if key is None:

@@ -56,8 +56,12 @@ TINTS = tokens.LiveMap({"task": "item_task", "note": "item_note", "update": "ite
 #: The operators' colours: (text, background).
 REF_COLOURS = tokens.LiveMap({"person": ("accent", "info_bg"), "new": ("caution", "caution_bg"), "none": ("text2", "hover"),
                               "task": ("ref_task", "ref_task_bg"), "type": ("caution", "caution_bg")})
-#: A line's colours: (its tint, and each operator's (start, length, a key of ``REF_COLOURS``)).
-NO_COLOURS: tuple[str | None, tuple[tuple[int, int, str], ...]] = (None, ())
+#: The words Parse and populate understood, tinted in the text itself (release 5.188, the redesign's decision 861): a fact's
+#: ground, and a person's ink and ground. A fact keeps the text's own ink.
+UNDERSTOOD = tokens.LiveMap({"fact": "caution_bg", "person": ("accent", "info_bg")})
+#: A line's colours: (its tint, each operator's (start, length, a key of ``REF_COLOURS``), and each understood phrase's
+#: (start, length, a key of ``UNDERSTOOD``), release 5.188).
+NO_COLOURS: tuple[str | None, tuple[tuple[int, int, str], ...], tuple[tuple[int, int, str], ...]] = (None, (), ())
 
 
 class _Coloured(QTextBlockUserData):
@@ -75,12 +79,23 @@ class OperatorHighlighter(QSyntaxHighlighter):
         super().__init__(doc)
         self.reading: items.Reading | None = None
         self.kinds: dict[int, str] = {}
+        self.understood: list[tuple[str, str]] = []
 
     def set_reading(self, reading: items.Reading | None) -> None:
         """Take a new reading. Only the lines whose colours change are coloured again, since that lays each one out again
         (release 5.52)."""
         self.reading = reading
         self.kinds = items.line_kinds(reading) if reading else {}
+        self._recolour()
+
+    def set_understood(self, phrases: list[tuple[str, str]]) -> None:
+        """Tint the words Parse and populate understood (release 5.188, decision 861): each ``(phrase, kind)``, kind "fact" or
+        "person", found in a line's own text where it is, so a phrase the owner changes loses its tint by itself. An empty list
+        takes every tint off. As with a reading, only the lines whose colours change are coloured again."""
+        self.understood = list(phrases)
+        self._recolour()
+
+    def _recolour(self) -> None:
         block = self.document().begin()
         while block.isValid():
             shown = block.userData()
@@ -88,27 +103,50 @@ class OperatorHighlighter(QSyntaxHighlighter):
                 self.rehighlightBlock(block)
             block = block.next()
 
+    def _found_in(self, text: str) -> tuple[tuple[int, int, str], ...]:
+        """Where each understood phrase is in a line's text: its first place, a whole match as written, in order; a phrase
+        that starts inside an earlier one, or that's shorter than two letters, gives nothing."""
+        spans = sorted((at, len(phrase), kind) for phrase, kind in self.understood
+                       if len(phrase) >= 2 and (at := text.find(phrase)) >= 0)
+        out: list[tuple[int, int, str]] = []
+        for start, length, kind in spans:
+            if out and start < out[-1][0] + out[-1][1]:
+                continue
+            out.append((start, length, kind))
+        return tuple(out)
+
     def _colours(self, block: QTextBlock) -> tuple:
-        """What the last reading colours a block with."""
+        """What the last reading colours a block with, and the understood phrases in it."""
+        found = self._found_in(block.text()) if self.understood else ()
         r = self.reading
         n = block.blockNumber()
         if not r or n >= len(r.lines):
-            return NO_COLOURS
+            return (None, (), found)
         line = r.lines[n]
         # A list item made with the list buttons has no "- " in its text; one typed as text has.
         base = 0 if block.textList() is not None else line.off
         return (TINTS.get(self.kinds.get(n, "")),
                 tuple((base + x.start, x.end - x.start, "type" if x.kind in ("type", "param") else "task" if x.kind == "task"
-                       else "none" if x.none else "new" if x.is_new else "person") for x in line.toks))
+                       else "none" if x.none else "new" if x.is_new else "person") for x in line.toks),
+                found)
 
     def highlightBlock(self, text: str) -> None:  # noqa: N802 - Qt's name
         colours = self._colours(self.currentBlock())
         self.setCurrentBlockUserData(_Coloured(colours))
-        tint, spans = colours
+        tint, spans, found = colours
         if tint:
             fmt = QTextCharFormat()
             fmt.setBackground(QColor(tint))
             self.setFormat(0, len(text), fmt)
+        for start, length, kind in found:  # under the operators, whose own colours win where they meet
+            fmt = QTextCharFormat()
+            if kind == "person":
+                fg, bg = UNDERSTOOD["person"]
+                fmt.setForeground(QColor(fg))
+            else:
+                bg = UNDERSTOOD["fact"]
+            fmt.setBackground(QColor(bg))
+            self.setFormat(start, length, fmt)
         for start, length, key in spans:
             fg, bg = REF_COLOURS[key]
             fmt = QTextCharFormat()

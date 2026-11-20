@@ -427,3 +427,98 @@ def test_show_on_the_board(browse):
     v.open_task.connect(opened.append)
     v.key(Qt.Key.Key_Return, Qt.KeyboardModifier.NoModifier)
     assert opened == ["T000015"]
+
+
+# ---- release 5.191 (the redesign's decision 866): columns as panels, an empty column a rail, a card at most three lines ----
+def test_an_empty_column_is_a_rail(browse):
+    from docrepo.ui.priorities_view import COLUMN_MIN, RAIL
+
+    v = browse.priorities
+    assert [c.is_rail for c in v.column_widgets] == [False, True, True, True, True]
+    browse.resize(1440, 900)
+    QApplication.processEvents()
+    assert all(c.width() == RAIL for c in v.column_widgets[1:]) and v.column_widgets[0].width() >= COLUMN_MIN
+    rail = v.column_widgets[1].rail
+    assert "press 1" in rail.toolTip() and rail.toolTip().startswith("Critical: no cards")
+    assert rail.accessibleName() == "Critical, empty" and not rail.isHidden() and v.column_widgets[1].open_box.isHidden()
+
+
+def test_the_rails_open_while_a_card_is_dragged(browse):
+    v = browse.priorities
+    v.set_rails_open(True)
+    from docrepo.ui.priorities_view import COLUMN_MIN
+
+    assert not any(c.is_rail for c in v.column_widgets) and all(c.minimumWidth() == COLUMN_MIN for c in v.column_widgets)
+    v.set_rails_open(False)
+    assert [c.is_rail for c in v.column_widgets] == [False, True, True, True, True]
+
+
+def test_a_card_that_lands_keeps_its_column_open(browse):
+    v = browse.priorities
+    v.set_rails_open(True)
+    v.drop("T000012", "high", None)  # drawn again while the drag's loop still runs: the new columns come up open
+    assert not any(c.is_rail for c in v.column_widgets)
+    v.set_rails_open(False)
+    assert [c.is_rail for c in v.column_widgets] == [False, True, False, True, True]
+    assert v.columns[2].ids == ["T000012"] and "T000012" in [c.task_id for c in v.column_widgets[2].cards]
+
+
+def test_a_key_moves_a_card_into_a_rails_bucket(browse):
+    v = browse.priorities
+    v.pick("T000012")
+    assert v.column_widgets[1].is_rail
+    v.key(Qt.Key.Key_1, Qt.KeyboardModifier.NoModifier)
+    assert not v.column_widgets[1].is_rail and v.columns[1].ids == ["T000012"]
+
+
+def test_a_drop_on_a_folded_column_lands(browse):
+    from PySide6.QtCore import QByteArray, QMimeData, QPointF
+    from PySide6.QtGui import QDropEvent
+
+    from docrepo.ui.priorities_view import MIME
+
+    v = browse.priorities
+    seen: list = []
+    v.moved.connect(lambda *a: seen.append(a))
+    column = v.column_widgets[3]  # Medium, folded
+    assert column.is_rail
+    mime = QMimeData()
+    mime.setData(MIME, QByteArray(b"T000019"))
+    drop = QDropEvent(QPointF(10, 40), Qt.DropAction.MoveAction, mime, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    column.dropEvent(drop)
+    assert seen[0] == ("T000019", "medium", None)
+
+
+def test_show_and_find_fold_what_they_empty(browse):
+    v = browse.priorities
+    v.drop("T000012", "critical", None)
+    v.drop("T000008", "high", None)  # Installation, a parent: Show Work leaves it off the board
+    assert [c.is_rail for c in v.column_widgets] == [False, False, False, True, True]
+    v.show_buttons["work"].click()
+    assert [c.is_rail for c in v.column_widgets] == [False, False, True, True, True]
+    v.show_buttons["all"].click()
+    browse.open_find()
+    v.find_box.setText("sling")  # Rigging plan alone, in Critical
+    assert [c.is_rail for c in v.column_widgets] == [True, False, True, True, True]
+    v.find_box.setText("nothing like this")  # nothing on the board: every column open
+    assert not any(c.is_rail for c in v.column_widgets)
+    v.close_find()
+
+
+def test_a_card_is_at_most_three_lines(browse):
+    from PySide6.QtWidgets import QWidget
+
+    from docrepo.ui.priorities_view import TwoLines
+    from docrepo.ui.widgets import ElidedLabel
+
+    v = browse.priorities
+    card = v.cards["T000012"]
+    assert isinstance(card.title, TwoLines) and card.title.objectName() == "prTitle"
+    long = TwoLines("A title that goes on " * 10)
+    long.setFont(card.title.font())
+    step = long.fontMetrics().lineSpacing()
+    assert long.heightForWidth(200) == 2 * step and long.lines(200)[1] and long.lines(200)[0][1].endswith("…")
+    assert TwoLines("Short").heightForWidth(200) == TwoLines("Short").fontMetrics().lineSpacing()
+    assert not [w for w in card.findChildren(ElidedLabel) if w.objectName() == "fieldLabel"]
+    assert "Reactor impeller upgrade" in card.toolTip() and card.toolTip().startswith("Rigging plan\n")
+    assert v.cards["T000008"].findChild(QWidget, "prFamily") is not None  # a parent's card keeps its subtasks' line

@@ -510,15 +510,123 @@ QFrame#popover[options="true"] QPushButton { text-align: left; }  /* a menu's wo
 /* ---- end lane B ---- */
 
 /* ---- lane C (the pages) ---- */
+/* release 5.185 (lane C): the task page and the workspace (the redesign's decision 859). The rules above these that name the same
+   widgets are overridden here; 5.194 tidies them. */
+QFrame#statusCard, QFrame#statusCard[empty="true"] { background: $sunken; border: none; border-radius: ${radius_l}px; }
+QLabel#statusName { color: $text2; }
+QLabel#statusWhen, QLabel#groupSummaryLabel { color: $text3; }
+QLabel#statusWhen[late="true"] { color: $caution; font-weight: 600; }
+QToolButton#statusLog { border: none; border-radius: ${radius_s}px; background: transparent; padding: 2px 4px 2px 6px; color: $text3; }
+QToolButton#statusLog:hover { background: $hover; color: $text; text-decoration: none; }
+QPushButton#cardAction, QPushButton#wsState, QPushButton#wsLater, QPushButton#wsAdd { background: $content; color: $text;
+  border: 1px solid $stroke_strong; border-radius: ${radius_s}px; padding: 0 10px; min-height: 24px; max-height: 24px; font-weight: 400; }
+QPushButton#cardAction:hover, QPushButton#wsState:hover, QPushButton#wsLater:hover, QPushButton#wsAdd:hover { background: $hover; }
+QPushButton#cardAction:pressed, QPushButton#wsState:pressed, QPushButton#wsLater:pressed, QPushButton#wsAdd:pressed { background: $pressed; }
+QToolButton#groupHead { border: none; border-radius: ${radius_s}px; background: transparent; padding: 2px 6px 2px 2px; color: $text; }
+QToolButton#groupHead:hover { background: $hover; }
 
+QWidget#workspace, QWidget#wsHead, QWidget#wsBar, QWidget#wsResources { background: $content; }
+QWidget#wsBar { border-bottom: 1px solid $stroke; }
+QWidget#wsResources { border-left: 1px solid $stroke; }
+QScrollArea#wsChain { background: $sunken; border: none; border-radius: ${radius_l}px; }
+QWidget#wsChainInner { background: transparent; }
+QLabel#wsCaption, QLabel#wsKicker, QLabel#wsThis, QLabel#wsStatus, QLabel#wsCount { color: $text3; }
+QLabel#wsCaption { padding-top: 6px; }
+QLabel#wsNote, QLabel#wsWait { color: $text2; }
+QLabel#wsWait[late="true"] { color: $caution; font-weight: 600; }
+QFrame#wsChainCard { background: transparent; border: none; border-radius: ${radius_s}px; }
+QFrame#wsChainCard:hover { background: $hover; }
+QFrame#wsChainCard[picked="true"] { background: $selected; }
+QLabel#wsBanner { background: $sunken; border-radius: ${radius}px; padding: 7px 10px; margin-bottom: 6px; }
+QLabel#wsOn { color: $text2; background: $sunken; border-radius: ${radius_s}px; padding: 2px 9px; }
+QFrame#wsAgents { border: 1px dashed $stroke_strong; border-radius: ${radius_s}px; }
+QPushButton#wsLink { color: $text2; border: none; background: transparent; padding: 0; text-align: left; min-height: 0; }
+QPushButton#wsLink:hover { color: $text; text-decoration: underline; }
+QPushButton#wsDay { color: $text; border: none; background: transparent; padding: 2px 0; text-align: left; min-height: 0; }
+QPushButton#wsDay:hover { text-decoration: underline; }
+QFrame#wsDatesFrame { background: $sunken; border: none; border-radius: ${radius_l}px; }
+QLabel#wsTodayLine { color: $text2; border-bottom: 1px solid $stroke_strong; padding-bottom: 2px; }
+QLabel#wsWhen { color: $text3; }
+QLabel#wsWhen[tone="soon"] { color: $caution; font-weight: 600; }
+QLabel#wsWhen[tone="late"] { color: $critical; font-weight: 600; }
+QLabel#wsKind { color: $text2; background: $hover; border-radius: ${radius_s}px; padding: 1px 8px; font-size: ${caption}pt; }
+QLabel#wsKind[kind="deadline"] { color: $critical; background: $critical_bg; }
+QLabel#wsKind[kind="reminder"] { color: $caution; background: $caution_bg; }
+QLabel#wsKind[kind="meeting"], QLabel#wsKind[kind="follow_up"] { color: $parked; background: $parked_bg; }
+/* release 5.186 (lane C): the notes without a frame (the redesign's decision 860, which retires decision 130's frame) */
+QFrame#notesCard { background: transparent; border: none; }
+QFrame#notesCard[typing="true"] { background: transparent; border: none; }
+QWidget#notesHead { background: transparent; border: none; }
+QFrame#notesRule { background: $stroke; border: none; }
+QWidget#notesHead QWidget#formatBar { border: none; }
+QWidget#notesHead QWidget#formatBar QToolButton { padding: 3px 4px; }
+QFrame#outlineSlot { background: transparent; border: none; }
+QWidget#checkRow { border-radius: ${radius_s}px; }
+QLabel#checkCount, QLabel#checkHeading { color: $text3; }
 /* ---- end lane C ---- */
 
 /* ---- lane D (the floating windows) ---- */
-
+/* release 5.187: floating surfaces and confirmations (decisions 862, 863). A top-level window keeps a square edge: Windows
+   rounds it and clips the corners. */
+QDialog#palette, QFrame#taskPicker, QWidget#pinWindow, QFrame#draftsList, QDialog#confirm
+    { background: $content; border: 1px solid $stroke_strong; border-radius: 0; }
+QLineEdit#paletteBox { border: none; border-bottom: 1px solid $stroke; border-radius: 0; background: transparent;
+    min-height: 43px; max-height: 43px; padding: 0 12px 0 8px; }
+QLineEdit#paletteBox:focus { border: none; border-bottom: 1px solid $stroke; padding: 0 12px 0 8px; }
+QTreeWidget#paletteList { border: none; background: transparent; }
+QListWidget#taskPickerList::item:selected, QListWidget#refPopup::item:selected { background: $hover; color: $text; border-radius: ${radius_s}px; }
+QLabel#confirmTitle { color: $text; font-size: ${section}pt; font-weight: 600; }
+QLabel#confirmText { color: $text2; }
+QPushButton#danger { background: $critical_fill; color: $on_accent; border: 1px solid $critical_fill; font-weight: 600; padding: 5px 16px; }
+QPushButton#danger:hover { background: $critical_hover; border-color: $critical_hover; }
+QPushButton#danger:pressed { background: $critical_pressed; border-color: $critical_pressed; }
+QWidget#summaryTop { background: $content; border-bottom: 1px solid $stroke; }
+QWidget#summaryFoot { background: $content; border-top: 1px solid $stroke; }
+/* release 5.188: the capture window's chips (decision 861). The understood words are tinted in the text, so the found box
+   loses its yellow and a filled field its tint and marker; Save shows its key. */
+QWidget#footer { background: $content; border-top: 1px solid $stroke; }
+QFrame#found, QFrame#found[empty="true"] { background: transparent; border: none; }
+QToolButton#fact { border: 1px solid $stroke; border-radius: ${radius_s}px; background: transparent; color: $text;
+    padding: 0 8px; min-height: 22px; max-height: 22px; font-size: ${caption}pt; }
+QToolButton#fact:hover, QToolButton#factMore:hover { background: $hover; }
+QToolButton#factMore { border: none; border-radius: ${radius_s}px; background: transparent; color: $text3;
+    padding: 0 8px; min-height: 24px; max-height: 24px; font-size: ${caption}pt; }
+QToolButton#factMore:checked { background: $sunken; color: $text; }
+QFrame#factPopover { background: $content; border: 1px solid $stroke_strong; border-radius: ${radius_l}px; }
+QPushButton#primary[keyed="true"] { padding: 5px 86px 5px 16px; text-align: left; }
+QLabel#saveKey { background: rgba(255, 255, 255, 0.18); color: $on_accent; border-radius: ${radius_box}px; padding: 1px 6px;
+    font-size: ${caption}pt; font-weight: 400; }
+QWidget#capture QLineEdit[filled="true"], QWidget#capture QLineEdit[filled="dot"], QWidget#capture QPlainTextEdit[filled="true"],
+QWidget#capture QComboBox[filled="true"] { background: $content; border-color: $stroke_strong; }
+QWidget#capture QLineEdit[filled="true"], QWidget#capture QLineEdit[filled="dot"] { padding-right: 8px; }
+QWidget#capture QLineEdit#dateLine[filled="true"], QWidget#capture QLineEdit#dateLine[filled="dot"] { padding-left: 8px; }
+QWidget#capture QLineEdit[filled="true"]:focus, QWidget#capture QLineEdit[filled="dot"]:focus,
+QWidget#capture QPlainTextEdit[filled="true"]:focus, QWidget#capture QComboBox[filled="true"]:focus { border-color: $accent; }
+QWidget#capture QLineEdit[filled="true"]:focus, QWidget#capture QLineEdit[filled="dot"]:focus { padding-right: 7px; }
+QWidget#capture QLineEdit#dateLine[filled="true"]:focus, QWidget#capture QLineEdit#dateLine[filled="dot"]:focus { padding-left: 7px; }
+QWidget#capture QCheckBox[filled="true"] { background: transparent; }
+QWidget#capture QToolButton#chip[filled="true"] { background: $sunken; border-color: transparent; }
 /* ---- end lane D ---- */
 
 /* ---- lane E (planning views and forms) ---- */
-
+/* release 5.191 (Priorities), lane E: columns as panels set apart on the content's white, an empty column a rail, the card */
+QScrollArea#prBoardScroll, QWidget#prBoard { background: $content; }
+QFrame#prCol { background: $sunken; border: none; border-radius: ${radius_l}px; }
+QFrame#prCol[over="true"] { background: $selected; border: none; }
+QWidget#prColBody, QWidget#prRail { background: transparent; }
+QLabel#prColName { color: $text; font-size: ${section}pt; font-weight: 600; }
+QFrame#prCard { background: $content; border: 1px solid $stroke; border-radius: ${radius}px; }
+QFrame#prCard:hover { border-color: $stroke_strong; }
+QFrame#prCard[sel="true"] { background: $selected; border-color: $info_line; }
+QLabel#prFacts { color: $text3; font-size: ${caption}pt; }
+QFrame#prRow { border-radius: ${radius_s}px; }
+QFrame#prRow[sel="true"] { background: $selected; border-color: $info_line; }
+QPushButton#prOpener { border-radius: ${radius_s}px; }
+QFrame#prDrop { background: $accent; border: none; border-radius: ${radius_hair}px; }
+QFrame#prStrip { background: $sunken; border: none; border-radius: ${radius_l}px; }
+/* release 5.192 (the Timeline and Capacity), lane E: the mode strips (the line under the chart already has its rule above) */
+QFrame#modeStrip { background: $selected; border: none; border-radius: ${radius_l}px; }
+QFrame#modeStrip QLineEdit { background: $content; }
 /* ---- end lane E ---- */
 """)
 
@@ -545,13 +653,11 @@ body { color: $text; }
 a { color: $accent; text-decoration: none; }
 h2 { font-family: 'Segoe UI'; font-size: ${page_title}pt; font-weight: 600; margin-top: 2px; margin-bottom: 4px; }
 .ptitle { font-family: 'Segoe UI'; font-size: ${page_title}pt; font-weight: 600; }
-.crumbs { color: $text2; font-size: ${caption}pt; margin: 0; }
 .sub { color: $text3; font-size: ${caption}pt; font-weight: 400; }
 .faint { color: $text2; }
 .k { color: $text3; padding-right: 12px; }
 .fk { color: $text3; font-size: ${caption}pt; }
 .note { color: $text3; font-size: ${caption}pt; }
-.box { background-color: $base; }
 .info { background-color: $info_bg; }
 .caution { color: $caution; }
 .critical { color: $critical; }
@@ -591,7 +697,6 @@ h2 { font-family: 'Segoe UI'; font-size: ${page_title}pt; font-weight: 600; marg
 .dt { color: $text3; font-size: ${caption}pt; padding-right: 14px; }
 .rel { color: $text3; font-size: ${caption}pt; font-weight: 400; }
 .over { color: $critical; }
-.tile { background-color: $base; border-bottom: 2px solid $content; }
 .stat { background-color: $base; }
 .sk { color: $text3; font-size: ${caption}pt; }
 .desc { color: $text2; margin-top: 4px; }
@@ -609,10 +714,6 @@ h2 { font-family: 'Segoe UI'; font-size: ${page_title}pt; font-weight: 600; marg
 .hitline { margin: 0; background-color: $caution_bg; }
 .gap { margin: 0; color: $text2; }
 .stext { margin-top: 4px; margin-bottom: 0; }
-.gk { color: $text3; padding-right: 10px; }
-.relb { color: $text2; font-weight: 400; }
-.grid { margin-top: 12px; }
-.anday { color: $text3; font-size: ${label}pt; font-weight: 600; margin-top: 14px; margin-bottom: 2px; }
 .src { color: $text3; font-size: ${caption}pt; font-weight: 400; margin-top: 8px; margin-bottom: 2px; }
 .nl { margin: 0; }
 .also { color: $text3; font-size: ${caption}pt; }
@@ -633,11 +734,23 @@ h2 { font-family: 'Segoe UI'; font-size: ${page_title}pt; font-weight: 600; marg
 /* ---- end lane B ---- */
 
 /* ---- lane C (the pages) ---- */
-
+/* release 5.185 (lane C): the task page (the redesign's decision 859) */
+.crumbs { color: $text3; font-size: ${caption}pt; margin: 0; }
+.gk { color: $text3; font-size: ${caption}pt; padding-right: 10px; }
+.relb { color: $text3; font-size: ${caption}pt; font-weight: 400; }
+.grid { margin-top: 16px; }
+.pill { background-color: $sunken; }
+.cmd { color: $text2; font-size: ${caption}pt; }
+.tile { border-top: 1px solid $stroke; padding-top: 6px; padding-bottom: 6px; }
+/* release 5.186 (lane C): the notes' days, and the other pages' soft panels */
+.anday { color: $text3; font-size: ${label}pt; font-weight: 600; margin-top: 16px; margin-bottom: 4px; }
+.box { background-color: $sunken; }
 /* ---- end lane C ---- */
 
 /* ---- lane D (the floating windows) ---- */
-
+/* release 5.187: the command palette's group heads and keys (decision 862) */
+.pgroup { color: $text3; font-size: ${label}pt; font-weight: 600; }
+.pkey { color: $text3; font-size: ${caption}pt; }
 /* ---- end lane D ---- */
 
 /* ---- lane E (planning views and forms) ---- */
