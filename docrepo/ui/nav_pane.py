@@ -2,9 +2,11 @@
 
 Each view is a row with its icon, its name and, where it asks for something (``views.ASKS``), a count. The groups
 (Lists, Plan, Manage) have small headings with a chevron that fold them, and a folded group still shows the view
-that's open. Discarded and Settings are pinned at the foot, below a hairline, and the rows above scroll on their own.
-The rows are painted here from the design tokens: a style sheet can't draw the selected row's short pill or put the
-count at the right edge.
+that's open. Discarded and Settings are pinned at the foot, and the rows above scroll on their own. The rows are painted here from
+the design tokens: a style sheet can't put the count at the right edge. Since release 5.182 (the redesign's decision
+854, the sidebar's neutral selection) the open view is a grey fill, its name semibold and its icon in the accent, with
+no pill; the pane is see-through, on the window's grey frame, and "Manage" starts folded on a data root that never
+folded a group (the browse window's ``_folded_groups``).
 
 Tab gives the pane one stop (the open view's row, or the row last moved to); the arrow keys, Home and End move between
 rows and headings, Enter or Space opens a view or folds a group, and Left and Right fold and unfold a heading.
@@ -33,9 +35,9 @@ FOOT = ("discarded", "settings")
 #: The sidebar's width to start with. Decision 84 chose 228 px, at the mock's 13 px text; DocRepo's 14 px text needs
 #: 248 px for "Overdue and next 7 days" in semibold and its count to fit, with room for the scroll bar.
 WIDTH = 248
-ROW = 32     # a view's row (the playbook's compact sidebar item)
+ROW = 30     # a view's row (release 5.182; 32 until then, the playbook's compact sidebar item)
 HEADING = 26
-PAD = 12     # the icon's, and a heading's, distance from the row's left edge
+PAD = 10     # the icon's, and a heading's, distance from the row's left edge (12 until release 5.182)
 GAP = 10     # between the icon and the name
 
 
@@ -65,11 +67,11 @@ class _Row(QAbstractButton):
         if fill is not None:
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(fill)
-            p.drawRoundedRect(QRectF(self.rect()), tokens.RADIUS, tokens.RADIUS)
+            p.drawRoundedRect(QRectF(self.rect()), tokens.RADIUS_S, tokens.RADIUS_S)
         if self.hasFocus():
             p.setPen(QPen(_c("accent"), 2))
             p.setBrush(Qt.BrushStyle.NoBrush)
-            p.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), tokens.RADIUS, tokens.RADIUS)
+            p.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), tokens.RADIUS_S, tokens.RADIUS_S)
 
     def _hover_fill(self) -> QColor | None:
         if self.isDown():
@@ -79,8 +81,8 @@ class _Row(QAbstractButton):
 
 class ViewRow(_Row):
     """A view: its icon, its name (ending in "…" when it doesn't fit, with the full name as the tooltip) and its count.
-    The open view has an inset backplate, a short accent pill at its left, its icon in the accent and its name in
-    semibold (decision 82)."""
+    The open view has a grey backplate, its icon in the accent and its name in semibold (decision 82; the grey and no
+    pill since release 5.182, decision 854)."""
 
     def __init__(self, view: ViewDef, parent: QWidget | None = None) -> None:
         super().__init__(view.label, ROW, parent)
@@ -112,11 +114,7 @@ class ViewRow(_Row):
         w, h = self.width(), self.height()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        self._backplate(p, _c("selected") if on else self._hover_fill())
-        if on:
-            p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(_c("accent"))
-            p.drawRoundedRect(QRectF(0, (h - 16) / 2, 3, 16), tokens.RADIUS_EDGE, tokens.RADIUS_EDGE)
+        self._backplate(p, _c("nav_selected") if on else self._hover_fill())
         self._icon.paint(p, QRect(PAD, (h - 16) // 2, 16, 16), Qt.AlignmentFlag.AlignCenter, QIcon.Mode.Normal,
                          QIcon.State.On if on else QIcon.State.Off)
         right = w - GAP
@@ -125,7 +123,7 @@ class ViewRow(_Row):
             text = str(self.count)
             cw = QFontMetrics(font).horizontalAdvance(text)
             p.setFont(font)
-            p.setPen(_c("text2"))
+            p.setPen(_c("text3"))
             p.drawText(QRect(right - cw, 0, cw, h), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, text)
             right -= cw + 8
         font = tokens.ui_font(tokens.BODY, semibold=on)
@@ -139,7 +137,7 @@ class ViewRow(_Row):
 
 
 class Heading(_Row):
-    """A group's heading: its name in Caption, semibold and muted, then a chevron that points down while it's open. The
+    """A group's heading: its name in the label size, semibold and in the third grey, then a chevron that points down while it's open. The
     whole heading is the button (decision 79)."""
 
     def __init__(self, name: str, parent: QWidget | None = None) -> None:
@@ -163,7 +161,7 @@ class Heading(_Row):
         font = tokens.ui_font(tokens.LABEL, semibold=True)
         tw = QFontMetrics(font).horizontalAdvance(self.text())
         p.setFont(font)
-        p.setPen(_c("text") if self.underMouse() else _c("text2"))
+        p.setPen(_c("text") if self.underMouse() else _c("text3"))
         p.drawText(QRect(PAD, 0, tw + 2, h), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, self.text())
         chevron = icon("chevron-right" if self.folded else "chevron-down", size=12)
         chevron.paint(p, QRect(PAD + tw + 4, (h - 12) // 2, 12, 12))
@@ -200,13 +198,14 @@ class NavPane(QWidget):
         body = QWidget(objectName="navBody")
         body.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
         lay = QVBoxLayout(body)
-        lay.setContentsMargins(4, 6, 4, 8)
-        lay.setSpacing(0)
+        # 8 px at each side (release 5.182): the card's left edge is drawn under the pane's right 3 px, so no row paints there
+        lay.setContentsMargins(8, 0, 8, 4)
+        lay.setSpacing(1)
         for v in views:
             if v.id in FOOT:
                 continue
             if v.section and v.section not in self.headings:
-                lay.addSpacing(tokens.SPACE["l"])
+                lay.addSpacing(tokens.SPACE["m"])
                 heading = Heading(v.section)
                 heading.clicked.connect(lambda _=False, s=v.section: self.toggle(s))
                 self.headings[v.section] = heading
@@ -220,8 +219,8 @@ class NavPane(QWidget):
         outer.addWidget(self.scroll, 1)
         self.foot = QFrame(objectName="navFoot")
         fl = QVBoxLayout(self.foot)
-        fl.setContentsMargins(4, 4, 4, 4)
-        fl.setSpacing(0)
+        fl.setContentsMargins(8, 4, 8, 0)
+        fl.setSpacing(1)
         by_id = {v.id: v for v in views}
         for vid in FOOT:
             if vid in by_id:

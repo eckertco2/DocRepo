@@ -180,7 +180,7 @@ def test_a_page_tile_has_its_circle_link_title_flag_and_days(sample_conn):
     m = Model(sample_conn)
     html = task_tile.html(task_tile.tile(m, BOOK, TODAY), lambda href, text: f'<a href="{href}">{text}</a>')
     assert f'href="state:{BOOK}"' in html and f'href="task:{BOOK}"' in html
-    assert 'src="tm:urgent"' in html and ">1</span>" in html
+    assert 'src="tm:urgent"' in html and ">1 d</span>" in html  # the number with its unit (release 5.183, decision 857)
     assert 'class="tile"' in html
     assert "Safety" not in html  # no labels on a tile (decision 569)
 

@@ -30,12 +30,14 @@ SELECT_VIEWS = ("tasks", *LIST_IDS)
 #: The views but the task tree whose rows nest, so they have Collapse a level and Expand a level (release 5.24).
 NESTING_VIEWS = ("today", *LIST_IDS, "agenda", "activity", "docs", "labels", "templates")
 #: Each view's rows (the list rows review, decision L1): its row height, and whether rows with a second line
-#: take two. Views whose rows nest are 28 px; Agendas, Documents, Activity and Search show a second line. Others are 32 px.
+#: take two. Every one-line row is 30 px since release 5.183 (decision 850); Agendas, Documents, Activity and Search show a
+#: second line.
 ROW_DENSITY = {"tasks": (tokens.TREE_ROW, False), **{v: (tokens.TREE_ROW, False) for v in LIST_IDS}, "labels": (tokens.TREE_ROW, False),
                "templates": (tokens.TREE_ROW, False), "docs": (tokens.TREE_ROW, True), "agenda": (tokens.LIST_ROW, True),
                "activity": (tokens.LIST_ROW, True), "search": (tokens.LIST_ROW, True)}
-#: Views whose column headings say nothing their cells don't (decision L6). Search has one column, so none either.
-NO_HEADINGS = ("today", "review", "tasks", "unfiled", "search", *LIST_IDS)
+#: The views with column heads (release 5.183, the redesign's decision 856): the real tables only. Every other list's
+#: columns say what they hold (decision L6).
+HEADINGS = ("people", "tagged", "glossaries")
 #: Activity's kinds as icons (release 5.78), in place of their chips.
 ACT_ICONS = {"task": "task", "update": "update", "note": "note", "email": "type-mail", "change": "edit", "doc": "file", "agenda": "agenda"}
 #: Unfiled's sources as icons (release 5.78), in place of a Source column.
@@ -98,8 +100,9 @@ def _due_html(cell) -> str:
     return f'<p align="right" style="{_due_css(cell.cls)}">{esc(cell.text)}</p>'
 
 
-#: The days number's column (release 5.138, the task tile plan's decision 568): an integer, so narrow.
-DAYS_COL = 44
+#: The days number's column (release 5.138, the task tile plan's decision 568): the number and its unit since release 5.183
+#: ("50 d", decision 857), so narrow.
+DAYS_COL = 56
 
 
 def tile_cells(m: Model, task_id: str, today, *, context: str = "", flat: bool = False, hide: tuple[str, ...] = (), dim: bool = False,

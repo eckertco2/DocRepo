@@ -24,7 +24,7 @@ from docrepo.ui.look import LOOK, set_hints  # noqa: E402
 from docrepo.ui.priorities_view import COLUMN_MIN, RAIL  # noqa: E402
 from docrepo.ui.task_pane import TaskPane  # noqa: E402
 from docrepo.ui.task_view import FOOT  # noqa: E402
-from docrepo.ui.tree_view import ACTIONS_ROLE, KEY_ROLE, Line, RowTree, with_actions  # noqa: E402
+from docrepo.ui.tree_view import ACTIONS_ROLE, KEY_ROLE, ROW_INSET, Line, RowTree, with_actions  # noqa: E402
 from docrepo.ui.widgets import DropButton, ElidedCheck, ElidedLabel, ViewStack, ask  # noqa: E402
 
 NOW = datetime(2026, 10, 8, 14, 10)
@@ -171,7 +171,7 @@ def test_row_actions_come_with_the_mouse_and_go_with_it(qapp):
     buttons = strip.findChildren(QPushButton)
     assert [b.accessibleName() for b in buttons] == ["Done", "Remove"] and all(b.text() == "" and not b.icon().isNull() for b in buttons)
     assert buttons[0].toolTip().startswith("Done")
-    assert strip.geometry().right() == t.viewport().width() - 1  # at the row's end, over its date
+    assert strip.geometry().right() == t.viewport().width() - ROW_INSET - 1  # at the row's end, over its date, inside its ground (5.183)
     t.setCurrentItem(second)
     t._sync_strips()
     assert [s.item for s in t._strips] == [first]  # the current row shows its date
@@ -205,7 +205,7 @@ def test_a_hovered_rows_words_stop_short_of_its_strip(qapp):
     t._sync_strips()
     assert t.strip_left(long_row) is None  # at rest, the words have the row
     strip = t.action_strip(long_row)
-    assert t.strip_left(long_row) == strip.geometry().left() == t.viewport().width() - (2 * 6 + 4 * 28)
+    assert t.strip_left(long_row) == strip.geometry().left() == t.viewport().width() - ROW_INSET - (2 * 6 + 4 * 28)  # inside the ground (5.183)
     assert strip.geometry().left() < t.columnWidth(0)  # wider than the date's column: the words make room
     t.hide()
 

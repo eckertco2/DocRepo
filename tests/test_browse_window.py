@@ -299,7 +299,7 @@ def test_later_from_today_and_its_undo(browse, monkeypatch):
     _actions(browse, ("task", "T000012"))["Later…"]()
     m = Model(browse.conn)
     assert not any(a.id == item.id for a in m.today_items()) and m.task("T000012").reminder == "2026-10-13"
-    assert "off Today until Tue 13 Oct" in browse.status.text() and "Undo" in browse.status.text()
+    assert "off Today until Tue 13 Oct" in browse.status.text() and browse.toast.offers_undo()
     browse._status_link("undo")
     m = Model(browse.conn)
     assert any(a.id == item.id for a in m.today_items()) and m.task("T000012").reminder is None
@@ -878,7 +878,7 @@ def test_the_task_page_bar_and_its_links(browse, monkeypatch):
     more = buttons[-1]
     assert more.accessibleName() == "More" and more.property("flowEnd") and more.menu().actions()[0].text() == "New task under this one\tT"
     centres = {b.mapTo(browse.actions, b.rect().center()).y() for b in buttons}  # Edit's two sit in a box of their own
-    assert len(centres) == 1 and more.geometry().right() == 899 - 16  # one row, centred, More at its end
+    assert len(centres) == 1 and more.geometry().right() == 899 - 12  # one row, centred, More at its end (12 from release 5.182: the card holds the other 4)
     add_to = next(b for b in buttons if b.text() == "Add to").menu().actions()
     assert add_to[0].text().startswith("Today") and add_to[-1].text() == "An agenda…	A"  # its key since 5.98
     opened = []

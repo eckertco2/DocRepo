@@ -1412,7 +1412,7 @@ class TimelineView(QWidget):
         self.confirm: Callable[[str, str], bool] = lambda title, words: True
         self.run_dialog: Callable[[QWidget], bool] = lambda dialog: bool(dialog.exec())
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(16, 12, 16, 10)
+        lay.setContentsMargins(12, 12, 12, 10)  # release 5.182: the card's own 4 px of padding makes the 16 it was
         lay.addWidget(QLabel("Timeline", objectName="paneTitle"))
         lay.addWidget(Help("Open tasks over the coming weeks: a row per project, folded to start with, a bar from Start to Due, "
                            "a diamond for a deadline and a dot for each occurrence of a routine task. Parked and closed tasks are "

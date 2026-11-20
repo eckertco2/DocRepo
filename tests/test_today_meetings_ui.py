@@ -139,7 +139,7 @@ def test_link_confirms_the_suggestion_with_undo(browse):
     row = row_of(browse, "Business team meeting")
     assert row.data(0, KEY_ROLE) == ("task", BUSINESS) and list(actions(row)) == ["Agenda", "Discussion or meeting"]
     assert row.data(0, LINE_ROLE).context == "Conf room B · 4 on its agenda"
-    assert "“Business team meeting” is linked to its meeting task" in browse.status.text() and "Undo" in browse.status.text()
+    assert "“Business team meeting” is linked to its meeting task" in browse.status.text() and browse.toast.offers_undo()
     browse._status_link("undo")
     assert meetings.links(browse.conn) == {} and "Link" in actions(row_of(browse, "Business team meeting"))
 

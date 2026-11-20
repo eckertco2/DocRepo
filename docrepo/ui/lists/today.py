@@ -28,7 +28,6 @@ from PySide6.QtWidgets import (
 
 from docrepo import db, edits, key_dates, later, priorities, urgency, waits
 from docrepo.dates import long_date
-from docrepo.detail import esc
 from docrepo.model import Model
 from docrepo.ui import current_ui, today_bins, today_meetings
 from docrepo.ui.lists import review as review_list
@@ -106,8 +105,8 @@ class TodayList:
         head = self.tree.add_row(None, None, ["<b>Today</b>"], grey, selectable=False, span=True) if bands else None
         for band, name, group in bands:
             colour = today_bins.colour_of(band).name()
-            self.tree.add_row(head, None, [f'<span style="color:{colour}; font-weight:600">{esc(name)}</span>&nbsp;&nbsp;<span class="sub">{len(group)}</span>'],
-                              selectable=False, span=True, tip=f"{name}: drag a task onto a bin to change its priority")
+            # the band's head: its colour as a dot, its name grey like every head (release 5.183, decision 856)
+            self.tree.add_head(head, name, count=str(len(group)), dot=colour, tag=band, tip=f"{name}: drag a task onto a bin to change its priority")
             halves = {True: [a.id for a in group if a.id in hot], False: [a.id for a in group if a.id not in hot]}
             for a in group:
                 self._today_band_of[a.id] = (band, a.id in hot)
