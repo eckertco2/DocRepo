@@ -56,6 +56,9 @@ def browse(ctx):
     w.confirm = lambda title, text: True
     w.show_browse()
     w.resize(1440, 900)
+    # The list pane as wide as Windows' own fonts leave it at this size: offscreen's are wider, and a narrower row would
+    # show Filter and Display as their icons alone, which the narrow pane's own tests check.
+    w.split.setSizes([248, 560, 620])
     for _ in range(5):  # its own showing and activation, settled before a panel opens: a popup closes when another window activates
         QApplication.processEvents()
     yield w
@@ -299,9 +302,11 @@ def test_the_title_is_cut_last(browse):
     head = browse.head
     natural = head.title.fontMetrics().horizontalAdvance("Activity") + 2
     cut_seen = False
-    for width in range(900, 200, -20):
-        head.resize(width, head.height())
-        QApplication.processEvents()
+    browse.resize(2000, 900)
+    for width in range(900, 150, -20):  # the line between the list and the page dragged left
+        browse.split.setSizes([248, width, 2000 - width])
+        for _ in range(3):
+            QApplication.processEvents()
         if head.title.maximumWidth() < natural:
             assert head.count.maximumWidth() == 0, width  # the title is cut only after the count
             cut_seen = True
@@ -335,3 +340,32 @@ def test_the_old_names_still_reach_the_header(browse):
     assert browse.pane_title is browse.head.title and browse.pane_count is browse.head.count and browse.pane_note is browse.head.note
     browse.set_view("tasks")
     assert browse.pane_title.text() == "Task tree" and browse.pane_count.text().endswith("open")
+
+
+#: Each view's narrowest list pane on `main` before release 5.184 (`d33abb2`), with the window 2000 px wide and the panes set to
+#: 248, 200 and 1550: the old bar's widest control held each. The views with no page beside them aren't here.
+PANE_BEFORE = {"tasks": 296, "due": 377, "agenda": 332, "activity": 676, "docs": 210, "people": 256, "labels": 256, "unfiled": 200}
+
+
+@pytest.mark.parametrize("view", sorted(PANE_BEFORE))
+def test_the_list_pane_goes_as_narrow_as_it_did(browse, view):
+    """The header never holds the list pane wider than it could be dragged before: in a narrow row the commands fold under
+    More, then Filter and Display keep only their icons, their words in their tooltips, and they come back with the room."""
+    browse.set_view(view)
+    browse.resize(2000, 900)
+    browse.split.setSizes([248, 200, 1550])
+    for _ in range(5):
+        QApplication.processEvents()
+    head = browse.head
+    # the pane's least width, which the splitter honours (it spreads a few pixels' shortfall over the panes as well)
+    assert browse.detail.isVisible() and browse.middle.minimumSizeHint().width() <= PANE_BEFORE[view], browse.middle.minimumSizeHint()
+    assert browse.split.sizes()[1] <= PANE_BEFORE[view] + 16, browse.split.sizes()
+    assert not head.commands() or head.more_button.isVisibleTo(browse) or all(b.isVisibleTo(browse) for b in head.commands())
+    for b in (head.filter_button, head.display_button):
+        if b.isVisibleTo(browse) and b.text() == "":
+            assert b.accessibleName() in ("Filter", "Display") and b.toolTip().startswith(b.accessibleName())
+    browse.split.setSizes([248, 900, 850])
+    for _ in range(5):
+        QApplication.processEvents()
+    if head.filter_button.isVisibleTo(browse):
+        assert head.filter_button.text().startswith("Filter")
