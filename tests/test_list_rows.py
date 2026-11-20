@@ -20,8 +20,7 @@ from docrepo.ui import tokens  # noqa: E402
 from docrepo.ui.browse_window import BrowseWindow  # noqa: E402
 from docrepo.ui.capture_window import CaptureWindow  # noqa: E402
 from docrepo.ui.context import AppContext  # noqa: E402
-from docrepo.ui.tree_view import HTML_ROLE, KEY_ROLE, LINE_ROLE, TILE_GAP, TILE_INSET, TWO_LINE_ROW, HtmlDelegate, Line, RowTree  # noqa: E402
-from docrepo.views import TASK_VIEWS  # noqa: E402
+from docrepo.ui.tree_view import EDGE_X, HTML_ROLE, KEY_ROLE, LINE_ROLE, ROW_INSET, TWO_LINE_ROW, HtmlDelegate, Line, RowTree  # noqa: E402
 
 NOW = datetime(2026, 10, 8, 14, 10)
 LONG = "Ring the vendor back about the impeller datasheet, the seals, the coupling and the crane booking before the 2 pm call"
@@ -83,10 +82,8 @@ def test_every_row_in_a_one_line_view_is_its_height(browse, ctx, view, height):
     browse.refresh(render=False)
     browse.open.update(Model(ctx.conn).tasks)  # the whole tree open, chips, labels and deadlines with it
     browse.set_view(view)
-    if view in TASK_VIEWS:  # a view of tasks draws its rows as tiles, TILE_GAP apart (release 5.138, decision 571); headings keep it
-        assert heights(browse, keyed=False) <= {height + TILE_GAP}, view
-    else:
-        assert heights(browse, keyed=False) <= {height}, view  # headings too: one height, so Qt can lay them out as one
+    # flat rows, no gap (release 5.183, decision 850); heads too: one height, so Qt can lay them out as one
+    assert heights(browse, keyed=False) <= {height}, view
 
 
 def test_a_long_title_is_cut_not_wrapped(browse, ctx):
@@ -94,7 +91,7 @@ def test_a_long_title_is_cut_not_wrapped(browse, ctx):
     browse.refresh(render=False)
     browse.set_view("today")
     note = next(i for i in browse.tree.items() if (i.data(0, LINE_ROLE) and i.data(0, LINE_ROLE).title == LONG))
-    assert browse.tree.visualItemRect(note).height() == tokens.LIST_ROW + TILE_GAP  # a tile (release 5.138)
+    assert browse.tree.visualItemRect(note).height() == tokens.LIST_ROW  # flat, no gap (release 5.183)
     delegate: HtmlDelegate = browse.tree.itemDelegate()
     fm = QFontMetrics(browse.tree.font())
     parts = delegate._parts(note.data(0, LINE_ROLE), 300, fm, fm, False)
@@ -108,8 +105,7 @@ def test_a_two_line_view_gives_each_item_two_lines(browse, view):
     assert lines, view
     QApplication.processEvents()
     browse.tree.doItemsLayout()
-    gap = TILE_GAP if view in TASK_VIEWS else 0  # tiles (release 5.138, decision 571)
-    assert {browse.tree.visualItemRect(i).height() for i in lines} == {TWO_LINE_ROW + gap}, view
+    assert {browse.tree.visualItemRect(i).height() for i in lines} == {TWO_LINE_ROW}, view
 
 
 def test_an_agenda_item_with_no_note_still_takes_two_lines(browse):
@@ -118,7 +114,7 @@ def test_an_agenda_item_with_no_note_still_takes_two_lines(browse):
     assert any(i.data(0, LINE_ROLE).second == "" for i in rows) and any(i.data(0, LINE_ROLE).second for i in rows)
     QApplication.processEvents()
     browse.tree.doItemsLayout()
-    assert {browse.tree.visualItemRect(i).height() for i in rows} == {TWO_LINE_ROW + TILE_GAP}
+    assert {browse.tree.visualItemRect(i).height() for i in rows} == {TWO_LINE_ROW}
 
 
 # ---- L2: no bold task rows ----
@@ -231,12 +227,12 @@ def rank(ctx, task_id: str, bucket: str) -> None:
 
 
 def edge_pixel(browse, key) -> str:
-    """The colour at the left edge of a row, as drawn."""
+    """The colour at the left edge of a row, as drawn: in the gutter, where its priority mark is (release 5.183)."""
     item = next(i for i in browse.tree.items() if i.data(0, KEY_ROLE) == key)
     browse.tree.scrollToItem(item)
     QApplication.processEvents()
     rect = browse.tree.visualItemRect(item)
-    x = TILE_INSET + 1 if browse.tree.tiled else 1  # a tile's edge is its own left edge (release 5.138, decision 571)
+    x = EDGE_X + 1
     return browse.tree.viewport().grab().toImage().pixelColor(x, rect.center().y()).name()
 
 
@@ -255,17 +251,20 @@ def test_a_ranked_tasks_row_has_its_priority_down_its_edge(browse, ctx, bucket, 
 def test_unranked_rows_have_no_edge_and_projects_no_colour(browse):
     browse.set_view("tasks")
     browse.select("task", "T000016")
-    background = browse.tree.viewport().grab().toImage().pixelColor(browse.tree.viewport().width() // 2, 2).name()
     top = edge_pixel(browse, ("task", "T000001"))  # a top-level task, unranked: once its project's colour
-    assert top not in {tokens.colour(k) for k in tokens.GROUP_KEYS} and top in (background, tokens.colour("hover"), "#ffffff")
+    assert top not in {tokens.colour(k) for k in tokens.GROUP_KEYS} and top == tokens.colour("content")  # the gutter's ground, outside any row's
 
 
-def test_the_selected_row_keeps_the_accent_bar(browse, ctx):
+def test_the_selected_row_keeps_its_priority_mark(browse, ctx):
+    """No accent bar on the selected row since release 5.183 (decision 844): its tint says it, and its priority stays."""
     rank(ctx, "T000012", "high")
     browse.refresh(render=False)
     browse.set_view("tasks")
     browse.select("task", "T000012")
-    assert edge_pixel(browse, ("task", "T000012")) == tokens.colour("accent")
+    assert edge_pixel(browse, ("task", "T000012")) == tokens.colour("pri_high")
+    item = next(i for i in browse.tree.items() if i.data(0, KEY_ROLE) == ("task", "T000012"))
+    rect = browse.tree.visualItemRect(item)
+    assert browse.tree.viewport().grab().toImage().pixelColor(ROW_INSET + 8, rect.center().y()).name() == tokens.colour("selected")
 
 
 def test_a_closed_or_unranked_task_gives_no_priority(browse, ctx):

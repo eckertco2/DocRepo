@@ -11,7 +11,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest  # noqa: E402
 from PySide6.QtCore import QSize  # noqa: E402
-from PySide6.QtWidgets import QApplication, QFrame, QLabel, QPushButton, QTreeWidgetItem, QWidget  # noqa: E402
+from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QTreeWidgetItem, QWidget  # noqa: E402
 
 from docrepo import db  # noqa: E402
 from docrepo.config import Settings  # noqa: E402
@@ -21,10 +21,10 @@ from docrepo.ui.browse_window import BrowseWindow  # noqa: E402
 from docrepo.ui.capture_window import CaptureWindow  # noqa: E402
 from docrepo.ui.context import AppContext  # noqa: E402
 from docrepo.ui.look import LOOK, set_hints  # noqa: E402
-from docrepo.ui.priorities_view import COLUMN_MIN  # noqa: E402
+from docrepo.ui.priorities_view import COLUMN_MIN, RAIL  # noqa: E402
 from docrepo.ui.task_pane import TaskPane  # noqa: E402
 from docrepo.ui.task_view import FOOT  # noqa: E402
-from docrepo.ui.tree_view import ACTIONS_ROLE, KEY_ROLE, Line, RowTree, with_actions  # noqa: E402
+from docrepo.ui.tree_view import ACTIONS_ROLE, KEY_ROLE, ROW_INSET, Line, RowTree, with_actions  # noqa: E402
 from docrepo.ui.widgets import DropButton, ElidedCheck, ElidedLabel, ViewStack, ask  # noqa: E402
 
 NOW = datetime(2026, 10, 8, 14, 10)
@@ -125,7 +125,10 @@ def test_a_narrow_list_drops_columns_from_after_the_title_and_brings_them_back(q
 def test_priorities_scrolls_across_rather_than_holding_the_windows_width(browse):
     browse.set_view("priorities")
     assert browse.priorities.board.parent().parent().horizontalScrollBar() is not None
-    assert all(c.minimumWidth() == COLUMN_MIN for c in browse.priorities.board.findChildren(QFrame, "prCol"))
+    # release 5.191 (decision 866): an open column is at least COLUMN_MIN, a column folded to its rail RAIL
+    columns = browse.priorities.column_widgets
+    assert any(c.is_rail for c in columns) and not all(c.is_rail for c in columns)
+    assert all(c.minimumWidth() == (RAIL if c.is_rail else COLUMN_MIN) for c in columns)
     browse.split.sizes()  # the middle pane asks for what's on show, not the board's five columns
     assert browse.priorities.minimumSizeHint().width() < 5 * COLUMN_MIN
 
@@ -168,7 +171,7 @@ def test_row_actions_come_with_the_mouse_and_go_with_it(qapp):
     buttons = strip.findChildren(QPushButton)
     assert [b.accessibleName() for b in buttons] == ["Done", "Remove"] and all(b.text() == "" and not b.icon().isNull() for b in buttons)
     assert buttons[0].toolTip().startswith("Done")
-    assert strip.geometry().right() == t.viewport().width() - 1  # at the row's end, over its date
+    assert strip.geometry().right() == t.viewport().width() - ROW_INSET - 1  # at the row's end, over its date, inside its ground (5.183)
     t.setCurrentItem(second)
     t._sync_strips()
     assert [s.item for s in t._strips] == [first]  # the current row shows its date
@@ -202,7 +205,7 @@ def test_a_hovered_rows_words_stop_short_of_its_strip(qapp):
     t._sync_strips()
     assert t.strip_left(long_row) is None  # at rest, the words have the row
     strip = t.action_strip(long_row)
-    assert t.strip_left(long_row) == strip.geometry().left() == t.viewport().width() - (2 * 6 + 4 * 28)
+    assert t.strip_left(long_row) == strip.geometry().left() == t.viewport().width() - ROW_INSET - (2 * 6 + 4 * 28)  # inside the ground (5.183)
     assert strip.geometry().left() < t.columnWidth(0)  # wider than the date's column: the words make room
     t.hide()
 

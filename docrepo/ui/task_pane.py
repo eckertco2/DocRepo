@@ -30,6 +30,9 @@ NOTES_MAX = 1040
 #: the text stops at about 90 characters, the top of Butterick's 45 to 90 (Segoe UI Variable's average character is 6 px
 #: at the Body size, so 90 is 552 px: narrower than the usual pane's 628 px of text, and far from the wide page's 1,000).
 NOTES_LINE = 90
+#: The page's left edge (release 5.185, the redesign's decision 859): the task page and the workspace's middle start their words
+#: this far in, whatever their caller asks for, so the notes' 28 px gutter for fold arrows and marks fits in the margin (5.186).
+PAGE_EDGE = 32
 #: How long the format bar stays after the caret leaves the notes, so a click on one of its menus keeps it (release 5.83, R8).
 BAR_LINGER_MS = 200
 #: How close to a landmark the pointer has to be, in pixels along the scroll bar, for its tooltip (release 5.86).
@@ -148,6 +151,7 @@ class TaskPane(QScrollArea):
 
     def __init__(self, css: str, margin: int) -> None:
         super().__init__()
+        margin = max(margin, PAGE_EDGE)  # one left edge for every page (release 5.185)
         self.setObjectName("taskPane")
         self.setWidgetResizable(True)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -325,6 +329,7 @@ class TaskPane(QScrollArea):
         hl.addWidget(self.menu_button)
         # In a narrow pane the format bar has a line of its own, so the page can be as narrow as the pane (release 5.58).
         self.head_row, self.bar_row, self.head_margin = hl, None, margin
+        self._mode_at = hl.indexOf(self.mode_strip)
         self.notes.viewport().installEventFilter(self)
         self.notes.on_page_key = self.page_key
         self.notes.cursorPositionChanged.connect(self.follow_caret)
@@ -602,7 +607,8 @@ class TaskPane(QScrollArea):
 
     def _fit_head(self) -> None:
         """The format bar (and All notes' Group strip, release 5.157) beside the Notes heading while they fit there, or else
-        on a line of their own under it."""
+        on a line of their own under it; since release 5.185 the This page or All notes switch goes to that line too, so the
+        heading fits the narrowest pane with the page's wider edge (``PAGE_EDGE``)."""
         spare = self.viewport().width() - 2 * self.head_margin - 22
         need = sum(w.sizeHint().width() + 8 for w in (self.title, self.mode_strip, self.group_box, self.saved, self.format_bar, self.table_button,
                                                       self.outline_button, self.jump_button, self.menu_button)
@@ -613,8 +619,11 @@ class TaskPane(QScrollArea):
         if narrow:
             self.head_row.removeWidget(self.format_bar)
             self.head_row.removeWidget(self.group_box)
+            self._mode_at = self.head_row.indexOf(self.mode_strip)  # where it goes back, after the title (and the workspace's words)
+            self.head_row.removeWidget(self.mode_strip)
             self.bar_row = QHBoxLayout()
             self.bar_row.setContentsMargins(0, 0, 0, 0)
+            self.bar_row.addWidget(self.mode_strip)
             self.bar_row.addWidget(self.group_box)
             self.bar_row.addWidget(self.format_bar)
             self.bar_row.addStretch()
@@ -622,10 +631,12 @@ class TaskPane(QScrollArea):
         else:
             self.bar_row.removeWidget(self.format_bar)
             self.bar_row.removeWidget(self.group_box)
+            self.bar_row.removeWidget(self.mode_strip)
             self.head_lines.removeItem(self.bar_row)
             self.bar_row = None
             self.head_row.insertWidget(self.head_row.count() - 2, self.format_bar)
             self.head_row.insertWidget(self.head_row.indexOf(self.saved), self.group_box)
+            self.head_row.insertWidget(self._mode_at, self.mode_strip)
 
     # ---- the outline (release 5.113) ----
     def set_outline_on(self, on: bool) -> None:

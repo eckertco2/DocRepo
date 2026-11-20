@@ -59,6 +59,8 @@ from docrepo.ui.rich_edit import RichEdit
 from docrepo.ui.explorer import show_in_explorer
 from docrepo.ui.front import bring_to_front
 from docrepo.ui.problems import ProblemsLine
+from docrepo.ui.content_card import CARD_GAP, CARD_PAD, ContentCard
+from docrepo.ui.toast import Toast
 from docrepo.ui.settings_view import SettingsView
 from docrepo.ui.search_scope import ScopeList, open_search
 from docrepo.ui import confirm, tokens
@@ -118,7 +120,7 @@ from docrepo.ui.lists.common import (  # noqa: F401 - the helpers, here as befor
     log,
     NAV_FOLDED_KEY,
     NESTING_VIEWS,
-    NO_HEADINGS,
+    HEADINGS,
     priorities_of,
     ROW_DENSITY,
     SELECT_VIEWS,
@@ -159,6 +161,9 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         ctx.save_open_pages = self.save_open_notes  # before the capture window adds a note to a page (release 5.69)
         ctx.open_capture_page = lambda cid: (self.show_browse(), self.go_capture(cid))  # an email captured before (release 5.93)
         self.setObjectName("browse")
+        # The grey frame (release 5.182, decision 851): this window alone, as four others share its object name.
+        self.setProperty("frame", True)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
         self.setWindowTitle(WINDOW_TITLE)
         self.setStyleSheet(style_sheet())
         #: Shows a file in File Explorer. Tests replace it.
@@ -243,22 +248,23 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         outer.setSpacing(0)
         bar = QWidget(objectName="toolbar")
         bl = QHBoxLayout(bar)
-        bl.setContentsMargins(10, 8, 12, 8)
+        bl.setContentsMargins(12, 8, 12, 8)  # with 32 px controls, a 48 px bar (release 5.182, decision 852)
         bl.setSpacing(8)
         self.keytips = KeyTips(self)
         # The visual overhaul's O5: an icon button folds the sidebar
         self.views_button = QToolButton(objectName="iconButton")
-        self.views_button.setIcon(icon("sidebar"))
+        # grey whether the sidebar shows or not: it isn't one of the accent's six jobs (release 5.182, decision 844)
+        self.views_button.setIcon(icon("sidebar", on=tokens.colour("text2")))
         self.views_button.setFixedSize(tokens.ICON_BUTTON, tokens.ICON_BUTTON)
         self.views_button.setAccessibleName("Views")
         self.views_button.setCheckable(True)
         tip(self.views_button, "Hide or show the list of views on the left", "Ctrl+B")
         self.keytips.add(self.views_button, "Ctrl+B", ctrl=True)
         bl.addWidget(self.views_button)
-        self.search_box = QLineEdit()
+        self.search_box = QLineEdit(objectName="topSearch")  # a soft fill on the frame (release 5.182, decision 852)
         self.search_box.setPlaceholderText("Search everything: tasks, captures, documents and people")
         tip(self.search_box, "Search everything. Narrow it as File search does: type:pdf, type:notes, type:decision, from:name, after:1 sep, is:pinned, tag:V-110, or a #task first", "Ctrl+Shift+F")
-        self.search_box.addAction(icon("search"), QLineEdit.ActionPosition.LeadingPosition)
+        self.search_box.addAction(icon("search", tokens.colour("text3")), QLineEdit.ActionPosition.LeadingPosition)
         self.search_box.setMaximumWidth(560)
         self.keytips.add(self.search_box, "Ctrl+Shift+F", ctrl=True)
         self.search_box.setClearButtonEnabled(True)
@@ -271,6 +277,11 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         self.search_scope = ScopeList(self.search_box, self.model, self)  # "#" lists tasks to search in (release 5.108)
         bl.addWidget(self.search_box, 1)
         bl.addStretch(0)
+        # The last save's problems until they're opened (release 5.91, the review's F12): in the top bar since release 5.182
+        # (decision 853), an amber pill beside New capture, as it has to outlast the messages at the bottom.
+        self.problems_line = ProblemsLine(self.ctx.problem_log, lambda path: self.reveal(path))
+        self.problems_line.setObjectName("problemsLine")
+        bl.addWidget(self.problems_line)
         new = QPushButton("New capture", objectName="primary")
         new.setIcon(icon("add", tokens.colour("on_accent")))
         tip(new, "A new note, task or update in the capture window", self.ctx.settings.hotkey)
@@ -300,6 +311,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         outer.addWidget(bar)
 
         self.split = QSplitter(Qt.Orientation.Horizontal)
+        self.split.setObjectName("browseSplit")  # its handles unpainted: the card draws the line (release 5.182)
         # The visual overhaul's O10 (release 5.22): a sidebar of its own, not the tree.
         # Capacity is under the Timeline now, on one page (decision 229), and its key and other routes lead there.
         self.nav = NavPane([v for v in VIEWS if v.id != "capacity"])
@@ -412,7 +424,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         dl.setSpacing(0)
         self.actions = QWidget(objectName="actions")
         self.actions_layout = FlowLayout(self.actions, spacing=4)
-        self.actions_layout.setContentsMargins(16, 10, 16, 2)
+        self.actions_layout.setContentsMargins(12, 10, 12, 2)  # the card's 4 px of padding makes the 16 it was
         dl.addWidget(self.actions)
         detail.setMinimumWidth(DETAIL_MIN)
         self.detail_stack = ViewStack()
@@ -420,7 +432,8 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         self.page.setOpenLinks(False)
         self.page.setOpenExternalLinks(False)
         self.page.document().setDefaultStyleSheet(page_css())
-        self.page.document().setDocumentMargin(16)
+        # 32, so a person's, a capture's and a document's page start where the task page does (release 5.182)
+        self.page.document().setDocumentMargin(32)
         self.page.anchorClicked.connect(self.on_link)
         self.page.link_menu = self.page_link_menu  # a task's link: the tile's menu (release 5.138)
         self.page.layout_changed.connect(self._page_width_changed)
@@ -445,31 +458,27 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         self.split.setSizes([NAV_WIDTH, 430, 560])
         self.split.setStretchFactor(1, 1)
         self.split.setStretchFactor(2, 1)
-        outer.addWidget(self.split, 1)
+        # One white card holds the list and the page, set into the grey frame (release 5.182, decision 851).
+        self.card = ContentCard(self.split)
+        outer.addWidget(self.card, 1)
         hidden = db.get_state(self.ctx.conn, VIEWS_HIDDEN_KEY) == "1"
         self.views_button.setChecked(not hidden)
         self.nav.setVisible(not hidden)
+        self.card.sync()
         self.views_button.toggled.connect(self.show_views_pane)
 
-        self.status = QLabel(objectName="status")
-        self.status.setWordWrap(True)
-        self._status_timer = QTimer(self)
-        self._status_timer.setSingleShot(True)
-        self._status_timer.setInterval(9000)
-        self._status_timer.timeout.connect(lambda: self.status.setText(""))
+        # The message at the bottom of the window (release 5.182, decision 853: the status strip goes). The names the rest
+        # of the code and the tests read stay: ``status`` is its words, ``_status_timer`` its timer.
+        self.toast = Toast(self)
+        self.status = self.toast.label
+        self._status_timer = self.toast.timer
         #: Each minute while Today shows: the next meeting's minutes, and the calendar read again when it's 5 minutes old (release 5.127).
         self.meetings_timer = today_meetings.start_timer(self)
-        #: Undo after a state picked from a row: a link after the line's words, for ten seconds (release 5.76, decision 363).
+        #: Undo after a state picked from a row: a button on the message, for ten seconds (release 5.76, decision 363).
         self._undo: Callable[[], None] | None = None
-        self._status_timer.timeout.connect(lambda: setattr(self, "_undo", None))
+        self.toast.undo.clicked.connect(lambda: self._status_link("undo"))
+        self.toast.closed.connect(lambda: setattr(self, "_undo", None))
         self.status.linkActivated.connect(self._status_link)
-        # The status line, with the last save's problems after it until they're opened (release 5.91, the review's F12).
-        status_row = QHBoxLayout()
-        status_row.setContentsMargins(0, 0, 0, 0)
-        status_row.addWidget(self.status, 1)
-        self.problems_line = ProblemsLine(self.ctx.problem_log, lambda path: self.reveal(path))
-        status_row.addWidget(self.problems_line)
-        outer.addLayout(status_row)
 
     def _build_edit_form(self) -> QWidget:
         form = QWidget()
@@ -521,7 +530,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
             self.resize(int(screen.width() * 0.82), int(screen.height() * 0.85))
             self.move(screen.x() + (screen.width() - self.width()) // 2, screen.y() + (screen.height() - self.height()) // 3)
             # the sidebar starts at its own width, not a share of the window's (O10)
-            rest = self.width() - NAV_WIDTH - 2 * self.split.handleWidth()
+            rest = self.width() - NAV_WIDTH - 2 * self.split.handleWidth() - CARD_GAP - CARD_PAD  # the card's right margin too
             self.split.setSizes([NAV_WIDTH, rest * 43 // 99, rest - rest * 43 // 99])
             self._placed = True
         if self.dirty:
@@ -630,23 +639,16 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         self.render_detail()
 
     def say(self, text: str, error: bool = False) -> None:
-        """A line in the status line at the bottom, for a few seconds. An error stays until the next thing it says (release 5.59)."""
-        self._undo = None  # a new line: an Undo was for the last one
-        self.status.setText(text)
-        self.status.setProperty("error", error)
-        self.status.style().unpolish(self.status)
-        self.status.style().polish(self.status)
-        if error:
-            self._status_timer.stop()
-        else:
-            self._status_timer.start(9000)
+        """A message at the bottom of the window for a few seconds (release 5.182, decision 853). An error stays until it's
+        dismissed or the next thing is said (release 5.59)."""
+        self._undo = None  # a new message: an Undo was for the last one
+        self.toast.say(text, error=error)
 
     def say_undo(self, text: str, undo: Callable[[], None]) -> None:
-        """A line with Undo after its words, for ten seconds (release 5.76, decision 363)."""
-        self.say(text)
-        self.status.setText(f'{esc(text)} &nbsp;<a href="undo">Undo</a>')
+        """A message with Undo on it, for ten seconds (release 5.76, decision 363)."""
+        self.say(text)  # through ``say`` as before, so whatever stands in for it (a test's recorder) hears it too
+        self.toast.say(text, undo=True, ms=UNDO_MS)
         self._undo = undo
-        self._status_timer.start(UNDO_MS)
 
     def _status_link(self, href: str) -> None:
         if href == "undo" and self._undo is not None:
@@ -742,12 +744,17 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         """The sidebar (O10): an icon per view, counts only where they ask for something, and the groups
         folded as the owner left them (in docs.db)."""
         counts = view_counts(self.model(), self.today(), self.ctx.settings.me)
-        folded = set(filter(None, (db.get_state(self.ctx.conn, NAV_FOLDED_KEY) or "").split(",")))
-        self.nav.show_state(counts, self.view if self.view != "search" else None, folded)
+        self.nav.show_state(counts, self.view if self.view != "search" else None, self._folded_groups())
+
+    def _folded_groups(self) -> set[str]:
+        """The sidebar's folded groups, from docs.db. Manage is folded until a group has been folded or opened by hand
+        (release 5.182, decision 854)."""
+        kept = db.get_state(self.ctx.conn, NAV_FOLDED_KEY)
+        return {"Manage"} if kept is None else set(filter(None, kept.split(",")))
 
     def _nav_folded(self, section: str, closed: bool) -> None:
         """A group in the sidebar was folded or unfolded; the choice is kept in docs.db's app_state."""
-        folded = set(filter(None, (db.get_state(self.ctx.conn, NAV_FOLDED_KEY) or "").split(",")))
+        folded = self._folded_groups()
         (folded.add if closed else folded.discard)(section)
         self.ctx.keep_state(NAV_FOLDED_KEY, ",".join(sorted(folded)))
 
@@ -825,6 +832,7 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
     def show_views_pane(self, on: bool) -> None:
         """Show or hide the views on the left (mods log round 1, M0012). The choice is kept in docs.db's app_state."""
         self.nav.setVisible(on)
+        self.card.sync()  # the frame's 8 px at the card's left when the sidebar's hidden (release 5.182)
         if self.views_button.isChecked() != on:
             self.views_button.setChecked(on)  # its toggled signal calls this again, which then finds nothing to do
         if db.get_state(self.ctx.conn, VIEWS_HIDDEN_KEY) != ("0" if on else "1"):
@@ -894,7 +902,6 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
         self.tree.stop_row_moves()  # the Templates view turns it back on
         self.tree.begin()
         self.tree.set_density(*ROW_DENSITY.get(self.view, (tokens.LIST_ROW, False)))
-        self.tree.set_tiled(self.view in TASK_VIEWS)  # tiles set apart by tone (release 5.138, decision 571)
         self.tree.priorities = priorities_of(self.model())
         try:
             if builder:
@@ -907,8 +914,8 @@ class BrowseWindow(ListBasics, TaskLists, TodayList, AgendaList, PeopleAndLabelL
             self._mark_states()
         finally:
             self.tree.end(self._row_to_select())
-        # no column headings over nothing, or where they say nothing the cells don't (decision L6)
-        self.tree.setHeaderHidden(self.view in NO_HEADINGS or not any(k is not None for k in self.tree.keys()))
+        # column heads only on the real tables, and never over nothing (release 5.183, decision 856)
+        self.tree.setHeaderHidden(self.view not in HEADINGS or not any(k is not None for k in self.tree.keys()))
         if self.view in NESTING_VIEWS:
             self._sync_level_buttons()
         self.filters.setVisible(any(_in_bar(self.filters_layout.itemAt(i)) for i in range(self.filters_layout.count())))

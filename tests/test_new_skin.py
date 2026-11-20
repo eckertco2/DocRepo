@@ -27,7 +27,7 @@ def test_the_scales_have_the_plans_numbers():
     assert (tokens.RADIUS_S, tokens.RADIUS, tokens.RADIUS_L, tokens.RADIUS_XL) == (6, 8, 10, 12)
     assert (tokens.PAGE_TITLE, tokens.VIEW_TITLE, tokens.SECTION, tokens.BODY, tokens.NOTES, tokens.CAPTION, tokens.LABEL) == (
         19, 11.5, 10, 10.5, 11, 9.5, 9)
-    assert (tokens.CONTROL, tokens.FIELD, tokens.TREE_ROW, tokens.LIST_ROW) == (32, 34, 28, 32)  # rows are lane B's (5.183)
+    assert (tokens.CONTROL, tokens.FIELD, tokens.TREE_ROW, tokens.LIST_ROW) == (32, 34, 30, 30)  # rows: lane B's 5.183 (decision 850)
 
 
 def test_the_new_colours_are_in_both_themes():
@@ -41,12 +41,10 @@ def test_both_templates_take_every_scale_by_name_and_end_with_the_lanes_sections
     by its scale, never as a number (section 5a)."""
     for template in (tokens._QSS.template, tokens._CSS.template):
         tail = template[template.index("/* ---- lane A"):]
-        # Each lane's rules sit between its own two lines (release 5.187 wrote the first ones): take them out, and what's
-        # left is the five empty sections, in order, with nothing after them.
-        for k, name in LANES:
-            start, end = f"/* ---- lane {k} ({name}) ---- */\n", f"/* ---- end lane {k} ---- */\n"
-            i, j = tail.index(start) + len(start), tail.index(end)
-            tail = tail[:i] + "\n" + tail[j:]
+        # a lane's rules (5.183 on) are between its own two lines: with them taken out, the sections are as 5.181 left them
+        for k, _name in LANES:
+            start, end = tail.index(f"/* ---- lane {k} ("), tail.index(f"/* ---- end lane {k} ---- */")
+            tail = tail[:tail.index("\n", start) + 1] + "\n" + tail[end:]
         want = "\n".join(f"/* ---- lane {k} ({name}) ---- */\n\n/* ---- end lane {k} ---- */\n" for k, name in LANES)
         assert tail == want
     for name in SCALES:
