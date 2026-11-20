@@ -19,6 +19,7 @@ from docrepo.dates import short, to_date
 from docrepo.overview import Record
 from docrepo.ui import tokens
 from docrepo.ui.icons import tinted
+from docrepo.ui.task_tile import STATE_ICONS
 
 ITEM_HEIGHT, COMPACT_HEIGHT, HEAD_HEIGHT, SUB_HEIGHT, TIP_HEIGHT, MORE_HEIGHT, EMPTY_HEIGHT = 48, 32, 30, 26, 34, 32, 110
 ROW_ROLE = Qt.ItemDataRole.UserRole + 1
@@ -280,8 +281,8 @@ class ResultDelegate(QStyledItemDelegate):
 
     def icon_of(self, r: Record) -> tuple[str, str]:
         if r.kind == "task":
-            return {"Not started": "state-ns", "In progress": "state-ip", "Parked": "state-pk", "Closed": "state-cl"}.get(r.state, "state-ns"), \
-                tokens.colour("accent" if r.state == "In progress" else "text2")
+            name, colour = STATE_ICONS.get(r.state, STATE_ICONS["Not started"])  # the one recipe for a state's mark (decision 858)
+            return name, tokens.colour(colour)
         if r.kind == "note":
             return ("update" if r.type == "update" else "note"), tokens.colour("text2")
         if r.kind == "email":

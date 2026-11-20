@@ -132,6 +132,9 @@ class NotesEdit(RichEdit):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("notesPage")
+        # The notes' words at their own size (release 5.181, decision 849), set here rather than in the style sheet so the
+        # pane measures its line with the font the words have.
+        self.setFont(tokens.ui_font(tokens.NOTES))
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)

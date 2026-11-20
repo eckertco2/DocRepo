@@ -152,7 +152,7 @@ class TodayList:
             head = self.tree.add_row(None, None, ["<b>Done today</b>"], grey, selectable=False, span=True)
             for a in done:
                 t = m.tasks.get(a.subject) if a.subject else None
-                line = Line(t.title if t else a.note, icon="state-cl", icon_tip="Done", context=f"Done at {(a.closed or '')[11:16]}", closed=True)
+                line = Line(t.title if t else a.note, icon="state-cl", icon_colour="success", icon_tip="Done", context=f"Done at {(a.closed or '')[11:16]}", closed=True)
                 item = self.tree.add_row(head, ("task", t.id) if t else None, _shape([line, _row_state(t.state) if t else _row_word("Note"), ""]))
                 self.tree.set_actions(item, [("Back on Today", lambda i=a.id: self.put_back_today(i), "Put it back on Today, at the bottom")])
             head.setExpanded(True)

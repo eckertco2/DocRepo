@@ -45,7 +45,7 @@ STATUS_CHARS = 130
 def _caption(text: str) -> QLabel:
     """A column's or a group's small heading: "UP THE CHAIN", "SUBTASKS", "and under"."""
     lb = QLabel(text, objectName="wsCaption")
-    lb.setFont(tokens.ui_font(tokens.CAPTION, semibold=True))
+    lb.setFont(tokens.ui_font(tokens.LABEL, semibold=True))
     return lb
 
 
@@ -426,7 +426,7 @@ KIND_COLOURS = {"Due": ("text2", "hover"), "Deadline": ("critical", "critical_bg
 
 def _chip_style(kind: str) -> str:
     fg, bg = KIND_COLOURS.get(kind, ("text2", "hover"))
-    return (f"color: {tokens.colour(fg)}; background: {tokens.colour(bg)}; border-radius: {tokens.RADIUS_CHIP}px; padding: 1px 8px;"
+    return (f"color: {tokens.colour(fg)}; background: {tokens.colour(bg)}; border-radius: {tokens.RADIUS_S}px; padding: 1px 8px;"
             f" font-size: {tokens.CAPTION}pt")
 
 

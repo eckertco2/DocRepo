@@ -86,7 +86,7 @@ class AgendaList:
             head = self.tree.add_row(None, None, ["<b>Closed recently</b>"], grey, selectable=False, span=True)
             for a in closed:
                 t = m.tasks.get(a.subject) if a.subject else None
-                line = Line(t.title if t else a.note, icon="state-cl", icon_tip=a.how, closed=True,
+                line = Line(t.title if t else a.note, icon="state-cl", icon_colour="success", icon_tip=a.how, closed=True,
                             second=f"{a.how} {long_date(date.fromisoformat(a.closed[:10]), self.today())}")
                 self.tree.add_row(head, ("task", t.id) if t else None,
                                   _shape([line, _row_state(t.state) if t else _row_word("Note"),

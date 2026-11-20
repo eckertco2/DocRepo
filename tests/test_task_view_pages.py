@@ -25,7 +25,7 @@ def records(sample_root):
 def test_the_header_has_the_title_state_dates_people_subtasks_and_latest(records):
     m, recs = records
     page = tvp.header(m, m.task("T000001"), recs, TODAY, "P001")
-    assert '<h2 title="T000001">Reactor impeller upgrade</h2>' in page
+    assert '<p class="ptitle" style="margin-top: 2px; margin-bottom: 4px" title="T000001">Reactor impeller upgrade</p>' in page
     assert "In progress" in page and 'href="label:Line%201"' in page
     assert "Fri 27 Nov" in page and "in 50 days" in page
     assert 'title="Tom Becker"' in page

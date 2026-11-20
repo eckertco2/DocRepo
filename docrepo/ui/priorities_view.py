@@ -49,7 +49,7 @@ COLUMN_MIN = 216
 #: A dragged card carries its task's ID.
 MIME = "application/x-docrepo-task"
 #: A state's chip colours, as the pages draw them.
-STATE_COLOURS = {"In progress": ("accent", "info_bg"), "Not started": ("text2", "hover"), "Parked": ("parked", "parked_bg"), "Closed": ("text2", "hover")}
+STATE_COLOURS = {"In progress": ("accent", "info_bg"), "Not started": ("text2", "hover"), "Parked": ("parked", "parked_bg"), "Closed": ("success", "success_bg")}
 #: A parent's card's opener, closed and open (release 5.137): the icons' chevrons, the one arrow family.
 CLOSED, OPENED = "chevron-right", "chevron-down"
 
@@ -249,7 +249,7 @@ class Row(_Picked, QFrame):
         lay.addWidget(Pips(m, [t.id]), 0, Qt.AlignmentFlag.AlignVCenter)
         # A task tile (release 5.138, the task tile plan's decision 575), its pip in its edge's place: the circle, the title
         # cut to fit, the flag, the marks and the days.
-        self.tile = tile_ui.TileWidget(task_tile.tile(m, t.id, today, task_tile.marks(m, today)), font=tokens.ui_font(tokens.CAPTION_L))
+        self.tile = tile_ui.TileWidget(task_tile.tile(m, t.id, today, task_tile.marks(m, today)), font=tokens.ui_font(tokens.CAPTION))
         self.tile.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         lay.addWidget(self.tile, 1)
         self.setToolTip(f"{t.title}: {priorities.name(t.priority)}")

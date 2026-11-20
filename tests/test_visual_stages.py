@@ -329,8 +329,9 @@ def test_no_corner_or_text_size_written_as_a_number_outside_the_tokens():
 
 
 def test_selection_keeps_its_colour_to_itself():
-    """The review's finding 6: one blue did seven jobs."""
-    assert tokens.css().count(f"background-color: {tokens.colour('selected')}") == 0
+    """The review's finding 6: one blue did seven jobs. Read by name: since release 5.181 the accent's tint, ``selected``, has
+    ``info_bg``'s value, but the pages still don't name the selection's."""
+    assert "$selected" not in tokens._CSS.template
     assert f".st-ip {{ color: {tokens.colour('accent')}; background-color: {tokens.colour('info_bg')}; }}" in tokens.css()
     assert f".u2 {{ background-color: {tokens.colour('caution_bg')}; }}" in tokens.css()
     assert set(tokens.LIGHT) == set(tokens.DARK)

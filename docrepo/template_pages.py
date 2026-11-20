@@ -203,6 +203,6 @@ def row_page(lib: Library, m: Model, row_id: int, today, workdays: Collection[in
         why = f": {esc(template.discard_reason.rstrip('.'))}" if template.discard_reason else ""
         gone = box(f"<b>Discarded</b> {esc(long_date(to_date(template.discarded[:10]), today))}{why}. It's hidden from Templates, and its tasks keep "
                    "their values. Nothing is deleted: Bring back restores it.", "warn")
-    head = f'{gone}{crumbs}<h2>{esc(row.title)}</h2><p class="tags">{tags}</p>{desc}'
+    head = f'{gone}{crumbs}{markup.page_title(esc(row.title))}<p class="tags">{tags}</p>{desc}'
     return (head + group("When", _when(lib, row)) + group("Who", _who(m, row, workdays)) + (_timing(lib, template.id, workdays, page_width) if top and not template.discarded else "") + _subtasks(lib, row) + _notes(row)
             + (_trees(lib, m, template.id) + _changes(lib, template.id, today) if top else _follow(lib, m, row)))

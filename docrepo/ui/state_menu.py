@@ -20,7 +20,7 @@ from docrepo.ui import tokens
 from docrepo.ui.icons import icon, tinted
 
 #: Each state's mark: its icon, and the colour token it's drawn in (as the task page's marks and the Task view's rows are).
-MARKS = {"Not started": ("state-ns", "text2"), "In progress": ("state-ip", "accent"), "Parked": ("state-pk", "parked"), "Closed": ("state-cl", "text2")}
+MARKS = {"Not started": ("state-ns", "text3"), "In progress": ("state-ip", "accent"), "Parked": ("state-pk", "parked"), "Closed": ("state-cl", "success")}
 #: How long Undo stays offered after a change (decision 363).
 UNDO_MS = 10_000
 #: The menu's line for closing a whole branch (decision 364).

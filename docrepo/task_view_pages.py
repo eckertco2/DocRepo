@@ -14,6 +14,7 @@ from urllib.parse import quote
 from docrepo import finder
 from docrepo.dates import days_words, long_date, to_date
 from docrepo.detail import Pages, chip, esc, label_href, link, multiline, state_chip
+from docrepo.markup import page_title
 from docrepo.file_rows import folder_of
 from docrepo.model import Model, Task
 from docrepo.overview import KIND_NAMES, TYPE_NAMES, Record, ago, family
@@ -53,7 +54,7 @@ def header(model: Model, task: Task, records: list[Record], today: date, me: str
     if kids:
         facts.append(f'<span class="fk">Subtasks</span>&nbsp; {len(kids) - closed} of {len(kids)} open '
                      f'<img src="progress:{closed}:{len(kids)}" width="72" height="4" style="vertical-align: middle">')
-    head = (f'<table width="100%" cellspacing="0" cellpadding="0"><tr><td valign="middle"><h2 title="{esc(task.id)}">{esc(task.title)}</h2></td>'
+    head = (f'<table width="100%" cellspacing="0" cellpadding="0"><tr><td valign="middle">{page_title(esc(task.title), task.id)}</td>'
             f'<td width="12"></td><td valign="middle">{tags}</td><td align="right" valign="middle" class="facts">{" &nbsp;&nbsp;&nbsp; ".join(facts)}</td></tr></table>')
     return head + status_and_latest(pages, task, records, today)
 

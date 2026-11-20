@@ -454,7 +454,10 @@ def test_quick_edit_shortens_a_name_too_long_for_its_chip(ctx):
     t = spread(conn, assignees=["P900"], assignee_hours=12, involvement={("assignee", "P900"): 25})
     w = QuickEdit(ctx, t)
     chip = next(b for b in w.rows["assignees"].findChildren(QToolButton) if b.objectName() == "chip" and b.text().endswith("×"))
-    assert chip.text().startswith("A") and "…" in chip.text() and chip.text().endswith(" 25% ×")
+    # the name cut short with "…" and the share kept; how much of the name shows depends on the font's widths (the offscreen
+    # platform's fallback font is wide), so the test reads the shortening, not a first letter
+    shown = chip.text().removesuffix(" 25% ×")
+    assert chip.text().endswith(" 25% ×") and shown.endswith("…") and "Alexandria Montgomery-Fitzgerald".startswith(shown[:-1])
     assert "Alexandria Montgomery-Fitzgerald" in chip.toolTip()
     w.deleteLater()
 
