@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QComboBox,
 )
 
+from docrepo.ui.empty_state import FIRST, LEFT, Empty, say  # empty states (release 5.196)
 from docrepo.dates import long_date, short
 from docrepo.detail import esc
 from docrepo.model import TODAY, is_person
@@ -39,9 +40,10 @@ class AgendaList:
         target = current_target(m, self.target)
         self.target = target
         if not target:
-            self._set_head("Agendas", "No agendas yet. Check Meeting on a task to give it an agenda, or put something on an agenda with "
-                                      "Add to agenda in the capture window.")
+            self._set_head("Agendas", "Open agenda items, grouped by the work they're about.")
             self.tree.set_columns(*_cols(*with_actions(["Item", "State", "Added"], [0, 96, 70], 130)))
+            say(self, Empty(FIRST, "No agendas yet. Tick Meeting on a task to give it an agenda, or put something on one with "
+                                   "Add to agenda in the capture window."))
             return
         when = m.meeting_when(target, self.today())
         when_text = f" {'Next meeting' if m.task(target).recurrence else 'Date'}: {when}." if when and when != "no date set" else ""
@@ -92,7 +94,7 @@ class AgendaList:
                                           f'<p align="right">{esc(short(date.fromisoformat(a.closed[:10]), self.today()))}</p>']))
             head.setExpanded(True)
         if not agenda_groups(m, target):
-            self.tree.add_row(None, None, ['<span class="sub">No open agenda items.</span>'], selectable=False, span=True)
+            say(self, Empty(LEFT, "Nothing left on this agenda."))
 
     def _agenda_actions(self, item_id: int) -> list[tuple[str, Callable[[], None], str]]:
         return [("Discussed", lambda: self.close_agenda_item(item_id, "Discussed"), "Close it as discussed, then note the outcome in an update"),

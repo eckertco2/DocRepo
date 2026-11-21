@@ -65,8 +65,9 @@ LIGHT = {
     "nest_bar": "#c9cdf3", "unfold_bar": "#dedee3", "moved_bar": "#7fb7a8",  # info_line's and stroke_strong's values since 5.181
     # Ticked checklist lines' words (decision 91) and the highlights, as pages and the editor show them (``markup``).
     "ticked": "#5c5c66", "mark_yellow": "#fff1a8", "mark_green": "#cdeccd", "mark_pink": "#f8d0e3",
-    # DocRepo's own icon, for the tray, the title bars and the taskbar (``app.make_icon``): the same in every theme.
-    "brand": "#1d5e98", "brand_ink": "#ffffff",
+    # DocRepo's own icon, for the tray, the title bars and the taskbar (``app_icon``): the same in every theme, the light
+    # accent's indigo since release 5.196 (decision 871), white on it 6.0:1.
+    "brand": "#4a54d1", "brand_ink": "#ffffff",
     # Lane D, release 5.187 (decision 863): a confirmation's doing button for what can't be undone, filled as the primary is.
     "critical_fill": "#c9302c", "critical_hover": "#b32a27", "critical_pressed": "#9e2522",
 }
@@ -93,7 +94,7 @@ DARK = {
     "type_mail": "#7cb0e2", "type_drawing": "#56c2b0", "type_link": "#a0aab4", "type_other": "#a0aab4",
     "nest_bar": "#3d4380", "unfold_bar": "#38383f", "moved_bar": "#4f8f80",
     "ticked": "#a3a3ad", "mark_yellow": "#5a4d12", "mark_green": "#1f4224", "mark_pink": "#4d2438",
-    "brand": "#1d5e98", "brand_ink": "#ffffff",
+    "brand": "#4a54d1", "brand_ink": "#ffffff",
     # Lane D, release 5.187: the danger button's fill, dark enough for white words (6.5 to 1), as accent_fill is.
     "critical_fill": "#b8372f", "critical_hover": "#c4453c", "critical_pressed": "#a3302a",
 }

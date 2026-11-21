@@ -17,6 +17,8 @@ from PySide6.QtWidgets import (
 )
 
 from docrepo.detail import esc
+from docrepo.ui import empty_state
+from docrepo.ui.empty_state import list_empty
 from docrepo.ui.icons import icon
 from docrepo.ui.keymap import KeyMapDialog
 from docrepo.ui.tree_view import DIM_ROLE, HTML_ROLE, KEY_ROLE, LINE_ROLE, group_ground, state_icon
@@ -127,6 +129,7 @@ class ListBasics:
         words = self.find_box.text().lower().split() if not self.find_bar.isHidden() else []
         if not words:
             self.find_count.clear()
+            empty_state.settle(self)  # the view's empty state, if it has nothing to show (release 5.196)
             return
         m = self.model()
 
@@ -166,6 +169,7 @@ class ListBasics:
                     heading.setHidden(False)
                     heading.setData(0, DIM_ROLE, None)
         self.find_count.setText(f"{hits} match{'es' if hits != 1 else ''}" if hits else "Nothing in this view matches")
+        empty_state.settle(self)  # nothing matching, with Clear Find (release 5.196)
 
     def show_keys(self) -> None:
         """F1: every key, in one list (mods log round 2, M0036)."""
@@ -290,7 +294,7 @@ class ListBasics:
             for x in ids:
                 self.tree.add_row(None, ("task", x), self._task_cells(x, 0), tip=full_path(m, x))
         if not order:
-            self.tree.add_row(None, None, ['<span class="sub">Nothing here right now.</span>'], selectable=False, span=True)
+            empty_state.say(self, list_empty(self, view_id))
 
     def _matching(self, task_list):
         from docrepo.lists import list_tasks

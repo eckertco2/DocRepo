@@ -5,6 +5,7 @@ from __future__ import annotations
 
 
 
+from docrepo.ui.empty_state import FIRST, LEFT, Empty, say  # empty states (release 5.196)
 from docrepo.detail import esc
 from docrepo.ui.tree_view import Line
 from docrepo.views import (
@@ -30,8 +31,11 @@ class CaptureLists:
             name, colour = SOURCE_ICONS.get(r.source, ("note", "text2"))
             line = Line(r.title, icon=name, icon_colour=colour, icon_tip=r.source, context=r.sub)
             self.tree.add_row(None, ("capture", r.id), [line, f'<p align="right">{esc(r.saved)}</p>'], tip=f"{r.id} · {r.source}")
-        if not rows:
-            self.tree.add_row(None, None, ['<span class="sub">No unfiled captures.</span>'], selectable=False, span=True)
+        if not rows and not self.model().captures:
+            say(self, Empty(FIRST, "Unfiled holds captures saved without a task, until you file them. Your capture hotkey makes "
+                                   "the first one.", "New capture", lambda: self.open_capture()))
+        elif not rows:
+            say(self, Empty(LEFT, "Every capture is filed."))
 
     def _discarded_view(self) -> None:
         """Tasks and captures discarded as made by mistake (mods log round 1, M0021), the latest first."""
@@ -42,4 +46,4 @@ class CaptureLists:
             line = Line(r.title, icon={"task": "task", "capture": "note"}.get(r.kind, "templates"), icon_tip=r.kind.capitalize(), context=r.sub)
             self.tree.add_row(None, (r.kind, r.id), [line, esc(r.reason), f'<p align="right">{esc(r.when)}</p>'], tip=f"{r.id} · {r.reason}" if r.reason else r.id)
         if not rows:
-            self.tree.add_row(None, None, ['<span class="sub">Nothing is discarded.</span>'], selectable=False, span=True)
+            say(self, Empty(FIRST, "Nothing is discarded. A task or capture discarded as made by mistake waits here."))

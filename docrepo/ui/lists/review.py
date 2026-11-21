@@ -26,6 +26,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import QLabel, QMenu, QPushButton
 
+from docrepo.ui.empty_state import LEFT, Empty, say  # empty states (release 5.196)
 from docrepo import activity, edits, review
 from docrepo.dates import long_date, short, to_date
 from docrepo.detail import esc
@@ -180,7 +181,8 @@ def _waited(w: BrowseWindow, task_id: str) -> tuple[str, ...]:
 
 
 def _empty_line(w: BrowseWindow, text: str) -> None:
-    w.tree.add_row(None, None, [f'<span class="sub">{esc(text)}</span>'], selectable=False, span=True)
+    """A step with nothing in it: its words as the list's empty state (release 5.196), nothing left to do there."""
+    say(w, Empty(LEFT, text))
 
 
 # ---- step 4: projects due for review ----

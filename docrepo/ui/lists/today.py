@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QPushButton,
 )
 
+from docrepo.ui.empty_state import FIRST, LEFT, Empty, has_tasks, say  # empty states (release 5.196)
 from docrepo import db, edits, key_dates, later, priorities, urgency, waits
 from docrepo.dates import long_date
 from docrepo.model import TODAY_BAND_NAMES, TODAY_BANDS, Model
@@ -157,8 +158,13 @@ class TodayList:
         if head is not None:
             head.setExpanded(True)
         if not m.today_items():
-            self.tree.add_row(None, None, ['<span class="sub">Nothing on Today. Select a task and press D, or type a quick task above.</span>'],
-                              selectable=False, span=True)
+            if not has_tasks(self):
+                say(self, Empty(FIRST, "Today is where the day’s work goes. Make a task, then put it on Today with D, "
+                                       "or type a quick task above.", "New task", lambda: self.open_capture(mode="new_task")))
+            elif m.done_on(today):
+                say(self, Empty(LEFT, "Everything on Today is done."))
+            else:
+                say(self, Empty(LEFT, "Nothing on Today. Select a task and press D, or type a quick task above."))
         self._today_due_rows(m, today, grey)
         done = m.done_on(today)
         if done:

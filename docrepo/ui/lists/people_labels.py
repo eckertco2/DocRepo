@@ -5,6 +5,7 @@ from __future__ import annotations
 
 
 
+from docrepo.ui.empty_state import FIRST, Empty, say  # empty states (release 5.196)
 from docrepo.detail import chip, esc
 from docrepo.ui import people_import
 from docrepo.ui.tree_view import Line
@@ -37,6 +38,9 @@ class PeopleAndLabelLists:
             line = Line(p.name, chips=chips, context=", ".join(p.aliases))
             self.tree.add_row(None, ("person", p.id), [line, esc(p.group or ""), esc(p.role or ""),
                                                         f'<p align="right">{"–" if p.hours is None else f"{p.hours:g}"}</p>', f'<p align="right">{count}</p>'])
+        if not m.people:
+            say(self, Empty(FIRST, "No people yet. Add the people you work with, or import a list of them, to assign tasks and "
+                                   "plan their hours.", "Add person", self.add_person))
 
     def _labels_view(self) -> None:
         m = self.model()
@@ -60,6 +64,9 @@ class PeopleAndLabelLists:
         for lb in m.labels:
             if lb.parent is None or not any(x.id == lb.parent for x in m.labels):
                 add(lb)
+        if not m.labels:
+            say(self, Empty(FIRST, "No labels yet. A label groups tasks across the tree, and its keywords let Parse and populate "
+                                   "suggest it.", "Add label", self.add_label))
 
     def _set_retired(self, which: str, on: bool) -> None:
         self.retired[which] = on

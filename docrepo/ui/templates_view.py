@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from docrepo.ui.empty_state import FIRST, Empty, say  # empty states (release 5.196)
 from docrepo import markup, template_pages, templates, ties, timing
 from docrepo.db import RECURRENCES
 from docrepo.detail import chip, esc
@@ -1136,8 +1137,9 @@ class TemplatesPane:
             self._add_rows(lib, t.top, item)
             item.setExpanded(True)
         if not live:
-            w.tree.add_row(None, None, ['<span class="sub">No templates yet. New template starts one, Import… makes one from a tree file, or use Save as template on a '
-                                        'task, from its More menu.</span>'], selectable=False, span=True)
+            say(w, Empty(FIRST, "No templates yet. A template is a tree of tasks without dates to start new work from. Import… makes "
+                                "one from a tree file, and Save as template on a task, in its More menu, makes one from a task.",
+                         "New template", self.new_template))
 
     def _pill(self, lib: Library, row_id: int) -> str:
         return " " + chip("Anchor", "anchor") if lib.template_of(row_id).anchor == row_id else ""

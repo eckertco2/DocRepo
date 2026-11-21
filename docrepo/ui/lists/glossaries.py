@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QLineEdit
 
+from docrepo.ui.empty_state import FIRST, Empty, say  # empty states (release 5.196)
 from docrepo import edits, glossaries, pages
 from docrepo.detail import esc, fields_table, none_text
 from docrepo.markup import page_title
@@ -67,8 +68,8 @@ def view(w: BrowseWindow) -> None:
     w._filter_widget(box)
     w.tree.set_columns(["Glossary", "Rows", "Tag column"], [0, 80, 140])
     if not listed:
-        w.tree.add_row(None, None, ['<span class="sub">No glossaries yet. Import… a table from Excel or CSV: an equipment list, an '
-                                    'instrument list, anything in rows. Every column is kept.</span>'], selectable=False)
+        say(w, Empty(FIRST, "No glossaries yet. Import a table from Excel or CSV: an equipment list, an instrument list, anything "
+                            "in rows. Every column is kept.", "Import…", lambda: import_new(w)))
         return
     for g in listed:
         context = f"{len(g.columns)} column{'s' if len(g.columns) != 1 else ''} · imported {g.imported[:10]}"

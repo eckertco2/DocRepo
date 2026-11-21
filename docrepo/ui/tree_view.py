@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from PySide6.QtCore import QModelIndex, QPoint, QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (QAbstractTextDocumentLayout, QColor, QCursor, QFont, QFontMetrics, QPainter, QPalette, QTextDocument,
                            QTextOption)
-from PySide6.QtWidgets import (QAbstractItemView, QHBoxLayout, QHeaderView, QLabel, QMenu, QPushButton, QStyle, QStyledItemDelegate, QStyleOptionViewItem,
+from PySide6.QtWidgets import (QAbstractItemView, QHBoxLayout, QHeaderView, QMenu, QPushButton, QStyle, QStyledItemDelegate, QStyleOptionViewItem,
                                QToolTip, QTreeWidget, QTreeWidgetItem, QWidget)
 
 from docrepo.detail import chip, esc
@@ -600,7 +600,9 @@ class RowTree(QTreeWidget):
         self._hover: QTreeWidgetItem | None = None
         self._strips: list[ActionStrip] = []
         self._widths: list[int] = []
-        self._empty: QWidget | None = None
+        self._empty = None  # the list's empty state (release 5.196), made when it's first wanted
+        #: What the view said it is when empty, while it's drawn (``empty_state.say``); gone at the next ``begin``.
+        self.wanted_empty = None
         # A task's state from its row (release 5.76, round 7's item 101): the browse window gives these.
         #: Opens the state menu for a task, at a point on the screen, when its State cell is clicked.
         self.state_clicked: Callable[[str, QPoint], None] | None = None
@@ -898,18 +900,16 @@ class RowTree(QTreeWidget):
         super().resizeEvent(event)
         self._fit_columns()
         self._sync_strips()
-        if self._empty is not None:
-            self._empty.setFixedWidth(self.viewport().width())
+        self._place_empty()
 
     def begin(self) -> None:
         """Start filling the list again. Changing the current row while filling doesn't count as picking."""
         self._building = True
         self._forget_strips()
         self._state_hover = self._state_open = None
+        self.wanted_empty = None
         if self._empty is not None:
             self._empty.hide()
-            self._empty.deleteLater()
-            self._empty = None
         self.clear()
 
     def set_density(self, height: int, two_lines: bool = False) -> None:
@@ -1133,19 +1133,49 @@ class RowTree(QTreeWidget):
             return None
         return self.viewport().width() - ROW_INSET - strip_width(item.data(0, ACTIONS_ROLE))
 
-    def show_empty(self, text: str, label: str, clicked: Callable[[], None]) -> None:
-        """An empty list's words and the one action that adds something (the playbook's empty states, release 5.61). Gone at the next ``begin``."""
-        self._empty = QWidget(self.viewport(), objectName="emptyState")
-        lay = QHBoxLayout(self._empty)
-        lay.setContentsMargins(16, 12, 16, 12)
-        lay.setSpacing(12)
-        lay.addWidget(QLabel(text))
-        button = QPushButton(label)
-        button.clicked.connect(lambda _=False: clicked())
-        lay.addWidget(button)
-        lay.addStretch()
-        self._empty.setGeometry(0, 0, self.viewport().width(), self._empty.sizeHint().height())
+    def show_state(self, empty, icon_name: str = "") -> None:
+        """The list's empty state (``empty_state.Empty``), or None for none (release 5.196, decision 871): one ``EmptyState``,
+        under the last row showing, or at the top when none is. Gone at the next ``begin``."""
+        from docrepo.ui.empty_state import EmptyState
+
+        if empty is None:
+            if self._empty is not None:
+                self._empty.hide()
+            return
+        if self._empty is None:
+            self._empty = EmptyState(self.viewport())
+            self.verticalScrollBar().valueChanged.connect(lambda _: self._place_empty())
+        self._empty.show_for(empty, icon_name)
         self._empty.show()
+        self._place_empty()
+
+    def shows_a_row(self) -> bool:
+        """Whether a row of something (a row with a key: a task, a capture, a person; not a heading or a line of words) is
+        showing."""
+        return any(item.data(0, KEY_ROLE) is not None and self._in_sight(item) for item in self.items())
+
+    def _in_sight(self, item: QTreeWidgetItem) -> bool:
+        """Neither it nor a parent hidden (Find hides rows), and every parent open."""
+        while item is not None:
+            if item.isHidden() or (item.parent() is not None and not item.parent().isExpanded()):
+                return False
+            item = item.parent()
+        return True
+
+    def _place_empty(self) -> None:
+        """The empty state across the list, ``GAP`` under the last row showing (or the list's top), moving as it scrolls."""
+        from docrepo.ui.empty_state import GAP
+
+        if self._empty is None or self._empty.isHidden():
+            return
+        bottom = 0
+        for item in self.items():
+            if self._in_sight(item):
+                rect = self.visualItemRect(item)
+                if rect.isValid():
+                    bottom = max(bottom, rect.bottom() + 1)
+        self._empty.fit(self.viewport().width())
+        self._empty.move(0, bottom + GAP)
 
     def _hover_from_cursor(self) -> None:
         """The row under the mouse now: after the list is drawn again or scrolls, it's under a still mouse."""

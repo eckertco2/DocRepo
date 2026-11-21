@@ -280,6 +280,7 @@ QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; }
 QScrollBar::add-page, QScrollBar::sub-page { background: none; }
 QAbstractScrollArea::corner { background: transparent; }
 QWidget#emptyState { background: transparent; }
+QLabel#emptyWords { color: $text2; font-size: ${body}pt; }  /* an empty view's one sentence (release 5.196) */
 /* the date fields' calendar: the icons' chevrons, and no blue bar across its top */
 QCalendarWidget QWidget#qt_calendar_navigationbar { background: $base; }
 QCalendarWidget QToolButton { color: $text; background: transparent; font-weight: 600; }
