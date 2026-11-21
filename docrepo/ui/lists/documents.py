@@ -7,6 +7,7 @@ import re
 from datetime import date
 
 
+from docrepo.ui.empty_state import FIRST, LEFT, MATCHING, Empty, say as empty_say  # empty states (release 5.196)
 from docrepo import decisions, search
 from docrepo.dates import short
 from docrepo.detail import esc
@@ -42,8 +43,10 @@ class DocumentLists:
         nodes = documents_tree(m, self.doc_task if self.doc_task in m.tasks else None, self.doc_subs)
         # A task's row holds its documents: only its title, so nothing stands under Status and Checked but a document's.
         self._add_nodes(nodes, filtered=True, row=lambda n: (self._task_cells(n.id, n.depth, context=not n.match)[:1], full_path(m, n.id)))
-        if not nodes:
-            self.tree.add_row(None, None, ['<span class="sub">No documents for this task.</span>'], selectable=False, span=True)
+        if not nodes and not m.documents:
+            empty_say(self, Empty(FIRST, "No documents yet. Files you save or link on a task show here, under their task."))
+        elif not nodes:
+            empty_say(self, Empty(LEFT, "No documents for this task."))
 
     def _set_doc_task(self, task_id: str | None) -> None:
         self.doc_task, self.doc_subs = task_id, True
@@ -90,7 +93,7 @@ class DocumentLists:
             who = " or ".join(f"“{s}”" for s in sorted(scope.senders))
             say(f"No email from {who} holds every word." if rest else f"No email's sender has {who} in it.")
         elif not results and not (scope and scope.hints):
-            say("No matches.")
+            empty_say(self, Empty(MATCHING, "Nothing matches what you searched for. Every word must be in the item."))
 
     def _result_line(self, m, r: search.Result, places: dict) -> tuple[Line, str]:
         """A result as a file's row is everywhere (release 5.114, decisions 427 to 430): its icon in its type's colour, its name,

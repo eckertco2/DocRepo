@@ -20,8 +20,8 @@ from datetime import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QAbstractNativeEventFilter, QLockFile, QObject, QRectF, QTimer, Signal
-from PySide6.QtGui import QAction, QColor, QFont, QIcon, QPainter, QPixmap
+from PySide6.QtCore import QAbstractNativeEventFilter, QLockFile, QObject, QTimer, Signal
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QApplication, QInputDialog, QMenu, QMessageBox, QSystemTrayIcon
 
 from docrepo import backup, capacity, db, diagnose, edits, hotkey, notes_page, people, prompts, search, sent_watch, tagged
@@ -33,11 +33,12 @@ from docrepo.panel_rules import OPEN_KEY
 from docrepo.safe_fs import SafeFS
 from docrepo.kinds import is_work
 from docrepo.schedule import due_of
-from docrepo.ui import current_ui, tokens
+from docrepo.ui import current_ui
 from docrepo.ui.browse_window import BrowseWindow
 from docrepo.ui.capture_window import CaptureWindow
 from docrepo.ui.context import AppContext
 from docrepo.ui import motion
+from docrepo.ui.app_icon import make_icon  # drawn in the accent (release 5.196, decision 871)
 from docrepo.ui.style import apply_look
 from docrepo.ui.wheels import Wheels
 
@@ -53,31 +54,6 @@ SHOW_BROWSE_MESSAGE = "DocRepo.ShowBrowse"
 HOTKEY_ID = hotkey.HOTKEY_IDS["hotkey"]
 MAX_SINGLE_REMINDERS = 3
 APP_ID = "DocRepo"  # Windows shows this as the name on notifications
-ICON_SIZES = (16, 20, 24, 32, 40, 48, 64)
-
-
-def make_icon() -> QIcon:
-    """DocRepo's icon, for the tray, the title bars and the taskbar, drawn here so no image file is needed: a blue square with a
-    white D, at each size Windows asks for, so it stays sharp."""
-    icon = QIcon()
-    for size in ICON_SIZES:
-        pixmap = QPixmap(size, size)
-        pixmap.fill(QColor(0, 0, 0, 0))
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setBrush(QColor(tokens.colour("brand")))
-        painter.setPen(QColor(tokens.colour("brand")))
-        inset, radius = size / 16, size * 3 / 16
-        painter.drawRoundedRect(QRectF(inset, inset, size - 2 * inset, size - 2 * inset), radius, radius)
-        painter.setPen(QColor(tokens.colour("brand_ink")))
-        font = QFont("Segoe UI")
-        font.setPixelSize(round(size * 0.62))
-        font.setWeight(QFont.Weight.Bold)
-        painter.setFont(font)
-        painter.drawText(pixmap.rect(), 0x84, "D")  # centred
-        painter.end()
-        icon.addPixmap(pixmap)
-    return icon
 
 
 def set_identity(qt: QApplication) -> None:

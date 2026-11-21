@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QComboBox,
 )
 
+from docrepo.ui.empty_state import LEFT, Empty, has_tasks, list_empty, no_tasks_yet, say  # empty states (release 5.196)
 from docrepo import bulk, edits, key_dates, priorities, task_tile
 from docrepo.lists import key_dates_due
 from docrepo.dates import short
@@ -174,10 +175,10 @@ class TaskLists:
                 head.setExpanded(True)
         else:
             self._add_nodes(nodes, filtered=filtered, expand_all=False, row=row)
-        if not nodes and not any(not t.discarded for t in m.tasks.values()):  # first use, not a filter's doing
-            self.tree.show_empty("No tasks yet.", "New task", lambda: self.open_capture(mode="new_task"))
-        elif not nodes:
-            self.tree.add_row(None, None, ['<span class="sub">No tasks match these filters.</span>'], selectable=False, span=True)
+        if not nodes and not has_tasks(self):  # first use, not a filter's doing
+            say(self, no_tasks_yet(self))
+        elif not nodes:  # a filter's doing says so itself (empty_state.settle); otherwise every task is closed
+            say(self, Empty(LEFT, "No open tasks: every task is closed."))
 
     def _tree_group_box(self, m) -> None:
         """The task tree's Group by (release 5.24): Group, Person or Label, or a parent label's sublabels."""
@@ -346,7 +347,7 @@ class TaskLists:
                     self.tree.set_actions(item, [("Clear", lambda tid=key[1]: self.clear_reminder(tid), "Clear this reminder. Its history records it.")])
         keyed = self._key_date_rows(None) if with_keys else 0
         if not nodes and not keyed:
-            self.tree.add_row(None, None, ['<span class="sub">Nothing here right now.</span>'], selectable=False, span=True)
+            say(self, list_empty(self, view_id))
 
     def _key_date_cells(self, d: key_dates.Due) -> list:
         """A key date's row (release 5.31): its task's title, the key date's words after it in quiet text, its plant and

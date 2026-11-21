@@ -20,7 +20,7 @@ from docrepo.ui.browse_window import BrowseWindow  # noqa: E402
 from docrepo.ui.context import AppContext  # noqa: E402
 from docrepo.ui.task_forms import TaskEditDialog  # noqa: E402
 from docrepo.ui.templates_view import MakeTasksDialog, PreviewDialog, RowDialog, SaveAsDialog  # noqa: E402
-from docrepo.ui.tree_view import HTML_ROLE, KEY_ROLE  # noqa: E402
+from docrepo.ui.tree_view import KEY_ROLE  # noqa: E402
 from docrepo.ui.widgets import Chip  # noqa: E402
 
 NOW = datetime(2026, 10, 8, 14, 10)
@@ -85,8 +85,8 @@ def test_the_view_is_under_manage_and_says_how_to_start(browse):
     browse.set_view("templates")
     assert browse.view == "templates" and browse.sel is None and not browse.detail.isVisible()
     assert browse.pane_title.text() == "Templates"
-    words = browse.tree.topLevelItem(0).data(0, HTML_ROLE)
-    assert "No templates yet" in words and "Save as template" in words
+    words = browse.tree._empty.words.text()  # the view's empty state (release 5.196), with New template
+    assert "No templates yet" in words and "Save as template" in words and browse.tree._empty.button.text() == "New template"
 
 
 def test_the_list_shows_templates_and_their_rows(browse):

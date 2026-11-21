@@ -22,6 +22,7 @@ from urllib.parse import unquote
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QInputDialog
 
+from docrepo.ui.empty_state import FIRST, LEFT, Empty, say  # empty states (release 5.196)
 from docrepo import edits, tagged
 from docrepo.detail import esc
 from docrepo.model import Model
@@ -93,9 +94,9 @@ def view(w: BrowseWindow) -> None:
     w._button("Patterns…", lambda: show_patterns(w), tip="Tag patterns, Never a tag and the tester, in Settings")
     w.tree.set_columns(["Tagged label", "Aliases", "Items"], [0, 180, 60])
     if not tg:
-        w.tree.add_row(None, None, ['<span class="sub">No tag list yet. Import the plant&#8217;s tag list from Excel or CSV: a tagged '
-                                    'label, its description and its aliases in each row. Or add tag patterns in Settings, and the tags '
-                                    'they find are suggested here.</span>'], selectable=False)
+        say(w, Empty(FIRST, "No tag list yet. Import the plant’s tag list from Excel or CSV: a tagged label, its description and "
+                            "its aliases in each row. Or add tag patterns in Settings, and the tags they find are suggested here.",
+                     "Import…", lambda: import_glossary(w)))
         return
     if sug:  # release 5.80: what the patterns found, waiting for the owner (decision 374)
         w.tree.add_row(None, None, [f'<b>Suggested</b> <span class="sub">{len(sug):,} · found by a tag pattern, not on the tag list: '
@@ -118,11 +119,10 @@ def view(w: BrowseWindow) -> None:
         w.tree.add_row(None, None, [f'<span class="sub">And {more:,} more. Search finds any of them, however it&#8217;s typed.</span>'],
                        selectable=False)
     if not labels and tg.glossary():
-        w.tree.add_row(None, None, [f'<span class="sub">Nothing mentions any of the tag list&#8217;s {len(tg.glossary()):,} labels yet. '
-                                    'Untick Mentioned only to list them.</span>'], selectable=False)
+        say(w, Empty(LEFT, f"Nothing mentions any of the tag list’s {len(tg.glossary()):,} labels yet.", "List them all",
+                     lambda: set_mentioned(w, False)))
     elif not labels:
-        w.tree.add_row(None, None, ['<span class="sub">No tag list yet: Add to the tag list on a suggestion, or Import… the plant&#8217;s '
-                                    'tag list.</span>'], selectable=False)
+        say(w, Empty(LEFT, "No tag list yet: Add to the tag list on a suggestion, or Import… the plant’s tag list."))
 
 
 def set_mentioned(w: BrowseWindow, on: bool) -> None:

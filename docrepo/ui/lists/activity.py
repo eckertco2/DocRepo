@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QPushButton,
 )
 
+from docrepo.ui.empty_state import FIRST, LEFT, Empty, has_tasks, say  # empty states (release 5.196)
 from docrepo import activity, edits, kinds, task_tile
 from docrepo.dates import long_date, short, to_date
 from docrepo.detail import esc
@@ -46,10 +47,11 @@ class ActivityList:
                                                               f"{activity.window_text(span, today)}")
         self._activity_controls(m, today, span)
         self.tree.set_columns(["What happened", "When"], [0, 96])
-        if not lines:
-            filtered = a["people"] or a["labels"] or a["kinds"]
-            self.tree.add_row(None, None, [f'<span class="sub">Nothing happened {"that matches these filters " if filtered else ""}from '
-                                           f'{esc(activity.window_text(span, today))}.</span>'], selectable=False, span=True)
+        if not lines and not has_tasks(self) and not m.captures:
+            say(self, Empty(FIRST, "Activity shows what happened, under the tasks it happened to: captures, changes, documents and "
+                                   "agenda items. It fills as you work.", "New capture", lambda: self.open_capture()))
+        elif not lines:  # filters that hide it all say so themselves (empty_state.settle)
+            say(self, Empty(LEFT, f"Nothing happened from {activity.window_text(span, today)}."))
         # The summary: how much happened on how many tasks, and of what kinds.
         if lines:
             tasks_n = len({x.task for x in lines if x.task})
