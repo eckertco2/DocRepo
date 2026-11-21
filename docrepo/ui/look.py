@@ -249,6 +249,9 @@ class _TipsHub(QObject):
         if kind == QEvent.Type.Show:
             if watched.isWidgetType() and watched.isWindow():
                 dress_window(watched)
+                from docrepo.ui import motion
+
+                motion.rise(watched)  # a popup's rise (release 5.195, decision 870): nothing when motion is off
             return False
         if kind not in _KEYS:
             return False

@@ -37,6 +37,7 @@ from docrepo.ui import current_ui, tokens
 from docrepo.ui.browse_window import BrowseWindow
 from docrepo.ui.capture_window import CaptureWindow
 from docrepo.ui.context import AppContext
+from docrepo.ui import motion
 from docrepo.ui.style import apply_look
 from docrepo.ui.wheels import Wheels
 
@@ -510,6 +511,7 @@ def run(data_root: Path, settings: Settings, fs: SafeFS, browse: bool = False) -
     qt.setQuitOnLastWindowClosed(False)
     qt.setApplicationName("DocRepo")
     apply_look(qt, settings.theme, settings.show_hints)  # Settings' Theme (release 5.194): light, dark, or as Windows is set
+    motion.start()  # the four animations (release 5.195), when Windows' animation effects are on
     set_identity(qt)
     lock = QLockFile(str(fs.checked_path(data_root / LOCK_FILE)))
     lock.setStaleLockTime(0)
