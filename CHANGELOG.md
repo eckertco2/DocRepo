@@ -4,9 +4,9 @@ One line per release, newest first: its number, the date it was built, and what 
 
 Since 2026-11-12, releases ship in weekly trains (the design workspace's `docs/mods/cold-eyes-plan.md`, decisions 464 to 468): each train has a heading with the day it was pushed to GitHub, over its releases. Releases keep their own numbers and tags.
 
-## Next train
+## Train of 2026-11-20
 
-Built for the train of Thursday 2026-11-26 (the design workspace's `docs/mods/redesign-plan.md`); not pushed yet.
+Releases 5.179 to 5.196, pushed to GitHub on Friday 2026-11-20 at the owner's word ("continue driving things forwards to push when everything is available"), ahead of the Thursday they were planned for. They are the redesign: a new look for every window, from the owner's ask of 2026-11-19 for a cold-eyes review of how DocRepo looks (the design workspace's `docs/ui-design/aesthetics-review-2026-11-19.md` and `docs/mods/redesign-plan.md`, decisions 840 to 872, all taken as recommended). The schema stays 31 and no package is new. Their corporate test is the design workspace's `handoff/docrepo/train-2026-11-20-test.md`.
 
 | Release | Date | What |
 |---|---|---|
