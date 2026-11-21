@@ -12,7 +12,7 @@ from __future__ import annotations
 from PySide6.QtCore import QEvent, QObject, Qt, QTimer, Signal
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QToolButton, QWidget
 
-from docrepo.ui import tokens
+from docrepo.ui import motion, tokens
 from docrepo.ui.icons import icon
 
 PLAIN_MS = 4000        # a message of up to 60 characters
@@ -104,18 +104,27 @@ class Toast(QFrame):
             w.style().unpolish(w)
             w.style().polish(w)
 
-    # ---- showing and hiding (release 5.195 animates these) ----
+    # ---- showing and hiding ----
     def _appear(self) -> None:
+        """Show it where ``place`` put it, sliding ``motion.TOAST_RISE`` px up into that place when it wasn't showing
+        (release 5.195, decision 870). Its Undo and close work from the start."""
+        was_hidden = self.isHidden()
         self.show()
         self.raise_()
+        if was_hidden:
+            rest = self.pos()
+            motion.animate(self, "slide", 1.0, 0.0, motion.TOAST_MS,
+                           lambda t: self.move(rest.x(), rest.y() + round(motion.TOAST_RISE * t)))
 
     def _leave(self) -> None:
+        motion.stop(self, "slide")
         self.hide()
 
     # ---- where it goes ----
     def place(self) -> None:
         """At the bottom centre of the window, ``MARGIN`` above its bottom edge; its words wrap past ``MAX_TEXT`` (or
         the window's width less ``SIDE_ROOM``), and it grows upward."""
+        motion.stop(self, "slide")  # placed afresh: any slide ends where it was going first
         parent = self.parentWidget()
         limit = max(SIDE_ROOM, min(MAX_TEXT, parent.width() - SIDE_ROOM))
         self.label.setWordWrap(False)

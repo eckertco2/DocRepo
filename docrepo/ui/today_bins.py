@@ -23,7 +23,7 @@ from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QWidget
 
 from docrepo.model import TODAY_BAND_NAMES, TODAY_BANDS
-from docrepo.ui import tokens
+from docrepo.ui import motion, tokens
 from docrepo.ui.icons import tinted
 
 #: A target: a band ("" for Not ranked) and whether it's the band's urgent part.
@@ -119,6 +119,8 @@ class DropGroups(QWidget):
         self.counts: dict[str, int] = {}
         self.hot: Target | None = None
         self.groups: list[Group] = []
+        #: How far the outlines have faded in (release 5.195, decision 870): they take a drop from the start.
+        self.reveal = 1.0
         self.hide()
 
     def open_for(self, own: str, counts: dict[str, int], area: QRect, own_urgent: bool = False, groups: list[Group] | None = None) -> None:
@@ -128,8 +130,15 @@ class DropGroups(QWidget):
         self.own, self.own_urgent, self.counts, self.hot = own, own_urgent, dict(counts), None
         self.groups = list(groups or [])
         self.setGeometry(area)
+        was_hidden = self.isHidden()
         self.show()
         self.raise_()
+        if was_hidden:
+            motion.animate(self, "reveal", 0.0, 1.0, motion.DROP_MS, self._revealed)
+        self.update()
+
+    def _revealed(self, t: float) -> None:
+        self.reveal = t
         self.update()
 
     def set_groups(self, area: QRect, groups: list[Group]) -> None:
@@ -139,6 +148,7 @@ class DropGroups(QWidget):
         self.update()
 
     def close_bins(self) -> None:
+        motion.stop(self, "reveal")
         self.own, self.hot, self.groups = None, None, []
         self.hide()
 
@@ -180,6 +190,8 @@ class DropGroups(QWidget):
     def paintEvent(self, event) -> None:  # noqa: N802 - Qt's name
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if self.reveal < 1.0:
+            p.setOpacity(self.reveal)
         accent = QColor(tokens.colour("accent"))
         for g in self.groups:
             lit = self.hot is not None and self.hot[0] == g.band

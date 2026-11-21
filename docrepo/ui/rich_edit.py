@@ -633,14 +633,26 @@ class RichEdit(QTextEdit):
             self.setCurrentCharFormat(fmt)
 
     def toggle_tick(self, block) -> None:
-        """Tick or untick a checklist line: one step of undo."""
+        """Tick or untick a checklist line: one step of undo. A tick draws itself in (release 5.195, decision 870)."""
         if not self.is_check(block):
             return
         c = QTextCursor(block)
         c.beginEditBlock()
-        self._set_tick(block, block.blockFormat().marker() != MARKER.Checked)
+        done = block.blockFormat().marker() != MARKER.Checked
+        self._set_tick(block, done)
         c.endEditBlock()
         self.formatting.emit()
+        if done:
+            from docrepo.ui import motion
+
+            number = block.blockNumber()
+            motion.animate(self, "tick", 0.0, 1.0, motion.TICK_MS, lambda t: self._drawing_tick(number, t),
+                           lambda: self._drawing_tick(None, 1.0))
+
+    def _drawing_tick(self, number: int | None, t: float) -> None:
+        """The line whose tick is drawing, and how far (0 to 1), for ``_paint_box``; None when none is."""
+        self._tick_drawing = None if number is None else (number, t)
+        self.viewport().update()
 
     def _make_check(self, block) -> None:
         if block.textList() is None:
@@ -1093,7 +1105,14 @@ class RichEdit(QTextEdit):
             pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
             p.setPen(pen)
             p.setBrush(Qt.BrushStyle.NoBrush)
-            p.drawPath(tick)
+            drawing = getattr(self, "_tick_drawing", None)
+            if drawing is not None and drawing[0] == b.blockNumber() and drawing[1] < 1.0:  # drawn in from its left (5.195)
+                p.save()
+                p.setClipRect(QRectF(box.left(), box.top() - 2, box.width() * drawing[1], box.height() + 4))
+                p.drawPath(tick)
+                p.restore()
+            else:
+                p.drawPath(tick)
         else:
             p.setPen(QPen(QColor(tokens.colour("control")), 1))
             p.setBrush(QColor(tokens.colour("content")))

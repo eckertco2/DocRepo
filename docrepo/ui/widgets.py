@@ -335,6 +335,19 @@ class Toggle(QCheckBox):
     def __init__(self, text: str = "", parent: QWidget | None = None) -> None:
         super().__init__(text, parent)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        #: Where the knob is drawn while it slides (release 5.195, decision 870): 0 off, 1 on; None at rest, as checked says.
+        self.knob: float | None = None
+        self.toggled.connect(self._slide)
+
+    def _slide(self, on: bool) -> None:
+        from docrepo.ui import motion
+
+        motion.animate(self, "knob", 0.0 if on else 1.0, 1.0 if on else 0.0, motion.TICK_MS, self._at,
+                       lambda: self._at(None))
+
+    def _at(self, knob: float | None) -> None:
+        self.knob = knob
+        self.update()
 
     def sizeHint(self) -> QSize:  # noqa: N802 - Qt's name
         words = self.fontMetrics().horizontalAdvance(self.text()) + self.GAP if self.text() else 0
@@ -360,7 +373,8 @@ class Toggle(QCheckBox):
         p.setBrush(QColor(tokens.colour(fill)))
         p.drawRoundedRect(track, track.height() / 2, track.height() / 2)
         inset = (self.TRACK.height() - self.KNOB) / 2
-        x = track.right() - inset - self.KNOB if on else track.left() + inset
+        along = (1.0 if on else 0.0) if self.knob is None else self.knob
+        x = track.left() + inset + along * (track.width() - 2 * inset - self.KNOB)
         p.setBrush(QColor(tokens.colour("on_accent")))
         p.drawEllipse(QRectF(x, track.top() + inset, self.KNOB, self.KNOB))
         if self.hasFocus() and self.focusPolicy() != Qt.FocusPolicy.NoFocus:
